@@ -2498,4 +2498,4 @@ No Dataverse choice/option-set change is needed — an unrecognized key just sho
 
 ---
 
-*For architecture details, component homes, and how to add a new **visual type**, see [VISUALHOST-ARCHITECTURE.md](VISUALHOST-ARCHITECTURE.md)*
+*For architecture details, component homes, and how to add a new **visual type**, see [VISUALHOST-ARCHITECTURE.md](../architecture/VISUALHOST-ARCHITECTURE.md)*

@@ -1928,7 +1928,9 @@ public class SecureChildOrdinaryParentMoveTests
         _world.Set("sprk_decisionrecord", record, "sprk_regardingrecordid", workAssignment.ToString("D"));
         _world.Set("sprk_decisionrecord", record, "sprk_steps", JsonSerializer.Serialize(new
         {
-            reviewId = Guid.NewGuid().ToString("D"), resolvedSignalIds = Array.Empty<string>(), steps = Array.Empty<object>(),
+            reviewId = Guid.NewGuid().ToString("D"),
+            resolvedSignalIds = Array.Empty<string>(),
+            steps = Array.Empty<object>(),
         }));
 
         // Driven from the ROOT's pass: the work assignment did not change, so its own pass never runs.

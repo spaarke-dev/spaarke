@@ -75,11 +75,11 @@ public class MappingSourceCallerMaskGuardTests
             ["src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs|RecordCreationService.RepairMappingAsync"] = (1,
                 "Repair runs as the system principal with no caller to mask against (owner decision 2026-10-21, option 1; UAC-r2 " +
                 "concurs). Secure sources are never mapped into a row that isn't isolated (Repair source gate, fail closed). " +
-                "Field-secured source columns will be skipped by Repair using the app-only metadata reader from task 033 (TODO " +
-                "task 033), failing closed when metadata is unavailable; no production caller until then " +
-                "(RecordRepairReachabilityTests; 052 hard-blocked on 033); the document access and D7 link columns are refused through " +
-                "RefuseAppOnlyWrite. Repair has no production caller until task 052, which is hard-blocked on 033 " +
-                "(RecordRepairReachabilityTests)."),
+                "Field-secured source columns are neither read for mapping nor handed to the engine: Repair reads the source " +
+                "table's column metadata app-only (IGenericEntityService.GetColumnMetadataAsync, task 052a) and copies only the " +
+                "columns it states are not secured; metadata that cannot be read, or does not say, maps nothing " +
+                "(record_repair.mapping_source_metadata_unavailable). The document access and D7 link columns are refused through " +
+                "RefuseAppOnlyWrite. Repair has no production caller until task 052's scheduled pass (RecordRepairReachabilityTests)."),
             ["src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs|FieldMappingEndpoints.ApplyMappingRule"] = (1,
                 "The field-mapping push (field-mapping-server-write-path-r1 task 040) reads its source AS THE CALLER through the " +
                 "impersonated query (RetrieveSourceRecordValuesAsCallerAsync), so Dataverse has already applied the caller's " +

@@ -222,9 +222,9 @@ The mutation loop is the scratchpad script `mutations.py`. Each revert was made 
 ## 9. Open questions for the owner
 
 1. **Re-confirm after a failed or rejected submission.** ANSWERED (owner 2026-10-20, D-139): refused with 409 `submission_already_ended`; a new attempt (new submission, new tracking `.n`, a generation key) is a later feature. The firm's own resubmission path (D-37) is a new upload and is unaffected.
-2. **Reject after confirm.** A document with a confirm submission is now always 409 on reject, even if the job later rejected the invoice. This is correct for "neither decision overwrites the other", but the owner may want a different rule once the submission is terminal.
-3. **`InvoiceDate` and `TotalAmount` in the confirm request** (review #12, known limit) are now ignored, because the job reads them from the document. They are kept in the request contract for compatibility. Should they be dropped from the contract?
-4. **Confirm's authorization filter is unchanged.** It still checks the caller's Create privilege on `sprk_invoice` (G5). The app still creates an invoice, only later, in the job. Keep it, or move to a submission privilege?
+2. **Reject after confirm.** ANSWERED (owner 2026-11-23, EB-D-262, option b): allowed once the submission ended Failed; built in 050c. A document with a confirm submission is now always 409 on reject, even if the job later rejected the invoice. This is correct for "neither decision overwrites the other", but the owner may want a different rule once the submission is terminal.
+3. ANSWERED (owner 2026-11-23, EB-D-263, option b): dropped in 050c. **`InvoiceDate` and `TotalAmount` in the confirm request** (review #12, known limit) are now ignored, because the job reads them from the document. They are kept in the request contract for compatibility. Should they be dropped from the contract?
+4. ANSWERED (owner 2026-11-23, EB-D-264): confirm uses the internal submission's check (`finance.submit_invoice`); built in 050c, reviewed by uac-r2. **Confirm's authorization filter is unchanged.** It still checks the caller's Create privilege on `sprk_invoice` (G5). The app still creates an invoice, only later, in the job. Keep it, or move to a submission privilege?
 
 ## 10. Known limits and things noticed (not fixed)
 

@@ -13,9 +13,9 @@ import * as React from 'react';
 import { useCallback } from 'react';
 import { makeStyles, tokens, Button, Divider, Switch, Text } from '@fluentui/react-components';
 import { Dismiss20Regular, ChevronLeft20Regular } from '@fluentui/react-icons';
-import { IFilterPanelProps, SearchFilters, DateRange, SearchMode } from '../types';
-import { FilterDropdown } from './FilterDropdown';
-import { DateRangeFilter } from './DateRangeFilter';
+import { FilterDropdown, DateRangeFilter } from '@spaarke/ui-components/dist/components/SearchFilters';
+import type { FilterDropdownOption } from '@spaarke/ui-components/dist/components/SearchFilters';
+import { IFilterPanelProps, SearchFilters, DateRange, SearchMode, FilterOption } from '../types';
 import { useFilterOptions } from '../hooks/useFilterOptions';
 
 const useStyles = makeStyles({
@@ -59,20 +59,24 @@ const emptyFilters: SearchFilters = {
 };
 
 // Threshold options (replaces Slider — 5 preset values)
-const THRESHOLD_OPTIONS = [
-  { key: '0', label: 'Off' },
-  { key: '25', label: '25%' },
-  { key: '50', label: '50%' },
-  { key: '75', label: '75%' },
-  { key: '100', label: '100%' },
+const THRESHOLD_OPTIONS: FilterDropdownOption[] = [
+  { value: '0', label: 'Off' },
+  { value: '25', label: '25%' },
+  { value: '50', label: '50%' },
+  { value: '75', label: '75%' },
+  { value: '100', label: '100%' },
 ];
 
 // Search mode options
-const MODE_OPTIONS = [
-  { key: 'hybrid', label: 'Hybrid' },
-  { key: 'vectorOnly', label: 'Concept Only' },
-  { key: 'keywordOnly', label: 'Keyword Only' },
+const MODE_OPTIONS: FilterDropdownOption[] = [
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'vectorOnly', label: 'Concept Only' },
+  { value: 'keywordOnly', label: 'Keyword Only' },
 ];
+
+// Dataverse options are { key, label }; the shared FilterDropdown takes { value, label }.
+const toDropdownOptions = (options: FilterOption[]): FilterDropdownOption[] =>
+  options.map(o => ({ value: o.key, label: o.label }));
 
 /**
  * FilterPanel component for search filters.
@@ -94,7 +98,9 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
   const styles = useStyles();
 
   // Fetch filter options from Dataverse
-  const { documentTypeOptions, matterTypeOptions, fileTypeOptions, isLoading: optionsLoading } = useFilterOptions();
+  const { matterTypeOptions, fileTypeOptions, isLoading: optionsLoading } = useFilterOptions();
+  const fileTypeDropdownOptions = React.useMemo(() => toDropdownOptions(fileTypeOptions), [fileTypeOptions]);
+  const matterTypeDropdownOptions = React.useMemo(() => toDropdownOptions(matterTypeOptions), [matterTypeOptions]);
 
   // Check if any filters are active
   const hasActiveFilters =
@@ -248,10 +254,11 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
       <div className={styles.filterSection}>
         <FilterDropdown
           label="File Type"
-          options={fileTypeOptions}
-          selectedKeys={filters.fileTypes}
-          onSelectionChange={handleFileTypesChange}
-          disabled={disabled || optionsLoading}
+          options={fileTypeDropdownOptions}
+          selectedValues={filters.fileTypes}
+          onChange={handleFileTypesChange}
+          isLoading={optionsLoading}
+          disabled={disabled}
           multiSelect
         />
       </div>
@@ -261,10 +268,11 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         <div className={styles.filterSection}>
           <FilterDropdown
             label="Matter Type"
-            options={matterTypeOptions}
-            selectedKeys={filters.matterTypes}
-            onSelectionChange={handleMatterTypesChange}
-            disabled={disabled || optionsLoading}
+            options={matterTypeDropdownOptions}
+            selectedValues={filters.matterTypes}
+            onChange={handleMatterTypesChange}
+            isLoading={optionsLoading}
+            disabled={disabled}
             multiSelect
           />
         </div>
@@ -287,8 +295,8 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         <FilterDropdown
           label="Threshold"
           options={THRESHOLD_OPTIONS}
-          selectedKeys={[String(filters.threshold)]}
-          onSelectionChange={handleThresholdChange}
+          selectedValues={[String(filters.threshold)]}
+          onChange={handleThresholdChange}
           disabled={disabled}
           multiSelect={false}
         />
@@ -299,8 +307,8 @@ export const FilterPanel: React.FC<IFilterPanelProps> = ({
         <FilterDropdown
           label="Mode"
           options={MODE_OPTIONS}
-          selectedKeys={[filters.searchMode]}
-          onSelectionChange={handleSearchModeChange}
+          selectedValues={[filters.searchMode]}
+          onChange={handleSearchModeChange}
           disabled={disabled}
           multiSelect={false}
         />

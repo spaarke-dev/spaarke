@@ -38,7 +38,14 @@ import {
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import { AddRegular, CommentMultipleRegular, DeleteRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
+import {
+  AddRegular,
+  CommentMultipleRegular,
+  DeleteRegular,
+  LockClosedRegular,
+  PinFilled,
+  PinRegular,
+} from '@fluentui/react-icons';
 
 export interface IThreadListRow {
   threadId: string;
@@ -53,6 +60,11 @@ export interface IThreadListRow {
    * (treated the same as unpinned).
    */
   isPinned?: boolean;
+  /**
+   * A row that only opens (fm task 056: a record's "Private · you and …" entry stands for a pair thread, so the pin and
+   * delete controls would act on the whole conversation). Hides the pin and delete affordances and shows a lock mark.
+   */
+  readOnly?: boolean;
 }
 
 export type ThreadListStatus = 'loading' | 'ready' | 'error';
@@ -64,6 +76,11 @@ export interface IThreadListProps {
   selectedThreadId?: string;
   onSelectThread: (threadId: string) => void;
   onCreateThread?: () => void;
+  /**
+   * "Send privately…" (fm task 056): a private message to one person about the record this list is scoped to. Rendered
+   * only when supplied, so a list that is not hosted for a record shows no such control.
+   */
+  onSendPrivately?: () => void;
   /**
    * Collapse the thread pane. When wired, clicking the "Threads" title row
    * collapses the pane (R3 UAT 2026-07-23 round 3 item 5 — no separate chevron).
@@ -91,6 +108,20 @@ export interface IThreadListProps {
    * hide the delete affordance entirely (e.g. a read-only host).
    */
   onDeleteThread?: (threadId: string) => void;
+  /**
+   * Optional content rendered under the header, above the rows (fm task 055: the shell's All / Messages switch). Omit to
+   * render nothing there.
+   */
+  subHeader?: React.ReactNode;
+  /** Accessible name and tooltip of the ＋ control. Default "New thread". */
+  createLabel?: string;
+  /** Text shown when the list is empty. Default "No threads yet.". */
+  emptyText?: string;
+  /**
+   * One short line shown under the loaded list (ontology task 221: "Some messages may not be shown." when the record's
+   * read was cut by a bound). Omit to show nothing.
+   */
+  footnote?: string;
   className?: string;
 }
 
@@ -332,6 +363,16 @@ const useStyles = makeStyles({
   errorState: {
     color: tokens.colorPaletteRedForeground1,
   },
+  // The line under the list (task 221): the muted info text of the empty state, compact, pinned below the rows.
+  footnote: {
+    flexShrink: 0,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
 
 export const ThreadList: React.FC<IThreadListProps> = ({
@@ -341,10 +382,15 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   selectedThreadId,
   onSelectThread,
   onCreateThread,
+  onSendPrivately,
   onCollapse,
   titleAccessory,
   onTogglePin,
   onDeleteThread,
+  subHeader,
+  createLabel = 'New thread',
+  emptyText = 'No threads yet.',
+  footnote,
   className,
 }) => {
   const styles = useStyles();
@@ -411,18 +457,31 @@ export const ThreadList: React.FC<IThreadListProps> = ({
         {/* Count accessory (item 3) — kept out of the collapse click target. */}
         {titleAccessory && <span className={styles.titleAccessory}>{titleAccessory}</span>}
         <span className={styles.headerSpacer} />
+        {onSendPrivately && (
+          <Tooltip content="Send privately…" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<LockClosedRegular />}
+              aria-label="Send privately…"
+              onClick={onSendPrivately}
+            />
+          </Tooltip>
+        )}
         {/* ＋ create control right-aligned (item 6). */}
-        <Tooltip content="New thread" relationship="label">
+        <Tooltip content={createLabel} relationship="label">
           <Button
             appearance="subtle"
             size="small"
             icon={<AddRegular />}
-            aria-label="New thread"
+            aria-label={createLabel}
             onClick={() => onCreateThread?.()}
             disabled={!onCreateThread}
           />
         </Tooltip>
       </div>
+
+      {subHeader}
 
       {status === 'loading' && (
         <div className={styles.centeredState} role="status" aria-live="polite">
@@ -438,7 +497,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
 
       {status === 'ready' && rows.length === 0 && (
         <div className={styles.centeredState}>
-          <Text>No threads yet.</Text>
+          <Text>{emptyText}</Text>
         </div>
       )}
 
@@ -479,6 +538,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                       title={`${row.unreadCount} unread message${row.unreadCount === 1 ? '' : 's'}`}
                     />
                   )}
+                  {row.readOnly && <LockClosedRegular aria-hidden="true" />}
                   <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
                     {displayName}
                   </Text>
@@ -487,7 +547,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                       (except a pinned thread's filled pin, which stays visible).
                       `data-row-action` is the reveal hook. */}
                   <div className={styles.rowActions}>
-                    {onDeleteThread && (
+                    {onDeleteThread && !row.readOnly && (
                       <Tooltip content="Delete thread" relationship="label">
                         <Button
                           data-row-action
@@ -503,7 +563,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                         />
                       </Tooltip>
                     )}
-                    {onTogglePin && (
+                    {onTogglePin && !row.readOnly && (
                       <Button
                         data-row-action
                         appearance="transparent"
@@ -529,6 +589,12 @@ export const ThreadList: React.FC<IThreadListProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {status === 'ready' && footnote && (
+        <div className={styles.footnote} role="note">
+          <Text size={200}>{footnote}</Text>
         </div>
       )}
 

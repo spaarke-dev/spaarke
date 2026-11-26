@@ -21,10 +21,23 @@
 #      workflow changing. Added 2026-10-06 by ontology task 081 round 7 as an
 #      owner-approved CLAUDE.md §6.5 PATH-A EXCEPTION to "do not extend without
 #      spec amendment" (FR-A02), scoped to this one job: see the job's comment.
+#   7. format-changed-cs      — `dotnet format whitespace --folder` over the C# files
+#      the change touches (src/, tests/), BLOCKING, <1 min, parallel. Added
+#      2026-11-10 (PR #2663) as an owner-approved §6.5 PATH-A EXCEPTION, scoped to
+#      this one job: see the job's comment.
+#   8. mcp-conformance        — the published modelcontextprotocol/conformance suite
+#      (pinned 0.2.0-alpha.12, spec 2026-07-28) against /mcp/legal-operations on the
+#      real BFF host (tests/integration/Mcp.Conformance.Host), BLOCKING, conditional
+#      on the MCP route, the decisions widget, the host or a CI workflow changing,
+#      about 1 min of job commands measured locally (+ checkout, tool setup and a cold
+#      BFF build on a hosted runner), parallel. Added 2026-11-15 by
+#      spaarkeai-mcp-bff-api-r1 task 025 (NFR-09) as an owner-approved §6.5 PATH-A
+#      EXCEPTION, scoped to this one job: see the job's comment.
 #
 # NOT IN TIER 1 (live in ci-tier2-advisory.yml or nightly-health.yml):
-#   format, lint, markdown link validator, dependency audit, Trivy,
-#   full unit/integration test suite.
+#   whole-solution format (Tier 2 keeps it as an advisory backstop; changed C#
+#   files are format-checked by job 7), lint, markdown link validator,
+#   dependency audit, Trivy, full unit/integration test suite.
 #
 # INPUTS (from ci-router.yml `classify` job)
 #   bff_changed       — true if src/server/api/Sprk.Bff.Api/** or shared server changed
@@ -114,6 +127,7 @@ jobs:
       reporting_surface: ${{ steps.filter.outputs.reporting_surface }}
       datagrid_gate: ${{ steps.filter.outputs.datagrid_gate }}
       xrm_guard: ${{ steps.filter.outputs.xrm_guard }}
+      mcp_conformance: ${{ steps.filter.outputs.mcp_conformance }}
       changed_namespaces: ${{ steps.derive-namespaces.outputs.value }}
     steps:
       - name: Checkout
@@ -183,6 +197,30 @@ jobs:
             xrm_guard:
               - 'src/client/**'
               - 'src/solutions/**'
+              # Added 2026-11-25 (task 035): the no-client-field-mapping guard scans every .ts/.tsx under src/,
+              # including the form scripts under src/dataverse/forms/.
+              - 'src/**/*.ts'
+              - 'src/**/*.tsx'
+              - '.github/workflows/**'
+            # Added 2026-11-15 by spaarkeai-mcp-bff-api-r1 task 025: runs mcp-conformance.
+            # A change to anything the MCP route or the conformance host depends on, plus a
+            # workflow edit so a change to the job proves the job.
+            mcp_conformance:
+              - 'src/server/api/Sprk.Bff.Api/Api/Mcp/**'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs'
+              # Everything the real Program host boots the MCP route through: pipeline order,
+              # rate limiter, authorization, route mapping, the MCP SDK package version, and
+              # the factory the conformance host builds on.
+              - 'src/server/api/Sprk.Bff.Api/Program.cs'
+              - 'src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/MiddlewarePipelineExtensions.cs'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs'
+              - 'tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs'
+              - 'src/client/widgets/spaarke-decisions/**'
+              - 'tests/integration/Mcp.Conformance.Host/**'
+              - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'
               - '.github/workflows/**'
 
       - name: Derive Spe.Integration.Tests namespaces from changed surface
@@ -230,6 +268,7 @@ jobs:
             echo "| reporting_surface | ${{ steps.filter.outputs.reporting_surface }} |"
             echo "| datagrid_gate (Spaarke.UI.Components, CI workflows) | ${{ steps.filter.outputs.datagrid_gate }} |"
             echo "| xrm_guard (src/client, src/solutions, CI workflows) | ${{ steps.filter.outputs.xrm_guard }} |"
+            echo "| mcp_conformance (MCP route, decisions widget, conformance host, CI workflows) | ${{ steps.filter.outputs.mcp_conformance }} |"
             echo ""
             echo "**BFF changed (from router)**: ${{ inputs.bff_changed }}"
             echo "**Smoke namespaces**: ${{ steps.derive-namespaces.outputs.value }}"
@@ -238,8 +277,8 @@ jobs:
   # --------------------------------------------------------------------------
   # Job 1 — compile (Debug only, no -warnaserror)
   # WarningsAsErrors policy lives in Directory.Build.props
-  # (TreatWarningsAsErrors=true + WarningsNotAsErrors=CS0109;CS0618;CS1998;
-  # CS8601;CS8604), so the CLI does NOT pass -warnaserror — see
+  # (TreatWarningsAsErrors=true; WarningsNotAsErrors is empty, CS0618 included),
+  # so the CLI does NOT pass -warnaserror — see
   # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
   #
   # SCOPE = THE WHOLE SOLUTION (widened 2026-08-31; was `Sprk.Bff.Api.csproj`
@@ -391,7 +430,10 @@ jobs:
     # 5 -> 10 (2026-10-22, GATE REPAIR; #2009): at 1355 tests the job measures 3m50s-4m10s when it
     # passes (build ~1m40s + test ~2m), and slower runners crossed 5m and read `cancelled` on master
     # (runs 39702128977, 39710479837, 39777076810) and on PR #2233 twice. Same headroom rule as #813.
-    timeout-minutes: 10
+    # 10 -> 20 (2026-11-12, GATE REPAIR; #2527): at 2,507 tests successful runs take 6-10 min (05:51-06:01Z and
+    # 07:27-07:37Z on 2026-11-12 both 9m53s), and two runs that day were cancelled at 10 min, which turns Router red.
+    # Revisit at ~5,000 tests or a run over 14 minutes.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -1007,3 +1049,188 @@ jobs:
       - name: getXrm capability guard (0 violations, 0 blind spots, every fixture fires)
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx jest --ci src/utils/__tests__/xrmCapabilityUsage.guard.test.ts
+
+      # Added 2026-11-14 by ontology task 183 (fix round 1). Reads the COMMITTED src/client/pcf/*/Solution bundles (no build): a PCF
+      # that declares the platform React library must not carry React 19's jsx-runtime (`react.transitional.element`), which
+      # React 16 rejects at render time. Same install, same job, a few seconds more.
+      - name: PCF bundle React-runtime guard (no React 19 jsx-runtime under the platform React library)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/utils/__tests__/pcfBundleReactRuntime.guard.test.ts
+
+      # Added 2026-11-14 by ontology task 184. A source scan of the shared library's wizard folders (no build, no network): no
+      # step under components/Create*Wizard/ or components/WizardFollowOns/ renders the inline LookupField or imports the retired
+      # EmailStep, and exactly one module defines SendEmailStep (owner UAT round 4, F-R4-2 / F-R4-3). Same install, same job,
+      # about two seconds more; it runs on any src/client/** change, which is where a wizard step lives.
+      - name: Wizard lookup / email pattern guard (side-pane lookup and shared composer only)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/__tests__/wizardLookupPatternGuard.test.ts
+
+      # Added 2026-11-25 by field-mapping-server-write-path-r1 task 035 (FR-22). A source scan of every .ts/.tsx under src/
+      # (no build, no network): the client field-mapping engine stays deleted, because field mapping runs only on the server
+      # create path. It fails if it reads fewer than 500 files, so a wrong path cannot pass. Same install, same job.
+      - name: No client field-mapping engine guard (mapping is server-side only)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/__tests__/architecture/noClientFieldMapping.test.ts
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 7 — format-changed-cs (BLOCKING)
+  #
+  # §6.5 PATH-A EXCEPTION (owner-approved 2026-11-10, PR #2663): the header's
+  # "do not extend without spec amendment" (ci-cd-unit-test-remediation-r1
+  # FR-A02) and its "format is not in Tier 1" are waived for THIS ONE JOB.
+  # Reason: the advisory Tier 2 `Format (dotnet format)` check let master reach
+  # 2,569 whitespace violations in 230 files (red for weeks, so it signalled
+  # nothing), because commits skipped the pre-commit hook with --no-verify.
+  # The owner's condition was no meaningful CI delay; measured, this job adds
+  # none to a PR's wait:
+  #   - it checks ONLY the C# files the change touches (src/ and tests/), so no
+  #     one fails for code they did not change;
+  #   - `dotnet format whitespace --folder` needs no restore or MSBuild
+  #     workspace: ~2 s of checking after checkout (~20 s) and .NET setup (~6 s);
+  #   - it runs in parallel with arch-tests (~7 min), the slowest Tier 1 job.
+  #
+  # BLOCKING: no continue-on-error; a failure fails `CI / Router` the same way
+  # compile / arch-tests do (no router change). The logic lives in
+  # scripts/quality/check-changed-cs-format.sh so a developer runs the same
+  # check locally. Base of the diff: a PR's merge commit's first parent (the
+  # base tip it merges into, hence fetch-depth 2); a merge-queue group's
+  # base_sha; a push's `before`. No base (new branch, manual run): every C#
+  # file under src/ and tests/ is checked.
+  # ──────────────────────────────────────────────────────────────────────────
+  format-changed-cs:
+    name: Format (changed C# files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5   # hang guard; measured well under 1 min
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+
+      - name: Resolve the diff base
+        id: base
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base=$(git rev-parse HEAD^1) ;;
+            merge_group)  base="$MERGE_GROUP_BASE" ;;
+            push)         base="$PUSH_BEFORE" ;;
+            *)            base="" ;;
+          esac
+          if [[ -n "$base" && ! "$base" =~ ^0+$ ]] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$base"
+          fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+          echo "Diff base for $EVENT: ${base:-<none: check all C# files>}"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Changed C# files are whitespace-formatted
+        shell: bash
+        run: bash scripts/quality/check-changed-cs-format.sh "${{ steps.base.outputs.sha }}" HEAD
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 8 — mcp-conformance (BLOCKING)
+  #
+  # §6.5 PATH-A EXCEPTION (owner-approved 2026-11-15, spaarkeai-mcp-bff-api-r1
+  # task 025, NFR-09): the header's "do not extend without spec amendment"
+  # (ci-cd-unit-test-remediation-r1 FR-A02) is waived for THIS ONE JOB.
+  # Reason: the Spaarke MCP endpoint is called by third-party clients (Claude
+  # Cowork and others) that speak the 2026-07-28 Streamable HTTP transport.
+  # Our own tests exercise the tools through our own client, so a transport
+  # regression (dual-Accept handling, stateless behaviour, header validation,
+  # SSE) would pass every other check and fail only in a customer's client.
+  # The published conformance suite is the only independent oracle for that.
+  # A seeded break of dual-Accept handling makes it fail (exit 1, 7 passed /
+  # 112 failed); the unmodified server passes (exit 0).
+  #
+  # WHAT RUNS: the real BFF (Program) in-process on localhost
+  # (tests/integration/Mcp.Conformance.Host: a TEST-ONLY host project that is
+  # not in Spaarke.sln and adds no test auth, switch or bypass to src/). Its
+  # JwtBearer test scheme trusts a test key, and a token injector adds the
+  # bearer token to /mcp requests because the suite's CLI cannot send headers.
+  # Seeded fakes sit at the module boundary (the decision capability and the
+  # lookup search). The suite is pinned to an exact version by
+  # package-lock.json (`npm ci`); 0.1.16 does not know spec 2026-07-28.
+  #
+  # BASELINE: conformance/conformance-baseline.yml lists, per check, the 41
+  # expected entries: 38 failures (37 need reference fixtures this server must
+  # not serve, 1 known gap tracked as issue #2835) and 3 SHOULD warnings
+  # (2 fixture, 1 SDK data.uri). A NEW failure fails the job; a baselined
+  # check that starts passing also fails it (stale entry), so the list only
+  # shrinks.
+  #
+  # BLOCKING: no continue-on-error; a failure fails `CI / Router` the same way
+  # compile / arch-tests do (no router change). RUNS when classify-tier1's
+  # `mcp_conformance` filter matches, fail-closed (an empty output runs it),
+  # and on workflow_dispatch. The same steps run locally:
+  #   bash tests/integration/Mcp.Conformance.Host/run-conformance.sh
+  # ──────────────────────────────────────────────────────────────────────────
+  mcp-conformance:
+    name: MCP conformance (2026-07-28)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # hang guard; ~1 min of job commands measured locally
+    needs: classify-tier1
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.classify-tier1.outputs.mcp_conformance != 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      # Same cache as the other Tier 1 jobs (an optimization, never a gate). The job
+      # restores the BFF and the test assembly's packages, so the key hashes every csproj.
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-mcp-conformance-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-mcp-conformance-
+            ${{ runner.os }}-nuget-
+
+      # Node 22: the conformance suite imports fs.globSync (Node >= 22); on Node 20
+      # it fails at load with "does not provide an export named 'globSync'"
+      # (first CI run, 2026-11-15).
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The BFF embeds the decisions widget only when dist/index.html exists at
+      # build time (Sprk.Bff.Api.csproj), and one conformance check reads it.
+      # Same step as deploy-bff-api.yml.
+      - name: Build the decisions widget
+        working-directory: src/client/widgets/spaarke-decisions
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
+      - name: Conformance suite against the real BFF MCP route
+        shell: bash
+        env:
+          OUT: ${{ runner.temp }}/conformance-results
+          MCP_SKIP_WIDGET: '1'   # built by the previous step
+        run: bash tests/integration/Mcp.Conformance.Host/run-conformance.sh
+
+      # run-conformance.sh writes the suite's per-scenario results AND the host's
+      # log (host.log) into OUT, so a failed run uploads both.
+      - name: Upload conformance results and host log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-conformance-results
+          path: ${{ runner.temp }}/conformance-results
+          if-no-files-found: ignore

@@ -20,10 +20,11 @@
 // ─── Foundation (task 001) ───
 export { dataGridTokens } from './tokens';
 export type { DataGridTokens } from './tokens';
+export { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 
 // ─── Core DataGrid (task 003) ───
 export { DataGrid, default as DataGridDefault } from './DataGrid';
-export type { DataGridProps, DataGridHostContext } from './DataGrid';
+export type { DataGridProps, DataGridHostContext, DataGridSettings, DataGridSortSetting } from './DataGrid';
 
 // ─── DataGridPageShell — canonical Custom Page mount (task 035 hardening) ───
 // Thin wrapper around DataGrid that handles FluentProvider + theme listener +
@@ -50,6 +51,15 @@ export type { SidePaneFilterMessage, SidePaneFilterTranslator, SidePaneSpec } fr
 
 export { useLazyLoad } from './useLazyLoad';
 export type { UseLazyLoadOptions, UseLazyLoadResult } from './useLazyLoad';
+
+// ─── Host options (R4 task 023a): host row source, row-actions column, truncate-with-tooltip ───
+export type {
+  DataGridRowSource,
+  DataGridRowSourceRequest,
+  DataGridRowSourceResult,
+  DataGridRowNoun,
+} from './useHostRowSource';
+export type { DataGridRowAction } from './RowActionsCell';
 
 export {
   resolveConfig,
@@ -105,7 +115,7 @@ export type { BoolFilterChipProps, BoolFilterValue } from './chips/BoolFilterChi
 // `CommandBar` exported by components/PageChrome/. The internal name in
 // commandBar/CommandBar.tsx stays `CommandBar` — deep imports still work.
 export { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
-export type { CommandBarProps as DataGridCommandBarProps } from './commandBar/CommandBar';
+export type { CommandBarProps as DataGridCommandBarProps, DataGridHostCommand } from './commandBar/CommandBar';
 
 export {
   defaultCreateFormHandler,
@@ -120,6 +130,7 @@ export {
 export type { DefaultHandler, DefaultHandlerContext, DefaultActionMeta } from './commandBar/defaults';
 
 export { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from './commandBar/csvExport';
+export type { ExportCellText } from './commandBar/csvExport';
 
 export {
   registerCommandHandler,

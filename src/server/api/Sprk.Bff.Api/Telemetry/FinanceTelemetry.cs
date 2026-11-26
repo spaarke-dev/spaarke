@@ -5,16 +5,15 @@ namespace Sprk.Bff.Api.Telemetry;
 
 /// <summary>
 /// Metrics and tracing for Finance Intelligence Module operations (OpenTelemetry-compatible).
-/// Tracks: classification, extraction, budget signals, cache operations.
+/// Tracks: classification, budget signals, cache operations.
 ///
 /// Usage:
 /// - Meter name: "Sprk.Bff.Api.Finance" for OpenTelemetry configuration
-/// - Metrics: finance.classification.*, finance.extraction.*, finance.signal.*
+/// - Metrics: finance.classification.*, finance.signal.* (finance.extraction.* retired with the legacy extraction path, ebilling-r1 050b)
 /// - Dimensions: finance.status (success/failed), finance.classification (InvoiceCandidate/Unknown)
 ///
 /// Application Insights custom queries:
 /// - Classification rate: customMetrics | where name startswith "finance.classification" | summarize count() by customDimensions["finance.status"]
-/// - Extraction latency: customMetrics | where name == "finance.extraction.duration" | summarize avg(value), percentile(value, 95)
 /// - Budget signals: customMetrics | where name startswith "finance.signal" | summarize count() by customDimensions["finance.signal_type"]
 /// </summary>
 public class FinanceTelemetry : IDisposable
@@ -27,17 +26,12 @@ public class FinanceTelemetry : IDisposable
     private readonly Counter<long> _classificationFailures;
     private readonly Histogram<double> _classificationDuration;
 
-    // Extraction metrics
-    private readonly Counter<long> _extractionRequests;
-    private readonly Counter<long> _extractionSuccesses;
-    private readonly Counter<long> _extractionFailures;
-    private readonly Histogram<double> _extractionDuration;
-
     // Signal metrics
     private readonly Counter<long> _signalsEmitted;
 
     // Billing compliance (ebilling-r1 task 072, review B3)
     private readonly Counter<long> _billingSecureRootWalkFaults;
+    private readonly Counter<long> _rerunRefusals;
 
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Finance";
@@ -73,29 +67,6 @@ public class FinanceTelemetry : IDisposable
             description: "Finance document classification duration in milliseconds");
 
         // ═══════════════════════════════════════════════════════════════════════════
-        // Extraction Metrics
-        // ═══════════════════════════════════════════════════════════════════════════
-        _extractionRequests = _meter.CreateCounter<long>(
-            name: "finance.extraction.requests",
-            unit: "{request}",
-            description: "Total number of finance data extraction requests");
-
-        _extractionSuccesses = _meter.CreateCounter<long>(
-            name: "finance.extraction.successes",
-            unit: "{request}",
-            description: "Number of successful finance data extractions");
-
-        _extractionFailures = _meter.CreateCounter<long>(
-            name: "finance.extraction.failures",
-            unit: "{request}",
-            description: "Number of failed finance data extractions");
-
-        _extractionDuration = _meter.CreateHistogram<double>(
-            name: "finance.extraction.duration",
-            unit: "ms",
-            description: "Finance data extraction duration in milliseconds");
-
-        // ═══════════════════════════════════════════════════════════════════════════
         // Signal Metrics
         // ═══════════════════════════════════════════════════════════════════════════
         _signalsEmitted = _meter.CreateCounter<long>(
@@ -107,6 +78,11 @@ public class FinanceTelemetry : IDisposable
             name: "finance.billing.secure_root_walk.faults",
             unit: "{fault}",
             description: "Billing evaluations whose secure-root walk (D-112) faulted, so every Duplicate prior's detail was withheld");
+
+        _rerunRefusals = _meter.CreateCounter<long>(
+            name: "finance.ebilling.rerun.refused",
+            unit: "{rerun}",
+            description: "Set-firm re-runs refused permanently (the invoice stays held until an operator acts), tagged with the refusal code");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -162,57 +138,6 @@ public class FinanceTelemetry : IDisposable
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Extraction Methods
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Record the start of an extraction request.
-    /// </summary>
-    public Stopwatch RecordExtractionStart(string documentId)
-    {
-        var tags = new TagList
-        {
-            { "document.id", documentId }
-        };
-
-        _extractionRequests.Add(1, tags);
-        return Stopwatch.StartNew();
-    }
-
-    /// <summary>
-    /// Record successful extraction.
-    /// </summary>
-    public void RecordExtractionSuccess(Stopwatch stopwatch, string documentId)
-    {
-        stopwatch.Stop();
-        var tags = new TagList
-        {
-            { "document.id", documentId },
-            { "finance.status", "success" }
-        };
-
-        _extractionSuccesses.Add(1, tags);
-        _extractionDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
-    }
-
-    /// <summary>
-    /// Record extraction failure.
-    /// </summary>
-    public void RecordExtractionFailure(Stopwatch stopwatch, string documentId, string errorCode)
-    {
-        stopwatch.Stop();
-        var tags = new TagList
-        {
-            { "document.id", documentId },
-            { "finance.status", "failed" },
-            { "finance.error_code", errorCode }
-        };
-
-        _extractionFailures.Add(1, tags);
-        _extractionDuration.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     // Signal Methods
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -240,6 +165,13 @@ public class FinanceTelemetry : IDisposable
     /// a walker defect, not a data state.
     /// </summary>
     public void RecordBillingSecureRootWalkFault() => _billingSecureRootWalkFaults.Add(1);
+
+    /// <summary>
+    /// ebilling-r1 task 095d-2b-1 (uac-r2 K2b): a Set-firm re-run job ended Refused (permanent). The invoice keeps its rerun-pending marker,
+    /// so it stays held and withheld from partners; this count makes a stuck invoice visible without a log query (alert on a non-zero rate;
+    /// the dead-lettered message names the submission). Tagged with the stable refusal code only (ADR-015: no id, no row text).
+    /// </summary>
+    public void RecordRerunRefused(string code) => _rerunRefusals.Add(1, new KeyValuePair<string, object?>("code", code));
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Distributed Tracing

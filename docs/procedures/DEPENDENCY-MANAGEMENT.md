@@ -11,17 +11,17 @@
 ## When to Follow This Procedure
 
 - Adding, updating, or removing any NuGet or npm package
-- Updating shared library versions (`@spaarke/ui-components`, `@spaarke/auth`, `@spaarke/sdap-client`)
+- Updating shared library versions (`@spaarke/ui-components`, `@spaarke/auth`)
 - Resolving vulnerability audit findings from the nightly health report (`nightly-health.yml`'s `dep-audit` / `vuln-scan` jobs)
 - Updating Kiota packages (requires special coordination)
 
 ## .NET Dependency Management
 
-### Central Package Management
+### Package versions live in each `.csproj`
 
-All .NET package versions are centralized in `Directory.Packages.props` at the repository root. Individual `.csproj` files reference packages without version numbers.
+Spaarke does **not** use NuGet Central Package Management. Every `<PackageReference>` carries its own `Version="…"` in the `.csproj` that uses it, and that is the version that builds. The repository-root `Directory.Packages.props` was removed on 2026-11-10: CPM had been switched off in it, so its pins were ignored and had drifted from the real versions (e.g. it said Kiota 1.17.1 and Microsoft.Graph 5.88.0 while the BFF built with Graph 6.5.0). Removing it also removes the old "rename it before `pac` commands" workaround (NU1008).
 
-**Key file**: `Directory.Packages.props`
+To find the version a project actually uses: `dotnet list <project> package` (add `--include-transitive` for transitive versions).
 
 | Package Group | Example Packages | Update Coordination |
 |---------------|-----------------|---------------------|
@@ -48,8 +48,8 @@ These apply to all .NET projects. Changes here affect every build.
 
 ### Procedure: Updating a NuGet Package
 
-1. Edit `Directory.Packages.props` -- change the version for the target package(s)
-2. If updating Kiota packages: update ALL 7 `Microsoft.Kiota.*` entries to the same version
+1. Change the `Version` on the `<PackageReference>` in every `.csproj` that references the package (find them with `git grep -n 'Include="<PackageId>"' -- '*.csproj'`)
+2. If updating Kiota packages: update ALL 7 `Microsoft.Kiota.*` references to the same version
 3. Run `dotnet restore --verbosity minimal`
 4. Run `dotnet build -warnaserror` to verify no breaking changes
 5. Run `dotnet test` to verify functionality
@@ -73,13 +73,12 @@ The Microsoft.Graph SDK depends on Kiota packages transitively. If you update on
 
 ### Shared Libraries (Internal)
 
-Three internal shared libraries are consumed by PCF controls, code pages, and solutions via `file:` references:
+Two internal shared libraries are consumed by PCF controls, code pages, and solutions via `file:` references:
 
 | Library | Path | Consumers | Peer Dependencies |
 |---------|------|-----------|-------------------|
 | `@spaarke/ui-components` | `src/client/shared/Spaarke.UI.Components` | Code pages, solutions, PCF (via workspace) | React >=16.14.0, Fluent UI v9 packages, Lexical |
 | `@spaarke/auth` | `src/client/shared/Spaarke.Auth` | Code pages, external SPA | `@azure/msal-browser` ^3.0.0 |
-| `@spaarke/sdap-client` | `src/client/shared/Spaarke.SdapClient` | PCF controls | None |
 
 **Consumption pattern** (code pages and solutions):
 ```json
@@ -146,7 +145,6 @@ Root (package.json)
 
 PCF Controls (src/client/pcf/*)
   ├── @spaarke/ui-components (workspace:*)
-  ├── @spaarke/sdap-client (file: reference)
   ├── pcf-scripts (build tooling)
   └── Platform provides: React 16/17, Fluent UI v9
 
@@ -165,7 +163,7 @@ Solutions (src/solutions/*)
   └── vite (build tooling)
 
 .NET Projects
-  └── All versions in Directory.Packages.props (central management)
+  └── Versions pinned per .csproj (no central package management)
 ```
 
 ## Checklists

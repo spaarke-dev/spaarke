@@ -192,7 +192,9 @@ describe('EmailReadingPaneShell', () => {
       expect(screen.getByRole('button', { name: 'Save to SharePoint' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Create Event' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Create To Do' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Link Invoice' })).toBeInTheDocument();
+      // ebilling-r1 task 118: "Link Invoice" became "Submit Invoice" (label and tooltip); the old name is gone.
+      expect(screen.getByRole('button', { name: 'Submit Invoice' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Link Invoice' })).not.toBeInTheDocument();
       // "Open full form" was removed from the toolbar per owner UAT (2026-07-29).
       expect(screen.queryByRole('button', { name: 'Open full form' })).not.toBeInTheDocument();
     });
@@ -206,7 +208,7 @@ describe('EmailReadingPaneShell', () => {
         onSaveToSharePoint: jest.fn(),
         onCreateEvent: jest.fn(),
         onCreateTodo: jest.fn(),
-        onLinkInvoice: jest.fn(),
+        onSubmitInvoice: jest.fn(),
       };
       renderShell({ actions });
       fireEvent.click(screen.getByText('Email one'));
@@ -217,7 +219,7 @@ describe('EmailReadingPaneShell', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save to SharePoint' }));
       fireEvent.click(screen.getByRole('button', { name: 'Create Event' }));
       fireEvent.click(screen.getByRole('button', { name: 'Create To Do' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Link Invoice' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Submit Invoice' }));
 
       expect(actions.onReply).toHaveBeenCalledWith('e1');
       expect(actions.onReplyAll).toHaveBeenCalledWith('e1');
@@ -225,7 +227,7 @@ describe('EmailReadingPaneShell', () => {
       expect(actions.onSaveToSharePoint).toHaveBeenCalledWith('e1');
       expect(actions.onCreateEvent).toHaveBeenCalledWith('e1');
       expect(actions.onCreateTodo).toHaveBeenCalledWith('e1');
-      expect(actions.onLinkInvoice).toHaveBeenCalledWith('e1');
+      expect(actions.onSubmitInvoice).toHaveBeenCalledWith('e1');
     });
 
     it('places "New email" in the LEFT list toolbar (wired to actions.onNew) — reachable with nothing selected, and never a reading-pane toolbar verb', () => {

@@ -30,25 +30,31 @@ export type IFamilyPageBootstrap = Pick<
 interface IPendingAction {
   action: RecordFamilyAction;
   rows: IFamilySelection[];
+  /** One per choice: the panel's `key`, so each choice opens a fresh panel and never shows the previous result. */
+  seq: number;
 }
 
 export function FamilyPage({ b }: { b: IFamilyPageBootstrap }): React.JSX.Element {
   // Validated: a malformed table name or id never reaches a request URL (see familyParams.ts).
   const anchor = readFamilyParams(b.params);
+  // The last action chosen. It stays set after the panel closes: the panel is closed with `open={false}`, never by
+  // unmounting it while open. A Fluent Dialog unmounted while open leaves tabster's aria-hidden on the rest of the page,
+  // so the whole Family would stay hidden from assistive technology after any push (#1906).
   const [pending, setPending] = React.useState<IPendingAction | null>(null);
-  const closePanel = React.useCallback(() => setPending(null), []);
+  const [panelOpen, setPanelOpen] = React.useState(false);
+  const closePanel = React.useCallback(() => setPanelOpen(false), []);
 
   // Escape closes the platform dialog only while focus is inside the embedded modal (its handler sits on the region
-  // root). The panel's Dialog unmounts when it closes, which would drop focus to <body>; so remember what had focus when
-  // the action was chosen (the action button) and hand focus back when the panel closes, falling back to the region root.
+  // root). When the panel's Dialog closes, focus could be left on <body>; so remember what had focus when the action
+  // was chosen (the action button) and hand focus back when the panel closes, falling back to the region root.
   const providerRef = React.useRef<HTMLDivElement>(null);
   const opener = React.useRef<HTMLElement | null>(null);
   const handleAction = React.useCallback((action: RecordFamilyAction, rows: IFamilySelection[]) => {
     const active = document.activeElement;
     opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
-    setPending({ action, rows });
+    setPending(prev => ({ action, rows, seq: (prev?.seq ?? 0) + 1 }));
+    setPanelOpen(true);
   }, []);
-  const panelOpen = pending !== null;
   const wasPanelOpen = React.useRef(false);
   React.useEffect(() => {
     if (panelOpen) {
@@ -97,7 +103,8 @@ export function FamilyPage({ b }: { b: IFamilyPageBootstrap }): React.JSX.Elemen
       />
       {pending && (
         <RecordFamilyActionPanel
-          open
+          key={pending.seq}
+          open={panelOpen}
           onClose={closePanel}
           action={pending.action}
           source={{ table: anchor.entityName, id: anchor.id }}

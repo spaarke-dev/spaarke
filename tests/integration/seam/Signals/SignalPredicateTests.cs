@@ -178,24 +178,43 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
 
         // The dry run evaluates as the evaluator. A field-secured column on the allow-list would let an author learn its values one
         // bit at a time, which is the oracle the allow-list closes. Each entry must exist (RetrieveAttribute throws otherwise) and must
-        // not be secured. Null (unknown) fails too.
+        // not be secured. Null (unknown) fails too. Every failing column is collected and reported in one assertion, so one run lists them all.
+        var failures = new List<string>();
         foreach (var (entity, column) in PolicyVersionValidator.AuthorableColumns.OrderBy(c => c.Entity, StringComparer.Ordinal).ThenBy(c => c.Column, StringComparer.Ordinal))
         {
             var attribute = await _dv.GetAttributeAsync(entity, column);
             _out.WriteLine($"{entity}.{column}: {attribute.GetType().Name}, IsSecured={attribute.IsSecured}");
-            attribute.IsSecured.Should().Be(false, $"{entity}.{column} is authorable, so it must not be field-level secured");
+            if (attribute.IsSecured != false)
+            {
+                failures.Add($"{entity}.{column} is authorable, so it must not be field-level secured (IsSecured={attribute.IsSecured})");
+            }
         }
 
         // ebilling-r1 D-130 (ontology-r1 review): the derived Threshold reads these base columns org-wide with the evaluator's identity.
         // They are deliberately NOT authorable, so the loop above does not cover them. A secured one would read as empty (the approved
-        // total would silently fall back to the billed total). Each must exist and not be secured. Offline twin:
+        // total would silently fall back to the billed total). Each must exist and not be secured, except the reviewed exceptions
+        // (DerivedBaseColumnSecurityExceptions, shared with the offline twin), which must be secured. Offline twin:
         // DerivedBaseColumnsFieldSecurityTests (SpaarkeMaster Entity.xml).
         foreach (var (entity, column) in FinanceBaseValues.DerivedBaseColumns)
         {
             var attribute = await _dv.GetAttributeAsync(entity, column);
             _out.WriteLine($"{entity}.{column} (derived base column): {attribute.GetType().Name}, IsSecured={attribute.IsSecured}");
-            attribute.IsSecured.Should().Be(false, $"{entity}.{column} is read org-wide by the derived Threshold, so it must not be field-level secured");
+            if (DerivedBaseColumnSecurityExceptions.SecuredForTheBffWriters.TryGetValue((entity, column), out var reason))
+            {
+                // Task 166 (EB-D-200), reviewed by ontology-r1: the one shared exception list. A listed column is secured on purpose for
+                // write integrity (the evaluator's identity keeps read through its profile), so here it must BE secured; a stale entry fails.
+                if (attribute.IsSecured != true)
+                {
+                    failures.Add($"{entity}.{column} is listed as field-secured for the BFF writers ({reason}); if it is no longer secured, remove the entry (IsSecured={attribute.IsSecured})");
+                }
+            }
+            else if (attribute.IsSecured != false)
+            {
+                failures.Add($"{entity}.{column} is read org-wide by the derived Threshold, so it must not be field-level secured (IsSecured={attribute.IsSecured})");
+            }
         }
+
+        failures.Should().BeEmpty("every authorable column and every derived base column must match its expected field security");
     }
 
     [SkippableFact]

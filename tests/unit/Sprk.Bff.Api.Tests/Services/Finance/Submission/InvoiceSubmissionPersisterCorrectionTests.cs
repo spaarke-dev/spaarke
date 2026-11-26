@@ -22,9 +22,17 @@ public partial class InvoiceSubmissionPersisterTests
     private const long OldVersion = 41;
 
     /// <summary>A store whose submission is a Correction of <see cref="OldInvoiceId"/> (In Review, this firm, this matter, version 41).</summary>
-    private static Store CorrectionStore(Action<Store>? beforeTransaction = null, Action<Store>? afterCommit = null)
+    private static Store CorrectionStore(
+        Action<Store>? beforeTransaction = null, Action<Store>? afterCommit = null,
+        Microsoft.Extensions.Logging.ILogger<InvoiceSubmissionPersister>? logger = null)
     {
-        var store = new Store { BeforeTransaction = beforeTransaction, AfterCommit = afterCommit, ProjectReads = true };
+        var store = new Store
+        {
+            BeforeTransaction = beforeTransaction,
+            AfterCommit = afterCommit,
+            ProjectReads = true,
+            Logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InvoiceSubmissionPersister>.Instance,
+        };
         store.Submission[InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference("sprk_invoicesubmission", EarlierSubmission);
         store.OtherSubmissions[EarlierSubmission] = new Entity("sprk_invoicesubmission", EarlierSubmission)
         {

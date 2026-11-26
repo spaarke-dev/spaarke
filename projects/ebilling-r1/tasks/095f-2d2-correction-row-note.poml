@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2d2" project="ebilling-r1">
+  <metadata>
+    <title>Decision notes, part 2d-2: correct and confirm carry a note on the correction row (sprk_invoicecorrection.sprk_note, EB-D-242)</title>
+    <phase>5 Partner surfaces — 095f part 2</phase>
+    <gate>095f-2s merged into work (the column on the pending list). Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF C# on the correction write (D-64 labels).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>095f-2s</deps>
+    <tags>bff-api, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build design §5.2 option B: CorrectionRequest gains Note (line and header routes), checked per design §1.1 before any read; CorrectAsync writes sprk_note on each sprk_invoicecorrection row it creates in that call, in the same create. The note is not part of the row's derived id. No Decision Record and no writer change.</prompt>
+
+  <goal>A reviewer's correct or confirm can carry a short note stored with the correction row.</goal>
+
+  <constraints>
+    <constraint source="EB-D-242">The derived row id is unchanged (a repeat with an edited note finds the same row and does not rewrite the note); no Decision Record.</constraint>
+    <constraint source="D-64">Correction labels (Corrected, Confirmed individually, Accepted in bulk) are unchanged; Accepted in bulk carries no note.</constraint>
+    <constraint source="design 1.1">The shared 400 codes ebilling.note_too_long and ebilling.note_invalid_characters.</constraint>
+    <constraint source="project">No live call. Never run python. Never --no-verify. No bare git stash.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A note is written on every row created by the call; no note writes no sprk_note; the row ids equal the pre-change ids (must-not-fire on an id change).</criterion>
+    <criterion testable="true">Bulk accepted rows carry no note; the validation set of 2a.</criterion>
+    <criterion testable="true">BFF build --warnaserror 0 warnings; correction suites green; ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="176" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The budget inquiry email and its replies are filed under the inquiry AND the matter, internal-only, in the matter's thread, and archived as .eml (D-216)</title>
+    <phase>11 UAT</phase>
+    <gate>startable: D-216 and its internal-only ruling recorded; uac-r2 agreed the access design (2026-11-10)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .cs in the BFF communication send and inbound paths; decides a communication's filing, owner, thread, archive and external visibility (access-sensitive).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches shared communication code (send mapping, inbound reply resolution, thread placement) with access consequences under a secure matter; the reply path still has to be mapped.</model-tier-reason>
+    <effort>high</effort>
+    <deps>070, 160</deps>
+    <tags>bff,email,access,testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner UAT of 161 on REAL-2026-123456.02 (2026-11-09): the budget inquiry email was sent and its `sprk_servicerequest` (the inquiry, filed under the matter) was created. But the `sprk_communication` has only `sprk_regardingservicerequest` set, so it does not show on the matter, and no .eml Document was archived. Causes: `BudgetInquiryExecutor.Build` (`Services/Signals/Actions/BudgetInquiryExecutor.cs` ~:97-122) sends associations [service request, matter], `CommunicationService.MapAssociationFieldsAsync` (~:2876) maps only associations[0], and the executor never sets `ArchiveToSpe` (default false). D-216 (owner): file the email under BOTH the inquiry and the matter, and archive it. Owner 2026-11-10, relayed by uac-r2: the inquiry email is internal-only. uac-r2 (access owner) agreed the design: `sprk_regardingservicerequest` is outside `SecureChildLineage` for communications, so with the matter set the row is an ordinary matter-filed communication (owner, Secure-if-any, Restricted bar and Secure mirror all key on the matter). The thread-filing sweep skips a row with two typed regarding lookups (`CommunicationThreadFilingSweepJob.cs` ~:43), so the email must be placed in a thread at send. Replies that the tracking footer token resolves to the inquiry (`TrackingTokenRung`, `IncomingCommunicationProcessor`) are service-request-only today: unfiled, and not Secure-owned under a secure matter. That is a pre-existing access gap, and this task closes it.</prompt>
+  <role>SPAARKE BFF engineer (communication filing and Signals actions).</role>
+  <goal>(1) The inquiry email is created with `sprk_regardingservicerequest` = the inquiry AND `sprk_regardingmatter` = the matter, both set before the first ownership decision and the core-ancestor stamp; with `sprk_isinternalonly = true` in the same create; placed in the matter's thread at send; and archived as an .eml Document (`ArchiveToSpe = true`). The service request stays associations[0], so the footer token and `sprk_regardingrecordid`/`name` still name the inquiry. (2) An inbound reply resolved to an INQUIRY service request also gets `sprk_regardingmatter` from that service request's matter, `sprk_isinternalonly = true` and the same matter thread, set before its first ownership decision and stamp. (3) Nothing else changes for any other sender or any other service request.</goal>
+
+  <constraints>
+    <constraint source="uac-r2 condition 1">Scope is INQUIRY service requests only: the ones `BudgetInquiryExecutor` creates. Identify them by a column the executor already writes at create (map it: direction Outbound plus whatever else it sets). If no existing column tells an inquiry service request from any other, STOP and report: no schema change and no wider rule in this task (a wider rule widens external visibility and goes back to uac-r2 and the owner).</constraint>
+    <constraint source="uac-r2 condition 2">Fail closed on the service request's matter read (reply path, and the send path if it reads it): read it presence-aware, not with `GetAttributeValue` treating a missing value as null. An absent column, an unread value or a faulted read must not create the row service-request-only. Treat it as an undecidable parent, the same way the create path handles an unreadable parent (fail the stamp, or retry). An explicit null (the service request has no matter) stays as today. Ids only: never names, never logged values other than ids.</constraint>
+    <constraint source="D-216">Opt-in for this sender only. Do NOT change `MapAssociationFieldsAsync` into "map every secondary association" for all callers. Add the smallest switch (for example a property on the matter `CommunicationAssociation`, or an executor-side field set before the stamp) and justify it in three sentences (CLAUDE.md §11: existing / extension / cost of doing nothing) in the task notes and the PR. Set the second lookup BEFORE `StampCoreAncestorOrThrowAsync` / `CoreAncestorResolver.StampAsync` so `InheritedAccessPermission` takes it in (`CoreAncestorResolver.cs` ~:991); never after (that would be a re-file needing `AfterRefileAsync`).</constraint>
+    <constraint source="D-216">The thread: place the email in the MATTER's thread at send through the existing `ThreadId` / thread-resolution path (`SendCommunicationRequest.ThreadId`, `ThreadResolver`); do not rely on the sweep. A reply joins the same thread. Follow the existing rule for Private/Open threads (`SendCommunicationRequest` ~:129-135); do not change the sweep.</constraint>
+    <constraint source="D-216">Archive: `ArchiveToSpe = true` on the inquiry send. The container resolves from the row's lookups (`CommunicationContainerResolver.cs` ~:95); with the matter set it should resolve the matter's container. A secure matter must land in the secure container (existing behaviour); do not add a fallback to the shared archive. An archive failure stays non-fatal, as today.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests; run filtered (Communication|BudgetInquiry|Inquiry|Thread|Incoming|CoreAncestor|RecordOwnership) and the full ArchTests. Measure the publish-size delta against a fresh master build (bff-hygiene). Public repo: no environment GUIDs or identity ids in code, tests, notes, commits or PR.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Map the send path (Build, MapAssociationFieldsAsync, StampAsync order, ArchiveToSpe, thread resolution) and the reply path (TrackingTokenRung, ResolveInboundFilingAsync); confirm how an inquiry service request is identified.</step>
+    <step>Write fail-first tests for every acceptance criterion.</step>
+    <step>Implement the send switch, the archive, the matter thread and the reply rule; any change to uac-r2's files comes as its own commit for their review.</step>
+    <step>Run the filtered BFF tests, the full ArchTests and the publish-size delta; push the branch for review (uac-r2 plus one independent adversarial review).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Send: the created `sprk_communication` carries `sprk_regardingservicerequest` = the inquiry, `sprk_regardingmatter` = the matter, `sprk_isinternalonly = true`, the matter's thread, and `sprk_regardingrecordid` = the service request (the footer token still names the inquiry). Assert on the real entity passed to create, not on a mock's echo.</criterion>
+    <criterion testable="true">Send: the matter lookup is on the entity when `StampAsync` runs. A test with a SECURE matter shows the inherited access permission and the owner the resolver picks are the matter's (Secure-team-owned). Mutation: set the matter lookup after the stamp, and the test fails.</criterion>
+    <criterion testable="true">Send: `ArchiveToSpe` is true on the request, and with the matter set the archive container resolves to the matter's (a secure matter's to the secure container).</criterion>
+    <criterion testable="true">Reply: an inbound email resolved by the tracking token to an inquiry service request whose matter is M gets `sprk_regardingmatter` = M, `sprk_isinternalonly = true` and the same matter thread, under an ordinary matter AND under a secure matter (Secure-team-owned). Mutation: skip the reply rule, and these tests fail.</criterion>
+    <criterion testable="true">Reply: the service request's matter read faults, or the column is absent or unread: the row is NOT created service-request-only (it fails or retries like an undecidable parent). An explicit null matter: the row is created as today (service-request-only).</criterion>
+    <criterion testable="true">External: an external contact holding a grant on the matter does not see the inquiry email or its reply in the portal message threads (internal-only).</criterion>
+    <criterion testable="true">Negative: a reply resolved to a service request that is NOT an inquiry, and every other sender (Assign Task, decision message, composer single-association sends), is unchanged. The existing tests stay green.</criterion>
+    <criterion testable="true">A thread test: a two-lookup inquiry email gets a thread at send (the sweep is not needed).</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-216 and its internal-only ruling; D-181 for the record label)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs (Build, ExecuteAsync, the service request create)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskNotifier.cs ~:580-590 (reference: IsInternalOnly = true on a Signals send)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (MapAssociationFieldsAsync ~:2876, SendAsync user path ~:2017-2100, ArchiveToSpeAsync ~:3038, footer ~:169-177)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/TrackingTokenRung.cs and IncomingCommunicationProcessor.cs (the reply path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (StampAsync ~:968, ApplyInheritedAccessPermissionAsync ~:1161)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs (~:24-27, :206-218: the service request is outside the communication lineage)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadFilingSweepJob.cs ~:43 (skips two typed lookups)</file>
+    </files>
+  </knowledge>
+  <review>uac-r2 reviews the diff (filing, owner, thread and visibility), plus one independent adversarial review. Dev deploy only with the owner's go, through uac-r2's deploy session.</review>
+
+  <completion date="2026-11-10" pr="2655">
+    <summary>Branch task/ontology-176-inquiry-email-filing, b07158ce51..bbeb1cfcd3: fail-first tests; RecordContainerResolver sole-root release of a held service request (uac-r2 option A, F-176-1) plus the ArchTest guard that keeps the 8 release columns unsecured; the send (matter before the stamp, internal-only, ArchiveToSpe, matter thread created Private in the create); the inbound reply (matter, internal-only, Private thread, service request kept as primary, provenance); the archive warning surfaced as inquiry_email_not_archived; the Console reply puts the message primary first so the footer signs the inquiry.</summary>
+    <acceptance>All 8 criteria pass. AC5 deviation, ruled by uac-r2: a matter key MISSING from a successful read counts as an explicit null (the SDK omits empty columns; a column that does not exist faults the read), so only a fault or a null row holds the reply. Behaviour change named in the PR: a reply to ANY service request is held when that read faults.</acceptance>
+    <review>One independent adversarial review (opus) of 045856ad10: no over-share, fail-open or ordering defect; fix-now items 1-4 and 6 fixed in round 2; its K7 led to the Private thread. uac-r2 approved the resolver, round 2 and round 3 (R3-1 stamp derivation test; R3-2 Console forward-and-reply fix).</review>
+    <gates>BFF build 0 warnings; filtered BFF tests 6067/0 (round 2) and 707/0 (round 3); ArchTests 1978/1978; jest DecisionWizard 179 + 7, EmailWorkspace 43/43; tsc clean. Publish size +8,028 bytes against the base at 045856ad10 (fresh master a0e1b4ab7c, same zip tool); rounds 2-3 add small logic only and were not re-measured.</gates>
+    <known-limits>K5 Outbound direction only identifies an inquiry (over-restricts). K8 Outlook add-in save path: DI-147 #2653. K9 no backfill of earlier inquiry emails (dev: the owner's UAT email).</known-limits>
+  </completion>
+</task>

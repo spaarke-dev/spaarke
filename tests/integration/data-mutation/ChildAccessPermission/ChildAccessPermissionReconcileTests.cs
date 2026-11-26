@@ -603,7 +603,7 @@ public partial class ChildAccessPermissionReconcileTests
         private readonly SecureChildReconciliationJob _job;
         private readonly ServiceProvider _provider;
 
-        public Harness(int? maxRowsPerRun = null, int? maxWritesPerRun = null)
+        public Harness(int? maxRowsPerRun = null, int? maxWritesPerRun = null, int? maxCarriedRows = null)
         {
             var services = new ServiceCollection();
             services.AddSingleton(SecureChildShareWorld.EntitiesOver(() => World).Object);
@@ -612,6 +612,8 @@ public partial class ChildAccessPermissionReconcileTests
             services.AddSingleton(_ => SecureChildShareWorld.CoreAncestorsOver(() => World));
             // Round 122 fix round 1 (K1): the attribute metadata the release reads for the two document link columns.
             services.AddSingleton<DataverseWebApiClient>(_ => LinkColumns);
+            // uac-r2 task 198 Part D: the share seam, as the host registers it — the Restricted filing bar reads and revokes here.
+            services.AddSingleton<IDataverseRecordShareService>(_ => Shares);
             _provider = services.BuildServiceProvider();
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -621,7 +623,11 @@ public partial class ChildAccessPermissionReconcileTests
             }).Build();
             _job = new SecureChildReconciliationJob(
                 _provider.GetRequiredService<IServiceScopeFactory>(), _time, configuration,
-                NullLogger<SecureChildReconciliationJob>.Instance);
+                NullLogger<SecureChildReconciliationJob>.Instance)
+            {
+                // uac-r2 198 pass 2 (F2): a small carry cap reaches the cap with a few rows (production: MaxCarriedRows).
+                AccessPermissionCarryCap = maxCarriedRows ?? SecureChildReconciliationJob.MaxCarriedRows,
+            };
         }
 
         public SecureChildShareWorld World { get; } = SecureChildShareWorld.Standard();

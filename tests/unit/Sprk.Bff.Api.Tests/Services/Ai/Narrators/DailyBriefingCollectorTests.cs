@@ -601,7 +601,9 @@ public sealed class DailyBriefingCollectorTests
             ("sprk_duedate", DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-dd"))), eventId);
         var sets = new Dictionary<string, Guid[]>
         {
-            ["sprk_matter"] = new[] { matterId }, ["sprk_project"] = new[] { projectId }, ["sprk_event"] = new[] { eventId },
+            ["sprk_matter"] = new[] { matterId },
+            ["sprk_project"] = new[] { projectId },
+            ["sprk_event"] = new[] { eventId },
         };
 
         var items = (await Sut(query, PeopleResolver(sets)).CollectHighPriorityAsync(SystemUserId, CancellationToken.None)).Items;

@@ -101,4 +101,9 @@ public static class OntologyWriterEvents
     /// pair, which is a programming fault (a malformed call), not a catalog fault. Logged at Error; returns
     /// <see cref="Guid.Empty"/>. Metered as <see cref="Telemetry.TaskCreateFaultReason.ArgumentFault"/>.</summary>
     public static readonly EventId TaskRegardingArgumentFault = new(50371, nameof(TaskRegardingArgumentFault));
+
+    /// <summary>Task 210 (DI-165): <see cref="RuleBodyDescriber"/> could not read a table's choice labels from the shared entity-metadata
+    /// cache, so the description shows the choice values as numbers (it is NOT refused). Logged at Warning, once per table per
+    /// description. Structured properties: <c>entity</c> and <c>exceptionType</c> ONLY; never the body or the exception message.</summary>
+    public static readonly EventId RuleDescriptionLabelsUnavailable = new(50372, nameof(RuleDescriptionLabelsUnavailable));
 }

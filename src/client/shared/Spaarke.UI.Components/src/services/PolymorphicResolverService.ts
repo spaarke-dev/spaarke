@@ -468,7 +468,14 @@ const _navPropCache: Record<string, INavPropEntry[]> = {};
  * `fetch`, resolved at call time); production callers omit it.
  *
  * Never throws — returns `[]` on a non-OK response or a fetch error. Callers
- * treat an empty set as "no nav-prop" and log a warn downstream.
+ * treat an empty set as "no nav-prop".
+ *
+ * The logical name is lowercased for the URL AND the cache key (SRFR-050):
+ * Dataverse entity logical names are lowercase, and the metadata endpoint
+ * answers a wrong-case name (e.g. a maker typing `sprk_Communication` into a
+ * control's `entity` input) with HTTP 200 and an EMPTY list, not a 404. That
+ * silently breaks every downstream write, so a zero-entry result is also
+ * warned about (naming the entity).
  *
  * @param entityLogicalName  e.g. `'sprk_event'`, `'sprk_invoice'`, `'sprk_document'`
  * @param fetchImpl          Fetch implementation (test seam; default global `fetch`)
@@ -478,13 +485,14 @@ export async function discoverNavProps(
   entityLogicalName: string,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<INavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
+  const entityLower = entityLogicalName.toLowerCase();
+  if (_navPropCache[entityLower]) {
+    return _navPropCache[entityLower];
   }
 
   try {
     const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
+      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLower}')/ManyToOneRelationships` +
       `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
 
     const resp = await fetchImpl(url, { credentials: 'include' });
@@ -509,7 +517,15 @@ export async function discoverNavProps(
       referencedEntity: r.ReferencedEntity,
     }));
 
-    _navPropCache[entityLogicalName] = entries;
+    if (entries.length === 0) {
+      console.warn(
+        `[PolymorphicResolver] Nav-prop discovery returned zero entries for entity="${entityLogicalName}" ` +
+          `(normalized "${entityLower}"). Verify it is a real entity logical name — ` +
+          `all resolver writes for it will fail otherwise.`
+      );
+    }
+
+    _navPropCache[entityLower] = entries;
     return entries;
   } catch (err) {
     console.warn(`[PolymorphicResolver] Nav-prop discovery error for ${entityLogicalName}:`, err);
@@ -550,7 +566,7 @@ export function toNavPropMap(entries: INavPropEntry[]): Record<string, string> {
  */
 export function _resetNavPropCacheForTests(entityLogicalName?: string): void {
   if (entityLogicalName) {
-    delete _navPropCache[entityLogicalName];
+    delete _navPropCache[entityLogicalName.toLowerCase()];
     return;
   }
   for (const k of Object.keys(_navPropCache)) {
@@ -787,6 +803,31 @@ export async function applyResolverFields(
     recordNumberSourceField: numberSourceField,
     displayName: finalDisplayName,
   };
+}
+
+/**
+ * For the UPDATE of a SAVED host: null `sprk_regardingrecordnumber` when {@link applyResolverFields} left it out.
+ *
+ * `applyResolverFields` skips the number when the new target has none (no catalog number field, or an empty value) —
+ * right for a CREATE, where there is nothing to overwrite, but on a re-regard it leaves the PREVIOUS target's number
+ * beside the new target's id, name and url (a matter's number on a contact). This nulls it so no number outlives the
+ * pair it described.
+ *
+ * Gated to hosts that carry the pair: the key is added only when the host has the `sprk_regardingrecordtype` lookup,
+ * because writing a column a host lacks makes Dataverse reject the whole update (HTTP 400). The number is the pair's
+ * fifth column, written by {@link applyResolverFields} on any host whose target has one, so the pair's presence is the
+ * signal this module already relies on. A number the payload already carries is never touched.
+ *
+ * @param payload       The assembled update payload (mutated in place).
+ * @param hostNavProps  Nav-props discovered for the host entity (the presence oracle).
+ */
+export function nullRecordNumberWhenTargetHasNone(
+  payload: Record<string, unknown>,
+  hostNavProps: INavPropEntry[]
+): void {
+  if (payload['sprk_regardingrecordnumber'] !== undefined) return;
+  if (!hostNavProps.some(n => n.columnName.toLowerCase() === 'sprk_regardingrecordtype')) return;
+  payload['sprk_regardingrecordnumber'] = null;
 }
 
 // ===========================================================================

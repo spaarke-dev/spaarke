@@ -1,8 +1,8 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Amended 2026-07-12)
+> **Status**: Accepted (Amended 2026-11-24)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-07-12 (Amendment: `@spaarke/visuals` presentational sibling — see below)
+> **Last Updated**: 2026-11-24 (`@spaarke/sdap-client` folded into `@spaarke/ui-components` (`src/services/sdap`), so no Grandfathered package remains; `@spaarke/compose-components` sanctioned: Compose document-editing model, TipTap quarantine; `@spaarke/ai-outputs` retired into `@spaarke/ai-widgets`; previous: 2026-11-18 Pattern D feature packages sanctioned: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`; previous: 2026-11-13 census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -42,7 +42,86 @@ Adding another shared package is a high bar. **All three** MUST hold — otherwi
 
 Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reuse test applies: extend the existing package.
 
-**Sanctioned shared packages (as of this amendment)**: `@spaarke/ui-components` (UX components + abstracted-I/O services), `@spaarke/visuals` (presentational data-viz), `@spaarke/auth` (auth), plus the domain component libraries (`@spaarke/events-components`, etc.). New siblings require an ADR amendment.
+The sanctioned packages are enumerated in the census below; the earlier open-ended "domain component libraries (… etc.)" wording is withdrawn. New siblings require an ADR amendment.
+
+---
+
+## Amendment (2026-11-10): Enumerated Shared-Package Census
+
+> Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md). The 2026-07-12 text sanctioned "the domain component libraries (`@spaarke/events-components`, etc.)". That "etc." covered 11 of the 15 packages in `src/client/shared/`, nine of which no ADR names — so the bar above was never applied to them. This amendment replaces it with a closed list.
+
+**Decision**: the table below is the complete list of shared packages (every `src/client/shared/*/package.json`).
+
+- **Sanctioned**: has an ADR-backed contract. Extend it before adding anything new.
+- **Grandfathered — under review**: existed before this census and was never assessed against the three-test bar above. Each one may be used and extended. Each one is later either sanctioned (by an amendment that adds an ADR citation) or consolidated into a sanctioned package. A grandfathered package is not a precedent for adding another. None remain since 2026-11-24; the status stays defined so the census test can still parse and reject it.
+
+**Enforced by**: `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs`. It fails when a folder is missing from this table, when the table lists a package that does not exist, and when the table and the test's census disagree on a package's status. Adding a package therefore takes an ADR amendment and a census entry together.
+
+<!-- shared-package-census:start -->
+| Package | Folder | Status | Contract / reason |
+|---|---|---|---|
+| `@spaarke/ui-components` | `Spaarke.UI.Components` | Sanctioned | UX components + abstracted-I/O services (`IDataService`); the default home (this ADR) |
+| `@spaarke/visuals` | `Spaarke.Visuals` | Sanctioned | Presentational data-viz; `react-charting` quarantine; `@types/react@18` pin (2026-07-12 amendment) |
+| `@spaarke/auth` | `Spaarke.Auth` | Sanctioned | The single SSO / token / authenticated-fetch implementation for every surface (ADR-028) |
+| `@spaarke/events-components` | `Spaarke.Events.Components` | Sanctioned | Events + Tasks components shared by the EventsPage code page and the SpaarkeAi Calendar widget (named in the 2026-07-12 amendment) |
+| `@spaarke/notifications` | `Spaarke.Notifications` | Sanctioned | Host-agnostic notification-spine client: SignalR delivery with poll fallback (ADR-047) |
+| `@spaarke/ai-widgets` | `Spaarke.AI.Widgets` | Sanctioned | Workspace + context widgets for the three-pane shell, including the internal output / source pane widgets in `src/outputs` (ADR-030 pane event bus, ADR-031 stage lifecycle) |
+| `@spaarke/smart-todo-components` | `Spaarke.SmartTodo.Components` | Sanctioned | Smart To Do feature package: SmartTodo code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
+| `@spaarke/communication-components` | `Spaarke.Communication.Components` | Sanctioned | Communications feature package: 3 PCFs (deep imports), Office add-ins, ai-widgets, 4 code pages (2026-11-18 Pattern D amendment) |
+| `@spaarke/daily-briefing-components` | `Spaarke.DailyBriefing.Components` | Sanctioned | Daily Briefing feature package: DailyBriefing code page + LegalWorkspace section (2026-11-18 Pattern D amendment) |
+| `@spaarke/compose-components` | `Spaarke.Compose.Components` | Sanctioned | The Compose document-editing model (TipTap document, DOCX bridge, checkout, comments); TipTap/ProseMirror quarantine; SpaarkeAi + LegalWorkspace (2026-11-24 amendment) |
+<!-- shared-package-census:end -->
+
+**Census changes since 2026-11-10** (each one owner-approved in `projects/reuse-governance-tightening-r1/notes/package-reviews.md`):
+- 2026-11-13: `@spaarke/ai-context` retired. It held only six types; they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from its barrel).
+- 2026-11-13: `@spaarke/legal-workspace` retired. It was a one-line re-export of the LegalWorkspace solution with one consumer. SpaarkeAi now declares a `file:` dependency on that solution (package `legal-workspace`, `exports` `./src/index.ts`). A solution exposing its own entry point to another solution is not a shared package.
+- 2026-11-13: `@spaarke/document-operations` retired. Its one hook, `useDocumentActions`, moved unchanged into `@spaarke/ui-components` (`src/hooks/useDocumentActions.ts`), exported from the main barrel only, not `pcf-safe`. Both consumers (SemanticSearch, Compose) already imported from ui-components.
+- 2026-11-18: `@spaarke/smart-todo-components`, `@spaarke/communication-components` and `@spaarke/daily-briefing-components` sanctioned as Pattern D feature packages (amendment below).
+- 2026-11-24: `@spaarke/compose-components` sanctioned (Compose amendment below).
+- 2026-11-24: `@spaarke/ai-outputs` retired. `@spaarke/ai-widgets` was its only importer; its widgets and types moved into `src/outputs` there, internal (not re-exported from the barrel). The registries key them by the `OutputWidgetType` / `SourceWidgetType` enums, and its duplicate pane-event and chat-session types were dropped for SprkChat's `IAiPaneEvent` / `IChatSession`.
+- 2026-11-24: `@spaarke/sdap-client` retired, the last Grandfathered package. It failed the three-test bar on its own (no contract distinct from ui-components' BFF services, no dependency to quarantine, two real importers — ui-components and DocumentUploadWizard — not the 18 its row claimed). The client moved into `@spaarke/ui-components` (`src/services/sdap`), exported from the main barrel only, not `pcf-safe`. Its drive-keyed `downloadFile` / `deleteFile` / `getFileMetadata` were deleted (P-2: they called retired BFF routes and had no callers); reads and deletes stay on the document-id routes. The stale listings, aliases, path maps and PCF stubs went with it (P-9, P-10).
+
+---
+
+## Amendment (2026-11-18): Pattern D Feature Packages
+
+> Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md). Owner-approved 2026-11-13 in `projects/reuse-governance-tightening-r1/notes/package-reviews.md` §2–§4 (issues #2802, #2803, #2804).
+
+**Decision**: a *Pattern D feature package* holds one feature's components, hooks and logic, shared by a standalone code page and the workspace section or widget that embeds the same feature (Pattern D dual-use). It is sanctioned when **all three** hold:
+
+- **(a) Cross-surface** — two or more surfaces import it (code page, workspace section, PCF, add-in, SPA).
+- **(b) Domain-bound** — it carries its feature's Dataverse schema (`sprk_*` entity and column names) or BFF record writes, which `@spaarke/ui-components` may not hold (MUST NOT below).
+- **(c) Deep imports from PCFs** — a PCF reaches it only through a sub-path (`@spaarke/<package>/logic/…`, `/components/…`), never the package barrel.
+
+This bar replaces the three-test bar above for these packages only. A feature package needs no quarantine-worthy dependency: it exists because folding it into `@spaarke/ui-components` would itself break this ADR (about 31,000 LOC and 437 `sprk_*` literals across the three) and grow the barrel that 17 PCFs import. Every other new package still meets the three-test bar.
+
+**Closed list.** Sanctioned under this amendment: `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`. Another feature package needs its own amendment that names it.
+
+**Entity-literal exception (P-8).** The MUST NOT on hard-coding Dataverse entity names does not apply inside these three packages; being domain-bound is condition (b). It still applies to every other shared package. Domain-agnostic UI written in a feature package belongs in `@spaarke/ui-components` (root CLAUDE.md §11), not in the feature package.
+
+Every other rule in this ADR applies to them, including React 16/17 compatibility for the code a PCF imports.
+
+**Enforced by**: `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs` — the census rows (closed list), and a source scan that fails when a file under `src/client/pcf/` imports one of these packages through its barrel (condition c). Conditions (a) and (b) are judged when an amendment is written.
+
+---
+
+## Amendment (2026-11-24): `@spaarke/compose-components` — Compose Document-Editing Model
+
+> Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md). Owner-approved 2026-11-13 in `projects/reuse-governance-tightening-r1/notes/package-reviews.md` §5 (issue #2805).
+
+**Decision**: `@spaarke/compose-components` (`src/client/shared/Spaarke.Compose.Components`) is sanctioned as the single home of the Compose document-editing model. It passes the three-test bar on its own:
+
+1. **Distinct contract** — the TipTap/ProseMirror document, the DOCX bridge (`src/utils/docxBridge.ts`, the only one; never delete it), checkout / heartbeat, comment threads and re-anchoring, the save op-log the BFF validates (ADR-049).
+2. **Quarantine** — 15 `@tiptap/*` packages plus ProseMirror stay out of `@spaarke/ui-components` and every PCF.
+3. **Cross-surface** — SpaarkeAi and LegalWorkspace (`composeEditor.registration.ts`). Not PCF-safe, by design.
+
+**Editor split.** Document editing (DOCX-backed: save, checkout, comments, redlines) → `ComposeEditor` here. Rich-text fields (email body, note) → `RichTextEditor` (Lexical) in `@spaarke/ui-components`. A third editor needs an amendment.
+
+**TipTap quarantine.** Only non-test source in this package imports `@tiptap/*` or `prosemirror-*`. No other shared package and no PCF declares them; SpaarkeAi and LegalWorkspace declare them only so their bundlers resolve Compose source.
+
+**Entity map (P-8).** Every Dataverse name the package uses is in `src/types/composeDocumentSchema.ts` (`COMPOSE_DOCUMENT_SCHEMA`: `sprk_document` and four columns). No other non-test source file in the package names a `sprk_` entity or column in code (comments may). This is narrower than the Pattern D exception.
+
+**Enforced by**: `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs` — the census row, a TipTap-quarantine scan (imports under `src/client` and `src/solutions`; declarations under `src/client/shared` and `src/client/pcf`) and an entity-map scan of the package, each with must-fire and must-not-fire controls.
 
 ---
 
@@ -65,7 +144,7 @@ Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reus
 
 - **MUST NOT** mix Fluent UI versions (v9 only)
 - **MUST NOT** reference PCF-specific APIs (`ComponentFramework.*`) in shared components
-- **MUST NOT** hard-code Dataverse entity names or schemas as string literals (use configurable entity maps)
+- **MUST NOT** hard-code Dataverse entity names or schemas as string literals (use configurable entity maps). Exceptions: the three Pattern D feature packages (2026-11-18 amendment); `@spaarke/compose-components` keeps its names in one entity map (2026-11-24 amendment)
 - **MUST NOT** use custom CSS (Fluent tokens only)
 - **MUST NOT** use React 18/19-only APIs (`useTransition`, `useDeferredValue`) in components intended for PCF
 - **MUST NOT** export components without tests
@@ -250,4 +329,4 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ---
 
-**Lines**: ~254
+**Lines**: ~332

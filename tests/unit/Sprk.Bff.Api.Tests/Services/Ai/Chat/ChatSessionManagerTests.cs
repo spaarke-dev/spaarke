@@ -991,7 +991,8 @@ public class ChatSessionManagerTests
             PlaybookId: PlaybookId,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: []) { OwnerOid = TestSessionOwner.Oid };
+            Messages: [])
+        { OwnerOid = TestSessionOwner.Oid };
 
     private void SetupCacheSetSuccess()
     {

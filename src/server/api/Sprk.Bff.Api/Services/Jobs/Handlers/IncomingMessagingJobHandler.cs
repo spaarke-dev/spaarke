@@ -148,6 +148,7 @@ public sealed class IncomingMessagingJobHandler : IJobHandler
                     Message = normalized,
                     ProviderMessageId = acsMessageId,
                     ProviderThreadId = payload.AcsThreadId,
+                    ProviderSenderId = _normalizer.ResolveSenderIdentifier(payload),
                     CorrelationId = string.IsNullOrEmpty(job.CorrelationId) ? job.JobId.ToString() : job.CorrelationId,
                 },
                 ct);

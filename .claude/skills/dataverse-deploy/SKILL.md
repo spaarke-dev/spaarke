@@ -33,7 +33,6 @@ last-reviewed: 2026-11-03
 - ✅ **MUST** update version in ALL 5 locations
 - ✅ **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
 - ✅ **MUST** use `pack.ps1` script (creates forward slashes in ZIP)
-- ✅ **MUST** disable/restore CPM around PAC commands
 
 ### 🚨 CRITICAL - Control Version is the Cache Key:
 - ✅ **MUST** update `ControlManifest.Input.xml` version FIRST - this is what Dataverse uses to detect updates
@@ -104,18 +103,14 @@ cp out/controls/control/bundle.js \
 ### Step 4: Pack and Import
 
 ```bash
-# Disable CPM
-mv /c/code_files/spaarke-wt-ai-rag-pipeline/Directory.Packages.props{,.disabled}
-
 # Pack (creates fresh ZIP with forward slashes)
 cd Solution && powershell -ExecutionPolicy Bypass -File pack.ps1
 
 # Import
 pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
-
-# Restore CPM
-mv /c/code_files/spaarke-wt-ai-rag-pipeline/Directory.Packages.props{.disabled,}
 ```
+
+(The old "disable CPM" rename of `Directory.Packages.props` is gone: the file was removed on 2026-11-10. If a worktree branched before that still has it and `pac` reports NU1008, rename it aside for the command.)
 
 ### Step 5: Verify
 
@@ -216,7 +211,7 @@ Is the PCF embedded in a Custom Page?
 
 ## Purpose
 
-Deploy Dataverse components using PAC CLI following the [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md). This skill handles authentication, Central Package Management conflicts, and solution import issues.
+Deploy Dataverse components using PAC CLI following the [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md). This skill handles authentication and solution import issues.
 
 ---
 
@@ -574,7 +569,7 @@ Publishing an entity also publishes every pending (unpublished) view, form and c
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `No active authentication profile` | Not logged in | Run `pac auth create --environment "URL"` |
-| `NU1008: Projects that use central package version management` | Directory.Packages.props conflict | Disable CPM before PAC commands |
+| `NU1008: Projects that use central package version management` | A worktree branched before 2026-11-10 still has `Directory.Packages.props` (removed from master then) | Rename it aside for the PAC command, or merge master |
 | `Unable to remove directory "obj\Debug\Metadata"` | File lock during cleanup | **Harmless** - import the packed solution directly |
 | `Solution not found` | Wrong solution name | Run `pac solution list` to find exact name |
 | `Publisher not found` | Wrong publisher prefix | Use `--publisher-prefix sprk` |
@@ -736,9 +731,9 @@ Spaarke ships **no Dataverse plugins**, so there is no plugin deployment — man
 
 | ADR | Relevance |
 |-----|-----------|
-| [ADR-006](.claude/adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
-| [ADR-022](.claude/adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility (CRITICAL) |
-| [ADR-021](.claude/adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
+| [ADR-006](../../adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
+| [ADR-022](../../adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility (CRITICAL) |
+| [ADR-021](../../adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
 
 ---
 

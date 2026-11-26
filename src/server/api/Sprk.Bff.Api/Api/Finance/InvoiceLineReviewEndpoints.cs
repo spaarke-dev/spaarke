@@ -22,10 +22,14 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Signals.</b> A decision closes the Open and Acknowledged Signals on its lines (D-122) through the app-identity writer, so the
 /// service first asks, AS THE CALLER with the caller's own token, for AppendTo on the core record and Write on each such line; a missing right is
 /// 403 <c>ebilling.decision.not_authorized</c> and nothing is written.</para>
+/// <para><b>Notes (095f-2d1, EB-D-236).</b> The single-line and multi-line bodies take an optional <c>note</c>; it lands on each decided line's own
+/// Decision Record (<c>Values["note"]</c>) and never on an invoice column. Accept all Clean and the approval's bulk accept take none. A refused note
+/// is 400 <c>ebilling.note_too_long</c> or <c>ebilling.note_invalid_characters</c>, before any read.</para>
 /// <para><b>Status codes.</b> 200 applied; 400 invalid (<c>errorCode</c> says which rule); 401; 403; 404 uniform (invoice or line absent or
 /// unreadable); 409 (not In Review, line Pending or not decidable, totals refused, another decision in progress, a line changed,
 /// <c>ebilling.line.corrections_pending</c> while a correction of a chosen line, or for Accept all Clean of the invoice, was saved but did not finish:
-/// the detail names each by field and line, to be repeated first); 503
+/// the detail names each by field and line, to be repeated first; <c>ebilling.decision.id_reused</c> when the decision id is already recorded on a
+/// chosen line with another decision: another action, reason, amount, note or reviewer, checked before anything is written (ISS-029)); 503
 /// <c>ebilling.disabled</c> or a transient failure; 503 <c>ebilling.decision.incomplete</c> when the lines were written but a later step did not
 /// finish (the body names the committed lines to repeat the decision with). Its <c>failedStep</c> is <c>totals</c>, <c>corrections</c>,
 /// <c>record</c>, or <c>signals</c> (2026-10-29: a Signal close failed, so a Signal is still Open; the decision stands and the repeat
@@ -58,14 +62,19 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision - one decision on one line
         group.MapPost("/invoices/{invoiceId:guid}/lines/{lineId:guid}/decision", DecideLine)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("DecideInvoiceLine")
             .WithSummary("Accept, reduce or disallow one invoice line")
             .WithDescription(
                 "Accept (approved = billed), Reduce (approvedAmount and reason required; between 0 and the billed amount) or Disallow (reason " +
                 "required; approved 0). Only while the invoice is In Review; a Pending line cannot be decided. Recomputes the invoice totals and " +
-                "records the decision. Repeating the request with the same decisionId records nothing twice.")
+                "records the decision. Repeating the request with the same decisionId records nothing twice. An optional note (at most 2000 " +
+                "characters; 400 ebilling.note_too_long or ebilling.note_invalid_characters, checked before any read) is saved on this line's own " +
+                "Decision Record and nowhere else. A repeat with the same decisionId must be the same decision: once the line's record exists, another " +
+                "action, reason, amount, note (or none) or reviewer is refused 409 ebilling.decision.id_reused before anything is written, and the first " +
+                "decision and note stay. Use a new decisionId for a new decision. A 503 on the lookup of the recorded decision writes nothing and is safe " +
+                "to repeat; other 503 codes (for example ebilling.decision.incomplete) say which step to repeat or that the step needs a fix first.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -76,13 +85,17 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/decisions - one action and reason on selected lines
         group.MapPost("/invoices/{invoiceId:guid}/lines/decisions", DecideLines)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("DecideInvoiceLines")
             .WithSummary("Apply one action and reason to several invoice lines")
             .WithDescription(
                 "The selected lines get the same action and reason; a Reduce carries its own approvedAmount per line (apply a suggestion to n " +
-                "lines). All or nothing: one invalid line writes nothing. An Accept writes the 'Accepted in bulk' correction rows (never a label).")
+                "lines). All or nothing: one invalid line writes nothing. An Accept writes the 'Accepted in bulk' correction rows (never a label). " +
+                "An optional note (the single-line route's rules) is saved on every selected line's own Decision Record, one record per line, and " +
+                "nowhere else. A repeat with the same decisionId must be the same decision as every chosen line already recorded under that decisionId: " +
+                "if one of those lines was recorded with another action, reason, amount, note or reviewer, the whole call is refused 409 " +
+                "ebilling.decision.id_reused and no line is written (see the single-line route). Lines not in the call are not checked.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -93,19 +106,37 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/accept-clean - Accept all Clean
         group.MapPost("/invoices/{invoiceId:guid}/lines/accept-clean", AcceptClean)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("AcceptCleanInvoiceLines")
             .WithSummary("Accept every Clean line of an invoice")
             .WithDescription(
                 "Accepts exactly the lines that are Clean when the request runs, at their billed amount. Flagged, Pending and already decided " +
-                "lines are untouched. Writes the 'Accepted in bulk' correction rows (never a label).")
+                "lines are untouched. Writes the 'Accepted in bulk' correction rows (never a label). Takes no note: its records carry none.")
             .Produces<LineDecisionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // POST /api/finance/invoices/{invoiceId}/lines - Add line (task 164, EB-D-188). The same right as a line decision: Write on the invoice, as the caller.
+        group.MapPost("/invoices/{invoiceId:guid}/lines", AddLine)
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .RequireEbillingEnabled()
+            .WithName("AddInvoiceLine")
+            .WithSummary("Add a Fee or Expense line the firm did not bill")
+            .WithDescription(
+                "Adds one reviewer-typed Fee or Expense line to an invoice that is In Review and has a firm. The line is created Flagged, its codes must be " +
+                "in the invoice's code set, and the billing rules are run again on the invoice. A retry with the same requestId addresses the same line.")
+            .Produces<AddLineResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return app;
@@ -119,7 +150,9 @@ public static class InvoiceLineReviewEndpoints
             CallerResolution.ResolveObjectId(httpContext.User) ?? string.Empty,
             TokenHelper.ExtractBearerTokenOrNull(httpContext));
 
-        var review = await service.GetAsync(invoiceId, caller, ct);
+        // Task 113 (model 8.2): step 0's verdict decides who gets the Procedure-change banner; it is read from the request, never resolved again.
+        var review = await service.GetAsync(
+            invoiceId, caller, FinanceAuthorizationFilter.StepZeroClassedInternal(httpContext) ? FinanceStepZeroVerdict.Internal : null, ct);
         return review is null
             ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext)
             : TypedResults.Ok(review);
@@ -146,7 +179,7 @@ public static class InvoiceLineReviewEndpoints
         var result = await service.DecideAsync(
             new LineDecisionCommand(
                 invoiceId, body.DecisionId, action, body.Reason,
-                [new LineDecisionLine(lineId, body.ApprovedAmount)], decider, Bulk: false, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
+                [new LineDecisionLine(lineId, body.ApprovedAmount)], decider, Bulk: false, TokenHelper.ExtractBearerTokenOrNull(httpContext), body.Note),
             ct);
         return ToResult(result, httpContext, body.DecisionId);
     }
@@ -177,7 +210,7 @@ public static class InvoiceLineReviewEndpoints
         var result = await service.DecideAsync(
             new LineDecisionCommand(
                 invoiceId, body.DecisionId, action, body.Reason,
-                body.Lines.Select(l => new LineDecisionLine(l.LineId, l.ApprovedAmount)).ToList(), decider, Bulk: true, TokenHelper.ExtractBearerTokenOrNull(httpContext)),
+                body.Lines.Select(l => new LineDecisionLine(l.LineId, l.ApprovedAmount)).ToList(), decider, Bulk: true, TokenHelper.ExtractBearerTokenOrNull(httpContext), body.Note),
             ct);
         return ToResult(result, httpContext, body.DecisionId);
     }
@@ -199,6 +232,57 @@ public static class InvoiceLineReviewEndpoints
         return ToResult(result, httpContext, body.DecisionId);
     }
 
+    private static async Task<IResult> AddLine(
+        Guid invoiceId, AddLineRequest? body, InvoiceLineAddService service, HttpContext httpContext, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Refused(StatusCodes.Status400BadRequest, AddLineCodes.Invalid, "A request body is required.");
+        }
+
+        // Step 0 before any I/O (the decider lookup included): a malformed request is 400 whoever sends it.
+        var command = new AddLineCommand(
+            invoiceId, body.RequestId, body.CostType, body.Date, body.Timekeeper, body.Hours, body.Rate, body.Amount,
+            body.TaskCode, body.ActivityCode, body.ExpenseCode, body.Description, body.Reason, DeciderSystemUserId: Guid.Empty);
+        if (InvoiceLineAddService.ShapeError(command, out _) is { } invalid)
+        {
+            return ToResult(invalid, httpContext, body.RequestId);
+        }
+
+        if (await DeciderAsync(httpContext, ct) is not { } decider)
+        {
+            return DeciderUnresolved(httpContext);
+        }
+
+        return ToResult(await service.AddAsync(command with { DeciderSystemUserId = decider }, ct), httpContext, body.RequestId);
+    }
+
+    /// <summary>Maps an Add line outcome to one HTTP status and one stable code (ADR-019; brief section 3).</summary>
+    internal static IResult ToResult(AddLineResult result, HttpContext httpContext, Guid requestId) => result.Status switch
+    {
+        AddLineStatus.Applied => TypedResults.Ok(new AddLineResponse(
+            requestId, result.LineId!.Value, result.DecisionId!.Value, result.LineStatus, result.AlreadyApplied, result.Totals)),
+        AddLineStatus.InvalidRequest => Refused(StatusCodes.Status400BadRequest, result.Code, result.Detail),
+        AddLineStatus.InvoiceNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
+        AddLineStatus.NotInReview or AddLineStatus.FirmMissing or AddLineStatus.CorrectionsPending or AddLineStatus.CodeSetUnavailable
+            or AddLineStatus.ProcedureGap or AddLineStatus.TotalsRefused or AddLineStatus.IdReused or AddLineStatus.Busy
+            or AddLineStatus.Changed or AddLineStatus.TooLarge => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+        AddLineStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
+        // The line was committed but totals, record or Signals did not finish: the repeat of the same request completes it (164a-4b, N10).
+        AddLineStatus.Incomplete => Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            detail: result.Detail,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = result.Code,
+                ["requestId"] = requestId,
+                ["lineId"] = result.LineId,
+                ["decisionId"] = result.DecisionId,
+                ["failedStep"] = result.FailedStep,
+            }),
+        _ => Refused(StatusCodes.Status503ServiceUnavailable, result.Code, result.Detail),
+    };
+
     /// <summary>The caller's <c>systemuserid</c> from the caller's own token (<c>WhoAmI</c> on the OBO token); null means the identity is unproven (fail closed).</summary>
     private static async Task<Guid?> DeciderAsync(HttpContext httpContext, CancellationToken ct) =>
         await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct);
@@ -219,7 +303,7 @@ public static class InvoiceLineReviewEndpoints
         LineDecisionStatus.InvalidRequest => Refused(StatusCodes.Status400BadRequest, result.Code, result.Detail),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         LineDecisionStatus.NotInReview or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.TotalsRefused
-            or LineDecisionStatus.Busy or LineDecisionStatus.Changed => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+            or LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.FirmRequired or LineDecisionStatus.IdReused => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         LineDecisionStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
         LineDecisionStatus.Forbidden => Refused(StatusCodes.Status403Forbidden, result.Code, result.Detail),
         LineDecisionStatus.Incomplete => Results.Problem(
@@ -241,16 +325,47 @@ public static class InvoiceLineReviewEndpoints
             extensions: new Dictionary<string, object?> { ["errorCode"] = errorCode });
 }
 
-/// <summary>Body of the single-line decision route. <paramref name="Action"/> is <c>accept</c>, <c>reduce</c> or <c>disallow</c>.</summary>
-public sealed record SingleLineDecisionRequest(Guid DecisionId, string? Action, string? Reason, decimal? ApprovedAmount);
+/// <summary>
+/// Body of the single-line decision route. <paramref name="Action"/> is <c>accept</c>, <c>reduce</c> or <c>disallow</c>. <paramref name="Note"/> is
+/// optional (095f-2d1, EB-D-236): at most 2000 characters after trimming, no control character other than newline, carriage return or tab (400
+/// <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>, before any read); blank means none. It is saved only on this line's own
+/// Decision Record, never on the invoice.
+/// </summary>
+public sealed record SingleLineDecisionRequest(Guid DecisionId, string? Action, string? Reason, decimal? ApprovedAmount, string? Note = null);
 
 public sealed record MultiLineDecisionLine(Guid LineId, decimal? ApprovedAmount);
 
-/// <summary>Body of the multi-line route: one action and reason, a per-line amount for a Reduce.</summary>
-public sealed record MultiLineDecisionRequest(Guid DecisionId, string? Action, string? Reason, IReadOnlyList<MultiLineDecisionLine>? Lines);
+/// <summary>
+/// Body of the multi-line route: one action and reason, a per-line amount for a Reduce. <paramref name="Note"/> is the single-line route's optional
+/// note (095f-2d1): one note, saved on every selected line's own Decision Record, as the reason is applied to every line.
+/// </summary>
+public sealed record MultiLineDecisionRequest(
+    Guid DecisionId, string? Action, string? Reason, IReadOnlyList<MultiLineDecisionLine>? Lines, string? Note = null);
 
-/// <summary>Body of Accept all Clean.</summary>
+/// <summary>Body of Accept all Clean. It carries no note (095f-2d1): the lines it accepts are accepted in bulk, and each record is written without one.</summary>
 public sealed record AcceptCleanRequest(Guid DecisionId);
 
 /// <summary>200 body of a decision: the lines decided (with their new state) and the invoice totals as 016 stored them (null when nothing was decided).</summary>
 public sealed record LineDecisionResponse(Guid DecisionId, IReadOnlyList<DecidedLineDto> Lines, ReviewTotalsDto? Totals);
+
+/// <summary>
+/// Body of Add line. No total, status, owner or person: the decider is the caller. <paramref name="RequestId"/> is the client's id for this add; a retry
+/// sends the same one.
+/// </summary>
+public sealed record AddLineRequest(
+    Guid RequestId,
+    string? CostType,
+    DateOnly? Date,
+    string? Timekeeper,
+    decimal? Hours,
+    decimal? Rate,
+    decimal? Amount,
+    string? TaskCode,
+    string? ActivityCode,
+    string? ExpenseCode,
+    string? Description,
+    string? Reason);
+
+/// <summary>200 body of Add line. <paramref name="AlreadyApplied"/> is true when the same request had already added the line. <paramref name="Totals"/> is
+/// null until task 164a-4b.</summary>
+public sealed record AddLineResponse(Guid RequestId, Guid LineId, Guid DecisionId, string? Status, bool AlreadyApplied, ReviewTotalsDto? Totals);

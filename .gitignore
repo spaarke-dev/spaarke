@@ -172,3 +172,9 @@ src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
 runs/*-intake.json
 
 __pycache__/
+
+# MCP conformance run output (tests/integration/Mcp.Conformance.Host/run-conformance.sh writes to a temp dir; this is a backstop)
+conformance-results/
+
+# jscpd duplication report (local runs of the weekly sweep; .jscpd.json)
+jscpd-report/

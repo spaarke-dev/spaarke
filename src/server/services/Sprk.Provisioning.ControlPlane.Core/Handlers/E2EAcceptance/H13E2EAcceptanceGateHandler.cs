@@ -422,7 +422,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     TenancyModel: run.TenancyModel ?? string.Empty,
                     // T7 checks both slots carry ExternalAccess__CustomerBusinessUnitId == H10's customer unit (task 265, #2265).
                     // Blank here is not an H13 rejection: T7 reports it as Failed (the run carries no H10 customer business unit).
-                    CustomerBusinessUnitId: run.InterStepState.CustomerBusinessUnitId?.Trim() ?? string.Empty),
+                    CustomerBusinessUnitId: run.InterStepState.CustomerBusinessUnitId?.Trim() ?? string.Empty,
+                    // T7 checks both slots carry Ontology__Writer__ManagedIdentityClientId == H2a's writer identity, and T3 that
+                    // the writer holds no Graph app role (task 266, #2605). Blank is not an H13 rejection: T7 / T3 report it Failed.
+                    OntologyWriterClientId: run.InterStepState.OntologyWriterClientId?.Trim() ?? string.Empty,
+                    OntologyWriterObjectId: run.InterStepState.OntologyWriterObjectId?.Trim() ?? string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1000,7 +1004,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     ///   sprk_provisionedon       ← <paramref name="readyStamp"/> (always)
     ///   sprk_bffversion          ← run.InterStepState.BffBuildId (H9 output — the deployed build)
     ///   sprk_solutionversion     ← ImportedSolutionSet.ComputeVersion(run.InterStepState.ImportedSolutions)
-    ///                              (H6 output — "SpaarkeMaster {version} ({managed|unmanaged})", T218b)
+    ///                              (H6 output — "SpaarkeMaster {Managed|Unmanaged} {version}", T218b)
     ///   sprk_azuresubscriptionid ← run.Parameters.NonSecret["subscriptionId"] (intake — the run's subscription)
     ///   sprk_resourcegroupname   ← run.InterStepState.ResourceGroupName (H2a output)
     ///   sprk_appservicename      ← run.InterStepState.AppServiceName (H2a output)
@@ -1109,11 +1113,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[$"h13-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h13-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
@@ -1158,6 +1158,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
+
+        // ISS-035: H13 completes the run itself, so it must still record its own success the way every handler does --
+        // otherwise a failed-then-resumed H13 stayed in FailedHandlers (and its failure-marker gates Pending) on a
+        // Completed run. The terminal status below overrides the Running status this call sets.
+        run.MarkPhaseSucceeded(HandlerIdentifier, completedAt);
 
         run.Status = RunStatus.Completed;
         run.CurrentPhase = HandlerIdentifier;

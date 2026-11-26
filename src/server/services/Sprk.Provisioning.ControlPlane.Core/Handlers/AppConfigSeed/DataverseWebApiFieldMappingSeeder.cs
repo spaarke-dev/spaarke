@@ -143,6 +143,8 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
     //     (MembershipOptions.AccessConferringRoles, seeded from MembershipOptionsDefaults.CanonicalAccessConferringRegistry).
     //     One-time (0): a push applies such a rule only to a request that opts in (includeAssignedTo), whatever its value, and
     //     the sync-mode script gives the same class 0.
+    //   - Display copy (task 032b-1): an Assigned-style column that confers no access (MembershipOptionsDefaults.DisplayCopyColumns,
+    //     the invoice's attorney and paralegal columns). One-time (0): the push never writes one, whatever its value.
     //   - Plain data: anything else. Manual Refresh (1), so an ordinary push refreshes it.
     // This project cannot reference the BFF, so the value is stated per profile; the ArchTest
     // FieldMappingSeederSyncModeClassTests asks the BFF's classifier (PushRuleSelection.AssignedToColumnsOf) about every seeded
@@ -175,7 +177,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         new FieldMappingProfileSeedItem(
             ProfileName: "Matter to Invoice (Attorney Matrix)",
             TargetEntityLogicalName: "sprk_invoice",
-            // Every target is an Assigned-To column of sprk_invoice in the registry.
+            // Every target is a DISPLAY COPY (field-mapping-server-write-path-r1 task 032b-1, UAC-r2 U3 (c)): not in the access
+            // registry, confers no access, mapped at create only and never pushed (the BFF's push skips it whatever its sync
+            // mode). One-time keeps the data in step with that.
             RuleSyncMode: SyncModeOneTime,
             Rules: new[]
             {

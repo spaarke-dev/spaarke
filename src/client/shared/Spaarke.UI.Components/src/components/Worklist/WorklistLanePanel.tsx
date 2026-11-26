@@ -23,7 +23,7 @@ import { MetricCardRow } from '../WorkspaceShell/MetricCardRow';
 import { MatterCard } from './MatterCard';
 import { bucketLaneItems, buildLaneCountCards } from './laneCountFilters';
 import type { LaneFilterKey } from './laneCountFilters';
-import type { OpenItemEvent, WorklistLane } from './types';
+import type { OpenItemEvent, WorklistItem, WorklistLane } from './types';
 import { useLaneOpen } from './useLaneOpen';
 import { hiddenItemsNote } from './worklistView';
 import type { LaneView } from './worklistView';
@@ -39,6 +39,10 @@ export interface WorklistLanePanelProps {
   onStart: () => void;
   /** The email aggregate row; rendered at the top of the lane when no filter is on. */
   aggregateRow?: React.ReactNode;
+  /** Optional per-item seam, passed to each `MatterCard` (see `MatterCardProps.renderItem`); absent keeps every item a standard line. */
+  renderItem?: (item: WorklistItem) => React.ReactNode;
+  /** Optional content rendered directly under the lane header, before the cards and the list; absent renders nothing. */
+  belowHeader?: React.ReactNode;
 }
 
 const LANE_COPY: Record<WorklistLane, { heading: string; subtitle: string; start: string; empty: string }> = {
@@ -77,6 +81,8 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
   onOpenItem,
   onStart,
   aggregateRow,
+  renderItem,
+  belowHeader,
 }) => {
   const styles = useStyles();
   const [open, setOpen] = useLaneOpen(lane);
@@ -139,6 +145,8 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
         </Button>
       </div>
 
+      {belowHeader}
+
       {total > 0 && <MetricCardRow layout="wide" ariaLabel={`${copy.heading} filters`} cards={cards} />}
 
       {(total > 0 || aggregateRow) && (
@@ -187,6 +195,7 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
               onOpenItem={onOpenItem}
               note={hiddenItemsNote(g.hiddenCount, g.group.core?.typeLabel, g.group.core === null)}
               today={today}
+              renderItem={renderItem}
             />
           ))}
         </div>

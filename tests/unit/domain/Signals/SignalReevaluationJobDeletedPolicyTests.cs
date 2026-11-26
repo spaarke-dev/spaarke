@@ -225,7 +225,8 @@ public partial class SignalReevaluationJobTests
         // there names that sweep, not "was deleted".
         var h = new Harness();
         h.Sysadmin.AddPolicy("POL-OFF", SignalWriter.LaneDecide, false, PathBBody, PathBTemplate);
-        SeedPolicyless(h, "POL-OFF", MatterId, null, SignalWriter.SignalStatusResolved);
+        // Task 217: the Off policy's Signal still carries stored detail, so the not-in-force sweep reads it (one with none is not read at all).
+        h.Org.Rows[SeedPolicyless(h, "POL-OFF", MatterId, null, SignalWriter.SignalStatusResolved)]["sprk_evidencerefs"] = StoredEvidenceQuotingTheWitness();
         SeedPolicyless(h, DeletedPolicyCode, OtherMatterId, null, SignalWriter.SignalStatusResolved);
         var offReads = 0;
         var deletedReads = 0;
@@ -368,10 +369,11 @@ public partial class SignalReevaluationJobTests
             .Should().Be(1, "the one past the bound is left for the next run");
         h.Log.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
             && e.Message.Contains($"More open Signals with no policy lookup remain than one run reads ({SignalEvaluator.MaxPages} pages)", StringComparison.Ordinal));
-        // The redaction's read of every status is bounded the same way; Resolved Signals never drop out of it, so its bound is a failed run.
+        // The redaction's read of every status is bounded the same way; Resolved Signals never drop out of it. Task 224 (#2085): its bound is
+        // reported and the next run continues after the last Signal read (a cursor), so it is no longer a failed run.
         h.Log.Should().Contain(e => e.Level == LogLevel.Warning
-            && e.Message.Contains("the stored evidence of the deleted policies beyond them was not checked", StringComparison.Ordinal));
-        result.Success.Should().BeFalse();
+            && e.Message.Contains("the next run continues after Signal", StringComparison.Ordinal));
+        result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
     // ── Fix round 5 (task 102b): the date rules of ExistingPolicyCodes, and the cap on the logged codes ─────────────────────────────

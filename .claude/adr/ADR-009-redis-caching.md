@@ -103,7 +103,7 @@ var snapshot = await _requestCache.GetOrCreateAsync(
 | Metadata (entity definitions) | ≤15 min | Document in code |
 | Non-metadata hotspots | 1-5s | Profiling evidence required |
 
-**See**: [Caching Pattern](../patterns/data/redis-caching.md)
+**See**: [Caching Pattern](../patterns/caching/distributed-cache.md)
 
 ---
 

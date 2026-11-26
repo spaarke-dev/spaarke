@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
 
@@ -318,10 +319,84 @@ public class ExternalDocumentNarrowingGuardTests
             ? $"ExternalCallerCommunicationGuard.{method.Name}"
             : null;
 
+    // ── uac-r2 task 191h: THE external visibility predicate on every lineage surface ──────────────────────────────────
+
+    /// <summary>
+    /// The surfaces that return root or lineage-child rows to a caller who may be external and must ask THE external visibility
+    /// predicate (<see cref="AppOnlyExternalVisibility"/>): the assistant's three read tools (#2189), the AI retrieval trim (an
+    /// external caller's document keys, #2369 part 2) and the external SPA's to-do and event lists (#2179 design §3.3).
+    /// </summary>
+    private static readonly string[] VisibilitySurfaces =
+    {
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler::ExecuteChatAsync",
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler::ExecuteChatAsync",
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler::DescribeRecordAsync",
+        "Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim::TrimByRecordAsync",
+        "Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService::GetTodosAsync",
+        "Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService::GetEventsAsync",
+        // Fix round 1 (F1): the single to-do / event writes (PATCH, delete-own) refuse a row the lists hide.
+        "Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints::UpdateTodo",
+        "Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints::AuthorizeDeleteOwnAsync",
+    };
+
+    [Fact(DisplayName = "uac-r2 191h: every lineage surface reaches THE external visibility predicate, and so does every use of IsVisibilityGuarded")]
+    public void EveryLineageSurface_ReachesTheVisibilityPredicate()
+    {
+        var scan = Scan(BffTypes.Value, IsVisibilityDecision, VisibilitySurfacePrimitive);
+
+        foreach (var surface in VisibilitySurfaces)
+            Assert.True(scan.Reaches.Contains(surface), $"{surface} should reach THE external visibility predicate (AppOnlyExternalVisibility).");
+        // Non-vacuity: the three tools are seen testing a lineage table.
+        foreach (var surface in VisibilitySurfaces.Take(3))
+            Assert.True(scan.Surfaces.ContainsKey(surface), $"{surface} should be seen testing IsVisibilityGuarded — the scan lost its signal.");
+
+        var problems = scan.Surfaces.Keys.Where(k => !scan.Reaches.Contains(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW lineage surface without THE predicate: {k} (uses {string.Join(", ", scan.Surfaces[k].Order())})")
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "A surface that tests ExternalCallerCommunicationGuard.IsVisibilityGuarded returns root or lineage-child rows to an " +
+            "external caller and must hide those THE external visibility predicate does not show: ask " +
+            "ExternalCallerCommunicationGuard.NotVisibleRowsAsync / NotVisibleIdsAsync (uac-r2 task 191h):\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "uac-r2 191h: negative control — a lineage read that skips the predicate is found; one that asks it (directly or through a helper) is not")]
+    public void VisibilityDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(VisibilityGuardControlSkipsThePredicate), typeof(VisibilityGuardControlAsksThroughAHelper),
+            typeof(VisibilityGuardControlAsksTheSeamDirectly), typeof(NarrowingGuardControlNoDocuments),
+        };
+        var scan = Scan(fixtures.SelectMany(IlCallScan.WithNested), IsVisibilityDecision, VisibilitySurfacePrimitive);
+
+        var flagged = scan.Surfaces.Keys.Where(k => !scan.Reaches.Contains(k)).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(new[] { $"{typeof(VisibilityGuardControlSkipsThePredicate).FullName}::ReadAsync" }, flagged);
+        Assert.Contains($"{typeof(VisibilityGuardControlAsksThroughAHelper).FullName}::ReadAsync", scan.Reaches);
+        Assert.Contains($"{typeof(VisibilityGuardControlAsksTheSeamDirectly).FullName}::ReadAsync", scan.Reaches);
+    }
+
+    private static bool IsVisibilityDecision(MethodBase method) =>
+        method.DeclaringType is { } declaring
+        && ((declaring == typeof(AppOnlyExternalVisibility) && method.Name == nameof(AppOnlyExternalVisibility.Invoke))
+            || (declaring == typeof(ExternalCallerCommunicationGuard)
+                && method.Name is nameof(ExternalCallerCommunicationGuard.NotVisibleRowsAsync)
+                    or nameof(ExternalCallerCommunicationGuard.NotVisibleIdsAsync)));
+
+    private static string? VisibilitySurfacePrimitive(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalCallerCommunicationGuard)
+        && method.Name == nameof(ExternalCallerCommunicationGuard.IsVisibilityGuarded)
+            ? "ExternalCallerCommunicationGuard.IsVisibilityGuarded"
+            : null;
+
     // ── K7: the consumers of the app-only narrowing seams are an allow-list ────────────────────────────────────────
 
     /// <summary>The app-only narrowing seams (CLAUDE.md §6.5 path B, owner round 111: a hide decision only).</summary>
-    private static readonly Type[] NarrowingSeams = { typeof(AppOnlyDocumentNarrowing), typeof(InternalRouteDocumentNarrowing) };
+    private static readonly Type[] NarrowingSeams =
+    {
+        typeof(AppOnlyDocumentNarrowing), typeof(InternalRouteDocumentNarrowing),
+        // uac-r2 task 191h: THE external visibility predicate, app-only by id, hide-only (the same shape).
+        typeof(AppOnlyExternalVisibility),
+    };
 
     /// <summary>
     /// Every BFF type allowed to hold, resolve, invoke or build an app-only narrowing seam, with its reason. A new consumer
@@ -331,17 +406,25 @@ public class ExternalDocumentNarrowingGuardTests
     private static readonly IReadOnlyDictionary<string, string> AllowedSeamConsumers = new Dictionary<string, string>
     {
         ["Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule"] =
-            "The ONE registrar: binds both seams to ExternalDataService.ReadAndNarrowDocumentsAsync (app-only).",
+            "The ONE registrar: binds both document seams to ExternalDataService.ReadAndNarrowDocumentsAsync (app-only), and " +
+            "(191h) the visibility seam to 191c's ExternalVisibilityDecider over the app-only readers.",
         ["Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyDocumentNarrowingExtensions"] =
             "Slice C: the hide-only overload (returns the hidden id set; no rows, no reasons).",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler"] =
-            "Assistant tool (path B): hides sprk_document rows and rows derived from a document from the user's own read.",
+            "Assistant tool (path B): hides sprk_document rows, rows derived from a document, and (191h) root and lineage-child " +
+            "rows THE visibility predicate does not show, from the user's own read.",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler"] =
-            "Assistant tool (path B): drops document hits and hits derived from a document from the user's own search.",
+            "Assistant tool (path B): drops document hits, hits derived from a document, and (191h) root and lineage-child hits " +
+            "THE visibility predicate does not show, from the user's own search.",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler"] =
-            "Assistant tool (path B): answers a hidden sprk_document record like not-found.",
+            "Assistant tool (path B): answers a hidden sprk_document record, and (191h) a root or lineage-child record THE " +
+            "visibility predicate does not show, like not-found.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.ExternalCallerCommunicationGuard"] =
+            "191h: NotVisibleRowsAsync / NotVisibleIdsAsync ask the visibility seam by id and return the not-visible id set " +
+            "(a fault throws); no rows, no reasons.",
         ["Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim"] =
-            "Slice A (F1-A): withholds an external caller's hidden document keys from AI retrieval.",
+            "Slice A (F1-A): withholds an external caller's hidden document keys from AI retrieval; (191h, #2369 part 2) also " +
+            "those THE visibility predicate does not show.",
         ["Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing"] =
             "Slice B: the internal plane's document filter, bulk download and container lists refuse or drop hidden documents.",
         // Round 4b (K7 hardening): direct callers of the app-only reader's narrowing entry points count as consumers.
@@ -349,6 +432,30 @@ public class ExternalDocumentNarrowingGuardTests
             "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
         ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
             "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
+        ["Sprk.Bff.Api.Services.Documents.OfficeEditAccessService"] =
+            "uac-r2 191g: asks the visibility seam whether ONE document is externally visible before a flagged-external caller " +
+            "gets a write permission on its file (only Visible from a decision that did not fault grants); no rows, no reasons, " +
+            "nothing returned to the caller but its own edit/view answer.",
+        ["Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync"] =
+            "uac-r2 191g: asks the visibility seam whether the documents of recorded item grants are still externally visible, " +
+            "to REMOVE a grant (Hidden or structurally undecidable) or keep it (Visible, or not decidable for now); no rows, " +
+            "nothing returned to any caller.",
+        ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
+            "uac-r2 197b: asks the visibility seam, for a Direct message's participants flagged external only, whether " +
+            "each row may be granted (Visible, or undecided only for no root), hidden (revoke) or deferred; no rows, nothing " +
+            "returned to any caller.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
+            "uac-r2 197b: resolves the visibility seam in a scope of its own for the live Direct grant's participants flagged " +
+            "external (DirectMessageParticipantShares.DecideForDirectParticipantsAsync), on the Direct-team branch and the other Direct " +
+            "branch (the no-root exemption only for the stamped pair of a recognized unfiled Direct message); a grant decision only.",
+        ["Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob"] =
+            "uac-r2 197b: resolves the visibility seam from its run scope and hands it to DirectMessageParticipantShares.",
+        ["Sprk.Bff.Api.Services.Access.SecureChildReconciler"] =
+            "uac-r2 197b: constructs DirectMessageParticipantShares on the refile path WITHOUT the visibility seam (the optional " +
+            "parameter stays null), so participants flagged external are deferred there and the share job grants them.",
+        ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
+            "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
+            "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",
     };
 
     [Fact(DisplayName = "Task 188 r3 C (K7): the app-only narrowing seams have only listed consumers")]
@@ -476,7 +583,11 @@ public class ExternalDocumentNarrowingGuardTests
 
     private const string AllVisibleDouble = "AllVisibleDocumentNarrowing";
 
-    private static bool ReferencesTheAllVisibleDouble(string source) => source.Contains(AllVisibleDouble, StringComparison.Ordinal);
+    /// <summary>uac-r2 191h: the visibility seam's doubles (all visible, faulted, ...) live in this test-only class.</summary>
+    private const string VisibilityDoubles = "ExternalVisibilitySeams";
+
+    private static bool ReferencesTheAllVisibleDouble(string source) =>
+        source.Contains(AllVisibleDouble, StringComparison.Ordinal) || source.Contains(VisibilityDoubles, StringComparison.Ordinal);
 
     [Fact(DisplayName = "Task 188 r3 (Option A, condition 2): the all-visible narrowing double is never referenced from src/, and production builds the real seams")]
     public void TheAllVisibleTestDouble_NeverReachesProduction()
@@ -509,17 +620,156 @@ public class ExternalDocumentNarrowingGuardTests
     {
         Assert.True(ReferencesTheAllVisibleDouble("services.UseAllVisibleDocumentNarrowing();"));
         Assert.True(ReferencesTheAllVisibleDouble("services.AddSingleton(AllVisibleDocumentNarrowing.Instance);"));
+        Assert.True(ReferencesTheAllVisibleDouble("services.AddSingleton(ExternalVisibilitySeams.AllVisible);"));
         Assert.False(ReferencesTheAllVisibleDouble(
             "services.AddScoped<InternalRouteDocumentNarrowing>(sp => (ids, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(ids, ct));"));
     }
 
+    // ── ebilling-r1 task 093: the firm file gate (self-contained) ─────────────────────────────────────────────────────
+    // A Stored File is not an SPE document, so THE document narrowing does not apply to it; the firm route's own gate does. Every
+    // external-plane source method that reads or streams a Stored File (any StoredFileService member, or the shared
+    // StoredFileEndpoints.StreamServableAsync) is a firm file surface. It must be THE gate (ExternalInvoiceSubmissionAuthorizationFilter
+    // .DecideInvoiceFilesAsync), which reaches the record gate (ExternalMessageEndpoints.GetRecordRightsDecisionAsync: Read through the
+    // invoice's parents, the secure-roots rule and the (a') predicate) and the one firm definition (ReadCallerFirmsAsync); or a listed
+    // handler that serves only from the gate's set (it reads ExternalInvoiceSubmissionScope.InvoiceFiles). A new surface, a gate that
+    // stops reaching one of the two, a handler that stops reading the set, and a stale entry all fail. Controls:
+    // FirmFileGuard_MustFireAndMustNotFire over the FirmFileControl* fixtures (end of file).
+    // (a') is NOT checked by reach here (task 093 fix round 1, review 2 F1): any path through the record gate reaches the predicate's
+    // invocation, so a reach check passes whether or not the gate hands the record gate a seam. What covers it: the record gate refuses
+    // every invoice when its (a') seam is null (fail closed), and ExternalInvoiceFileRoutesTests' hidden, predicate-fault and "asked once"
+    // cases fail when the seam is null or hides nothing (the 093 notes' seeding proofs).
+
+    /// <summary>THE firm file gate: each must reach the record gate (and with it (a')) and the firm read.</summary>
+    private static readonly string[] FirmFileGates =
+    {
+        $"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DecideInvoiceFilesAsync",
+    };
+
+    /// <summary>The firm file handlers: each serves only a file of the gate's set (it reads <c>ExternalInvoiceSubmissionScope.InvoiceFiles</c>).</summary>
+    private static readonly string[] FirmFileHandlers =
+    {
+        $"{typeof(ExternalInvoiceSubmissionEndpoints).FullName}::GetInvoiceFileContentAsync",
+    };
+
+    [Fact(DisplayName = "ebilling-r1 093: every external Stored File read is THE firm file gate (record gate, firms, (a')) or a handler serving its set")]
+    public void EveryExternalStoredFileSurface_IsTheFirmFileGate()
+    {
+        var problems = FirmFileProblems(BffTypes.Value, IsExternalPlane, FirmFileGates, FirmFileHandlers);
+        Assert.True(problems.Count == 0,
+            "An external-plane read of a Stored File must go through ExternalInvoiceSubmissionAuthorizationFilter's InvoiceFiles gate " +
+            "(ebilling-r1 task 093): the record gate (with the (a') predicate) and the caller's firms, then the visible file set; a handler " +
+            "serves only a file of that set. Wire it, or list it with a reviewer's reason:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 093: negative control — an unlisted Stored File read, a gate missing a check and a handler not reading the set are found; the full gate and a handler serving its set are not")]
+    public void FirmFileGuard_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(FirmFileControlReadsWithoutTheGate), typeof(FirmFileControlGateSkipsTheFirmRead),
+            typeof(FirmFileControlGateSkipsTheRecordGate), typeof(FirmFileControlFullGate),
+            typeof(FirmFileControlHandlerServesTheSet), typeof(FirmFileControlHandlerWithoutTheSet),
+            typeof(NarrowingGuardControlNoDocuments),
+        };
+        string Key(Type type, string method) => $"{type.FullName}::{method}";
+        var gates = new[]
+        {
+            Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync"), Key(typeof(FirmFileControlGateSkipsTheRecordGate), "DecideAsync"),
+            Key(typeof(FirmFileControlFullGate), "DecideAsync"),
+        };
+        var handlers = new[]
+        {
+            Key(typeof(FirmFileControlHandlerServesTheSet), "ServeAsync"), Key(typeof(FirmFileControlHandlerWithoutTheSet), "ServeAsync"),
+        };
+
+        var problems = FirmFileProblems(fixtures.SelectMany(IlCallScan.WithNested), _ => true, gates, handlers);
+
+        Assert.Equal(
+            new[]
+            {
+                $"GATE MISSES the record gate: {Key(typeof(FirmFileControlGateSkipsTheRecordGate), "DecideAsync")}",
+                $"GATE MISSES the firm read: {Key(typeof(FirmFileControlGateSkipsTheFirmRead), "DecideAsync")}",
+                $"HANDLER does not serve from the gate's set: {Key(typeof(FirmFileControlHandlerWithoutTheSet), "ServeAsync")}",
+                $"NEW external Stored File surface: {Key(typeof(FirmFileControlReadsWithoutTheGate), "ListAsync")}",
+            }.Order(StringComparer.Ordinal).ToArray(),
+            problems.Order(StringComparer.Ordinal).ToArray());
+
+        // The ratchet: a listed entry that no longer reads a Stored File is stale.
+        var stale = FirmFileProblems(fixtures.SelectMany(IlCallScan.WithNested), _ => true,
+            gates.Append(Key(typeof(NarrowingGuardControlNoDocuments), "ListAsync")).ToArray(), handlers);
+        Assert.Contains($"STALE entry {Key(typeof(NarrowingGuardControlNoDocuments), "ListAsync")}: it no longer reads a Stored File — remove it.", stale);
+    }
+
+    /// <summary>The external plane: the BFF's external-access API and infrastructure namespaces.</summary>
+    private static bool IsExternalPlane(Type caller) =>
+        IlCallScan.Outermost(caller).Namespace is "Sprk.Bff.Api.Api.ExternalAccess" or "Sprk.Bff.Api.Infrastructure.ExternalAccess";
+
+    private static List<string> FirmFileProblems(
+        IEnumerable<Type> types, Func<Type, bool> inScope, IReadOnlyCollection<string> gates, IReadOnlyCollection<string> handlers)
+    {
+        var list = types.ToList();
+        var inScopeList = list.Where(inScope).ToList();
+        var surfaces = Scan(inScopeList, _ => false, FirmFileSurfacePrimitive).Surfaces;
+        var recordGate = Scan(list, IsRecordGate, _ => null).Reaches;
+        var firms = Scan(list, IsFirmRead, _ => null).Reaches;
+        var fileSet = Scan(list, IsFileSetRead, _ => null).Reaches;
+
+        var problems = new List<string>();
+        foreach (var surface in surfaces.Keys.Where(s => !gates.Contains(s) && !handlers.Contains(s)).Order(StringComparer.Ordinal))
+            problems.Add($"NEW external Stored File surface: {surface}");
+
+        foreach (var gate in gates)
+        {
+            if (!surfaces.ContainsKey(gate))
+            {
+                problems.Add($"STALE entry {gate}: it no longer reads a Stored File — remove it.");
+                continue;
+            }
+
+            if (!recordGate.Contains(gate))
+                problems.Add($"GATE MISSES the record gate: {gate}");
+            if (!firms.Contains(gate))
+                problems.Add($"GATE MISSES the firm read: {gate}");
+        }
+
+        foreach (var handler in handlers)
+        {
+            if (!surfaces.ContainsKey(handler))
+                problems.Add($"STALE entry {handler}: it no longer reads a Stored File — remove it.");
+            else if (!fileSet.Contains(handler))
+                problems.Add($"HANDLER does not serve from the gate's set: {handler}");
+        }
+
+        return problems;
+    }
+
+    private static string? FirmFileSurfacePrimitive(MethodBase method) => method.DeclaringType switch
+    {
+        { } t when t == typeof(Sprk.Bff.Api.Services.Finance.Files.StoredFileService) => $"StoredFileService.{method.Name}",
+        { } t when t == typeof(Sprk.Bff.Api.Api.Finance.StoredFileEndpoints)
+                   && method.Name == nameof(Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.StreamServableAsync) =>
+            "StoredFileEndpoints.StreamServableAsync",
+        _ => null,
+    };
+
+    private static bool IsRecordGate(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalMessageEndpoints)
+        && method.Name == nameof(ExternalMessageEndpoints.GetRecordRightsDecisionAsync);
+
+    private static bool IsFirmRead(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalInvoiceSubmissionAuthorizationFilter)
+        && method.Name == nameof(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync);
+
+    private static bool IsFileSetRead(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalInvoiceSubmissionScope) && method.Name == "get_" + nameof(ExternalInvoiceSubmissionScope.InvoiceFiles);
+
     // ── detector ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches);
+    internal sealed record ScanResult(IReadOnlyDictionary<string, HashSet<string>> Surfaces, IReadOnlySet<string> Reaches, IReadOnlyDictionary<string, HashSet<string>> Calls);
 
     private static ScanResult Scan(IEnumerable<Type> types) => Scan(types, IsNarrowing, SurfacePrimitive);
 
-    private static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
+    internal static ScanResult Scan(IEnumerable<Type> types, Func<MethodBase, bool> isNarrowing, Func<MethodBase, string?> surfacePrimitive)
     {
         var surfaces = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var calls = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -556,7 +806,7 @@ public class ExternalDocumentNarrowingGuardTests
             }
         }
 
-        return new ScanResult(surfaces, reaches);
+        return new ScanResult(surfaces, reaches, calls);
     }
 
     /// <summary>
@@ -577,7 +827,7 @@ public class ExternalDocumentNarrowingGuardTests
 
     private static readonly Regex CompilerPrefix = new(@"^<+([^<>]+)>", RegexOptions.Compiled);
 
-    private static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
+    internal static string Normalize(string name) => CompilerPrefix.Match(name) is { Success: true } m ? m.Groups[1].Value : name;
 
     private static bool IsNarrowing(MethodBase method) =>
         method.DeclaringType is { } declaring
@@ -1097,6 +1347,9 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService::UpsertSignalAsync"] = "Writes sprk_spendsignal only (SignalEntity).",
+        // ebilling-r1 task 095d-2b-2: the re-run's after-commit Signal steps record their state on the submission.
+        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionRerun::WriteSignalStateAsync"] =
+            "Writes sprk_invoicesubmission only (FinanceBaseValues.SubmissionEntity): sprk_findingsjson and sprk_adminattention, a payload it builds itself.",
         // ebilling-r1 (D-104): the rollup's write moved into WriteRollupAsync, whose one caller passes BuildRollupFields.
         ["Sprk.Bff.Api.Services.Finance.FinanceRollupService::WriteRollupAsync"] =
             "Writes its own rollup fields (BuildRollupFields, then BuildPendingSpendFields) to sprk_matter or sprk_project only " +
@@ -1105,7 +1358,8 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Coding.CodeSetProposalService::ConfirmAsync"] =
             "Writes only sprk_DefaultBillingCodeSet@odata.bind (DefaultSetBind) on a matter type or practice area reference row.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceLifecycleService::TransitionAsync"] =
-            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), conditioned on the row version.",
+            "Writes only statuscode and statecode on sprk_invoice (InvoiceEntity), plus the blanked review detail and (095f-2a) the decision note, " +
+            "conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Finance.InvoiceTotalsService::RecalculateAsync"] =
             "Writes only sprk_amount on an adjustment sprk_billingevent and the five totals columns on sprk_invoice (literal keys).",
         // ebilling-r1 task 103: the approval claim, conditioned on the approval portion's row version.
@@ -1133,8 +1387,13 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
-        // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go.
-        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawForUndoAsync"] =
+        // ebilling-r1 task 095g: the firm-assign route's one slot writer, on a matter, project or work assignment only.
+        ["Sprk.Bff.Api.Services.Finance.CoreRecordFirmAssignmentService::WriteAsync"] =
+            "Writes only sprk_assignedlawfirm1 / sprk_assignedlawfirm2 (Slot1Column / Slot2Column, an organization reference or DBNull) on " +
+            "sprk_matter, sprk_project or sprk_workassignment (InvoiceCoreRecord.EntityLogicalName), under the version just read; never a document.",
+        // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go. Task 116
+        // moved the write into the shared WithdrawRowsAsync (WithdrawForUndoAsync, and ReplaceForCallerAsync for a version's earlier file).
+        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawRowsAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Removed) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
         ["Sprk.Bff.Api.Services.ScorecardCalculatorService::UpdateEntityGradesAsync"] =
@@ -1155,6 +1414,14 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard::UpdateExistingAsync"] =
             "The invoice family's update-only write primitive: it writes its caller's payload, so it is itself a recognised " +
             "generic update (GenericUpdateNames) and each of its callers is held to the refusal here.",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite::UpdateExistingSplitAsync"] =
+            "#2799: the same primitive for a write that acts for a person (its locked columns written by the application after " +
+            "the person's checks): it writes its caller's payload, so it is itself a recognised generic update " +
+            "(GenericUpdateNames) and each of its callers is held to the refusal here.",
+        ["Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite::PatchAsCallerAsync"] =
+            "#2799: its application write is only the locked invoice-family lookups (LockedColumnsOf(table): a family table's " +
+            "core record and invoice lookups, picked out of the body by name), update-only, after the caller's Write/Append/" +
+            "AppendTo checks; never sprk_document. Every other column goes in the caller's own PATCH.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::PutBackFilingAsync"] =
             "Rollback of this re-file's own failed write (#2143): writes back only the values this row held before the re-file " +
             "(`restore`, read from the row before the write), and only while the row is still filed as the re-file left it " +
@@ -1164,6 +1431,16 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
+            "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
+            "member, conditioned on the row version; never a link value.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::ClearPrivateFilingAsync"] =
+            "fm 056: writes only clears (DBNull) of a private sprk_communication's filing columns (DirectMessageOwnerStep." +
+            "PrivateFilingColumns), built in this member, conditioned on the row version; never a document, a link value or an " +
+            "Access Permission.",
+        ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
+            "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
+            "row version read with the owner check; never a link column.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService::CreateAsync"] =
             "Creates only (step 11, a fresh Guid upserted; an isolated root too): a link set in a create can only HIDE the new " +
             "row (D7 narrows, never widens), and no existing document is re-pointed or un-linked.",
@@ -1188,8 +1465,6 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Jobs.Handlers.AttachmentClassificationJobHandler::WriteClassificationToDataverseAsync"] =
             "Writes literal keys only: sprk_classification, sprk_classificationconfidence, sprk_invoicehintsjson, " +
             "sprk_mattersuggestionjson, sprk_mattersuggestedref, sprk_invoicereviewstatus.",
-        ["Sprk.Bff.Api.Services.Jobs.Handlers.InvoiceExtractionJobHandler::UpdateInvoiceExtractionStatusAsync"] =
-            "Writes the literal key sprk_extractionstatus only.",
     };
 
     /// <summary>
@@ -1441,6 +1716,9 @@ public class ExternalDocumentNarrowingGuardTests
         // (DataverseUpdateHandler, the Update Record core and the field-mapping push write an invoice or line through it).
         [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.UpdateExistingAsync)] =
             typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard),
+        // #2799: its drop-in for a write that may act for a person; the same three paths will write through it.
+        [nameof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite.UpdateExistingSplitAsync)] =
+            typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyLockedWrite),
     };
 
     private static bool IsGenericUpdate(MethodBase method) =>
@@ -1465,6 +1743,117 @@ public class ExternalDocumentNarrowingGuardTests
 
         return problems;
     }
+
+    // ── uac-r2 191b: the lineage registry is the ONE table → external-marker map ─────────────────────────────────────
+
+    /// <summary>
+    /// Types whose STATIC initializer names a communication-content table (<see cref="SecureChildLineage.NeverExternalTables"/>)
+    /// for a purpose other than external visibility, each with its reason (the 191b ratchet: a new type fails until it is
+    /// reviewed and listed here, or derives its list from the registry; an entry that stops naming one is stale).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> OtherTableListsNamingNeverTables = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
+            "Task 198: the content rows of a Direct-team-owned message that are granted to its participants (table → its " +
+            "message lookup); a share list, not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission"] =
+            "#2253: the access-deciding columns per table that an app-only generic write refuses; a write guard, not an " +
+            "external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordFamilyEdges"] =
+            "The record-family edge registry (child → parent per lookup) and its display-only DetailTables; edges, not an " +
+            "external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader"] =
+            "The display-name column of each family table (display data only); not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar"] =
+            "A message's content rows (table → its message lookup), the same set task 198 Part B grants, barred on a " +
+            "Restricted filing; a share bar, not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson"] =
+            "Task 146: the child tables the BFF creates as the application that carry the creator column; a stamp list, not " +
+            "an external-visibility map.",
+    };
+
+    [Fact(DisplayName = "uac-r2 191b: no type but the lineage registry lists the communication-content (Never) tables, except the listed other-purpose lists")]
+    public void NoSecondTableToInternalOnlyMap_OutsideTheRegistry()
+    {
+        var found = NeverTableListers(BffTypes.Value);
+
+        var problems = found.Keys.Where(k => !OtherTableListsNamingNeverTables.ContainsKey(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW list of Never tables in {k} ({string.Join(", ", found[k].Order())}): derive it from " +
+                         "SecureChildLineage (ExternalMarker / NeverExternalTables), or list it with its reason if it is not about " +
+                         "external visibility.")
+            .Concat(OtherTableListsNamingNeverTables.Keys.Where(k => !found.ContainsKey(k)).Order(StringComparer.Ordinal)
+                .Select(k => $"STALE entry {k}: it no longer names a Never table — remove it (the ratchet)."))
+            .ToList();
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "uac-r2 191b: negative control — a static list naming a Never table is found; a registry-derived list and an instance method's mention are not")]
+    public void NeverTableListDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(NeverTableControlStaticList), typeof(NeverTableControlDerivedFromTheRegistry),
+            typeof(NeverTableControlInstanceMention),
+        };
+
+        var found = NeverTableListers(fixtures.SelectMany(IlCallScan.WithNested));
+
+        Assert.Equal(new[] { typeof(NeverTableControlStaticList).FullName }, found.Keys.ToArray());
+        Assert.Contains("sprk_emailartifact", found[typeof(NeverTableControlStaticList).FullName!]);
+    }
+
+    [Fact(DisplayName = "uac-r2 191b: the AI guard's two lists ARE the registry's (Never markers; document-text markers)")]
+    public void TheGuardsLists_AreDerivedFromTheRegistry()
+    {
+        Assert.Same(SecureChildLineage.NeverExternalTables, ExternalCallerCommunicationGuard.RefusedContentTables);
+        Assert.Equal(
+            SecureChildLineage.DocumentTextTables.Keys.Order(StringComparer.Ordinal),
+            ExternalCallerCommunicationGuard.DocumentDerivedTablesForTest.Keys.Order(StringComparer.Ordinal));
+        Assert.All(SecureChildLineage.Children.Values, table => Assert.NotNull(table.External));
+    }
+
+    /// <summary>
+    /// Every outermost BFF type (other than the registry) whose STATIC constructor loads the name of a
+    /// <see cref="SecureChildLineage.NeverExternalTables"/> table: a static table list that includes communication content,
+    /// the shape a second "internal-only" map takes. Case-insensitive.
+    /// </summary>
+    private static IReadOnlyDictionary<string, HashSet<string>> NeverTableListers(IEnumerable<Type> types)
+    {
+        var found = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var (caller, method, value) in IlCallScan.StringLoads(types))
+        {
+            if (method is not ConstructorInfo { IsStatic: true } || !SecureChildLineage.NeverExternalTables.Contains(value))
+                continue;
+            var key = IlCallScan.Outermost(caller).FullName!;
+            if (key == typeof(SecureChildLineage).FullName)
+                continue;
+            if (!found.TryGetValue(key, out var names))
+                found[key] = names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            names.Add(value.ToLowerInvariant());
+        }
+
+        return found;
+    }
+}
+
+// ── uac-r2 191b: compiled control fixtures for NeverTableListDetector_MustFireAndMustNotFire (never run; IL only) ──
+
+/// <summary>MUST FIRE (191b): a static set naming a communication-content table: a second internal-only map.</summary>
+internal static class NeverTableControlStaticList
+{
+    internal static readonly IReadOnlySet<string> Hidden = new HashSet<string> { "sprk_emailartifact", "sprk_todo" };
+}
+
+/// <summary>MUST NOT FIRE (191b): the same list derived from the registry.</summary>
+internal static class NeverTableControlDerivedFromTheRegistry
+{
+    internal static readonly IReadOnlySet<string> Hidden = SecureChildLineage.NeverExternalTables;
+}
+
+/// <summary>MUST NOT FIRE (191b): an instance method that names a table (a query, not a static list).</summary>
+internal sealed class NeverTableControlInstanceMention
+{
+    internal string Set() => "sprk_emailartifact";
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the
@@ -1592,6 +1981,30 @@ internal sealed class DerivedGuardControlNarrowsThroughAHelper(
     private Task<IReadOnlySet<Guid>> HiddenAsync(IEnumerable<Guid> ids, CancellationToken ct) => narrow.HiddenDocumentIdsAsync(ids, ct);
 }
 
+/// <summary>MUST FIRE (191h): tests a lineage table and returns its rows without asking THE visibility predicate.</summary>
+internal sealed class VisibilityGuardControlSkipsThePredicate
+{
+    internal Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        Task.FromResult(ExternalCallerCommunicationGuard.IsVisibilityGuarded(table) && id != Guid.Empty);
+}
+
+/// <summary>MUST NOT FIRE (191h): tests a lineage table and asks the predicate through the guard, in a helper.</summary>
+internal sealed class VisibilityGuardControlAsksThroughAHelper(AppOnlyExternalVisibility visibility)
+{
+    internal async Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.IsVisibilityGuarded(table) && !(await NotVisibleAsync(table, id, ct)).Contains(id);
+
+    private Task<IReadOnlySet<Guid>> NotVisibleAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.NotVisibleIdsAsync(visibility, table, new[] { id }, ct);
+}
+
+/// <summary>MUST NOT FIRE (191h): tests a lineage table and invokes the seam itself.</summary>
+internal sealed class VisibilityGuardControlAsksTheSeamDirectly(AppOnlyExternalVisibility visibility)
+{
+    internal async Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.IsVisibilityGuarded(table) && (await visibility(new[] { (table, id) }, ct)).IsVisible(table, id);
+}
+
 /// <summary>MUST FIRE (K7): takes the assistant's seam.</summary>
 internal sealed class SeamControlTakesTheSeam(AppOnlyDocumentNarrowing narrow)
 {
@@ -1696,7 +2109,10 @@ internal sealed class DocumentGrantControlDirect(Spaarke.Core.Auth.Authorization
     internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
         authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
         {
-            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+            UserId = "u",
+            ResourceId = id.ToString(),
+            Operation = "read",
+            UserAccessToken = null,
         });
 }
 
@@ -1706,7 +2122,10 @@ internal sealed class DocumentGrantControlDirectThroughTheInterface(Spaarke.Core
     internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
         authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
         {
-            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+            UserId = "u",
+            ResourceId = id.ToString(),
+            Operation = "read",
+            UserAccessToken = null,
         });
 }
 
@@ -1731,7 +2150,10 @@ internal sealed class DocumentGrantControlListed(Spaarke.Core.Auth.IAuthorizatio
     internal Task<Spaarke.Core.Auth.AuthorizationResult> GrantAsync(Guid id) =>
         authorization.AuthorizeAsync(new Spaarke.Core.Auth.AuthorizationContext
         {
-            UserId = "u", ResourceId = id.ToString(), Operation = "read", UserAccessToken = null,
+            UserId = "u",
+            ResourceId = id.ToString(),
+            Operation = "read",
+            UserAccessToken = null,
         });
 }
 
@@ -1930,4 +2352,77 @@ internal sealed class DocumentProfileWriterControlThroughItsWrapper(Spaarke.Data
     internal static Dictionary<string, object?> BuildPayload(Guid id, System.Text.Json.JsonElement output) =>
         Sprk.Bff.Api.Services.Ai.DocumentProfileOutputMapper.BuildFields(
             id, output, "control.pdf", null, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+}
+
+// ── ebilling-r1 task 093: compiled control fixtures for FirmFileGuard_MustFireAndMustNotFire (never run; IL only) ──────
+
+/// <summary>MUST FIRE: an external-plane read of a Stored File that is neither the gate nor a listed handler.</summary>
+internal sealed class FirmFileControlReadsWithoutTheGate(Sprk.Bff.Api.Services.Finance.Files.StoredFileService store)
+{
+    internal Task<IReadOnlyList<Sprk.Bff.Api.Services.Finance.Files.StoredFileRow>> ListAsync(Guid invoiceId) =>
+        store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None);
+}
+
+/// <summary>MUST FIRE: a gate that asks the record gate and the (a') predicate but not the caller's firms.</summary>
+internal sealed class FirmFileControlGateSkipsTheFirmRead(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalModuleRegistry modules, ExternalInvoiceHiding hide,
+    Microsoft.Extensions.Logging.ILogger logger)
+{
+    internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
+    {
+        var decision = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
+            ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
+            (_, _, _, _) => throw new NotSupportedException(), logger, CancellationToken.None, null, null, hide);
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (decision, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+    }
+}
+
+/// <summary>MUST FIRE: a gate that reads the caller's firms and asks the (a') predicate itself, but never asks the record gate.</summary>
+internal sealed class FirmFileControlGateSkipsTheRecordGate(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalParticipationService participations, ExternalInvoiceHiding hide,
+    Microsoft.Extensions.Logging.ILogger logger)
+{
+    internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
+    {
+        var firms = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, CancellationToken.None);
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (firms, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+    }
+}
+
+/// <summary>MUST NOT FIRE: the firm read, the record gate and the (a') predicate, then the Stored File read.</summary>
+internal sealed class FirmFileControlFullGate(
+    Sprk.Bff.Api.Services.Finance.Files.StoredFileService store, ExternalModuleRegistry modules, ExternalParticipationService participations,
+    ExternalInvoiceHiding hide, Microsoft.Extensions.Logging.ILogger logger)
+{
+    internal async Task<object> DecideAsync(CallerPrincipal caller, Guid invoiceId)
+    {
+        var firms = await ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(caller, participations, logger, CancellationToken.None);
+        var decision = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
+            ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
+            (_, _, _, _) => throw new NotSupportedException(), logger, CancellationToken.None, null, null, hide);
+        await hide(caller, new[] { invoiceId }, CancellationToken.None);
+        return (firms, decision, await store.ReadRowsForInvoiceAsync(invoiceId, 1, CancellationToken.None));
+    }
+}
+
+/// <summary>MUST NOT FIRE: a handler that streams only a file of the gate's set (through a helper that reads it).</summary>
+internal sealed class FirmFileControlHandlerServesTheSet(Sprk.Bff.Api.Services.Finance.Files.StoredFileService store)
+{
+    internal Task<Microsoft.AspNetCore.Http.IResult> ServeAsync(Microsoft.AspNetCore.Http.HttpContext http, Microsoft.Extensions.Logging.ILogger logger) =>
+        Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.StreamServableAsync(
+            http, FromTheSet(http), store, logger, "application/pdf", null, CancellationToken.None);
+
+    private static Sprk.Bff.Api.Services.Finance.Files.StoredFileServable FromTheSet(Microsoft.AspNetCore.Http.HttpContext http) =>
+        ((ExternalInvoiceSubmissionScope)http.Items["scope"]!).InvoiceFiles!.Files[0].Servable!;
+}
+
+/// <summary>MUST FIRE: a handler that streams a file it was handed, not one of the gate's set.</summary>
+internal sealed class FirmFileControlHandlerWithoutTheSet(Sprk.Bff.Api.Services.Finance.Files.StoredFileService store)
+{
+    internal Task<Microsoft.AspNetCore.Http.IResult> ServeAsync(
+        Microsoft.AspNetCore.Http.HttpContext http, Sprk.Bff.Api.Services.Finance.Files.StoredFileServable file,
+        Microsoft.Extensions.Logging.ILogger logger) =>
+        Sprk.Bff.Api.Api.Finance.StoredFileEndpoints.StreamServableAsync(http, file, store, logger, "application/pdf", null, CancellationToken.None);
 }

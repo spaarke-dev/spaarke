@@ -35,7 +35,8 @@ public class ChatSessionSerializationTests
             PlaybookId: Guid.NewGuid(),
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: Array.Empty<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+            Messages: Array.Empty<ChatMessage>())
+        { OwnerOid = TestSessionOwner.Oid };
 
         // Act
         var bytes = JsonSerializer.SerializeToUtf8Bytes(session, DefaultOptions);
@@ -64,7 +65,8 @@ public class ChatSessionSerializationTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: Array.Empty<ChatSessionFile>())
+        { OwnerOid = TestSessionOwner.Oid };
 
         // Act
         var bytes = JsonSerializer.SerializeToUtf8Bytes(session, DefaultOptions);
@@ -106,7 +108,8 @@ public class ChatSessionSerializationTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: new[] { "pinned-1", "pinned-2" },
-            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: files)
+        { OwnerOid = TestSessionOwner.Oid };
 
         // Act
         var bytes = JsonSerializer.SerializeToUtf8Bytes(session, DefaultOptions);

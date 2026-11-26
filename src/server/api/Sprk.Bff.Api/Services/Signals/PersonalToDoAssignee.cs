@@ -12,15 +12,19 @@ namespace Sprk.Bff.Api.Services.Signals;
 // =====================================================================================================================
 // D-134 / D-135 (owner, 2026-10-12): a row about a PERSONAL To Do (a sprk_todo filed under nothing) is owned by the
 // business-unit team of the To Do's Assigned To user, not the To Do's own team. This is the ONE place that answers "who is
-// that user": sprk_todo.sprk_assignedto (a contact) -> the systemuser whose sprk_primarycontact names it (task 141's link),
-// enabled only. Shared by the Decision Record (task 043, DecisionCommitService) and, next, the Signal (task 143, SignalWriter).
+// that user": sprk_todo.sprk_assignedto (a contact) -> the one eligible systemuser that contact represents, by the ONE
+// contact -> user rule (ContactUserRepresentation, uac-r2 task 193). Shared by the Decision Record (task 043,
+// DecisionCommitService) and the Signal (task 143, SignalWriter).
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
 //   Existing: AssignedAccessStore.ReadLinkCandidatesAsync (uac-r2 task 142) already reads "the systemusers a contact
 //     represents" with isdisabled; IContactIdentityStore.FindSystemUsersLinkingAsync reads the same link but returns no
 //     isdisabled; AssignedToDefaults WRITES sprk_assignedto and never reads it back as a person.
-//   Extension: this adds no Dataverse plumbing: it is a static rule over those two existing injected reads (the To Do
-//     through IGenericEntityService, the link through AssignedAccessStore). Not a DI service: it holds no state.
+//   Extension: this adds no Dataverse plumbing: it is a static rule over two existing injected reads (the To Do through
+//     IGenericEntityService, who the contact represents through ContactUserRepresentation). Not a DI service: no state.
+//   Task 193 (deliberate correction): it no longer reads the link alone. The contact is read too, so an inactive contact
+//     represents nobody, and a user with no link whose oid the contact's binding carries (confirmed by the binder's oid
+//     decision) counts toward "exactly one", as it does for the Assigned-To materializer and the grant notifier.
 //   Cost of doing nothing: D-134 cannot be applied; the Decision Record (and later the Signal) about a personal To Do stays
 //     owned by the To Do creator's team, which the assignee in another business unit cannot read.
 // =====================================================================================================================
@@ -31,10 +35,10 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// </summary>
 /// <remarks>
 /// <para><b>No single user</b> (D-135 items 1, 5, 6): the To Do does not exist, is filed under a record (a core filing takes
-/// precedence), or has no Assigned To; or no systemuser links to that contact, several enabled ones do, or only disabled ones
-/// do. A contact that does not exist simply has no linked user.</para>
-/// <para><b>A fault is not that answer.</b> A Dataverse fault reading the To Do or the systemusers PROPAGATES: the caller fails
-/// closed (it does not know whether a user exists, so it must not fall back).</para>
+/// precedence), or has no Assigned To; or the contact represents no systemuser, several eligible ones, or only ineligible ones.
+/// A contact that does not exist, or is inactive, represents nobody (task 193): it answers <see cref="Outcome.NoLinkedUser"/>.</para>
+/// <para><b>A fault is not that answer.</b> A Dataverse fault reading the To Do, the contact or the systemusers PROPAGATES: the
+/// caller fails closed (it does not know whether a user exists, so it must not fall back).</para>
 /// <para>Item 7 (a secure parent wins) is the caller's: this answers only who the assignee is.</para>
 /// </remarks>
 internal static class PersonalToDoAssignee
@@ -62,8 +66,8 @@ internal static class PersonalToDoAssignee
     /// <summary>Reads the To Do app-only and answers its Assigned To's one enabled systemuser; <c>null</c> for no single user.</summary>
     /// <exception cref="Exception">A Dataverse fault (other than the row not existing) propagates.</exception>
     internal static async Task<Guid?> ResolveAsync(
-        IGenericEntityService entities, AssignedAccessStore links, Guid todoId, CancellationToken ct) =>
-        (await ClassifyAsync(entities, links, todoId, ct).ConfigureAwait(false)).UserId;
+        IGenericEntityService entities, ContactUserRepresentation people, Guid todoId, CancellationToken ct) =>
+        (await ClassifyAsync(entities, people, todoId, ct).ConfigureAwait(false)).UserId;
 
     /// <summary>
     /// <see cref="ResolveAsync"/> with WHY there is no single user (task 148: the follow-the-assignee job counts each fallback
@@ -71,10 +75,10 @@ internal static class PersonalToDoAssignee
     /// </summary>
     /// <exception cref="Exception">A Dataverse fault (other than the row not existing) propagates.</exception>
     internal static async Task<Answer> ClassifyAsync(
-        IGenericEntityService entities, AssignedAccessStore links, Guid todoId, CancellationToken ct)
+        IGenericEntityService entities, ContactUserRepresentation people, Guid todoId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(people);
 
         Entity? todo;
         try
@@ -93,7 +97,7 @@ internal static class PersonalToDoAssignee
         if (todo.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is not { } assignedTo || assignedTo.Id == Guid.Empty)
             return new Answer(null, Outcome.NoAssignedTo);
 
-        return await ClassifyLinkedUsersAsync(links, assignedTo.Id, ct).ConfigureAwait(false);
+        return await ClassifyRepresentedUsersAsync(people, assignedTo.Id, ct).ConfigureAwait(false);
     }
 
     /// <summary>Why <see cref="ClassifyAsync"/> named a user or none.</summary>
@@ -111,13 +115,13 @@ internal static class PersonalToDoAssignee
         /// <summary>The To Do has no Assigned To.</summary>
         NoAssignedTo,
 
-        /// <summary>No systemuser links to the Assigned To contact.</summary>
+        /// <summary>The Assigned To contact represents no systemuser (or does not exist, or is inactive).</summary>
         NoLinkedUser,
 
-        /// <summary>Several eligible systemusers link to the contact (D-135 item 5).</summary>
+        /// <summary>The contact represents several eligible systemusers (D-135 item 5).</summary>
         SeveralUsers,
 
-        /// <summary>Only ineligible users link to it: disabled, application, non-interactive or external (D-135 item 6).</summary>
+        /// <summary>It represents only ineligible users: disabled, application, non-interactive or external (D-135 item 6).</summary>
         OnlyIneligibleUsers,
     }
 
@@ -129,39 +133,56 @@ internal static class PersonalToDoAssignee
         FilingColumns.Any(c => todo.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty)
         || PairColumns.Any(c => todo.Contains(c) && todo[c] is { } v && !string.IsNullOrWhiteSpace(v.ToString()));
 
-    /// <summary>The ONE eligible (enabled, interactive, non-application) systemuser whose <c>sprk_primarycontact</c> is
-    /// <paramref name="contactId"/>; <c>null</c> when there is none, several, or only ineligible ones. A fault propagates.</summary>
-    internal static async Task<Guid?> SingleEnabledUserAsync(AssignedAccessStore links, Guid contactId, CancellationToken ct)
+    /// <summary>The ONE eligible (enabled, interactive, non-application) systemuser <paramref name="contactId"/> represents
+    /// (<see cref="ContactUserRepresentation"/>); <c>null</c> when there is none, several, or only ineligible ones. A fault
+    /// propagates.</summary>
+    internal static async Task<Guid?> SingleEnabledUserAsync(ContactUserRepresentation people, Guid contactId, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(links);
+        ArgumentNullException.ThrowIfNull(people);
         if (contactId == Guid.Empty)
             return null;
 
-        return (await ClassifyLinkedUsersAsync(links, contactId, ct).ConfigureAwait(false)).UserId;
+        return (await ClassifyRepresentedUsersAsync(people, contactId, ct).ConfigureAwait(false)).UserId;
     }
 
     /// <summary><see cref="SingleEnabledUserAsync"/> with why there is no single user. A fault propagates.</summary>
-    private static async Task<Answer> ClassifyLinkedUsersAsync(AssignedAccessStore links, Guid contactId, CancellationToken ct)
+    private static async Task<Answer> ClassifyRepresentedUsersAsync(
+        ContactUserRepresentation people, Guid contactId, CancellationToken ct)
     {
-        var linked = (await links.ReadLinkCandidatesAsync(contactId, boundOid: null, ct).ConfigureAwait(false))
-            .Where(c => c.PrimaryContactId == contactId)
-            .ToList();
-        // Only a person who can be shared with counts (the ONE rule AssignedAccessMaterializer applies, InternalShareEndpoints
-        // .ClassifyEligibility): an application user, a non-interactive account, an external-flagged one or a disabled one never
-        // counts toward "exactly one". rootIsRestricted is null (not read here), which ClassifyEligibility documents as fail
-        // closed: an external-flagged user is refused. (false would admit one, as it does for a share on an ordinary record.)
-        var enabled = linked
-            .Where(c => InternalShareEndpoints.ClassifyEligibility(c.IsDisabled, c.AccessMode, c.ApplicationId, c.IsExternal, rootIsRestricted: null)
-                    == InternalShareEndpoints.ShareEligibility.Eligible)
-            .Select(c => c.SystemUserId)
+        // The ONE contact -> user rule (task 193). rootIsRestricted is null (not read here), which ClassifyEligibility
+        // documents as fail closed: an external-flagged user is refused. (false would admit one, as it does for a share on an
+        // ordinary record.) No binding column here means no oid binding exists, so the link alone decides (DecideOnLink).
+        var representation = await people.ResolveAsync(
+            contactId, rootIsRestricted: null, BindingColumnMissingPolicy.DecideOnLink, ct).ConfigureAwait(false);
+        switch (representation.Status)
+        {
+            case ContactRepresentationStatus.Read:
+            case ContactRepresentationStatus.ColumnMissing:
+                break;
+            case ContactRepresentationStatus.NotFound:
+            case ContactRepresentationStatus.Inactive:
+                return new Answer(null, Outcome.NoLinkedUser); // a missing or inactive contact represents nobody
+            default:
+                // A fault is not "no single user": it propagates, so the caller fails closed.
+                if (representation.Fault is { } fault)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+                throw new InvalidOperationException(
+                    representation.FaultDetail ?? $"Who contact {contactId} represents could not be read.");
+        }
+
+        // Only a person who can be shared with counts (the ONE rule the materializer applies): an application user, a
+        // non-interactive account, an external-flagged one or a disabled one never counts toward "exactly one".
+        var eligible = representation.Users
+            .Where(u => u.Eligibility == InternalShareEndpoints.ShareEligibility.Eligible)
+            .Select(u => u.SystemUserId)
             .Distinct()
             .ToList();
 
-        return enabled.Count switch
+        return eligible.Count switch
         {
-            1 => new Answer(enabled[0], Outcome.SingleUser),
+            1 => new Answer(eligible[0], Outcome.SingleUser),
             > 1 => new Answer(null, Outcome.SeveralUsers),
-            _ => new Answer(null, linked.Count == 0 ? Outcome.NoLinkedUser : Outcome.OnlyIneligibleUsers),
+            _ => new Answer(null, representation.Users.Count == 0 ? Outcome.NoLinkedUser : Outcome.OnlyIneligibleUsers),
         };
     }
 

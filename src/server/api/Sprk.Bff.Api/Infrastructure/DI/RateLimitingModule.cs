@@ -10,6 +10,12 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 public static class RateLimitingModule
 {
+    /// <summary>The "mcp" policy name, used by <c>McpEndpoints</c>.</summary>
+    internal const string McpPolicyName = "mcp";
+
+    /// <summary>The "mcp" policy's permits per caller per minute.</summary>
+    internal const int McpPermitLimit = 60;
+
     /// <summary>
     /// Adds rate limiting services with the named policies below and a ProblemDetails rejection handler.
     /// </summary>
@@ -267,6 +273,23 @@ public static class RateLimitingModule
                 });
             });
 
+            // 14. MCP - every /mcp/{area} request (spaarkeai-mcp-bff-api-r1 task 020, FR-01, ADR-016): 60 requests/min per caller,
+            //     sliding window, no queue. One chat turn is 2-4 stateless calls (initialize, tools/list, tools/call) and a widget
+            //     adds its own callServerTool calls, so a person at normal pace stays well under 60; a runaway widget or a looping
+            //     model hits 429 (a refusal is answered at once, never held) while every other caller keeps their own budget. Keyed on the
+            //     caller (GetUserId), so Copilot and Cowork traffic from different users never shares a bucket.
+            options.AddPolicy(McpPolicyName, context =>
+            {
+                var userId = GetUserId(context);
+                return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = McpPermitLimit,
+                    QueueLimit = 0,
+                    SegmentsPerWindow = 6
+                });
+            });
+
             // ProblemDetails JSON response for rate limit rejections
             options.OnRejected = async (context, cancellationToken) =>
             {
@@ -294,13 +317,22 @@ public static class RateLimitingModule
                 var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(problemDetails);
                 await context.HttpContext.Response.Body.WriteAsync(json, cancellationToken);
 
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                // ADR-015 (Tier 1 App Insights logs): identifiers, sizes, timings and reason codes only — never a
+                // claim value. Identity.Name is the UPN/email, and the client IP is personal data the ADR's
+                // allow-list does not include, so neither is logged. The caller is identified by the same opaque
+                // key the limiter partitions by (oid, else sub); an unauthenticated caller has none.
+                // TraceIdentifier correlates the entry with the request in the platform's own HTTP logs.
+                // The policy name is not logged: OnRejectedContext does not carry it, and the only way to read it
+                // is the endpoint's EnableRateLimitingAttribute, which RouteAuthorizationGuardTests bans from source
+                // (RateLimitPoliciesAreAppliedOnlyOnAScannedChain). The path identifies the route and so its policy.
+                var httpContext = context.HttpContext;
+                var logger = httpContext.RequestServices.GetRequiredService<ILogger<Program>>();
                 logger.LogWarning(
-                    "Rate limit exceeded for {Path} by {User} (IP: {IP}). Retry after {RetryAfter}s",
-                    context.HttpContext.Request.Path,
-                    context.HttpContext.User?.Identity?.Name ?? "anonymous",
-                    context.HttpContext.Connection.RemoteIpAddress,
-                    retryAfter);
+                    "Rate limit exceeded for {Path} by caller {CallerKey}. Retry after {RetryAfter}s. TraceId {TraceId}",
+                    httpContext.Request.Path,
+                    CallerResolution.ResolveOpaqueCallerKey(httpContext.User) ?? "anonymous",
+                    retryAfter,
+                    httpContext.TraceIdentifier);
             };
         });
 

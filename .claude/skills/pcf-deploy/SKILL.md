@@ -254,11 +254,10 @@ If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, co
 
 **In a FRESH worktree** (the recommended deploy source — a short-path worktree of master), the shared libraries have no `node_modules` or `dist/` yet. Build them in this order before the first PCF build, each with `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build` (found 2026-10-09, task 125):
 1. `src/client/shared/Spaarke.Auth` — every PCF consumes its `dist/`.
-2. `src/client/shared/Spaarke.SdapClient` (`@spaarke/sdap-client`) — `Spaarke.UI.Components` does not compile without it.
-3. `src/client/shared/Spaarke.UI.Components` — or let the PCF's `prebuild:prod` hook build it once 1–2 exist.
-4. `src/client/shared/Spaarke.Communication.Components` — `npm install` only, for the Communication* PCFs.
-5. `src/client/shared/Spaarke.Visuals` — `npm install` only, for VisualHost, which bundles its source; without it the build fails with `Can't resolve '@fluentui/react-icons'` (found 2026-10-10, task 127).
-6. `src/client/code-pages/DocumentRelationshipViewer` — `npm install` only, for the DocumentRelationshipViewer PCF, which compiles that code page's `src/`; without it the build fails with `TS2307: Cannot find module '@spaarke/auth'` / `'@xyflow/react'` (found 2026-10-10).
+2. `src/client/shared/Spaarke.UI.Components` — or let the PCF's `prebuild:prod` hook build it once 1 exists. (The separate `Spaarke.SdapClient` step that came before it is gone: that client is part of ui-components since 2026-11-24.)
+3. `src/client/shared/Spaarke.Communication.Components` — `npm install` only, for the Communication* PCFs.
+4. `src/client/shared/Spaarke.Visuals` — `npm install` only, for VisualHost, which bundles its source; without it the build fails with `Can't resolve '@fluentui/react-icons'` (found 2026-10-10, task 127).
+5. `src/client/code-pages/DocumentRelationshipViewer` — `npm install` only, for the DocumentRelationshipViewer PCF, which compiles that code page's `src/`; without it the build fails with `TS2307: Cannot find module '@spaarke/auth'` / `'@xyflow/react'` (found 2026-10-10).
 
 **Is dev behind master? Compare bundles, not versions.** `build:prod` is reproducible: a fresh build of an unchanged control is byte-for-byte the `cc_<Namespace>.<Control>/bundle.js` that dev serves (verified 2026-10-10 on SemanticSearchControl and VisualHost). So a control whose fresh master build differs from dev's published bundle carries undeployed changes, often from a shared library and not its own folder, even when the version numbers match. Such a control needs a version bump and a deploy. Ignore a difference of a few bytes that is only CRLF vs LF in the leading license comment.
 
@@ -318,14 +317,10 @@ Controls/sprk_Spaarke.Controls.{ControlName}/css/*.css  (if applicable)
 ### Step 5: Import to Dataverse
 
 ```bash
-# Disable CPM if needed
-mv /c/code_files/{worktree}/Directory.Packages.props{,.disabled}
-
 pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName {SolutionName}
-
-# Restore CPM
-mv /c/code_files/{worktree}/Directory.Packages.props{.disabled,}
 ```
+
+(No "disable CPM" step any more: `Directory.Packages.props` was removed on 2026-11-10. A worktree branched before that may still have it; if `pac` reports NU1008 there, rename it aside for the command.)
 
 ### Step 6: Verify
 

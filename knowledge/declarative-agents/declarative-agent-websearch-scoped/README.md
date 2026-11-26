@@ -10,7 +10,7 @@ Common features that the agent can help with:
 
 This is based off the blog post: [Building a blog post helper agent for Microsoft 365 Copilot | pkbullock.com](https://pkbullock.com/blog/2025/building-a-blog-post-helper-agent-for-microsoft-365-copilot)
 
-![Screenshot of the agent start screen](assets/screenshot.png)
+*(image not included in this snapshot: Screenshot of the agent start screen)*
 
 ## Version history
 
@@ -93,7 +93,7 @@ The following are Teams Toolkit specific project files. You can [visit a complet
 
 ## Addition information and references
 
-- [Declarative agents for Microsoft 365](https://aka.ms/teams-toolkit-declarative-agent)
+- [Declarative agents for Microsoft 365](https://learn.microsoft.com/microsoft-365-copilot/extensibility/overview-declarative-agent)
 
 
 <img src="https://m365-visitor-stats.azurewebsites.net/copilot-pro-dev-samples/samples/da-BlogPostHelper" />

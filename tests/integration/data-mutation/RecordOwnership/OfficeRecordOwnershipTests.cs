@@ -426,60 +426,8 @@ public class OfficeRecordOwnershipTests
     }
 
     // =====================================================================================
-    // sprk_invoice — POST /api/office/quickcreate/invoice (filed against nothing: the caller's unit)
-    // =====================================================================================
-
-    [Fact]
-    public async Task QuickCreateInvoice_IsOwnedByTheCallersTeam_NotTheCaller()
-    {
-        var callerSystemUserId = Guid.NewGuid();
-        using var factory = InvoiceFactory(callerSystemUserId, out var created);
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-0080" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var invoice = created.Should().ContainSingle().Subject;
-        invoice.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
-        factory.Ownership.Requests.Should().ContainSingle()
-            .Which.CallerSystemUserId.Should().Be(callerSystemUserId);
-        // c1-r1 (owner round 13 item 9): the Office user is recorded on the app-created invoice.
-        invoice.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(callerSystemUserId);
-    }
-
-    [Fact]
-    public async Task QuickCreateInvoice_WhenNoOwnerTeamResolves_Returns403Office022_AndCreatesNothing()
-    {
-        // Was best-effort until task 080: an unresolved owner left the invoice app-owned in ROOT and still created it.
-        using var factory = InvoiceFactory(Guid.NewGuid(), out var created);
-        factory.Ownership.TeamId = null;
-
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-0081" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await ErrorCodeOf(response)).Should().Be("OFFICE_022");
-        created.Should().BeEmpty();
-    }
-
-    // =====================================================================================
     // Harness
     // =====================================================================================
-
-    private static OfficeQuickCreateTestWebAppFactory InvoiceFactory(Guid callerSystemUserId, out List<Entity> created)
-    {
-        var factory = new OfficeQuickCreateTestWebAppFactory();
-        var captured = new List<Entity>();
-        factory.CallerResolver
-            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
-        factory.Entities
-            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((entity, _) => captured.Add(entity))
-            .ReturnsAsync(Guid.NewGuid());
-        created = captured;
-        return factory;
-    }
 
     private static async Task<string?> ErrorCodeOf(HttpResponseMessage response)
     {

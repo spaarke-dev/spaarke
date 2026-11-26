@@ -4,7 +4,8 @@
  * Configuration-driven Dataverse grid built on Fluent v9 native `DataGrid` primitives:
  * - Three-tier config resolution (explicit `overrides` → `sprk_configjson` → metadata + layoutXml → framework defaults)
  * - Native selection (`selectionMode="multiselect"`) — NO hand-rolled checkbox column
- * - Native sort (`sortable` + `createTableColumn({ compare })`) — NO manual sort state
+ * - Native sort (`sortable` + `createTableColumn({ compare })`); the grid holds the sort column/direction and hands it to
+ *   Fluent (`sortState`), so a header-cell click and the column menu's "A to Z" / "Z to A" set the same sort
  * - Native column resize (`resizableColumns` + `columnSizingOptions`) — NO drag handles
  * - Native keyboard nav (`focusMode="composite"`) — NO `onKeyDown` switch
  * - Lazy infinite-scroll paging (FetchXML paging-cookie chain via {@link useLazyLoad})
@@ -30,6 +31,9 @@ import {
   DataGridBody,
   DataGridCell,
   createTableColumn,
+  MessageBar,
+  MessageBarBody,
+  Button,
   Spinner,
   Text,
   Link,
@@ -50,7 +54,7 @@ import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
-import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
+import type { CommandBarAction, DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { fetchConfigRecord, resolveSource } from './resolveGridSource';
 import {
   DataGridContextProvider,
@@ -58,6 +62,7 @@ import {
   type DataGridParentContext,
 } from '../../hooks/useDataGridContext';
 import { dataGridTokens } from './tokens';
+import { dataGridCellStyle, dataGridHeaderCellStyle } from './cellStyles';
 import {
   resolveConfig,
   resolveEffectiveAvailableViews,
@@ -67,6 +72,9 @@ import {
   type ResolvedColumn,
 } from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
+import { useHostRowSource, type DataGridRowSource, type DataGridRowNoun } from './useHostRowSource';
+import { RowActionsCell, ROW_ACTIONS_COLUMN_ID, rowActionsColumnWidth, type DataGridRowAction } from './RowActionsCell';
+import { TruncatedCellText } from './TruncatedCellText';
 import {
   overlayParentContextFilter,
   overlayHostFilters,
@@ -74,7 +82,9 @@ import {
   type HostFilterCondition,
 } from './fetchXmlOverlay';
 import type { MembershipResolver } from '../../services/membership';
-import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
+import { CommandBar as DataGridCommandBar, type DataGridHostCommand } from './commandBar/CommandBar';
+import type { ExportCellText } from './commandBar/csvExport';
+import { objectCellText } from './objectCellText';
 import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
@@ -93,6 +103,24 @@ export interface DataGridHostContext {
   entityName: string;
   parentContext?: DataGridParentContext;
   selectedIds: string[];
+}
+
+/** A column sort: the column's name (its logical name, as in the grid configuration) and the direction. */
+export interface DataGridSortSetting {
+  columnId: string;
+  direction: 'ascending' | 'descending';
+}
+
+/**
+ * The part of a grid's look a user can change and a host may want to keep: the widths of columns the user dragged and the
+ * column the user sorted by. Plain data, so the host decides where and whether it is stored (ADR-012: no storage in the
+ * shared lib). Used both ways: `initialSettings` hands it to the grid, `onSettingsChange` reports it back.
+ */
+export interface DataGridSettings {
+  /** Column name → width in px, for the columns the user resized. A column not listed keeps the grid's own fit. */
+  widths?: Readonly<Record<string, number>>;
+  /** The sorted column. Absent: not sorted by the user (the configured order). */
+  sort?: DataGridSortSetting;
 }
 
 /**
@@ -168,7 +196,7 @@ export interface DataGridProps {
   /** OPTIONAL — fires when the user clicks the primary-name link on a row. */
   onRecordOpen?: (recordId: string, record: Record<string, unknown>, ctx: DataGridHostContext) => void;
 
-  /** OPTIONAL — fires when the user invokes a per-row secondary action. */
+  /** OPTIONAL — fires when the user invokes a per-row action (see `rowActions`). */
   onRecordAction?: (
     actionId: string,
     recordId: string,
@@ -189,6 +217,110 @@ export interface DataGridProps {
    * first as an observer.
    */
   onCreateNew?: () => void;
+
+  /**
+   * OPTIONAL — commands the HOST adds to the grid's command bar, beyond what the
+   * `sprk_gridconfiguration` record and the built-ins give (for example a "Submit"
+   * action that opens a host-owned dialog). Generic: the host owns the behaviour
+   * (`onInvoke`); the grid only places and renders the button. Placement: first
+   * in the bar, in the order supplied, then the normal inline limit / overflow
+   * rules; an `id` equal to a configured or built-in item is skipped (a host command never replaces one; a console.warn names it).
+   * Absent or empty = the command bar is unchanged for every other grid.
+   * `onCommandInvoke` still fires first as an observer. Pass a stable array
+   * (`useMemo`).
+   *
+   * See {@link DataGridHostCommand}.
+   */
+  hostCommands?: ReadonlyArray<DataGridHostCommand>;
+
+  /**
+   * OPTIONAL — the HOST supplies the rows (spaarke-SPA-external-access-platform-r4 task 023a). A page loader:
+   * `rowSource({ page, pageSize, signal }) → Promise<{ rows, hasMore, truncated? }>`.
+   *
+   * When given, the grid still loads the configuration and entity metadata (`configId`) and takes its columns,
+   * labels and renderers from them, but it runs NO FetchXML query (no `retrieveMultipleRecords`), no filter chips,
+   * no host-filter / parent-context / membership overlay. Paging stays the grid's lazy scroll (ADR-051): page N+1 is
+   * requested while `hasMore` is true. A rejected page shows the grid's error banner; `truncated: true` shows a
+   * notice that the list is incomplete. The in-flight request's `signal` is aborted on unmount and on reload.
+   * Sorting stays inside the grid (over the loaded rows). Data fetching stays with the host (ADR-012).
+   *
+   * The latest callback is read on every request, so an inline function does not reload the grid; change
+   * `rowSourceKey` to reload page 1. Absent = the FetchXML path, unchanged.
+   */
+  rowSource?: DataGridRowSource;
+
+  /** OPTIONAL — with `rowSource`: change it to reload page 1 (e.g. after the host uploads or deletes a row). */
+  rowSourceKey?: string;
+
+  /**
+   * OPTIONAL — with `rowSource`: the noun for the rows in the incomplete-list notice, singular and plural (for
+   * example `{ one: 'document', other: 'documents' }`). Default `row` / `rows`.
+   */
+  rowNoun?: DataGridRowNoun;
+
+  /**
+   * OPTIONAL — what an empty list shows below the column headers, in place of the configuration's
+   * `display.emptyStateMessage` (for example the shared `EmptyState` with a hint that names an action only the host
+   * knows the caller is offered). Shown only when the list is truly empty: never while loading, after a failed
+   * load, or when the host's row source says the list is incomplete. Absent = the configuration's message, unchanged.
+   */
+  emptyState?: React.ReactNode;
+
+  /**
+   * OPTIONAL — per-row actions the HOST adds as the grid's LAST column (fixed width, not resizable, not sortable).
+   * Each is an icon button whose tooltip equals its aria-label; activating it calls
+   * `onRecordAction(action.id, recordId, record, ctx)`. An action whose `isVisible(record)` returns false is NOT
+   * rendered for that row (hide, don't disable). Past an inline limit (3) the rest fold into a "More actions" menu.
+   * Absent or empty = no actions column. Pass a stable array (`useMemo`).
+   *
+   * See {@link DataGridRowAction}.
+   */
+  rowActions?: ReadonlyArray<DataGridRowAction>;
+
+  /**
+   * OPTIONAL — ellipsis + tooltip on truncated text cells (see `DisplayConfig.truncateWithTooltip`). When set, wins
+   * over the configuration's `display.truncateWithTooltip`; when absent, the configuration decides (default off).
+   */
+  truncateWithTooltip?: boolean;
+
+  /**
+   * OPTIONAL — the column widths and sort to START with (spaarke-SPA-external-access-platform-r4 task 032, FR-19).
+   * Read once, when the grid mounts; a later change to it is ignored (use `settingsResetKey` to return to the defaults).
+   * A width is a width the user dragged: it is kept (never below the column's minimum) and the grid stops fitting
+   * columns to the container once any is present, exactly as after a drag. A column name the configuration does not
+   * have, a width that is not a positive finite number of at most 2000 px and a sort on an unknown column are dropped. Absent = the
+   * configured widths and order, unchanged. See {@link DataGridSettings}.
+   */
+  initialSettings?: DataGridSettings;
+
+  /**
+   * OPTIONAL — reports the user's current {@link DataGridSettings} every time they change: the user resizes a column or
+   * sorts, or a `settingsResetKey` reset clears something (then with empty widths and no sort), so the host can store
+   * them. Never called with settings equal to the last ones reported or handed in, so it is not called just because
+   * the grid mounted with `initialSettings`; but a stored width for a column the configuration does not have is pruned
+   * once the columns load, and that prune IS reported (the settings then differ from the ones handed in). While a
+   * column is being dragged it can fire on every pointer step: a host that stores them should be cheap or debounce.
+   * Absent = nothing is reported (the user can still sort and resize; it is just not remembered). The grid never stores
+   * anything itself.
+   */
+  onSettingsChange?: (settings: DataGridSettings) => void;
+
+  /**
+   * OPTIONAL — "Clear all": when this value CHANGES (not on mount), the grid returns to its configured widths
+   * (the container fit comes back) and its configured order (no user sort), clears every column filter (the filter
+   * chip state, so the header filter indicators go and the query runs unfiltered), and reports the empty settings
+   * through `onSettingsChange` (the filters are not part of the settings: the host stores widths and sort only).
+   * The host owns the command that triggers it (see `hostCommands`) and clears its own store.
+   * Absent = no reset signal.
+   */
+  settingsResetKey?: number | string;
+
+  /**
+   * OPTIONAL — built-in actions this HOST does not offer, whatever the configuration says (e.g. `['create-form']`
+   * when the host adds its own create commands through `hostCommands`). Forwarded to the command bar; see
+   * `CommandBarProps.hiddenBuiltInCommands`. Pass a stable array. Absent = unchanged.
+   */
+  hiddenBuiltInCommands?: ReadonlyArray<CommandBarAction>;
 
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
@@ -391,34 +523,9 @@ const useStyles = makeStyles({
     height: '1px',
     width: '100%',
   },
-  cell: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    // Power Apps OOB body row height ≈ 38px.
-    minHeight: '38px',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightRegular,
-    color: tokens.colorNeutralForeground1,
-  },
-  headerCell: {
-    // Power Apps OOB header row height ≈ 41px.
-    minHeight: '41px',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
-    fontSize: tokens.fontSizeBase300,
-    fontWeight: tokens.fontWeightSemibold,
-    backgroundColor: dataGridTokens.header.background,
-    color: dataGridTokens.header.foreground,
-  },
+  // Shared with SearchResultsGrid (SemanticSearch) via ./cellStyles (#2866).
+  cell: dataGridCellStyle,
+  headerCell: dataGridHeaderCellStyle,
   primaryNameLink: {
     color: dataGridTokens.primaryNameLink.color,
     fontWeight: dataGridTokens.primaryNameLink.fontWeight,
@@ -427,6 +534,28 @@ const useStyles = makeStyles({
     ':hover': {
       textDecorationLine: 'underline',
     },
+  },
+  /** Primary-name link inside a truncate-with-tooltip cell (task 023a): clamp to the cell and ellipsise. */
+  primaryNameLinkTruncate: {
+    display: 'inline-block',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    verticalAlign: 'bottom',
+  },
+  /** Screen-reader-only header label of the row-actions column (task 023a). */
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    whiteSpace: 'nowrap',
+  },
+  /** Host row-source banners (error / truncated notice) above the rows (task 023a). */
+  hostRowsBanner: {
+    flexShrink: 0,
   },
   /**
    * Header CARD — own card with border + matching depth. Holds:
@@ -517,7 +646,14 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     backgroundColor: tokens.colorPaletteRedBackground1,
   },
+  // The configuration-load banner: the sentence and its Try again button side by side.
+  errorBannerWithAction: {
+    columnGap: tokens.spacingHorizontalM,
+  },
 });
+
+/** What the grid says when its configuration could not be loaded (the detail goes to the console, not the page). */
+const CONFIG_LOAD_FAILED_TEXT = 'This list could not be loaded. Try again later.';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper — pretty-print arbitrary cell value into a string
@@ -601,6 +737,9 @@ export function formattedLabelOf(row: Record<string, unknown>, column: string): 
 /** Renderers whose client formatting wins over a server label: dates (task 098 calendar-day rule) and percentages. */
 const CLIENT_FORMATTED_RENDERERS = new Set(['date', 'dateonly', 'datetime', 'percentage']);
 
+/** The date renderers: the export writes the date these draw (cellExportText). */
+const DATE_RENDERERS = new Set(['date', 'dateonly', 'datetime']);
+
 /**
  * Whether a server label replaces the client rendering of a cell (task 061). Not for the client-formatted renderers,
  * and not for a plain number under 'currency' (a configured currency column keeps its client formatting; a Money
@@ -618,16 +757,29 @@ function usesFormattedLabel(value: unknown, renderer: string): boolean {
  * precedence over the raw value so an option set / lookup / money value shows its label instead of JSON. The date and
  * percentage renderers ignore it (a server-formatted date carries the server's culture and zone and would undo the
  * calendar-day handling below, task 098), and so does 'currency' for a plain number (see usesFormattedLabel).
+ *
+ * An object with no label is never drawn as JSON or "[object Object]": a lookup shows its name (or label), a Money
+ * object its amount, anything else nothing (see {@link objectCellText}).
  */
 export function renderCellValue(value: unknown, renderer: string, formattedLabel?: string): string {
   if (value === null || value === undefined || value === '') return '';
   if (formattedLabel && usesFormattedLabel(value, renderer)) {
     return formattedLabel;
   }
+  // An object (not a Date; not Money, which the currency branch reads) has no label here: show its name or nothing.
+  if (typeof value === 'object' && !(value instanceof Date) && renderer !== 'currency') {
+    return objectCellText(value);
+  }
   switch (renderer) {
     case 'currency': {
-      const num = typeof value === 'number' ? value : Number(value);
-      if (Number.isNaN(num)) return String(value);
+      // A Money value with no server label is the SDK object `{ value, extensionData }` (task 033): read its amount.
+      const num =
+        typeof value === 'object'
+          ? (moneyAmountOf(value) ?? Number.NaN)
+          : typeof value === 'number'
+            ? value
+            : Number(value);
+      if (Number.isNaN(num)) return typeof value === 'object' ? objectCellText(value) : String(value);
       return new Intl.NumberFormat(undefined, {
         style: 'currency',
         currency: 'USD',
@@ -667,15 +819,114 @@ export function renderCellValue(value: unknown, renderer: string, formattedLabel
         return String(value);
       }
     }
-    default: {
-      if (typeof value === 'object') {
-        const v = value as Record<string, unknown>;
-        if (typeof v.name === 'string') return v.name;
-        return JSON.stringify(value);
-      }
+    default:
       return String(value);
-    }
   }
+}
+
+/** A plain decimal number as text (optional sign, optional exponent); keeps `Number()` from reading `'0x10'` as 16. */
+const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i;
+
+/** A finite number from a number or a numeric string; otherwise null. */
+function finiteNumberOf(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (!NUMERIC_TEXT.test(text)) return null;
+    const n = Number(text);
+    // An overflowing string ("1e400") is Infinity, not an amount; the comparator must never see Infinity - Infinity.
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * The amount in a raw Money cell value, or null when it has none (spaarke-SPA-external-access-platform-r4 task 033).
+ *
+ * The BFF module fetch returns a Money column as the SDK object `{ value: 100, extensionData: null }` (System.Text.Json
+ * writes the SDK type through its public properties; `FetchService.ProjectEntity`), with the display text under
+ * `@formattedValues`. The grid also meets a plain number (other hosts' clients) and a numeric string. Accepts all three;
+ * `{ Value: n }` is read too. A display label such as "$1,200.00", any other object, an array, `null`, `undefined` and
+ * `''` have no amount.
+ */
+export function moneyAmountOf(raw: unknown): number | null {
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const wrapped = raw as { value?: unknown; Value?: unknown };
+    return finiteNumberOf(wrapped.value ?? wrapped.Value);
+  }
+  return finiteNumberOf(raw);
+}
+
+/**
+ * The comparator behind every sortable column (task 061 display-string key; task 033 Money). Returns the ascending
+ * order; Fluent multiplies it by -1 for a descending sort, so both Fluent's own sort state and the host-controlled one
+ * (`initialSettings.sort`, task 032) reach it the same way.
+ *
+ * - A Money column (renderer 'currency') compares the amount from {@link moneyAmountOf}, never the text, so $9 < $10 <
+ *   $100. A row with no amount (null, undefined, '', or text with no number) sorts LOWEST: first ascending and last
+ *   descending, the same place an empty cell already took when the grid compared display strings. Two empty rows tie.
+ * - Two numbers compare numerically (any renderer).
+ * - Date renderers compare the raw ISO text (the display string is locale order, not time order).
+ * - Everything else compares what the cell shows (an option set or lookup is an object, which would otherwise compare as
+ *   "[object Object]" and never move).
+ */
+export function compareColumnValues(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  column: { name: string; renderer: string }
+): number {
+  const aVal = a[column.name];
+  const bVal = b[column.name];
+  if (column.renderer === 'currency') {
+    const aAmount = moneyAmountOf(aVal);
+    const bAmount = moneyAmountOf(bVal);
+    if (aAmount === null || bAmount === null) {
+      return aAmount === bAmount ? 0 : aAmount === null ? -1 : 1;
+    }
+    return aAmount - bAmount;
+  }
+  if (typeof aVal === 'number' && typeof bVal === 'number') {
+    return aVal - bVal;
+  }
+  // Dates sort on the raw ISO value (their display string is locale order, not time order).
+  if (column.renderer === 'date' || column.renderer === 'dateonly' || column.renderer === 'datetime') {
+    return String(aVal ?? '').localeCompare(String(bVal ?? ''));
+  }
+  // Everything else sorts on what the cell shows (task 061).
+  return renderCellValue(aVal, column.renderer, formattedLabelOf(a, column.name)).localeCompare(
+    renderCellValue(bVal, column.renderer, formattedLabelOf(b, column.name))
+  );
+}
+
+/**
+ * The CSV text for one cell: the text the grid draws for it (task 033 Money; D-34 #3045 every column). Goes through the
+ * same {@link renderCellValue} + {@link formattedLabelOf} path as the cell, so an option set exports its label
+ * ("Draft"), a lookup its name, a Money cell "$1,200.00", and an object with no label nothing, never
+ * `{"value":1,"extensionData":null}`. The primary-name column is drawn with the 'default' renderer, so it exports as that.
+ *
+ * A date column exports the date the grid draws (owner decision 2026-11-24: dates are exported as shown, not as the
+ * raw UTC timestamp), so a Date Only value keeps its calendar day and a date-time shows the viewer's local time. An
+ * invalid date is an empty field, never "Invalid Date".
+ *
+ * Returns undefined (the export keeps `exportCsv`'s own formatting of the raw value) for a plain value in a percentage
+ * column (a spreadsheet wants the 0-1 fraction) and for a `Date` instance in a column that is not a date column. A
+ * plain string, number or boolean with no label yields the text the default formatting would write, so those are
+ * byte-identical to the old export.
+ */
+export function cellExportText(
+  record: Record<string, unknown>,
+  column: { name: string; renderer: string; isPrimaryName?: boolean }
+): string | undefined {
+  const value = record[column.name];
+  const renderer = column.isPrimaryName ? 'default' : column.renderer;
+  if (DATE_RENDERERS.has(renderer)) {
+    const shown = renderCellValue(value, renderer, formattedLabelOf(record, column.name));
+    return shown === 'Invalid Date' ? '' : shown;
+  }
+  if (value instanceof Date) return undefined;
+  const isObject = typeof value === 'object' && value !== null;
+  if (!isObject && CLIENT_FORMATTED_RENDERERS.has(renderer)) return undefined;
+  return renderCellValue(value, renderer, formattedLabelOf(record, column.name));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -713,6 +964,43 @@ const INITIAL_LOAD_STATE: ConfigLoadState = {
  *
  * See module-level JSDoc for the full feature list and ADR references.
  */
+/** Task 032 (review fix round 1): the widest column a stored width may ask for, in px; wider is dropped as tampered. */
+const MAX_INITIAL_COLUMN_WIDTH_PX = 2000;
+
+/**
+ * Task 032: keeps only usable widths (positive, finite, at most {@link MAX_INITIAL_COLUMN_WIDTH_PX}) from a host's
+ * `initialSettings.widths`.
+ */
+function sanitizeInitialWidths(widths: DataGridSettings['widths']): Partial<Record<string, number>> {
+  const out: Partial<Record<string, number>> = {};
+  if (!widths || typeof widths !== 'object') return out;
+  for (const [id, w] of Object.entries(widths)) {
+    if (typeof w === 'number' && Number.isFinite(w) && w > 0 && w <= MAX_INITIAL_COLUMN_WIDTH_PX) {
+      out[id] = Math.round(w);
+    }
+  }
+  return out;
+}
+
+/** Task 032: the settings the user's current widths and sort add up to, in the shape the host stores. */
+function settingsOf(
+  widths: Readonly<Partial<Record<string, number>>>,
+  sort: DataGridSortSetting | undefined
+): DataGridSettings {
+  const w: Record<string, number> = {};
+  for (const [id, v] of Object.entries(widths)) if (v !== undefined) w[id] = v;
+  return sort ? { widths: w, sort: { ...sort } } : { widths: w };
+}
+
+/** Task 032: a stable string for {@link settingsOf}, so "did anything change" is a comparison, not an object identity. */
+function settingsKeyOf(
+  widths: Readonly<Partial<Record<string, number>>>,
+  sort: DataGridSortSetting | undefined
+): string {
+  const entries = Object.entries(widths).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([entries, sort ? [sort.columnId, sort.direction] : null]);
+}
+
 export const DataGrid: React.FC<DataGridProps> = props => {
   const {
     configId,
@@ -722,9 +1010,20 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     membershipResolver,
     onRecordsLoaded,
     onRecordOpen,
-    onRecordAction: _onRecordAction,
+    onRecordAction,
     onCommandInvoke,
     onCreateNew,
+    hostCommands,
+    rowSource,
+    rowSourceKey,
+    rowNoun,
+    emptyState: hostEmptyState,
+    rowActions,
+    truncateWithTooltip: truncateWithTooltipProp,
+    initialSettings,
+    onSettingsChange,
+    settingsResetKey,
+    hiddenBuiltInCommands,
     overrides,
     pageSize: pageSizeOverride,
     availableViewsAllowlist: availableViewsAllowlistOverride,
@@ -741,6 +1040,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // DataGridExternalHost.tsx. Everywhere else `externalHost` is false and the prop behaves as before.
   const externalHost = useDataGridExternalHost();
   const showViewSelector = !externalHost && showViewSelectorProp;
+
+  // Task 023a: a host row source replaces the FetchXML row path (no query, no chips, no overlays). Absent: false,
+  // and every branch below that reads it behaves exactly as before.
+  const hostRowsActive = typeof rowSource === 'function';
+  const hasRowActions = Boolean(rowActions && rowActions.length > 0);
 
   // Stable default: instantiate XrmDataverseClient once if no client passed.
   // XrmDataverseClient throws at first method call if Xrm context is unavailable
@@ -893,6 +1197,14 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     externalHost,
   ]);
 
+  // The technical reason the configuration did not load goes to the console, once per failure (the banner says only
+  // CONFIG_LOAD_FAILED_TEXT).
+  React.useEffect(() => {
+    if (!loadState.error) return;
+    // eslint-disable-next-line no-console
+    console.error(`[DataGrid] configuration did not load (configId=${configId}):`, loadState.error);
+  }, [loadState.error, configId]);
+
   // Once we have metadata, resolve the full configuration.
   const resolved: ResolvedConfig | null = React.useMemo(() => {
     if (!loadState.entityMetadata) return null;
@@ -914,7 +1226,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // base query (correct for MDA form-subgrids with no BFF token).
   const membershipFilterCfg = resolved?.behavior?.membershipFilter;
   const membershipEntityName = resolved?.entityName ?? '';
-  const membershipActive = Boolean(membershipFilterCfg && membershipResolver && membershipEntityName);
+  // Task 023a: with a host row source there is no query to scope, so the resolver is never called.
+  const membershipActive =
+    !hostRowsActive && Boolean(membershipFilterCfg && membershipResolver && membershipEntityName);
   // `undefined` = pending resolution OR feature inactive; `null` = resolved-but-
   // failed (fail-soft → base query); `string[]` = resolved ids (empty ⇒
   // impossible-match → empty grid, never everyone's records).
@@ -962,6 +1276,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // a working "Filter by" affordance. The OOB Power Apps grid always offers
   // Filter by, so the user's mental model expects it on every column.
   const chipDescriptors = React.useMemo(() => {
+    // Task 023a: chips filter the FetchXML query; a host row source has none, so no chip is offered.
+    if (hostRowsActive) return [];
     if (!resolved || !loadState.entityMetadata) return [];
     const discovered = discoverChips(resolved.filterChips, resolved.columns, loadState.entityMetadata);
     if (discovered.length > 0) return discovered;
@@ -972,7 +1288,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         attribute: c.name,
         label: c.label,
       }));
-  }, [resolved, loadState.entityMetadata]);
+  }, [resolved, loadState.entityMetadata, hostRowsActive]);
 
   // Lazy load — only kicks off once we have entityName + fetchXml.
   // FetchXML composition order: base savedQuery → parent-context overlay →
@@ -980,6 +1296,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // identical inputs ⇒ identical output (lazy-load reset detector relies on
   // referential stability).
   const fetchXml = React.useMemo(() => {
+    // Task 023a: a host row source runs no FetchXML query (empty fetchXml ⇒ useLazyLoad no-op).
+    if (hostRowsActive) return '';
     let xml = loadState.savedQuery?.fetchXml ?? '';
     const parentFilter = resolved?.behavior?.parentContextFilter;
     if (xml && parentFilter) {
@@ -1030,6 +1348,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     membershipFilterCfg,
     chipDescriptors,
     chipState,
+    hostRowsActive,
   ]);
   const entityNameForLoad = resolved?.entityName ?? '';
   // FR-07 (spaarke-dataset-grid-framework-r2, task 003): framework default 25.
@@ -1046,25 +1365,42 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // preserved as belt-and-suspenders against the pre-resolution render path.
   const pageSize = resolveEffectivePageSize(pageSizeOverride, resolved?.behavior.pageSize) ?? 25;
 
-  const {
-    records,
-    isLoading: isLoadingRows,
-    hasMore,
-    fetchNextPage,
-    reset: resetLazyLoad,
-  } = useLazyLoad<Record<string, unknown>>({
+  const lazy = useLazyLoad<Record<string, unknown>>({
     dataverseClient,
     entityName: entityNameForLoad,
     fetchXml,
     pageSize,
   });
 
+  // Task 023a: host row source. Starts once the configuration has resolved (columns + effective page size known),
+  // like the FetchXML path waits for its entity name. Disabled (and inert) without `rowSource`.
+  const hostRows = useHostRowSource({
+    rowSource,
+    rowSourceKey,
+    pageSize,
+    enabled: hostRowsActive && Boolean(entityNameForLoad),
+  });
+
+  const records = hostRowsActive ? hostRows.records : lazy.records;
+  const isLoadingRows = hostRowsActive ? hostRows.isLoading : lazy.isLoading;
+  const hasMore = hostRowsActive ? hostRows.hasMore : lazy.hasMore;
+  const fetchNextPage = hostRowsActive ? hostRows.fetchNextPage : lazy.fetchNextPage;
+  const resetLazyLoad = hostRowsActive ? hostRows.reset : lazy.reset;
+  const effectiveTruncateWithTooltip = truncateWithTooltipProp ?? resolved?.display.truncateWithTooltip ?? false;
+
   // Selection — preserved across pages per FR-DG-12.
   const [selectedRowIds, setSelectedRowIds] = React.useState<Set<TableRowId>>(new Set());
 
   // Sentinel + IntersectionObserver for lazy paging.
   const sentinelRef = React.useRef<HTMLDivElement>(null);
-  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
+  // The scroll container only exists once the configuration has loaded (the loading and error states return early,
+  // below), so the width measurement keys on the element itself, not on the first mount (R4 task 028 fix round).
+  const [scrollContainerEl, setScrollContainerEl] = React.useState<HTMLDivElement | null>(null);
+  const setScrollContainer = React.useCallback((el: HTMLDivElement | null) => {
+    scrollContainerRef.current = el;
+    setScrollContainerEl(el);
+  }, []);
 
   React.useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -1152,27 +1488,68 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   );
   const effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen;
 
+  // Export to Excel writes each cell as the grid draws it (cellExportText). A column the host draws with its own
+  // `overrides.columnRenderers` entry is exported as that entry's text: it is called with the arguments the cell
+  // render uses, and a string it returns IS the cell text. When it returns something else (a React node has no text to
+  // read), an object value (an option set, a lookup), a Money column and a date column still export the text the grid
+  // would draw, never JSON; any other value keeps the raw-value export (task 033 K2).
+  const hostColumnRenderers = resolved?.overrides.columnRenderers;
+  const exportCellText = React.useCallback<ExportCellText>(
+    (record, column) => {
+      const hostRenderer = column.isPrimaryName ? undefined : hostColumnRenderers?.[column.name];
+      if (!hostRenderer) return cellExportText(record, column);
+      let drawn: unknown;
+      try {
+        drawn = hostRenderer(record[column.name], record);
+      } catch {
+        drawn = undefined; // a renderer that throws on an export call is treated as drawing no text
+      }
+      if (typeof drawn === 'string') return drawn;
+      const value = record[column.name];
+      const isObject = typeof value === 'object' && value !== null && !(value instanceof Date);
+      return isObject || column.renderer === 'currency' || DATE_RENDERERS.has(column.renderer)
+        ? cellExportText(record, column)
+        : undefined;
+    },
+    [hostColumnRenderers]
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sort. The grid always holds the sort in state and hands it to Fluent (`sortState` + `onSortChange`), so both ways a
+  // user sorts land in one place: a click on the header cell (Fluent's own toggle) and the column menu's "A to Z" /
+  // "Z to A". In a browser the column name IS the menu trigger and stops the click, so the menu is the way most users
+  // sort (task 038 E2E, 2026-11-25: the menu items used to be no-ops and sorting was reachable only from the cell edge).
+  //
+  // Task 032 (FR-19, #2489): opt-in persisted settings. The grid stores nothing: `onSettingsChange` hands the host the
+  // widths + sort, `initialSettings` takes them back, `settingsResetKey` clears them. A host that sets none of the three
+  // gets the same sort behaviour, just not remembered.
+  // ─────────────────────────────────────────────────────────────────────────
+  const [userSort, setUserSort] = React.useState<DataGridSortSetting | undefined>(() =>
+    initialSettings?.sort && initialSettings.sort.columnId ? { ...initialSettings.sort } : undefined
+  );
+  const handleSortChange = React.useCallback<NonNullable<FluentDataGridProps['onSortChange']>>((_ev, data) => {
+    setUserSort(
+      data.sortColumn === undefined ? undefined : { columnId: String(data.sortColumn), direction: data.sortDirection }
+    );
+  }, []);
+  // A sort on a column the configuration does not have (or on a grid with sorting off) is not applied or reported.
+  const enableSorting = resolved?.behavior.enableSorting ?? false;
+  const effectiveSort = React.useMemo<DataGridSortSetting | undefined>(() => {
+    if (!userSort) return undefined;
+    if (visibleColumns.length === 0) return userSort; // columns still loading: keep it until they are known
+    return enableSorting && visibleColumns.some(c => c.name === userSort.columnId) ? userSort : undefined;
+  }, [userSort, visibleColumns, enableSorting]);
+  const fluentSortState = React.useMemo(
+    () => ({ sortColumn: effectiveSort?.columnId, sortDirection: effectiveSort?.direction ?? ('ascending' as const) }),
+    [effectiveSort]
+  );
+
   const tableColumns: TableColumnDefinition<GridItem>[] = React.useMemo(() => {
     if (!resolved) return [];
-    return visibleColumns.map(col =>
+    const columns = visibleColumns.map(col =>
       createTableColumn<GridItem>({
         columnId: col.name,
-        compare: (a, b) => {
-          const aVal = a[col.name];
-          const bVal = b[col.name];
-          if (typeof aVal === 'number' && typeof bVal === 'number') {
-            return aVal - bVal;
-          }
-          // Dates sort on the raw ISO value (their display string is locale order, not time order).
-          if (col.renderer === 'date' || col.renderer === 'dateonly' || col.renderer === 'datetime') {
-            return String(aVal ?? '').localeCompare(String(bVal ?? ''));
-          }
-          // Everything else sorts on what the cell shows (task 061): an option set or lookup arrives as an object,
-          // which would otherwise compare as "[object Object]" and never move.
-          return renderCellValue(aVal, col.renderer, formattedLabelOf(a, col.name)).localeCompare(
-            renderCellValue(bVal, col.renderer, formattedLabelOf(b, col.name))
-          );
-        },
+        compare: (a, b) => compareColumnValues(a, b, col),
         renderHeaderCell: () => (
           <HeaderCellContent
             label={col.label}
@@ -1180,16 +1557,19 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             state={chipState}
             onStateChange={setChipState}
             theme={theme}
-            // Always passing `onSortChange` so the chevron menu always renders
-            // (HeaderCellContent hides the trigger when BOTH descriptor and
-            // onSortChange are undefined). The actual sort is still applied
-            // by Fluent v9's native `sortable={true}` header click — the menu
-            // items just give a discoverable surface for the same action.
-            onSortChange={() => {
-              // no-op — Fluent v9 native sort is wired via `sortable` on the
-              // DataGrid below; future enhancement: pass through to Fluent
-              // sort state explicitly so the menu can drive sort programmatically.
-            }}
+            // "A to Z" / "Z to A" set the grid's sort (see the Sort block above). With sorting off there are no sort
+            // items, and a column with no filter either shows a plain label. No `sortDirection`: Fluent's header cell
+            // already draws the sort arrow.
+            onSortChange={
+              enableSorting
+                ? next =>
+                    setUserSort(
+                      next === null
+                        ? undefined
+                        : { columnId: col.name, direction: next === 'asc' ? 'ascending' : 'descending' }
+                    )
+                : undefined
+            }
           />
         ),
         renderCell: item => {
@@ -1198,11 +1578,13 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           if (col.isPrimaryName && resolved) {
             const idValue = String(item[resolved.primaryIdAttribute] ?? item._rowId ?? '');
             const label = renderCellValue(value, 'default', formattedLabelOf(item, col.name)) || '(no name)';
-            return React.createElement(
+            const link = React.createElement(
               Link,
               {
                 as: 'button',
-                className: styles.primaryNameLink,
+                className: effectiveTruncateWithTooltip
+                  ? mergeClasses(styles.primaryNameLink, styles.primaryNameLinkTruncate)
+                  : styles.primaryNameLink,
                 onClick: () => {
                   effectiveRecordOpen(idValue, item, {
                     configId,
@@ -1214,6 +1596,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               },
               label
             );
+            return effectiveTruncateWithTooltip ? <TruncatedCellText text={label}>{link}</TruncatedCellText> : link;
           }
 
           // Host-supplied custom renderer wins over derived renderer.
@@ -1221,10 +1604,40 @@ export const DataGrid: React.FC<DataGridProps> = props => {
           if (customRenderer) {
             return customRenderer(value, item) as React.ReactNode;
           }
-          return renderCellValue(value, col.renderer, formattedLabelOf(item, col.name));
+          const text = renderCellValue(value, col.renderer, formattedLabelOf(item, col.name));
+          return effectiveTruncateWithTooltip ? <TruncatedCellText text={text} /> : text;
         },
       })
     );
+    // Task 023a: host row actions — a final column, no `compare` (so Fluent never sorts it).
+    if (rowActions && rowActions.length > 0) {
+      columns.push(
+        createTableColumn<GridItem>({
+          columnId: ROW_ACTIONS_COLUMN_ID,
+          renderHeaderCell: () => <span className={styles.visuallyHidden}>Actions</span>,
+          renderCell: item => {
+            // A row may lack the primary-id column at runtime (index access is not checked), so fall back to _rowId.
+            const primaryId: unknown = item[resolved.primaryIdAttribute];
+            const recordId = String(primaryId ?? item._rowId);
+            return (
+              <RowActionsCell
+                actions={rowActions}
+                record={item}
+                onInvoke={actionId =>
+                  onRecordAction?.(actionId, recordId, item, {
+                    configId,
+                    entityName: resolved.entityName,
+                    parentContext,
+                    selectedIds: Array.from(selectedRowIds).map(String),
+                  })
+                }
+              />
+            );
+          },
+        })
+      );
+    }
+    return columns;
   }, [
     resolved,
     visibleColumns,
@@ -1236,6 +1649,12 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     chipDescriptorByAttribute,
     chipState,
     theme,
+    effectiveTruncateWithTooltip,
+    styles.primaryNameLinkTruncate,
+    styles.visuallyHidden,
+    rowActions,
+    onRecordAction,
+    enableSorting,
   ]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1253,30 +1672,95 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // scroll appears as a last resort (correct).
   // ─────────────────────────────────────────────────────────────────────────
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
-  // Synchronous initial measurement BEFORE FluentDataGrid's first commit, so
-  // its initial `columnSizingOptions` already reflect the container width
-  // (round 2 feedback found that ResizeObserver firing AFTER mount didn't
-  // re-apply column sizing — Fluent treats `columnSizingOptions` as initial
-  // values, not live-tracked). useLayoutEffect runs synchronously after the
-  // DOM is laid out but before paint, so the column sizes are correct on
-  // the very first visible frame.
+  // Synchronous initial measurement before the first paint, so the columns
+  // are fitted on the very first visible frame. Later measurements (the
+  // ResizeObserver) re-fit the columns live: Fluent re-reads changed
+  // `columnSizingOptions` (`COLUMN_SIZING_OPTIONS_UPDATED` in
+  // @fluentui/react-table's useTableColumnResizeState), so no remount is
+  // needed (review F1-1).
+  // R4 task 028 fix round: both effects key on `scrollContainerEl`. With `[]` they ran at mount, while the grid still
+  // showed its loading placeholder, found no container, and never measured or observed it, so `containerWidth` stayed 0
+  // and none of the fitting above ever applied. Both read `clientWidth` (padding included), which is the width the
+  // sizing math below assumes (it subtracts gridScroll's padding itself); `contentRect.width` would subtract it twice.
   React.useLayoutEffect(() => {
-    const el = scrollContainerRef.current;
-    if (el) {
-      setContainerWidth(el.clientWidth);
+    if (scrollContainerEl) {
+      setContainerWidth(scrollContainerEl.clientWidth);
     }
-  }, []);
+  }, [scrollContainerEl]);
   React.useEffect(() => {
-    const el = scrollContainerRef.current;
+    const el = scrollContainerEl;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
+    const ro = new ResizeObserver(() => {
+      setContainerWidth(el.clientWidth);
     });
     ro.observe(el);
     return () => ro.disconnect();
+  }, [scrollContainerEl]);
+
+  // R4 task 028 fix round (review F1-2): a width the user drags is theirs for the grid's lifetime. Fluent resets a
+  // column to `columnSizingOptions[col].idealWidth` whenever that differs from its own state (`columnDefinitionsToState`),
+  // and it re-reads the options on every change to them or to the column definitions — a 1px container change, a row
+  // selection, chip state, a host's inline callbacks. So the dragged width is recorded here and fed back as that
+  // column's ideal width below; the columns the user has not dragged keep the proportional fit. Ids of columns that no
+  // longer exist are dropped; the host's `settingsResetKey` (task 032, "Clear all") is the only other thing that clears it.
+  // Task 032: the widths a host hands over (`initialSettings`) are dragged widths that were kept, so they seed this map.
+  const [userColumnWidths, setUserColumnWidths] = React.useState<Readonly<Partial<Record<string, number>>>>(() =>
+    sanitizeInitialWidths(initialSettings?.widths)
+  );
+  const handleColumnResize = React.useCallback<NonNullable<FluentDataGridProps['onColumnResize']>>((_ev, data) => {
+    const id = String(data.columnId);
+    // The row-actions column has a fixed width and no resize handle.
+    if (id === ROW_ACTIONS_COLUMN_ID) return;
+    setUserColumnWidths(prev => (prev[id] === data.width ? prev : { ...prev, [id]: data.width }));
   }, []);
+  React.useEffect(() => {
+    // An empty column set is a reload in progress, not a column set without the dragged columns.
+    if (visibleColumns.length === 0) return;
+    const present = new Set(visibleColumns.map(c => c.name));
+    setUserColumnWidths(prev => {
+      const stale = Object.keys(prev).filter(id => !present.has(id));
+      if (stale.length === 0) return prev;
+      const next = { ...prev };
+      for (const id of stale) delete next[id];
+      return next;
+    });
+  }, [visibleColumns]);
+  // Fluent's auto-fit keeps the columns inside the container on every resize step and container change, so a column
+  // grows only by taking width from columns above their minimum, and when the grid is squeezed (every column at its
+  // minimum) it undoes the drag. Auto-fit stays on for the fit-to-container sizing until the user resizes a column;
+  // from then on the dragged column follows the pointer and the grid scrolls sideways if it has to.
+  const hasUserColumnWidths = Object.keys(userColumnWidths).length > 0;
+  const resizableColumnsOptions = React.useMemo(
+    () => ({ autoFitColumns: !hasUserColumnWidths }),
+    [hasUserColumnWidths]
+  );
+
+  // Task 032 (FR-19, #2489): report a change of widths or sort (the sort state is declared above `tableColumns`, which
+  // the column menu sets). Compared with what was last reported (or handed in), so nothing is reported on mount, in
+  // StrictMode, or when a state update produced the same settings. The latest callback is read from a ref (an inline
+  // one is fine).
+  const onSettingsChangeRef = React.useRef(onSettingsChange);
+  React.useEffect(() => {
+    onSettingsChangeRef.current = onSettingsChange;
+  }, [onSettingsChange]);
+  const lastReportedRef = React.useRef<string>(settingsKeyOf(userColumnWidths, effectiveSort));
+  React.useEffect(() => {
+    const key = settingsKeyOf(userColumnWidths, effectiveSort);
+    if (key === lastReportedRef.current) return;
+    lastReportedRef.current = key;
+    onSettingsChangeRef.current?.(settingsOf(userColumnWidths, effectiveSort));
+  }, [userColumnWidths, effectiveSort]);
+
+  // "Clear all" (owner 2026-11-23): a CHANGED key returns to the configured widths (auto-fit comes back) and order,
+  // and clears the column filters too (the chip state; it is not part of the persisted settings).
+  const lastResetKeyRef = React.useRef(settingsResetKey);
+  React.useEffect(() => {
+    if (lastResetKeyRef.current === settingsResetKey) return;
+    lastResetKeyRef.current = settingsResetKey;
+    setUserColumnWidths(prev => (Object.keys(prev).length === 0 ? prev : {}));
+    setUserSort(undefined);
+    setChipState(prev => (Object.keys(prev).length === 0 ? prev : {}));
+  }, [settingsResetKey]);
 
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
@@ -1299,7 +1783,9 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // subtraction is the defensive layer for any future surface that misses
     // it.
     const perColPaddingReserve = visibleColumns.length * 24;
-    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve);
+    // Task 023a: the fixed-width row-actions column (when present) is taken off the shared space first.
+    const actionsWidth = hasRowActions && rowActions ? rowActionsColumnWidth(rowActions) : 0;
+    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve - actionsWidth);
     // Bidirectional scale: when `available` < `baseSum`, scale < 1 shrinks
     // the columns to fit (down to each column's minimum); when `available`
     // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the
@@ -1339,14 +1825,27 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       }
     }
     for (let i = 0; i < visibleColumns.length; i++) {
+      // A column the user dragged keeps the dragged width (F1-2 above); the others take the fit.
+      const userWidth = userColumnWidths[visibleColumns[i].name];
+      const width = userWidth !== undefined ? Math.max(mins[i], userWidth) : targets[i];
       options[visibleColumns[i].name] = {
-        defaultWidth: targets[i],
+        defaultWidth: width,
         minWidth: mins[i],
-        idealWidth: targets[i],
+        idealWidth: width,
       };
     }
+    if (actionsWidth > 0) {
+      options[ROW_ACTIONS_COLUMN_ID] = { defaultWidth: actionsWidth, minWidth: actionsWidth, idealWidth: actionsWidth };
+    }
     return options;
-  }, [visibleColumns, containerWidth, resolved]);
+  }, [visibleColumns, containerWidth, resolved, hasRowActions, rowActions, userColumnWidths]);
+
+  // Task 023a: the actions column keeps its width whatever Fluent's sizing state does (no resize, no auto-fit).
+  const rowActionsCellStyle: React.CSSProperties | undefined = React.useMemo(() => {
+    if (!hasRowActions || !rowActions) return undefined;
+    const w = `${rowActionsColumnWidth(rowActions)}px`;
+    return { width: w, minWidth: w, maxWidth: w, flexGrow: 0, flexShrink: 0, flexBasis: w };
+  }, [hasRowActions, rowActions]);
 
   // Items with stable row ids (primaryId-derived, so selection survives reorder).
   const items: GridItem[] = React.useMemo(() => {
@@ -1405,10 +1904,15 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }
 
   if (loadState.error || !loadState.entityMetadata || !resolved) {
+    // End users get one sentence they can act on; the technical detail (a missing source, a server message from a metadata
+    // read) stays in the console (logged once per failure by the effect above), never in the page.
     return (
       <div className={mergeClasses(styles.root, className)} role="alert">
-        <div className={styles.errorBanner}>
-          <Text size={300}>{loadState.error?.message ?? 'DataGrid configuration could not be resolved.'}</Text>
+        <div className={mergeClasses(styles.errorBanner, styles.errorBannerWithAction)}>
+          <Text size={300}>{CONFIG_LOAD_FAILED_TEXT}</Text>
+          <Button size="small" appearance="secondary" onClick={refresh}>
+            Try again
+          </Button>
         </div>
       </div>
     );
@@ -1423,7 +1927,15 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     entityMetadata: loadState.entityMetadata,
   };
 
-  const isEmpty = !isLoadingRows && records.length === 0 && !loadState.isLoading;
+  // Task 023a: host row-source states. Always false/null on the FetchXML path.
+  const hostRowsError = hostRowsActive ? hostRows.error : null;
+  const hostRowsTruncated = hostRowsActive && hostRows.truncated;
+  const rowNounOne = rowNoun?.one || 'row';
+  const rowNounOther = rowNoun?.other || 'rows';
+  // An incomplete list with no rows, or a failed load, is not "no records": the notice / banner says so instead.
+  // (loadState.isLoading is always false here: the configuration-loading state returned above.)
+  const isEmpty = !isLoadingRows && records.length === 0 && !hostRowsError && !hostRowsTruncated;
+  const rowsSelectable = resolved.behavior.selectionMode !== 'none';
   const selectedCount = selectedRowIds.size;
   const totalCount = records.length;
   const visibleTitle = resolved.display.title ?? loadState.savedQuery?.name ?? '';
@@ -1486,6 +1998,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             selectedIds={Array.from(selectedRowIds).map(String)}
             records={records}
             columns={visibleColumns}
+            exportCellText={exportCellText}
             currentView={contextValue.currentView}
             refresh={refresh}
             theme={theme}
@@ -1496,6 +2009,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
             inlineLimit={3}
             onCommandInvoke={handleCommandInvoke}
             onCreateNew={onCreateNew}
+            hostCommands={hostCommands}
+            hiddenBuiltInCommands={hiddenBuiltInCommands}
           />
         </div>
 
@@ -1509,7 +2024,23 @@ export const DataGrid: React.FC<DataGridProps> = props => {
            * row instead.
            */}
 
-          <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={scrollContainerRef}>
+          {/* Task 023a: host row source — a rejected page (error banner) or an incomplete list (notice). */}
+          {hostRowsError && (
+            <div className={mergeClasses(styles.errorBanner, styles.hostRowsBanner)} role="alert">
+              <Text size={300}>{hostRowsError.message || 'The rows could not be loaded.'}</Text>
+            </div>
+          )}
+          {hostRowsTruncated && (
+            <MessageBar intent="warning" className={styles.hostRowsBanner} data-testid="datagrid-truncated-notice">
+              <MessageBarBody>
+                {totalCount === 0
+                  ? `The ${rowNounOther} could not be loaded just now, so none are shown. This does not mean there are none — please try again.`
+                  : `This list is incomplete: only ${totalCount} ${totalCount === 1 ? rowNounOne : rowNounOther} could be shown. Some ${rowNounOther} are not listed here.`}
+              </MessageBarBody>
+            </MessageBar>
+          )}
+
+          <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={setScrollContainer}>
             {/*
              * The FluentDataGrid is ALWAYS rendered (even when there are zero
              * rows) so the column-header row — which hosts the chevron menus
@@ -1519,24 +2050,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
              * Power Apps OOB pattern: header always visible, body empty,
              * empty-state message sits below the (empty) body.
              *
-             * ai-spaarke-ai-workspace-UI-r1 iter 2 round 4 (2026-06-09):
-             * FluentDataGrid treats `columnSizingOptions` as INITIAL-only —
-             * once mounted, prop changes to those options do not re-flow
-             * the columns. To get responsive sizing in containers whose
-             * width changes (workspace section embeds; window resize), we
-             * use a key bucket (every 50px) so significant width changes
-             * force a remount with fresh column widths. We do NOT gate the
-             * mount on a non-zero width — that would collapse gridScroll's
-             * flex:1 layout (no children) and prevent the initial width
-             * measurement, leaving an empty pane. Instead the grid mounts
-             * immediately with the baseline (containerWidth=0) widths and
-             * remounts ~one frame later when useLayoutEffect measures.
-             * Selection state lives in DataGrid's React state above this
-             * FluentDataGrid, so remount only loses Fluent's internal
-             * sort/filter-popover UI state — acceptable trade-off.
+             * Responsive sizing: FluentDataGrid re-reads `columnSizingOptions`
+             * when they change (@fluentui/react-table 9.19.x handles
+             * `COLUMN_SIZING_OPTIONS_UPDATED` live), so a container-width
+             * change re-fits the columns in place. The grid is NOT keyed on
+             * the width (an earlier 50px-bucket key remounted it on every
+             * width change and lost the sort and focus — R4 task 028 review
+             * F1-1). We do NOT gate the mount on a non-zero width — that
+             * would collapse gridScroll's flex:1 layout (no children) and
+             * prevent the initial width measurement, leaving an empty pane.
              */}
             <FluentDataGrid
-              key={`fg-${Math.floor((containerWidth || 0) / 50)}`}
               items={items}
               columns={tableColumns}
               selectionMode={
@@ -1549,14 +2073,19 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               selectedItems={selectedRowIds}
               onSelectionChange={handleSelectionChange}
               sortable={resolved.behavior.enableSorting}
+              // Always controlled, so the column menu and a header-cell click share one sort (see the Sort block).
+              sortState={fluentSortState}
+              onSortChange={handleSortChange}
               resizableColumns={resolved.behavior.enableColumnResize}
               columnSizingOptions={columnSizingOptions}
+              resizableColumnsOptions={resizableColumnsOptions}
+              onColumnResize={handleColumnResize}
               focusMode="composite"
               size={density}
               getRowId={(item: GridItem) => item._rowId}
               // CSS belt-and-suspenders: maxWidth caps the FluentDataGrid at
               // the container width even if `columnSizingOptions` failed to
-              // apply (Fluent treats it as initial-only). Without this, when
+              // apply. Without this, when
               // sum-of-column-widths > container width, the grid renders past
               // the container's right edge with a permanent horizontal scroll
               // (round 2 testing feedback).
@@ -1567,19 +2096,40 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               aria-label={contextValue.currentView}
             >
               <DataGridHeader>
-                <DataGridRow selectionCell={{ checkboxIndicator: { 'aria-label': 'Select all rows' } }}>
-                  {({ renderHeaderCell }) => (
-                    <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
-                  )}
+                <DataGridRow
+                  // Fluent renders an explicitly passed selection cell even when the grid is not selectable, so a
+                  // `selectionMode: 'none'` grid would show dead checkboxes. Pass the slot only when rows can be selected.
+                  selectionCell={
+                    rowsSelectable ? { checkboxIndicator: { 'aria-label': 'Select all rows' } } : undefined
+                  }
+                >
+                  {({ renderHeaderCell, columnId }) =>
+                    columnId === ROW_ACTIONS_COLUMN_ID ? (
+                      // Task 023a: fixed width, no resize handle (`aside`), no sort (no `compare`).
+                      <DataGridHeaderCell className={styles.headerCell} style={rowActionsCellStyle} aside={null}>
+                        {renderHeaderCell()}
+                      </DataGridHeaderCell>
+                    ) : (
+                      <DataGridHeaderCell className={styles.headerCell}>{renderHeaderCell()}</DataGridHeaderCell>
+                    )
+                  }
                 </DataGridRow>
               </DataGridHeader>
               <DataGridBody<GridItem>>
                 {({ item, rowId }) => (
                   <DataGridRow<GridItem>
                     key={rowId}
-                    selectionCell={{ checkboxIndicator: { 'aria-label': 'Select row' } }}
+                    selectionCell={rowsSelectable ? { checkboxIndicator: { 'aria-label': 'Select row' } } : undefined}
                   >
-                    {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
+                    {({ renderCell, columnId }) =>
+                      columnId === ROW_ACTIONS_COLUMN_ID ? (
+                        <DataGridCell className={styles.cell} style={rowActionsCellStyle}>
+                          {renderCell(item)}
+                        </DataGridCell>
+                      ) : (
+                        <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>
+                      )
+                    }
                   </DataGridRow>
                 )}
               </DataGridBody>
@@ -1587,9 +2137,11 @@ export const DataGrid: React.FC<DataGridProps> = props => {
 
             {isEmpty && (
               <div className={styles.emptyState}>
-                <Text size={400} weight="semibold">
-                  {resolved.display.emptyStateMessage ?? 'No records to display'}
-                </Text>
+                {hostEmptyState ?? (
+                  <Text size={400} weight="semibold">
+                    {resolved.display.emptyStateMessage ?? 'No records to display'}
+                  </Text>
+                )}
               </div>
             )}
 

@@ -637,7 +637,7 @@ public static class CommunicationModule
     /// <summary>
     /// Job handlers + background (hosted) services: the dedicated sdap-communication queue processor, the
     /// delta-query reconciliation backstop, the Graph webhook subscription manager, the missed-webhook polling
-    /// backup, and the daily send-count reset. Hosted services start in registration order; this helper keeps
+    /// backup (an <c>IScheduledJob</c> since #2749), and the daily send-count reset. Hosted services start in registration order; this helper keeps
     /// their original relative order. Behavior-neutral extraction (r3 task 026) — same registrations, lifetimes,
     /// and order as the original inline block.
     /// </summary>
@@ -671,8 +671,12 @@ public static class CommunicationModule
         services.AddSingleton<GraphSubscriptionManager>();
         services.AddHostedService(sp => sp.GetRequiredService<GraphSubscriptionManager>());
 
-        // Background service: backup polling for missed webhooks (ADR-001)
-        services.AddHostedService<InboundPollingBackupService>();
+        // Scheduled job: backup polling for missed webhooks, every 5 minutes. An IScheduledJob on ScheduledJobHost
+        // (ADR-036) — migrated from a hand-rolled PeriodicTimer BackgroundService by #2749 (PR #2757), which changed its
+        // behaviour; ADR-052 §1 migrates a timer service when it is next touched (owner decision 2026-11-13, §6.5 Path C).
+        // One run per tick across instances (distributed lease). The singleton AddScheduledJob registers keeps the
+        // per-mailbox cursors across runs; the watermark itself is persisted in IDistributedCache.
+        services.AddScheduledJob<InboundPollingBackupService>(InboundPollingBackupService.DefaultCronSchedule);
 
         // Background service: reset daily send counts at midnight UTC (ADR-001)
         services.AddHostedService<DailySendCountResetService>();
@@ -719,6 +723,21 @@ public static class CommunicationModule
         services.AddSingleton(sp => new Lazy<IThreadMembershipDerivationService>(
             () => sp.GetRequiredService<IThreadMembershipDerivationService>()));
         services.AddSingleton<IDirectThreadAccessService, DirectThreadAccessService>(); // task 043
+        // field-mapping-server-write-path-r1 task 054a — the owner team of Direct 1:1 messages not filed under a record
+        // (DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName, no defaults: unset refuses at use, never at
+        // startup). Concrete singleton (ADR-010): it holds the short-lived verdict cache (ADR-009 metadata exception).
+        services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>();
+        // field-mapping-server-write-path-r1 task 054 piece 3a — the one step after a message joins a thread (the grant, then the
+        // Direct team for a Direct message filed under nothing) and the 1:1 pre-send check. Concrete singleton (ADR-010: one
+        // implementation, no seam needed); CommunicationService and MessagingIngestor take it as an optional dependency.
+        services.AddSingleton<DirectMessageOwnerStep>();
+        // field-mapping-server-write-path-r1 task 056b — the private-message gate: the record checks of both participants before a
+        // private message is sent, and the one writer of its record reference. Section 11: (1) existing — the probe, the No Access
+        // guard and the effective-flag read it calls; (2) extension — it only orders those questions, so it cannot live in one of
+        // them; (3) without it a Direct message cannot name a record without becoming a record message. Scoped like
+        // SecureShareNoAccessGuard, which it takes (AddExternalAccess registers it unconditionally); the singleton
+        // CommunicationService resolves it from the request's services.
+        services.AddScoped<PrivateMessageSendGate>();
         // task 041/043 — explicit participant/grant reader. Task 041 registered the ADR-032 Null-Object default
         // (no explicit grants); task 043 replaces it with the REAL Direct-topology reader (owner ∪ POA share).
         // For a Direct thread it returns the two participants; for any non-Direct thread it returns EMPTY, so

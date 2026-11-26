@@ -306,7 +306,7 @@ Post-MVP improvements for chart definitions:
 
 - **Spec**: `projects/financial-intelligence-module-r1/spec.md`
 - **Architectural Pivot Decision**: `current-task.md` (2026-02-11 session notes)
-- **Dataverse Chart Documentation**: [Power Apps Chart XML Schema](https://docs.microsoft.com/en-us/powerapps/developer/data-platform/customize-visualizations-dashboards)
+- **Dataverse Chart Documentation**: [Power Apps Chart XML Schema](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/customize-visualizations-dashboards)
 - **VisualHost Documentation**: (Internal Spaarke platform docs)
 
 ---

@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="133" project="ebilling-r1">
+  <amendment source="EB-D-254, owner 2026-11-17 (option b)">No PDF report file in R1; task 133 is withdrawn. The firm report is the on-screen report (130's projection) in the SPA, plus the findings table in the 131 notice email body. FR-40 and D-36 are amended. This amendment overrides every PDF, report-download and 133 reference below.</amendment>
   <metadata>
     <title>Adjustment report PDF</title>
     <phase>5 Firm feedback (WP5) — wave W5-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Generates a document from an existing projection and stores it through SpeFileStore; one new SpeFileStore method wraps a Graph call; content rules come from 130.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -47,7 +48,8 @@
     <constraint source="NFR-08">GenerateAsync is idempotent: an existing report for the same outcome is reused; a changed outcome (for example Return after an earlier rejection report) creates a new document and repoints the link.</constraint>
     <constraint source="ADR-008, ADR-028, 040">Download route on the external group: CIAM caller checked with 130's firm-scope check; 404 with a stable code when no report exists; RequireEbillingEnabled().</constraint>
     <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new package (OpenXml already referenced), publish-size delta recorded, no new HIGH CVE.</constraint>
-    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+    <constraint source="076 review round 2 item 5, re-keyed by task 083 (notes/083-firm-clause-applicability.md)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceId, ct). invoiceId is the invoice the finding belongs to, read server-side and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never one derived from the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. GetFirmClauseAsync reads the invoice's firm and its evaluation snapshot itself and returns text only for a policy version that snapshot applied; a displaced or excluded version, an invoice with no snapshot or no firm, a read fault, a non-Billing policy and a rule set with visible-to-firms off all return no text, and it never re-resolves. The result carries FirmFacingName (the Procedure's firm-facing name, or "Billing instructions for this record" for a record rule): show that name, never the Procedure's Name. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+    <constraint source="model 7.4 (R3), task 083">The report takes only the fields of 130's allow-list DTO; a negative test asserts that no override reason, Procedure name or Procedure id appears in the report.</constraint>
   </constraints>
 
   <knowledge>

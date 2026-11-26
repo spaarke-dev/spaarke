@@ -308,6 +308,7 @@ public sealed class SecureChildShareSynchronizer
 
     private const string OwningTeamColumn = "owningteam";
     private const string OwningUserColumn = "owninguser";
+    private const string CommunicationTable = "sprk_communication";
     private const string IsSecureColumn = "sprk_issecure";
     private const int OwnerTeamType = SecureRecordOwnerTeam.OwnerTeamType;
 
@@ -318,20 +319,30 @@ public sealed class SecureChildShareSynchronizer
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SecureChildShareSynchronizer> _logger;
+    private readonly ExternalTeamShareSynchronizer? _externalTeam;
 
+    /// <param name="externalTeam">uac-r2 task 191c: the External-team mode (#2179 design §3.4, §3.5): the predicate and the
+    /// stored <c>sprk_isexternal</c> flags the mirror asks before it gives a flagged system user a right on a child. Optional so
+    /// the test compositions keep compiling; the host registers it. Without it the mirror behaves as before task 191c.</param>
     public SecureChildShareSynchronizer(
         IGenericEntityService dataverse,
         IDataverseRecordShareService recordShare,
         SecureShareNoAccessGuard noAccessGuard,
         IConfiguration configuration,
-        ILogger<SecureChildShareSynchronizer> logger)
+        ILogger<SecureChildShareSynchronizer> logger,
+        ExternalTeamShareSynchronizer? externalTeam = null)
     {
         _dataverse = dataverse;
         _recordShare = recordShare;
         _noAccessGuard = noAccessGuard;
         _configuration = configuration;
         _logger = logger;
+        _externalTeam = externalTeam;
     }
+
+    /// <summary>uac-r2 task 191c: the External-team mode this synchronizer was composed with, if any (the L1 hooks reach it
+    /// through here).</summary>
+    internal ExternalTeamShareSynchronizer? ExternalTeam => _externalTeam;
 
     /// <summary>
     /// Brings every secure child of ONE root into line with the root's current shares — the fan-out after a share,
@@ -357,14 +368,45 @@ public sealed class SecureChildShareSynchronizer
         && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 016 (review pass 3): this environment's Secure Record owner team as
-    /// <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/> answers it — the
-    /// id, or none (no Secure Record business unit or team) with a refusal when it is ambiguous — for a caller that must
-    /// tell "not the Secure team" from "the Secure team cannot be told" (Repair's mapping-source gate fails closed on the
-    /// latter). <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
+    /// field-mapping-server-write-path-r1 task 016 (review pass 3), task 022 fix round 6: this environment's Secure Record
+    /// owner team for the mapping-source copy gate (<see cref="ResolveSecureOwnerTeamForCopyGateAsync"/>), for a caller that
+    /// must tell "not the Secure team" from "the Secure team cannot be told" (the gate fails closed on the latter).
+    /// <see cref="IsSecureOwnerTeamAsync"/> and its callers are unchanged. A Dataverse fault propagates.
     /// </summary>
     internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct) =>
-        ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct);
+        ResolveSecureOwnerTeamForCopyGateAsync(_dataverse, _configuration, ct);
+
+    /// <summary>The refusal <see cref="ResolveSecureOwnerTeamForCopyGateAsync"/> gives when the Secure Record business unit
+    /// exists and holds no Secure Record owner team with the configured name.</summary>
+    internal const string SecureOwnerTeamNotFoundRefusal =
+        "the Secure Record business unit holds no Secure Record owner team with the configured name";
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 022 fix round 6: the Secure Record owner team as the mapping-source copy gate
+    /// needs it, with "not set up" told apart from "set up but not found" — the rule the ownership resolver applies
+    /// (<c>RecordOwnershipResolver</c>: no Secure Record business unit means no secure owner; a business unit whose named
+    /// team is missing or not unique is a refusal):
+    /// <list type="bullet">
+    /// <item>the team's id, as <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/>
+    /// answers it;</item>
+    /// <item><c>(null, null)</c>: this environment has no Secure Record business unit, so no team can own a secure record;</item>
+    /// <item><c>(null, refusal)</c>: the business unit is ambiguous, or the named team is ambiguous, or the business unit
+    /// exists and holds no such team (<see cref="SecureOwnerTeamNotFoundRefusal"/>).</item>
+    /// </list>
+    /// A Dataverse fault propagates. The business unit is read a second time only when no team was found.
+    /// </summary>
+    internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamForCopyGateAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    {
+        var team = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (team.TeamId is not null || team.Refusal is not null)
+            return team;
+
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return (null, "more than one business unit carries the Secure Record name");
+        return secureBu.Id is null ? (null, null) : (null, SecureOwnerTeamNotFoundRefusal);
+    }
 
     /// <summary>
     /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a
@@ -842,7 +884,7 @@ public sealed class SecureChildShareSynchronizer
 
         var run = new Run(this, secureTeamId, ct);
         if (readRows is not null)
-            run.Seed(readRows);
+            await run.SeedAsync(readRows).ConfigureAwait(false);
         await run.PrefetchLineagesAsync(groups.SelectMany(g => g)).ConfigureAwait(false);
 
         var answers = new List<SecureRootsAbove>(groups.Count);
@@ -1338,32 +1380,105 @@ public sealed class SecureChildShareSynchronizer
     /// <summary>
     /// <c>true</c> when the team's OWN row proves it is not the Secure Record owner team: another name, its business
     /// unit's default team, or not an Owner team — none of which <see cref="ResolveSecureOwnerTeamAsync"/> can ever
-    /// select. <c>false</c> means "it could be" (the full resolution decides), including a team row that is not found. A
-    /// Dataverse fault propagates.
+    /// select. <c>false</c> means "it could be" (the full resolution decides). Never throws for a Dataverse fault: a fault
+    /// answers <c>false</c>; cancellation of <paramref name="ct"/> propagates.
     /// </summary>
-    /// <remarks>Names compare trimmed and case-insensitively, as Dataverse's own <c>name</c> equality does. Any doubt
-    /// answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</remarks>
+    /// <remarks>
+    /// <para>The name is matched by Dataverse, never in code: the team is read with <c>name eq</c> the configured name, the
+    /// same condition <see cref="ResolveSecureOwnerTeamAsync"/> uses, so whatever Dataverse's collation treats as equal (case,
+    /// accents, trailing spaces) can never answer "another name".</para>
+    /// <para>When that read finds no row, "another name" is proven only by a configured team name that names a team:</para>
+    /// <list type="bullet">
+    /// <item>Secure settings PRESENT (<see cref="SecureSettingsConfigured"/>): <c>true</c> only when a non-default Owner team
+    /// carries the configured team name (the Secure team must carry it). When no team does, the answer is <c>false</c>: a wrong
+    /// team setting must never rule the real Secure team out. The business-unit setting does not bear on the name, and is not
+    /// read here (an ordinary owner is ruled out even while the Secure unit is unresolved, task 149 F7); a unit setting that
+    /// finds nothing is <see cref="IsSecureOwnerTeamAsync"/>'s "unknown".</item>
+    /// <item>Secure settings ABSENT (the compiled defaults apply): the team is read by id — <c>true</c> when it exists,
+    /// <c>false</c> when it is not found.</item>
+    /// </list>
+    /// <para>Any doubt answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</para>
+    /// </remarks>
     internal static async Task<bool> CannotBeSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
     {
-        var query = new QueryExpression("team")
+        try
         {
-            ColumnSet = new ColumnSet("name", "isdefault", "teamtype"),
-            TopCount = 1,
-            NoLock = true,
-        };
-        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
-        var team = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (team is null)
-            return false;
+            var named = new QueryExpression("team")
+            {
+                ColumnSet = new ColumnSet("isdefault", "teamtype"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            named.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+            named.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+            var team = (await dataverse.RetrieveMultipleAsync(named, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (team is null)
+            {
+                if (SecureSettingsConfigured(configuration))
+                {
+                    // Another name proves "not the Secure team" only when the configured team name names a team: the Secure
+                    // team carries that name, so a name that finds no team proves nothing about the team that owns the row.
+                    var carrier = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                    carrier.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+                    carrier.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
+                    carrier.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
+                    return (await dataverse.RetrieveMultipleAsync(carrier, ct).ConfigureAwait(false)).Entities.Count > 0;
+                }
 
-        if (team.GetAttributeValue<string>("name") is { } name
-            && !string.Equals(name.Trim(), SecureRecordOwnerTeam.OwnerTeamName(configuration).Trim(), StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (team.GetAttributeValue<bool?>("isdefault") == true)
-            return true;
-        return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
+                // The compiled defaults: another name when the team exists, unknown (false) when it does not.
+                var byId = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                byId.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+                return (await dataverse.RetrieveMultipleAsync(byId, ct).ConfigureAwait(false)).Entities.Count > 0;
+            }
+
+            if (team.GetAttributeValue<bool?>("isdefault") == true)
+                return true;
+            return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return false; // doubt: the full resolution decides
+        }
     }
+
+    /// <summary>
+    /// Whether <paramref name="teamId"/> is the Secure Record owner team, for a caller that grants access or moves an owner on a
+    /// "not Secure" answer: <c>true</c> it is, <c>false</c> it is not, <c>null</c> it cannot be told (the caller grants or
+    /// moves nothing), with the reason. <see cref="CannotBeSecureOwnerTeamAsync"/> first, then
+    /// <see cref="ResolveSecureOwnerTeamAsync"/> and an id compare. A Dataverse fault in the resolution propagates.
+    /// </summary>
+    /// <remarks>
+    /// The resolution's "no Secure team" (no unit or no team under the names looked for) is read by
+    /// <see cref="SecureSettingsConfigured"/>: with the Secure settings ABSENT it is <c>false</c> (no record is secure in this
+    /// environment, as the compiled defaults find nothing — the behaviour before this rule); with them PRESENT it is
+    /// <c>null</c>, because the settings name a unit or team Dataverse does not find and the real Secure team may own the row.
+    /// </remarks>
+    internal static async Task<(bool? Secure, string? Undetermined)> IsSecureOwnerTeamAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
+    {
+        if (await CannotBeSecureOwnerTeamAsync(dataverse, configuration, teamId, ct).ConfigureAwait(false))
+            return (false, null);
+
+        var secure = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secure.Refusal is { } refusal)
+            return (null, refusal);
+        if (secure.TeamId is { } secureTeam)
+            return (secureTeam == teamId, null);
+        return SecureSettingsConfigured(configuration)
+            ? (null, "the configured Secure Record business unit or owner team was not found")
+            : (false, null);
+    }
+
+    /// <summary>
+    /// <c>true</c> when <c>SecureRecord:BusinessUnitName</c> or <c>SecureRecord:OwnerTeamName</c> is set (not blank) — the
+    /// environment names its Secure Record unit or team, so finding neither is a wrong setting, not "no secure records". Unset,
+    /// the compiled defaults apply (<see cref="SecureRecordOwnerTeam.DefaultBusinessUnitName"/>,
+    /// <see cref="SecureRecordOwnerTeam.DefaultOwnerTeamName"/>).
+    /// </summary>
+    internal static bool SecureSettingsConfigured(IConfiguration configuration) =>
+        !string.IsNullOrWhiteSpace(configuration[SecureRecordOwnerTeam.BusinessUnitNameConfigKey])
+        || !string.IsNullOrWhiteSpace(configuration[SecureRecordOwnerTeam.OwnerTeamNameConfigKey]);
 
     /// <summary>A root's owner team and flag, or <c>null</c> when the row does not exist. A fault propagates.</summary>
     private static async Task<RootFacts?> ReadRootFactsAsync(IGenericEntityService dataverse, RowRef root, CancellationToken ct)
@@ -1482,9 +1597,10 @@ public sealed class SecureChildShareSynchronizer
         {
             foreach (var table in SecureChildLineage.Children.Values)
             {
+                await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.LineageColumns.Append(OwningTeamColumn).ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append(OwningTeamColumn).Concat(PrivateColumnsOf(table.LogicalName)).ToArray()),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(OwningTeamColumn, ConditionOperator.Equal, _secureTeamId);
@@ -1503,6 +1619,7 @@ public sealed class SecureChildShareSynchronizer
         /// </summary>
         public async Task<bool> LoadSecureChildAsync(SecureChildLineage.Table table, Guid id)
         {
+            await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
             var query = new QueryExpression(table.LogicalName)
             {
                 ColumnSet = new ColumnSet(WalkColumns(table)),
@@ -1542,6 +1659,7 @@ public sealed class SecureChildShareSynchronizer
 
                 foreach (var table in SecureChildLineage.Children.Values)
                 {
+                    await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                     // Every (lookup column, parent id) pair of this table that points into the previous level — and, on a
                     // Signal or Decision Record, its core record pair naming a root of it (SecureChildLineage.CorePairMatches).
                     var pairs = table.Lookups
@@ -1619,12 +1737,13 @@ public sealed class SecureChildShareSynchronizer
         /// when it was read with every column the walk reads (<see cref="WalkColumns"/>); a row read with fewer is ignored and
         /// read as usual, so a column the caller did not select never reads as absent.
         /// </summary>
-        public void Seed(IEnumerable<(Entity Row, ColumnSet ReadWith)> rows)
+        public async Task SeedAsync(IEnumerable<(Entity Row, ColumnSet ReadWith)> rows)
         {
             foreach (var (entity, readWith) in rows)
             {
                 if (entity.Id == Guid.Empty || !SecureChildLineage.Children.TryGetValue(entity.LogicalName, out var table))
                     continue;
+                await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                 if (!readWith.AllColumns
                     && !WalkColumns(table).All(c => readWith.Columns.Contains(c, StringComparer.OrdinalIgnoreCase)))
                     continue;
@@ -1679,6 +1798,8 @@ public sealed class SecureChildShareSynchronizer
                 }
 
                 var table = SecureChildLineage.IsRoot(group.Key) ? null : SecureChildLineage.Children[group.Key];
+                if (table is not null)
+                    await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
                 foreach (var chunk in group.Chunk(DescendantConditionsPerQuery))
                 {
                     var ids = chunk.Select(r => r.Id).ToHashSet();
@@ -1728,6 +1849,7 @@ public sealed class SecureChildShareSynchronizer
                 return cached;
 
             var table = SecureChildLineage.Children[reference.Table];
+            await EnsureCommunicationColumnsAsync(table.LogicalName).ConfigureAwait(false);
             var query = new QueryExpression(table.LogicalName)
             {
                 ColumnSet = new ColumnSet(WalkColumns(table)),
@@ -1743,11 +1865,43 @@ public sealed class SecureChildShareSynchronizer
         }
 
         /// <summary>The columns the walk reads of a child row: its lineage columns (lookups, and a core record pair) and its owner.</summary>
-        private static string[] WalkColumns(SecureChildLineage.Table table) =>
-            table.LineageColumns.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
+        private string[] WalkColumns(SecureChildLineage.Table table) =>
+            table.LineageColumns.Append(OwningTeamColumn).Append(OwningUserColumn).Concat(PrivateColumnsOf(table.LogicalName)).ToArray();
 
-        private static Row ToRow(SecureChildLineage.Table table, Entity entity)
+        // fm task 056 (owner 2026-11-22; UAC-r2: fail closed wherever a filing is read): the private-message reference columns
+        // of a sprk_communication read, the ones that exist in this environment (metadata read once per run; a fault propagates).
+        private IReadOnlySet<string>? _communicationColumns;
+
+        private async Task EnsureCommunicationColumnsAsync(string table)
         {
+            if (_communicationColumns is null && string.Equals(table, CommunicationTable, StringComparison.OrdinalIgnoreCase))
+            {
+                var metadata = await _owner._dataverse.GetColumnMetadataAsync(CommunicationTable, _ct).ConfigureAwait(false);
+                _communicationColumns = (metadata ?? throw new InvalidOperationException(
+                    $"The columns of {CommunicationTable} could not be read; the read does not run without that answer."))
+                    .Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private IEnumerable<string> PrivateColumnsOf(string table) =>
+            Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.PresentColumnsOf(
+                table, _communicationColumns ?? new HashSet<string>());
+
+        private Row ToRow(SecureChildLineage.Table table, Entity entity)
+        {
+            // A private message is never filed: whatever it is filed under is not read, so it descends from no root.
+            if (string.Equals(table.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase)
+                && Sprk.Bff.Api.Services.Communication.Access.PrivateContextColumns.IsPrivate(entity))
+            {
+                Log.LogWarning("[SECURE-CHILD-SHARES] {Table} {Id} is a private message: it is never filed, so it is placed under no " +
+                    "root and no share is mirrored onto it.", table.LogicalName, entity.Id);
+                return new Row(
+                    new RowRef(table.LogicalName, entity.Id),
+                    entity.GetAttributeValue<EntityReference>(OwningTeamColumn) is { } team && team.Id != Guid.Empty ? team.Id : null,
+                    UserOwned: entity.GetAttributeValue<EntityReference>(OwningUserColumn) is { } user && user.Id != Guid.Empty,
+                    Array.Empty<RowRef>());
+            }
+
             var parents = new List<RowRef>();
             foreach (var (column, target) in table.Lookups)
             {
@@ -2222,7 +2376,12 @@ public sealed class SecureChildShareSynchronizer
                     row.Ref, lineage.Undetermined, revokes.Count, modifies.Count);
             }
 
-            if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
+            // uac-r2 task 191c: a child already at its mirror can still hold a flagged user's share the predicate takes away
+            // (FilterFlaggedAsync below), so with the External-team engine composed it is not left early while a system user
+            // holds a share on it. The filter reads each user's flag once per run and asks the predicate only for a child a
+            // flagged user holds.
+            if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0
+                && (_owner._externalTeam is null || !have.Keys.Any(p => p.Kind == DataversePrincipalKind.SystemUser)))
                 return heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
             var failed = false;
@@ -2299,6 +2458,15 @@ public sealed class SecureChildShareSynchronizer
                 }
             }
 
+            // uac-r2 task 191c (#2179 design §3.4, §3.5, §3.8): a flagged system user gets a right on a secure child only when
+            // the predicate shows the child. Adding: a stored sprk_isexternal = true, or a flag that cannot be read, is refused
+            // on a child the predicate does not show (Hidden or Undecided). With the External-team writes on, a share a
+            // flagged user (stored true only) already holds on such a child is revoked, whatever made it.
+            var (flagFilterDecided, flagFiltered) = await FilterFlaggedAsync(row.Ref, have, grants, revokes, modifies)
+                .ConfigureAwait(false);
+            modifies = flagFiltered;
+            failed |= !flagFilterDecided;
+
             if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
                 return failed ? ChildOutcome.NotUpdated : heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
@@ -2307,6 +2475,139 @@ public sealed class SecureChildShareSynchronizer
             if (failed)
                 return ChildOutcome.NotUpdated;
             return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+        }
+
+        // uac-r2 task 191c: the stored sprk_isexternal flags (null: the user's row did not come back or the read faulted) and
+        // the predicate's answer per child, read at most once per run.
+        private readonly Dictionary<Guid, bool?> _externalFlags = new();
+        private readonly Dictionary<RowRef, bool> _childVisible = new();
+        private readonly HashSet<RowRef> _childBatchAsked = new();
+
+        /// <summary>uac-r2 191c: the secure children asked about in one predicate call when the flagged filter first needs an
+        /// answer.</summary>
+        private const int ChildVisibilityBatch = 200;
+
+        /// <summary>
+        /// uac-r2 task 191c (#2179 design §3.4, §3.5, §3.8): the flagged-principal filter of the mirror. A system user whose stored
+        /// <c>sprk_isexternal</c> is <c>true</c>, or whose flag cannot be read, is given nothing on a child the predicate does not
+        /// show (Hidden or Undecided): its grant is dropped and its widening keeps only the narrowing part. With the External-team
+        /// writes on (<see cref="ExternalTeamShareSynchronizer.WritesEnabledConfigKey"/>), a share a user flagged <c>true</c>
+        /// already holds on such a child is revoked; with them off it is kept and logged. Teams and internal users are untouched.
+        /// Returns <c>false</c> as its first item when a flag or the predicate could not be read (the child is then not updated
+        /// this run, and nothing is added for any user whose flag is unknown).
+        /// </summary>
+        private async Task<(bool Decided, List<(DataversePrincipalRef Principal, int Mask)> Modifies)> FilterFlaggedAsync(
+            RowRef child, IReadOnlyDictionary<DataversePrincipalRef, int> have,
+            List<(DataversePrincipalRef Principal, int Mask)> grants, List<DataversePrincipalRef> revokes,
+            List<(DataversePrincipalRef Principal, int Mask)> modifies)
+        {
+            if (_owner._externalTeam is not { } external)
+                return (true, modifies);
+
+            var writesOn = external.WritesEnabled;
+            var adding = grants.Select(g => g.Principal)
+                .Concat(modifies.Where(m => (m.Mask & ~have[m.Principal]) != 0).Select(m => m.Principal))
+                .Where(p => p.Kind == DataversePrincipalKind.SystemUser)
+                .Distinct()
+                .ToList();
+            var holding = have.Keys
+                .Where(p => p.Kind == DataversePrincipalKind.SystemUser && !revokes.Contains(p))
+                .ToList();
+            var users = adding.Concat(holding).Select(p => p.Id).Distinct().ToList();
+            if (users.Count == 0)
+                return (true, modifies);
+
+            var flagFault = false;
+            var unread = users.Where(u => !_externalFlags.ContainsKey(u)).ToList();
+            if (unread.Count > 0)
+            {
+                try
+                {
+                    var read = await external.ReadExternalFlagsAsync(unread, _ct).ConfigureAwait(false);
+                    foreach (var user in unread)
+                        _externalFlags[user] = read.TryGetValue(user, out var flag) ? flag : null;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-SHARES] the sprk_isexternal flags of {Count} user(s) could not be read for {Child}; " +
+                        "nothing is added for them there.", unread.Count, child);
+                    flagFault = true; // not cached: the next child asks again
+                }
+            }
+
+            // A flag that could not be read is external for a GRANT (design §3.8), never for a revoke.
+            bool FlaggedOrUnknown(DataversePrincipalRef p) => !_externalFlags.TryGetValue(p.Id, out var f) || f is not false;
+            bool Flagged(DataversePrincipalRef p) => _externalFlags.TryGetValue(p.Id, out var f) && f is true;
+
+            var addingFlagged = adding.Where(FlaggedOrUnknown).ToHashSet();
+            var holdingFlagged = holding.Where(Flagged).ToList();
+            if (addingFlagged.Count == 0 && holdingFlagged.Count == 0)
+                return (true, modifies);
+
+            // Undecided until the predicate answers: nothing is added for a flagged or unverifiable user meanwhile.
+            var decided = !(flagFault && addingFlagged.Count > 0);
+            if (!_childVisible.ContainsKey(child) && _childBatchAsked.Add(child))
+            {
+                // A child that needs an answer is asked about with the next secure children of this run not yet asked (at most
+                // ChildVisibilityBatch in one predicate call, F3 cost), so later children are usually answered already. A
+                // faulted batch is left to the per-child question below.
+                var batchRows = new List<(string Table, Guid Id)> { (child.Table, child.Id) };
+                foreach (var other in _secureChildren.Keys)
+                {
+                    if (batchRows.Count >= ChildVisibilityBatch)
+                        break;
+                    if (!_childVisible.ContainsKey(other) && _childBatchAsked.Add(other))
+                        batchRows.Add((other.Table, other.Id));
+                }
+
+                var batch = await external.DecideAsync(batchRows, _ct).ConfigureAwait(false);
+                if (!batch.Faulted)
+                {
+                    foreach (var (table, id) in batchRows)
+                        _childVisible[new RowRef(table, id)] = batch.IsVisible(table, id);
+                }
+            }
+
+            if (!_childVisible.TryGetValue(child, out var visible))
+            {
+                var answer = await external.DecideAsync([(child.Table, child.Id)], _ct).ConfigureAwait(false);
+                visible = answer.IsVisible(child.Table, child.Id);
+                if (answer.Faulted)
+                    decided &= addingFlagged.Count == 0;
+                else
+                    _childVisible[child] = visible;
+            }
+
+            if (visible)
+                return (decided, modifies);
+
+            if (addingFlagged.Count > 0)
+            {
+                grants.RemoveAll(g => addingFlagged.Contains(g.Principal));
+                modifies = NarrowingPartOnly(modifies, have, addingFlagged.Contains, revokes);
+                Log.LogInformation("[SECURE-CHILD-SHARES] {Child} is not shown to external users (the predicate); nothing is added " +
+                    "there for {Count} flagged or unverifiable user(s).", child, addingFlagged.Count);
+            }
+
+            if (holdingFlagged.Count > 0 && writesOn)
+            {
+                foreach (var principal in holdingFlagged.Where(p => !revokes.Contains(p)))
+                {
+                    modifies.RemoveAll(m => m.Principal == principal);
+                    revokes.Add(principal);
+                }
+
+                Log.LogInformation("[SECURE-CHILD-SHARES] {Child} is not shown to external users (the predicate); {Count} flagged " +
+                    "user share(s) on it are revoked.", child, holdingFlagged.Count);
+            }
+            else if (holdingFlagged.Count > 0)
+            {
+                Log.LogInformation("[EXTERNAL-TEAM-SHARE] report-only table={Table} secureChild={Id} flaggedUserRevokes={Count}: " +
+                    "flagged user share(s) on a secure child the predicate does not show would be revoked ({Key} is off).",
+                    child.Table, child.Id, holdingFlagged.Count, ExternalTeamShareSynchronizer.WritesEnabledConfigKey);
+            }
+
+            return (decided, modifies);
         }
 
         /// <summary>

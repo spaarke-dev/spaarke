@@ -101,6 +101,61 @@ public sealed class CopilotAgentClientPreAuthorizationTests
     }
 
     [Fact]
+    public void Bicep_DemoOnlyClients_AreAnEmptyByDefault_ArrayParameter_EmittedAsTheirOwnIndexedSettings()
+    {
+        using var template = LoadCompiledTemplate();
+        var root = template.RootElement;
+
+        var param = root.GetProperty("parameters").GetProperty("demoPreAuthorizedClientAppIds");
+        param.GetProperty("type").GetString().Should().Be("array");
+        param.GetProperty("defaultValue").GetArrayLength().Should().Be(0);
+        WorkerModule(root).GetProperty("properties").GetProperty("parameters")
+            .GetProperty("demoPreAuthorizedClientAppIds").GetProperty("value").GetString()
+            .Should().Be("[parameters('demoPreAuthorizedClientAppIds')]");
+
+        var settings = WorkerModule(root).GetProperty("properties").GetProperty("template")
+            .GetProperty("variables").GetProperty("entraAppRegSettings").GetString();
+        settings.Should().Contain("EntraAppRegOptions__DemoPreAuthorizedClientAppIds__{0}")
+            .And.Contain("parameters('demoPreAuthorizedClientAppIds')[lambdaVariables('i')]");
+        settings.Should().NotContain("concat(parameters('preAuthorizedClientAppIds'), parameters('demoPreAuthorizedClientAppIds'))",
+            "the Demo-only clients must never join the list H3 puts on every stamp");
+    }
+
+    [Fact]
+    public void DevParameters_ListTheOperatorToolsClient_OnlyAsADemoOnlyClient()
+    {
+        var text = File.ReadAllText(Path.Combine(RepoRoot(), "infrastructure", "bicep", "parameters", "platform-controlplane-dev.bicepparam"));
+        const string operatorToolsClientId = "ec3c52c1-3f6f-41ac-b50e-2a251096fdb7";
+
+        text.Should().MatchRegex(@"param demoPreAuthorizedClientAppIds = \[\s*'" + operatorToolsClientId + @"'\s*\]",
+            "dev states the client explicitly: 'Spaarke Operator Tools (Demo)' was created 2026-11-26 (demo plan decision 1)");
+        var platformList = System.Text.RegularExpressions.Regex.Match(text, @"param preAuthorizedClientAppIds = \[(?<ids>[^\]]*)\]");
+        if (platformList.Success)
+        {
+            platformList.Groups["ids"].Value.Should().NotContain(operatorToolsClientId,
+                "the platform list reaches every customer stamp; the operator client is for Demo stamps only");
+        }
+    }
+
+    [Fact]
+    public void TheEmittedDemoSettings_BindToDemoPreAuthorizedClientAppIds_NotThePlatformList()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["EntraAppRegOptions:PreAuthorizedClientAppIds:0"] = AddInClientId,
+                ["EntraAppRegOptions:DemoPreAuthorizedClientAppIds:0"] = CopilotClientId,
+            })
+            .Build();
+
+        var options = new EntraAppRegOptions();
+        config.GetSection(nameof(EntraAppRegOptions)).Bind(options);
+
+        options.PreAuthorizedClientAppIds.Should().Equal(AddInClientId);
+        options.DemoPreAuthorizedClientAppIds.Should().Equal(CopilotClientId);
+    }
+
+    [Fact]
     public void H3_PreAuthorizesTheAddIn_AndTheCopilotClient_OnUserImpersonation()
     {
         var plan = GraphAppRegistrationProvisioner.PlanClientAccess(App(preAuthorized: [Pre(AddInClientId)]), [Origin],
@@ -126,15 +181,15 @@ public sealed class CopilotAgentClientPreAuthorizationTests
     private static Application App(
         IEnumerable<string>? spa = null,
         IEnumerable<PreAuthorizedApplication>? preAuthorized = null) => new()
-    {
-        AppId = BffAppId,
-        Spa = new SpaApplication { RedirectUris = (spa ?? []).ToList() },
-        Api = new ApiApplication
         {
-            Oauth2PermissionScopes = [new PermissionScope { Id = ScopeId, Value = "user_impersonation", IsEnabled = true, Type = "User" }],
-            PreAuthorizedApplications = (preAuthorized ?? []).ToList(),
-        },
-    };
+            AppId = BffAppId,
+            Spa = new SpaApplication { RedirectUris = (spa ?? []).ToList() },
+            Api = new ApiApplication
+            {
+                Oauth2PermissionScopes = [new PermissionScope { Id = ScopeId, Value = "user_impersonation", IsEnabled = true, Type = "User" }],
+                PreAuthorizedApplications = (preAuthorized ?? []).ToList(),
+            },
+        };
 
     private static PreAuthorizedApplication Pre(string appId) => new()
     {

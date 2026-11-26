@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -63,6 +64,12 @@ public static class InviteAndGrantExternalUserEndpoint
         return group;
     }
 
+    /// <summary>
+    /// Task 193: <see cref="InviteAndGrantResponse.OnboardStatus"/> when the email's contact represents an internal user and
+    /// the record was shared with that user — nobody was onboarded.
+    /// </summary>
+    internal const string SharedWithInternalUserStatus = "SharedWithInternalUser";
+
     /// <summary>Handles <c>POST /api/v1/external-access/invite-and-grant</c>. Internal so the auth tests can drive it directly.</summary>
     internal static async Task<IResult> InviteAndGrantAsync(
         InviteExternalUserRequest request,
@@ -83,7 +90,8 @@ public static class InviteAndGrantExternalUserEndpoint
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] ContactInternalUserShare contactShare)
     {
         // ── Validation ───────────────────────────────────────────────────────
         // C5: the request's own shape is validated first, on every host, before any lookup: a malformed request is a 400
@@ -135,15 +143,6 @@ public static class InviteAndGrantExternalUserEndpoint
         if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
             return expiryProblem;
 
-        // Task 138: the record's access policy, BEFORE onboarding. The grantee is a named Contact, so this is
-        // refused only on a Restricted record (or when the policy cannot be read). The grant core checks again
-        // below — that second read is the core's own guarantee for every writer, and catches a record that
-        // became Restricted while the account was being provisioned.
-        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
-            participations, grantRoot.Type, grantRoot.Id, GrantGranteeKind.Contact, logger, ct);
-        if (!policy.IsAllowed)
-            return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
-
         // Slice B2: a work account (the email's organisation is a configured customer tenant) or a portal account, decided
         // before any contact is read, onboarded or granted. A malformed domain is a 400; a lookup with no definite answer
         // is a 503 with nothing written (retry).
@@ -153,6 +152,72 @@ public static class InviteAndGrantExternalUserEndpoint
         if (organizationProblem is not null)
             return organizationProblem;
         var workAccountTenantId = organization!.WorkAccountTenantId;
+
+        // ── Task 193 (#2338) step 4: never CIAM-invite an internal user ──
+        // An email that names ONE existing contact which represents an internal user takes /grant's decision: exactly one
+        // represented user → shared at the requested level, plus the grant paired with that share (no CIAM account, no
+        // email); several → 409;
+        // unreadable → 503. Decided by ContactUserRepresentation after the organisation decision (which reads no contact),
+        // BEFORE the contact policy (a share is not a contact grant) and before anything is onboarded. The binder's link refusal below and the invite core's link guard stay
+        // as safety nets, never the decider. No contact, or two (the binder refuses those), goes on unchanged.
+        ContactLookup existing;
+        try
+        {
+            existing = await binder.Store.FindActiveContactsByEmailAsync(request.Email, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-INVITE-GRANT] The contact lookup for the invite email failed on {RootType} {RootId} (trace {TraceId}). " +
+                "Nothing was onboarded or granted.", grantRoot.Type, grantRoot.Id, httpContext.TraceIdentifier);
+            existing = ContactLookup.Failed;
+        }
+
+        if (existing.Status != LookupStatus.Read)
+        {
+            // Not "no contact yet": an unread lookup may hide a colleague's contact, so nothing is onboarded.
+            return InviteExternalUserEndpoint.LookupFailureResult(new InviteExternalUserEndpoint.InviteLookupFailure(
+                ContactBindingDecision.InviteContactLookupFailed,
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed)!),
+                httpContext);
+        }
+
+        var activeContacts = existing.Rows.Where(r => r.IsActive && r.ContactId != Guid.Empty).ToList();
+        if (activeContacts.Count == 1)
+        {
+            var existingContactId = activeContacts[0].ContactId;
+            var decision = await contactShare.DecideAsync(
+                existingContactId, grantRoot.Type, grantRoot.Id, (ExternalAccessLevel)request.AccessLevel,
+                dataverseClient, participations, callerAccessProbe, assignedAccess, accessNotifier, accessibleRecords,
+                request.OrganizationId, request.ExpiryDate, httpContext, logger, ct);
+
+            if (decision.Result is { } answered)
+                return answered;
+
+            if (decision is { Shared: { } sharedWith, ShareResponse: { } share })
+                return TypedResults.Ok(new InviteAndGrantResponse(
+                    existingContactId,
+                    SharedWithInternalUserStatus,
+                    Guid.Empty,
+                    PortalUrl: string.Empty,
+                    GrantedAccessLevel: share.AccessLevel,
+                    Narrowed: share.Narrowed,
+                    NotificationFailed: share.NotificationFailed,
+                    EmailSent: null,
+                    EmailErrorCode: null,
+                    SharedWithUser: sharedWith,
+                    ExpiryNotApplied: request.ExpiryDate is not null ? true : null,
+                    WorkforceApp: decision.WorkforceApp));
+        }
+
+        // Task 138: the record's access policy, BEFORE onboarding. The grantee is a named Contact, so this is
+        // refused only on a Restricted record (or when the policy cannot be read). The grant core checks again
+        // below — that second read is the core's own guarantee for every writer, and catches a record that
+        // became Restricted while the account was being provisioned.
+        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            participations, grantRoot.Type, grantRoot.Id, GrantGranteeKind.Contact, logger, ct);
+        if (!policy.IsAllowed)
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
         // ── Task 139: the grantor ceiling, BEFORE onboarding ──────────────────
         // The caller's own rights on the record, re-probed as them (not trusted from the delegation filter). A probe
@@ -190,8 +255,8 @@ public static class InviteAndGrantExternalUserEndpoint
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex,
-                "[EXT-INVITE-GRANT] Could not check whether {Email} already has a Contact. Nothing was onboarded or granted.",
-                request.Email);
+                "[EXT-INVITE-GRANT] The invite email's contact lookup failed on {RootType} {RootId} (trace {TraceId}). " +
+                "Nothing was onboarded or granted.", grantRoot.Type, grantRoot.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -199,7 +264,7 @@ public static class InviteAndGrantExternalUserEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        if (InviteExternalUserEndpoint.NotProvisionable(invitee, request.Email, logger) is { } notProvisionable)
+        if (InviteExternalUserEndpoint.NotProvisionable(invitee, logger) is { } notProvisionable)
         {
             return notProvisionable.Refusal is { } inviteRefusal
                 ? InviteExternalUserEndpoint.RefusalResult(inviteRefusal, httpContext)
@@ -208,7 +273,7 @@ public static class InviteAndGrantExternalUserEndpoint
 
         // Slice B2: a work-account invite to a contact that already carries a sign-in is refused before any grant.
         if (workAccountTenantId is not null
-            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(invitee, request.Email, logger) is { Refusal: { } bound })
+            && InviteExternalUserEndpoint.WorkAccountNotProvisionable(invitee, logger) is { Refusal: { } bound })
         {
             return InviteExternalUserEndpoint.RefusalResult(bound, httpContext);
         }
@@ -230,8 +295,9 @@ public static class InviteAndGrantExternalUserEndpoint
                 // An existing-contact outcome without a contact id, or a state this code does not know: fail closed,
                 // exactly as onboarding would — nothing is onboarded or granted.
                 logger.LogError(
-                    "[EXT-INVITE-GRANT] The invite decision for {Email} ended in an unexpected state ({Action}). Nothing " +
-                    "was onboarded or granted.", request.Email, invitee.Action);
+                    "[EXT-INVITE-GRANT] The invite decision on {RootType} {RootId} ended in an unexpected state ({Action}) " +
+                    "(trace {TraceId}). Nothing was onboarded or granted.", grantRoot.Type, grantRoot.Id, invitee.Action,
+                    httpContext.TraceIdentifier);
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
                     title: "Internal Server Error",
@@ -245,14 +311,14 @@ public static class InviteAndGrantExternalUserEndpoint
         try
         {
             preCheck = await GrantExternalAccessEndpoint.CheckGrantAsync(
-                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling,
+                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling, today,
                 dataverseClient, participations, accessibleRecords, binder.Store, logger, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex,
-                "[EXT-INVITE-GRANT] The pre-onboarding grant check failed for {Email} on {RootType} {RootId}. Nothing " +
-                "was onboarded or granted.", request.Email, grantRoot.Type, grantRoot.Id);
+                "[EXT-INVITE-GRANT] The pre-onboarding grant check failed on {RootType} {RootId} (trace {TraceId}). Nothing " +
+                "was onboarded or granted.", grantRoot.Type, grantRoot.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -263,8 +329,8 @@ public static class InviteAndGrantExternalUserEndpoint
         if (preCheck.Refusal is { } preRefusal)
         {
             logger.LogWarning(
-                "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: {ReasonCode}.",
-                request.Email, grantRoot.Type, grantRoot.Id, preRefusal.ReasonCode);
+                "[EXT-INVITE-GRANT] Refused the invitee on {RootType} {RootId} before onboarding: {ReasonCode} (trace {TraceId}).",
+                grantRoot.Type, grantRoot.Id, preRefusal.ReasonCode, httpContext.TraceIdentifier);
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(preRefusal, httpContext);
         }
 
@@ -283,9 +349,9 @@ public static class InviteAndGrantExternalUserEndpoint
             if (owner.Refusal is { } ownerRefusal)
             {
                 logger.LogWarning(
-                    "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: the new grant row's owner " +
-                    "team could not be resolved ({ReasonCode}). Nothing was onboarded or granted.",
-                    request.Email, grantRoot.Type, grantRoot.Id, ownerRefusal.ReasonCode);
+                    "[EXT-INVITE-GRANT] Refused the invitee on {RootType} {RootId} before onboarding: the new grant row's " +
+                    "owner team could not be resolved ({ReasonCode}; trace {TraceId}). Nothing was onboarded or granted.",
+                    grantRoot.Type, grantRoot.Id, ownerRefusal.ReasonCode, httpContext.TraceIdentifier);
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(ownerRefusal, httpContext);
             }
 
@@ -299,9 +365,9 @@ public static class InviteAndGrantExternalUserEndpoint
             if (privilegeRefusal is not null)
             {
                 logger.LogWarning(
-                    "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: the new grant row's owner " +
-                    "team may not own it ({ReasonCode}). Nothing was onboarded or granted.",
-                    request.Email, grantRoot.Type, grantRoot.Id, privilegeRefusal.ReasonCode);
+                    "[EXT-INVITE-GRANT] Refused the invitee on {RootType} {RootId} before onboarding: the new grant row's " +
+                    "owner team may not own it ({ReasonCode}; trace {TraceId}). Nothing was onboarded or granted.",
+                    grantRoot.Type, grantRoot.Id, privilegeRefusal.ReasonCode, httpContext.TraceIdentifier);
                 return GrantExternalAccessEndpoint.PolicyRefusalProblem(privilegeRefusal, httpContext);
             }
 
@@ -312,8 +378,8 @@ public static class InviteAndGrantExternalUserEndpoint
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
 
         logger.LogInformation(
-            "[EXT-INVITE-GRANT] Core user onboarding+granting {Email} to {RootType} {RootId} at level {AccessLevel}",
-            request.Email, grantRoot.Type, grantRoot.Id, request.AccessLevel);
+            "[EXT-INVITE-GRANT] Core user onboarding+granting the invitee to {RootType} {RootId} at level {AccessLevel} " +
+            "(trace {TraceId})", grantRoot.Type, grantRoot.Id, request.AccessLevel, httpContext.TraceIdentifier);
 
         // ── Step 1: Onboard (idempotent CIAM provision) — reuse the invite core (task 025) ──
         Guid contactId;
@@ -359,7 +425,8 @@ public static class InviteAndGrantExternalUserEndpoint
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[EXT-INVITE-GRANT] Onboarding failed for {Email}", request.Email);
+            logger.LogError(ex, "[EXT-INVITE-GRANT] Onboarding failed on {RootType} {RootId} (trace {TraceId})",
+                grantRoot.Type, grantRoot.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -393,7 +460,8 @@ public static class InviteAndGrantExternalUserEndpoint
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
                 dataverseClient, participations, accessibleRecords, binder.Store, ownership, ownerPrivileges, logger, ct,
-                reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId);
+                reAddRestoresLapsed: true, resolvedOwnerTeamId: ownerTeamId,
+                auditLoggers: GrantExternalAccessEndpoint.AuditLoggersOf(httpContext));
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
@@ -441,8 +509,8 @@ public static class InviteAndGrantExternalUserEndpoint
             // Onboarding succeeded (Contact {ContactId} provisioned) but the grant failed. Re-running the
             // action is safe — onboarding is idempotent and re-issues only the grant.
             logger.LogError(ex,
-                "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} ({Email}) but the grant failed for {RootType} {RootId}",
-                contactId, request.Email, grantRoot.Type, grantRoot.Id);
+                "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant failed for {RootType} {RootId} (trace {TraceId})",
+                contactId, grantRoot.Type, grantRoot.Id, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",

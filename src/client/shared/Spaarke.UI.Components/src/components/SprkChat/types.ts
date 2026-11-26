@@ -196,9 +196,9 @@ export interface IChatSession {
  * and SourcePanel to render the correct widget. They are NOT chat tokens;
  * SprkChat routes them via the onPaneEvent callback rather than rendering them.
  *
- * Mirrors OutputPaneEvent | SourcePaneEvent | SourceHighlightEvent from
- * @spaarke/ai-outputs types/index.ts, but defined here as a loose shape so
- * the shared SprkChat library has no dependency on @spaarke/ai-outputs.
+ * The one pane-event definition (DEF-006, P-6). `@spaarke/ai-widgets` aliases
+ * it as `AiPaneEvent`; it lives here because this package cannot import
+ * ai-widgets (ai-widgets depends on ui-components).
  */
 export interface IAiPaneEvent {
   /** Discriminates the target pane and event semantics. */

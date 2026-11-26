@@ -1,0 +1,46 @@
+{
+  "$comment": "The reference values demo-records.json depends on that NO seed file carries: the record types and the choice labels (SpaarkeMaster metadata as read from spaarkedev1 on 2026-11-25; English / 1033 labels). The taxonomy names and event types are NOT copied here any more: Get-DemoSeedReference (scripts/demo-data/DemoDataLib.ps1) reads them from the seed files themselves - the D4 'legal-standard' pack (scripts/seed-data/reference/packs/legal-standard/<table>.json, name column per file) and scripts/seed-data/reference/sprk_eventtype_ref.json - so they cannot drift. The loader validates the dataset against them and resolves the same names on the TARGET stamp, listing every missing value before it writes anything. Update this file in the same PR as any dataset change that needs a new choice label.",
+  "snapshotDate": "2026-11-25",
+  "recordTypes": ["sprk_matter", "sprk_project"],
+  "options": {
+    "sprk_event.sprk_eventstatus": [
+      "Draft",
+      "Open",
+      "Completed",
+      "Closed",
+      "On Hold",
+      "Cancelled",
+      "Reassigned",
+      "Archived"
+    ],
+    "sprk_event.sprk_priority": ["Low", "Normal", "High", "Urgent"],
+    "sprk_todo.sprk_priority": ["Urgent", "Important", "Medium", "Low"],
+    "sprk_communication.sprk_direction": ["Incoming", "Outgoing"],
+    "sprk_communication.sprk_communicationtype": ["Email", "Teams Message", "SMS", "Notification", "Message"],
+    "sprk_communication.sprk_bodyformat": ["PlainText", "HTML"],
+    "sprk_document.sprk_documenttype": [
+      "Contract",
+      "Invoice",
+      "Proposal",
+      "Report",
+      "Letter",
+      "Memo",
+      "Email",
+      "Agreement",
+      "Statement",
+      "Patent",
+      "Trademark",
+      "Non-Disclosure Agreement",
+      "Other"
+    ],
+    "sprk_document.sprk_documentstatus": [
+      "Draft",
+      "Working",
+      "In Review",
+      "Approved Final",
+      "Rejected Final",
+      "Replaced Final",
+      "Archived"
+    ]
+  }
+}

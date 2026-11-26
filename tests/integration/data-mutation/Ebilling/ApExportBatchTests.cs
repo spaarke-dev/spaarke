@@ -21,11 +21,74 @@ public sealed class ApExportBatchTests
     // The happy path
     // =========================================================================================
 
+    [Fact(DisplayName = "ISS-051: the export's line codes are the resolved codes (the code lookups' rows); the firm's as-billed text only where a line has no resolved code")]
+    public async Task Export_EmitsTheResolvedCode_AndTheAsBilledTextOnlyWithNoResolvedCode()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-C", approved: 1350m, lines: 3);
+        var lines = world.Dataverse.RowsOf("sprk_billingevent")
+            .Where(l => l.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id)
+            .OrderBy(l => l.GetAttributeValue<int>("sprk_linesequence"))
+            .ToList();
+        var l120 = new Entity("sprk_billingcode", Guid.NewGuid()) { ["sprk_code"] = "L120" };
+        var a103 = new Entity("sprk_billingcode", Guid.NewGuid()) { ["sprk_code"] = "A103" };
+        world.Dataverse.Put(l120);
+        world.Dataverse.Put(a103);
+
+        // Line 1: the firm billed L110, the coding resolved L120 (a firm-code mismatch), plus an activity code the firm did not bill.
+        world.Dataverse.Touch("sprk_billingevent", lines[0].Id, new Dictionary<string, object>
+        {
+            ["sprk_taskcode"] = new EntityReference("sprk_billingcode", l120.Id),
+            ["sprk_activitycode"] = new EntityReference("sprk_billingcode", a103.Id),
+        });
+
+        // Line 2: no resolved code (refused or not coded), so the firm's as-billed text. Line 3: no resolved code and nothing billed.
+        world.Dataverse.Touch("sprk_billingevent", lines[2].Id, new Dictionary<string, object> { ["sprk_taskcodeasbilled"] = null! });
+        world.GrantEverything();
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created, result.Detail);
+        var batch = world.Batches().Should().ContainSingle().Subject;
+        using var json = System.Text.Json.JsonDocument.Parse(world.TextOf(world.FileOf(batch.Id, Json)));
+        var exported = json.RootElement.GetProperty("invoices")[0].GetProperty("lines");
+        exported[0].GetProperty("taskCode").GetString().Should().Be("L120", "the resolved code, not the firm's L110");
+        exported[0].GetProperty("activityCode").GetString().Should().Be("A103");
+        exported[1].GetProperty("taskCode").GetString().Should().Be("L110", "no resolved code: the firm's as-billed text");
+        exported[1].GetProperty("activityCode").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+        exported[2].GetProperty("taskCode").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null, "no resolved code and nothing billed");
+    }
+
     [Fact(DisplayName = "150 FR-41: a batch of Approved invoices writes a CSV and a JSON as internal-only Stored Files, snapshots the mapping, sets count and total, and sends every invoice to AP")]
     public async Task Export_WritesBothFiles_Snapshots_AndSendsTheInvoices()
     {
         var world = new ApExportWorld();
-        var a = world.AddInvoice("INV-A", approved: 900m);
+        // Task 165b-2 fix round: invoice A's lines give a distinct value to each of the four exported totals: billed 1000; a Fee line of 1000 reduced to 940
+        // (line adjustments 60); a Fixed invoice adjustment of 40 (invoice adjustments 40); approved 900. A swap of the two adjustment columns shows.
+        var a = world.AddInvoice("INV-A", approved: 1000m);
+        foreach (var aLine in world.Dataverse.RowsOf("sprk_billingevent").Where(l => l.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == a.Id).ToList())
+        {
+            var isFee = aLine.GetAttributeValue<int>("sprk_linesequence") == 2;
+            world.Dataverse.Touch("sprk_billingevent", aLine.Id, isFee
+                ? new Dictionary<string, object>
+                {
+                    ["sprk_amount"] = new Money(1000m),
+                    ["sprk_linestatus"] = new OptionSetValue((int)InvoiceLineStatus.Reduced),
+                    ["sprk_approvedamount"] = new Money(940m),
+                }
+                : new Dictionary<string, object>
+                {
+                    ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Adjustment),
+                    ["sprk_amount"] = new Money(40m),
+                    ["sprk_adjustmentmethod"] = new OptionSetValue((int)InvoiceAdjustmentMethod.Fixed),
+                    ["sprk_adjustmentvalue"] = 40m,
+                });
+        }
+
+        world.StoreTotalsFromLines(a.Id);
+        world.Invoice(a.Id).GetAttributeValue<Money>("sprk_lineadjustmentstotal").Value.Should().Be(60m);
+        world.Invoice(a.Id).GetAttributeValue<Money>("sprk_invoiceadjustmentstotal").Value.Should().Be(40m);
+        world.Invoice(a.Id).GetAttributeValue<Money>("sprk_approvedtotal").Value.Should().Be(900m);
         var b = world.AddInvoice("INV-B", approved: 450.5m, lines: 1);
         world.GrantEverything();
 
@@ -71,7 +134,8 @@ public sealed class ApExportBatchTests
         world.OwnerQuestions.Should().NotContain(q => q.RequestedBy == null || q.RequestedBy.SystemUserId == null,
             "every ownership question names the exporting user; without one the Stored File write fails closed");
 
-        // The CSV: D-56 header, one row per invoice, in invoice-number order, with the values read once.
+        // The CSV: D-56 header, one row per invoice, in invoice-number order, with the values read once. Task 165b-2: the world stores the totals the
+        // calculator derives from the lines (invoice A: billed 1000, line adjustments 60, invoice adjustments 40, approved 900).
         var csv = world.TextOf(world.FileOf(batch.Id, Csv)).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         csv[0].Should().StartWith("BatchId,SpaarkeInvoiceId,VendorName,VendorApId,VendorTaxId,InvoiceNumber,TrackingNumber,InvoiceDate,DueDate");
         csv.Should().HaveCount(3);
@@ -89,7 +153,7 @@ public sealed class ApExportBatchTests
         line.GetProperty("date").GetString().Should().Be("2026-09-12");
         line.GetProperty("type").GetString().Should().Be("Fee");
         line.GetProperty("hours").GetDecimal().Should().Be(3.0m);
-        line.GetProperty("billed").GetDecimal().Should().Be(900m);
+        line.GetProperty("billed").GetDecimal().Should().Be(1000m);
         line.GetProperty("taskCode").GetString().Should().Be("L110");
         invoices[1].GetProperty("lines").GetArrayLength().Should().Be(1);
 

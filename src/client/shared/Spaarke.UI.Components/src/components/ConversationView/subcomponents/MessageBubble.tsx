@@ -34,7 +34,7 @@
  * `CommunicationTimeline/subcomponents/MessageRow.tsx`.
  */
 import * as React from 'react';
-import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { sanitizeEmailHtml } from '../../../utils/sanitizeEmailHtml';
 import { CheckmarkCircleRegular, ErrorCircleRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
@@ -234,6 +234,13 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({
           isInternalOnly={message.isInternalOnly}
           isPrivate={message.isPrivate}
         />
+        {/* fm task 056: a private message names the record it is about. The server resolves the reference as the viewer, so
+            a null (no reference, or a record this viewer cannot read) shows nothing. */}
+        {message.privateContext && (
+          <Badge appearance="tint" color="brand" size="small" data-private-context>
+            {`About ${message.privateContext.name || 'a record'}`}
+          </Badge>
+        )}
         {!isOwn && <Text className={styles.senderLabel}>{displayName}</Text>}
         {timestampLabel && <Text className={styles.headerTimestamp}>{timestampLabel}</Text>}
         {headerAction && (

@@ -89,6 +89,8 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     private const string AppServiceName = "sprk-bff-acme";
     private const string KeyVaultName = "sprk-acme-prod-kv";
     private const string CustomerBusinessUnitId = "a1b2c3d4-0000-4000-8000-0000000000aa";   // H10 output (task 265)
+    private const string OntologyWriterClientId = "5a5a5a5a-0000-4000-8000-0000000000cc";   // H2a output (task 266)
+    private const string OntologyWriterObjectId = "9a9a9a9a-0000-4000-8000-0000000000ee";
     private const string EnvironmentId = "b0000000-0000-0000-0000-000000000001";
 
     // ---------- AC-1 happy path ----------
@@ -270,6 +272,8 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
         trapRequest.ContainerTypeId.Should().Be("ct-from-intake", "T6 selects the SPE owning-app credential by container type (task 245b)");
         trapRequest.CustomerBusinessUnitId.Should().Be(CustomerBusinessUnitId, "T7 compares both slots' ExternalAccess__CustomerBusinessUnitId with H10's unit (task 265)");
+        trapRequest.OntologyWriterClientId.Should().Be(OntologyWriterClientId, "T7 compares both slots' Ontology__Writer__ManagedIdentityClientId with H2a's writer (task 266)");
+        trapRequest.OntologyWriterObjectId.Should().Be(OntologyWriterObjectId, "T3 checks the writer holds no Graph app role (task 266)");
         seams.Invariants.LastRequest!.ContainerTypeId.Should().Be("ct-from-intake", "I4 compares the BFF's container type with the run's (task 227c)");
         seams.Invariants.LastRequest.SpeContainerId.Should().Be(run.InterStepState.SpeContainerId ?? string.Empty,
             "I4 compares the BFF's container settings with H8's container (task 227c)");
@@ -294,6 +298,22 @@ public sealed class H13E2EAcceptanceGateHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>("T7 owns the verdict on a missing unit, not an H13 pre-check");
         seams.Traps.LastRequest!.CustomerBusinessUnitId.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AC2k_NoOntologyWriterInInterStepState_PassesEmptyToT7AndT3_NotAnH13Rejection()
+    {
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = null;
+        run.InterStepState.OntologyWriterObjectId = null;
+        var repo = new FakeRepository(run, etag: "etag-2k");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>("T7 and T3 own the verdict on a missing writer, not an H13 pre-check");
+        seams.Traps.LastRequest!.OntologyWriterClientId.Should().BeEmpty();
+        seams.Traps.LastRequest.OntologyWriterObjectId.Should().BeEmpty();
     }
 
     private static void ClearInterStepStateValue(ProvisioningRun run, string property)
@@ -324,6 +344,37 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         failure.Diagnostic.Should().Contain("SC #5").And.Contain("2 failing check");
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
         seams.Registry.CallCount.Should().Be(0, "registry PATCH never runs on failure");
+    }
+
+    // ---------- ISS-035: a later success clears the earlier failure ----------
+
+    [Fact]
+    public async Task ISS035_FailedThenResumedAndSucceeded_ClearsItsMarkerAndLeavesFailedHandlers()
+    {
+        // First pass: extended validation fails -> the failure marker is written and (as the dispatcher's outcome
+        // applier does) H13 is recorded in FailedHandlers.
+        var repo = new FakeRepository(BuildRun(), etag: "etag-iss035");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Validator = FakeValidator.Failure(new[] { "bff-healthz" }, "500 from /healthz"));
+        var failed = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        failed.Should().BeOfType<HandlerResult.Failure>();
+        var run = repo.LastWrittenRun!;
+        run.MarkPhaseFailed("H13", RunStatus.Failed, "[h13-extended-validation-failed] 500");
+        var markerKey = run.GateStates.Single(g => g.Value.Status == GateState.Pending && g.Value.FailureOfHandler == "H13").Key;
+
+        // Second pass (operator fixed it and resumed): everything is green now.
+        var resumedRepo = new FakeRepository(run, etag: "etag-iss035-2");
+        var resumed = BuildHandler(resumedRepo, out _);
+        var result = await resumed.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var final = resumedRepo.LastWrittenRun!;
+        final.Status.Should().Be(RunStatus.Completed);
+        final.FailedHandlers.Should().NotContain("H13", "H13 succeeded, so it is no longer a failed handler");
+        final.GateStates[markerKey].Status.Should().Be(GateState.Cleared);
+        final.GateStates[markerKey].VerifierHandler.Should().Be("system:handler-succeeded");
+        final.GateStates[markerKey].VerifiedAt.Should().NotBeNull();
+        final.GateStates.Values.Should().NotContain(g => g.Status == GateState.Pending, "nothing is owed on a Completed run");
     }
 
     // ---------- AC-4 extended validate script infra fault ----------
@@ -1162,6 +1213,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         run.InterStepState.KeyVaultName = KeyVaultName;
         // H10 output (task 265) — T7 reads both slots' ExternalAccess__CustomerBusinessUnitId against it.
         run.InterStepState.CustomerBusinessUnitId = CustomerBusinessUnitId;
+        // H2a outputs (task 266) — T7 reads the writer setting against the client id, T3 the writer's Graph roles.
+        run.InterStepState.OntologyWriterClientId = OntologyWriterClientId;
+        run.InterStepState.OntologyWriterObjectId = OntologyWriterObjectId;
         return run;
     }
 

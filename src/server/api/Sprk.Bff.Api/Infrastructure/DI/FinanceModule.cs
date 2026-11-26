@@ -25,14 +25,12 @@ public static class FinanceModule
         // ============================================================================
         // Bind FinanceOptions from "Finance" configuration section
         // Provides: ClassificationConfidenceThreshold, BudgetWarningPercentage,
-        //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes,
-        //           ExtractionDeploymentName
+        //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. No member is required (all have
-        // safe defaults; InvoiceExtractionPlaybookId is intentionally empty in lower envs, so it is NOT [Required]).
-        // ebilling-r1 task 028: the eBilling container id (Procedure Library) is format-checked only ([RegularExpression], b!…) —
-        // empty passes, so no stamp fails to boot and IOptionsDriftTests demands no key. It must also be distinct from the
-        // email/archive containers (FinanceOptionsValidator; fails start-up naming both keys). Task 092 retired the second key
-        // (Finance:EbillingOutputContainerId): export files are Stored Files in Finance:FileStore.
+        // safe defaults).
+        // ebilling-r1 tasks 092 and 124 retired both eBilling SPE container keys (Finance:EbillingOutputContainerId and
+        // Finance:ProcedureLibraryContainerId): every eBilling file is a Stored File in Finance:FileStore, so FinanceOptionsValidator
+        // checks only the file store and IOptionsDriftTests demands no container key.
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<FinanceOptions>, FinanceOptionsValidator>();
         services.AddOptions<FinanceOptions>()
             .Bind(configuration.GetSection(FinanceOptions.SectionName))
@@ -77,9 +75,9 @@ public static class FinanceModule
         services.AddScoped<IInvoiceResolutionService, InvoiceResolutionService>();
 
         // Billing compliance evaluation (ebilling-r1 task 072, FR-25, D-23 in-memory strategy): BillingFactLoader reads the published
-        // billing rules for the client default and the firm, the core record, the firm's priors and their secure roots (D-112) once
-        // per submission; InvoiceComplianceEvaluator selects the versions in force per line (firm over client default, D-39), gates
-        // them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
+        // billing rules (the legacy client-default and firm sets, and the Procedure stream through the static ProcedureResolver, 082c: no
+        // registration), the core record, the firm's priors and their secure roots (D-112) once per submission; InvoiceComplianceEvaluator
+        // selects the versions in force per line (rank and PrecedenceOf, 082c), gates them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
         // the loader holds the scoped SecureChildShareSynchronizer (ExternalAccessModule, unconditional); the gate PolicyVersionValidator
         // is a singleton (SignalsModule). Unconditional (flag rule above). Caller: task 049 (pipeline orchestration).
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader>();
@@ -96,10 +94,29 @@ public static class FinanceModule
         services.AddScoped<IInvoiceLifecycleService, InvoiceLifecycleService>();
 
         // Notification seam of the submission pipeline (ebilling-r1 task 049 part A, Processing Pipeline step 9): the processor reports every
-        // Accepted / Rejected submission here after its decision commits. The no-op is the default; task 132 replaces THIS registration with its
-        // job-enqueuing sink, so the interface is a real seam (a second implementation is planned), not a 1:1 convenience (ADR-010).
+        // Accepted / Rejected submission here after its decision commits. Task 132 replaced the no-op default with the job-enqueuing sink
+        // (NoOpEbillingNotificationSink stays as the seam's test double), so the interface is a real seam with two implementations (ADR-010).
         // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
-        services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
+        services.AddScoped<IEbillingNotificationSink, EbillingNotificationSink>();
+
+        // eBilling notifications (ebilling-r1 task 132, FR-39, FR-35, FR-50, ADR-004): the one enqueuer (103 approve, 104 reject / return, the sink above),
+        // the recipients reader and the job. Concrete (ADR-010: one implementation each), scoped (the recipients and the job hold scoped Dataverse
+        // services; the enqueuer holds the scoped JobSubmissionService's dependencies). Unconditional (flag rule above): the job reads EbillingOptions.Enabled
+        // itself (ADR-018) and the routes carry the kill switch.
+        services.AddScoped<EbillingNotificationEnqueuer>();
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.EbillingRecipientAccessRule>(); // the outcome route's row rule, asked for a recipient (D-70); concrete, no interface
+        services.AddScoped<EbillingNotificationRecipients>();
+        services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EbillingNotificationJobHandler>();
+
+        // The external notification feed's eBilling source (task 132): derived from invoice status, each invoice re-checked by the outcome route's own
+        // rule. Scoped (it holds the scoped participation and data services). Unconditional; the feed route carries the module and ceiling checks.
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.EbillingFeedSource>();
+
+        // Submission outcome bell (ebilling-r1 task 095b): the job handler tells the submitter, in the model-driven app's bell, when a submission
+        // reaches a final status (after it is committed; never fails or delays the outcome). Concrete (ADR-010: one implementation; no second
+        // is planned, task 132's channels are the sink's). Scoped like the handler that calls it. Unconditional (flag rule above): NotificationService
+        // is a singleton registered by AnalysisServicesModule's unconditional notification services.
+        services.AddScoped<SubmissionOutcomeNotifier>();
 
         // Rate card and timekeeper import / publish (ebilling-r1 task 078, FR-29 / FR-08): template, all-or-nothing import into a Draft card,
         // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
@@ -117,6 +134,18 @@ public static class FinanceModule
         // per-request CallerRecordAccessProbe (ExternalAccessModule). Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<AffectedInvoiceCounter>();
         services.AddScoped<ProcedureService>();
+        // Procedure assignments and record overrides (ebilling-r1 task 089b, EB-D-148, model 6.2 / 6.3): assign, pin or exclude a Procedure
+        // and exclude a rule for one core record; 089c adds change rule and remove. Concrete (ADR-010). Scoped: it holds the scoped ownership
+        // resolver. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<ProcedureAssignmentService>();
+        // ebilling-r1 task 117 (model 5.2 / 12, O-17): the no-plugin cleanup after a core record's delete — retires each record-scoped rule
+        // set left with no record (RuleSetService, the one rule-set lifecycle writer) and deletes each assignment row left with no core record
+        // (ProcedureAssignmentService). ADR-036 IScheduledJob, ADR-052 "BFF, schedule". Registered DISABLED, as CommunicationThreadFilingSweepJob:
+        // it runs when an admin triggers it (POST /api/admin/jobs/finance-record-rule-set-retire/trigger) or enables the schedule, and writes only
+        // while RecordRuleSetRetireSweep:Apply is true (task 079 switches it on with the owner's OK).
+        services.AddScheduledJob<RecordRuleSetRetireJob>(RecordRuleSetRetireJob.CronOf(configuration), enabled: false);
+        services.AddScoped<RecordProcedureReadService>(); // ebilling-r1 task 084: the caller-read lists of a record's Procedures and rules in force
+        services.AddScoped<BillingGuidelinesService>(); // ebilling-r1 task 135 (FR-49): the SPA Billing Guidelines read; the route carries the kill switch
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a
@@ -136,9 +165,34 @@ public static class FinanceModule
         // 074 recorder and processing lock (decisions). Unconditional (flag rule above); the routes carry the kill switch. The read model also takes
         // the caller's IDataverseUserClient and EarlierInvoiceReadability (SignalsModule, unconditional) for the D-176 Duplicate check (task 119).
         services.AddScoped<InvoiceReviewReadService>();
+        // Read-time Procedure-change banner (ebilling-r1 task 113, model 8.2): the review read model's one extra member, computed on GET /review only,
+        // for an internal caller of an open invoice. Concrete (ADR-010: no interface, one implementation). Scoped, like the read model that holds it.
+        // It reads the Procedure rows with the singleton app-only Dataverse client (the evaluation's identity) and writes nothing. Unconditional (flag
+        // rule above): the read model that takes it maps unconditionally.
+        services.AddScoped<ProcedureChangeBanner>();
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
+        // Firm-visible outcome projection (ebilling-r1 task 130a, FR-38, D-66, EB-D-202): read-only, no caller check (its callers establish that the
+        // invoice may be shown). Concrete (ADR-010: no interface, one implementation). Scoped: it holds the singleton generic Dataverse client. It takes
+        // the clause reader as a delegate resolved lazily, as ExternalInvoiceHiding is, so it does not hold RuleSetService's nine dependencies.
+        // Unconditional (flag rule above); the routes (130b) carry the kill switch.
+        services.AddScoped<FirmClauseReader>(sp => (policyVersionId, invoiceId, ct) =>
+            sp.GetRequiredService<RuleSetService>().GetFirmClauseAsync(policyVersionId, invoiceId, ct));
+        // 130b: the writer identity (BillingDecisionRecorder.WriterUserIdAsync, the source 165b's readers use) is passed as a delegate, resolved lazily, so
+        // a reason comes only from a Decision Record the writer created and the singleton recorder is not built for an invoice with no decided lines.
+        services.AddScoped<FirmFindingsProjection>(sp => new FirmFindingsProjection(
+            sp.GetRequiredService<Spaarke.Dataverse.IGenericEntityService>(),
+            sp.GetRequiredService<FirmClauseReader>(),
+            ct => sp.GetRequiredService<BillingDecisionRecorder>().WriterUserIdAsync(ct),
+            sp.GetRequiredService<ILogger<FirmFindingsProjection>>()));
+        // Firm notice (ebilling-r1 task 131, FR-50, D-60): composes the notice from the projection above and the prose of IInvoiceAi.DraftFirmNoticeAsync
+        // (the Null peer when the AI kill switch is off: the composer then uses its fixed template, never a 500). Concrete (ADR-010), scoped: it holds the
+        // scoped projection. Unconditional (flag rule above); the draft route carries the kill switch. The public constructor is the DI one.
+        services.AddScoped<FirmNoticeComposer>();
+        // Add line (ebilling-r1 task 164, EB-D-188): a reviewer-typed Fee or Expense line. Concrete (ADR-010), scoped: it holds the scoped CodeSetResolver,
+        // IInvoiceResolutionService, BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above); the route carries the kill switch.
+        services.AddScoped<InvoiceLineAddService>();
         // Value and code corrections (ebilling-r1 task 101 part B1, FR-31, FR-22, D-64): the D-64 correction rows and the corrected value. Concrete (ADR-010).
         // Scoped: it holds the scoped CodeSetResolver and the scoped EligibleApproverResolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<InvoiceCorrectionService>();
@@ -201,6 +255,16 @@ public static class FinanceModule
         services.AddScoped<EligibleApproverResolver>();
         services.AddScoped<InvoiceApprovalService>();
 
+        // Set firm on a held no-firm invoice (ebilling-r1 task 095d-1b, notes 095c 16.4-16.7): concrete (ADR-010), scoped like its scoped
+        // dependencies (IGenericEntityService, InvoiceSubmissionService, CoreAncestorResolver). It hands its one-transaction apply to the
+        // allocator (095d-1a), the number columns' only writer. Unconditional (flag rule above); the route reads the kill switch.
+        services.AddScoped<InvoiceAssignFirmService>();
+
+        // Assign a firm to a core record from the Outlook pane (ebilling-r1 task 095g, EB-D-224): the one writer of the record's assigned
+        // law-firm slots for that route, which then runs the Assigned-To owner (AssignedAccessMaterializer, ExternalAccessModule) inline.
+        // Concrete (ADR-010), scoped like its scoped dependencies. Unconditional (flag rule above); the routes read the kill switch.
+        services.AddScoped<CoreRecordFirmAssignmentService>();
+
         // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
         services.AddScoped<InvoiceRejectReturnService>();
 
@@ -237,21 +301,20 @@ public static class FinanceModule
         services.AddScoped<SubmissionCommitGate>();
         services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
 
-        // ============================================================================
-        // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
-        // ============================================================================
-        // Scoped: loads the extraction playbook prompt per-request, calls OpenAI structured output
-        // (classification no longer goes through it: task 042 moved it to IInvoiceAi.ClassifyAsync / INVOICE-CLASSIFY@v1)
-        // Uses IPlaybookService for prompt loading (FinanceExtraction)
-        // Uses IOpenAiClient.GetStructuredCompletionAsync for constrained JSON output
-        //
-        // Depends on IOpenAiClient which is only registered when DocumentIntelligence:Enabled=true
-        // (see AnalysisServicesModule). Register conditionally so DI does not fail when AI is disabled.
-        var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
-        if (documentIntelligenceEnabled)
-        {
-            services.AddScoped<IInvoiceAnalysisService, InvoiceAnalysisService>();
-        }
+        // The rules re-run after Set firm (ebilling-r1 task 095d-2b-1; EB-D-185..187; notes/095d-2b-1.md). Unconditional (flag rule above;
+        // the handler reads the kill switch, so a queued message never dead-letters NoHandler). Scoped like their scoped dependencies.
+        //   * InvoiceSubmissionProcessor (concrete) - the re-run calls EvaluateFromReadAsync, which is not on IInvoiceSubmissionProcessor (the
+        //     049 seam the handler tests fake). Existing: the interface registration above. Extension: widening the 049 seam would put a
+        //     re-run-only entry point on every fake of it. Cost of nothing: InvoiceSubmissionRerun cannot be resolved, so no re-run runs.
+        //   * InvoiceSubmissionRerun (concrete, ADR-010: one implementation) - the re-run's evaluation and its one commit (095d-2a-2). Existing:
+        //     the persister (writes an intake once) and InvoiceCorrectionReevaluation (one field's diff). Extension: neither may re-evaluate a
+        //     committed outcome. Cost of nothing: the job handler cannot be built, and the rerun-pending hold never lifts.
+        //   * InvoiceSubmissionRerunJobHandler (Services/Ai/Jobs: the re-run can call AI coding, uac-r2 Q7) - the queued, retried run Set firm
+        //     enqueues. Existing: the 049 handler. Extension: its "never re-evaluate a linked submission" invariant. Cost of nothing: Set
+        //     firm's enqueued message dead-letters NoHandler and the invoice stays held for ever.
+        services.AddScoped<InvoiceSubmissionProcessor>();
+        services.AddScoped<InvoiceSubmissionRerun>();
+        services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.InvoiceSubmissionRerunJobHandler>();
 
         // ============================================================================
         // Signal Evaluation Service (threshold-based signal detection, no AI)
@@ -278,6 +341,7 @@ public static class FinanceModule
         // Uses SearchIndexClient for accessing spaarke-invoices-index
         //
         // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
+        var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
             services.AddScoped<IInvoiceSearchService, InvoiceSearchService>();
@@ -309,25 +373,24 @@ public static class FinanceModule
         services.AddScoped<IFinanceSummaryService, FinanceSummaryService>();
 
         // ============================================================================
-        // Playbook Lookup + Output Orchestrator — MOVED to AnalysisServicesModule
+        // Playbook Lookup — MOVED to AnalysisServicesModule
         // ============================================================================
         // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05): IPlaybookLookupService
-        // and IOutputOrchestratorService are AI playbook services that landed here during
-        // earlier Finance accretion. Real registrations now live in
-        // AnalysisServicesModule.AddPlaybookServices (compound Analysis:Enabled &&
-        // DocumentIntelligence:Enabled gate); ADR-032 P3 Null-Object peers are registered in
-        // AnalysisServicesModule.AddNullObjectsForCompoundOff so unconditional consumers
-        // (ChatEndpoints, WorkspaceFileEndpoints, Workspace prefill services,
-        // InvoiceExtractionJobHandler) keep resolving and surface the 503 kill-switch
-        // pattern when the compound AI gate is OFF.
+        // is an AI playbook service that landed here during earlier Finance accretion. Its real
+        // registration now lives in AnalysisServicesModule.AddPlaybookServices (compound
+        // Analysis:Enabled && DocumentIntelligence:Enabled gate); the ADR-032 P3 Null-Object peer
+        // is registered in AnalysisServicesModule.AddNullObjectsForCompoundOff so unconditional
+        // consumers (ChatEndpoints, WorkspaceFileEndpoints, Workspace prefill services) keep
+        // resolving and surface the 503 kill-switch pattern when the compound AI gate is OFF.
 
         // ============================================================================
         // Dataverse Update Handler (low-level update operations with concurrency control)
         // ============================================================================
         // Scoped: handles Dataverse entity updates with optimistic concurrency and retry logic
-        // NOT a tool handler - called by OutputOrchestrator for record updates
+        // NOT a tool handler. ebilling-r1 task 050b deleted OutputOrchestratorService, its only injector; the handler's
+        // static helpers are still used by FieldMappingEndpoints and UpdateRecordActionCore, and the instance is kept
+        // for the writer guards that resolve it (see projects/ebilling-r1/notes/050b-retire-legacy-extraction.md).
         // Features: row version checking, exponential backoff, concurrency conflict detection
-        // Used by playbooks to update invoice and matter records
         services.AddScoped<IDataverseUpdateHandler, DataverseUpdateHandler>();
 
         // ============================================================================
@@ -346,8 +409,8 @@ public static class FinanceModule
         // FinancialCalculationToolHandler - calculates and updates matter/project financial totals
         // Operations: "recalculate" (from all invoices) or "increment" (add single invoice)
         // Uses optimistic concurrency with row version checks and exponential backoff retry
-        // Dual registration: concrete type needed by InvoiceExtractionJobHandler (direct injection),
-        // interface forwarding needed by playbook tool discovery (GetServices<IAiToolHandler>).
+        // Dual registration: the concrete type, and interface forwarding needed by playbook tool discovery
+        // (GetServices<IAiToolHandler>).
         services.AddScoped<FinancialCalculationToolHandler>();
         services.AddScoped<IAiToolHandler>(sp => sp.GetRequiredService<FinancialCalculationToolHandler>());
 
@@ -369,21 +432,13 @@ public static class FinanceModule
             services.AddScoped<IJobHandler, AttachmentClassificationJobHandler>();
         }
 
-        // ============================================================================
-        // Invoice Extraction Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)
-        // ============================================================================
-        // Scoped: extracts invoice facts via AI (Playbook B), creates BillingEvent records
-        // IdempotencyKey: extract-{invoiceId}
-        // VisibilityState ALWAYS "Invoiced" (deterministic, never from LLM)
-        // Enqueues InvoiceIndexing on success (legacy path, no producer since 050a; 050b deletes it).
-        // NOTE (verified 2026-08-20): it does NOT enqueue SpendSnapshotGeneration — no code
-        // anywhere submits that job type. The snapshots → signals → rollup analytics chain has
-        // no automatic trigger; FinanceRollupService runs ONLY via the manual
-        // POST /api/finance/{matters|projects}/{id}/recalculate endpoints. Whether the missing
-        // enqueue is a wiring gap or intended is an owner decision — do not wire it without
-        // validating the side effects (same class as the TodoGenerationService trap in
-        // docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md).
-        services.AddScoped<IJobHandler, InvoiceExtractionJobHandler>();
+        // NOTE (verified 2026-08-20): no code anywhere submits a SpendSnapshotGeneration job. The
+        // snapshots → signals → rollup analytics chain has no automatic trigger; FinanceRollupService
+        // runs ONLY via the manual POST /api/finance/{matters|projects}/{id}/recalculate endpoints.
+        // Whether the missing enqueue is a wiring gap or intended is an owner decision — do not wire
+        // it without validating the side effects (same class as the TodoGenerationService trap in
+        // docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md). (This note used to sit on the
+        // InvoiceExtractionJobHandler registration, which ebilling-r1 task 050b deleted.)
 
         // ============================================================================
         // Invoice Indexing Job Handler (indexes invoices into Azure AI Search)

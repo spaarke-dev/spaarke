@@ -22,7 +22,6 @@ import {
 import { buildWorkspaceConfig } from "../../workspaceConfig";
 import { buildDynamicWorkspaceConfig } from "../../workspace/buildDynamicWorkspaceConfig";
 import { SECTION_REGISTRY } from "../../sectionRegistry";
-import { WorkspaceHeader } from "../WorkspaceHeader";
 import type { WorkspaceLayoutSummary } from "../WorkspaceHeader";
 import type { IWebApi } from "../../types/xrm";
 import { getBffBaseUrl } from "../../config/runtimeConfig";
@@ -205,9 +204,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     layouts: workspaceLayouts,
     activeLayout,
     activeLayoutJson,
-    isLoading: isLayoutsLoading,
     status: layoutStatus,
-    error: layoutError,
     setActiveLayoutById,
     refetch: refetchLayouts,
   } = useWorkspaceLayouts({ initialWorkspaceId, embedded });

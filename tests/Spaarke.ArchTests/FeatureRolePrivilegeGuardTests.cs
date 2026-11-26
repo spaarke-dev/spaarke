@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Xml.Linq;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
 namespace Spaarke.ArchTests;
@@ -19,8 +20,8 @@ namespace Spaarke.ArchTests;
 /// <c>RetrieveUserSetOfPrivilegesByNames</c>) or the target table is organization-owned (any depth reaches every row,
 /// <c>CallerWriteAuthorization.CallerMayAppendToOrganizationOwnedAsync</c>). <c>Deep</c> where the caller's right on a business record
 /// is asked (<c>RetrievePrincipalAccess</c>): those rows are owned by business-unit default owner teams (I-6), which a user-depth
-/// grant does not reach. <c>Global</c> where the rows are owned outside the user's business units (the event-type exception in
-/// <c>config/core-user-wizard-linking-role.json</c>; the analysis playbooks, skills, knowledge and tools, user-owned by their authors in
+/// grant does not reach. <c>Global</c> where the rows are owned outside the user's business units (the event types, ISS-042: Read and AppendTo are both Global,
+/// <c>config/product-configuration-read-role.json</c> and <c>config/core-user-wizard-linking-role.json</c>; the analysis playbooks, skills, knowledge and tools, user-owned by their authors in
 /// any business unit).</para>
 /// <para><b>Not repeated here.</b> Spaarke Core User's AppendTo on every target the create wizards bind is guarded by
 /// <see cref="CoreUserWizardLinkingGuardTests"/>; the ontology writer role's AppendTo on Signal and Decision Record lookup targets by
@@ -43,6 +44,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>The ruled changes (task 046b).</b> <c>config/feature-role-privileges.json</c> lists the role changes the owner ruled on
 /// task 046's gaps; <c>scripts/Set-FeatureRolePrivileges.ps1</c> applies it to an environment. The role files hold each change at
 /// its declared depth, and putting any one back to its earlier level fails this guard.</para>
+/// <para><b>Pinned whole sets (ebilling-r1 DEF-059).</b> <see cref="ExactPrivilegeSets"/> lists roles whose entire privilege set is
+/// fixed: Spaarke Decision Record Reader holds Read on <c>sprk_decisionrecord</c> at Global and nothing else. An added privilege, a
+/// depth change or a table change fails.</para>
 /// <para><b>Basic User is read-only on Spaarke tables (task 046c; owner, 2026-11-06).</b> Spaarke Basic User holds Read and nothing else on
 /// every <c>sprk_*</c> table; its other privileges are the platform privileges listed by name in
 /// <see cref="BasicUserPlatformPrivileges"/>. <see cref="BasicUserIsReadOnlyOnSpaarkeTables"/> checks the role file against that rule.
@@ -66,6 +70,7 @@ public class FeatureRolePrivilegeGuardTests
     private const string BillingAdmin = "Spaarke Billing Administrator";
     private const string OntologyAdmin = "Spaarke Ontology Administrator";
     private const string AiAdmin = "Spaarke AI Analysis Admin";
+    private const string DecisionRecordReader = "Spaarke Decision Record Reader";
 
     private const string Bff = "src/server/api/Sprk.Bff.Api/";
     private const string ChildCreate = Bff + "Api/ChildRecordEndpoints.cs:70-85,279-286; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:63-90";
@@ -95,6 +100,10 @@ public class FeatureRolePrivilegeGuardTests
     /// Dataverse asks AppendTo on the referenced row when the form sets the lookup).</summary>
     private const string OrganizationTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_OrganizationType_Ref.xml:3-18,38-53";
     private const string DocumentTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_documenttype_ref.xml:3-18";
+
+    /// <summary>The model-driven form lookups on the contact-type reference table, from a contact and from a contact-organization row
+    /// (no BFF route asks them; Dataverse asks AppendTo on the referenced row when the form sets the lookup).</summary>
+    private const string ContactTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ContactType_Ref.xml:3-18,38-53";
 
     /// <summary>The quick create's source Read (one of EntityAccessFilter's tables; contact is the assignee row's).</summary>
     private const string QuickCreateSource = Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:246-260; " + Bff + "Api/Filters/EntityAccessFilter.cs:115-155";
@@ -171,7 +180,17 @@ public class FeatureRolePrivilegeGuardTests
         .. Wizard("Project wizard", "prvCreatesprk_Project", "prvAppendsprk_Project"),
         .. Wizard("Event wizard", "prvCreatesprk_Event", "prvAppendsprk_Event"),
         .. Wizard("To Do wizard", "prvCreatesprk_Todo", "prvAppendsprk_Todo"),
-        .. Wizard("Invoice wizard", "prvCreatesprk_Invoice", "prvAppendsprk_Invoice"),
+        // Invoice (ebilling-r1 task 096b, EB-D-201): the Create Invoice wizard no longer creates through the child-records route (an
+        // invoice is created only by submission, by the application). Create stays held, and this row stays, until the role change
+        // (096b notes, D3), for the reason that still asks it of the caller: R4 (the wizard launcher's Mscrm.CreateSelectedEntityPermission
+        // display rule, sprk_Invoice RibbonDiff). R1, the confirm route's own ask of the caller's Create, is closed (ebilling-r1 task 050c,
+        // EB-D-264: confirm asks what the manual submission asks, finance.submit_invoice and finance.attach_invoice, and no table privilege).
+        // R2, the Office quick-create's invoice Create ask, is closed (ebilling-r1 task 096: the route refuses an invoice before any privilege
+        // question). Append: no create route asks it for an invoice; it is not removed here (D3, R5).
+        .. For("The Create Invoice wizard launcher's display rule (R4; R1, the confirm route, closed by 050c)", [Core], "Basic",
+            "src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Invoice/RibbonDiff.xml:162-167 (sprk.SecureChild.sprk_invoice.New.Command DisplayRules)", "prvCreatesprk_Invoice"),
+        .. For("Invoice Append (not removed by 096b; the role change is D3, see the 096b notes R5)", [Core], "Basic",
+            Bff + "Api/ChildRecordEndpoints.cs:116 (RefileTables: the one child-records route that still names the invoice)", "prvAppendsprk_Invoice"),
         .. Wizard("Work Assignment wizard", "prvCreatesprk_WorkAssignment", "prvAppendsprk_WorkAssignment"),
         .. Wizard("Report Card wizard", "prvCreatesprk_ReportCard", "prvAppendsprk_ReportCard"),
         .. Wizard("Document upload (wizard document rows)", "prvCreatesprk_Document", "prvAppendsprk_Document"),
@@ -210,12 +229,14 @@ public class FeatureRolePrivilegeGuardTests
         // tables. Core User holds AppendTo on them, before Basic User loses it.
         .. For("Organization type on an organization (model-driven form)", [Core], "Basic", OrganizationTypeBind, "prvAppendTosprk_OrganizationType_Ref"),
         .. For("Document type on a practice area matrix row (model-driven form)", [Core], "Basic", DocumentTypeBind, "prvAppendTosprk_documenttype_ref"),
+        // ISS-043 (owner 2026-11-25): the same for the contact type; sprk_contacttype_ref is organization-owned (OrgOwned in its Entity.xml), so Basic is the least depth that serves it.
+        .. For("Contact type on a contact (model-driven form)", [Core], "Basic", ContactTypeBind, "prvAppendTosprk_ContactType_Ref"),
 
         // Events, typed route: POST /api/v1/events (Create privilege in the route filter; the rest in the service as the caller).
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131", "prvCreatesprk_Event"),
         .. For("Event (typed route)", [Core], "Basic", Bff + "Services/Dataverse/CallerWriteAuthorization.cs:72-77", "prvAppendsprk_Event"),
         .. For("Event (typed route)", [Core], "Global",
-            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToAboveRead)",
+            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToDepth)",
             "prvAppendTosprk_EventType_Ref"),
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:949; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409",
             "prvAppendTosprk_RecordType_Ref"),
@@ -226,10 +247,18 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131",
             "prvCreatesprk_Event", "prvAppendsprk_Event"),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Global",
-            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToAboveRead)",
+            Bff + "Api/Events/EventEndpoints.cs:928; config/core-user-wizard-linking-role.json (sprk_eventtype_ref appendToDepth)",
             "prvAppendTosprk_EventType_Ref"),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Basic",
             Bff + "Api/Events/EventEndpoints.cs:949; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409", "prvAppendTosprk_RecordType_Ref"),
+        // ISS-042 (owner 2026-11-25): the event types are user-owned rows that provisioning creates as the control-plane app user in a
+        // stamp's root business unit, while the stamp's users sit in a child unit, so Read below Global hides every event type. Core and
+        // Basic User hold the Read through config/product-configuration-read-role.json (ProductConfigurationReadRoleGuardTests holds the
+        // role files to it); Office Add In User through config/feature-role-privileges.json (gap ISS-042). Basic is its own row (a
+        // [Basic, Office] row would be met by Office alone); Office Add In User is ruled not standalone and is held with a base role, so
+        // it has no row of its own (the put-back proof puts its change back together with the base roles' Read, PutBackGroup).
+        .. For("Event types readable on stamps (Create Event wizard picker)", [Core], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125; config/product-configuration-read-role.json", "prvReadsprk_EventType_Ref"),
+        .. For("Event types readable on stamps (Create Event wizard picker, Basic User)", [Basic], "Global", "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts:106-125; config/product-configuration-read-role.json", "prvReadsprk_EventType_Ref"),
         // AppendTo on the regarding record (fix round 1): the route takes any of the eight regarding types from any caller; no
         // Office add-in path posts it, so both role sets the doc names are held to every type.
         .. For("Event (typed route)", [Core], "Deep", EventRegarding, EventRegardingAppendTo),
@@ -256,16 +285,16 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Office version save (Basic User + Office Add In User)", [Basic, Office], "Deep", VersionOfferRead, "prvReadsprk_Document"),
 
         // Office quick create (POST /api/office/quickcreate/{entityType}): Create in the filter; Matter and Project through the service.
-        .. For("Office quick create", [Core], "Basic", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-117; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:335",
-            "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice"),
+        .. For("Office quick create", [Core], "Basic", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-122 (an invoice is refused first, ebilling-r1 task 096: no Create row)",
+            "prvCreatesprk_Matter", "prvCreatesprk_Project"),
         .. For("Office quick create", [Core], "Basic", Bff + "Services/Office/OfficeService.cs:2422-2439",
             "prvAppendsprk_Matter", "prvAppendsprk_Project"),
         .. For("Office quick create", [Core], "Deep", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:310-345; " + Bff + "Services/Office/OfficeService.cs:2431-2449",
             "prvReadContact", "prvAppendToContact"),
         .. For("Office quick create", [Core], "Basic", Bff + "Services/Office/OfficeService.cs:2402-2413", "prvAppendTosprk_RecordType_Ref"),
         .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic",
-            Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-117; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:335",
-            "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice"),
+            Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-122 (an invoice is refused first, ebilling-r1 task 096: no Create row)",
+            "prvCreatesprk_Matter", "prvCreatesprk_Project"),
         .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic", Bff + "Services/Office/OfficeService.cs:2422-2439",
             "prvAppendsprk_Matter", "prvAppendsprk_Project"),
         .. For("Office quick create (Office Add In User)", [Basic, Office], "Deep",
@@ -512,6 +541,12 @@ public class FeatureRolePrivilegeGuardTests
         new("Spaarke Reporting Access Admin", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
         new("Spaarke Reporting Access Author", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
         new("Spaarke Reporting Access Viewer", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
+        // ebilling-r1 DEF-059: held by the BFF application identity only, never by people. Not AppUsers on purpose: AppUsers leaves a
+        // role out of the person-role set, and so out of the writer-only must-not-hold rules, which must keep binding this role (the
+        // server writer alone creates Decision Records). Its whole privilege set is pinned by ExactPrivilegeSets.
+        new(DecisionRecordReader, RoleKind.AddOn, [], [],
+            NoBffFeature + "the BFF reads Decision Records app-only as its own application identity (counted spend, firm findings), "
+            + "not as a caller; this role gives that identity the one read, and ExactPrivilegeSets pins it."),
     ];
 
     private const string ReportingByRole =
@@ -835,9 +870,10 @@ public class FeatureRolePrivilegeGuardTests
             Directory.Delete(root, recursive: true);
         }
 
-        // Seeded drift against the real repo: the Billing row's former evidence names a file that is not on this branch.
-        Assert.Equal(new[] { Bff + "Api/Finance/ProcedureAssignmentEndpoints.cs" },
-            MissingEvidencePaths(Bff + "Api/Finance/ProcedureAssignmentEndpoints.cs:114-133,310-380 (branch task/ebilling-089e)", SourceScan.RepoRoot));
+        // Seeded drift against the real repo: evidence naming a file that exists on no branch is reported. (The seed used to be
+        // ProcedureAssignmentEndpoints.cs, absent on master but present once ebilling-r1 merges, so the seed now names a file that never exists.)
+        Assert.Equal(new[] { Bff + "Api/Finance/SeededDriftNoSuchEndpoints.cs" },
+            MissingEvidencePaths(Bff + "Api/Finance/SeededDriftNoSuchEndpoints.cs:114-133,310-380", SourceScan.RepoRoot));
     }
 
     /// <summary>Each "; "-separated evidence segment starts with a repo-relative path (up to its first ':', ' ' or '('); the paths that
@@ -941,7 +977,7 @@ public class FeatureRolePrivilegeGuardTests
     public void EveryRoleFileIsClassifiedAndEachAddOnIsCheckedAlone()
     {
         var files = RoleFileNames(RolesDirectory);
-        Assert.True(files.Count >= 13, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 13).");
+        Assert.True(files.Count >= 14, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 14).");
         _ = LoadRoles(RolesDirectory, files); // each file parses, holds privileges and names its own role
 
         var problems = ClassificationProblems(files, RoleClasses, Declared, Requirements, StandaloneExceptions.Keys.ToArray());
@@ -1484,6 +1520,363 @@ public class FeatureRolePrivilegeGuardTests
         doc.Save(path);
     }
 
+    // ── Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249) ─────────────────────────────────────────────
+
+    /// <summary>The verbs no person role holds on a table <see cref="RecordTableRules"/> flags
+    /// <see cref="RecordTableRule.CreatedOnlyByItsWriter"/>.</summary>
+    internal static readonly string[] WriterOnlyNativeWriteVerbs = ["Create", "Write", "Delete", "Assign", "Share"];
+
+    /// <summary>The writer-only tables, read from the same registry flag the generic create, update and delete refusals read.</summary>
+    internal static IReadOnlySet<string> WriterOnlyTables() =>
+        RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The ratchet baseline: (role, privilege, depth). A finding not listed at exactly its depth fails; a listed entry not found at
+    /// exactly its depth fails as stale.</summary>
+    internal static readonly IReadOnlyList<(string Role, string Privilege, string Depth)> WriterOnlyNativeWriteBaseline =
+    [
+        // Owner-ruled, ontology D-160/D-162, reaffirmed 2026-11-05 (designated cleanup role).
+        (OntologyAdmin, "prvAssignsprk_Signal", "Deep"),
+        (OntologyAdmin, "prvDeletesprk_Signal", "Deep"),
+        // Owner-ruled, ontology D-160/D-162 and D-204, reaffirmed 2026-11-05 (designated cleanup role).
+        (OntologyAdmin, "prvDeletesprk_BudgetRevision", "Deep"),
+        (OntologyAdmin, "prvWritesprk_BudgetRevision", "Deep"),
+    ];
+
+    /// <summary>The gap of the config's removals for this section (<c>scripts/Set-FeatureRolePrivileges.ps1 -Remove -Gap ISS028</c>).</summary>
+    internal const string WriterOnlyRemovalGap = "ISS028";
+
+    private const string RoleFileSource = "role file";
+    private const string RuledChangeSource = "config/feature-role-privileges.json";
+
+    /// <summary>One finding: where it is (a role file, or a ruled change in the config), the role, the privilege and its depth.</summary>
+    internal sealed record WriterOnlyHold(string Source, string Role, string Privilege, string Depth)
+    {
+        public override string ToString() => $"{Source}: {Role}: {Privilege} at {Depth}";
+    }
+
+    /// <summary>The verb of a privilege name (<c>prv</c> + verb + table), or null (as <see cref="PrivilegeTable"/>).</summary>
+    internal static string? PrivilegeVerb(string privilege)
+    {
+        if (PrivilegeTable(privilege) is null) return null;
+        var rest = privilege[3..];
+        return PrivilegeVerbs.First(v => rest.StartsWith(v, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsWriterOnlyNativeWrite(string privilege, IReadOnlySet<string> tables) =>
+        PrivilegeVerb(privilege) is { } verb && WriterOnlyNativeWriteVerbs.Contains(verb, StringComparer.OrdinalIgnoreCase)
+        && PrivilegeTable(privilege) is { } table && tables.Contains(table);
+
+    /// <summary>Each person role (role files) and each ruled change (config) that holds a <see cref="WriterOnlyNativeWriteVerbs"/>
+    /// privilege on one of <paramref name="tables"/>. A ruled change for a role in <paramref name="appUsersRoles"/> is left out, as
+    /// <see cref="PersonRoles"/> leaves out its role file.</summary>
+    internal static List<WriterOnlyHold> WriterOnlyNativeWrites(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> personRoles,
+        IReadOnlyList<RuledChange> changes,
+        IReadOnlySet<string> tables,
+        IReadOnlyCollection<string> appUsersRoles)
+    {
+        var found = new List<WriterOnlyHold>();
+        foreach (var role in personRoles.Keys.Order(StringComparer.Ordinal))
+            foreach (var (privilege, depth) in personRoles[role].OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
+                if (IsWriterOnlyNativeWrite(privilege, tables))
+                    found.Add(new(RoleFileSource, role, privilege, depth));
+        foreach (var c in changes)
+            if (!appUsersRoles.Contains(c.Role, StringComparer.Ordinal) && IsWriterOnlyNativeWrite(c.Privilege, tables))
+                found.Add(new(RuledChangeSource, c.Role, c.Privilege, c.Depth));
+        return found;
+    }
+
+    /// <summary>The ratchet, on (role, privilege, depth): findings not in the baseline at exactly their depth (unlisted), and baseline
+    /// entries with no finding at exactly their depth (stale). A depth change on a baseline entry is both.</summary>
+    internal static (List<string> Unlisted, List<string> Stale) WriterOnlyRatchet(
+        IReadOnlyList<WriterOnlyHold> found, IReadOnlyList<(string Role, string Privilege, string Depth)> baseline)
+    {
+        static bool Match(WriterOnlyHold f, (string Role, string Privilege, string Depth) b) =>
+            f.Role == b.Role && Same(f.Privilege, b.Privilege) && Same(f.Depth, b.Depth);
+        var unlisted = found.Where(f => !baseline.Any(b => Match(f, b))).Select(f => f.ToString()).ToList();
+        var stale = baseline.Where(b => !found.Any(f => Match(f, b)))
+            .Select(b => $"{b.Role}: {b.Privilege} at {b.Depth} — in the baseline but not found at that depth; correct or remove the entry").ToList();
+        return (unlisted, stale);
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: the role files and the ruled changes agree with the writer-only registry, outside the baseline")]
+    public void WriterOnlyTablesHaveNoNativeWritesOutsideTheBaseline()
+    {
+        var tables = WriterOnlyTables();
+        Assert.Contains("sprk_invoicecorrection", tables);
+        var entities = EntityNames(SolutionsDirectory);
+        Assert.All(tables, t => Assert.True(entities.Contains(t), $"Writer-only table '{t}' is not an entity under src/dataverse/solutions/**/Entities."));
+
+        // The baseline is well formed: each entry is a person role, a forbidden verb on a writer-only table, and listed once.
+        var personRoles = PersonRoles(SolutionsDirectory);
+        Assert.All(WriterOnlyNativeWriteBaseline, b =>
+        {
+            Assert.True(personRoles.ContainsKey(b.Role), $"'{b.Role}' is in the baseline but is not a person role file.");
+            Assert.True(IsWriterOnlyNativeWrite(b.Privilege, tables), $"{b.Privilege} is in the baseline but is not a forbidden verb on a writer-only table.");
+        });
+        Assert.Equal(WriterOnlyNativeWriteBaseline.Count,
+            WriterOnlyNativeWriteBaseline.Select(b => (b.Role, b.Privilege.ToLowerInvariant())).Distinct().Count());
+        Assert.All(WriterOnlyNativeWriteBaseline, b => Assert.True(Rank(b.Depth) >= 0, $"{b.Privilege}: baseline depth '{b.Depth}' is not a depth."));
+
+        var found = WriterOnlyNativeWrites(personRoles, LoadRuledChanges(RuledChangesPath), tables, ExpectedAppUsersRoles);
+        var (unlisted, stale) = WriterOnlyRatchet(found, WriterOnlyNativeWriteBaseline);
+        Assert.True(unlisted.Count == 0,
+            "A person role (or a ruled change for one) holds a privilege on a writer-only table (RecordTableRule.CreatedOnlyByItsWriter) "
+            + "that only the table's writer may hold:\n  " + string.Join("\n  ", unlisted));
+        Assert.True(stale.Count == 0, "The writer-only baseline lists entries not found at their depth:\n  " + string.Join("\n  ", stale));
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: must-fire and must-not-fire controls on synthetic roles and ruled changes")]
+    public void WriterOnlyNativeWriteControls()
+    {
+        var tables = new HashSet<string>(["sprk_invoicecorrection", "sprk_signal"], StringComparer.OrdinalIgnoreCase);
+
+        // must-fire: each forbidden verb, in any casing, on a writer-only table
+        foreach (var verb in WriterOnlyNativeWriteVerbs)
+        {
+            var roles = new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["Person"] = Privileges(($"PRV{verb.ToUpperInvariant()}SPRK_INVOICECORRECTION", "Basic")),
+            };
+            var found = WriterOnlyNativeWrites(roles, [], tables, [Writer]);
+            Assert.Equal(new[] { $"{RoleFileSource}: Person: PRV{verb.ToUpperInvariant()}SPRK_INVOICECORRECTION at Basic" }, found.Select(f => f.ToString()));
+        }
+
+        // must-not-fire: Read, Append and AppendTo on a writer-only table; a forbidden verb on another table
+        var allowed = new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["Person"] = Privileges(
+                ("prvReadsprk_invoicecorrection", "Deep"), ("prvAppendsprk_invoicecorrection", "Deep"), ("prvAppendTosprk_invoicecorrection", "Deep"),
+                ("prvCreatesprk_Matter", "Deep"), ("prvWritesprk_Matter", "Deep"), ("prvDeletesprk_Matter", "Deep")),
+        };
+        Assert.Empty(WriterOnlyNativeWrites(allowed, [], tables, [Writer]));
+
+        // must-fire: a ruled change that grants a forbidden verb to a person role; must-not-fire: the same for the writer's role,
+        // and a ruled change on another table
+        var changes = new RuledChange[]
+        {
+            new("X", "Person", "sprk_invoicecorrection", "prvSharesprk_invoicecorrection", "Deep", "None"),
+            new("X", Writer, "sprk_invoicecorrection", "prvCreatesprk_invoicecorrection", "Global", "None"),
+            new("X", "Person", "sprk_invoicecorrection", "prvAppendTosprk_invoicecorrection", "Deep", "None"),
+            new("X", "Person", "sprk_matter", "prvCreatesprk_Matter", "Deep", "None"),
+        };
+        Assert.Equal(new[] { $"{RuledChangeSource}: Person: prvSharesprk_invoicecorrection at Deep" },
+            WriterOnlyNativeWrites(new Dictionary<string, IReadOnlyDictionary<string, string>>(), changes, tables, [Writer]).Select(f => f.ToString()));
+
+        // the verb parse: AppendTo is not Append, and a name with no known verb has none
+        Assert.Equal("AppendTo", PrivilegeVerb("prvAppendTosprk_invoicecorrection"));
+        Assert.Equal("Append", PrivilegeVerb("prvAppendsprk_invoicecorrection"));
+        Assert.Null(PrivilegeVerb("prvMakesprk_invoicecorrection"));
+
+        // the ratchet: a listed finding passes (any casing), an unlisted one fails, a listed entry with no finding is stale
+        var finding = new List<WriterOnlyHold> { new(RoleFileSource, "Person", "prvDeletesprk_Signal", "Deep") };
+        Assert.Equal((0, 0), Counts(WriterOnlyRatchet(finding, [("Person", "PRVDELETESPRK_SIGNAL", "deep")])));
+        Assert.Equal((1, 0), Counts(WriterOnlyRatchet(finding, [])));
+        Assert.Equal((0, 1), Counts(WriterOnlyRatchet([], [("Person", "prvDeletesprk_Signal", "Deep")])));
+        // must-fire (K6): the same privilege at another depth than the baseline's, deeper or shallower, is unlisted and leaves the entry stale
+        var deeper = new List<WriterOnlyHold> { new(RoleFileSource, "Person", "prvDeletesprk_Signal", "Global") };
+        Assert.Equal((1, 1), Counts(WriterOnlyRatchet(deeper, [("Person", "prvDeletesprk_Signal", "Deep")])));
+        Assert.Equal(new[] { $"{RoleFileSource}: Person: prvDeletesprk_Signal at Global" }, WriterOnlyRatchet(deeper, [("Person", "prvDeletesprk_Signal", "Deep")]).Unlisted);
+        var shallower = new List<WriterOnlyHold> { new(RoleFileSource, "Person", "prvDeletesprk_Signal", "Basic") };
+        Assert.Equal((1, 1), Counts(WriterOnlyRatchet(shallower, [("Person", "prvDeletesprk_Signal", "Deep")])));
+
+        static (int, int) Counts((List<string> Unlisted, List<string> Stale) r) => (r.Unlisted.Count, r.Stale.Count);
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: a config removal entry is must-not-fire (it removes); the same entry as a change is must-fire")]
+    public void WriterOnlyNativeWriteIgnoresConfigRemovals()
+    {
+        var tables = WriterOnlyTables();
+
+        // The real config: its ISS028 removals name only writer-only tables and are not reported.
+        var real = LoadRemovals(RuledChangesPath).Where(r => r.Gap == WriterOnlyRemovalGap).ToList();
+        Assert.Equal(5, real.Count);
+        Assert.All(real, r => Assert.True(IsWriterOnlyNativeWrite(r.Privilege, tables), $"{r.Privilege} is an ISS028 removal outside the writer-only rule."));
+        Assert.Empty(WriterOnlyNativeWrites(new Dictionary<string, IReadOnlyDictionary<string, string>>(), LoadRuledChanges(RuledChangesPath), tables, ExpectedAppUsersRoles));
+
+        // A seeded config: the entry in "removals" is not reported; moved to "changes" it is.
+        var path = Path.Combine(Path.GetTempPath(), "sprk-writer-only-config-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            const string benign = "{ \"gap\": \"X\", \"role\": \"Person\", \"table\": \"sprk_matter\", \"privilege\": \"prvReadsprk_Matter\", \"depth\": \"Deep\", \"from\": \"None\" }";
+            const string entry = "\"gap\": \"ISS028\", \"role\": \"Person\", \"table\": \"sprk_invoicecorrection\", \"privilege\": \"prvCreatesprk_invoicecorrection\"";
+            File.WriteAllText(path, "{ \"schemaVersion\": 1, \"changes\": [ " + benign + " ], \"removals\": [ { " + entry + ", \"expectedDepth\": \"Deep\" } ] }");
+            Assert.Single(LoadRemovals(path));
+            Assert.Empty(WriterOnlyNativeWrites(new Dictionary<string, IReadOnlyDictionary<string, string>>(), LoadRuledChanges(path), tables, [Writer]));
+
+            File.WriteAllText(path, "{ \"schemaVersion\": 1, \"changes\": [ " + benign + ", { " + entry + ", \"depth\": \"Deep\", \"from\": \"None\" } ], \"removals\": [] }");
+            Assert.Equal(new[] { $"{RuledChangeSource}: Person: prvCreatesprk_invoicecorrection at Deep" },
+                WriterOnlyNativeWrites(new Dictionary<string, IReadOnlyDictionary<string, string>>(), LoadRuledChanges(path), tables, [Writer]).Select(f => f.ToString()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact(DisplayName = "Correction rows, native write hardening: seeded role files — a synthetic role document fails, the writer's role does not, a dropped or deepened baseline entry fails")]
+    public void WriterOnlyNativeWriteFiresOnSeededRoleFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sprk-writer-only-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var dir = Path.Combine(root, "SpaarkeMaster", "Roles");
+            Directory.CreateDirectory(dir);
+            foreach (var file in Directory.EnumerateFiles(RolesDirectory, "*.xml"))
+                File.Copy(file, Path.Combine(dir, Path.GetFileName(file)));
+            var tables = WriterOnlyTables();
+            var changes = LoadRuledChanges(RuledChangesPath);
+            (List<string> Unlisted, List<string> Stale) Run() =>
+                WriterOnlyRatchet(WriterOnlyNativeWrites(PersonRoles(root), changes, tables, ExpectedAppUsersRoles), WriterOnlyNativeWriteBaseline);
+
+            // must-not-fire: the copy as it is
+            var before = Run();
+            Assert.Empty(before.Unlisted);
+            Assert.Empty(before.Stale);
+
+            // must-fire: a synthetic role document granting Create on a correction row
+            File.WriteAllText(Path.Combine(dir, "Spaarke Synthetic.xml"),
+                "<Role name=\"Spaarke Synthetic\"><RolePrivileges>"
+                + "<RolePrivilege name=\"prvCreatesprk_invoicecorrection\" level=\"Deep\" />"
+                + "<RolePrivilege name=\"prvReadsprk_invoicecorrection\" level=\"Deep\" />"
+                + "<RolePrivilege name=\"prvAppendsprk_invoicecorrection\" level=\"Deep\" />"
+                + "<RolePrivilege name=\"prvAppendTosprk_invoicecorrection\" level=\"Deep\" />"
+                + "</RolePrivileges></Role>");
+            // must-not-fire: the writer's role (AppUsers) holding the same
+            AddPrivilege(dir, Writer, "prvCreatesprk_invoicecorrection", "Global");
+
+            var after = Run();
+            Assert.Equal(new[] { $"{RoleFileSource}: Spaarke Synthetic: prvCreatesprk_invoicecorrection at Deep" }, after.Unlisted);
+            Assert.Empty(after.Stale);
+
+            // must-fire: a baseline entry the role file no longer holds is stale
+            var adminPath = Path.Combine(dir, OntologyAdmin + ".xml");
+            var doc = XDocument.Parse(File.ReadAllText(adminPath));
+            var (role, privilege, depth) = WriterOnlyNativeWriteBaseline[0];
+            doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", privilege)).Remove();
+            // must-fire (K6): another baseline entry raised to a deeper level is unlisted, and its entry is stale
+            var (role2, privilege2, depth2) = WriterOnlyNativeWriteBaseline[1];
+            doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", privilege2)).SetAttributeValue("level", "Global");
+            doc.Save(adminPath);
+            var dropped = Run();
+            Assert.Equal(
+                new[]
+                {
+                    $"{role}: {privilege} at {depth} — in the baseline but not found at that depth; correct or remove the entry",
+                    $"{role2}: {privilege2} at {depth2} — in the baseline but not found at that depth; correct or remove the entry",
+                },
+                dropped.Stale);
+            Assert.Equal(
+                new[] { $"{RoleFileSource}: {role2}: {privilege2} at Global", $"{RoleFileSource}: Spaarke Synthetic: prvCreatesprk_invoicecorrection at Deep" },
+                dropped.Unlisted);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // ── Pinned whole privilege sets (ebilling-r1 DEF-059) ───────────────────────────────────────────────────────────────
+
+    /// <summary>Roles whose WHOLE privilege set is pinned: the role file holds exactly these entries (privilege and depth), no other
+    /// entry, and no entry twice. Spaarke Decision Record Reader gives the BFF application identity organization-wide Decision Record
+    /// read and nothing else; Create stays with the server writer (Spaarke Ontology Service), so write provenance is unchanged.</summary>
+    internal static readonly IReadOnlyDictionary<string, (string Privilege, string Depth)[]> ExactPrivilegeSets =
+        new Dictionary<string, (string Privilege, string Depth)[]>(StringComparer.Ordinal)
+        {
+            [DecisionRecordReader] = [("prvReadsprk_DecisionRecord", "Global")],
+        };
+
+    /// <summary>What differs between a role file's privilege entries and its pinned set: a count that is not the pinned count, an entry
+    /// outside the set (another privilege, or a pinned privilege at another depth), or a pinned entry that is absent.</summary>
+    internal static List<string> ExactPrivilegeSetProblems(string role, string roleXml, IReadOnlyList<(string Privilege, string Depth)> pinned)
+    {
+        var held = XDocument.Parse(roleXml).Descendants().Where(e => e.Name.LocalName == "RolePrivilege")
+            .Select(e => (Privilege: (string?)e.Attribute("name") ?? string.Empty, Depth: (string?)e.Attribute("level") ?? string.Empty))
+            .ToList();
+        bool Pinned((string Privilege, string Depth) h) => pinned.Any(p => Same(p.Privilege, h.Privilege) && Same(p.Depth, h.Depth));
+        var problems = new List<string>();
+        if (held.Count != pinned.Count)
+            problems.Add($"{role}: holds {held.Count} privilege entr{(held.Count == 1 ? "y" : "ies")}, pinned to exactly {pinned.Count}");
+        problems.AddRange(held.Where(h => !Pinned(h)).Select(h => $"{role}: holds {h.Privilege} at {h.Depth}, which is not in its pinned set"));
+        problems.AddRange(pinned.Where(p => !held.Any(h => Same(h.Privilege, p.Privilege) && Same(h.Depth, p.Depth)))
+            .Select(p => $"{role}: lacks {p.Privilege} at {p.Depth}"));
+        return problems;
+    }
+
+    [Fact(DisplayName = "DEF-059: Spaarke Decision Record Reader holds exactly one privilege, Read on sprk_decisionrecord at Global, and stays a person role for the writer-only rules")]
+    public void PinnedRolesHoldExactlyTheirSet()
+    {
+        // the pin itself is literal
+        Assert.Equal(new[] { DecisionRecordReader }, ExactPrivilegeSets.Keys);
+        Assert.Equal(new[] { ("prvReadsprk_DecisionRecord", "Global") }, ExactPrivilegeSets[DecisionRecordReader]);
+
+        foreach (var (role, pinned) in ExactPrivilegeSets)
+        {
+            Assert.Contains(RoleClasses, c => c.Role == role);
+            _ = LoadRoles(RolesDirectory, [role]); // present, parsable, names its own role
+            var problems = ExactPrivilegeSetProblems(role, File.ReadAllText(Path.Combine(RolesDirectory, role + ".xml")), pinned);
+            Assert.True(problems.Count == 0,
+                "A pinned role's privilege set changed (ebilling-r1 DEF-059). The role exists to give one read and nothing else; a change "
+                + "needs the owner's approval and unified-access-control-r2's review:\n  " + string.Join("\n  ", problems));
+        }
+
+        // Not exempt: the role is in the person-role set, so no writer-only privilege can be added to it unseen.
+        Assert.Contains(DecisionRecordReader, PersonRoles(SolutionsDirectory).Keys);
+        Assert.DoesNotContain(DecisionRecordReader, ExpectedAppUsersRoles);
+    }
+
+    [Theory(DisplayName = "DEF-059 must-fire: a seeded copy of Spaarke Decision Record Reader with an added privilege, another depth, another table, another verb, a duplicate or no grant fails the pin")]
+    [InlineData("add-baseline", "holds prvReadUser at Basic, which is not in its pinned set")]
+    [InlineData("add-signal-read", "holds prvReadsprk_Signal at Global, which is not in its pinned set")]
+    [InlineData("add-create", "holds prvCreatesprk_DecisionRecord at Global, which is not in its pinned set")]
+    [InlineData("depth-deep", "holds prvReadsprk_DecisionRecord at Deep, which is not in its pinned set")]
+    [InlineData("depth-basic", "lacks prvReadsprk_DecisionRecord at Global")]
+    [InlineData("table-signal", "holds prvReadsprk_Signal at Global, which is not in its pinned set")]
+    [InlineData("verb-write", "holds prvWritesprk_DecisionRecord at Global, which is not in its pinned set")]
+    [InlineData("duplicate", "holds 2 privilege entries, pinned to exactly 1")]
+    [InlineData("removed", "lacks prvReadsprk_DecisionRecord at Global")]
+    public void PinnedRoleSetFiresOnASeededCopy(string mutation, string expected)
+    {
+        var doc = XDocument.Parse(File.ReadAllText(Path.Combine(RolesDirectory, DecisionRecordReader + ".xml")));
+        var container = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivileges");
+        var grant = container.Elements().Single(e => e.Name.LocalName == "RolePrivilege");
+        XElement Grant(string name, string level) => new(grant.Name, new XAttribute("name", name), new XAttribute("level", level));
+        switch (mutation)
+        {
+            case "add-baseline": container.Add(Grant("prvReadUser", "Basic")); break;
+            case "add-signal-read": container.Add(Grant("prvReadsprk_Signal", "Global")); break;
+            case "add-create": container.Add(Grant("prvCreatesprk_DecisionRecord", "Global")); break;
+            case "depth-deep": grant.SetAttributeValue("level", "Deep"); break;
+            case "depth-basic": grant.SetAttributeValue("level", "Basic"); break;
+            case "table-signal": grant.SetAttributeValue("name", "prvReadsprk_Signal"); break;
+            case "verb-write": grant.SetAttributeValue("name", "prvWritesprk_DecisionRecord"); break;
+            case "duplicate": container.Add(Grant("prvReadsprk_DecisionRecord", "Global")); break;
+            case "removed": grant.Remove(); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, null);
+        }
+
+        var problems = ExactPrivilegeSetProblems(DecisionRecordReader, doc.ToString(), ExactPrivilegeSets[DecisionRecordReader]);
+
+        Assert.Contains($"{DecisionRecordReader}: {expected}", problems);
+    }
+
+    [Fact(DisplayName = "DEF-059 must-not-fire: the exact set in other casing passes; must-fire: Create on a Decision Record given to the reader is also caught by the writer-only rule")]
+    public void PinnedRoleSetControls()
+    {
+        const string otherCasing = """<Role name="R"><RolePrivileges><RolePrivilege name="PRVREADSPRK_DECISIONRECORD" level="global" /></RolePrivileges></Role>""";
+        Assert.Empty(ExactPrivilegeSetProblems("R", otherCasing, [("prvReadsprk_DecisionRecord", "Global")]));
+
+        // The writer-only must-not-hold rule binds the reader too (it is a person role here, not AppUsers).
+        var real = PersonRoles(SolutionsDirectory);
+        var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(real)
+        {
+            [DecisionRecordReader] = new Dictionary<string, string>(real[DecisionRecordReader], StringComparer.OrdinalIgnoreCase) { ["prvCreatesprk_DecisionRecord"] = "Global" },
+        };
+        Assert.Empty(ForbiddenHeld(real, MustNotHold));
+        Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{DecisionRecordReader}: prvCreatesprk_DecisionRecord at Global", StringComparison.Ordinal));
+    }
+
     // ── The ruled changes (task 046b) ──────────────────────────────────────────────────────────────────────────────────
 
     internal sealed record RuledChange(string Gap, string Role, string Table, string Privilege, string Depth, string From);
@@ -1529,6 +1922,56 @@ public class FeatureRolePrivilegeGuardTests
             RuledChangeProblems(changes, roles));
     }
 
+    /// <summary>The role files the seeded proof puts back together for one ruled change: the change itself, and, when its role is ruled
+    /// not standalone (<see cref="StandaloneExceptions"/>; it is held with a base role, so the base role meets its rows), each base
+    /// role's Read of the same privilege. A base role the same gap lists for that privilege is put back to that entry's 'from'; one the
+    /// config does not list is put back to this change's 'from' when it holds the privilege at this change's depth (ISS-042: Core and
+    /// Basic hold the Office Add In User's Read through config/product-configuration-read-role.json); one another gap lists for that
+    /// privilege is left alone, because that gap's own entry puts it back.</summary>
+    internal static List<(string Role, string Privilege, string From)> PutBackGroup(
+        RuledChange change, IReadOnlyList<RuledChange> changes, IEnumerable<string> baseRoles, Func<string, string?> heldDepth)
+    {
+        var group = new List<(string Role, string Privilege, string From)> { (change.Role, change.Privilege, change.From) };
+        if (!StandaloneExceptions.ContainsKey(change.Role))
+            return group;
+
+        foreach (var baseRole in baseRoles)
+        {
+            var listed = changes.Where(c => Same(c.Role, baseRole) && Same(c.Privilege, change.Privilege)).ToList();
+            var sameGap = listed.FirstOrDefault(c => c.Gap == change.Gap);
+            if (sameGap is not null)
+                group.Add((baseRole, change.Privilege, sameGap.From));
+            else if (listed.Count == 0 && heldDepth(baseRole) is { } depth && Same(depth, change.Depth))
+                group.Add((baseRole, change.Privilege, change.From));
+        }
+
+        return group;
+    }
+
+    [Fact(DisplayName = "046b seeded proof control: a standalone-exception change is put back with the base roles of its own gap or unlisted ones at its depth, never with another gap's")]
+    public void PutBackGroupIsKeyedOnTheGap()
+    {
+        const string priv = "prvReadsprk_EventType_Ref";
+        RuledChange office = new("ISS-A", Office, "t", priv, "Global", "Deep");
+        RuledChange coreSameGap = new("ISS-A", Core, "t", priv, "Global", "Basic");
+        RuledChange coreOtherGap = new("ISS-B", Core, "t", priv, "Global", "Basic");
+        string[] baseRoles = [Core, Basic];
+        string? Held(string role) => role == Basic ? "Global" : null;
+
+        // The same gap lists Core: it goes back to that entry's 'from'; Basic is unlisted and holds the depth, so it goes back to the change's.
+        Assert.Equal(
+            new[] { (Office, priv, "Deep"), (Core, priv, "Basic"), (Basic, priv, "Deep") },
+            PutBackGroup(office, [office, coreSameGap], baseRoles, Held));
+
+        // Another gap lists Core for the privilege: Core is left to that gap even though it holds the depth (the bug: a privilege-only\r\n        // key put it back with this one).
+        Assert.Equal(
+            new[] { (Office, priv, "Deep"), (Basic, priv, "Deep") },
+            PutBackGroup(office, [office, coreOtherGap], baseRoles, _ => "Global")); // Core holds the depth too, through the other gap
+
+        // An unlisted base role that holds another depth is not touched; a change on a role that is not an exception goes back alone.
+        Assert.Equal(new[] { (Office, priv, "Deep") }, PutBackGroup(office, [office], baseRoles, _ => "Deep"));
+        Assert.Equal(new[] { (Core, priv, "Basic") }, PutBackGroup(coreSameGap, [office, coreSameGap], baseRoles, Held));
+    }
     [Fact(DisplayName = "046b seeded proof (AC1): putting any one ruled change back to its earlier level in a copy of its role file fails the feature guard")]
     public void PuttingARuledChangeBackFailsTheGuard()
     {
@@ -1546,20 +1989,33 @@ public class FeatureRolePrivilegeGuardTests
             var misses = new List<string>();
             foreach (var change in changes)
             {
-                var path = Path.Combine(dir, change.Role + ".xml");
-                var original = File.ReadAllText(path);
-                var doc = XDocument.Parse(original);
-                var element = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", change.Privilege));
-                if (Same(change.From, "None"))
-                    element.Remove();
-                else
-                    element.SetAttributeValue("level", change.From);
-                doc.Save(path);
+                // A role ruled not standalone (StandaloneExceptions) is held with a base role, so the guard asks its rows of the base role
+                // too: its change is put back together with the base roles' Read of the same privilege at the same depth, whether the
+                // config lists them (the same gap, and only that gap) or not (ISS-042: Basic and Core hold the Read the Office Add In User
+                // role is raised with, through config/product-configuration-read-role.json). Any other change is put back alone.
+                var baseRoles = RoleClasses.Where(c => c.Kind == RoleKind.Base).Select(c => c.Role).ToArray();
+                var group = PutBackGroup(change, changes, baseRoles,
+                    role => LoadRoles(dir, [role])[role].TryGetValue(change.Privilege, out var depth) ? depth : null);
+                var originals = new Dictionary<string, string>();
+                foreach (var member in group)
+                {
+                    var path = Path.Combine(dir, member.Role + ".xml");
+                    var original = File.ReadAllText(path);
+                    originals[path] = original;
+                    var doc = XDocument.Parse(original);
+                    var element = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", member.Privilege));
+                    if (Same(member.From, "None"))
+                        element.Remove();
+                    else
+                        element.SetAttributeValue("level", member.From);
+                    doc.Save(path);
+                }
 
                 var (unlisted, _, changed) = Ratchet(Gaps(Requirements, LoadRoles(dir, roleNames)), KnownGaps);
                 if (!unlisted.Concat(changed).Any(s => s.Contains(": " + change.Privilege + " ", StringComparison.OrdinalIgnoreCase)))
                     misses.Add($"{change.Gap} {change.Role}: {change.Privilege} back to {change.From} — the guard did not fail");
-                File.WriteAllText(path, original);
+                foreach (var (path, original) in originals)
+                    File.WriteAllText(path, original);
             }
 
             Assert.Empty(misses);
@@ -1605,9 +2061,10 @@ public class FeatureRolePrivilegeGuardTests
     {
         var removals = LoadRemovals(RuledChangesPath);
         var changes = LoadRuledChanges(RuledChangesPath);
-        // R1 (046b) and the 80 of R3 (046c: Basic User is read-only on Spaarke tables)
-        Assert.Equal(81, removals.Count);
+        // R1 (046b), the 80 of R3 (046c: Basic User is read-only on Spaarke tables) and the 5 of ISS028 (correction rows: native write hardening)
+        Assert.Equal(86, removals.Count);
         Assert.Equal(80, removals.Count(r => r.Gap == "R3" && r.Role == Basic));
+        Assert.Equal(5, removals.Count(r => r.Gap == WriterOnlyRemovalGap));
         var personRoles = PersonRoles(SolutionsDirectory);
         var roles = LoadRoles(RolesDirectory, removals.Select(r => r.Role));
 
@@ -1618,12 +2075,16 @@ public class FeatureRolePrivilegeGuardTests
 
         foreach (var r in removals)
         {
-            // each removed privilege is covered by a must-not-hold rule for that role (or, for Basic User, by the read-only rule), so the
-            // role file cannot get it back unseen
+            // each removed privilege is covered by a must-not-hold rule for that role (or, for Basic User, by the read-only rule; for the
+            // ISS028 entries, by the writer-only guard), so the role file cannot get it back unseen
             var seededRole = new Dictionary<string, string>(personRoles[r.Role], StringComparer.OrdinalIgnoreCase) { [r.Privilege] = r.ExpectedDepth };
             var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(personRoles) { [r.Role] = seededRole };
             if (r.Role == Basic)
                 Assert.Contains(ReadOnlyProblems(seededRole, BasicUserPlatformPrivileges), f => f.StartsWith($"{r.Privilege} at {r.ExpectedDepth}: ", StringComparison.Ordinal));
+            else if (r.Gap == WriterOnlyRemovalGap)
+                Assert.Contains(
+                    WriterOnlyRatchet(WriterOnlyNativeWrites(seeded, [], WriterOnlyTables(), ExpectedAppUsersRoles), WriterOnlyNativeWriteBaseline).Unlisted,
+                    f => f == $"{RoleFileSource}: {r.Role}: {r.Privilege} at {r.ExpectedDepth}");
             else
                 Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{r.Role}: {r.Privilege} at {r.ExpectedDepth}", StringComparison.Ordinal));
 
@@ -1740,13 +2201,189 @@ public class FeatureRolePrivilegeGuardTests
         return problems;
     }
 
+    /// <summary>Removal gaps that no expectations file carries yet, each with the newest expectations version it was raised against. The
+    /// next release's role-privilege expectations file must carry their entries (managed stage-and-upgrade); then the gap leaves this list.
+    /// None now: ISS028 (correction rows: native write hardening, raised against 1.3.1.0) is carried by 1.3.2.0 and left the list.</summary>
+    internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseRemovalGaps =
+        new Dictionary<string, Version>(StringComparer.Ordinal);
+
+    /// <summary>Change gaps that no expectations file carries yet, each with the newest expectations version it was raised against; the same
+    /// rule as <see cref="PendingNextReleaseRemovalGaps"/> for the config's <c>changes</c>: the published files are not edited, so the next
+    /// release's expectations file must carry each entry in its role's present list; then the gap leaves this list. None now: ISS-042
+    /// (event types readable at Global, raised against 1.3.2.0) and ISS-043 (Core User's AppendTo on the contact type table) are carried
+    /// by 1.3.3.0.</summary>
+    internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseChangeGaps =
+        new Dictionary<string, Version>(StringComparer.Ordinal);
+
+    /// <summary>One expectations file: its version and its roles.</summary>
+    internal sealed record ExpectationsRelease(Version Version, IReadOnlyDictionary<string, RoleExpectation> Roles);
+
+    /// <summary>Every <c>spaarkemaster-{version}.json</c> in <paramref name="directory"/>, oldest first.</summary>
+    internal static IReadOnlyList<ExpectationsRelease> LoadAllExpectations(string directory) =>
+        Directory.GetFiles(directory, "spaarkemaster-*.json")
+            .Select(f => (File: f, Ok: Version.TryParse(Path.GetFileNameWithoutExtension(f)["spaarkemaster-".Length..], out var v), Version: v))
+            .Where(x => x.Ok)
+            .OrderBy(x => x.Version)
+            .Select(x => new ExpectationsRelease(x.Version!, LoadExpectations(x.File)))
+            .ToList();
+
+    /// <summary>The pending ratchet. Reported: a pending gap with no removal in the config; a raised-against version with no expectations
+    /// file; each expectations file NEWER than the raised-against version that does not carry an entry of the gap in its role's absent list
+    /// (that release must carry it); and each entry of the gap that the newest file carries (stale: the gap leaves the pending list).</summary>
+    internal static List<string> PendingRemovalProblems(
+        IReadOnlyList<Removal> removals, IReadOnlyDictionary<string, Version> pendingGaps, IReadOnlyList<ExpectationsRelease> releases)
+    {
+        var problems = new List<string>();
+        var newest = releases.MaxBy(r => r.Version);
+        foreach (var (gap, raised) in pendingGaps.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            var entries = removals.Where(r => r.Gap == gap).ToList();
+            if (entries.Count == 0) problems.Add($"{gap}: a pending gap with no removal in the config");
+            if (!releases.Any(r => r.Version == raised)) problems.Add($"{gap}: raised against expectations {raised}, but there is no such expectations file");
+
+            foreach (var release in releases.Where(r => r.Version > raised).OrderBy(r => r.Version))
+                foreach (var r in entries)
+                    if (!(release.Roles.TryGetValue(r.Role, out var e) && e.Absent.Contains(r.Privilege)))
+                        problems.Add($"{release.Version}: {r.Role}: {r.Privilege} — the next release's expectations must carry gap {gap} (raised against "
+                            + $"{raised}) in the role's absent list; taking it off a managed role needs a managed stage-and-upgrade");
+
+            if (newest is not null)
+                foreach (var r in entries)
+                    if (newest.Roles.TryGetValue(r.Role, out var e) && e.Absent.Contains(r.Privilege))
+                        problems.Add($"{r.Role}: {r.Privilege} — removal {gap} is pending but the newest expectations file ({newest.Version}) carries it; take {gap} off the pending list");
+        }
+
+        return problems;
+    }
+
+    /// <summary>The pending-change ratchet, as <see cref="PendingRemovalProblems"/> for changes: a pending gap with no change in the config; a
+    /// raised-against version with no expectations file; each expectations file NEWER than the raised-against version that does not carry an
+    /// entry of the gap in its role's present list at the declared depth; and each entry of the gap that the newest file carries (stale: the
+    /// gap leaves the pending list).</summary>
+    internal static List<string> PendingChangeProblems(
+        IReadOnlyList<RuledChange> changes, IReadOnlyDictionary<string, Version> pendingGaps, IReadOnlyList<ExpectationsRelease> releases)
+    {
+        var problems = new List<string>();
+        var newest = releases.MaxBy(r => r.Version);
+        bool Carries(ExpectationsRelease release, RuledChange c) =>
+            release.Roles.TryGetValue(c.Role, out var e) && e.Present.TryGetValue(c.Privilege, out var depth) && Same(depth, c.Depth);
+
+        foreach (var (gap, raised) in pendingGaps.OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            var entries = changes.Where(c => c.Gap == gap).ToList();
+            if (entries.Count == 0) problems.Add($"{gap}: a pending gap with no change in the config");
+            if (!releases.Any(r => r.Version == raised)) problems.Add($"{gap}: raised against expectations {raised}, but there is no such expectations file");
+
+            foreach (var release in releases.Where(r => r.Version > raised).OrderBy(r => r.Version))
+                foreach (var c in entries.Where(c => !Carries(release, c)))
+                    problems.Add($"{release.Version}: {c.Role}: {c.Privilege} — the next release's expectations must carry gap {gap} (raised against "
+                        + $"{raised}) in the role's present list at {c.Depth}");
+
+            if (newest is not null)
+                foreach (var c in entries.Where(c => Carries(newest, c)))
+                    problems.Add($"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({newest.Version}) carries it; take {gap} off the pending list");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "ISS-042 pending change gaps: a newer expectations file without a pending gap's entries fails; one with them passes and flags the entries stale; without the pending list the entries fail the carry check")]
+    public void PendingChangeGapsAreARatchet()
+    {
+        var allChanges = LoadRuledChanges(RuledChangesPath);
+        var allReleases = LoadAllExpectations(ExpectationsDirectory);
+
+        // The real files and list are held by NewestExpectationsFileCarriesTheRuledSet (it fails once a newer file leaves a pending entry out,
+        // and flags the entries stale once one carries them, which is the signal to take the gap off the list), so this test does not read
+        // them: its controls stay valid after that. Only non-vacuity reads the config: every pending gap names a change in it.
+        Assert.All(PendingNextReleaseChangeGaps.Keys, g => Assert.Contains(allChanges, c => c.Gap == g));
+
+        // The controls below replay ISS-042's history on a local map, so they keep firing after the list changes: raised against
+        // 1.3.2.0, before a later release carried it. Only the files up to the raised-against version count as the releases of that
+        // moment. The entries are the three roles the gap first named, local too, so no control depends on the config's present entries.
+        const string gap = "ISS-042";
+        var raised = new Version(1, 3, 2, 0);
+        var pendingGaps = new Dictionary<string, Version>(StringComparer.Ordinal) { [gap] = raised };
+        var releases = allReleases.Where(r => r.Version <= raised).ToList();
+        var newest = releases[^1];
+        Assert.Equal(raised, newest.Version);
+        RuledChange[] pending =
+        [
+            new(gap, Basic, "sprk_eventtype_ref", "prvReadsprk_EventType_Ref", "Global", "Deep"),
+            new(gap, Core, "sprk_eventtype_ref", "prvReadsprk_EventType_Ref", "Global", "Deep"),
+            new(gap, Office, "sprk_eventtype_ref", "prvReadsprk_EventType_Ref", "Global", "Deep"),
+        ];
+        var next = new Version(newest.Version.Major, newest.Version.Minor, newest.Version.Build + 1, 0);
+
+        IReadOnlyDictionary<string, RoleExpectation> WithPresent(IEnumerable<RuledChange> entries, string? depthOverride = null)
+        {
+            var copy = newest.Roles.ToDictionary(x => x.Key, x => x.Value);
+            foreach (var c in entries)
+                copy[c.Role] = new RoleExpectation(copy[c.Role].Absent,
+                    copy[c.Role].Present.Append(new(c.Privilege.ToUpperInvariant(), depthOverride ?? c.Depth.ToLowerInvariant())).ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase));
+            return copy;
+        }
+
+        // must-not-fire: that moment's files with the gap pending
+        Assert.Empty(PendingChangeProblems(pending, pendingGaps, releases));
+
+        // must-fire: without the pending list, each pending change fails the carry check
+        var carry = ExpectationProblems([], pending, newest.Roles);
+        Assert.All(pending, c => Assert.Contains(carry, p => p.StartsWith($"{c.Role}: {c.Privilege} — change {c.Gap} is not in the expectations' present list", StringComparison.Ordinal)));
+
+        // must-fire: a newer expectations file that does not carry the gap's entries
+        var without = releases.Append(new ExpectationsRelease(next, newest.Roles)).ToList();
+        var missing = PendingChangeProblems(pending, pendingGaps, without);
+        Assert.Equal(pending.Length, missing.Count);
+        Assert.All(pending, c => Assert.Contains(missing, p => p.StartsWith($"{next}: {c.Role}: {c.Privilege} — the next release's expectations must carry gap {gap}", StringComparison.Ordinal)));
+
+        // must-fire: a newer file that carries only some of them (or one at another depth) still fails for the rest
+        var partial = releases.Append(new ExpectationsRelease(next, WithPresent(pending.Take(2)))).ToList();
+        Assert.Single(PendingChangeProblems(pending, pendingGaps, partial), p => p.StartsWith($"{next}: ", StringComparison.Ordinal));
+        var wrongDepth = releases.Append(new ExpectationsRelease(next, WithPresent(pending, "Deep"))).ToList();
+        Assert.Equal(pending.Length, PendingChangeProblems(pending, pendingGaps, wrongDepth).Count);
+
+        // must-not-fire for the carry (other casing), must-fire stale: a newer file that carries all of them flags each pending entry
+        var withThem = releases.Append(new ExpectationsRelease(next, WithPresent(pending))).ToList();
+        Assert.Equal(
+            pending.Select(c => $"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({next}) carries it; take {gap} off the pending list"),
+            PendingChangeProblems(pending, pendingGaps, withThem));
+
+        // must-fire stale: the raised-against file itself (the newest) carries an entry
+        foreach (var c in pending)
+        {
+            var seeded = releases.Take(releases.Count - 1).Append(new ExpectationsRelease(newest.Version, WithPresent([c]))).ToList();
+            Assert.Equal(
+                new[] { $"{c.Role}: {c.Privilege} — change {gap} is pending but the newest expectations file ({newest.Version}) carries it; take {gap} off the pending list" },
+                PendingChangeProblems(pending, pendingGaps, seeded));
+        }
+
+        // must-fire: a pending gap with no change, and a raised-against version with no file
+        Assert.Equal(new[] { "NOPE: a pending gap with no change in the config" },
+            PendingChangeProblems(pending, new Dictionary<string, Version>(StringComparer.Ordinal) { ["NOPE"] = newest.Version }, releases));
+        var unknown = new Dictionary<string, Version>(StringComparer.Ordinal) { [gap] = new Version(9, 9, 9, 9) };
+        Assert.Equal(new[] { $"{gap}: raised against expectations 9.9.9.9, but there is no such expectations file" },
+            PendingChangeProblems(pending, unknown, releases));
+    }
+
     [Fact(DisplayName = "046c fix 2: every removal of config/feature-role-privileges.json is in the newest role-privilege expectations file's absent list, every change in its present list")]
     public void NewestExpectationsFileCarriesTheRuledSet()
     {
-        var removals = LoadRemovals(RuledChangesPath);
-        var changes = LoadRuledChanges(RuledChangesPath);
+        var allRemovals = LoadRemovals(RuledChangesPath);
+        var allChanges = LoadRuledChanges(RuledChangesPath);
         var file = NewestExpectationsFile(ExpectationsDirectory);
         var expectations = LoadExpectations(file);
+
+        // The pending gaps (the next release's expectations file takes them) are left out here, and held by their own ratchet, which
+        // fails once a newer expectations file than the one a gap was raised against leaves the gap's entries out.
+        Assert.Empty(PendingNextReleaseRemovalGaps); // ISS028 left the list when 1.3.2.0 carried it
+        var pendingProblems = PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, LoadAllExpectations(ExpectationsDirectory));
+        Assert.True(pendingProblems.Count == 0, "Pending removal gaps:\n  " + string.Join("\n  ", pendingProblems));
+        var removals = allRemovals.Where(r => !PendingNextReleaseRemovalGaps.ContainsKey(r.Gap)).ToList();
+        // The same for changes (ISS-042): held by PendingChangeProblems, which fails once a newer file leaves them out.
+        var pendingChangeProblems = PendingChangeProblems(allChanges, PendingNextReleaseChangeGaps, LoadAllExpectations(ExpectationsDirectory));
+        Assert.True(pendingChangeProblems.Count == 0, "Pending change gaps:\n  " + string.Join("\n  ", pendingChangeProblems));
+        var changes = allChanges.Where(c => !PendingNextReleaseChangeGaps.ContainsKey(c.Gap)).ToList();
 
         // must-not-fire: the repo as it is
         Assert.Empty(ExpectationProblems(removals, changes, expectations));
@@ -1785,6 +2422,83 @@ public class FeatureRolePrivilegeGuardTests
             x => x.Key,
             x => new RoleExpectation(x.Value.Absent.Append("prvReadsprk_NotInTheConfig").ToHashSet(StringComparer.OrdinalIgnoreCase), x.Value.Present.Append(new("prvReadsprk_AlsoNotInTheConfig", "Deep")).ToDictionary(y => y.Key, y => y.Value, StringComparer.OrdinalIgnoreCase)));
         Assert.Empty(ExpectationProblems(removals, changes, extra));
+    }
+
+    [Fact(DisplayName = "046c fix 2 pending gaps: a newer expectations file without a pending gap's entries fails; one with them passes and flags the entries stale; without the pending list the entries fail the carry check")]
+    public void PendingRemovalGapsAreARatchet()
+    {
+        var allRemovals = LoadRemovals(RuledChangesPath);
+        var changes = LoadRuledChanges(RuledChangesPath);
+        var allReleases = LoadAllExpectations(ExpectationsDirectory);
+
+        // must-not-fire: the real files and list (no gap is pending now)
+        Assert.Empty(PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, allReleases));
+
+        // The controls below replay ISS028's history, so they keep firing while no gap is pending: raised against 1.3.1.0, before
+        // 1.3.2.0 carried it. Only the files up to the raised-against version count as the releases of that moment.
+        var raised = new Version(1, 3, 1, 0);
+        var pendingGaps = new Dictionary<string, Version>(StringComparer.Ordinal) { [WriterOnlyRemovalGap] = raised };
+        var releases = allReleases.Where(r => r.Version <= raised).ToList();
+        var newest = releases[^1];
+        var pending = allRemovals.Where(r => r.Gap == WriterOnlyRemovalGap).ToList();
+        Assert.NotEmpty(pending);
+        Assert.Equal(raised, newest.Version);
+
+        // must-not-fire: that moment's files with the gap pending
+        Assert.Empty(PendingRemovalProblems(allRemovals, pendingGaps, releases));
+
+        // must-fire stale, on the real files: had ISS028 stayed pending, 1.3.2.0 (which carries it) flags each entry
+        var newestReal = allReleases[^1];
+        Assert.True(newestReal.Version > raised, "the real files have no release after the one ISS028 was raised against");
+        Assert.Equal(
+            pending.Select(r => $"{r.Role}: {r.Privilege} — removal {r.Gap} is pending but the newest expectations file ({newestReal.Version}) carries it; take {r.Gap} off the pending list"),
+            PendingRemovalProblems(allRemovals, pendingGaps, allReleases));
+
+        // must-fire: without the pending list, each pending removal fails the carry check
+        foreach (var r in pending)
+            Assert.Contains(ExpectationProblems(allRemovals, changes, newest.Roles), p => p.StartsWith($"{r.Role}: {r.Privilege} — removal {r.Gap} is not in", StringComparison.Ordinal));
+
+        var next = new Version(newest.Version.Major, newest.Version.Minor, newest.Version.Build + 1, 0);
+        IReadOnlyDictionary<string, RoleExpectation> WithPending(IReadOnlyDictionary<string, RoleExpectation> roles, IEnumerable<Removal> entries)
+        {
+            var copy = roles.ToDictionary(x => x.Key, x => x.Value);
+            foreach (var r in entries)
+                copy[r.Role] = new RoleExpectation(copy[r.Role].Absent.Append(r.Privilege.ToUpperInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase), copy[r.Role].Present);
+            return copy;
+        }
+
+        // must-fire (F4): a newer expectations file (seeded in memory) that does not carry the gap's entries
+        var withoutThem = releases.Append(new ExpectationsRelease(next, newest.Roles)).ToList();
+        var missing = PendingRemovalProblems(allRemovals, pendingGaps, withoutThem);
+        Assert.Equal(pending.Count, missing.Count);
+        Assert.All(pending, r => Assert.Contains(missing, p => p.StartsWith($"{next}: {r.Role}: {r.Privilege} — the next release's expectations must carry gap {r.Gap}", StringComparison.Ordinal)
+            && p.Contains("managed stage-and-upgrade", StringComparison.Ordinal)));
+
+        // must-fire (F4): a newer file that carries only some of them still fails for the rest
+        var partial = releases.Append(new ExpectationsRelease(next, WithPending(newest.Roles, pending.Take(1)))).ToList();
+        Assert.Equal(pending.Count - 1, PendingRemovalProblems(allRemovals, pendingGaps, partial).Count(p => p.StartsWith($"{next}: ", StringComparison.Ordinal)));
+
+        // must-not-fire for the carry, must-fire stale: a newer file that carries all of them passes and flags each pending entry stale
+        var withThem = releases.Append(new ExpectationsRelease(next, WithPending(newest.Roles, pending))).ToList();
+        Assert.Equal(
+            pending.Select(r => $"{r.Role}: {r.Privilege} — removal {r.Gap} is pending but the newest expectations file ({next}) carries it; take {r.Gap} off the pending list"),
+            PendingRemovalProblems(allRemovals, pendingGaps, withThem));
+
+        // must-fire stale: the raised-against file itself (the newest) carries an entry
+        foreach (var r in pending)
+        {
+            var seeded = releases.Take(releases.Count - 1).Append(new ExpectationsRelease(newest.Version, WithPending(newest.Roles, [r]))).ToList();
+            Assert.Equal(
+                new[] { $"{r.Role}: {r.Privilege} — removal {r.Gap} is pending but the newest expectations file ({newest.Version}) carries it; take {r.Gap} off the pending list" },
+                PendingRemovalProblems(allRemovals, pendingGaps, seeded));
+        }
+
+        // must-fire: a pending gap with no removal, and a raised-against version with no file
+        var none = new Dictionary<string, Version>(StringComparer.Ordinal) { ["NOPE"] = newest.Version };
+        Assert.Equal(new[] { "NOPE: a pending gap with no removal in the config" }, PendingRemovalProblems(allRemovals, none, releases));
+        var unknown = new Dictionary<string, Version>(StringComparer.Ordinal) { [WriterOnlyRemovalGap] = new Version(9, 9, 9, 9) };
+        Assert.Equal(new[] { $"{WriterOnlyRemovalGap}: raised against expectations 9.9.9.9, but there is no such expectations file" },
+            PendingRemovalProblems(allRemovals, unknown, releases));
     }
 
     [Fact(DisplayName = "046c fix 2: the newest expectations file is chosen by version, not by name; none is an error")]
@@ -2026,6 +2740,88 @@ public class FeatureRolePrivilegeGuardTests
             AddPrivilege(dir, Basic, "prvWriteSomePlatformTable", "Basic"); // must-fire: not in the list, not a Spaarke-table Read
             Assert.Equal(new[] { "prvWriteSomePlatformTable at Basic: neither Read on a Spaarke table nor in the named platform list (add it to the list only if it is a platform privilege)" },
                 ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // ── G5: invoice readers are never wider than core readers (field-mapping-server-write-path-r1 task 032b-1, Q-U1) ──────
+
+    private const string InvoiceRead = "prvReadsprk_invoice";
+    private static readonly string[] CoreReads = ["prvReadsprk_matter", "prvReadsprk_project", "prvReadsprk_workassignment"];
+
+    /// <summary>
+    /// Every role whose Read on <c>sprk_invoice</c> is deeper than its shallowest Read on the three core tables (an absent core Read
+    /// is shallower than any depth): such a role would show an invoice's copies of core-record values (its description, priority
+    /// and attorney and paralegal display copies, design notes/task-032b-design.md §2) to people who cannot read the core record. An
+    /// invoice Read at a level the scan does not know is reported too (fail closed).
+    /// </summary>
+    internal static List<string> InvoiceReaderProblems(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> roles)
+    {
+        var problems = new List<string>();
+        foreach (var (role, privileges) in roles.OrderBy(r => r.Key, StringComparer.Ordinal))
+        {
+            if (!privileges.TryGetValue(InvoiceRead, out var invoice))
+                continue;
+            if (Rank(invoice) < 0)
+            {
+                problems.Add($"{role}: {InvoiceRead} at an unknown level '{invoice}'");
+                continue;
+            }
+
+            var shallowest = CoreReads
+                .Select(p => (Privilege: p, Level: privileges.TryGetValue(p, out var l) ? l : "none"))
+                .OrderBy(x => Rank(x.Level))
+                .First();
+            if (Rank(invoice) > Rank(shallowest.Level))
+                problems.Add($"{role}: {InvoiceRead} at {invoice} is wider than {shallowest.Privilege} at {shallowest.Level}");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "032b-1 G5: no role reads invoices more widely than it reads matters, projects and work assignments")]
+    public void InvoiceReadIsNeverWiderThanCoreRead()
+    {
+        var files = RoleFileNames(RolesDirectory);
+        var roles = LoadRoles(RolesDirectory, files);
+        Assert.Contains(roles, r => r.Value.ContainsKey(InvoiceRead)); // not vacuous: some role reads invoices
+
+        var problems = InvoiceReaderProblems(roles);
+        Assert.True(problems.Count == 0,
+            "An invoice carries copies of core-record values, so its readers must be a subset of the core record's (task 032b, "
+            + "Q-U1). Raise the core Read or lower the invoice Read with unified-access-control-r2:\n  " + string.Join("\n  ", problems));
+    }
+
+    [Fact(DisplayName = "032b-1 G5 controls: a seeded role with invoice Read at Global and matter Read at Local fails; equal depths and no invoice Read pass")]
+    public void InvoiceReadCheckFires()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            void Seed(string name, params (string Privilege, string Level)[] privileges) => File.WriteAllText(
+                Path.Combine(dir, name + ".xml"),
+                new XDocument(new XElement("Role", new XAttribute("name", name),
+                    new XElement("RolePrivileges", privileges.Select(p =>
+                        new XElement("RolePrivilege", new XAttribute("name", p.Privilege), new XAttribute("level", p.Level)))))).ToString());
+
+            Seed("Wide", ("prvReadsprk_Invoice", "Global"), ("prvReadsprk_matter", "Local"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Global"));
+            Seed("NoCore", ("prvReadsprk_invoice", "Basic"), ("prvReadsprk_matter", "Basic"), ("prvReadsprk_project", "Basic"));
+            Seed("Unknown", ("prvReadsprk_invoice", "Org"), ("prvReadsprk_matter", "Global"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Global"));
+            Seed("Equal", ("prvReadsprk_invoice", "Deep"), ("prvReadsprk_matter", "Deep"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Deep"));
+            Seed("NoInvoice", ("prvReadsprk_matter", "Basic"));
+
+            var problems = InvoiceReaderProblems(LoadRoles(dir, ["Wide", "NoCore", "Unknown", "Equal", "NoInvoice"]));
+
+            Assert.Equal(new[]
+            {
+                "NoCore: prvReadsprk_invoice at Basic is wider than prvReadsprk_workassignment at none",
+                "Unknown: prvReadsprk_invoice at an unknown level 'Org'",
+                "Wide: prvReadsprk_invoice at Global is wider than prvReadsprk_matter at Local",
+            }, problems);
         }
         finally
         {

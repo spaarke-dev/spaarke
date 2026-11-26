@@ -181,6 +181,9 @@ function Invoke-Dv {
             Authorization      = "Bearer $(Get-DataverseToken)"
             'OData-MaxVersion' = '4.0'
             'OData-Version'    = '4.0'
+            # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+            # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+            Consistency        = 'Strong'
             Accept             = 'application/json'
         }
         foreach ($k in $ExtraHeaders.Keys) { $headers[$k] = $ExtraHeaders[$k] }
@@ -593,6 +596,41 @@ function Get-RowCountExact([string]$EntitySet, [string]$IdColumn, [string]$Filte
     return $null
 }
 
+# Read only. $null when the signed-in caller is shown to read EVERY row of the table, which is organization-wide (Global) Read on the table.
+# There is no role-name shortcut: a System Administrator holds Global Read anyway, and a name check would only add a pass path (a custom
+# role named "System Administrator"). Otherwise the reason that cannot be confirmed. A count (Get-RowCountExact) is taken as the caller: on
+# a user-owned table a row outside the caller's read depth is not returned and not masked, so the count is silently short. Any fault in the
+# check, and any answer not shaped as expected (no value list, no RolePrivileges), is a gap, never a pass. -Wording is the clause after
+# "cannot confirm" (default: every <Table> row can be read) for a caller with its own established phrase. The one check behind the task 193
+# and 116 delete scripts (the "any row holds a value" census before a column delete) and Deploy-EbillingProcedureVersionPublishedOn.ps1.
+function Get-ReadAllRowsGap([string]$Table, [string]$Wording = '') {
+    if (-not $Wording) { $Wording = "every $Table row can be read" }
+    $lead = "cannot confirm $Wording"
+    try {
+        $who = Invoke-Dv 'WhoAmI'
+        $userId = [string]$who.UserId
+        if (-not $userId) { return "${lead}: WhoAmI returned no user id" }
+        $priv = Invoke-Dv "privileges?`$select=privilegeid&`$filter=name eq 'prvRead$Table'"
+        if ($null -eq $priv -or $priv.PSObject.Properties.Name -notcontains 'value') { return "${lead}: the privilege lookup for $Table answered without a value list (malformed answer)" }
+        $privilegeId = [string]@(@($priv.value) | Where-Object { $null -ne $_ })[0].privilegeid
+        if (-not $privilegeId) { return "${lead}: the Read privilege of $Table was not found" }
+        $held = Invoke-Dv "systemusers($userId)/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()"
+        if ($null -eq $held -or $held.PSObject.Properties.Name -notcontains 'RolePrivileges') { return "${lead}: the privilege list of the caller answered without RolePrivileges (malformed answer)" }
+        $rank = @{ Basic = 1; Local = 2; Deep = 3; Global = 4 }
+        $best = $null
+        foreach ($p in @($held.RolePrivileges)) {
+            if ($null -eq $p) { continue }
+            if (([string]$p.PrivilegeId).ToLowerInvariant() -ne $privilegeId.ToLowerInvariant()) { continue }
+            $depth = [string]$p.Depth
+            if ($rank.ContainsKey($depth) -and (-not $best -or $rank[$depth] -gt $rank[$best])) { $best = $depth }
+        }
+        if ($best -eq 'Global') { return $null }
+        $shown = if ($best) { $best } else { 'none found' }
+        return "${lead}: the caller's Read depth on $Table is '$shown', not organization (Global). Run as a System Administrator or a user whose role reads the whole table; a count taken at a lower depth would be short."
+    }
+    catch { return "${lead}: the check failed ($($_.Exception.Message))" }
+}
+
 # The create body's MaxLength for the primary name column is ignored by Dataverse (it comes back as 850). Shorten the
 # primary name to the wanted length - only while the table has no rows, so no data can be cut.
 function Set-PrimaryNameLength([string]$Table, [string]$Column, [int]$Wanted) {
@@ -619,6 +657,28 @@ function Set-PrimaryNameLength([string]$Table, [string]$Column, [int]$Wanted) {
     if (-not $chk -or [int]$chk.MaxLength -ne $Wanted) { throw "$Table.$Column max length is still $($chk.MaxLength) after the update." }
     $script:LengthSet["$Table.$Column"] = $Wanted
     $script:Changed.Add("$Table.$Column length $Wanted"); Write-Host "  CHANGED  $Column max length $was -> $Wanted" -ForegroundColor Green
+}
+
+# Runs a call that does not go through Invoke-Dv (the shared PublishXml of scripts/lib/Publish-SolutionComponents.ps1, which has no retry of
+# its own) with the same transient test and backoff Invoke-Dv uses: a publish / customization lock, throttling or a 5xx is retried
+# (5 s, 10 s, 20 s ...) up to -MaxAttempts calls in all; any other error, and the last transient one, is thrown at once. Task 193 fix round 2.
+function Invoke-WithTransientRetry([scriptblock]$Action, [int]$MaxAttempts = 4) {
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try { return & $Action }
+        catch {
+            $status = Get-StatusCode $_
+            $text = Get-ErrorText $_
+            if ($attempt -lt $MaxAttempts -and (Test-Transient $status $text)) {
+                $delay = [Math]::Min(60, 5 * [Math]::Pow(2, $attempt - 1))
+                Write-Host "    transient failure (HTTP $status), retry $attempt/$($MaxAttempts - 1) in ${delay}s: $text" -ForegroundColor DarkYellow
+                Start-Sleep -Seconds $delay
+                continue
+            }
+            throw
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -835,11 +895,11 @@ function Add-ManyToMany {
 Export-ModuleMember -Function @(
     'Initialize-EbillingSchema', 'Get-EbEntity', 'Set-EbEntity', 'Format-Tally',
     'Get-DataverseToken', 'Get-ErrorText', 'Get-StatusCode', 'Test-Transient', 'Test-DuplicateRefusal',
-    'Invoke-Dv', 'Get-DvOrNull', 'New-Label', 'Invoke-WhilePropagating',
+    'Invoke-Dv', 'Get-DvOrNull', 'New-Label', 'Invoke-WhilePropagating', 'Invoke-WithTransientRetry',
     'Get-Attr', 'Assert-AttrType', 'Test-TableKnown', 'Invoke-DvCreate', 'Wait-AttrVisible',
     'Add-Column', 'Add-Lookup', 'Add-LocalChoice', 'Get-PicklistLabels', 'Add-Table',
     'New-StringDef', 'New-MemoDef', 'New-MoneyDef', 'New-DateOnlyDef', 'New-DateTimeDef',
-    'Get-RowCountExact', 'Set-PrimaryNameLength', 'Set-PrimaryNameRequired', 'Set-ColumnRequiredLevel',
+    'Get-RowCountExact', 'Get-ReadAllRowsGap', 'Set-PrimaryNameLength', 'Set-PrimaryNameRequired', 'Set-ColumnRequiredLevel',
     'Set-LookupRequiredLevel', 'Set-StringRequiredLevel', 'Set-PicklistRequiredLevel', 'Set-IntegerRequiredLevel',
     'Get-Keys', 'Add-AlternateKey', 'Get-ManyToMany', 'Add-ManyToMany'
 )

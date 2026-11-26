@@ -30,7 +30,11 @@ public class OfficeSubmissionEmailSaveContractTests
 
     private static AttachmentReference Attachment(string name, byte[] bytes, string type) => new()
     {
-        AttachmentId = "att-" + name, FileName = name, Size = bytes.Length, ContentType = type, ContentBase64 = Convert.ToBase64String(bytes),
+        AttachmentId = "att-" + name,
+        FileName = name,
+        Size = bytes.Length,
+        ContentType = type,
+        ContentBase64 = Convert.ToBase64String(bytes),
     };
 
     private static SaveRequest SubmissionSave(List<string>? selected = null, string? idempotencyKey = null) => new()

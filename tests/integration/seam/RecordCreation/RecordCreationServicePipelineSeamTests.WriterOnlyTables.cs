@@ -24,6 +24,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         { "sprk_signal", "caller-webapi" }, { "sprk_signal", "caller-mapped" }, { "sprk_signal", "system" },
         { "sprk_decisionrecord", "caller-webapi" }, { "sprk_decisionrecord", "caller-mapped" }, { "sprk_decisionrecord", "system" },
         { "sprk_budgetrevision", "caller-webapi" }, { "sprk_budgetrevision", "caller-mapped" }, { "sprk_budgetrevision", "system" },
+        { "sprk_invoicecorrection", "caller-webapi" }, { "sprk_invoicecorrection", "caller-mapped" }, { "sprk_invoicecorrection", "system" },
     };
 
     [Theory(DisplayName = "042c fix round 4 (D-204, must fire): a create of a table only its writer creates is refused before any read, for the caller and the system principal")]
@@ -60,6 +61,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
     [InlineData("sprk_budgetrevision")]
+    [InlineData("sprk_invoicecorrection")]
     public async Task CreateAsync_ATableOnlyItsWriterCreates_IsRefusedAsAnUnregisteredTableIs(string table)
     {
         const string unregistered = "sprk_notregisteredfixture";
@@ -86,6 +88,35 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         _creates.Should().ContainSingle().Which.Table.Should().Be("sprk_event");
         Owner(_creates[0].Fields).Should().Be(Directory.ChildTeam);
+    }
+
+    // ── ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's generic create alone is refused ─────────────────────────
+    // RecordTableRule.GenericCreateOnlyRefused: the same refusal, at the same point, as the three writer-only tables, while the
+    // line's update and delete stay open (CreatedOnlyByItsWriter is false; D-96's detach / move / re-attach updates it).
+
+    [Theory(DisplayName = "164a-1 (must fire): a create of an invoice line is refused before any read, for the caller and the system principal")]
+    [InlineData("caller-webapi")]
+    [InlineData("caller-mapped")]
+    [InlineData("system")]
+    public async Task CreateAsync_AnInvoiceLine_IsRefused_BeforeAnyReadOrWrite(string way)
+    {
+        var rule = RecordTableRules.Get("sprk_billingevent");
+        rule.GenericCreateRefused.Should().BeTrue();
+        rule.CreatedOnlyByItsWriter.Should().BeFalse("create only: the line's update and delete are not refused");
+
+        await CreateAsync_ATableOnlyItsWriterCreates_IsRefused_BeforeAnyReadOrWrite("sprk_billingevent", way);
+    }
+
+    [Fact(DisplayName = "164a-1: an invoice line's refusal is a table the service does not create, word for word")]
+    public Task CreateAsync_AnInvoiceLine_IsRefusedAsAnUnregisteredTableIs() =>
+        CreateAsync_ATableOnlyItsWriterCreates_IsRefusedAsAnUnregisteredTableIs("sprk_billingevent");
+
+    [Fact(DisplayName = "164a-1 (must not fire): another table's create, an event, is unaffected by the invoice line's refusal")]
+    public async Task CreateAsync_AnEvent_IsStillCreated_TheInvoiceLineRefusalDoesNotFire()
+    {
+        RecordTableRules.Get("sprk_event").GenericCreateRefused.Should().BeFalse();
+
+        await CreateAsync_AnEvent_IsStillCreated_TheRefusalDoesNotFire();
     }
 
     /// <summary>A create of <paramref name="table"/> filed under the Secure matter, the way <paramref name="way"/> names.</summary>

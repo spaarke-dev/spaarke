@@ -32,21 +32,29 @@ public sealed partial class DecisionRecordWriterTests
     internal static Harness WithBillingLookups(Harness h)
     {
         h.Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Returns((QueryExpression query, CancellationToken _) =>
+            .Returns(async (QueryExpression query, CancellationToken _) =>
             {
-                h.Lookups.Add(query);
-                if (h.LookupFault is { } fault)
+                // Task 084h-5: the harness's lock (creates may run concurrently), then its barrier: answered, then held, so concurrent
+                // attempts have all read before any of them creates.
+                List<Entity> stored;
+                lock (h.Created)
                 {
-                    return Task.FromException<EntityCollection>(fault);
+                    h.Lookups.Add(query);
+                    if (h.LookupFault is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    stored = h.Created.Select(c => StoredByTheWriter(c, c.Id == Guid.Empty ? h.NewId : c.Id))
+                        .Concat(h.Seeded)
+                        .Concat(h.Rows.Values)
+                        .Where(row => row.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => BillingSatisfies(c, row)))
+                        .Take(query.TopCount ?? int.MaxValue)
+                        .ToList();
                 }
 
-                var stored = h.Created.Select(c => StoredByTheWriter(c, c.Id == Guid.Empty ? h.NewId : c.Id))
-                    .Concat(h.Seeded)
-                    .Concat(h.Rows.Values)
-                    .Where(row => row.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => BillingSatisfies(c, row)))
-                    .Take(query.TopCount ?? int.MaxValue)
-                    .ToList();
-                return Task.FromResult(new EntityCollection(stored));
+                await h.HoldIfKeyedAsync(query);
+                return new EntityCollection(stored);
             });
         return h;
 
@@ -58,6 +66,28 @@ public sealed partial class DecisionRecordWriterTests
             stored["createdby"] = new EntityReference("systemuser", WriterUser);
             return stored;
         }
+    }
+
+    /// <summary>
+    /// ISS-034 review round 1 (F2): the shared harness answers EVERY create with the one <see cref="Harness.NewId"/>, so two records written in
+    /// one test cannot be told apart by id. This re-answers the create the way Dataverse does: the FIRST create still gets
+    /// <see cref="Harness.NewId"/> (so a test that reads it for a single record is unchanged), every later create its own new id, and each
+    /// created row carries its id (the lookups above find it by that id). Opt-in, so the shared harness (ontology-owned) stays byte-identical.
+    /// </summary>
+    internal static Harness WithDistinctCreateIds(Harness h)
+    {
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity e, CancellationToken _) =>
+            {
+                if (e.Id == Guid.Empty)
+                {
+                    e.Id = h.Created.Count == 0 ? h.NewId : Guid.NewGuid();
+                }
+
+                h.Created.Add(e);
+                return Task.FromResult(e.Id);
+            });
+        return h;
     }
 
     private static bool BillingSatisfies(ConditionExpression condition, Entity row)
@@ -78,9 +108,9 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     /// <summary>A harness whose invoice is filed under <see cref="MatterId"/> and whose line under its own project (D-75).</summary>
-    private static Harness BillingHarness(Guid? lineProject = null)
+    private static Harness BillingHarness(Guid? lineProject = null, IReadOnlySet<DecisionRecordWriter.KeyedEntry>? derivedRecordIds = null)
     {
-        var h = WithBillingLookups(new Harness());
+        var h = WithBillingLookups(new Harness(derivedRecordIds: derivedRecordIds));
         h.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) };
         h.Rows[("sprk_billingevent", LineId)] = new Entity("sprk_billingevent", LineId)
         {
@@ -103,7 +133,7 @@ public sealed partial class DecisionRecordWriterTests
         Guid? policyVersion = null) => new(
         decisionId ?? BillingDecision,
         code,
-        subject ?? (code is "accept-line" or "reduce-line" or "disallow-line"
+        subject ?? (code is "accept-line" or "reduce-line" or "disallow-line" or "add-line"
             ? new DecisionRecordRef("sprk_billingevent", LineId)
             : new DecisionRecordRef("sprk_invoice", InvoiceId)),
         system ? null : confirmer ?? Reviewer,
@@ -173,6 +203,8 @@ public sealed partial class DecisionRecordWriterTests
     [InlineData("approve-invoice", "sprk_matter")]
     [InlineData("accept-line", "sprk_todo")]
     [InlineData("override-submission", "sprk_invoicesubmission")]
+    [InlineData("assign-firm", "sprk_invoicesubmission")] // 095d-1b: Set firm files under the invoice, never the submission
+    [InlineData("add-line", "sprk_invoice")] // 164a-2 (EB-D-198): an added line is filed under the line, never the invoice
     public async Task Billing_C2_ASubjectThatIsNotTheCodesTable_IsRefused_WithZeroReaderCallsAndZeroCreates(string code, string table)
     {
         var h = BillingHarness();
@@ -192,7 +224,14 @@ public sealed partial class DecisionRecordWriterTests
         {
             ("accept-line", "sprk_billingevent"), ("reduce-line", "sprk_billingevent"), ("disallow-line", "sprk_billingevent"),
             ("approve-invoice", "sprk_invoice"), ("reject-invoice", "sprk_invoice"), ("return-to-firm", "sprk_invoice"),
-            ("override-submission", "sprk_invoice"),
+            ("override-submission", "sprk_invoice"), ("assign-firm", "sprk_invoice"),
+            ("add-line", "sprk_billingevent"), // 164a-2 (EB-D-198): the subject is the line (D-75)
+            // 095f-2b (EB-D-241; design 3 option A, ontology-r1 amendment of D-100 "additive only"): an invoice-level adjustment and its removal
+            // file under the invoice; the writer literal is unchanged (every code outside the four line codes maps to the invoice).
+            ("add-adjustment", "sprk_invoice"), ("remove-adjustment", "sprk_invoice"),
+            // iss034a (EB-D-244; ontology-r1 reviews the amendment as for 095f-2b): the operator's finish of a stranded decision files under the
+            // invoice; the writer literal is unchanged.
+            ("finish-stranded-decision", "sprk_invoice"),
         }, "D-75, D-101: no submission subject; the override and the automatic rejection file under the invoice");
         DecisionRecordWriter.BillingSubjectEntityOf("mark-complete").Should().BeNull("a Signals code has no billing subject");
         DecisionActionCatalog.BillingActions.Should().OnlyContain(d => !d.Code.Contains('_') && !d.Code.Contains('%') && !d.Code.Contains('['),
@@ -215,6 +254,43 @@ public sealed partial class DecisionRecordWriterTests
         second.ConfirmedByUserId.Should().Be(Reviewer, "the stored confirmer");
         h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
         h.OwnerAsks.Should().ContainSingle("a repeat stops at the lookup");
+    }
+
+    [Fact]
+    public async Task Billing_C3_AddLine_IsFiledUnderTheLine_WithTheReason_AndARepeatOfTheDecisionIdGivesOneRecord()
+    {
+        // 164a-2 (EB-D-198): idempotent on the decision id - a retry after a timeout gives one line's record, not two.
+        var h = BillingHarness();
+        var facts = new Dictionary<string, object?> { ["lineId"] = LineId.ToString("D"), ["costType"] = "Fee", ["utbmsTask"] = "L100" };
+
+        var first = await h.Writer.WriteBillingDecisionAsync(Billing("add-line", reason: "Fee omitted from the invoice", facts: facts));
+        var second = await h.Writer.WriteBillingDecisionAsync(Billing("add-line", reason: "Fee omitted from the invoice", facts: facts));
+
+        first.AlreadyRecorded.Should().BeFalse();
+        second.AlreadyRecorded.Should().BeTrue();
+        second.RecordId.Should().Be(first.RecordId);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        var record = h.Created.Should().ContainSingle().Which;
+        record.GetAttributeValue<string>("sprk_actioncode").Should().Be("add-line");
+        record.GetAttributeValue<string>("sprk_reason").Should().Be("Fee omitted from the invoice");
+        record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Reviewer);
+        first.ResolvedSignalIds.Should().BeEmpty("an added line resolves no Signal");
+    }
+
+    [Fact]
+    public async Task Billing_C3_AddLine_WithoutAReason_IsRefusedBeforeAnyIo_AndTheSameIdWithOtherContentIsRefused()
+    {
+        var h = BillingHarness();
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("add-line", reason: " "))).Should()
+            .ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NoIo(h);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("add-line", reason: "Fee omitted"));
+        var other = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("add-line", reason: "A different reason"))).Should()
+            .ThrowAsync<DecisionRecordRefusedException>()).Which;
+        other.Message.Should().Contain("other content", "the same id with another reason is not a repeat");
+        h.Created.Should().ContainSingle();
     }
 
     [Fact]
@@ -292,6 +368,7 @@ public sealed partial class DecisionRecordWriterTests
         first.AlreadyRecorded.Should().BeFalse();
         ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
         ex.Message.Should().Contain("another billing action", "refused by the lookup, not by validation");
+        ex.IsOtherContent.Should().BeFalse("another billing action under the id is not other content");
         h.Lookups.Where(q => q.EntityName == "sprk_decisionrecord").Should().HaveCount(2, "both calls reached the lookup");
         h.Created.Should().ContainSingle("the first decision's record only")
             .Which.GetAttributeValue<string>("sprk_actioncode").Should().Be("reject-invoice");
@@ -571,8 +648,26 @@ public sealed partial class DecisionRecordWriterTests
             ["createdby"] = new EntityReference("systemuser", WriterUser),
         });
 
-        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>())
-            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        // ebilling-r1 164a fix round K2: same reason, but the message says the content cannot be read, so a caller does not read it as proven
+        // other content (Add line answers id_reused only for DecisionRecordWriter.BillingOtherContentRefusal).
+        ex.Message.Should().Be(DecisionRecordWriter.BillingContentUnreadableRefusal);
+        ex.IsOtherContent.Should().BeFalse("an unreadable recorded content is not proven other content");
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_K2_ReadableOtherContent_IsTheOtherContentRefusal()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(StoredBillingRow("1111111111111111111111111111111111111111111111111111111111111111"));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        ex.Message.Should().Be(DecisionRecordWriter.BillingOtherContentRefusal);
+        ex.IsOtherContent.Should().BeTrue("the typed marker, not the message, is what a caller reads");
         h.Created.Should().BeEmpty();
     }
 
@@ -1125,8 +1220,8 @@ public sealed partial class DecisionRecordWriterTests
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_actioncode" && c.Operator == ConditionOperator.In);
         query.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like
             && ((string)c.Values.Single()).Contains(BillingDecisionKey.IdOf("sprk_billingevent", LineId, BillingDecision).ToString("D"), StringComparison.Ordinal));
-        query.ColumnSet.Columns.Should().BeEquivalentTo(["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby"],
-            "ids, read time, codes and the decider only, never record text");
+        query.ColumnSet.Columns.Should().BeEquivalentTo(["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby", "sprk_reason"],
+            "ids, read time, codes, the decider and (095f-2c round 1) the stored reason, so a repeat can finish a stranded decision from its record; the note rides in sprk_steps");
         h.Created.Should().BeEmpty("a read writes nothing");
     }
 
@@ -1145,6 +1240,56 @@ public sealed partial class DecisionRecordWriterTests
         stored.SetReadAtUtc!.Value.Kind.Should().Be(DateTimeKind.Utc);
         stored.Signals.Should().Equal((BillingSignal, "EB-RATE"));
         stored.ConfirmedByUserId.Should().Be(Reviewer, "the decider as the writer wrote it (sprk_confirmedby), for a repeat's close");
+    }
+
+    [Theory(DisplayName = "095f-2c round 1: the stored set carries the record's stored reason and note (a note that is absent is readable and means none), so a repeat can finish the decision from its record")]
+    [InlineData("A note", "A note")]
+    [InlineData(null, null)]
+    public async Task Billing_StoredSet_CarriesTheStoredReasonAndNote(string? note, string? expectedNote)
+    {
+        var h = BillingHarness();
+        var values = new Dictionary<string, object?> { ["submissionId"] = "s-1" }; // the override's own values are never empty
+        if (note is not null)
+        {
+            values["note"] = note;
+        }
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("override-submission", reason: "The stored reason.", values: values, facts: FactsWithSet()));
+
+        var stored = (await h.Writer.FindBillingDecisionResolvedSetAsync(new DecisionRecordRef("sprk_invoice", InvoiceId), BillingDecision))!;
+
+        stored.Reason.Should().Be("The stored reason.");
+        stored.Note.Should().Be(expectedNote);
+        stored.StoredContentReadable.Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "095f-2c round 1: a stored record whose step has no values, or whose note is not text, is not readable as a decision (the caller fails closed)")]
+    [InlineData("values-missing")]
+    [InlineData("note-not-text")]
+    [InlineData("blank-note")]
+    public async Task Billing_StoredSet_ADamagedStep_IsNotReadable(string damage)
+    {
+        var h = BillingHarness();
+        await h.Writer.WriteBillingDecisionAsync(Billing(
+            "override-submission", reason: "The stored reason.", values: new Dictionary<string, object?> { ["note"] = "A note" }, facts: FactsWithSet()));
+        var record = h.Created.Single(e => e.LogicalName == "sprk_decisionrecord");
+        var steps = System.Text.Json.Nodes.JsonNode.Parse(record.GetAttributeValue<string>("sprk_steps"))!;
+        var step = steps["steps"]!.AsArray().Single()!.AsObject();
+        if (damage == "values-missing")
+        {
+            step.Remove("values");
+        }
+        else
+        {
+            step["values"]!["note"] = damage == "note-not-text" ? 7 : "   ";
+        }
+
+        record["sprk_steps"] = steps.ToJsonString();
+
+        var stored = (await h.Writer.FindBillingDecisionResolvedSetAsync(new DecisionRecordRef("sprk_invoice", InvoiceId), BillingDecision))!;
+
+        stored.StoredContentReadable.Should().BeFalse();
+        stored.Note.Should().BeNull();
     }
 
     [Fact]

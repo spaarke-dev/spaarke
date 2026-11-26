@@ -18,9 +18,10 @@
 import { createChildRecordViaBff } from '@spaarke/ui-components';
 import { authenticatedFetch } from './authInit';
 import { getBffBaseUrl } from '../config/runtimeConfig';
-import { IResult, ok, fail, tryCatch } from '../types/result';
-import { IMatter, IEvent, ITodo, IProject, IDocument, IInvoice, IUserPreference } from '../types/entities';
-import { TodoStatus, EventFilterCategory } from '../types/enums';
+import { TodoDataverseService } from '@spaarke/smart-todo-components';
+import { IResult, tryCatch } from '../types/result';
+import { IMatter, IEvent, IProject, IDocument, IInvoice } from '../types/entities';
+import { EventFilterCategory } from '../types/enums';
 import type { IWebApi, WebApiEntity } from '../types/xrm';
 import {
   buildMattersQuery,
@@ -32,36 +33,8 @@ import {
   buildDocumentsByMatterQuery,
   buildDocumentsByUserQuery,
   buildDocumentsTabQuery,
-  DOCUMENT_TAB_SELECT_FIELDS,
-  buildTodoItemsQuery,
-  buildDismissedTodoQuery,
   buildOwnerFilter,
 } from './queryHelpers';
-
-// ---------------------------------------------------------------------------
-// statuscode + statecode constants for sprk_todo (per task 009 customization)
-// ---------------------------------------------------------------------------
-
-/**
- * sprk_todo.statuscode values:
- *   1          = Open       (statecode 0 / Active)
- *   659490001  = In Progress(statecode 0 / Active)
- *   2          = Completed  (statecode 1 / Inactive)
- *   659490002  = Dismissed  (statecode 1 / Inactive)
- *
- * Maps the legacy TodoStatus string discriminator onto sprk_todo lifecycle.
- * "Restored" is not a distinct status — restore = set statuscode back to Open.
- */
-const TODO_STATUSCODE_VALUES: Record<TodoStatus, number> = {
-  Open: 1,
-  Completed: 2,
-  Dismissed: 659490002,
-};
-
-/** Active statecode for sprk_todo (0 = Active). */
-const STATECODE_ACTIVE = 0;
-/** Inactive statecode for sprk_todo (1 = Inactive). */
-const STATECODE_INACTIVE = 1;
 
 // ---------------------------------------------------------------------------
 // Xrm.WebApi result shape helpers
@@ -95,19 +68,6 @@ function mapEventFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
     eventTypeName: (e[`_sprk_eventtype_ref_value${FV}`] as string) ?? '',
     regardingRecordTypeName: (e[`_sprk_regardingrecordtype_value${FV}`] as string) ?? '',
     assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
-  }));
-}
-
-/**
- * Map formatted-value annotations on `sprk_todo` records into typed display
- * properties (assignedToName, statuscodeName) so UI components can read a
- * single property without collision risk.
- */
-function mapTodoFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
-  return entities.map(e => ({
-    ...e,
-    assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
-    statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
   }));
 }
 
@@ -171,7 +131,13 @@ function mapDocumentTabFormattedValues(entities: WebApiRecord[]): WebApiRecord[]
 // DataverseService class
 // ---------------------------------------------------------------------------
 
-export class DataverseService {
+/**
+ * The to-do and user-preference methods (getActiveTodos, createTodo, updateTodoStatus, dismissTodo,
+ * getUserPreferences, saveUserPreferences and the Kanban column/pin writes) come from the shared
+ * `TodoDataverseService` (#2972) — the SmartTodo code page uses the same class. This class adds the
+ * workspace's own queries (matters, projects, invoices, documents, events, notifications).
+ */
+export class DataverseService extends TodoDataverseService {
   /**
    * Construct with the Xrm.WebApi interface (or compatible).
    * Obtain via: getWebApi() from xrmProvider.ts
@@ -182,9 +148,11 @@ export class DataverseService {
      * UAC-r2 task 147 r1 (owner round 28 item 1): how a to-do is CREATED — through the BFF (G5), which decides its owner.
      * Injectable for tests.
      */
-    private readonly _createTodoRecord: (payload: WebApiEntity) => Promise<string> = payload =>
+    createTodoRecord: (payload: WebApiEntity) => Promise<string> = payload =>
       createChildRecordViaBff(authenticatedFetch, getBffBaseUrl(), 'sprk_todo', payload)
-  ) {}
+  ) {
+    super(_webApi, createTodoRecord);
+  }
 
   // -------------------------------------------------------------------------
   // Matter queries
@@ -439,7 +407,6 @@ export class DataverseService {
     return tryCatch(async () => {
       // 1. Retrieve the view's FetchXML
       const entity = options.viewType === 'userquery' ? 'userquery' : 'savedquery';
-      const idField = options.viewType === 'userquery' ? 'userqueryid' : 'savedqueryid';
       const viewRecord = await this._webApi.retrieveRecord(entity, viewId, '?$select=fetchxml');
       let fetchXml = viewRecord.fetchxml as string;
       if (!fetchXml) throw new Error(`View ${viewId} has no fetchxml`);
@@ -455,296 +422,6 @@ export class DataverseService {
       );
       return toTypedArray<IDocument>(mapDocumentTabFormattedValues(result.entities));
     }, 'DOCUMENTS_VIEW_FETCH_ERROR');
-  }
-
-  // -------------------------------------------------------------------------
-  // To-Do CRUD operations (sprk_todo — first-class entity per R3 FR-09 / FR-11)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Retrieve active (non-dismissed) to-do items for the Smart To Do widget.
-   *
-   * Returns `sprk_todo` records where statecode = 0 (Active) and statuscode in
-   * (Open, In Progress). Ownership predicate uses the workspace scope context
-   * (my / all). Sort: priorityscore desc, duedate asc.
-   *
-   * Per R3 FR-29 / OS-1, this no longer queries `sprk_event` with todoflag.
-   *
-   * @param userId  - The GUID of the current user
-   * @param options - Workspace scope context
-   */
-  async getActiveTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<ITodo[]>> {
-    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
-    const query = buildTodoItemsQuery(userId, ctx);
-    return tryCatch(async () => {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
-      return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));
-    }, 'TODOS_FETCH_ERROR');
-  }
-
-  /**
-   * Retrieve dismissed to-do items (collapsible dismissed section).
-   *
-   * Returns `sprk_todo` records where statuscode = 659490002 (Dismissed).
-   *
-   * @param userId  - The GUID of the current user
-   * @param options - Workspace scope context
-   */
-  async getDismissedTodos(userId: string, options: { scope?: 'my' | 'all'; businessUnitId?: string } = {}): Promise<IResult<ITodo[]>> {
-    const ctx = options.scope ? { userId, scope: options.scope, businessUnitId: options.businessUnitId } : undefined;
-    const query = buildDismissedTodoQuery(userId, ctx);
-    return tryCatch(async () => {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
-      return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));
-    }, 'DISMISSED_TODOS_FETCH_ERROR');
-  }
-
-  /**
-   * Create a new manual to-do as a `sprk_todo` record.
-   *
-   * Sets:
-   *   sprk_name   = title
-   *   statuscode  = 1 (Open)
-   *   statecode   = 0 (Active)
-   *   (no owner: the BFF decides it — UAC-r2 task 147 r1)
-   *
-   * Per OS-1: no `sprk_todoflag` write. Per FR-09: the source field is no
-   * longer modelled on the entity — provenance lives in audit logs instead.
-   *
-   * @param title  - The subject / title for the to-do item
-   * @param userId - The GUID of the current user (kept for the call signature; the owner is the server's decision)
-   * @returns      IResult<string> — the new sprk_todoid GUID on success
-   */
-  async createTodo(title: string, userId: string): Promise<IResult<string>> {
-    if (!title || title.trim().length === 0) {
-      return fail('VALIDATION_ERROR', 'To-do title cannot be empty.');
-    }
-
-    void userId;
-    // UAC-r2 task 147 r1 (owner round 28 item 1): no `ownerid` — the client never sets the owner. The BFF creates the
-    // to-do as the application, owned by the team the ownership rule names (for an unfiled to-do, the caller's
-    // business-unit team, owner round 5) and records the caller as its creator person.
-    const record: WebApiEntity = {
-      sprk_name: title.trim(),
-      statecode: STATECODE_ACTIVE,
-      statuscode: TODO_STATUSCODE_VALUES.Open,
-    };
-
-    return tryCatch(async () => this._createTodoRecord(record), 'TODO_CREATE_ERROR');
-  }
-
-  /**
-   * Update the statuscode/statecode on an existing `sprk_todo` item.
-   *
-   * Status transitions (per task 009):
-   *   - Open       → statecode 0 / statuscode 1
-   *   - Completed  → statecode 1 / statuscode 2
-   *   - Dismissed  → statecode 1 / statuscode 659490002
-   *
-   * @param todoId - The sprk_todoid GUID to update
-   * @param status - The new TodoStatus value ('Open', 'Completed', 'Dismissed')
-   */
-  async updateTodoStatus(todoId: string, status: TodoStatus): Promise<IResult<void>> {
-    const statuscode = TODO_STATUSCODE_VALUES[status];
-    const statecode = status === 'Open' ? STATECODE_ACTIVE : STATECODE_INACTIVE;
-    const record: WebApiEntity = { statecode, statuscode };
-
-    return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_todo', todoId, record);
-    }, 'TODO_STATUS_UPDATE_ERROR');
-  }
-
-  /**
-   * Dismiss a to-do item by setting its status to Dismissed.
-   *
-   * The item moves from the active list to the collapsible "dismissed"
-   * section and can be restored later via `updateTodoStatus(id, 'Open')`.
-   *
-   * @param todoId - The sprk_todoid GUID to dismiss
-   */
-  async dismissTodo(todoId: string): Promise<IResult<void>> {
-    return this.updateTodoStatus(todoId, 'Dismissed');
-  }
-
-  /**
-   * Delete a to-do record entirely (hard delete).
-   * Reserved for user-created items where the user explicitly removes it.
-   * Prefer `dismissTodo` to preserve audit history.
-   *
-   * @param todoId - The sprk_todoid GUID to delete
-   */
-  async deleteTodo(todoId: string): Promise<IResult<void>> {
-    return tryCatch(async () => {
-      await this._webApi.deleteRecord('sprk_todo', todoId);
-    }, 'TODO_DELETE_ERROR');
-  }
-
-  // -------------------------------------------------------------------------
-  // Kanban & User Preference operations
-  // -------------------------------------------------------------------------
-
-  /**
-   * Retrieve user preferences by type.
-   * Queries sprk_userpreference filtered by user and preference type.
-   *
-   * @param userId - The GUID of the current user
-   * @param preferenceType - The preference type choice value (e.g., 100000000 for TodoKanbanThresholds)
-   * @returns IResult<IUserPreference[]>
-   */
-  async getUserPreferences(
-    userId: string,
-    preferenceType: number
-  ): Promise<IResult<IUserPreference[]>> {
-    const select = [
-      'sprk_userpreferenceid',
-      'sprk_preferencetype',
-      'sprk_preferencevalue',
-      '_sprk_user_value',
-      'createdon',
-      'modifiedon',
-    ].join(',');
-
-    const filter = `_sprk_user_value eq ${userId} and sprk_preferencetype eq ${preferenceType}`;
-    const query = `?$select=${select}&$filter=${filter}&$top=1`;
-
-    return tryCatch(async () => {
-      const result = await this._webApi.retrieveMultipleRecords('sprk_userpreference', query, 1);
-      return toTypedArray<IUserPreference>(result.entities);
-    }, 'USER_PREFERENCES_FETCH_ERROR');
-  }
-
-  /**
-   * Create or update a user preference record.
-   * If a record already exists for this user + type, updates it; otherwise creates a new one.
-   *
-   * @param userId - The GUID of the current user
-   * @param preferenceType - The preference type choice value
-   * @param value - The JSON string to store in sprk_preferencevalue
-   * @param existingId - Optional existing record ID (if known, avoids a query)
-   * @returns IResult<string> — the preference record ID
-   */
-  async saveUserPreferences(
-    userId: string,
-    preferenceType: number,
-    value: string,
-    existingId?: string
-  ): Promise<IResult<string>> {
-    // If we already know the record ID, just update
-    if (existingId) {
-      return tryCatch(async () => {
-        await this._webApi.updateRecord('sprk_userpreference', existingId, {
-          sprk_preferencevalue: value,
-        });
-        return existingId;
-      }, 'USER_PREFERENCES_SAVE_ERROR');
-    }
-
-    // Check if a record exists for this user + type
-    const existing = await this.getUserPreferences(userId, preferenceType);
-    if (existing.success && existing.data.length > 0) {
-      const id = existing.data[0].sprk_userpreferenceid;
-      return tryCatch(async () => {
-        await this._webApi.updateRecord('sprk_userpreference', id, {
-          sprk_preferencevalue: value,
-        });
-        return id;
-      }, 'USER_PREFERENCES_SAVE_ERROR');
-    }
-
-    // Create new preference record
-    return tryCatch(async () => {
-      const record: WebApiEntity = {
-        sprk_preferencetype: preferenceType,
-        sprk_preferencevalue: value,
-        'sprk_User@odata.bind': `/systemusers(${userId})`,
-      };
-      const result = await this._webApi.createRecord('sprk_userpreference', record);
-      return result.id;
-    }, 'USER_PREFERENCES_CREATE_ERROR');
-  }
-
-  /**
-   * Update the Kanban column assignment for a to-do.
-   *
-   * Method name retained as `updateEventColumn` to keep the `useKanbanColumns`
-   * hook signature stable; the value is a `sprk_todoid` and the target is
-   * `sprk_todo` (R3 FR-29 / OS-1).
-   *
-   * @param todoId - The sprk_todoid GUID
-   * @param column - sprk_todocolumn choice (100000000=Today, 100000001=Tomorrow, 100000002=Future)
-   */
-  async updateEventColumn(todoId: string, column: number): Promise<IResult<void>> {
-    return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_todo', todoId, {
-        sprk_todocolumn: column,
-      });
-    }, 'TODO_COLUMN_UPDATE_ERROR');
-  }
-
-  /**
-   * Update the pin/lock state for a to-do.
-   *
-   * Method name retained as `updateEventPinned` for hook compatibility; the
-   * value is a `sprk_todoid` and the target is `sprk_todo`.
-   *
-   * @param todoId - The sprk_todoid GUID
-   * @param pinned - true to pin (lock in current column), false to unpin
-   */
-  async updateEventPinned(todoId: string, pinned: boolean): Promise<IResult<void>> {
-    return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_todo', todoId, {
-        sprk_todopinned: pinned,
-      });
-    }, 'TODO_PIN_UPDATE_ERROR');
-  }
-
-  /**
-   * Batch update Kanban column assignments for multiple to-do items.
-   * Used by the Recalculate action to reassign unpinned items.
-   *
-   * Executes sequential updateRecord calls (Xrm.WebApi has no $batch support).
-   * Returns count of successes and failures.
-   *
-   * Param-name retained as `eventId` for backward compatibility with the hook
-   * signature; the value is a `sprk_todoid`.
-   *
-   * @param updates - Array of { eventId, column } pairs
-   */
-  async batchUpdateEventColumns(
-    updates: Array<{ eventId: string; column: number }>
-  ): Promise<IResult<{ succeeded: number; failed: number }>> {
-    let succeeded = 0;
-    let failed = 0;
-
-    for (const update of updates) {
-      try {
-        await this._webApi.updateRecord('sprk_todo', update.eventId, {
-          sprk_todocolumn: update.column,
-        });
-        succeeded++;
-      } catch {
-        failed++;
-      }
-    }
-
-    return ok({ succeeded, failed });
-  }
-
-  /**
-   * Update the description of a to-do.
-   *
-   * Method name retained as `updateEventDescription` for compatibility; target
-   * is `sprk_todo`.
-   *
-   * @param todoId - The sprk_todoid GUID
-   * @param description - The new description text
-   */
-  async updateEventDescription(todoId: string, description: string): Promise<IResult<void>> {
-    return tryCatch(async () => {
-      await this._webApi.updateRecord('sprk_todo', todoId, {
-        sprk_description: description,
-      });
-    }, 'TODO_DESCRIPTION_UPDATE_ERROR');
   }
 
   // -------------------------------------------------------------------------

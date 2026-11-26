@@ -1,5 +1,5 @@
 import * as React from "react";
-import { makeStyles, tokens, Text, MessageBar, MessageBarBody } from "@fluentui/react-components";
+import { makeStyles, tokens, MessageBar, MessageBarBody } from "@fluentui/react-components";
 import {
   MoneyRegular,
   WarningRegular,

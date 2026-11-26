@@ -311,7 +311,8 @@ export const EmailView: React.FC<EmailViewProps> = ({
             mode="compose"
             sendMode="user"
             {...(fromMailbox ? { fromMailbox } : {})}
-            // The server's outbound `.eml` archive is not part of this flow (and is off by default server-side).
+            // This flow does not ask for the outbound `.eml` archive; the server still archives the email when it is filed to a
+            // record (D-217).
             archiveToSpe={false}
             // Only the open document is attached; no add-file / link-document / record-search affordances.
             attachmentSources={NO_ADDITIONAL_ATTACHMENT_SOURCES}

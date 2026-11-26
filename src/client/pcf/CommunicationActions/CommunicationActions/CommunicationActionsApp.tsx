@@ -50,11 +50,16 @@ import {
   type ICommunicationAssociation,
   searchUsersAndContacts,
   createXrmDataService,
+  createXrmEmailComposeHandlers,
+  resolveInitialInvoiceRecord,
   cleanGuid,
   getXrm,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
-import { initializeAuth, resolveDataverseUrl } from './authInit';
+import {
+  usePcfAuthBootstrap,
+  resolveDataverseUrl as resolveDataverseUrlFrom,
+} from '@spaarke/communication-components/logic/pcf-host';
 import { archiveFailureMessage } from './archiveFailure';
 import { readSourceIsInternalOnly } from './sourceInternalOnly';
 // Task 022: the Layer-1 action-bar / composer-prefill / suggested-create logic now
@@ -70,13 +75,29 @@ import {
   archiveStatus,
   type IArchiveResult,
 } from '@spaarke/communication-components/logic/actions';
+// ebilling-r1 task 118: "Submit Invoice" replaces "Link Invoice". The flow, its dialog and its transport live in the
+// shared lib (the same ones the email workspace uses); this PCF only injects the host's fetch and Dataverse read.
+import { createEmailInvoiceSubmission } from '@spaarke/communication-components/logic/invoice';
+import {
+  SubmitInvoiceDialog,
+  type SubmitInvoiceDialogProps,
+} from '@spaarke/communication-components/components/SubmitInvoice';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
+
+/** The environment-variable readers the shared auth bootstrap resolves its settings with. */
+/** The Dataverse org URL (MSAL redirect URI / document links). */
+const resolveDataverseUrl = (): string => resolveDataverseUrlFrom(getClientUrl);
+
+const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
+// getXrm is never passed as a value (the Xrm capability guard follows every getXrm value to its uses).
+const getClientUrl = (): unknown => getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
 // whose FC return type is incompatible with React 16's JSX element type. Cast at
 // the boundary (same pattern as RegardingResolver's PolymorphicPicker). Runtime
 // is unaffected — the compiled module is identical.
 const SendEmailPageR16 = SendEmailPage as unknown as React.ComponentType<ISendEmailPageProps>;
+const SubmitInvoiceDialogR16 = SubmitInvoiceDialog as unknown as React.ComponentType<SubmitInvoiceDialogProps>;
 
 // sprk_communicationtype = Email (task-002 verified) — the only interactive channel.
 const COMMUNICATION_TYPE_EMAIL = 100000000;
@@ -119,17 +140,24 @@ const COMMUNICATION_REGARDING_FIELDS: { field: string; entityType: string }[] = 
   { field: 'sprk_regardingworkassignment', entityType: 'sprk_workassignment' },
 ];
 
-// "Create from this email" flows. Target-entity mapping + the modal launch itself
+// "Create from this email" flows (Event / To Do). Target-entity mapping + the modal launch itself
 // live in the `launchCreate` seam (CreateKind imported above) so OOB↔custom is
 // swappable without touching the button call sites (UAT R3 C11-3, owner requirement).
+// Submit Invoice (task 118) is not a "create a form" flow: it runs the shared dialog below.
+
+/** What the engine's provenance suggests: the Event / To Do creates, and whether this looks like an invoice. */
+interface ISuggestions {
+  creates: Set<CreateKind>;
+  invoice: boolean;
+}
 
 /**
  * Parse the association provenance JSON and decide which "create from this email"
  * actions the engine's structural signals suggest (mirrors the Connections PCF's
  * deriveCreateActions). Best-effort: bad/empty JSON → no suggestions.
  */
-function deriveSuggestedCreates(provenanceRaw: string | null | undefined): Set<CreateKind> {
-  const out = new Set<CreateKind>();
+function deriveSuggestions(provenanceRaw: string | null | undefined): ISuggestions {
+  const out: ISuggestions = { creates: new Set<CreateKind>(), invoice: false };
   if (!provenanceRaw) return out;
   try {
     const doc = JSON.parse(provenanceRaw) as {
@@ -137,9 +165,9 @@ function deriveSuggestedCreates(provenanceRaw: string | null | undefined): Set<C
     };
     for (const sig of doc.signals ?? []) {
       const obligations = sig.obligations ?? [];
-      if (sig.category === 'invoice') out.add('invoice');
-      if (sig.category === 'event' || obligations.includes('calendar-response')) out.add('event');
-      if (obligations.includes('deadline-response') || obligations.includes('payment-review')) out.add('todo');
+      if (sig.category === 'invoice') out.invoice = true;
+      if (sig.category === 'event' || obligations.includes('calendar-response')) out.creates.add('event');
+      if (obligations.includes('deadline-response') || obligations.includes('payment-review')) out.creates.add('todo');
     }
   } catch {
     /* ignore malformed provenance */
@@ -265,9 +293,6 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const communicationId = React.useMemo(() => getHostRecordId(), []);
   const webApi = context.webAPI;
 
-  const [authReady, setAuthReady] = React.useState(false);
-  const [authError, setAuthError] = React.useState<string | null>(null);
-  const [bffBaseUrl, setBffBaseUrl] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
   // PR #2248: a Save to SharePoint that refused an attachment is a warning, not a success.
@@ -289,40 +314,23 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // Which "create from this email" actions the engine flagged (from the provenance
   // signals) — drives the subtle ✨ brand tint on the icon-only create buttons.
   const [suggestedCreates, setSuggestedCreates] = React.useState<Set<CreateKind>>(new Set());
+  const [invoiceSuggested, setInvoiceSuggested] = React.useState(false);
+  // The Submit Invoice dialog (task 118): open when the toolbar button is pressed.
+  const [invoiceOpen, setInvoiceOpen] = React.useState(false);
 
   // Bootstrap @spaarke/auth once. Config resolves from the PCF manifest inputs FIRST,
   // then falls back to the Dataverse environment variables (sprk_MsalClientId /
   // sprk_BffApiAppId / sprk_BffApiBaseUrl) — the same pattern SemanticSearch uses, so
   // the control works with zero form config where those env vars are set.
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const clientAppId = manifestClientAppId || (await getMsalClientId(webApi));
-        const bffAppId = manifestBffAppId || (await getBffApiAppId(webApi));
-        // getApiBaseUrl returns host-only (strips /api); @spaarke/auth re-adds /api.
-        const baseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-        if (!clientAppId || !bffAppId || !baseUrl) {
-          if (!cancelled) {
-            setAuthError(
-              'Communication actions are not configured. Set the sprk_MsalClientId / sprk_BffApiAppId / ' +
-                'sprk_BffApiBaseUrl Dataverse environment variables (or the PCF Client App ID / BFF App ID / API URL inputs).'
-            );
-          }
-          return;
-        }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
-        if (cancelled) return;
-        setBffBaseUrl(baseUrl);
-        setAuthReady(true);
-      } catch (err) {
-        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
+  const { authReady, authError, bffBaseUrl } = usePcfAuthBootstrap({
+    controlLabel: 'Communication actions are',
+    webApi,
+    manifestClientAppId,
+    manifestBffAppId,
+    manifestApiBaseUrl,
+    env: PCF_ENV,
+    getClientUrl,
+  });
 
   // Load the record fields the composer needs for reply/forward pre-fill.
   React.useEffect(() => {
@@ -371,7 +379,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           });
         }
         setParentAssociations(inherited);
-        setSuggestedCreates(deriveSuggestedCreates(rec.sprk_associationprovenance as string | null));
+        const suggestions = deriveSuggestions(rec.sprk_associationprovenance as string | null);
+        setSuggestedCreates(suggestions.creates);
+        setInvoiceSuggested(suggestions.invoice);
       } catch (err) {
         console.warn('[CommunicationActions] prefill retrieve failed:', err);
       }
@@ -406,6 +416,25 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     (query: string) => searchUsersAndContacts(dataService, query),
     [dataService]
   );
+
+  // Submit Invoice (ebilling-r1 task 118): the shared flow submits through the BFF's from-document route; nothing
+  // here creates an sprk_invoice. The fetch is `@spaarke/auth`'s (relative path, like the archive call above).
+  const invoiceSubmission = React.useMemo(
+    () => createEmailInvoiceSubmission({ authenticatedFetch, dataService }),
+    [dataService]
+  );
+  // The core record the email is already filed to (a Matter, Project or Work Assignment), if any: the flow starts with it.
+  const invoiceInitialRecord = React.useMemo(() => {
+    for (const a of parentAssociations) {
+      const core = resolveInitialInvoiceRecord({
+        entityType: a.entityType,
+        recordId: a.entityId,
+        recordName: a.entityName ?? '',
+      });
+      if (core) return core;
+    }
+    return undefined;
+  }, [parentAssociations]);
 
   // Record lookup (owner UAT round 5): the attachments search icon opens a menu of these
   // entity types (RegardingResolver pattern). A Document pick attaches; any other record is
@@ -492,8 +521,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     };
   }, []);
 
-  // Launch a "create from this email" form (Event / To Do / Invoice) as an in-app
-  // MODAL (UAT R3 C11-3). All three route through the single `launchCreate` seam so
+  // Launch a "create from this email" form (Event / To Do) as an in-app
+  // MODAL (UAT R3 C11-3). Both route through the single `launchCreate` seam so
   // the OOB `navigateTo` dialog can later be swapped for a custom Fluent dialog
   // WITHOUT editing these call sites (owner requirement). R4 launches the target
   // create form; full create-and-link is the Notification-Spine project.
@@ -532,6 +561,14 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     })();
   }, [communicationId]);
 
+  // Task 188 (D-219 Q3): templates, AI drafting and local-file attachments, like the Console's Send Email dialog.
+  // ONE factory instance, taken only for the four feature handlers — the recipient/record lookups above are this
+  // PCF's own inline copies (the factory's header notes the PCF keeps them). A handler left out hides its feature.
+  const composeFeatureHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [bffBaseUrl]
+  );
+
   // Compose/reply/replyAll/forward pre-fill derived from the loaded record (pure helper).
   const composerProps = React.useMemo<ISendEmailPageProps | null>(() => {
     if (!composerMode) return null;
@@ -551,6 +588,10 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       recordLookupCatalog: RECORD_LOOKUP_CATALOG,
       onLookupRecord: handleLookupRecord,
       onAddRelationship: handleAddRelationship,
+      onListEmailTemplates: composeFeatureHandlers.onListEmailTemplates,
+      onRenderEmailTemplate: composeFeatureHandlers.onRenderEmailTemplate,
+      onDraftWithAi: composeFeatureHandlers.onDraftWithAi,
+      onUploadLocalAttachment: composeFeatureHandlers.onUploadLocalAttachment,
       // Reply / Reply All / Forward inherit the parent's filed associations (owner UAT 2026-07-24);
       // '+ New' (compose) starts with none.
       associations: composerMode === 'compose' ? undefined : parentAssociations,
@@ -577,6 +618,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     handleLookupRecipients,
     handleLookupRecord,
     handleAddRelationship,
+    composeFeatureHandlers,
     sourceAttachments,
     parentAssociations,
     sourceIsInternalOnly,
@@ -694,15 +736,15 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
               />
             </Tooltip>
             <Tooltip
-              content={suggestedCreates.has('invoice') ? 'Link Invoice (suggested from this email)' : 'Link Invoice'}
+              content={invoiceSuggested ? 'Submit Invoice (suggested from this email)' : 'Submit Invoice'}
               relationship="label"
             >
               <ToolbarButton
                 className={s.iconBtn}
-                icon={<Receipt20Regular className={suggestedCreates.has('invoice') ? s.suggestedIcon : undefined} />}
-                aria-label="Link Invoice"
-                disabled={disabled}
-                onClick={() => handleCreate('invoice')}
+                icon={<Receipt20Regular className={invoiceSuggested ? s.suggestedIcon : undefined} />}
+                aria-label="Submit Invoice"
+                disabled={disabled || !communicationId}
+                onClick={() => setInvoiceOpen(true)}
               />
             </Tooltip>
           </div>
@@ -741,6 +783,19 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           <DialogBody className={s.dialogBody}>{composerProps && <SendEmailPageR16 {...composerProps} />}</DialogBody>
         </DialogSurface>
       </Dialog>
+
+      {/* Submit Invoice (task 118): the shared flow in the standard modal shell (ADR-050). */}
+      {communicationId && (
+        <SubmitInvoiceDialogR16
+          open={invoiceOpen}
+          onClose={() => setInvoiceOpen(false)}
+          // Accepting files the email under the chosen record: refresh the form so Related to shows it.
+          onAccepted={() => void refreshHostForm()}
+          communicationId={communicationId}
+          submission={invoiceSubmission}
+          initialRecord={invoiceInitialRecord}
+        />
+      )}
     </div>
   );
 };

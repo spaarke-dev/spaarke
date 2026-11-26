@@ -22,6 +22,7 @@ import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-co
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
 import { SummarizeFilesDialog } from "@spaarke/ui-components/components/SummarizeFilesWizard";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
@@ -69,6 +70,11 @@ function App() {
 
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: resolvedBffBaseUrl || undefined }),
+    [resolvedBffBaseUrl]
+  );
 
   // UAT R5-8 (the create-flow file leg): when launched from the Assistant "Summarize Files" Quick
   // Start card via the surface-launch envelope, read the hand-off and pass the session file refs so
@@ -101,6 +107,7 @@ function App() {
         onClose={handleClose}
         dataService={dataService}
         navigationService={navigationService}
+        emailComposeHandlers={emailComposeHandlers}
         embedded={true}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}

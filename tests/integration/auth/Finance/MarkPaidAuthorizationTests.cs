@@ -137,6 +137,48 @@ public sealed class MarkPaidAuthorizationTests
         host.StatusWrites.Should().BeEmpty();
     }
 
+    // =========================================================================================
+    // Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid decides only from server-written sources
+    // =========================================================================================
+
+    [Theory(DisplayName = "165b-3 fix round K1 must fire: a Sent to AP invoice without the writer-created approve record under its approval's key is 409 ebilling.apexport.approval_not_recorded; the lifecycle is not called and nothing is written")]
+    [InlineData("no-record")]
+    [InlineData("another-key")]
+    [InlineData("another-identity")]
+    public async Task SentToAp_WithoutTheApproveRecord_Is409_AndNothingIsWritten(string kind)
+    {
+        await using var host = await ApExportRoutesHost.StartAsync();
+        var invoice = host.World.AddInvoice("INV-A", status: InvoiceStatusCodes.SentToAp, approveRecord: false);
+        _ = kind switch
+        {
+            "another-key" => host.World.AddApproveRecord(invoice, reviewId: Guid.NewGuid()),
+            "another-identity" => host.World.AddApproveRecord(invoice, createdBy: Guid.NewGuid()),
+            _ => null,
+        };
+
+        var response = await host.SendAsync(HttpMethod.Post, Url(invoice.Id));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await BodyAsync(response))["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.ApprovalNotRecorded);
+        host.StatusReads.Should().Be(0, "the lifecycle is not called without the record");
+        host.StatusWrites.Should().BeEmpty();
+        host.World.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.SentToAp);
+    }
+
+    [Fact(DisplayName = "165b-3 fix round K1 control: a Sent to AP invoice with the writer-created approve record under its approval's key is marked Paid")]
+    public async Task SentToAp_WithTheApproveRecord_BecomesPaid()
+    {
+        await using var host = await ApExportRoutesHost.StartAsync();
+        var invoice = host.World.AddInvoice("INV-A", status: InvoiceStatusCodes.SentToAp, approveRecord: false);
+        host.World.AddApproveRecord(invoice, reviewId: host.World.ApprovalKeyOf(invoice));
+
+        var response = await host.SendAsync(HttpMethod.Post, Url(invoice.Id));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.StatusOfInvoice(invoice.Id).Should().Be(InvoiceStatusCodes.Paid);
+        host.StatusWrites.Should().Equal(invoice.Id);
+    }
+
     [Fact(DisplayName = "151a: rights that hold on an invoice that no longer exists give the same uniform 404 as no rights")]
     public async Task InvoiceGoneAfterTheRightsCheck_IsTheUniform404()
     {

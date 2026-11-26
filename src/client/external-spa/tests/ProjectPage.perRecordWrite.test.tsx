@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { documentRow, rowAction } from './documentsGridHarness';
 
 const { bffApiCall } = vi.hoisted(() => ({ bffApiCall: vi.fn() }));
 
@@ -16,6 +17,8 @@ vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
   return { ...actual, bffApiCall, bffApiBlob: vi.fn() };
 });
+
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
 
 vi.mock('../src/api/web-api-client', async () => {
   const actual = await vi.importActual<typeof import('../src/api/web-api-client')>('../src/api/web-api-client');
@@ -48,7 +51,6 @@ vi.mock('../src/hooks/useExternalContext', () => ({
 
 // Tabs this test is not about.
 vi.mock('../src/components/EventsCalendar', () => ({ EventsCalendar: () => null }));
-vi.mock('../src/components/SmartTodo', () => ({ SmartTodo: () => null }));
 
 import { ProjectPage } from '../src/pages/ProjectPage';
 
@@ -78,16 +80,19 @@ describe('ProjectPage: /me writeAccessPerRecord reaches the Documents section', 
     perRecord = true;
     renderProject();
 
-    expect(await screen.findByRole('button', { name: /Upload Document/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Download Brief.pdf' })).toBeTruthy();
-  });
+    // The page, /me and the list all settle first; under a loaded machine that took longer than findBy's 1 s default.
+    expect(await screen.findByRole('button', { name: /Upload Document/ }, { timeout: 15000 })).toBeTruthy();
+    expect(rowAction(await documentRow('Brief.pdf'), 'Download')).toBeTruthy();
+  }, 30000);
 
   it('every other ViewOnly caller is offered neither (the level rule, unchanged)', async () => {
     perRecord = false;
     renderProject();
 
-    await screen.findByText('Brief.pdf');
+    const row = await documentRow('Brief.pdf');
     expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Download Brief.pdf' })).toBeNull();
-  });
+    expect(rowAction(row, 'Download')).toBeNull();
+    // The same full-page render as the test above, so the same budget: `documentRow` waits up to 15 s, which
+    // vitest's 5 s default cut short on a loaded CI runner (nightly #1906, 2026-11-25).
+  }, 30000);
 });

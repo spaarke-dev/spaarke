@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191j" project="unified-access-control-r2">
+  <metadata>
+    <title>T191j: docs and issues: remove the round-77 and #2179 known limits, name the enforcement, close or re-scope the issues</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>blocked: 191i gate passed</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Rewrites security invariants (I-14, I-16) and the auth constraints.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The invariant text is the contract later sessions enforce; it must match the code and the live gate exactly.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/constraints/auth.md (main session only; sub-agents cannot write .claude/) and the write-path architecture doc.</parallel-reason>
+    <deps>191i</deps>
+    <tags>documentation, security, access-control</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Update the invariants, constraints and guides to the built and gated design, and close or re-scope every issue 191 owns.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Writes precise invariant text with "Enforced by" lines.</role>
+  <goal>I-14, I-16, auth.md, the deployment guide and the UAC guide describe the External Collaborators model with its enforcement; the known limits are removed; #1864, #2125, #2179, #2201, #2369 are closed or re-scoped and #2189 is answered.</goal>
+
+  <context>
+    <background>Design §3.15 (enforced by), §3.17 AC-12, §4.1. Current limit text: `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-14 row (:145) and `.claude/constraints/auth.md` (:97).</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-14, I-16)</file>
+      <file role="modify">.claude/constraints/auth.md (:97 known limit; main session applies)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (BU, role, field security, settings, live gate per environment)</file>
+      <file role="modify">docs/guides/UAC-ACCESS-MODEL-GUIDE.md (what a flagged-external user sees and can do)</file>
+      <file role="modify">projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md (status: built)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191i" status="pending">The live gate evidence.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3">Sub-agents cannot write .claude/; the main session applies the auth.md edit from text the agent drafts.</constraint>
+    <constraint source="project">Every rule states "Enforced by"; the out-of-product window (≤ 2 min + run) stays as prose with its reason (ADR-002).</constraint>
+    <constraint source="project">Public repo: mechanisms only; no named identity, role holding or live exposure.</constraint>
+    <constraint source="project">Issues: comment with the merged PRs and the gate evidence before closing; re-scope instead of closing anything not fully covered.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="invariant row with Enforced by" location="docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md">One row per invariant, one owner, the enforcing mechanism named.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Rewrite I-14 and I-16: remove the round-77 and #2179 (c) limits; add the External Collaborators model and the "Enforced by" list from design §3.15.</step>
+    <step order="2">Draft the auth.md change and hand it to the main session.</step>
+    <step order="3">Deployment guide: per-environment checklist (inventory, role and BU, profiles, field security, settings, live gate). UAC guide: the flagged-user experience.</step>
+    <step order="4">Issues: close #2179, #1864, #2125, #2201 with evidence; close or re-scope #2369 (part 1 by construction, part 2 by 191h); answer #2189.</step>
+    <step order="5">Update TASK-INDEX.md: this task's and 191's status cells to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the gated behaviour differs from the design anywhere, STOP and escalate rather than documenting the difference as intended.</trigger>
+    <trigger>Closing an issue the owner filed or scheduled needs the evidence comment first; if any acceptance criterion it names is not met, re-scope and report instead.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</output>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+    <output type="docs">docs/guides/UAC-ACCESS-MODEL-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">I-14 and I-16 contain no round-77 or #2179 known limit and name each enforcing mechanism.</criterion>
+    <criterion testable="true">auth.md's known-limit line (:97) is replaced by the enforced rule (applied by the main session).</criterion>
+    <criterion testable="true">The deployment guide has the per-environment 191 checklist, including the owner-go steps.</criterion>
+    <criterion testable="true">#2179, #1864, #2125 and #2201 are closed with evidence comments; #2369 is closed or re-scoped; #2189 has an answer.</criterion>
+    <criterion testable="true">Negative: no doc names an identity, a role holding or a live exposure.</criterion>
+  </acceptance-criteria>
+
+  <notes>Task 090 closes after 191, 193 and 194, with a final test-diet over their tests.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

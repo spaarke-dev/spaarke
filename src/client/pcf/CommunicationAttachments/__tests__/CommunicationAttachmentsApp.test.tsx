@@ -2,7 +2,9 @@
  * Wiring tests for CommunicationAttachmentsApp:
  *   - auth gate resolves, attachments load (inline images filtered out),
  *   - clicking a file row opens the shared RichFilePreviewDialog (mocked),
- *   - clicking an .eml row opens the SAME in-modal preview (UAT R4 B12-4).
+ *   - clicking an .eml row opens the SAME in-modal preview (UAT R4 B12-4),
+ *   - "Open file" (desktop) behaves the same as every other surface (ISS-004): an Office file launches the
+ *     Office app through a hidden iframe; any other file downloads through /content; a failure is shown.
  */
 
 import * as React from 'react';
@@ -61,8 +63,18 @@ const renderApp = (context: unknown) =>
     </FluentProvider>
   );
 
+// The mock's default implementation (preview-url + open-links with a desktopUrl); tests below override it.
+const defaultFetchImpl = (authenticatedFetch as jest.Mock).getMockImplementation();
+
 beforeEach(() => {
   (authenticatedFetch as jest.Mock).mockClear();
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  (authenticatedFetch as jest.Mock).mockImplementation(defaultFetchImpl);
+  document.querySelectorAll('iframe').forEach(frame => frame.remove());
+  delete (window as unknown as { Xrm?: unknown }).Xrm;
 });
 
 describe('CommunicationAttachmentsApp', () => {
@@ -154,5 +166,81 @@ describe('CommunicationAttachmentsApp', () => {
   it('shows an empty state when the communication has no file attachments', async () => {
     renderApp(makeContext([]));
     expect(await screen.findByText('No attachments on this communication.')).toBeInTheDocument();
+  });
+
+  describe('Open file (desktop)', () => {
+    const openPreview = async () => {
+      renderApp(makeContext(rows));
+      fireEvent.click(await screen.findByText('Report.pdf'));
+      await screen.findByTestId('rich-file-preview-dialog');
+    };
+
+    it('Office file: launches the desktop URL through a hidden iframe, without downloading', async () => {
+      await openPreview();
+      fireEvent.click(screen.getByTestId('preview-open-file'));
+
+      await waitFor(() => {
+        const frame = document.querySelector('iframe');
+        expect(frame).not.toBeNull();
+        expect(frame!.getAttribute('src')).toBe('ms-word:ofe|u|https://spe/file.docx');
+        expect(frame!.style.display).toBe('none');
+      });
+      const contentFetched = (authenticatedFetch as jest.Mock).mock.calls.some((call: unknown[]) =>
+        String(call[0]).includes('/content')
+      );
+      expect(contentFetched).toBe(false);
+    });
+
+    it('non-Office file: downloads through the BFF /content route, never the SharePoint webUrl', async () => {
+      const urlApi = URL as unknown as { createObjectURL?: () => string; revokeObjectURL?: () => void };
+      urlApi.createObjectURL = jest.fn(() => 'blob:test');
+      urlApi.revokeObjectURL = jest.fn();
+      const openSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+      const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
+        if (url.includes('/open-links')) {
+          return { ok: true, status: 200, json: async () => ({ webUrl: 'https://spe/file', fileName: 'Report.pdf' }) };
+        }
+        if (url.includes('/content')) {
+          return { ok: true, status: 200, blob: async () => new Blob(['x']) };
+        }
+        return { ok: true, status: 200, json: async () => ({ previewUrl: 'https://preview/embed' }) };
+      });
+      try {
+        await openPreview();
+        fireEvent.click(screen.getByTestId('preview-open-file'));
+
+        await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+        expect((authenticatedFetch as jest.Mock).mock.calls.map((call: unknown[]) => String(call[0]))).toContain(
+          'https://bff.example/api/documents/doc-1/content'
+        );
+        expect(openSpy).not.toHaveBeenCalled();
+        expect(document.querySelector('iframe')).toBeNull();
+      } finally {
+        clickSpy.mockRestore();
+        openSpy.mockRestore();
+      }
+    });
+
+    it('a failed download is shown to the user (platform error dialog)', async () => {
+      const openErrorDialog = jest.fn();
+      (window as unknown as { Xrm?: unknown }).Xrm = { WebApi: {}, Navigation: { openErrorDialog } };
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
+        if (url.includes('/open-links')) {
+          return { ok: true, status: 200, json: async () => ({ webUrl: 'https://spe/file', fileName: 'Report.pdf' }) };
+        }
+        if (url.includes('/content')) throw new Error('HTTP 403');
+        return { ok: true, status: 200, json: async () => ({ previewUrl: 'https://preview/embed' }) };
+      });
+      await openPreview();
+      fireEvent.click(screen.getByTestId('preview-open-file'));
+
+      await waitFor(() =>
+        expect(openErrorDialog).toHaveBeenCalledWith({
+          message: "Couldn't open the file. Try again, or download it from the record.",
+        })
+      );
+    });
   });
 });

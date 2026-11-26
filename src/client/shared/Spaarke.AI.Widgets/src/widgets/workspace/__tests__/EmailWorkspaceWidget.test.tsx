@@ -38,17 +38,12 @@ jest.mock('@spaarke/communication-components', () => ({
   },
 }));
 
-// Mock the Xrm adapter factories the widget resolves at mount. `getXrm()?.WebApi`
-// MUST be truthy or the widget fails closed (returns null before rendering).
+// Mock the Xrm host wiring the widget resolves at mount (the shared hook is tested in ui-components).
+// `getXrm()?.WebApi` MUST be truthy or the widget fails closed (returns null before rendering).
 jest.mock('@spaarke/ui-components', () => ({
   __esModule: true,
-  XrmDataverseClient: class {},
-  createXrmDataService: () => ({}),
-  createXrmNavigationService: () => ({}),
-  createXrmEmailComposeHandlers: () => ({}),
-  resolveCurrentUserEmail: () => Promise.resolve('me@example.com'),
-  searchUsersAndContacts: () => Promise.resolve([]),
-  getXrm: () => ({ WebApi: {}, Utility: { getGlobalContext: () => ({ getClientUrl: () => '' }) } }),
+  useXrmEmailHostProps: () => ({}),
+  getXrm: () => ({ WebApi: {} }),
 }));
 
 // The widget reads auth/bff from the AiSession provider context.

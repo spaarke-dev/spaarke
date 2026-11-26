@@ -1,11 +1,15 @@
 /**
  * Spaarke Document Operations
- * Version: 1.28.2
+ * Version: 1.28.3
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
+ *
+ * Changes in 1.28.3:
+ * - Open in desktop for a file with no desktop URL (the server returns one for only 6 MIME types, so e.g. .docm/.xlsm
+ *   reach this branch) downloads it, and refreshes the form when the open included a checkout (ISS-004).
  *
  * Changes in 1.28.2:
  * - Delete: a 409 is no longer always "checked out". The BFF refuses to delete a document that is
@@ -93,7 +97,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.28.2",
+    version: "1.28.3",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -1632,10 +1636,16 @@ Spaarke.Document.openInDesktop = async function(primaryControl) {
                     }, 500);
                 }
             } else {
-                console.warn("[Spaarke.Document] No desktop URL available for document");
-                await Xrm.Navigation.openErrorDialog({
-                    message: "This document cannot be opened in a desktop application."
-                });
+                // No desktop URL: the enable rule allows 22 Office extensions, but the server returns a desktopUrl
+                // for only 6 MIME types (e.g. .docm / .xlsm get none). Download the file so the browser hands it to
+                // the user's default app — the same behaviour as every other surface (ISS-004).
+                console.log("[Spaarke.Document] No desktop URL for this file type; downloading instead");
+                await Spaarke.Document.downloadDocument(primaryControl);
+
+                // If we checked out, refresh the form to show updated status (as the desktop branch does)
+                if (didCheckout) {
+                    Spaarke.Document.refreshForm(formContext, docInfo.id);
+                }
             }
 
         } else {

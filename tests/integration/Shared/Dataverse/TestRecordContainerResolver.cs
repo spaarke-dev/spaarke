@@ -226,7 +226,7 @@ internal static class TestRecordContainerResolver
         /// <summary><c>EmailProcessing:DefaultContainerId</c> — an unfiled document's container of last resort (task 166 f1).</summary>
         public string? UnfiledDefaultContainer { get; init; }
 
-        /// <summary>Further configuration the resolver reads (#2151: the declared home containers of unfiled documents).</summary>
+        /// <summary>Further configuration the resolver reads (a test may set a retired key to prove it is ignored).</summary>
         public Dictionary<string, string?> Settings { get; } = new(StringComparer.Ordinal);
 
         /// <summary>Every app-only UPDATE the built resolver's entity service received (the relocator's re-point).</summary>

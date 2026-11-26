@@ -487,7 +487,8 @@ public partial class SignalSuppressionTests
 
     private static Task<IResult> Route(Guid signal, Store s, (SignalCoreRecordAccess Access, IDataverseUserClient Users) c, HttpContext? http = null, CancellationToken ct = default) =>
         DecisionPlanEndpoints.GetSuppressionAsync(
-            signal, http ?? new DefaultHttpContext(), c.Access, s.Service, c.Users, NullLogger<SignalSuppressionService>.Instance, ct);
+            signal, http ?? DecisionCapabilityFixtures.SignedIn(),
+            DecisionCapabilityFixtures.Capability(c.Access, suppression: s.Service, caller: c.Users), ct);
 
     [Fact]
     public async Task TheRoute_Returns200WithTheCountAndTheUntilDate_ForACallerWhoCanReadEverySignal()
@@ -577,7 +578,7 @@ public partial class SignalSuppressionTests
         s.Signals.Single(x => x.Id == noPolicy).Attributes.Remove("sprk_policy");
         var readable = s.Open(MatterId, Guid.NewGuid());
 
-        static HttpContext Http() => new DefaultHttpContext { TraceIdentifier = "trace-1" };
+        static HttpContext Http() => DecisionCapabilityFixtures.SignedIn("trace-1");
         static string Body(IResult r) => JsonSerializer.Serialize(r.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails);
 
         var denied = await Route(readable, s, Caller(s, Ok(SignalRow()), Fail(404, DataverseUserClientErrorCodes.NotFound)), Http());
@@ -594,7 +595,7 @@ public partial class SignalSuppressionTests
         var s = new Store { FailReads = true };
         var signal = s.Open(MatterId, Guid.NewGuid());
 
-        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), new DefaultHttpContext { TraceIdentifier = "trace-9" });
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), DecisionCapabilityFixtures.SignedIn("trace-9"));
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(503);
@@ -1249,6 +1250,23 @@ public partial class SignalSuppressionTests
     }
 
     [Fact]
+    [Trait("status", "new")]
+    public async Task Task205_PartitionsOfSignals_ReadsARowsSignalsInOneQuery_AndAMissingSignalStillThrows()
+    {
+        // Ontology task 205 (DI-146): a row decision's families are read with one paged query, not one Retrieve per Signal.
+        var s = new Store();
+        var ids = Enumerable.Range(0, 18).Select(_ => s.Open(MatterId, Guid.NewGuid(), secure: true, family: Store.ProjectA)).ToList();
+
+        var families = await s.Service.PartitionsOfSignalsAsync(ids, default);
+
+        families.Should().HaveCount(18).And.OnlyContain(f => f == FamilyA);
+        s.QueriesOf("sprk_signal").Should().Be(1, "18 Signals are one page");
+
+        await s.Service.Invoking(x => x.PartitionsOfSignalsAsync([ids[0], Guid.NewGuid()], default))
+            .Should().ThrowAsync<InvalidOperationException>("a Signal the read does not return has an unknown family");
+    }
+
+    [Fact]
     public async Task R4_TwoSecureFamilies_UnderOneReadableMatter_EachHaveTheirOwnCount()
     {
         var s = new Store();
@@ -1277,7 +1295,7 @@ public partial class SignalSuppressionTests
         var s = new Store { SecureBusinessUnitAmbiguous = true };
         var signal = s.Open(MatterId, Guid.NewGuid());
 
-        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), new DefaultHttpContext { TraceIdentifier = "trace-7" });
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), DecisionCapabilityFixtures.SignedIn("trace-7"));
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(503, "a count that cannot be partitioned is never answered");
@@ -1853,6 +1871,9 @@ public partial class SignalSuppressionTests
                     FailReads ? throw new InvalidOperationException("dataverse is down") : Signals.Single(x => x.Id == id));
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => Run(q));
+            // fm task 056: the walk asks which private-message reference columns sprk_communication has; this environment has none.
+            entities.Setup(e => e.GetColumnMetadataAsync("sprk_communication", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, ColumnMetadata>());
             // The record-type catalog a Signal's core record pair names, as Dataverse answers it (the lineage walk reads a pair's type
             // through it): each type's table, and a missing row for any other type.
             entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))

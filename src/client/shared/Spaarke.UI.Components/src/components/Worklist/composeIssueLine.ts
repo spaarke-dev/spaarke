@@ -2,7 +2,9 @@
  * composeIssueLine — builds what one line displays from a Work Item's DISPLAY COLUMNS (D-23, FR-48).
  *
  * The headline is a display, not a claim, so spec section 0.3 is not engaged: it is the subject's name and nothing
- * else. It never interpolates a value into the rule sentence and never shows a witness value (sender, date): those
+ * else. The FINDING is what the row and the wizard's first step lead with (rule short name, else the Signal's title,
+ * else the subject name), with the subject (headline) under it; it is never the rule's sentence (the wizard's quoted
+ * claim). Neither interpolates a value into the rule sentence nor shows a witness value (sender, date): those
  * are evidence lines in the wizard (task 058). Age (Decide) and due state (Do) are computed here, client-side, in the
  * viewer's local calendar date; the tier comes from the one shared `dueUrgencyForDays` (task 081 / C-17).
  *
@@ -19,7 +21,12 @@ import type { WorklistItem } from './types';
 export type TimingTone = 'age' | DueUrgency;
 
 export interface IssueLineView {
-  /** Never empty: the subject name, else the Signal's stored title, else a neutral placeholder. */
+  /**
+   * What was found: the line a row and the wizard's first step lead with. Never empty: the rule's short name, else the
+   * Signal's stored title, else the subject name, else a neutral placeholder. Never the rule sentence.
+   */
+  finding: string;
+  /** Never empty: the subject name, else the Signal's stored title, else a neutral placeholder. (Not changed by `finding`.) */
   headline: string;
   /** The rule's short name, or null when the policy has none. */
   ruleShortName: string | null;
@@ -63,11 +70,12 @@ export function formatDueState(
 export function composeIssueLine(item: WorklistItem, today: Date = new Date()): IssueLineView {
   const headline = clean(item.subjectName) ?? clean(item.title) ?? UNTITLED;
   const ruleShortName = clean(item.ruleShortName);
+  const finding = ruleShortName ?? clean(item.title) ?? clean(item.subjectName) ?? UNTITLED;
   const timingText = clean(item.timingText);
-  if (timingText) return { headline, ruleShortName, timing: { text: timingText, tone: 'age' } };
+  if (timingText) return { finding, headline, ruleShortName, timing: { text: timingText, tone: 'age' } };
   if (item.lane === 'Do') {
     const due = formatDueState(item.dueDate, today, item.pastDueWording === 'late' ? 'late' : 'overdue');
-    return { headline, ruleShortName, timing: due };
+    return { finding, headline, ruleShortName, timing: due };
   }
-  return { headline, ruleShortName, timing: { text: formatAge(item.raisedOn, today), tone: 'age' } };
+  return { finding, headline, ruleShortName, timing: { text: formatAge(item.raisedOn, today), tone: 'age' } };
 }

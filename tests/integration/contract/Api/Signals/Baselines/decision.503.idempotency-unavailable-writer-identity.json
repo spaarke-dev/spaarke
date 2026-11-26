@@ -1,0 +1,16 @@
+{
+  "case": "decision.503.idempotency-unavailable-writer-identity",
+  "status": 503,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.4\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"The decision could not be recorded right now; nothing was done. Try again shortly.\",\"reasonCode\":\"ontology.decision.idempotency_unavailable\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000039\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.6.4",
+    "title": "Service Unavailable",
+    "status": 503,
+    "detail": "The decision could not be recorded right now; nothing was done. Try again shortly.",
+    "reasonCode": "ontology.decision.idempotency_unavailable",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000039",
+    "actionCode": null
+  }
+}

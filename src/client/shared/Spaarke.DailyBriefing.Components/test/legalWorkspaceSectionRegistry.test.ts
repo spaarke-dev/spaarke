@@ -36,10 +36,19 @@
 // ---------------------------------------------------------------------------
 // Pre-import mocks (must come BEFORE the LegalWorkspace imports below).
 //
-// LegalWorkspace's `sectionRegistry.ts` imports 11 individual section
-// registrations. Each of those transitively imports React, services, hooks,
-// etc. We mock every section registration to a trivial `SectionRegistration`
-// shape so the factory can build without dragging in the whole app.
+// LegalWorkspace's `sectionRegistry.ts` imports one module per section
+// registration. Each of those transitively imports React, services, hooks,
+// other shared packages, etc. We mock EVERY section registration to a trivial
+// `SectionRegistration` shape so the factory can build without dragging in the
+// whole app.
+//
+// A registration left unmocked loads for real: its whole dependency tree
+// (e.g. `@spaarke/communication-components` SOURCE) is then compiled by ts-jest
+// under THIS package's tsconfig.test.json, which maps `@spaarke/ui-components`
+// to the hand-written mock in `test/__mocks__/`. The first time that tree
+// imports a ui-components export the mock lacks, this suite dies with TS2305
+// (issue #1906: `nullRecordNumberWhenTargetHasNone`, 2026-11-11). The guard
+// test at the bottom fails by name when a new registration is not stubbed here.
 //
 // `dailyBriefing.registration` is mocked to expose
 // `createLegalWorkspaceDailyBriefingRegistration` as a `jest.fn()` so test 2
@@ -85,6 +94,38 @@ jest.mock('../../../../solutions/LegalWorkspace/src/sections/workAssignments.reg
 }));
 jest.mock('../../../../solutions/LegalWorkspace/src/sections/matters.registration', () => ({
   mattersRegistration: { id: 'matters', category: 'core', factory: () => ({ id: 'matters' }) },
+}));
+// Sections added to the registry after this suite was written (#1906). Ids match
+// each real registration's `id`, so the worklist / decisionRecords assertions
+// below and the registry's metadata-drift guard see the same ids as production.
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/communications.registration', () => ({
+  communicationsRegistration: { id: 'communications', category: 'data', factory: () => ({ id: 'communications' }) },
+}));
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/composeEditor.registration', () => ({
+  composeEditorRegistration: {
+    id: 'compose-editor',
+    category: 'productivity',
+    factory: () => ({ id: 'compose-editor' }),
+  },
+}));
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/email.registration', () => ({
+  emailRegistration: { id: 'email', category: 'data', factory: () => ({ id: 'email' }) },
+}));
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/reconciliation.registration', () => ({
+  reconciliationRegistration: { id: 'reconciliation', category: 'data', factory: () => ({ id: 'reconciliation' }) },
+}));
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/worklist.registration', () => ({
+  worklistRegistration: { id: 'worklist', category: 'data', factory: () => ({ id: 'worklist' }) },
+}));
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/decisionRecords.registration', () => ({
+  decisionRecordsRegistration: {
+    id: 'decisionRecords',
+    category: 'data',
+    factory: () => ({ id: 'decisionRecords' }),
+  },
+}));
+jest.mock('../../../../solutions/LegalWorkspace/src/sections/analysisHub.registration', () => ({
+  analysisHubRegistration: { id: 'analysis', category: 'ai', factory: () => ({ id: 'analysis' }) },
 }));
 
 // Mock the dailyBriefing registration. `createLegalWorkspaceDailyBriefingRegistration`
@@ -209,5 +250,54 @@ describe('createLegalWorkspaceSectionRegistry (R2 Option D)', () => {
     // And no live var declaration of the module-mutable slot.
     const slotRegex = /^[^/\n]*\b(?:let|const|var)\s+_globalNotificationLoader\b/m;
     expect(dailyBriefingSource).not.toMatch(slotRegex);
+  });
+
+  describe('section-stub guard (#1906)', () => {
+    // Source-text guard (same technique as the test above). An unstubbed
+    // registration compiles its real dependency tree against this package's
+    // ui-components MOCK — see the "Pre-import mocks" note at the top. Today
+    // that fails late and far from the cause (a TS2305 in another package's
+    // source, the night some unrelated PR adds a ui-components export), so it
+    // fails here instead, naming the module to stub. Caveat: if the unstubbed
+    // module does not compile at all, the suite fails before this test runs —
+    // the compile error then names the registration file.
+    const registryImports = (registrySource: string): string[] =>
+      [...registrySource.matchAll(/^\s*import\s[^;]*?\bfrom\s*["']\.\/(sections\/[^"']+)["']/gm)]
+        .map(m => m[1])
+        .sort();
+    const unstubbed = (registrySource: string, testSource: string): string[] => {
+      const mocked = new Set(
+        [
+          ...testSource.matchAll(/jest\.mock\(\s*'\.\.\/\.\.\/\.\.\/\.\.\/solutions\/LegalWorkspace\/src\/(sections\/[^']+)'/g),
+        ].map(m => m[1])
+      );
+      return registryImports(registrySource).filter(spec => !mocked.has(spec));
+    };
+
+    test('every section module sectionRegistry.ts imports is stubbed by a jest.mock in this file', () => {
+      const fs = require('fs');
+      const path = require('path');
+      const registrySource: string = fs.readFileSync(
+        path.resolve(__dirname, '../../../../solutions/LegalWorkspace/src/sectionRegistry.ts'),
+        'utf8'
+      );
+      const thisSource: string = fs.readFileSync(__filename, 'utf8');
+
+      // The parse must find the registry's section imports at all, or the
+      // assertion below would pass vacuously.
+      expect(registryImports(registrySource).length).toBeGreaterThanOrEqual(10);
+      expect(unstubbed(registrySource, thisSource)).toEqual([]);
+    });
+
+    test('must-fire control: a registry import with no matching jest.mock is reported', () => {
+      const registrySource = [
+        'import { aRegistration } from "./sections/a.registration";',
+        'import { bRegistration } from "./sections/b/b.registration";',
+        'import type { SectionRegistration } from "@spaarke/ui-components";',
+      ].join('\n');
+      const testSource =
+        "jest.mock('../../../../solutions/LegalWorkspace/src/sections/a.registration', () => ({}));";
+      expect(unstubbed(registrySource, testSource)).toEqual(['sections/b/b.registration']);
+    });
   });
 });

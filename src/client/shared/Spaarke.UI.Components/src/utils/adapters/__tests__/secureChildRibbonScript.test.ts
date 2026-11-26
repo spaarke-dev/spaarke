@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
+import { parseComposeRegarding } from '../../../components/EmailComposer/openEmailCompose';
 
 const SCRIPT = fs.readFileSync(
   path.join(__dirname, '..', '..', '..', '..', '..', '..', 'webresources', 'js', 'sprk_secure_child_ribbon.js'),
@@ -24,9 +25,12 @@ const HOST_ID = 'a1470000-0000-4000-8000-000000000001';
 const NEW_ID = 'b1470000-0000-4000-8000-000000000002';
 
 interface IRibbon {
-  nativeNewAllowed(primaryControl: unknown): boolean | Promise<boolean>;
-  newChildAvailable(primaryControl: unknown): boolean | Promise<boolean>;
+  nativeNewAllowed(primaryControl: unknown, table?: string): boolean | Promise<boolean>;
+  newChildAvailable(primaryControl: unknown, table?: string): boolean | Promise<boolean>;
   newChild(primaryControl: unknown, selectedControl: unknown, childTable: string): void;
+  TABLES: string[];
+  WIZARDS: Record<string, { page: string }>;
+  CREATE_THEN_OPEN: Record<string, unknown>;
 }
 
 interface IHarness {
@@ -36,13 +40,16 @@ interface IHarness {
   pages: Array<{ name: string; data: string }>;
   forms: Array<{ entityName: string; entityId: string }>;
   posts: Array<{ url: string; body: Record<string, unknown> }>;
+  metadataUrls: string[];
+  warnings: string[];
 }
 
 function harness(options: {
   flag?: boolean | null | 'throw';
   bffStatus?: number;
   bffBody?: unknown;
-  invoiceRow?: Record<string, unknown>;
+  /** The ManyToOneRelationships read answers 200 with an empty list (what a wrong-case logical name gets). */
+  noRelationships?: boolean;
 }): IHarness {
   const h: IHarness = {
     ribbon: undefined as unknown as IRibbon,
@@ -51,10 +58,18 @@ function harness(options: {
     pages: [],
     forms: [],
     posts: [],
+    metadataUrls: [],
+    warnings: [],
   };
   const flag = options.flag;
   const context: Record<string, unknown> = {
-    console: { warn: () => undefined, error: () => undefined, log: () => undefined },
+    console: {
+      warn: (...args: unknown[]) => {
+        h.warnings.push(args.map(String).join(' '));
+      },
+      error: () => undefined,
+      log: () => undefined,
+    },
     Promise,
     Object,
     JSON,
@@ -64,7 +79,6 @@ function harness(options: {
       WebApi: {
         retrieveRecord: (entity: string, id: string, query: string) => {
           h.reads.push(`${entity}(${id})${query}`);
-          if (query.includes('_sprk_matter_value')) return Promise.resolve(options.invoiceRow ?? {});
           if (flag === 'throw') return Promise.reject(new Error('no read'));
           return Promise.resolve({ sprk_issecure: flag });
         },
@@ -86,28 +100,31 @@ function harness(options: {
       Utility: { getGlobalContext: () => ({ getClientUrl: () => 'https://org.crm.dynamics.com' }) },
     },
     fetch: (url: string, init?: { method?: string; body?: string }) => {
+      if (url.includes('EntityDefinitions(')) h.metadataUrls.push(url);
       if (url.includes('/ManyToOneRelationships')) {
         return Promise.resolve({
           ok: true,
           json: () =>
             Promise.resolve({
-              value: [
-                {
-                  ReferencingAttribute: 'sprk_matter',
-                  ReferencingEntityNavigationPropertyName: 'sprk_Matter',
-                  ReferencedEntity: 'sprk_matter',
-                },
-                {
-                  ReferencingAttribute: 'sprk_project',
-                  ReferencingEntityNavigationPropertyName: 'sprk_Project',
-                  ReferencedEntity: 'sprk_project',
-                },
-                {
-                  ReferencingAttribute: 'sprk_invoice',
-                  ReferencingEntityNavigationPropertyName: 'sprk_Invoice',
-                  ReferencedEntity: 'sprk_invoice',
-                },
-              ],
+              value: options.noRelationships
+                ? []
+                : [
+                    {
+                      ReferencingAttribute: 'sprk_matter',
+                      ReferencingEntityNavigationPropertyName: 'sprk_Matter',
+                      ReferencedEntity: 'sprk_matter',
+                    },
+                    {
+                      ReferencingAttribute: 'sprk_project',
+                      ReferencingEntityNavigationPropertyName: 'sprk_Project',
+                      ReferencedEntity: 'sprk_project',
+                    },
+                    {
+                      ReferencingAttribute: 'sprk_invoice',
+                      ReferencingEntityNavigationPropertyName: 'sprk_Invoice',
+                      ReferencedEntity: 'sprk_invoice',
+                    },
+                  ],
             }),
         });
       }
@@ -207,11 +224,86 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
     expect(h.reads).toEqual([]);
   });
 
+  // ebilling-r1 task 096b (EB-D-201): the invoice's platform "+ New" is closed on EVERY host; the Invoice wizard is the one "New" on a core-record host.
+  it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment'])(
+    'a %s read as NOT secure offers NO platform "+ New" for an invoice and shows the Invoice wizard command (must fire); a to-do keeps the platform one (must not fire)',
+    async root => {
+      const h = harness({ flag: false });
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_invoice'))).resolves.toBe(false);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_invoice'))).resolves.toBe(true);
+      expect(h.reads).toEqual([]); // the answer does not depend on the flag
+
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_todo'))).resolves.toBe(true);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_todo'))).resolves.toBe(false);
+    }
+  );
+
+  it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment'])(
+    'the Invoice wizard shows on a %s host whether the flag reads secure, not secure or unreadable (must fire)',
+    async root => {
+      for (const flag of [true, false, 'throw'] as const) {
+        const h = harness({ flag });
+        expect(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_invoice')).toBe(false);
+        expect(h.ribbon.newChildAvailable(formOf(root), 'sprk_invoice')).toBe(true);
+        expect(h.reads).toEqual([]);
+      }
+    }
+  );
+
+  it.each(['sprk_event', 'contact', 'sprk_organization', 'account'])(
+    'an invoice subgrid on a %s host (not a core record the submission route accepts): no platform "+ New" and NO Invoice wizard command (must not fire)',
+    async host => {
+      const h = harness({ flag: 'throw' });
+      expect(h.ribbon.nativeNewAllowed(formOf(host), 'sprk_invoice')).toBe(false);
+      expect(h.ribbon.newChildAvailable(formOf(host), 'sprk_invoice')).toBe(false);
+      expect(h.reads).toEqual([]);
+    }
+  );
+
+  it('an invoice on an unsaved host or on the AP export batch still offers no "New" (the wizard needs a saved host; the batch offers none)', async () => {
+    const h = harness({ flag: false });
+    const unsaved = { data: { entity: { getId: () => '', getEntityName: () => 'sprk_matter' } } };
+    expect(h.ribbon.newChildAvailable(unsaved, 'sprk_invoice')).toBe(false);
+    expect(h.ribbon.nativeNewAllowed(unsaved, 'sprk_invoice')).toBe(false);
+    expect(h.ribbon.newChildAvailable(formOf('sprk_billingexport'), 'sprk_invoice')).toBe(false);
+    expect(h.ribbon.nativeNewAllowed(formOf('sprk_billingexport'), 'sprk_invoice')).toBe(false);
+  });
+
   it('an unsaved host keeps the platform command (it prefills nothing) and offers no BFF command', () => {
     const h = harness({ flag: true });
     const unsaved = { data: { entity: { getId: () => '', getEntityName: () => 'sprk_matter' } } };
     expect(h.ribbon.nativeNewAllowed(unsaved)).toBe(true);
     expect(h.ribbon.newChildAvailable(unsaved)).toBe(false);
+  });
+});
+
+describe('sprk_secure_child_ribbon.js — "New Email" on a communications subgrid (#2908)', () => {
+  it('opens the email composer (sprk_emailpage) "Related to" the host, never the retired Communication page', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(formOf('sprk_matter', HOST_ID, 'Acme v Beta & Co'), null, 'sprk_communication');
+    for (let i = 0; i < 10 && h.pages.length === 0; i++) await flush();
+
+    expect(h.pages).toHaveLength(1);
+    expect(h.pages[0].name).toBe('sprk_emailpage');
+    const data = new URLSearchParams(h.pages[0].data);
+    expect(data.get('compose')).toBe('new');
+    // The composer reads exactly what the shared launcher writes (parseComposeRegarding / composeRegardingParams).
+    expect(parseComposeRegarding(data)).toEqual({ entityType: 'sprk_matter', id: HOST_ID, name: 'Acme v Beta & Co' });
+    expect(h.posts).toEqual([]);
+    expect(h.forms).toEqual([]);
+  });
+
+  it('an unsaved host opens nothing and asks to save first', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(
+      { data: { entity: { getId: () => '', getEntityName: () => 'sprk_matter' } } },
+      null,
+      'sprk_communication'
+    );
+    await flush();
+
+    expect(h.pages).toEqual([]);
+    expect(h.alerts[0]?.text).toContain('Save this record first');
   });
 });
 
@@ -229,7 +321,7 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     expect(h.posts).toEqual([]);
   });
 
-  it.each(['sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent'])(
+  it.each(['sprk_budget', 'sprk_kpiassessment'])(
     'creates a %s through POST /api/v1/child-records/{table}, filed under the host, then opens it',
     async table => {
       const h = harness({ flag: true });
@@ -244,42 +336,38 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     }
   );
 
-  // ebilling-r1 ISS-010 (FR-05): the server refuses a billing event that names no core record of its own (D-75), so the
-  // invoice form's "New Billing Event" binds the invoice's one core record too.
-  const MATTER_ID = 'c1470000-0000-4000-8000-000000000003';
-  const PROJECT_ID = 'c1470000-0000-4000-8000-000000000004';
+  // ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's new rows have one server-side owner (extraction, a line decision,
+  // Add line), and the BFF no longer creates one on the child-record route, so the ribbon has no "New Billing Event" create.
+  it.each(['sprk_invoice', 'sprk_matter'])(
+    'a billing event on a %s is not created: nothing is sent, nothing opens, the user is told',
+    async host => {
+      const h = harness({ flag: true });
+      h.ribbon.newChild(formOf(host), { getRelationship: () => ({ attributeName: host }) }, 'sprk_billingevent');
+      for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
 
-  it('a billing event on an invoice also binds the one core record the invoice is filed under', async () => {
-    const h = harness({ flag: true, invoiceRow: { _sprk_matter_value: MATTER_ID, _sprk_project_value: null } });
-    h.ribbon.newChild(
-      formOf('sprk_invoice'),
-      { getRelationship: () => ({ attributeName: 'sprk_invoice' }) },
-      'sprk_billingevent'
-    );
-    for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
+      expect(h.posts).toEqual([]);
+      expect(h.reads).toEqual([]); // not even the host row: there is no create to prepare
+      expect(h.forms).toEqual([]);
+      expect(h.pages).toEqual([]);
+      expect(h.alerts).toHaveLength(1);
+      expect(h.alerts[0].text).toContain('Nothing was created.');
+    }
+  );
 
-    expect(h.posts).toHaveLength(1);
-    expect(h.posts[0].body['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${HOST_ID})`);
-    expect(h.posts[0].body['sprk_Matter@odata.bind']).toBe(`/sprk_matters(${MATTER_ID})`);
-    expect(h.forms).toEqual([{ entityName: 'sprk_billingevent', entityId: NEW_ID }]);
+  it('the billing event subgrid on an invoice still hides the platform "+ New" (the hide is kept; only the create is gone)', async () => {
+    const h = harness({ flag: false });
+    await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_invoice')))).resolves.toBe(false);
   });
 
-  it.each([
-    ['no core record', {}],
-    ['two core records', { _sprk_matter_value: MATTER_ID, _sprk_project_value: PROJECT_ID }],
-  ])('a billing event on an invoice with %s is refused before anything is sent', async (_label, row) => {
-    const h = harness({ flag: true, invoiceRow: row });
-    h.ribbon.newChild(
-      formOf('sprk_invoice'),
-      { getRelationship: () => ({ attributeName: 'sprk_invoice' }) },
-      'sprk_billingevent'
-    );
-    for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
-
-    expect(h.posts).toEqual([]);
-    expect(h.alerts).toHaveLength(1);
-    expect(h.alerts[0].text).toContain('Nothing was created.');
-    expect(h.forms).toEqual([]);
+  // ebilling-r1 task 096b (EB-D-201): the billing event is no longer a served table; its platform "+ New" is hidden outright in the
+  // sprk_BillingEvent RibbonDiff. The invoice entry stays and opens the Invoice wizard (a submission).
+  it('does not serve sprk_billingevent, and still serves sprk_invoice through the Invoice wizard', () => {
+    const h = harness({ flag: true });
+    expect(h.ribbon.TABLES).not.toContain('sprk_billingevent');
+    expect(h.ribbon.TABLES).toContain('sprk_invoice');
+    expect(h.ribbon.WIZARDS.sprk_invoice.page).toBe('sprk_createinvoicewizard');
+    expect(h.ribbon.CREATE_THEN_OPEN.sprk_billingevent).toBeUndefined();
+    expect(h.ribbon.CREATE_THEN_OPEN.sprk_invoice).toBeUndefined();
   });
 
   it('a BFF refusal shows the server message and opens nothing', async () => {
@@ -299,5 +387,56 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     expect(h.alerts[0].text).toContain('A record this budget is filed under was not found.');
     expect(h.alerts[0].text).toContain('Nothing was created.');
     expect(h.forms).toEqual([]);
+  });
+});
+
+// #2909: the script keeps its own nav-prop discovery (a ribbon web resource has no module system), aligned with the
+// shared discoverNavProps: lowercased logical names (SRFR-050) and a warning on an empty relationship list.
+describe('sprk_secure_child_ribbon.js — nav-prop discovery follows the shared discoverNavProps (#2909)', () => {
+  it('lowercases a mixed-case host name for the metadata reads and the lookup match, and still files the row under the host', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(
+      formOf('sprk_Matter'),
+      { getRelationship: () => ({ attributeName: 'sprk_Matter' }) },
+      'sprk_budget'
+    );
+    for (let i = 0; i < 10 && h.forms.length === 0 && h.alerts.length === 0; i++) await flush();
+
+    expect(h.metadataUrls.length).toBeGreaterThan(0);
+    for (const url of h.metadataUrls) {
+      const name = /LogicalName='([^']*)'/.exec(url)?.[1] ?? '';
+      expect(name).toBe(name.toLowerCase());
+    }
+    expect(h.alerts).toEqual([]);
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0].body['sprk_Matter@odata.bind']).toBe(`/sprk_matters(${HOST_ID})`);
+  });
+
+  it('warns, naming the table, when the relationship list is empty, and creates nothing (must fire)', async () => {
+    const h = harness({ flag: true, noRelationships: true });
+    h.ribbon.newChild(
+      formOf('sprk_matter'),
+      { getRelationship: () => ({ attributeName: 'sprk_matter' }) },
+      'sprk_budget'
+    );
+    for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
+
+    expect(h.warnings.some(w => w.includes('zero entries') && w.includes('sprk_budget'))).toBe(true);
+    expect(h.posts).toEqual([]);
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0].text).toContain('Nothing was created.');
+  });
+
+  it('does not warn when relationships are found (must not fire)', async () => {
+    const h = harness({ flag: true });
+    h.ribbon.newChild(
+      formOf('sprk_matter'),
+      { getRelationship: () => ({ attributeName: 'sprk_matter' }) },
+      'sprk_budget'
+    );
+    for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
+
+    expect(h.forms).toHaveLength(1);
+    expect(h.warnings.some(w => w.includes('zero entries'))).toBe(false);
   });
 });

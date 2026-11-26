@@ -1,0 +1,81 @@
+{
+  "table": "sprk_mattertype_ref",
+  "entitySet": "sprk_mattertype_refs",
+  "primaryKey": "sprk_mattertype_refid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_mattertypecode",
+  "nameColumn": "sprk_mattertypename",
+  "columns": ["sprk_mattertypecode", "sprk_mattertypename"],
+  "rows": [
+    {
+      "sprk_mattertype_refid": "11aed095-30da-f011-8406-7ced8d1dc988",
+      "sprk_mattertypecode": "LITG",
+      "sprk_mattertypename": "Litigation"
+    },
+    {
+      "sprk_mattertype_refid": "6cedd99b-30da-f011-8406-7ced8d1dc988",
+      "sprk_mattertypecode": "CMRCL",
+      "sprk_mattertypename": "Commercial"
+    },
+    {
+      "sprk_mattertype_refid": "cdbf53b0-30da-f011-8406-7ced8d1dc988",
+      "sprk_mattertypecode": "EMPL",
+      "sprk_mattertypename": "Employment"
+    },
+    {
+      "sprk_mattertype_refid": "46c35aa2-30da-f011-8406-7ced8d1dc988",
+      "sprk_mattertypecode": "PAT",
+      "sprk_mattertypename": "Patent"
+    },
+    {
+      "sprk_mattertype_refid": "60c35aa2-30da-f011-8406-7ced8d1dc988",
+      "sprk_mattertypecode": "TMRK",
+      "sprk_mattertypename": "Trademark"
+    },
+    {
+      "sprk_mattertype_refid": "498f0f74-c1d3-4597-a5c4-7dbbf63f58ad",
+      "sprk_mattertypecode": "CORPMA",
+      "sprk_mattertypename": "Corporate / M&A"
+    },
+    {
+      "sprk_mattertype_refid": "7bf238a3-8744-4600-8ed9-1e798be9d746",
+      "sprk_mattertypecode": "REGCOMP",
+      "sprk_mattertypename": "Regulatory & Compliance"
+    },
+    {
+      "sprk_mattertype_refid": "5d3f4a96-cf2f-47a5-9e6e-bd8b323138af",
+      "sprk_mattertypecode": "REALEST",
+      "sprk_mattertypename": "Real Estate"
+    },
+    {
+      "sprk_mattertype_refid": "98613dbe-101b-4b66-931f-b8033632852e",
+      "sprk_mattertypecode": "FINBNK",
+      "sprk_mattertypename": "Finance & Banking"
+    },
+    {
+      "sprk_mattertype_refid": "90143114-5542-46b5-97e0-3f65bf010b2c",
+      "sprk_mattertypecode": "PRIVACY",
+      "sprk_mattertypename": "Privacy & Data Protection"
+    },
+    {
+      "sprk_mattertype_refid": "9c77dac4-f44c-48ca-8b31-0d29dbed2aed",
+      "sprk_mattertypecode": "INVEST",
+      "sprk_mattertypename": "Investigations"
+    },
+    {
+      "sprk_mattertype_refid": "3b460e71-95f2-47eb-9ea1-031266941b9f",
+      "sprk_mattertypecode": "TAX",
+      "sprk_mattertypename": "Tax"
+    },
+    {
+      "sprk_mattertype_refid": "30ea58a9-ec65-48c6-b652-fe1d260a2fc6",
+      "sprk_mattertypecode": "BANKRPT",
+      "sprk_mattertypename": "Bankruptcy & Restructuring"
+    },
+    {
+      "sprk_mattertype_refid": "322fef06-2f4b-4c8e-b2bc-a8eab1ce318b",
+      "sprk_mattertypecode": "GENADV",
+      "sprk_mattertypename": "General Advisory"
+    }
+  ]
+}

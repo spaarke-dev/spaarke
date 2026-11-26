@@ -44,6 +44,9 @@ public sealed record LineDecisionLine(Guid LineId, decimal? ApprovedAmount = nul
 /// correction rows (D-64). The single-line route writes none.</param>
 /// <param name="CallerBearerToken">The caller's own token, from the request: the rights to close the lines' Signals (AppendTo on the core
 /// record, Write on each line) are asked of Dataverse AS THE CALLER with it. Null answers every rights question "no".</param>
+/// <param name="Note">Task 095f-2d1 (EB-D-236): the optional note of an individual decision (single-line and multi-line routes only). One note goes on
+/// every line's own Decision Record, as <c>Values["note"]</c>, only when non-blank; it is checked by <see cref="InvoiceCorrectionNote.Check"/>
+/// beside the reason (<see cref="ShapeError"/>). Never written to an invoice column, and always null for Accept all Clean and the approval's bulk accept.</param>
 public sealed record LineDecisionCommand(
     Guid InvoiceId,
     Guid DecisionId,
@@ -52,7 +55,8 @@ public sealed record LineDecisionCommand(
     IReadOnlyList<LineDecisionLine> Lines,
     Guid DeciderSystemUserId,
     bool Bulk,
-    string? CallerBearerToken = null);
+    string? CallerBearerToken = null,
+    string? Note = null);
 
 /// <summary>Outcome class of a decision attempt. The endpoint maps each to one HTTP status and one stable code.</summary>
 public enum LineDecisionStatus
@@ -78,6 +82,14 @@ public enum LineDecisionStatus
     /// <summary>The decision closes Signals and the caller lacks AppendTo on the core record or Write on a decided line (FR-51, the commit
     /// route's rule); NOTHING was changed.</summary>
     Forbidden,
+
+    /// <summary>Task 095d-0 (EB-D-185): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>);
+    /// 409, NOTHING was changed.</summary>
+    FirmRequired,
+
+    /// <summary>ISS-029: the decision id already has a line's Decision Record holding another decision (another action, reason, amount, note
+    /// or decider, as the writer compares them); 409, NOTHING was changed. A new decision needs a new decision id.</summary>
+    IdReused,
 }
 
 /// <summary>Stable ProblemDetails codes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -100,12 +112,36 @@ public static class LineDecisionCodes
     public const string OwnerUnresolved = "ebilling.decision.owner_unresolved";
     public const string Unavailable = "ebilling.decision.unavailable";
     public const string Incomplete = "ebilling.decision.incomplete";
+
+    /// <summary>409 (ISS-029): the decision id is already recorded on a chosen line with another decision; nothing was changed.</summary>
+    public const string IdReused = "ebilling.decision.id_reused";
     public const string DeciderUnresolved = "ebilling.decider.unresolved";
     public const string NotAuthorized = "ebilling.decision.not_authorized";
 
     /// <summary>101 fix round, part 3 (F-2): a correction of the line (for Accept all Clean, of the invoice) was saved but its follow-through has not
     /// finished; 409, nothing was changed. The detail names each correction by field and line and says to repeat it.</summary>
     public const string CorrectionsPending = "ebilling.line.corrections_pending";
+
+    /// <summary>409 (task 095d-0, EB-D-185): no line is decided while the invoice has no firm, is held for one, or its post-Set-firm re-run is pending.</summary>
+    public const string FirmMissing = "ebilling.line_decision.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm. A reviewer must add the firm before its lines can be decided.";
+
+    /// <summary>The sentence with <see cref="FirmMissing"/> when the invoice is held for its firm (a firm set outside the pipeline does not count).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. Its lines can be decided once the firm is assigned.";
+
+    /// <summary>The sentence with <see cref="FirmMissing"/> while the re-run after Set firm has not completed.</summary>
+    public const string FirmRerunPendingDetail =
+        "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => FirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => FirmRerunPendingDetail,
+        _ => FirmMissingDetail,
+    };
 }
 
 /// <summary>A decided line as the caller needs it to update the screen without a second read.</summary>
@@ -135,12 +171,29 @@ public sealed record LineDecisionResult(
 /// request (<see cref="IGenericEntityService.BulkUpdateIfRowVersionsMatchAsync"/>, all-or-nothing), so a lock that expired mid-request, or a writer
 /// that does not take the lock, makes the write fail (409 <c>ebilling.line.changed</c>) before anything is recorded. The Decision Record is written only
 /// AFTER the line write succeeded, so a refused or conflicting decision leaves no record.</para>
+/// <para><b>Lock renewal (ISS-050).</b> The lock lasts <see cref="LockDuration"/> (2 minutes) and a call can cover up to
+/// <see cref="MaxLinesPerRequest"/> lines, one Decision Record each, so the call renews it
+/// (<see cref="IIdempotencyService.RenewProcessingLockAsync"/>, owner-checked) at checkpoints: after each read or check before the first write
+/// (the line read, the unapplied corrections, the Signal sets, the close rights, the firm gate), before each owner question for the correction
+/// rows, and before every write (the line write, the totals, each correction chunk, each line's Decision Record and each line's Signal close). A
+/// checkpoint renews only once <see cref="LockRenewInterval"/> has passed since the lock was taken or last renewed, so a short call makes no
+/// renewal. The lock can lapse only when two consecutive checkpoints are more than <see cref="LockDuration"/> minus <see cref="LockRenewInterval"/>
+/// apart (90 seconds on this route), that is when one read, one owner question or one write takes that long. A renewal that answers false or
+/// throws means the lock is LOST: the call writes nothing more and answers 503 <c>ebilling.decision.incomplete</c> naming the step it stopped
+/// before (503 <c>ebilling.decision.unavailable</c> when nothing was written yet), never 409 and never unlocked; the repeat of the same decision
+/// completes it under a new lock. The approval's held paths (<see cref="AcceptCleanHeldAsync"/>, <see cref="CompleteBulkAcceptHeldAsync"/>,
+/// <see cref="WriteUnreviewedAsync"/>) renew the approval's own lock the same way, at the approval's lock duration, and renew at their first
+/// checkpoint (the caller's time under it is not known here): the approval's own reads before the call must fit in its lock.</para>
 /// <para><b>Order and recovery.</b> Validate everything (all lines, the amount rules, the dry-run totals, the recorder's no-I/O preflight, the owner of
 /// the correction rows) before the first write, then: lines (one conditional transaction) -> totals (016) -> correction rows (deterministic-id upserts) ->
 /// Decision Records (one per line, idempotent by decision id). A failure after the lines were written answers 503 <c>ebilling.decision.incomplete</c>
 /// with the committed line ids; the caller repeats the decision with the same decision id through the multi-line route
 /// (<c>POST .../lines/decisions</c> with those line ids), which re-applies the same values, recomputes, upserts the same correction rows and records
-/// only what is missing. Accept all Clean cannot be repeated by itself after its lines left Clean, which is why the committed ids are returned.</para>
+/// only what is missing. Accept all Clean cannot be repeated by itself after its lines left Clean, which is why the committed ids are returned.
+/// A repeat must be the SAME decision: when a chosen line already has a record under the decision id, the writer's own comparison
+/// (<see cref="BillingDecisionRecorder.PreflightRepeat"/>, over the record the stored-set read already found) runs before the first write, and another
+/// action, reason, amount, note or decider is 409 <c>ebilling.decision.id_reused</c> with nothing written (ISS-029), never a 503 no repeat could
+/// complete.</para>
 /// <para><b>Identity.</b> The decider is the caller's <c>systemuserid</c> from the authenticated principal. The linked contact is looked up by the
 /// recorder. Lines are written by the application (D-90: the caller's role cannot write <c>sprk_billingevent</c>); the endpoint filter has already
 /// proven Write on the invoice as the caller (D-77).</para>
@@ -180,9 +233,18 @@ public sealed class InvoiceLineDecisionService
     private const int CorrectionChunk = 400;
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// ISS-050: how long a call runs on its lock before the next checkpoint renews it (a quarter of <see cref="LockDuration"/>). A checkpoint that
+    /// does not renew is less than this past the last renewal, so the lock lapses only when the next checkpoint is more than the lock's duration
+    /// minus this later (90 seconds at <see cref="LockDuration"/>): one pre-write read or check, one owner question, one conditional line
+    /// transaction, one totals recalculation (with the best-effort index enqueue after it), one correction chunk, or one line's record or close
+    /// taking that long.
+    /// </summary>
+    internal static readonly TimeSpan LockRenewInterval = TimeSpan.FromSeconds(30);
+
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.InvoiceBilledTotal,
+        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, InvoiceSubmissionPersister.InvoiceVendorOrg, // 095d-0: the firm gate reads the firm column
         "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
         CoreAncestorResolver.RegardingRecordTypeColumn, CoreAncestorResolver.RegardingRecordIdColumn,
         "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber",
@@ -280,6 +342,7 @@ public sealed class InvoiceLineDecisionService
 
         var key = LockKeyFor(command.InvoiceId);
         var owner = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+        var takenAt = _time.GetUtcNow(); // read before the acquire: the lock lasts at least LockDuration from here
         bool acquired;
         try
         {
@@ -300,7 +363,7 @@ public sealed class InvoiceLineDecisionService
 
         try
         {
-            return await ApplyAsync(command, acceptClean, checkCorrections: true, ct).ConfigureAwait(false);
+            return await ApplyAsync(command, acceptClean, checkCorrections: true, new LockLease(key, owner, LockDuration, takenAt), ct).ConfigureAwait(false);
         }
         finally
         {
@@ -324,11 +387,15 @@ public sealed class InvoiceLineDecisionService
     /// Task 103 (D-72, F-2): Accept all Clean as a bulk decision, run by the approval, which already HOLDS <see cref="LockKeyFor"/>. Same rules,
     /// order and recovery as <see cref="AcceptCleanAsync"/>; only the lock is the caller's.
     /// </summary>
+    /// <param name="lockOwner">ISS-050: the owner id under which the caller holds <see cref="LockKeyFor"/>; the call renews that lock (owner-checked)
+    /// for <paramref name="lockDuration"/>, the caller's own lock duration, and stops before its next write when the lock is lost.</param>
     internal Task<LineDecisionResult> AcceptCleanHeldAsync(
-        Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+        Guid invoiceId, Guid decisionId, Guid deciderSystemUserId, string? callerBearerToken, string lockOwner, TimeSpan lockDuration, CancellationToken ct)
     {
         var command = new LineDecisionCommand(invoiceId, decisionId, LineDecisionAction.Accept, null, [], deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: true) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: true, checkCorrections: false, ct);
+        return ShapeError(command, acceptClean: true) is { } invalid
+            ? Task.FromResult(invalid)
+            : ApplyAsync(command, acceptClean: true, checkCorrections: false, LockLease.Held(LockKeyFor(invoiceId), lockOwner, lockDuration), ct);
     }
 
     /// <summary>
@@ -336,24 +403,89 @@ public sealed class InvoiceLineDecisionService
     /// no longer chooses them). The documented repeat of an Incomplete bulk decision: the same decision id over those lines, Bulk, Accept, so
     /// the same values, the same correction row ids ("Accepted in bulk") and only the missing records. The caller holds <see cref="LockKeyFor"/>.
     /// </summary>
+    /// <param name="lockOwner">ISS-050: as on <see cref="AcceptCleanHeldAsync"/>.</param>
     internal Task<LineDecisionResult> CompleteBulkAcceptHeldAsync(
-        Guid invoiceId, Guid decisionId, IReadOnlyList<Guid> lineIds, Guid deciderSystemUserId, string? callerBearerToken, CancellationToken ct)
+        Guid invoiceId, Guid decisionId, IReadOnlyList<Guid> lineIds, Guid deciderSystemUserId, string? callerBearerToken, string lockOwner, TimeSpan lockDuration,
+        CancellationToken ct)
     {
         var command = new LineDecisionCommand(
             invoiceId, decisionId, LineDecisionAction.Accept, null, lineIds.Select(id => new LineDecisionLine(id)).ToList(), deciderSystemUserId, Bulk: true, callerBearerToken);
-        return ShapeError(command, acceptClean: false) is { } invalid ? Task.FromResult(invalid) : ApplyAsync(command, acceptClean: false, checkCorrections: false, ct);
+        return ShapeError(command, acceptClean: false) is { } invalid
+            ? Task.FromResult(invalid)
+            : ApplyAsync(command, acceptClean: false, checkCorrections: false, LockLease.Held(LockKeyFor(invoiceId), lockOwner, lockDuration), ct);
     }
+
+    /// <summary>ISS-050: the line-decision lock one call holds, and when it was last taken or renewed (by this service's clock).</summary>
+    private sealed class LockLease(string key, string owner, TimeSpan duration, DateTimeOffset renewedAt)
+    {
+        public string Key { get; } = key;
+
+        public string Owner { get; } = owner;
+
+        public TimeSpan Duration { get; } = duration;
+
+        public DateTimeOffset RenewedAt { get; set; } = renewedAt;
+
+        /// <summary>A lock the caller took at a time not known here: the first checkpoint renews it.</summary>
+        public static LockLease Held(string key, string owner, TimeSpan duration) => new(key, owner, duration, DateTimeOffset.MinValue);
+    }
+
+    /// <summary>
+    /// ISS-050: the checkpoint before a write. Renews the lock once <see cref="LockRenewInterval"/> has passed since it was taken or last renewed;
+    /// otherwise does nothing. <see langword="false"/> = the lock is LOST (the renewal answered false or threw): the caller writes nothing more.
+    /// </summary>
+    private async Task<bool> KeepLockAsync(LockLease lease, Guid invoiceId, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow();
+        if (now - lease.RenewedAt < LockRenewInterval)
+        {
+            return true;
+        }
+
+        bool renewed;
+        try
+        {
+            renewed = await _locks.RenewProcessingLockAsync(lease.Key, lease.Owner, lease.Duration, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Line decision on invoice {InvoiceId}: the processing lock could not be renewed ({ExceptionType}).", invoiceId, ex.GetType().Name);
+            renewed = false;
+        }
+
+        if (!renewed)
+        {
+            _logger.LogError("Line decision on invoice {InvoiceId}: lock-lost: the processing lock is no longer this call's; nothing more is written.", invoiceId);
+            return false;
+        }
+
+        lease.RenewedAt = now; // read before the renewal: the lock lasts at least its duration from here
+        return true;
+    }
+
+    /// <summary>ISS-050: the answer of a call that lost its lock. Nothing written yet: 503 unavailable. Lines written: 503 incomplete at <paramref name="step"/>.</summary>
+    private LineDecisionResult LockLost(LineDecisionCommand command, IReadOnlyList<Guid>? committed, string step) =>
+        committed is null ? LockLostBeforeWrite() : Incomplete(command, committed, step, "lock-lost");
+
+    /// <summary>ISS-050: the lock was lost before this call wrote anything: 503 unavailable, nothing changed, safe to repeat.</summary>
+    private static LineDecisionResult LockLostBeforeWrite() =>
+        new(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The decision could not be finished; nothing was changed. Try again.");
 
     /// <summary>
     /// Task 103 (D-72): every AI-sourced field of a decided Fee or Expense line (Accepted, Reduced, Disallowed) that has no correction row yet
     /// gets one "Unreviewed" row (<c>sprk_islabel</c> false), attributed to the approver. Fields that already have a row (Accepted in bulk,
     /// Corrected, Confirmed individually) are left alone. Row ids are deterministic per (<paramref name="scopeId"/>, line, field), so a repeat
-    /// upserts the same rows. The caller holds <see cref="LockKeyFor"/>. Returns Applied, or Unavailable / OwnerUnresolved with nothing
-    /// written, or Incomplete when a later chunk failed (a repeat completes it).
+    /// upserts the same rows. The caller holds <see cref="LockKeyFor"/>. Returns Applied (with <see cref="LineDecisionResult.CommittedLineIds"/>
+    /// set to the lines that got rows, when any did), or Unavailable / OwnerUnresolved with nothing written, or Incomplete when a later chunk
+    /// failed (a repeat completes it).
     /// </summary>
+    /// <param name="lockOwner">ISS-050: as on <see cref="AcceptCleanHeldAsync"/>: the caller's lock is renewed while the owners are resolved and
+    /// before each chunk; a lost lock stops before the next chunk (Unavailable when none was written, Incomplete otherwise).</param>
     internal async Task<LineDecisionResult> WriteUnreviewedAsync(
-        Guid invoiceId, Guid scopeId, Guid reviewerSystemUserId, string reviewerRole, DateTime decidedOnUtc, CancellationToken ct)
+        Guid invoiceId, Guid scopeId, Guid reviewerSystemUserId, string reviewerRole, DateTime decidedOnUtc, string lockOwner, TimeSpan lockDuration,
+        CancellationToken ct)
     {
+        var lease = LockLease.Held(LockKeyFor(invoiceId), lockOwner, lockDuration);
         Entity? invoice;
         List<Entity> lineRows;
         HashSet<(Guid Line, string Field)> existing;
@@ -395,7 +527,7 @@ public sealed class InvoiceLineDecisionService
             return new LineDecisionResult(LineDecisionStatus.Applied, "ok");
         }
 
-        if (await StampOwnerAsync(rows, invoice, invoiceId, reviewerSystemUserId, ct).ConfigureAwait(false) is { } failure)
+        if (await StampOwnerAsync(rows, invoice, invoiceId, reviewerSystemUserId, lease, ct).ConfigureAwait(false) is { } failure)
         {
             return failure;
         }
@@ -405,6 +537,15 @@ public sealed class InvoiceLineDecisionService
         {
             for (var offset = 0; offset < rows.Count; offset += CorrectionChunk)
             {
+                if (!await KeepLockAsync(lease, invoiceId, ct).ConfigureAwait(false))
+                {
+                    return written == 0
+                        ? LockLostBeforeWrite()
+                        : new LineDecisionResult(
+                            LineDecisionStatus.Incomplete, LineDecisionCodes.Incomplete, "The Unreviewed correction rows could not all be written. Try again.",
+                            FailedStep: "unreviewed");
+                }
+
                 var requests = rows.Skip(offset).Take(CorrectionChunk).Select(row => (OrganizationRequest)new UpsertRequest { Target = row }).ToList();
                 await _entities.ExecuteTransactionAsync(requests, ct).ConfigureAwait(false);
                 written += requests.Count;
@@ -422,7 +563,10 @@ public sealed class InvoiceLineDecisionService
         }
 
         _logger.LogInformation("Unreviewed correction rows of invoice {InvoiceId}: {Count} written.", invoiceId, rows.Count);
-        return new LineDecisionResult(LineDecisionStatus.Applied, "ok");
+
+        // ISS-050 fix round 2: the lines that got rows, so the approval knows it wrote (a later refusal then never says "nothing was changed").
+        var writtenLines = rows.Select(row => row.GetAttributeValue<EntityReference>("sprk_invoiceline").Id).Distinct().ToList();
+        return new LineDecisionResult(LineDecisionStatus.Applied, "ok", CommittedLineIds: writtenLines);
     }
 
     /// <summary>The (line, field) pairs that already have a correction row on the invoice (any outcome).</summary>
@@ -444,7 +588,8 @@ public sealed class InvoiceLineDecisionService
             .ToHashSet();
     }
 
-    /// <summary>The request-shape rules that need no data (400). Reduce / Disallow need a reason; only Reduce takes an amount.</summary>
+    /// <summary>The request-shape rules that need no data (400). Reduce / Disallow need a reason; only Reduce takes an amount; an optional note
+    /// (095f-2d1) is refused when too long or when it holds a control character other than newline, carriage return or tab.</summary>
     internal static LineDecisionResult? ShapeError(LineDecisionCommand command, bool acceptClean)
     {
         static LineDecisionResult Bad(string code, string detail) => new(LineDecisionStatus.InvalidRequest, code, detail);
@@ -488,6 +633,13 @@ public sealed class InvoiceLineDecisionService
             }
         }
 
+        // 095f-2d1 (design 1.1, 5.1): the note by the one shared rule, after the reason and before any lock or read; never truncated or stripped.
+        // The refusal never echoes the note. (Accept all Clean returned above: it carries no note.)
+        if (InvoiceCorrectionNote.DecisionRefusalOf(InvoiceCorrectionNote.Check(command.Note).Refusal) is { } noteRefusal)
+        {
+            return Bad(noteRefusal.Code, noteRefusal.Detail);
+        }
+
         if (command.Action == LineDecisionAction.Reduce)
         {
             if (command.Lines.Any(l => l.ApprovedAmount is null))
@@ -514,7 +666,8 @@ public sealed class InvoiceLineDecisionService
 
     /// <param name="checkCorrections">Refuse while a correction is unapplied (<see cref="RefuseUnappliedAsync"/>). False on the approval's held paths: the
     /// approval's own guard has just refused on the same read (<see cref="InvoiceApprovalCodes.CorrectionsPending"/>).</param>
-    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, bool checkCorrections, CancellationToken ct)
+    /// <param name="lease">ISS-050: the lock this call holds, renewed at the checkpoint before every write (<see cref="KeepLockAsync"/>).</param>
+    private async Task<LineDecisionResult> ApplyAsync(LineDecisionCommand command, bool acceptClean, bool checkCorrections, LockLease lease, CancellationToken ct)
     {
         Entity? invoice;
         List<Entity> lineRows;
@@ -577,6 +730,13 @@ public sealed class InvoiceLineDecisionService
             return new LineDecisionResult(LineDecisionStatus.Applied, "ok", Lines: [], Totals: null);
         }
 
+        // ── ISS-050 (fix round 1): the reads and checks before the first write grow with the line count, so the lock is kept after each of
+        //    them too (and before each owner question in StampOwnerAsync). A loss here is Unavailable: nothing was written. ──
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLostBeforeWrite();
+        }
+
         // ── Validate every line (all or nothing) and build the proposals. ──
         var reason = command.Action == LineDecisionAction.Accept ? null : command.Reason!.Trim();
         var proposals = new List<Proposal>(chosen.Count);
@@ -634,15 +794,21 @@ public sealed class InvoiceLineDecisionService
             return pending;
         }
 
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLostBeforeWrite();
+        }
+
         // ── Dry-run the totals (I-1 via 016's calculator): a refusal changes nothing. ──
         var billedTotal = invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value;
         var proposed = proposals.ToDictionary(p => p.Line.Id);
         var inputs = lineRows.Select(row =>
         {
             var t = all[row.Id];
+            var reviewerAdded = InvoiceTotalsService.ReviewerAddedOf(row);
             return proposed.TryGetValue(row.Id, out var p)
-                ? new InvoiceLineInput(row.Id, t.Type, t.Billed, p.Approved, p.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue))
-                : new InvoiceLineInput(row.Id, t.Type, t.Billed, t.PreviousApproved, t.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue));
+                ? new InvoiceLineInput(row.Id, t.Type, t.Billed, p.Approved, p.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue), reviewerAdded)
+                : new InvoiceLineInput(row.Id, t.Type, t.Billed, t.PreviousApproved, t.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue), reviewerAdded);
         }).ToList();
         var dryRun = InvoiceTotalsCalculator.Calculate(billedTotal, inputs);
         if (dryRun.IsRefused)
@@ -658,10 +824,32 @@ public sealed class InvoiceLineDecisionService
             return setFailure;
         }
 
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLostBeforeWrite();
+        }
+
         // ── FR-51, before any write: closing Signals (app identity, no impersonation) needs the caller's rights, asked as the caller. ──
         if (await AuthorizeCloseAsync(command, invoice, signalSets.ByLine, ct).ConfigureAwait(false) is { } denied)
         {
             return denied;
+        }
+
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLostBeforeWrite();
+        }
+
+        // ── Task 095d-0 (EB-D-185): a firm comes first. After the caller's rights (403 first), before any write: no firm, held for one, or the
+        //    post-Set-firm re-run pending refuses (409). A read fault refuses (fail closed). ──
+        if (await FirmGateRefusalAsync(command, invoice, ct).ConfigureAwait(false) is { } firmRefused)
+        {
+            return firmRefused;
+        }
+
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLostBeforeWrite();
         }
 
         // ── The recorder's no-I/O refusals, before our first write (074 obligation: refuse before you change anything). ──
@@ -680,17 +868,49 @@ public sealed class InvoiceLineDecisionService
             return new LineDecisionResult(LineDecisionStatus.InvalidRequest, LineDecisionCodes.DecisionInvalid, ex.Reason);
         }
 
+        // ── ISS-029: a line already recorded under this decision id must be recorded with THIS decision, decided by the writer's own comparison
+        //    against the record read above (no new read). Another action, reason, amount, note or decider (or a recorded content that cannot be
+        //    read) would be refused at the record step after the line, the totals and the corrections were rewritten, and every repeat would be
+        //    refused the same way: so it is 409 id_reused here, before any write. The same content passes and the repeat completes as before. ──
+        if (signalSets.Stored is { Count: > 0 } stored)
+        {
+            try
+            {
+                foreach (var decision in decisions)
+                {
+                    BillingDecisionRecorder.PreflightRepeat(decision, stored.GetValueOrDefault(decision.SubjectId));
+                }
+            }
+            catch (DecisionRecordRefusedException ex)
+            {
+                _logger.LogWarning(
+                    "Line decision {DecisionId} on invoice {InvoiceId}: the decision id is already recorded on a chosen line with another decision ({Reason}, other content {OtherContent}); nothing changed.",
+                    command.DecisionId, command.InvoiceId, ex.Reason, ex.IsOtherContent);
+                return new LineDecisionResult(
+                    LineDecisionStatus.IdReused, LineDecisionCodes.IdReused,
+                    ex.IsOtherContent
+                        ? "This decision id was already used on one of these lines with another reason, amount, note or reviewer. Nothing was changed. Use a new decision id."
+                        : "This decision id was already used on one of these lines for another action, or its recorded decision cannot be read. Nothing was changed. Use a new decision id.");
+            }
+        }
+
         // ── The bulk correction rows (D-64) and their owner, resolved before the first write. ──
         List<Entity> corrections = [];
         if (command.Bulk && command.Action == LineDecisionAction.Accept)
         {
-            var built = await BuildCorrectionsAsync(command, invoice, proposals, decidedOn.UtcDateTime, ct).ConfigureAwait(false);
+            var built = await BuildCorrectionsAsync(command, invoice, proposals, decidedOn.UtcDateTime, lease, ct).ConfigureAwait(false);
             if (built.Failure is not null)
             {
                 return built.Failure;
             }
 
             corrections = built.Rows;
+        }
+
+        // ── ISS-050: every write below is preceded by a lock checkpoint; a lost lock stops the call before that write. ──
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLost(command, committed: null, "lines");
         }
 
         // ── 1. The lines: one conditional all-or-nothing transaction. ──
@@ -716,6 +936,11 @@ public sealed class InvoiceLineDecisionService
         var committed = proposals.Select(p => p.Line.Id).ToList();
 
         // ── 2. Totals (016): the approved total follows the approved amounts (D-130). ──
+        if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+        {
+            return LockLost(command, committed, "totals");
+        }
+
         InvoiceTotalsCalculation calculation;
         try
         {
@@ -740,6 +965,11 @@ public sealed class InvoiceLineDecisionService
         {
             for (var offset = 0; offset < corrections.Count; offset += CorrectionChunk)
             {
+                if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+                {
+                    return LockLost(command, committed, "corrections");
+                }
+
                 var requests = corrections.Skip(offset).Take(CorrectionChunk)
                     .Select(row => (OrganizationRequest)new UpsertRequest { Target = row }).ToList();
                 await _entities.ExecuteTransactionAsync(requests, ct).ConfigureAwait(false);
@@ -756,16 +986,29 @@ public sealed class InvoiceLineDecisionService
         var signalsNotClosed = 0;
         for (var i = 0; i < proposals.Count; i++)
         {
+            // ISS-050: a lost lock stops the loop (unlike a failed record, after which the other lines are still attempted).
+            if (!await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+            {
+                return LockLost(command, committed, "record");
+            }
+
             try
             {
                 var recorded = await _recorder.RecordAsync(decisions[i], ct).ConfigureAwait(false);
                 decided.Add(new DecidedLineDto(
                     proposals[i].Line.Id, proposals[i].Status.ToString(), proposals[i].Approved, proposals[i].Reason, decidedOn, recorded.AlreadyRecorded));
 
+                var lineSignals = signalSets.ByLine[proposals[i].Line.Id];
+                if (lineSignals.Signals.Count > 0 && !await KeepLockAsync(lease, command.InvoiceId, ct).ConfigureAwait(false))
+                {
+                    // The last line's record is written and only its close is left; otherwise later lines are not recorded yet.
+                    return LockLost(command, committed, failedStep is null && i == proposals.Count - 1 ? SignalsStep : "record");
+                }
+
                 // ── 5. The line's Signals, closed as Acted by its record (a retry: AlreadyClosedByThisRecord). Every Signal and every line is
                 //    still attempted, but a close that failed is counted: nothing else closes that Signal later, so the answer is 'incomplete'. ──
                 signalsNotClosed += await HumanDecisionSignalClose.CloseSetAsync(
-                    _closeActed, signalSets.ByLine[proposals[i].Line.Id], recorded.RecordId, command.DeciderSystemUserId, _logger, ct).ConfigureAwait(false);
+                    _closeActed, lineSignals, recorded.RecordId, command.DeciderSystemUserId, _logger, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -874,9 +1117,23 @@ public sealed class InvoiceLineDecisionService
         LineDecisionCommand command, Proposal p, DateTimeOffset decidedOn, InvoiceSubmissionAfterSteps.ResolvedSignalSet signals)
     {
         // Values are built the same way on every attempt (same keys, decimals normalised by the hash): 074 K-5.
-        IReadOnlyDictionary<string, object?>? values = p.Status == InvoiceLineStatus.Reduced
-            ? new Dictionary<string, object?> { ["approvedAmount"] = p.Approved }
-            : null;
+        // 095f-2d1 (design 1.2): the note is a value only when one is given (checked and trimmed by ShapeError already; never a null-valued key,
+        // which would hash differently from no key), so a decision without a note hashes exactly as before. One note, every line's record.
+        var note = InvoiceCorrectionNote.Check(command.Note).Value;
+        Dictionary<string, object?>? values = null;
+        if (p.Status == InvoiceLineStatus.Reduced || note is not null)
+        {
+            values = [];
+            if (p.Status == InvoiceLineStatus.Reduced)
+            {
+                values["approvedAmount"] = p.Approved;
+            }
+
+            if (note is not null)
+            {
+                values["note"] = note;
+            }
+        }
 
         // Ids, codes and amounts only (ADR-015): no narrative, no extracted text.
         var facts = new Dictionary<string, object?>
@@ -919,7 +1176,11 @@ public sealed class InvoiceLineDecisionService
             .ToList(),
     };
 
-    private sealed record SignalSets(Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> ByLine, LineDecisionResult? Failure);
+    /// <param name="Stored">ISS-029: the record already written under this decision id, per line that has one (the same read as the stored set);
+    /// <see cref="ApplyAsync"/> checks the decision against it before any write.</param>
+    private sealed record SignalSets(
+        Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet> ByLine, LineDecisionResult? Failure,
+        IReadOnlyDictionary<Guid, DecisionRecordWriter.BillingStoredResolvedSet>? Stored = null);
 
     /// <summary>
     /// D-122 per decided line. A line whose decision is already recorded under this decision id keeps the set stored with that record (a
@@ -930,6 +1191,7 @@ public sealed class InvoiceLineDecisionService
     private async Task<SignalSets> ResolveSignalSetsAsync(LineDecisionCommand command, IReadOnlyList<Proposal> proposals, CancellationToken ct)
     {
         var byLine = new Dictionary<Guid, InvoiceSubmissionAfterSteps.ResolvedSignalSet>(proposals.Count);
+        var storedByLine = new Dictionary<Guid, DecisionRecordWriter.BillingStoredResolvedSet>();
         var fresh = new List<Guid>();
         try
         {
@@ -941,6 +1203,7 @@ public sealed class InvoiceLineDecisionService
                 {
                     if (found.TryGetValue(p.Line.Id, out var stored) && stored is not null)
                     {
+                        storedByLine[p.Line.Id] = stored;
                         byLine[p.Line.Id] = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(
                             stored.SetReadAtUtc ?? DateTime.MinValue,
                             stored.Signals.Select(s => new InvoiceSubmissionAfterSteps.ResolvedSignal(s.SignalId, s.PolicyCode)).ToList());
@@ -982,7 +1245,7 @@ public sealed class InvoiceLineDecisionService
             }
         }
 
-        return new SignalSets(byLine, null);
+        return new SignalSets(byLine, null, storedByLine);
     }
 
     /// <summary>
@@ -1020,10 +1283,34 @@ public sealed class InvoiceLineDecisionService
         }
     }
 
+    /// <summary>Task 095d-0 (EB-D-185): <see cref="LineDecisionStatus.FirmRequired"/> unless <see cref="InvoiceFirmGate"/> is open; a read fault is
+    /// <see cref="LineDecisionStatus.Unavailable"/> (nothing changed). Null when the decision may proceed.</summary>
+    private async Task<LineDecisionResult?> FirmGateRefusalAsync(LineDecisionCommand command, Entity invoice, CancellationToken ct)
+    {
+        InvoiceFirmGateResult gate;
+        try
+        {
+            gate = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Line decision on invoice {InvoiceId}: the firm gate could not be read ({ExceptionType}); nothing changed.", command.InvoiceId, ex.GetType().Name);
+            return new LineDecisionResult(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The decision could not be checked; nothing was changed. Try again.");
+        }
+
+        if (gate == InvoiceFirmGateResult.Open)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: the invoice is not open for decisions ({Gate}); nothing changed.", command.InvoiceId, gate);
+        return new LineDecisionResult(LineDecisionStatus.FirmRequired, LineDecisionCodes.FirmMissing, LineDecisionCodes.FirmDetailFor(gate));
+    }
+
     private sealed record CorrectionBuild(List<Entity> Rows, LineDecisionResult? Failure);
 
     private async Task<CorrectionBuild> BuildCorrectionsAsync(
-        LineDecisionCommand command, Entity invoice, IReadOnlyList<Proposal> proposals, DateTime decidedOnUtc, CancellationToken ct)
+        LineDecisionCommand command, Entity invoice, IReadOnlyList<Proposal> proposals, DateTime decidedOnUtc, LockLease lease, CancellationToken ct)
     {
         if (SingleCoreOf(invoice) is not { } singleCore)
         {
@@ -1044,14 +1331,17 @@ public sealed class InvoiceLineDecisionService
             return new CorrectionBuild(rows, null);
         }
 
-        return new CorrectionBuild(rows, await StampOwnerAsync(rows, invoice, command.InvoiceId, command.DeciderSystemUserId, ct).ConfigureAwait(false));
+        return new CorrectionBuild(rows, await StampOwnerAsync(rows, invoice, command.InvoiceId, command.DeciderSystemUserId, lease, ct).ConfigureAwait(false));
     }
 
     /// <summary>
     /// Files the correction rows (013): each line's owner asked through the row's own question (194b R3b-2, below), the creating person,
     /// and 013's guard. Null when stamped; a refusal otherwise (nothing is written).
     /// </summary>
-    private async Task<LineDecisionResult?> StampOwnerAsync(List<Entity> rows, Entity invoice, Guid invoiceId, Guid creatorSystemUserId, CancellationToken ct)
+    /// <param name="lease">ISS-050: one owner question per line can take minutes on a large invoice, so the lock is kept before each question; a
+    /// lost lock is Unavailable (nothing written).</param>
+    private async Task<LineDecisionResult?> StampOwnerAsync(
+        List<Entity> rows, Entity invoice, Guid invoiceId, Guid creatorSystemUserId, LockLease lease, CancellationToken ct)
     {
         if (SingleCoreOf(invoice) is null)
         {
@@ -1068,6 +1358,11 @@ public sealed class InvoiceLineDecisionService
             if (owners.ContainsKey(lineId))
             {
                 continue;
+            }
+
+            if (!await KeepLockAsync(lease, invoiceId, ct).ConfigureAwait(false))
+            {
+                return LockLostBeforeWrite();
             }
 
             RecordOwnerResolution answer;
@@ -1118,24 +1413,6 @@ public sealed class InvoiceLineDecisionService
     {
         _logger.LogWarning("Line decision on invoice {InvoiceId}: the invoice names no single core record; nothing changed.", invoiceId);
         return new LineDecisionResult(LineDecisionStatus.OwnerUnresolved, LineDecisionCodes.OwnerUnresolved, "The invoice names no single core record.");
-    }
-
-    /// <summary>
-    /// The invoice's first core record found (matter, project, else work assignment); null when it names none. NOT the single-core rule: with
-    /// two lookups set it returns the first. The line decisions and corrections use <see cref="SingleCoreOf"/>; the remaining callers are
-    /// <c>InvoiceAdjustmentService</c> and <c>SubmissionOverrideService</c> (#2455 follow-up).
-    /// </summary>
-    internal static (string Entity, Guid Id)? CoreOf(Entity invoice)
-    {
-        foreach (var (column, entity) in new[] { ("sprk_matter", "sprk_matter"), ("sprk_project", "sprk_project"), ("sprk_regardingworkassignment", "sprk_workassignment") })
-        {
-            if (invoice.GetAttributeValue<EntityReference>(column) is { } reference && reference.Id != Guid.Empty)
-            {
-                return (entity, reference.Id);
-            }
-        }
-
-        return null;
     }
 
     /// <summary>

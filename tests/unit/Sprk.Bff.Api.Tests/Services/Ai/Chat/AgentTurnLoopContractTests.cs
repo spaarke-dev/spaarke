@@ -165,7 +165,8 @@ public class AgentTurnLoopContractTests
             new ChatSession(
                 SessionId: "s1", TenantId: "t1", DocumentId: null, PlaybookId: null,
                 CreatedAt: DateTimeOffset.UtcNow, LastActivity: DateTimeOffset.UtcNow,
-                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid });
+                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())
+            { OwnerOid = TestSessionOwner.Oid });
 
         var entry = new SessionToolChain
         {

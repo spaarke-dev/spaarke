@@ -73,13 +73,16 @@ import type { CommunicationSendMode } from '../../services/communicationApi';
 import { ModalWindowControls } from '../ModalWindowControls';
 
 import { sendCommunication } from '../../services/communicationApi';
-import { SprkModal } from '../SprkModal';
+import { ConfirmModal, SprkModal } from '../SprkModal';
 import {
   describeDraftSaveFailure,
   describeSendFailure,
+  mayHaveBeenSent,
   toSendCommunicationError,
+  toSendRequestError,
   type ISendFailureDescription,
 } from './describeSendFailure';
+import { discardUpload } from './uploadDiscard';
 
 import {
   emailComposerReducer,
@@ -102,6 +105,8 @@ import type {
 import type { RichTextEditorRef } from '../RichTextEditor';
 import type { InlineAiAction } from '../InlineAiToolbar';
 
+import { useFocusReturn } from '../../utils/focusReturn';
+import { isSafeHref } from './composeOnlyText';
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
@@ -110,7 +115,7 @@ import { InternalOnlySwitch } from './subcomponents/InternalOnlySwitch';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 import { ComposerSendButton } from './subcomponents/ComposerSendButton';
 
-// The Dataverse logical name for a governed Document — the paperclip's "Link documents"
+// The Dataverse logical name for a governed Document — the Attach menu's "Link documents"
 // picks this type and ATTACHES it, so it's intentionally excluded from the record-search
 // catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
 const DOCUMENT_LOGICAL_NAME = 'sprk_document';
@@ -133,6 +138,48 @@ function isComposeBodyEmpty(body: string): boolean {
       .replace(/<[^>]*>/g, '')
       .replace(/&nbsp;/g, '')
       .trim().length === 0
+  );
+}
+
+// The words of a body, for "did the user change it": tags, &nbsp; and spacing are ignored, so the editor
+// re-serializing a seeded body (or an empty one as <p><br></p>) never reads as a change.
+// Style and script blocks are not words, and an entity is the character it stands for: the editor drops a quoted reply's
+// <style> and writes `&quot;` back as `"`, which is not an edit (task 220 K3).
+function bodyWords(body: string): string {
+  return (body || '')
+    .replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&(nbsp|quot|apos|lt|gt|#\d+|#x[0-9a-f]+);/gi, (_m, name: string) => {
+      const n = name.toLowerCase();
+      if (n === 'nbsp') return ' ';
+      if (n === 'quot') return '"';
+      if (n === 'apos') return "'";
+      if (n === 'lt') return '<';
+      if (n === 'gt') return '>';
+      const code = n.startsWith('#x') ? parseInt(n.slice(2), 16) : parseInt(n.slice(1), 10);
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+    })
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function recipientKeys(list: ReadonlyArray<{ email: string }>): string {
+  return list.map(r => r.email.trim().toLowerCase()).join('\n');
+}
+
+// Whether closing now would lose something the user wrote (task 220, #2946): a recipient, the subject, the message
+// text or the attachments differ from what the composer opened with. A host's pre-fill is not the user's work, so an
+// untouched reply or seeded draft closes without asking. Mirrors RuleWizard's `hasWork(draft, initial)`.
+function hasTypedWork(state: EmailComposerState, initial: EmailComposerState): boolean {
+  if (state.readOnly) return false;
+  return (
+    recipientKeys(state.to) !== recipientKeys(initial.to) ||
+    recipientKeys(state.cc) !== recipientKeys(initial.cc) ||
+    recipientKeys(state.bcc) !== recipientKeys(initial.bcc) ||
+    state.subject.trim() !== initial.subject.trim() ||
+    bodyWords(state.body) !== bodyWords(initial.body) ||
+    state.attachments.map(a => a.id).join('\n') !== initial.attachments.map(a => a.id).join('\n')
   );
 }
 
@@ -228,16 +275,6 @@ function defaultAttachmentSources(
   return wizardContext
     ? [{ kind: 'wizard' }, { kind: 'related' }, { kind: 'local' }, { kind: 'spe' }]
     : [{ kind: 'local' }, { kind: 'related' }, { kind: 'spe' }];
-}
-
-/**
- * Blocks script-executing schemes (`javascript:`/`data:`/`vbscript:`) before an
- * (untrusted) `recordLink.url` is rendered into an `<a href>`. This is the
- * shared send engine — a caller could build the url from record-derived data.
- * Everything else (http(s), app-relative, mailto) is allowed.
- */
-function isSafeHref(url: string): boolean {
-  return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
 /** Escape a plain string for safe interpolation into HTML (record-link label/href). */
@@ -405,7 +442,7 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
     },
   },
-  // Trailing controls placed into the RichTextEditor toolbar slot (paperclip / search).
+  // Trailing controls placed into the RichTextEditor toolbar slot (record search / template / AI).
   // Kept visually grouped at the toolbar's trailing end.
   toolbarSlot: {
     display: 'flex',
@@ -519,6 +556,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // recreating validate/send/saveDraft/getState on every keystroke.
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  // What the composer opened with (the host's pre-fill), for "would closing lose the user's work" (task 220).
+  const openedWithRef = React.useRef(state);
 
   const showAssociations = props.showAssociations ?? true;
   const attachmentSources = React.useMemo(
@@ -538,8 +577,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Imperative handle to the HTML body editor — used to insert a record link AT THE CURSOR
   // (owner UAT 2026-07-24) rather than appending to the end. Null in plain-text mode.
   const bodyEditorRef = React.useRef<RichTextEditorRef>(null);
-  // Local-file picker input (trigger lives in the RTF toolbar's paperclip menu, owner UAT
-  // 2026-07-24). Pick-time policy rejections surface here.
+  // Local-file picker input (trigger lives in the Attach menu beside the Attachments heading;
+  // owner UAT 2026-07-24, moved task 197). Pick-time policy rejections surface here.
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   // Late-bound handle to handleAddAttachment (defined below) so the file-pick callback,
   // declared earlier, can invoke it without a temporal-dead-zone reference.
@@ -605,7 +644,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
   }, []);
 
-  // Local-file pick (paperclip → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
+  // Local-file pick (Attach menu → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
   // rejected files are dropped and surfaced (never silently). Moved out of AttachmentList when
   // the add controls hoisted to the RTF toolbar (owner UAT 2026-07-24).
   const handleLocalFilesPicked = React.useCallback(
@@ -636,6 +675,40 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [state.attachments.length]
   );
 
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Focus return after a host lookup (task 199; the shared helper is in utils/focusReturn.ts since task 200). The
+  // platform lookup pane hands focus back to whatever opened the surrounding dialog (a grid link behind the wizard)
+  // when it closes, so a keyboard user is lost. Once the lookup settles (pick, cancel or failure) take focus back to
+  // the button that started it; skip when the composer unmounted or focus is already inside it (a host or the user put
+  // it there on purpose); fall back to the composer root when the trigger is gone or disabled. The document comes from
+  // the composer's own ownerDocument, so an iframe-hosted composer (Find Similar -> Document Relationship Viewer ->
+  // Email) uses its own frame. ONE wrapper for every lookup path (recipients, Link a record, Link documents, record search).
+  const returnFocus = useFocusReturn({
+    getRoot: () => rootRef.current,
+    getFallback: () => rootRef.current,
+  });
+  const withLookupFocusReturn = React.useCallback(
+    <T,>(trigger: HTMLElement | null | undefined, run: () => Promise<T>): Promise<T> =>
+      run().then(
+        value => {
+          returnFocus(trigger);
+          return value;
+        },
+        err => {
+          returnFocus(trigger);
+          throw err;
+        }
+      ),
+    [returnFocus]
+  );
+
   // "Link another record" → pick a record via the host polymorphic picker and APPEND it to the
   // in-memory "Related to" list (owner UAT 2026-07-31). No record exists yet in compose/reply/
   // forward, so associations are held in reducer state and ride the send payload; the user can add
@@ -643,24 +716,28 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // maps associations[0] as the primary regarding at send time (CLIENT-ONLY ordering). No
   // replace-confirm — adding is additive, not a single-primary swap.
   const onAddRelationship = props.onAddRelationship;
-  const handleAddRelationship = React.useCallback(() => {
-    if (!onAddRelationship) return;
-    setRelatedCollapsed(false);
-    void onAddRelationship()
-      .then(picked => {
-        if (!picked) return;
-        dispatch({
-          type: 'ADD_ASSOCIATION',
-          association: {
-            entityType: picked.entityType,
-            entityId: picked.id,
-            entityName: picked.name,
-            entityUrl: picked.url,
-          },
-        });
-      })
-      .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
-  }, [onAddRelationship]);
+  const handleAddRelationship = React.useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!onAddRelationship) return;
+      const trigger = e.currentTarget;
+      setRelatedCollapsed(false);
+      void withLookupFocusReturn(trigger, onAddRelationship)
+        .then(picked => {
+          if (!picked) return;
+          dispatch({
+            type: 'ADD_ASSOCIATION',
+            association: {
+              entityType: picked.entityType,
+              entityId: picked.id,
+              entityName: picked.name,
+              entityUrl: picked.url,
+            },
+          });
+        })
+        .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
+    },
+    [onAddRelationship, withLookupFocusReturn]
+  );
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -670,14 +747,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Absent resolver → local picks stay display-only (pre-task-042 behavior).
   const [resolvingIds, setResolvingIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const [uploadError, setUploadError] = React.useState<string | undefined>();
-  const mountedRef = React.useRef(true);
-  React.useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   // The "Email not sent" / "Draft not saved" dialog (owner decision 2026-10-09: a failed send is
   // never silent). Transient UI state, not engine state. Non-null → the dialog is open.
   const [failureNotice, setFailureNotice] = React.useState<ISendFailureDescription | null>(null);
@@ -695,6 +764,29 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }, 0);
   }, []);
 
+  // ── Session uploads (task 220, #2813) ──────────────────────────────────────
+  // A document this composer uploaded carries the delete the upload handed back on its item (`discard`, also kept when
+  // a compose-only step restores the item). Only those are ever deleted: a document picked from existing records (or
+  // passed in by the host) has no delete. Every delete goes through `uploadDiscard.ts` (at most once; never one a
+  // Finish send kept).
+  // Documents a send attempt carried while its outcome was unknown or may have delivered the email: never deleted
+  // (a sent email's `sprk_communicationattachment` row is RemoveLink on document delete — it would be silently
+  // unlinked, not refused). An attempt that provably sent nothing releases its documents again. A draft save keeps
+  // what it carried here too: the saved draft may name them.
+  const sentOrMaybeSentRef = React.useRef(new Set<string>());
+  // Set once a send succeeded: closing afterwards neither asks "Discard this email?" nor deletes anything.
+  const deliveredRef = React.useRef(false);
+  // Set once an attempt may have sent the email: the discard prompt then no longer says it "will not be sent".
+  const maybeSentRef = React.useRef(false);
+  // Attachments whose upload was still running when the user removed them or abandoned the draft: the document such
+  // an upload creates is deleted when it arrives (its id never reached the draft, the host or a send).
+  const removedWhileUploadingRef = React.useRef(new Set<string>());
+
+  const runDiscard = React.useCallback((documentId: string | undefined, discard: (() => Promise<void>) | undefined) => {
+    if (!discard || (documentId && sentOrMaybeSentRef.current.has(documentId))) return;
+    discardUpload(discard);
+  }, []);
+
   const onUploadLocalAttachment = props.onUploadLocalAttachment;
   const handleAddAttachment = React.useCallback(
     (item: IAttachmentItem) => {
@@ -705,13 +797,20 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       setResolvingIds(prev => new Set(prev).add(item.id));
       onUploadLocalAttachment(file)
         .then(res => {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || removedWhileUploadingRef.current.has(item.id)) {
+            // Nobody will ever reference this document: the composer is gone or discarded, or the file was removed
+            // while it uploaded. (A wizard step that unmounts mid-upload uploads the file again itself.)
+            removedWhileUploadingRef.current.delete(item.id);
+            runDiscard(res.documentId, res.discard);
+            return;
+          }
           dispatch({
             type: 'RESOLVE_ATTACHMENT_DOCUMENT',
             id: item.id,
             documentId: res.documentId,
             driveItemId: res.driveItemId,
             linkUrl: res.linkUrl,
+            discard: res.discard,
           });
         })
         .catch((err: unknown) => {
@@ -730,9 +829,25 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           });
         });
     },
-    [onUploadLocalAttachment]
+    [onUploadLocalAttachment, runDiscard]
   );
   handleAddAttachmentRef.current = handleAddAttachment;
+
+  // Removing a file from the draft deletes the document this composer uploaded for it (remove-then-reattach leaves
+  // nothing behind); a picked or carried document is only taken off the email.
+  const handleRemoveAttachment = React.useCallback(
+    (id: string) => {
+      const item = stateRef.current.attachments.find(a => a.id === id);
+      if (item?.discard) {
+        runDiscard(item.documentId, item.discard);
+      } else if (item?.source === 'local' && !item.documentId) {
+        // Its upload may still be running: the document it creates is deleted when it arrives.
+        removedWhileUploadingRef.current.add(id);
+      }
+      dispatch({ type: 'REMOVE_ATTACHMENT', id });
+    },
+    [runDiscard]
+  );
 
   // ── RTF toolbar slot (owner UAT 2026-07-24) ────────────────────────────────
   // The attachment / record-lookup / connector actions live INLINE in the RichTextEditor
@@ -741,7 +856,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const canAddLocal = !state.readOnly && attachmentSources.some(s => s.kind === 'local');
   const canLinkDocument = !state.readOnly && !!props.onLookupRecord;
   // Record search excludes Document (owner UAT 2026-07-24): documents are attached via the
-  // paperclip's "Link documents"; every other catalog type inserts a body link.
+  // the Attach menu's "Link documents"; every other catalog type inserts a body link.
   const recordSearchCatalog = React.useMemo(
     () => (props.recordLookupCatalog ?? []).filter(t => t.logicalName !== DOCUMENT_LOGICAL_NAME),
     [props.recordLookupCatalog]
@@ -751,21 +866,32 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // a record now happens via the "Link another record" tile inside the "Related to" section (item 10).
   const canLinkRecord = !state.readOnly && !!props.onAddRelationship;
 
+  // The buttons whose menus start a record lookup; the menu item itself unmounts on close, so focus
+  // returns to the menu's trigger button (task 199).
+  const attachButtonRef = React.useRef<HTMLButtonElement>(null);
+  const recordSearchButtonRef = React.useRef<HTMLButtonElement>(null);
+
   const runDocumentLink = React.useCallback(() => {
-    if (!props.onLookupRecord) return;
-    void props.onLookupRecord(DOCUMENT_LOGICAL_NAME).then(picked => {
-      if (picked) handleRecordPicked(picked);
-    });
-  }, [props.onLookupRecord, handleRecordPicked]);
+    const onLookupRecord = props.onLookupRecord;
+    if (!onLookupRecord) return;
+    void withLookupFocusReturn(attachButtonRef.current, () => onLookupRecord(DOCUMENT_LOGICAL_NAME))
+      .then(picked => {
+        if (picked) handleRecordPicked(picked);
+      })
+      .catch(err => console.warn('[EmailComposer] record lookup failed:', err));
+  }, [props.onLookupRecord, handleRecordPicked, withLookupFocusReturn]);
 
   const runRecordSearch = React.useCallback(
     (logicalName: string) => {
-      if (!props.onLookupRecord) return;
-      void props.onLookupRecord(logicalName).then(picked => {
-        if (picked) handleRecordPicked(picked);
-      });
+      const onLookupRecord = props.onLookupRecord;
+      if (!onLookupRecord) return;
+      void withLookupFocusReturn(recordSearchButtonRef.current, () => onLookupRecord(logicalName))
+        .then(picked => {
+          if (picked) handleRecordPicked(picked);
+        })
+        .catch(err => console.warn('[EmailComposer] record lookup failed:', err));
     },
-    [props.onLookupRecord, handleRecordPicked]
+    [props.onLookupRecord, handleRecordPicked, withLookupFocusReturn]
   );
 
   // ── Template picker (Wave E) ───────────────────────────────────────────────
@@ -912,32 +1038,40 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     return () => window.clearTimeout(t);
   }, [aiMenuOpen]);
 
+  // Attach menu (owner dev recheck 2026-11-18, task 197): the trigger sits beside the
+  // "Attachments" heading — styled like the "Link a record" tile — in BOTH rich and plain-text
+  // modes (it used to be the RTF toolbar paperclip, so plain text could not attach). Same menu
+  // items and handlers as before; absent when the host can neither add local files nor link
+  // documents.
+  const attachMenu =
+    canAddLocal || canLinkDocument ? (
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
+          <button type="button" className={styles.linkTile} ref={attachButtonRef}>
+            <Attach20Regular />
+            <span>Attach</span>
+          </button>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
+            {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    ) : undefined;
+
   const toolbarSlot =
-    canAddLocal || canLinkDocument || showRecordSearch || showTemplatePicker || showSparkle ? (
+    showRecordSearch || showTemplatePicker || showSparkle ? (
       <div className={styles.toolbarSlot}>
-        {(canAddLocal || canLinkDocument) && (
-          <Menu positioning="below-end">
-            <MenuTrigger disableButtonEnhancement>
-              <Tooltip content="Attach files or link a document" relationship="label">
-                <ToolbarButton icon={<Attach20Regular />} aria-label="Attach" />
-              </Tooltip>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
-                {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-        )}
         {showRecordSearch && (
-          // Grouped in the SAME toolbar section as the paperclip — no divider between them
-          // (owner UAT 2026-07-27). The section-leading divider is still supplied once by
-          // ToolbarPlugin, separating this whole group from the editor controls.
+          // Leads the trailing toolbar group. The section-leading divider is supplied once by
+          // ToolbarPlugin, separating this whole group from the editor controls. (The attach
+          // paperclip moved beside the Attachments heading — task 197.)
           <Menu positioning="below-end">
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="Insert a link to a record" relationship="label">
-                <ToolbarButton icon={<SearchRegular />} aria-label="Insert record link" />
+                <ToolbarButton ref={recordSearchButtonRef} icon={<SearchRegular />} aria-label="Insert record link" />
               </Tooltip>
             </MenuTrigger>
             <MenuPopover>
@@ -951,13 +1085,13 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             </MenuPopover>
           </Menu>
         )}
-        {/* "|" separator between the attach/record-link group and the template/AI group
+        {/* "|" separator between the record-link group and the template/AI group
             (owner UAT 2026-08-03 R5 item 3) — only when both groups have at least one tool. */}
-        {(showTemplatePicker || showSparkle) && (canAddLocal || canLinkDocument || showRecordSearch) && (
+        {(showTemplatePicker || showSparkle) && showRecordSearch && (
           <span className={styles.toolbarDivider} role="separator" aria-orientation="vertical" />
         )}
         {showTemplatePicker && (
-          // Apply an email template (Wave E). Grouped with the paperclip/search in the same
+          // Apply an email template (Wave E). Grouped with the record search in the same
           // toolbar section. Templates load on menu open; picking one fills subject + body.
           <Menu
             positioning="below-end"
@@ -1072,7 +1206,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     const key = `${props.mode}:${props.communicationId ?? ''}`;
     if (key !== initKeyRef.current) {
       initKeyRef.current = key;
-      dispatch({ type: 'RESET', state: initialState(props) });
+      const reset = initialState(props);
+      openedWithRef.current = reset;
+      deliveredRef.current = false;
+      maybeSentRef.current = false;
+      dispatch({ type: 'RESET', state: reset });
       rootRef.current?.focus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1126,6 +1264,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     }
 
     dispatch({ type: 'BEGIN_SEND' });
+    // Task 220: from here until the outcome is known, nothing this attempt carries may be deleted (a Close while the
+    // send is in flight must not pull a document out from under it). Released below only when nothing was sent.
+    // Every document the email names, attached or only linked (a body link to the row is written for every
+    // `linkSelected` item, attached or not — buildBodyWithAttachmentLinks).
+    const carried = stateRef.current.attachments
+      .filter(a => !!a.documentId)
+      .map(a => a.documentId as string)
+      .filter(id => !sentOrMaybeSentRef.current.has(id));
+    carried.forEach(id => sentOrMaybeSentRef.current.add(id));
+    const releaseCarried = () => carried.forEach(id => sentOrMaybeSentRef.current.delete(id));
     // An unresolved record link is refused with an inline message (below) — it is already on screen,
     // so it is not reported again through onError or the failure dialog.
     let refusedInline = false;
@@ -1155,24 +1303,38 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         props.threadId,
         props.threadIsPrivate
       );
-      response = await sendCommunication(request, {
-        authenticatedFetch: props.authenticatedFetch,
-        bffBaseUrl: props.bffBaseUrl,
-      });
+      try {
+        response = await sendCommunication(request, {
+          authenticatedFetch: props.authenticatedFetch,
+          bffBaseUrl: props.bffBaseUrl,
+        });
+      } catch (requestErr) {
+        // What the request itself threw without a response is a connection failure, whatever the browser called it
+        // (task 220, #2946) — never "something went wrong on this page".
+        throw toSendRequestError(requestErr);
+      }
       dispatch({ type: 'END_SEND' });
     } catch (err) {
       dispatch({ type: 'END_SEND' });
-      if (refusedInline) throw err;
+      if (refusedInline) {
+        releaseCarried();
+        throw err;
+      }
       // Every other failure — a server refusal, an expired sign-in, a request that never reached the
       // server — is normalized so the host's onError hears about it, and the user is told (owner
       // decision 2026-10-09: a failed send is never silent). See `sendFailureDisplay`.
       const failure = toSendCommunicationError(err);
+      // A send that provably sent nothing frees its documents for cleanup again; one that may have gone out
+      // (no response, 5xx, 2xx without an id) keeps them for good.
+      if (!mayHaveBeenSent(failure)) releaseCarried();
+      else maybeSentRef.current = true;
       props.onError?.(failure);
       if (props.sendFailureDisplay !== 'host' && mountedRef.current) {
         setFailureNotice(describeSendFailure(failure));
       }
       throw failure;
     }
+    deliveredRef.current = true;
     // The email is delivered. A host `onSent` that throws is the host's bug, not a failed send: it must never
     // reach the "Email not sent" path (or reject send()), so it is only logged.
     try {
@@ -1206,6 +1368,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           'No BFF draft-persistence endpoint exists yet — wire onSaveDraftRequest once one ships.'
       );
     }
+    // Task 220: a saved draft may name its documents (and a failed save may still have stored them), so none of them
+    // is ever deleted by this composer afterwards.
+    for (const a of stateRef.current.attachments) {
+      if (a.documentId) sentOrMaybeSentRef.current.add(a.documentId);
+    }
     dispatch({ type: 'BEGIN_SAVE_DRAFT' });
     try {
       const response = await props.onSaveDraftRequest(stateRef.current);
@@ -1221,7 +1388,35 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
   const getState = React.useCallback((): EmailComposerState => stateRef.current, []);
 
-  useImperativeHandle(ref, () => ({ validate, send, saveDraft, getState }), [validate, send, saveDraft, getState]);
+  // ── Closing (task 220): ask before a typed draft is lost; clean up this session's uploads ──
+  // "Discard this email?" is RuleWizard's "Discard this rule?" pattern (ConfirmModal, Discard / Keep editing).
+  const [discardAsk, setDiscardAsk] = React.useState(false);
+  const onCancel = props.onCancel;
+  const abandon = React.useCallback(() => {
+    // The email will not be sent: every document this composer uploaded and no attempt may have sent goes, and an
+    // upload still running is deleted when it arrives.
+    for (const a of stateRef.current.attachments) {
+      if (a.source === 'local' && !a.documentId) removedWhileUploadingRef.current.add(a.id);
+    }
+    for (const a of stateRef.current.attachments) runDiscard(a.documentId, a.discard);
+    onCancel?.();
+  }, [onCancel, runDiscard]);
+  const requestCancel = React.useCallback(() => {
+    // No host close wired: Cancel does nothing, as before.
+    if (!onCancel) return;
+    // After a successful send there is nothing to discard: close as before.
+    if (deliveredRef.current) onCancel();
+    else if (hasTypedWork(stateRef.current, openedWithRef.current)) setDiscardAsk(true);
+    else abandon();
+  }, [onCancel, abandon]);
+
+  useImperativeHandle(ref, () => ({ validate, send, saveDraft, getState, requestCancel }), [
+    validate,
+    send,
+    saveDraft,
+    getState,
+    requestCancel,
+  ]);
 
   // ── Field handlers ──────────────────────────────────────────────────────
   const fieldErrors = React.useMemo(() => {
@@ -1277,22 +1472,26 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           mailbox. Wired to the engine's existing `sendMode` state. Hidden in read-only (view)
           mode — there is nothing to send. The primary Send control lives HERE, left of "From:"
           (owner UAT 2026-08-03 item 1 — Outlook-style Send in the address section, not a bottom bar). */}
-      {/* Task 160 (D-179): compose-only hides the whole row: Send, "From:" and the sender (switcher or static text). */}
-      {!state.readOnly && !props.composeOnly && (
+      {/* Task 160 (D-179): compose-only hides the whole row: Send, "From:" and the sender (switcher or static text).
+          Task 182 (D-219 Q2): a compose-only host that sets `composeOnlyShowsFrom` gets the row back WITHOUT Send — the
+          host sends later, from the mailbox chosen here. */}
+      {!state.readOnly && (!props.composeOnly || props.composeOnlyShowsFrom === true) && (
         <div className={styles.fromRow} role="group" aria-label="From">
-          <ComposerSendButton
-            isSending={state.isSending}
-            canSend={canSend}
-            sendMode={state.sendMode}
-            showSendModeChoice={showSendModeRadio && !state.readOnly}
-            onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
-            onSend={() => {
-              send().catch(() => {
-                /* send() already told the user (failure dialog / host via onError) — swallow so the
-                   click doesn't leave an unhandled rejection. */
-              });
-            }}
-          />
+          {!props.composeOnly && (
+            <ComposerSendButton
+              isSending={state.isSending}
+              canSend={canSend}
+              sendMode={state.sendMode}
+              showSendModeChoice={showSendModeRadio && !state.readOnly}
+              onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
+              onSend={() => {
+                send().catch(() => {
+                  /* send() already told the user (failure dialog / host via onError) — swallow so the
+                     click doesn't leave an unhandled rejection. */
+                });
+              }}
+            />
+          )}
           {/* "From:" as plain semibold text, not a boxed label (owner UAT 2026-07-30 R2 item 9);
               the mailbox value beside it stays a subtle switcher (user ↔ Spaarke shared mailbox). */}
           <span className={styles.fromLabel} aria-hidden="true">
@@ -1354,7 +1553,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.to}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'to', value: recipients })}
           onSearch={props.onSearchRecipients}
-          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('to') : undefined}
+          onLookup={
+            props.onLookupRecipients
+              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('to'))
+              : undefined
+          }
           errorMessage={fieldErrors.to}
         />
         <RecipientField
@@ -1363,7 +1566,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.cc}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
           onSearch={props.onSearchRecipients}
-          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('cc') : undefined}
+          onLookup={
+            props.onLookupRecipients
+              ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('cc'))
+              : undefined
+          }
         />
         {bccVisible ? (
           <RecipientField
@@ -1372,7 +1579,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             value={state.bcc}
             onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
             onSearch={props.onSearchRecipients}
-            onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('bcc') : undefined}
+            onLookup={
+              props.onLookupRecipients
+                ? trigger => withLookupFocusReturn(trigger, () => props.onLookupRecipients!('bcc'))
+                : undefined
+            }
           />
         ) : (
           !state.readOnly && (
@@ -1401,8 +1612,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      {/* Hidden local-file input — triggered by the RTF toolbar's paperclip "Add files"
-          (owner UAT 2026-07-24). */}
+      {/* Hidden local-file input — triggered by the Attach menu's "Add files" beside the
+          Attachments heading (owner UAT 2026-07-24; moved from the RTF toolbar, task 197). */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1412,14 +1623,15 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         aria-label="Choose files from your computer"
       />
 
-      {/* Attachments — display-only collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24);
-          the add/link controls now live in the RTF toolbar. */}
+      {/* Attachments — collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24); the add/link
+          menu is the button beside the heading (task 197). */}
       <div className={styles.section} role="region" aria-label="Attachments">
         <AttachmentList
           items={state.attachments}
-          onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
+          onRemove={handleRemoveAttachment}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
+          headerAction={attachMenu}
           resolvingIds={resolvingIds}
           readOnly={state.readOnly}
           errorMessage={[fieldErrors.attachments, uploadError, ...pickErrors].filter(Boolean).join(' ') || undefined}
@@ -1566,7 +1778,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           <ModalWindowControls
             isMaximized={props.isMaximized}
             onToggleMaximize={props.onToggleMaximize}
-            onClose={props.onCancel}
+            onClose={requestCancel}
           />
         </div>
       )}
@@ -1592,10 +1804,31 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             if (mountedRef.current) setFailureNotice(describeDraftSaveFailure(err, !draftSaveAvailable));
           });
         }}
-        onCancel={() => props.onCancel?.()}
+        onCancel={requestCancel}
         onEdit={props.onEdit}
         onReply={props.onReply}
         onForward={props.onForward}
+      />
+
+      {/* Closing a draft with typed content (task 220, #2946): the same question RuleWizard asks. Nested over the
+          composer (and over SendEmailDialog's SprkModal) like the failure dialog below; Keep editing returns to the
+          draft untouched. */}
+      <ConfirmModal
+        open={discardAsk}
+        onClose={() => setDiscardAsk(false)}
+        onConfirm={() => {
+          setDiscardAsk(false);
+          abandon();
+        }}
+        title="Discard this email?"
+        message={
+          maybeSentRef.current
+            ? 'What you have written will be lost.'
+            : 'What you have written will be lost. The email will not be sent.'
+        }
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
       />
 
       {/* Failed send / Save Draft (owner decision 2026-10-09). The canonical shell (ADR-050) as a

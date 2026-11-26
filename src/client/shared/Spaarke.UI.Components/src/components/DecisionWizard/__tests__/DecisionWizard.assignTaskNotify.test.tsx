@@ -37,7 +37,7 @@ const assignTask: DecisionAction = {
     },
   ],
   effectLines: [
-    'Creates a task (an event of type Task) linked to the record, assigned to the person above, when the decision is recorded',
+    'Creates a task (an event of type Task) linked to the record, assigned to the person you choose, when the decision is recorded',
   ],
   excludes: [],
 };
@@ -127,6 +127,24 @@ describe('Assign Task: Send email notification', () => {
     );
     expect(describeWarning('assignee_email_not_sent_unverified')).toBe(
       'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.'
+    );
+  });
+
+  it('task 207: an assignee whose user account is Administrative-only reads as its own sentence, with no code', () => {
+    const text = describeWarning('assignee_email_not_sent_admin_account');
+    expect(text).toBe(
+      "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and cannot use the app."
+    );
+    expect(text).not.toContain('assignee_email_not_sent');
+    // The generic fallback still serves a code this build does not know.
+    expect(describeWarning('assignee_email_not_sent_something_new')).toBe(
+      'The decision was recorded, but one follow-up step needs a look.'
+    );
+  });
+
+  it('task 176: an inquiry email that was sent but not archived reads as a sentence, not a code', () => {
+    expect(describeWarning('inquiry_email_not_archived')).toBe(
+      'The inquiry email was sent, but a copy of it could not be saved to the matter.'
     );
   });
 });

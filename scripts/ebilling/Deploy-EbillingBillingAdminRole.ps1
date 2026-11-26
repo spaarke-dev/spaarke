@@ -29,8 +29,10 @@
          invariants (ADR-002). Any other privilege held deeper than that stops a plain run (exit 2; it is never lowered).
          Never Delete, Assign or Share; on the Procedure tables only Read on sprk_procedure, at Deep (task 089e, owner
          2026-11-04: "Add to role file + apply on dev"; the depth of the rule-set Read), which the Procedure override removal
-         and preview ask of the caller. Nothing else on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task
-         121 adds the rest after uac-r2 task 191). Holding one of these stops the run (exit 2).
+         and preview ask of the caller, and Read on sprk_procedureversion and sprk_procedureassignment, at Deep (task 084f, owner
+         EB-D-220 2026-11-12, uac-r2 agreed), which the two record-level Procedure routes ask of the caller for every row they
+         expose. Nothing else on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task 121 adds the rest after
+         uac-r2 task 191). Holding one of these stops the run (exit 2).
       3. Spaarke Core User and Spaarke Basic User: prvReadsprk_ruleset is removed with RemovePrivilegeRole, one call per
          root role. That is the ONLY removal this script makes. If either role holds any OTHER privilege on sprk_ruleset, or
          holds the Read at a depth other than Deep (the depth the role source showed), the run stops before writing (exit 2).
@@ -43,7 +45,7 @@
 
     Modes:
       -WhatIf   reads everything, prints the plan and what -Verify would report; writes nothing.
-      (plain)   applies the plan; reads every change back (root role and per-business-unit copies).
+      (plain)   applies the plan; reads every change back (root role and per-business-unit copies). A team holding the role is printed and exits 1, as -Verify does (089e K6).
       -Verify   read-only; exit 0 when the state above holds, exit 1 naming every gap (drift).
 
     No publish is needed (privileges are not a published customization). The role source in
@@ -106,6 +108,8 @@ $State = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniq
 $script:Changed = $State.Changed
 $script:Skipped = $State.Skipped
 $Gaps = [System.Collections.Generic.List[string]]::new()
+# 089e K6: a team holding the role is a gap a plain (apply) run cannot fix and must not pass over: it prints it and exits 1, as -Verify does.
+$TeamHolderGaps = [System.Collections.Generic.List[string]]::new()
 
 # ---------------------------------------------------------------------------------------------------------------
 # Helpers
@@ -204,8 +208,18 @@ try {
     if (-not $procedureRead) { throw "Privilege prvReadsprk_procedure not found." }
     if (-not $procedureRead.Deep) { throw [EscalationException]::new("$($procedureRead.Name) cannot be held at Deep. Nothing was changed.") }
     $wanted += [pscustomobject]@{ Name = $procedureRead.Name; Id = $procedureRead.Id; Depth = 'Deep' }
+    # Task 084f (EB-D-220, owner 2026-11-12; uac-r2 agreed): Read at Deep on sprk_procedureversion and sprk_procedureassignment too. The two
+    # record-level Procedure routes read their rows app-only, then ask the caller's own Read on every row they expose (EB-D-218).
+    $procedureAllowedIds = @($procedureRead.Id)
+    foreach ($t in 'sprk_procedureversion', 'sprk_procedureassignment') {
+        $r = $privs[$t]['Read']
+        if (-not $r) { throw "Privilege prvRead$t not found." }
+        if (-not $r.Deep) { throw [EscalationException]::new("$($r.Name) cannot be held at Deep. Nothing was changed.") }
+        $wanted += [pscustomobject]@{ Name = $r.Name; Id = $r.Id; Depth = 'Deep' }
+        $procedureAllowedIds += $r.Id
+    }
     $forbiddenForAdmin = @(foreach ($t in $AdminTables.Keys) { foreach ($v in $Verbs) { if ($AdminVerbs -notcontains $v) { $privs[$t][$v] } } }) +
-    @(foreach ($t in $ProcedureTables) { $privs[$t].Values | Where-Object { $_.Id -ne $procedureRead.Id } })
+    @(foreach ($t in $ProcedureTables) { $privs[$t].Values | Where-Object { $procedureAllowedIds -notcontains $_.Id } })
     $ruleSetPrivs = @($privs['sprk_ruleset'].Values)
     $stripPriv = $privs['sprk_ruleset']['Read']
     $rootBu = Get-RootBusinessUnitId
@@ -245,7 +259,9 @@ try {
 
     # --- 2. Solution membership ----------------------------------------------------------------------------------------
     if ($roleExists) {
-        $headers = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+        # Strongly consistent reads: attribute metadata (IsSecured) is cached per server, and a plain read soon after a change can
+        # come back stale (a secured column reported as unsecured). The header is ignored on data requests.
+        $headers = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; Consistency = 'Strong' }
         $inSolution = Test-DvInSolution -Membership (Get-DvSolutionMembership -Api $State.ApiBase -Headers $headers -SolutionId $solution[0].solutionid) -ComponentId $RoleId
         if ($inSolution) {
             $script:Skipped.Add("role in $SolutionUniqueName"); Write-Host "  skipped  role is in solution $SolutionUniqueName" -ForegroundColor Yellow
@@ -262,11 +278,11 @@ try {
 
     # --- 3. The role's privileges --------------------------------------------------------------------------------------
     Write-Host ""
-    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic; Read Deep on sprk_procedure)" -ForegroundColor Cyan
+    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic; Read Deep on sprk_procedure, sprk_procedureversion and sprk_procedureassignment)" -ForegroundColor Cyan
     $have = if ($roleExists) { Get-RolePrivilegeMap $RoleId } else { @{} }
     $forbidden = @($forbiddenForAdmin | Where-Object { $have.ContainsKey($_.Id) })
     if ($forbidden.Count) {
-        $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables but Read on sprk_procedure (D-76, uac-r2 081, 089e)."
+        $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables but Read on sprk_procedure, sprk_procedureversion and sprk_procedureassignment (D-76, uac-r2 081, 089e, 084f)."
         if ($Verify) { $Gaps.Add($msg) } else { throw [EscalationException]::new("$msg STOP: this script removes nothing from the role. Nothing further was changed.") }
     }
     # The one lowering (owner EB-D-162): a Read still held at Global, the task 120 depth, goes to Deep. RemovePrivilegeRole first,
@@ -329,11 +345,19 @@ try {
         if ($bad.Count) { $Gaps.Add("$RoleName business-unit copies without the set: $($bad -join '; ')"); Write-Host "  WARNING: business-unit copies without the set: $($bad -join '; ')" -ForegroundColor DarkYellow }
         else { Write-Host "  business-unit copies ($($copies.Count)) hold the set" -ForegroundColor Green }
 
-        # uac-r2 K-1: users only, never a team.
-        $teams = @((Invoke-Dv "roles($RoleId)/teamroles_association?`$select=name").value)
-        $users = @((Invoke-Dv "roles($RoleId)/systemuserroles_association?`$select=fullname").value)
-        Write-Host "  held by $($users.Count) user(s) directly, $($teams.Count) team(s)"
-        if ($teams.Count) { $Gaps.Add("$RoleName is held by team(s) $(($teams | ForEach-Object { $_.name }) -join ', '): assign it to users directly, never to a team (uac-r2 K-1)") }
+        # uac-r2 K-1: users only, never a team. 089e fix round 2 (F2): the holders of the root role AND of every business-unit copy, both
+        # associations for each (a team or a user holds the copy in its own unit, so the root role's holders alone miss them).
+        $teams = [System.Collections.Generic.List[object]]::new()
+        $users = [System.Collections.Generic.List[object]]::new()
+        foreach ($holderRoleId in @($RoleId) + @($copies | ForEach-Object { ([string]$_.roleid).ToLower() })) {
+            foreach ($tm in @((Invoke-Dv "roles($holderRoleId)/teamroles_association?`$select=name").value)) { $teams.Add([pscustomobject]@{ name = $tm.name; RoleId = $holderRoleId }) }
+            foreach ($u in @((Invoke-Dv "roles($holderRoleId)/systemuserroles_association?`$select=fullname").value)) { $users.Add([pscustomobject]@{ fullname = $u.fullname; RoleId = $holderRoleId }) }
+        }
+        Write-Host "  held by $($users.Count) user(s) directly, $($teams.Count) team(s), across the root role and $($copies.Count) business-unit copies"
+        if ($teams.Count) {
+            $teamGap = "$RoleName is held by team(s) $(($teams | ForEach-Object { "$($_.name) (role copy $($_.RoleId))" }) -join ', '): assign it to users directly, never to a team (uac-r2 K-1)"
+            $Gaps.Add($teamGap); $TeamHolderGaps.Add($teamGap)
+        }
     }
 
     # --- 4. Core and Basic User lose Read on sprk_ruleset ------------------------------------------------------------
@@ -444,5 +468,10 @@ if ($ReadOnly) {
     Write-Host "-Verify would report $($Gaps.Count) gap(s) now:" -ForegroundColor Cyan
     foreach ($g in $Gaps) { Write-Host "  GAP  $g" }
     Write-Host "WhatIf run: nothing was written." -ForegroundColor Cyan
+}
+elseif ($TeamHolderGaps.Count -gt 0) {
+    foreach ($g in $TeamHolderGaps) { Write-Host "  GAP  $g" -ForegroundColor Red }
+    Write-Host "APPLY FAIL: $($TeamHolderGaps.Count) team-holder gap(s) this script does not change (what it could change was applied above)." -ForegroundColor Red
+    exit 1
 }
 exit 0

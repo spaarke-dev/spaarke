@@ -1320,6 +1320,46 @@ public class MembershipResolverServiceTests
             "including opposing counsel");
     }
 
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_workassignment")]
+    public async Task ResolveAsync_AccessConferringOnly_BillingFirmAndBillingResponsible_ConferNothing(string entityType)
+    {
+        // ebilling-r1 task 089a (procedure model 5.2, K-2): a core record's billing firm and billing responsible are
+        // organization lookups the eBilling routing reads; they name who BILLS the record, not who works on it, and must never
+        // confer access. The registry-listed law-firm column is the control: org-typed columns DO reach the FetchXml when
+        // registered, so the billing columns' absence is the registry's decision, not an org-typed blind spot.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"),     // registered (control)
+            Descriptor("sprk_billingfirm", "billingFirm", "Organization"),              // NOT registered
+            Descriptor("sprk_billingresponsible", "billingResponsible", "Organization")); // NOT registered
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection());
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            entityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedLawFirm" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1");
+        captured.Query.Should().NotContain("sprk_billingfirm", "the billing firm names who bills the record, not who may read it");
+        captured.Query.Should().NotContain("sprk_billingresponsible",
+            "the billing responsible organization names who pays, not who may read the record");
+    }
+
     [Fact]
     public async Task ResolveAsync_AccessConferringOnly_OwnershipIdentityTypes_EmitOnlyThePlatformOwnershipConditions()
     {

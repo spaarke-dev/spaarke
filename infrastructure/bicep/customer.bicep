@@ -261,6 +261,22 @@ module uami 'modules/uami.bicep' = {
   }
 }
 
+// Ontology writer identity (task 266 / #2605, ontology FR-21). The BFF's SignalWriter and DecisionRecordWriter
+// authenticate ONLY as this identity (Ontology__Writer__ManagedIdentityClientId, written by H4b from this module's
+// clientId); without it they fail closed and no Signal or Decision Record is ever written on the stamp. It is a
+// SEPARATE, least-privileged identity, never the stamp UAMI above (which is System Administrator in Dataverse):
+// it holds no Azure role and no Graph role (H13 T3), and in Dataverse only what H7b S24 grants. Attached to the
+// BFF site and its staging slot next to the stamp UAMI; keyVaultReferenceIdentity stays the stamp UAMI.
+module uamiOntologyWriter 'modules/uami.bicep' = {
+  scope: rg
+  name: 'uami-ontology-writer-${baseName}'
+  params: {
+    name: 'mi-spaarke-${customerId}-${environmentName}-ontology-writer'
+    location: location
+    tags: tags
+  }
+}
+
 // ============================================================================
 // KEY VAULT (Deploy first - other resources store secrets here)
 // ============================================================================
@@ -615,6 +631,7 @@ module bffApi 'modules/app-service.bicep' = {
     appServicePlanId: appServicePlan.outputs.planId
     location: location
     userAssignedIdentityResourceId: uami.outputs.id
+    additionalUserAssignedIdentityResourceIds: [uamiOntologyWriter.outputs.id]
     // G-8 Batch 1 defect #14: this invocation previously passed ZERO appSettings
     // — the Model 2 BFF booted with no config and no AZURE_CLIENT_ID UAMI pin,
     // so DefaultAzureCredential could not resolve the UAMI and the H9 health
@@ -706,6 +723,7 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
     location: location
     appServicePlanId: appServicePlan.outputs.planId
     userAssignedIdentityResourceId: uami.outputs.id
+    additionalUserAssignedIdentityResourceIds: [uamiOntologyWriter.outputs.id]
     tags: tags
   }
 }
@@ -926,6 +944,11 @@ output signalrSkuDeployed string = signalr.?outputs.signalrSku ?? ''
 output userAssignedIdentityResourceId string = uami.outputs.id
 output userAssignedIdentityObjectId string = uami.outputs.principalId
 output userAssignedIdentityClientId string = uami.outputs.clientId
+
+// Ontology writer UAMI (task 266 / #2605). H2a captures the client id; H4b writes it to both slots.
+output ontologyWriterIdentityResourceId string = uamiOntologyWriter.outputs.id
+output ontologyWriterIdentityObjectId string = uamiOntologyWriter.outputs.principalId
+output ontologyWriterIdentityClientId string = uamiOntologyWriter.outputs.clientId
 
 // --- App Service (BFF) — task 127 / Phase C. Output names are LOAD-BEARING: ArmDeploymentRunner.MapOutputs
 // (task 123) reads these exact names to populate BicepDeployOutputs.AppServiceName / AppServiceStagingSlotName. ---

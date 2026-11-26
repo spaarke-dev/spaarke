@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="196" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Gate Decision Record job: a refused processing lock is a Failure (redelivered, then dead-lettered), never a silent Success</title>
+    <phase>12 Create-wizard lookups and composer (185 dev check fixes)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies .cs code and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One located defect in one handler with a clear contract and an existing test rig.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>185-fixes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only GateDecisionRecordJob.cs and its test file; no other open task touches them.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, job, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Defect in our own task 149 code on master, found by ebilling-r1 during their 084h-3 review (2026-11-17); owner chose "Fix it now" (2026-11-17). `GateDecisionRecordJobHandler.ProcessAsync` returns `JobOutcome.Success` when `TryAcquireProcessingLockAsync` refuses the decision's lock. A refused lock is not proof that a record exists or will exist. Concrete loss path: attempt 1 fails (a Dataverse fault returns Failure and the message is abandoned), its lock release in the finally block hits a cache fault (IdempotencyService swallows it), and the broker redelivers the SAME message (same JobId = same lock owner) within `IdempotencyService.OwnerTakeoverAge` (1 minute). The redelivery is refused, completes as Success, and the gate decision never gets its Decision Record. Nothing is logged above Information and nothing is dead-lettered.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core, ADR-004 Service Bus job handlers and the BFF idempotency service.</role>
+  <goal>A refused processing lock makes the job return `JobOutcome.Failure`: the processor abandons it for redelivery and, on the final delivery, dead-letters it (visible, replayable). A concurrent duplicate whose sibling wrote the record finds it on redelivery and completes as "already recorded". No path completes a gate job without a record except the D-144 by-design skips that exist today.</goal>
+  <context>
+    <background>
+- Handler: `src/server/api/Sprk.Bff.Api/Services/Signals/GateDecisionRecordJob.cs`, `ProcessAsync` ~200-280 at origin/master `3c9a2ff4e1`. The refused branch is ~215-222. The class remarks (~148-160) say "a duplicate in flight [is] Success": update that sentence to the new rule.
+- Lock semantics: `src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs` ~90-135 (acquire fails OPEN on a cache fault; same owner takes over only at least 1 minute later) and ~201-225 (owner release swallows faults). Do NOT change IdempotencyService (shared by many handlers).
+- Processor: `Services/Jobs/ServiceBusJobProcessor.cs` ~210-240: Completed completes; Poisoned or `job.IsFinalDelivery` dead-letters; otherwise abandon (immediate redelivery). `JobContract.MaxDeliveryCount` = 5, `IsFinalDelivery` (JobContract.cs ~82).
+- Reference: ebilling-r1's 084h-3 repair job (reviewed by us 2026-11-17 at `36b3f9004f`) returns Failure on a refused lock; same rule here.
+- Tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Signals/GateDecisionRecordJobTests.cs`. `AJobWhileAnotherJobHoldsTheSameDecision_WritesNothing_AndCompletes_TheLockNarrowsTheRace` (~177) asserts the old Success and must change; extend the existing Rig, do not build a new one.
+- Line numbers are at origin/master `3c9a2ff4e1`; re-grep before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/GateDecisionRecordJob.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/GateDecisionRecordJobTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change this task makes to Sprk.Bff.Api follows .claude/constraints/bff-extensions.md. No new endpoint, DI registration, package, refusal reason or telemetry instrument. Measure the publish-size delta against a fresh master build and record it in the task notes.</constraint>
+    <constraint source="project">Change only the refused-lock branch and the remarks that describe it. Every other outcome of the handler (Poisoned paths, D-144 skips, Failure paths, the finally release) is unchanged; their existing tests pass unmodified.</constraint>
+    <constraint source="project">The refused branch never releases the lock (it does not hold it) and never calls the writer.</constraint>
+    <constraint source="project">Logging on the refused branch: Warning with the job id, communication id, authorize flag, attempt and delivery count; on the final delivery (`job.IsFinalDelivery`) log Error saying the job will be dead-lettered and count it once with the existing `OntologyWriterTelemetry.RecordFailure(DecisionRecordRefusalReason.GateRecordFailed)`. Ids and gate values only (D-123).</constraint>
+    <constraint source="ADR-004">The fix stays inside the handler's outcome contract (Success / Failure / Poisoned); no change to ServiceBusJobProcessor, JobContract or IdempotencyService.</constraint>
+    <constraint source="ADR-038">Tests cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target. Never run the unfiltered Sprk.Bff.Api.Tests; filter on GateDecisionRecordJobTests (and IdempotencyService tests if touched, which they must not be).</constraint>
+    <constraint source="project">No deploy in this task. The fix reaches dev only through uac-r2's next dev BFF build.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read ProcessAsync, the class remarks, IdempotencyService's acquire/release and the processor's outcome handling.</step>
+    <step order="2">Change the refused-lock branch to return Failure with the logging and final-delivery metering in the constraints; update the remarks.</step>
+    <step order="3">Write the tests in the acceptance criteria; prove the own-leftover-lock test fails on the old code (seeding proof: this guard prevents silent data loss).</step>
+    <step order="4">Run the filtered tests, `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test tests/Spaarke.ArchTests` and `dotnet format --verify-no-changes` on the changed files. Record the publish-size delta.</step>
+    <step order="5">Update tasks/TASK-INDEX.md status to `✅ [done]` AND this POML's status to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`. Record deviations and known limits in notes/task-196-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test (seeding proof): a redelivery of the same job (same JobId) that finds its own earlier attempt's lock younger than OwnerTakeoverAge (the earlier release failed) returns Failed, writes nothing, logs at Warning, and leaves the lock in place. Against the old code it returns Completed.</criterion>
+    <criterion testable="true">Test: the same redelivery once the lock is at least OwnerTakeoverAge old takes the lock over and writes exactly one record (Completed).</criterion>
+    <criterion testable="true">Test: a second job (different JobId) for the same decision while the first holds the lock returns Failed and writes nothing; the first completes and writes exactly one record; a redelivery of the second after that completes as "already recorded" with no second record.</criterion>
+    <criterion testable="true">Test: a refused lock on the final delivery (`IsFinalDelivery` true) returns Failed, logs at Error and counts GateRecordFailed exactly once; on a non-final delivery it counts nothing.</criterion>
+    <criterion testable="true">Every other existing GateDecisionRecordJobTests test passes unmodified (only the old refused-lock test changes).</criterion>
+    <criterion testable="true">BFF build clean; ArchTests pass; dotnet format clean on changed files; publish-size delta recorded.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>If a correct fix needs a change to IdempotencyService, JobContract or ServiceBusJobProcessor, STOP and report the options.</trigger>
+    <trigger>If another job handler relies on the gate job completing on a refused lock, STOP and report.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build the BFF; filtered dotnet test on GateDecisionRecordJobTests; ArchTests</tool>
+  </tools>
+  <completion>Done 2026-11-17: PR #2884 merged to master (0de88473b1). Refused processing lock returns Failure (Warning per non-final delivery; Error + one GateRecordFailed on the final, then dead-lettered). Fix round 1 added the same fix to our AssignTaskEmailJob (task 168), plus K1 remarks and K4 log wording. Independent Opus review PASS (no F), fix diff re-checked by the main session. Publish delta +153 bytes. Not deployed: dev via uac-r2 next BFF build. Notes: notes/task-196-notes.md. rework: fix-round-1 task 196</completion>
+  <execution>
+    <protocol>Run through task-execute. Fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

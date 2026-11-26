@@ -1,0 +1,333 @@
+/**
+ * SubmitInvoiceAction — "Submit invoice" on a Matter, Project and Work assignment record
+ * (spaarke-SPA-external-access-platform-r4 task 007 FR-10; task 010 moved it from a page to a modal over the record).
+ * It opens ebilling's shared submission wizard in a CHILD `SprkModal` over the record view, with THIS record fixed
+ * (`lockedRecord`: the wizard has no Record step and no picker). The flow itself is ebilling's; R4 hosts it.
+ *
+ * WHERE. A Matter and a Project list it under `sectionActions.invoices` (the Invoices section's header button); a Work
+ * assignment has no Invoices section (no `sprk_invoice` lookup to it), so it keeps the action in the header toolbar. The
+ * host mounts for either, and its dialog is a React descendant of the record modal (the same child-dialog arrangement as
+ * Upload and New message).
+ *
+ * OFFERED (hide, don't disable; the server re-checks Read, Create and the firm link on submit, so this is a display rule):
+ *   - `/me` `firms` is a non-empty array and the caller is not on the workforce plane (`callerMaySubmitInvoices`, the
+ *     `InvoicesWidget` rule; SPA-r4 task 040), AND
+ *   - for at least one of those firms the firm-records answer lists this record under its kind (`submitInvoiceRightOf`).
+ * Unknown (the caller context or an answer not in yet), a failed read, and an answer that does not list the record, even
+ * one flagged `partial` / `truncated`, all leave it hidden. It needs no router: nothing navigates.
+ *
+ * READS. One firm-records read per firm, not per render and not per record: the answer is the firm's list of linked
+ * records, one read with no paging, so it is cached for the OPENING. The cache is keyed by the opening's `/me` object
+ * (`useCallerContext` reads it once per modal instance and the openers mount a new instance per opening), so browsing to
+ * the next record in the same opening reuses the answers and closing and reopening reads again. A failed read stays
+ * failed for the opening (hidden); reopening retries.
+ *
+ * THE DIALOG. A `SprkModal` of the record modal's own size (`lg`, so it sits where the record does), `explicit` dismiss
+ * (the child-dialog Esc standard: Esc and the backdrop close neither this dialog nor the record, a half-filled invoice is
+ * never lost; × and the wizard's Cancel close it). The wizard is mounted `embedded` with its own title bar hidden, so the
+ * `SprkModal` is the one dialog (one focus trap, one close button) and its × goes to the wizard's `onClose`. The wizard is
+ * mounted only while the dialog is open, so every opening starts clean. Focus returns to the control that opened it.
+ *
+ * THE RECORD CHECK (review 2, F1). The wizard asks `loadRecords` per firm whether the locked record can take an invoice. The
+ * host answers from the SAME source that decides the button, the firm-records read (`readInvoiceFirmRecords`: uncapped), not
+ * from `listInvoiceCoreRecords`, which caps each kind at 200 rows: a record beyond that cap would show "only part of your
+ * list could be read" forever. The answer is `[lockedRecord]` when the firm's list names it (kind and id, id without regard
+ * to case), else `[]`, carrying the answer's own `truncated` / `partial` flags, so the wizard shows the fixed message only
+ * for a complete answer. With no firm in the query (the firms are unknown) it falls back to `listInvoiceCoreRecords`. Every
+ * call reads afresh (Retry must be able to recover).
+ *
+ * IN FLIGHT (review 1). While a submission request is in flight the dialog cannot be closed: × (and Cancel) are ignored, and
+ * the action reports busy (`onBusyChange`) so the record behind it is held too. Closing then would hide a refusal (a 4xx or
+ * 5xx) the wizard is about to show; the wizard shows it and the user closes the dialog afterwards.
+ *
+ * REFRESH. Once the server has accepted the submission (`onSubmitted`), ANY close (Done, Cancel, ×) re-reads the record's
+ * Invoices section, so the new invoice shows as soon as it exists. A submission that is accepted after the dialog was
+ * closed mid-flight refreshes at once.
+ *
+ * LINKS (ebilling-r1 iss052). The result screen offers "Open invoice" (an Accepted invoice the server named) and "Open {record}".
+ *   - "Open {record}" for the record this modal already shows CLOSES this dialog back to it: the record is the one behind the
+ *     dialog, so nothing is stacked (a second copy of the same record over itself would be confusing). Another record (not
+ *     reachable with the record locked) opens as a child record over this one.
+ *   - "Open invoice" closes this dialog and opens the invoice the way a row of the Invoices section does: a child record over this
+ *     record (`useChildRecordOpener`), which re-reads the Invoices section on close and puts focus on the invoice's row. Not the
+ *     shell's `useOpenRecord`, which would replace the record shown (or stack a second top-level dialog over a grid's modal).
+ *     Inside a child record there is no child opener, and then no "Open invoice" is offered.
+ */
+import * as React from 'react';
+import { makeStyles } from '@fluentui/react-components';
+import { InvoiceSubmissionWizard } from '@spaarke/ui-components/components/InvoiceSubmission';
+import type {
+  InvoiceCoreRecordKind,
+  InvoiceCoreRecordList,
+  InvoiceCoreRecordOption,
+  InvoiceRecordQuery,
+  InvoiceSubmissionRecordRef,
+} from '@spaarke/ui-components/components/InvoiceSubmission';
+import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
+import {
+  getInvoiceSubmission,
+  listInvoiceCoreRecords,
+  listInvoiceFirms,
+  readInvoiceFirmRecords,
+  submitInvoice,
+} from '../../../api/web-api-client';
+import { activePlaneOrNull } from '../../../auth/backend-selection';
+import type { ExternalUserContextResponse } from '../../../auth/bff-client';
+import { renderSubmissionReport } from '../../ebilling/InvoiceOutcomeReport';
+import { coreRecordTarget, INVOICE_ENTITY } from '../../ebilling/submissionLinks';
+import { useChildDialog } from '../../createAction';
+import { useChildRecordOpener } from '../childRecord';
+import {
+  callerFirmIdsOf,
+  callerMaySubmitInvoices,
+  invoiceKindOfEntity,
+  submitInvoiceRightOf,
+  type FirmRecordsRead,
+} from '../recordAccess';
+import { recordText } from '../recordTemplates';
+import type { RecordActionHostContext } from '../recordTemplate.types';
+
+const useStyles = makeStyles({
+  // The unpadded `SprkModal` body is filled by the embedded wizard, which keeps its own footer on screen.
+  frame: {
+    height: '100%',
+    minHeight: 0,
+  },
+});
+
+const FIRM_RECORD_LIST_OF_KIND: Readonly<Record<InvoiceCoreRecordKind, 'matters' | 'projects' | 'workAssignments'>> = {
+  matter: 'matters',
+  project: 'projects',
+  workassignment: 'workAssignments',
+};
+
+/** Each opening's firm-records reads, by firm id (see READS above). */
+const readsByOpening = new WeakMap<ExternalUserContextResponse, Map<string, Promise<FirmRecordsRead>>>();
+
+function openingReads(callerContext: ExternalUserContextResponse): Map<string, Promise<FirmRecordsRead>> {
+  let reads = readsByOpening.get(callerContext);
+  if (!reads) {
+    reads = new Map();
+    readsByOpening.set(callerContext, reads);
+  }
+  return reads;
+}
+
+/** The firm-records answers of the caller's firms, as they arrive (`undefined` until a firm's answer is in). */
+function useFirmRecordsReads(
+  callerContext: ExternalUserContextResponse | null,
+  enabled: boolean
+): Readonly<Record<string, FirmRecordsRead>> {
+  const [answers, setAnswers] = React.useState<Readonly<Record<string, FirmRecordsRead>>>({});
+  const firmIds = React.useMemo(() => callerFirmIdsOf(callerContext), [callerContext]);
+
+  React.useEffect(() => {
+    if (!enabled || !callerContext || firmIds.length === 0) return;
+    let cancelled = false;
+    const reads = openingReads(callerContext);
+    for (const firmId of firmIds) {
+      let read = reads.get(firmId);
+      if (!read) {
+        read = readInvoiceFirmRecords(firmId).then(
+          answer => answer,
+          (): FirmRecordsRead => 'failed'
+        );
+        reads.set(firmId, read);
+      }
+      void read.then(answer => {
+        if (!cancelled) setAnswers(prev => (prev[firmId] === answer ? prev : { ...prev, [firmId]: answer }));
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [callerContext, enabled, firmIds]);
+
+  return answers;
+}
+
+export const SubmitInvoiceAction: React.FC<RecordActionHostContext> = ({
+  config,
+  recordId,
+  record,
+  callerContext,
+  onActionChange,
+  onBusyChange,
+  refreshSection,
+}) => {
+  const styles = useStyles();
+  const kind = invoiceKindOfEntity(config.entity);
+  const plane = activePlaneOrNull();
+  // No firm-records read for a caller the plane rule already hides it from (task 040).
+  const reads = useFirmRecordsReads(callerContext, kind !== undefined && callerMaySubmitInvoices(callerContext, plane));
+  const visible = submitInvoiceRightOf({ callerContext, plane, kind, recordId, reads });
+  const dialog = useChildDialog();
+
+  // The record the wizard fixes: this one, named as the record view names it (never read again).
+  const lockedRecord = React.useMemo<InvoiceCoreRecordOption | undefined>(() => {
+    if (!kind) return undefined;
+    return {
+      kind,
+      recordId,
+      name: recordText(record, config.nameAttribute) ?? config.label,
+      number: config.titleNumberAttribute ? recordText(record, config.titleNumberAttribute) : null,
+    };
+  }, [kind, recordId, record, config.nameAttribute, config.titleNumberAttribute, config.label]);
+
+  // The wizard's per-firm record check (see THE RECORD CHECK above).
+  const loadRecords = React.useCallback(
+    async (query: InvoiceRecordQuery): Promise<InvoiceCoreRecordList> => {
+      if (!query.firmId || !lockedRecord) return listInvoiceCoreRecords(query);
+      const answer = await readInvoiceFirmRecords(query.firmId);
+      const wanted = lockedRecord.recordId.toLowerCase();
+      const listed = (answer[FIRM_RECORD_LIST_OF_KIND[lockedRecord.kind]] ?? []).some(
+        id => id.toLowerCase() === wanted
+      );
+      return {
+        records: listed ? [lockedRecord] : [],
+        truncated: answer.truncated === true,
+        partial: answer.partial === true,
+      };
+    },
+    [lockedRecord]
+  );
+
+  // Set by `onSubmitted`, consumed by the next close (see REFRESH above). `isOpen` lets a late `onSubmitted` (after the
+  // dialog was closed mid-flight) refresh immediately.
+  const submitted = React.useRef(false);
+  const isOpen = React.useRef(false);
+  isOpen.current = dialog.open;
+
+  // A submission request in flight: the dialog stays open until it settles (see IN FLIGHT above).
+  const inFlight = React.useRef(false);
+  const trackedSubmit = React.useCallback(
+    async (input: Parameters<typeof submitInvoice>[0]): ReturnType<typeof submitInvoice> => {
+      inFlight.current = true;
+      onBusyChange(true);
+      try {
+        return await submitInvoice(input);
+      } finally {
+        inFlight.current = false;
+        onBusyChange(false);
+      }
+    },
+    [onBusyChange]
+  );
+  // Never leave the record held if this host goes away mid-request.
+  React.useEffect(() => () => onBusyChange(false), [onBusyChange]);
+
+  const { hide } = dialog;
+  const handleClose = React.useCallback((): void => {
+    if (inFlight.current) return;
+    hide();
+    if (submitted.current) {
+      submitted.current = false;
+      refreshSection('invoices');
+    }
+  }, [hide, refreshSection]);
+
+  const handleSubmitted = React.useCallback((): void => {
+    if (isOpen.current) {
+      submitted.current = true;
+    } else {
+      refreshSection('invoices');
+    }
+  }, [refreshSection]);
+
+  // iss052: the result screen's links (see LINKS above). Each first closes this dialog (a close after a submission re-reads the
+  // Invoices section), and only when no request is in flight.
+  //
+  // FOCUS (iss052 fix round 1). The link button goes away with this dialog, and the child record's own close looks for a row of
+  // the child (a work assignment has no Invoices rows), so focus would fall to the page body. The control that opened this
+  // dialog (the record's "Submit invoice" button, remembered as the dialog is shown) is handed to the child as its trigger, so
+  // closing the child puts focus back on it. The child opens one task later: this dialog's close has then unmounted it and run
+  // its own focus restore (`useChildDialog`, also a zero-delay task, queued first), so that restore cannot land behind the
+  // child, and the child remembers the trigger, not a control of the dialog that is gone.
+  const openChild = useChildRecordOpener();
+  const opener = React.useRef<HTMLElement | null>(null);
+  const pendingChild = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => () => window.clearTimeout(pendingChild.current), []);
+  const openChildAfterClose = React.useCallback(
+    (entity: string, childId: string, section?: 'invoices'): void => {
+      if (!openChild) return;
+      window.clearTimeout(pendingChild.current);
+      pendingChild.current = window.setTimeout(() => {
+        pendingChild.current = undefined;
+        const trigger = opener.current?.isConnected ? opener.current : null;
+        openChild(entity, childId, trigger, section);
+      }, 0);
+    },
+    [openChild]
+  );
+  const handleOpenRecord = React.useCallback(
+    (target: InvoiceSubmissionRecordRef): void => {
+      if (inFlight.current) return;
+      const isShown = target.kind === kind && target.recordId.toLowerCase() === recordId.toLowerCase();
+      handleClose();
+      // The record this modal already shows: closing the dialog IS opening it (no second copy is stacked over it).
+      if (isShown || !openChild) return;
+      const child = coreRecordTarget(target);
+      openChildAfterClose(child.entityName, child.recordId);
+    },
+    [kind, recordId, handleClose, openChild, openChildAfterClose]
+  );
+  const handleOpenInvoice = React.useMemo(
+    () =>
+      openChild
+        ? (invoiceId: string): void => {
+            if (inFlight.current) return;
+            handleClose();
+            // As a row of the Invoices section opens one: a child record over this record, re-reading the section on close.
+            openChildAfterClose(INVOICE_ENTITY, invoiceId.toLowerCase(), 'invoices');
+          }
+        : undefined,
+    [handleClose, openChild, openChildAfterClose]
+  );
+
+  // The click reads `show` through a ref, so the offered action stays stable across renders. It also remembers the control
+  // that opened the dialog (see FOCUS above).
+  const latest = React.useRef({ show: dialog.show });
+  latest.current = { show: dialog.show };
+
+  React.useEffect(() => {
+    if (!visible) {
+      onActionChange(null);
+      return;
+    }
+    onActionChange({
+      visible: true,
+      onClick: () => {
+        const active = document.activeElement;
+        opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+        latest.current.show();
+      },
+    });
+    return () => onActionChange(null);
+  }, [visible, onActionChange]);
+
+  if (!dialog.open || !lockedRecord) return null;
+  return (
+    <SprkModal open onClose={handleClose} title="Submit invoice" size="lg" dismiss="explicit" padded={false}>
+      <div className={styles.frame} data-testid="submit-invoice-modal">
+        <InvoiceSubmissionWizard
+          embedded
+          hideTitle
+          open
+          title="Submit invoice"
+          doneLabel="Done"
+          lockedRecord={lockedRecord}
+          loadRecords={loadRecords}
+          loadFirms={listInvoiceFirms}
+          submit={trackedSubmit}
+          getStatus={getInvoiceSubmission}
+          renderReport={renderSubmissionReport}
+          onSubmitted={handleSubmitted}
+          onClose={handleClose}
+          onOpenInvoice={handleOpenInvoice}
+          onOpenRecord={handleOpenRecord}
+          showReasonCode={false}
+        />
+      </div>
+    </SprkModal>
+  );
+};

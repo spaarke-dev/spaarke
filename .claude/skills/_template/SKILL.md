@@ -98,7 +98,7 @@ If there are auto-detection rules (file types touched, commands run, project sta
 <Pointers to deeper context. Keep this section short — link, don't inline.>
 
 - **Code entry points**: `<path/to/file.cs:lineno>` — <what this code shows about the skill's domain>
-- **ADRs**: [ADR-XXX](../../../docs/adr/ADR-XXX-<slug>.md) — <relevance>
+- **ADRs**: ADR-XXX (`.claude/adr/ADR-XXX-<slug>.md`) — <relevance>
 - **Patterns**: `.claude/patterns/<topic>/<name>.md` — <what pattern applies>
 - **Examples** (in this skill's subdirectory): `examples/<name>.md`
 - **Detailed references** (in this skill's subdirectory): `references/<name>.md`

@@ -98,7 +98,7 @@ The BFF API is organized into 7 functional domains, each with its own endpoint g
 | **AI Platform** | `/api/ai/*` | ~40+ | ChatSessionManager, RagService, AnalysisOrchestrationService, SprkChatAgentFactory | Azure OpenAI, AI Search, Document Intelligence |
 | **Office Add-ins** | `/api/office/*` | ~10 | IOfficeService, JobStatusService | Graph API, Service Bus |
 | **Email / Communication** | `/api/emails`, `/api/communications` | ~10 | EmailService, CommunicationService | Graph API (Mail), Service Bus |
-| **Finance Intelligence** | `/api/finance/*` | ~6 | FinanceService, InvoiceExtractionJobHandler, ScorecardCalculatorService | Document Intelligence, AI Search |
+| **Finance Intelligence** | `/api/finance/*` | ~6 | FinanceService, InvoiceSubmissionProcessingJobHandler, ScorecardCalculatorService | Document Intelligence, AI Search |
 | **Workspace / Portfolio** | `/api/workspace/*` | ~18 | PortfolioService, BriefingService, PriorityScoringService, WorkspaceLayoutService, SectionRegistry | Azure OpenAI (optional), Dataverse |
 | **Admin / System** | `/api/admin/*`, `/api/resilience` | ~8 | BuilderScopeAdmin, RecordMatchingAdmin | AI Search, Dataverse |
 
@@ -218,7 +218,7 @@ Invoice classification, field extraction, and financial aggregation.
 
 **Endpoints**:
 ```
-/api/finance/invoice-review/confirm       Confirm + enqueue extraction
+/api/finance/invoice-review/confirm       Confirm + submit as an invoice (202; the job creates the invoice)
 /api/finance/invoice-review/reject        Reject as non-invoice
 /api/finance/invoices/search              Semantic invoice search
 /api/finance/matters/{matterId}/summary   Financial summary per matter
@@ -276,7 +276,7 @@ All async work runs through Azure Service Bus with a single `ServiceBusJobProces
 | `DocumentProcessingJobHandler` | Chunking, extraction, indexing | Upload completion |
 | `EmailAnalysisJobHandler` | Email content analysis | Email save |
 | `IncomingCommunicationJobHandler` | Inbound email processing | Webhook |
-| `InvoiceExtractionJobHandler` | Invoice field extraction | Finance confirm |
+| `InvoiceSubmissionProcessingJobHandler` | Invoice read, evaluation and persistence | Finance confirm (via the submission) |
 | `InvoiceIndexingJobHandler` | Invoice → AI Search | Post-extraction |
 | `ProfileSummaryJobHandler` | Matter profile aggregation | Scheduled |
 | `RagIndexingJobHandler` | Single document indexing | Knowledge source upload |

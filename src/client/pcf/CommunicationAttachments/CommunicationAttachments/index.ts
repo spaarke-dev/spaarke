@@ -23,7 +23,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { CommunicationAttachmentsHost } from './CommunicationAttachmentsHost';
 
-const CONTROL_VERSION = '1.3.3';
+const CONTROL_VERSION = '1.3.6';
 
 export class CommunicationAttachments implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private _boundField: string | undefined;

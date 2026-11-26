@@ -4,7 +4,7 @@
     <title>/push applies Copy rules only on the canonical engine, selects by sync mode, returns fixed error text (FR-23); preview, includeAssignedTo, confirmed childIds, Filing-edge children incl. the pair (FR-34)</title>
     <phase>4 W4 /push</phase>
     <gate>001+005+019+070+071 complete; UAC 195 merged (pair data)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>

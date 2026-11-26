@@ -31,7 +31,11 @@ public sealed class StoredFileTenantIsolationTests
 
     private static StoredFileRowSpec Spec(Guid fileId) => new()
     {
-        FileId = fileId, Purpose = StoredFilePurpose.InvoicePdf, Parent = Parent, Name = "invoice.pdf", ContentType = "application/pdf",
+        FileId = fileId,
+        Purpose = StoredFilePurpose.InvoicePdf,
+        Parent = Parent,
+        Name = "invoice.pdf",
+        ContentType = "application/pdf",
     };
 
     [Fact(DisplayName = "Stage puts the tenant first; the same parent and file ids in two tenants are two blobs, neither a conflict for the other")]

@@ -1,6 +1,6 @@
 /**
  * DocumentLibrary component — Document management for the Project page Documents tab AND the record detail view
- * (task 054: project, matter, work assignment, service request, invoice - the task 031 routes).
+ * (task 054: project, matter, work assignment, service request - the task 031 routes).
  *
  * ROOT (task 054). `root` + `recordId` pick the task 031 routes (`/api/v1/external/{projects|matters|workassignments|
  * servicerequests}/{id}/documents[/...]`); a service request's documents are reachable ONLY through its own route. The
@@ -8,18 +8,25 @@
  *
  * RIGHTS (task 054). Upload needs Create and download needs Read on the record. A host that knows better passes
  * `canUpload` / `canDownload`; otherwise download follows `accessLevel` (Collaborate / Full Access), and Upload follows
- * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request) or `accessLevel`
- * (a project). For a caller whose write access is decided per record (`writeAccessPerRecord`, task 036), download and
- * version history are offered wherever the list rendered (the list already passed the Read the download routes need), and
- * a project's Upload follows its list's `canCreate`. This is only what is SHOWN: the server decides, and a refused upload
- * shows its 403 as an error.
+ * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request), or, on a project,
+ * that `canCreate` AND `accessLevel` (R4 D-9: the shared `listCreateRightOf` rule; a list that answered without
+ * `canCreate` follows the level; nothing is offered before the list answers). For a caller whose write access is decided
+ * per record (`writeAccessPerRecord`, task 036), download and version history are offered wherever the list rendered (the
+ * list already passed the Read the download routes need), and a project's Upload follows its list's `canCreate` alone.
+ * This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
  *
- * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
- * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
- * message and the row stays. Without `caller` there is no Delete.
+ * DELETE-OWN (task 054, FR-26). With a `caller` identity AND the same write verdict that shows Upload, a row the caller
+ * created (creator stamp = the signed-in principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the
+ * row; a 403 / 409 / 503 / 500 shows a message and the row stays. Without `caller`, or for a View-only caller, there is no
+ * Delete.
  *
- * Displays the record's documents in a Fluent UI v9 DataGrid. Shows pre-computed AI
- * summaries from the sprk_document.sprk_summary field (Document Profile pipeline).
+ * Displays the record's documents on the SHARED grid (`<ExternalDataGrid configId={RECORD_DOCUMENTS_GRID}>`, R4 task 023c,
+ * FR-16): the grid takes its columns, resize, ellipsis + tooltip and lazy scroll from the "External record documents" grid
+ * configuration, and its rows from this component's `rowSource`, which is the record route's list read (the authorised
+ * path: Read on the parent, the secure-roots rule, invoice-linked hiding, `truncated`, `canCreate`). Download, Version
+ * history and Delete are the grid's row actions; the name opens the document's record in the record template. The list is
+ * read once per load or refresh (the same response gives the rows and `canCreate`); an upload or a delete bumps
+ * `rowSourceKey`, which re-reads.
  * Upload and download are restricted by access level — View Only users (100000000)
  * cannot upload or download. Collaborate (100000001) and Full Access (100000002)
  * users have full upload and download capabilities.
@@ -32,28 +39,11 @@
 
 import * as React from 'react';
 import {
-  DataGrid,
-  DataGridHeader,
-  DataGridRow,
-  DataGridHeaderCell,
-  DataGridBody,
-  DataGridCell,
-  TableColumnDefinition,
-  createTableColumn,
   makeStyles,
-  shorthands,
   tokens,
   Button,
   Spinner,
   Text,
-  Badge,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
-  Tooltip,
   MessageBar,
   MessageBarBody,
   Divider,
@@ -62,14 +52,14 @@ import {
   ArrowDownloadRegular,
   ArrowUploadRegular,
   DeleteRegular,
-  HistoryRegular,
   DocumentRegular,
-  DismissRegular,
+  HistoryRegular,
 } from '@fluentui/react-icons';
 // Deep component imports — avoids loading Virtualized* components that need react-window
+import { EmptyState } from '@spaarke/ui-components/components/EmptyState';
 import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
-import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
+import { FormModal, SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import {
   getDocuments,
   getRecordDocuments,
@@ -82,9 +72,56 @@ import {
 } from '../api/web-api-client';
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
-import { TruncatedListNotice } from './TruncatedListNotice';
+import {
+  currentFocusTarget,
+  type FocusTarget,
+  restoreFocusTo,
+  useChildDialog,
+  useOfferCreateAction,
+  type CreateActionReporter,
+} from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
+import { levelVerdictOf, listCreateRightOf } from './record/recordAccess';
+import { gridDataverseClient } from '../services/gridDataverseClient';
+import { ExternalDataGrid } from '../widgets/ExternalDataGrid';
+import { useGridSettings } from '../widgets/useGridSettings';
+import { useAmbientTheme } from '../widgets/useAmbientTheme';
+import { saveBlobAs } from './saveBlobAs';
 import { AccessLevel, ApiError } from '../types';
+
+/**
+ * The `sprk_gridconfiguration` record the record Documents list renders with ("External record documents": Name, Type,
+ * Date Added, AI Summary; `config/external-record-documents.gridconfiguration.json`, written live by task 028; its id must be
+ * in the BFF's `OutsideCounselGridConfigurationIds`, task 023b). The ONE place the SPA names it.
+ */
+export const RECORD_DOCUMENTS_GRID = '286be8b4-f96f-4d5a-b1d5-82fd83ca9693';
+
+/** The grid's row-source type, read off the wrapper's props (`typeof` is the one non-JSX use the grid guard allows). */
+type DocumentsRowSource = NonNullable<React.ComponentProps<typeof ExternalDataGrid>['rowSource']>;
+type DocumentsRecordAction = NonNullable<React.ComponentProps<typeof ExternalDataGrid>['onRecordAction']>;
+type DocumentsRecordOpen = NonNullable<React.ComponentProps<typeof ExternalDataGrid>['onRecordOpen']>;
+
+/** Ids of the grid's row actions (`onRecordAction`'s `actionId`). */
+const ACTION_DOWNLOAD = 'download';
+const ACTION_VERSIONS = 'versions';
+const ACTION_DELETE = 'delete';
+
+/**
+ * A document as a grid row. The configuration's primary name column is `sprk_documentname`, but the record route names the
+ * document `sprk_name`: the row carries both. Every other member (id, type, summary, date, `hasFile`, the creator stamps)
+ * is the route's own, so the row actions read them back from the row the grid hands over.
+ */
+function gridRowOf(doc: ODataDocument): Record<string, unknown> {
+  return { ...doc, sprk_documentname: doc.sprk_name };
+}
+
+/** The document a grid row stands for (the row is `gridRowOf`'s: the route's document plus the grid's own members). */
+function documentOfRow(row: Record<string, unknown>): ODataDocument {
+  return row as unknown as ODataDocument;
+}
+
+/** What the grid's error banner says when the list could not be read (a message fit for users: no status, no detail). */
+const LIST_LOAD_FAILED = 'Failed to load documents. Please try refreshing the page.';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -101,67 +138,21 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalM,
   },
-  toolbarLeft: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  toolbarRight: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  gridContainer: {
-    width: '100%',
-    overflowX: 'auto',
-    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  documentName: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    color: tokens.colorBrandForeground1,
-    cursor: 'pointer',
-    ':hover': {
-      textDecoration: 'underline',
-    },
-  },
-  documentNameIcon: {
-    flexShrink: '0',
-    color: tokens.colorNeutralForeground3,
-  },
-  summaryText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase200,
-  },
-  emptyState: {
+  // The shared grid fills its parent (height 100%, its rows scroll inside). A list in a record card has no height of its
+  // own, so this host gives the grid a ceiling: with a few rows the grid is as tall as its rows, with many it scrolls.
+  gridHost: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '240px',
-    gap: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-    padding: tokens.spacingHorizontalXL,
+    width: '100%',
+    minWidth: 0,
+    maxHeight: 'min(70vh, 720px)',
   },
-  emptyStateIcon: {
-    fontSize: '40px',
+  // The shared EmptyState leaves the icon's colour to its caller (R4 task 024, FR-17).
+  emptyIcon: {
     color: tokens.colorNeutralForeground4,
-  },
-  emptyStateText: {
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
   },
   loadingContainer: {
     display: 'flex',
@@ -170,11 +161,6 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     minHeight: '200px',
     gap: tokens.spacingVerticalM,
-  },
-  actionButtons: {
-    display: 'flex',
-    flexDirection: 'row',
-    gap: tokens.spacingHorizontalXS,
   },
   versionList: {
     display: 'flex',
@@ -199,11 +185,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-  },
-  noSummaryText: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase200,
-    fontStyle: 'italic',
   },
 });
 
@@ -235,7 +216,7 @@ interface DocumentVersionsResponse {
 /**
  * Format a file size in bytes to a human-readable string.
  */
-function formatFileSize(bytes: number | null | undefined): string {
+export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || bytes <= 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB'];
   let value = bytes;
@@ -250,7 +231,7 @@ function formatFileSize(bytes: number | null | undefined): string {
 /**
  * Format a Dataverse ISO date string for display.
  */
-function formatDate(isoDate: string | null | undefined): string {
+export function formatDate(isoDate: string | null | undefined): string {
   if (!isoDate) return '—';
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -269,7 +250,6 @@ const RECORD_NOUN: Readonly<Record<DocumentRoot, string>> = {
   matters: 'matter',
   workassignments: 'work assignment',
   servicerequests: 'service request',
-  invoices: 'invoice',
 };
 
 /**
@@ -299,51 +279,52 @@ export async function downloadDocumentFile(
   documentId: string,
   fileName: string
 ): Promise<void> {
-  let objectUrl: string | undefined;
-  try {
-    const blob = await bffApiBlob(documentContentPath(root, recordId, documentId));
+  saveBlobAs(await bffApiBlob(documentContentPath(root, recordId, documentId)), fileName);
+}
 
-    objectUrl = window.URL.createObjectURL(blob);
+// saveBlobAs lives in its own file: the view-selector guard (ExternalSpaGridViewSelectorGuardTests) refuses DOM element
+// creation calls in any file that mounts the shared grid, and this file does. Re-exported for its other users.
+export { saveBlobAs };
 
-    // Trigger browser download via a temporary anchor element
-    const anchor = window.document.createElement('a');
-    anchor.href = objectUrl;
-    anchor.download = fileName;
-    anchor.style.display = 'none';
-    window.document.body.appendChild(anchor);
-    anchor.click();
-    window.document.body.removeChild(anchor);
-  } finally {
-    // Revoke on the next tick - revoking synchronously can cancel the in-flight navigation the anchor click just started.
-    if (objectUrl) {
-      const toRevoke = objectUrl;
-      window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
-    }
-  }
+/** A record a document is filed to: the content and versions routes are scoped by it. */
+export interface DocumentParent {
+  root: DocumentRoot;
+  id: string;
 }
 
 /**
- * Downloads a document filed to several records (record detail, task 066): asks each parent's content route in order and
- * moves to the next ONLY when the server refuses with 403 (that parent is not readable by the caller, or does not hold the
- * document). Any other failure stops at once (a 5xx on one parent says nothing about the next, and retrying hides it).
- * When every parent refuses, the last 403 is thrown. An empty list is a programming error: the host offers no Download then.
+ * Runs `read` through each parent of a document filed to several records, in order (R4 task 023c, D-23 #2928: the one loop
+ * the download and the preview share). It moves to the next parent ONLY when the server refuses with 403 (that parent is not
+ * readable by the caller, or does not hold the document). Any other failure stops at once (a 5xx on one parent says nothing
+ * about the next, and retrying hides it). When every parent refuses, the last 403 is thrown. An empty list is a programming
+ * error: the host offers no Download or preview then.
  */
-export async function downloadDocumentFromParents(
-  parents: ReadonlyArray<{ root: DocumentRoot; id: string }>,
-  documentId: string,
-  fileName: string
-): Promise<void> {
-  let lastRefusal: unknown = new Error('No parent record to download the document through.');
+export async function readFromParents<T>(
+  parents: ReadonlyArray<DocumentParent>,
+  read: (parent: DocumentParent) => Promise<T>
+): Promise<T> {
+  let lastRefusal: unknown = new Error('No parent record to read the document through.');
   for (const parent of parents) {
     try {
-      await downloadDocumentFile(parent.root, parent.id, documentId, fileName);
-      return;
+      return await read(parent);
     } catch (err) {
       if (!(err instanceof ApiError) || err.statusCode !== 403) throw err;
       lastRefusal = err;
     }
   }
   throw lastRefusal;
+}
+
+/**
+ * Downloads a document filed to several records (record detail, task 066) through `readFromParents`: each parent's content
+ * route in order, the next only after a 403.
+ */
+export async function downloadDocumentFromParents(
+  parents: ReadonlyArray<DocumentParent>,
+  documentId: string,
+  fileName: string
+): Promise<void> {
+  await readFromParents(parents, parent => downloadDocumentFile(parent.root, parent.id, documentId, fileName));
 }
 
 /**
@@ -363,8 +344,6 @@ export function downloadFailureMessage(err: unknown): string {
 export function downloadFailureLogText(err: unknown): string {
   return err instanceof ApiError ? `HTTP ${err.statusCode}` : 'no HTTP status (network or client error)';
 }
-
-// AiSummaryCell is now rendered inline using AiSummaryPopover from @spaarke/ui-components.
 
 // ---------------------------------------------------------------------------
 // Version history panel sub-component
@@ -429,67 +408,62 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
     };
   }, [root, recordId, documentId, open]);
 
+  // A read-only list: the base SprkModal (task 004, FR-03). `BrowseModal` is a record-browse preset (a stage + metadata grid
+  // with a "N of M" nav), which a version list is not. Light dismiss (Esc, backdrop, ×) closes it, and the footer's single
+  // Close is the right-hand primary, as the other Close-only presets (`PreviewModal`, `BrowseModal`) place it.
   return (
-    <Dialog
+    <SprkModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) onClose();
-      }}
+      onClose={onClose}
+      title={`Version History — ${documentName}`}
+      size="sm"
+      footer={
+        <Button appearance="primary" onClick={onClose}>
+          Close
+        </Button>
+      }
     >
-      <DialogSurface>
-        <DialogTitle
-          action={<Button appearance="subtle" aria-label="Close" icon={<DismissRegular />} onClick={onClose} />}
-        >
-          Version History — {documentName}
-        </DialogTitle>
-        <DialogBody>
-          <DialogContent>
-            {loading && (
-              <div className={styles.loadingContainer}>
-                <Spinner size="small" label="Loading versions..." />
+      {loading && (
+        <div className={styles.loadingContainer}>
+          <Spinner size="small" label="Loading versions..." />
+        </div>
+      )}
+
+      {error && !loading && (
+        <MessageBar intent="error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+
+      {!loading && !error && versions.length === 0 && (
+        <EmptyState
+          size="compact"
+          icon={<HistoryRegular className={styles.emptyIcon} />}
+          heading="No version history"
+          description="No version history available for this document."
+        />
+      )}
+
+      {!loading && !error && versions.length > 0 && (
+        <div className={styles.versionList}>
+          {versions.map((version, index) => (
+            <React.Fragment key={version.versionId}>
+              {index > 0 && <Divider />}
+              <div className={styles.versionItem}>
+                <Text size={300} weight="semibold">
+                  Version {version.versionLabel}
+                </Text>
+                <Text size={200} className={styles.versionLabel}>
+                  {formatDate(version.createdAt)}
+                  {version.createdByName ? ` · ${version.createdByName}` : ''}
+                  {version.fileSizeBytes != null ? ` · ${formatFileSize(version.fileSizeBytes)}` : ''}
+                </Text>
               </div>
-            )}
-
-            {error && !loading && (
-              <MessageBar intent="error">
-                <MessageBarBody>{error}</MessageBarBody>
-              </MessageBar>
-            )}
-
-            {!loading && !error && versions.length === 0 && (
-              <Text size={300} className={styles.emptyStateText}>
-                No version history available for this document.
-              </Text>
-            )}
-
-            {!loading && !error && versions.length > 0 && (
-              <div className={styles.versionList}>
-                {versions.map((version, index) => (
-                  <React.Fragment key={version.versionId}>
-                    {index > 0 && <Divider />}
-                    <div className={styles.versionItem}>
-                      <Text size={300} weight="semibold">
-                        Version {version.versionLabel}
-                      </Text>
-                      <Text size={200} className={styles.versionLabel}>
-                        {formatDate(version.createdAt)}
-                        {version.createdByName ? ` · ${version.createdByName}` : ''}
-                        {version.fileSizeBytes != null ? ` · ${formatFileSize(version.fileSizeBytes)}` : ''}
-                      </Text>
-                    </div>
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
-          </DialogContent>
-        </DialogBody>
-        <DialogActions>
-          <Button appearance="secondary" onClick={onClose}>
-            Close
-          </Button>
-        </DialogActions>
-      </DialogSurface>
-    </Dialog>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </SprkModal>
   );
 };
 
@@ -503,15 +477,38 @@ interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
   onUploadComplete: () => void;
+  /** Called with `true` while the upload is in flight and `false` otherwise (and on unmount), so a host can hold. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
-const UploadDialog: React.FC<UploadDialogProps> = ({ root, recordId, open, onClose, onUploadComplete }) => {
+const UploadDialog: React.FC<UploadDialogProps> = ({
+  root,
+  recordId,
+  open,
+  onClose,
+  onUploadComplete,
+  onBusyChange,
+}) => {
   const styles = useStyles();
   const noun = RECORD_NOUN[root];
   const [selectedFiles, setSelectedFiles] = React.useState<IUploadedFile[]>([]);
   const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
   const [uploading, setUploading] = React.useState<boolean>(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
+
+  // The record template holds browsing, Close and Refresh while the post is in flight (task 004). The latest callback is
+  // read through a ref so a new function identity never re-fires the effect, and unmount always reports "not busy".
+  const onBusyChangeRef = React.useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+  React.useEffect(() => {
+    onBusyChangeRef.current?.(uploading);
+  }, [uploading]);
+  React.useEffect(
+    () => () => {
+      onBusyChangeRef.current?.(false);
+    },
+    []
+  );
 
   const handleFilesAccepted = (files: IUploadedFile[]) => {
     // Replace existing selection — dialog uploads one file at a time
@@ -592,67 +589,40 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ root, recordId, open, onClo
     onClose();
   };
 
+  // A FormModal (task 004, FR-03): Cancel in the left footer slot, Upload on the right. Esc does nothing (modal
+  // standard: an explicit dialog keeps a draft), so typed input survives a stray Esc.
   return (
-    <Dialog
+    <FormModal
       open={open}
-      onOpenChange={(_ev, data) => {
-        if (!data.open) handleDialogClose();
-      }}
+      onClose={handleDialogClose}
+      onSubmit={() => void handleUpload()}
+      title="Upload Document"
+      submitLabel={uploading ? 'Uploading…' : 'Upload'}
+      submitDisabled={selectedFiles.length === 0}
+      busy={uploading}
     >
-      <DialogSurface>
-        <DialogTitle
-          action={
-            <Button
-              appearance="subtle"
-              aria-label="Close"
-              icon={<DismissRegular />}
-              onClick={handleDialogClose}
-              disabled={uploading}
-            />
-          }
-        >
-          Upload Document
-        </DialogTitle>
-        <DialogBody>
-          <DialogContent>
-            <div className={styles.uploadDialogContent}>
-              {uploadError && (
-                <MessageBar intent="error">
-                  <MessageBarBody>{uploadError}</MessageBarBody>
-                </MessageBar>
-              )}
+      <div className={styles.uploadDialogContent}>
+        {uploadError && (
+          <MessageBar intent="error">
+            <MessageBarBody>{uploadError}</MessageBarBody>
+          </MessageBar>
+        )}
 
-              {validationErrors.length > 0 && (
-                <MessageBar intent="warning">
-                  <MessageBarBody>{validationErrors.map(e => `${e.fileName}: ${e.reason}`).join(' · ')}</MessageBarBody>
-                </MessageBar>
-              )}
+        {validationErrors.length > 0 && (
+          <MessageBar intent="warning">
+            <MessageBarBody>{validationErrors.map(e => `${e.fileName}: ${e.reason}`).join(' · ')}</MessageBarBody>
+          </MessageBar>
+        )}
 
-              <FileUploadZone
-                onFilesAccepted={handleFilesAccepted}
-                onValidationErrors={handleValidationErrors}
-                disabled={uploading}
-              />
+        <FileUploadZone
+          onFilesAccepted={handleFilesAccepted}
+          onValidationErrors={handleValidationErrors}
+          disabled={uploading}
+        />
 
-              <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} disabled={uploading} />
-            </div>
-          </DialogContent>
-        </DialogBody>
-        <DialogActions>
-          <Button
-            appearance="primary"
-            icon={uploading ? <Spinner size="tiny" /> : <ArrowUploadRegular />}
-            onClick={() => void handleUpload()}
-            disabled={selectedFiles.length === 0 || uploading}
-          >
-            {uploading ? 'Uploading…' : 'Upload'}
-          </Button>
-          <Button appearance="secondary" onClick={handleDialogClose} disabled={uploading}>
-            Cancel
-          </Button>
-        </DialogActions>
-      </DialogSurface>
-    </Dialog>
+        <UploadedFileList files={selectedFiles} onRemove={handleRemoveFile} disabled={uploading} />
+      </div>
+    </FormModal>
   );
 };
 
@@ -680,9 +650,10 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   /** The authenticated user's access level for this record: the default for `canUpload` / `canDownload`. */
   accessLevel?: AccessLevel;
   /**
-   * Show the Upload control. When the host passes none: a project follows `accessLevel` (Collaborate / Full Access); any
-   * other record follows the BFF's `canCreate` on its document list (the right the upload route checks), else
-   * `accessLevel`. The server enforces Create either way.
+   * The level's verdict on Upload, decided by the host. When the host passes none: a project uses `accessLevel`
+   * (Collaborate / Full Access) for a caller whose write access is not per record; any other record follows the BFF's
+   * `canCreate` on its document list (the right the upload route checks), else `accessLevel`. On a project (and inside the
+   * record template) the list's `canCreate` must agree (D-9). The server enforces Create either way.
    */
   canUpload?: boolean;
   /**
@@ -699,26 +670,45 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
    * the Read those routes check.
    */
   writeAccessPerRecord?: boolean;
+  /**
+   * Record template only (task 004, FR-03; task 009). When given, the Upload in the Documents section's header is the
+   * entry point: this list shows no "Upload Document" button of its own, offers its Upload action through this callback
+   * (shown exactly when its own button would have been) and renders the upload dialog itself, so the dialog is a
+   * descendant of the host.
+   * Omit it everywhere else (the project page keeps its button).
+   */
+  onCreateActionChange?: CreateActionReporter;
+  /** Called with `true` while an upload is in flight and `false` otherwise (and on unmount), so the host can hold. */
+  onBusyChange?: (busy: boolean) => void;
+  /**
+   * Opens the document's record (task 013, owner 2026-11-14; the Project page too since the task 023c review). A click on
+   * a document's name calls this with the document's id and the control that was activated (focus returns to it when the
+   * record opened over this one closes; null when focus is on no control); a document with no file (`hasFile === false`)
+   * is still opened (FR-15: its record shows Information only). The record template passes its child-record opener, the
+   * Project page the shell's `useOpenRecord`. With none, the name is still the grid's link (the shared grid has no
+   * plain-text name) and a click does nothing; no host in the app omits it where a Documents list can be shown.
+   */
+  onOpenDocument?: (documentId: string, trigger: HTMLElement | null) => void;
 };
 
 // ---------------------------------------------------------------------------
 // DocumentLibrary — main component
 // ---------------------------------------------------------------------------
 
+/** The grid's noun for its rows (its incomplete-list notice says "only 1 document could be shown"). */
+const DOCUMENT_NOUN = { one: 'document', other: 'documents' } as const;
+
 /**
- * DocumentLibrary — document management tab for the Project page.
+ * DocumentLibrary — a record's documents: the Project page's Documents card and the record template's Documents section.
  *
  * Features:
- * - Fetches documents from Dataverse via Power Pages Web API (getDocuments)
- * - Displays documents in a Fluent v9 DataGrid
- * - Columns: Name, Type, Size, Modified Date, AI Summary
- * - AI summaries are pre-computed (from sprk_summary field) — not generated on demand
- * - Upload button: Collaborate and Full Access only
- * - Download button: Collaborate and Full Access only
- * - View Only users (AccessLevel.ViewOnly) see read-only list with no action buttons
- * - Version history dialog via BFF API GET /api/v1/external/documents/{id}/versions
- * - Empty state when no documents
- * - Loading state while fetching
+ * - The list is the shared grid (`RECORD_DOCUMENTS_GRID`) over the record route's list read (`getDocuments` /
+ *   `getRecordDocuments`), one page; the grid shows the loading, error, empty and incomplete-list states
+ * - Columns (the grid configuration): Name, Type, Date Added, AI Summary; resize, ellipsis and tooltip are the grid's
+ * - Row actions: Download and Version history (not on a row with `hasFile === false`), Delete (the caller's own rows, and
+ *   only for a caller who may upload)
+ * - Upload button: Collaborate and Full Access only (on the Project page; the record template offers its own)
+ * - Version history dialog via BFF API GET /api/v1/external/{root}/{id}/documents/{documentId}/versions
  *
  * ADR-021: Fluent UI v9 only. makeStyles + tokens. No hard-coded colors.
  */
@@ -731,87 +721,106 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   canDownload,
   caller,
   writeAccessPerRecord = false,
+  onCreateActionChange,
+  onBusyChange,
+  onOpenDocument,
 }) => {
   const styles = useStyles();
+  const theme = useAmbientTheme();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
-  // upstream) is an error state below, never a spinner that cannot end.
+  // upstream) is an error state below: the grid is not mounted, so nothing is read and nothing spins.
   const recordId = recordIdProp ?? projectId ?? '';
-  const noun = RECORD_NOUN[root];
 
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
 
-  const [documents, setDocuments] = React.useState<ODataDocument[]>([]);
-  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
-  const [truncated, setTruncated] = React.useState<boolean>(false);
   // The BFF's raw `canCreate` on this record's document list (null = not said, or not loaded yet). How it is read depends
-  // on `writeAccessPerRecord`, which is applied at render (below), never baked in by the fetch: `/me` may answer after the
+  // on `writeAccessPerRecord`, which is applied at render (below), never baked in by the read: `/me` may answer after the
   // list did, and a stored, already-interpreted value would then be stale (task 036 fix round 2).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
-  const [loading, setLoading] = React.useState<boolean>(true);
+  // True once a list read has answered, so a re-read after an upload does not withdraw the section's Upload (and with it
+  // the control focus returns to).
+  const [loadedOnce, setLoadedOnce] = React.useState<boolean>(false);
+  // Why the last list read failed (null = it did not); the grid shows the same text in its banner.
   const [error, setError] = React.useState<string | null>(null);
-  const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
+  // Bumped after an upload or a delete: the grid re-reads page 1 (`rowSourceKey`).
+  const [reloadCount, setReloadCount] = React.useState<number>(0);
+  const upload = useChildDialog();
   const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<ODataDocument | null>(null);
-  const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
+  // The control that opened the version history, so focus returns to it when the dialog closes.
+  const versionInvoker = React.useRef<FocusTarget | null>(null);
+  // Documents whose download is in flight: a second click on the same row waits for the first.
+  const downloading = React.useRef<Set<string>>(new Set());
   // Task 066: why the last download failed (null = none); cleared when the next download starts.
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
-  // A project follows the access level unless the caller's write access is per record (task 036 fix round 1); then it
-  // follows `canCreate` like every other record, and a missing one reads as "cannot".
-  const uploadFromList = root === 'projects' ? (writeAccessPerRecord ? (listCanCreate ?? false) : null) : listCanCreate;
-  const showUpload = canUpload ?? uploadFromList ?? canUploadOrDownload(accessLevel);
+  // The Upload right (task 006, FR-06: `listCreateRightOf` / `createRightOf`, the rule EventsCalendar shares
+  // too): offered exactly when it is known to be `true`. The list must have answered (a re-read after an upload keeps
+  // the last answer, so the action does not blink out) and its `canCreate` must allow. A level that decides must allow
+  // too: the host's `canUpload` (the record template's `uploadOverride`), else, on a project, the `/me` level for a caller
+  // whose write access is not per record (`levelVerdictOf`; a per-record caller follows the list alone, task 036 fix round
+  // 1). D-9 (#2716): the project page used to offer Upload on that level alone, so a `canCreate: false` (a workforce role
+  // ceiling) was offered an upload the POST refuses with 403.
+  const levelAllows =
+    canUpload ?? (root === 'projects' ? levelVerdictOf(accessLevel, writeAccessPerRecord) : undefined);
+  const { right, allowed: uploadAllowed } = listCreateRightOf({
+    loaded: loadedOnce && !error,
+    listCanCreate,
+    levelAllows,
+  });
+  // The list's own button (outside the template). A project follows the shared
+  // rule; every other record keeps its R3 rule, unchanged: the host's `canUpload`, else the list's `canCreate`, else
+  // `accessLevel`.
+  const showUpload =
+    root === 'projects' ? uploadAllowed : (canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel));
+  // In the record template the section's Upload replaces this list's button (task 004 / 009), and the dialog stays here.
+  const ownUploadButton = onCreateActionChange === undefined;
+  useOfferCreateAction(onCreateActionChange, uploadAllowed, upload.show, right);
+  // Whether an Upload is offered at all: this list's own button, or (in the record template) the section's. The empty
+  // state names the action only then (hide, don't disable; task 024).
+  const uploadOffered = ownUploadButton ? showUpload : uploadAllowed;
+  const noun = RECORD_NOUN[root];
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
   // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
   const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));
 
-  // Delete-own (task 054): the row leaves the list on the server's 204; any refusal keeps it and is shown.
+  // Delete-own (task 054): the server's 204 re-reads the list (the grid's `rowSourceKey`); any refusal keeps the row and is
+  // shown.
   const del = useDeleteOwn<ODataDocument>({
     noun: 'document',
     remove: doc => deleteOwnDocument(doc.sprk_documentid),
-    onRemoved: doc => setDocuments(prev => prev.filter(d => d.sprk_documentid !== doc.sprk_documentid)),
+    onRemoved: () => setReloadCount(n => n + 1),
   });
   const askDelete = del.ask;
 
   // ---------------------------------------------------------------------------
-  // Data fetching
+  // Rows: the grid's row source is the record route's list read (one call per load or refresh)
   // ---------------------------------------------------------------------------
 
-  const fetchDocuments = React.useCallback(async () => {
-    if (!recordId) {
-      setLoading(false);
-      setError('Documents cannot be loaded: no record was given.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // The project read keeps its own client function (`getDocuments`); the other roots share the task 031 route and
-      // also say whether the caller may upload.
-      if (root === 'projects') {
-        const data = await getDocuments(recordId);
-        setDocuments(data.items);
-        setTruncated(data.truncated);
-        setListCanCreate(data.canCreate ?? null);
-      } else {
-        const data = await getRecordDocuments(root, recordId);
-        setDocuments(data.items);
-        setTruncated(data.truncated);
-        setListCanCreate(data.canCreate ?? null);
+  const loadRows = React.useCallback<DocumentsRowSource>(
+    async ({ signal }) => {
+      try {
+        // The project read keeps its own client function (`getDocuments`); the other roots share the task 031 route and
+        // also say whether the caller may upload.
+        const data = root === 'projects' ? await getDocuments(recordId) : await getRecordDocuments(root, recordId);
+        if (!signal.aborted) {
+          setListCanCreate(data.canCreate ?? null);
+          setLoadedOnce(true);
+          setError(null);
+        }
+        // One page: the route answers its capped list at once, and says when it was cut short (`truncated`).
+        return { rows: data.items.map(gridRowOf), hasMore: false, truncated: data.truncated };
+      } catch (err) {
+        console.error('[DocumentLibrary] Failed to load documents:', err);
+        if (!signal.aborted) setError(LIST_LOAD_FAILED);
+        // The grid shows this message as is: no status code, no server detail.
+        throw new Error(LIST_LOAD_FAILED);
       }
-    } catch (err) {
-      console.error('[DocumentLibrary] Failed to load documents:', err);
-      setError('Failed to load documents. Please try refreshing the page.');
-    } finally {
-      setLoading(false);
-    }
-  }, [root, recordId]);
-
-  React.useEffect(() => {
-    void fetchDocuments();
-  }, [fetchDocuments]);
+    },
+    [root, recordId]
+  );
+  const rowSourceKey = `${root}:${recordId}:${reloadCount}`;
 
   // ---------------------------------------------------------------------------
   // Download handler
@@ -820,264 +829,108 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   const handleDownload = React.useCallback(
     async (doc: ODataDocument) => {
       if (!canActOnDocuments) return;
-
-      setDownloadingId(doc.sprk_documentid);
+      const documentId = doc.sprk_documentid;
+      if (downloading.current.has(documentId)) return;
+      downloading.current.add(documentId);
       setDownloadError(null);
 
       try {
-        await downloadDocumentFile(root, recordId, doc.sprk_documentid, doc.sprk_name);
+        await downloadDocumentFile(root, recordId, documentId, doc.sprk_name);
       } catch (err) {
-        console.error(
-          `[DocumentLibrary] Download failed for document ${doc.sprk_documentid}: ${downloadFailureLogText(err)}`
-        );
+        console.error(`[DocumentLibrary] Download failed for document ${documentId}: ${downloadFailureLogText(err)}`);
         // Task 066: a failed download is shown, not only logged.
         setDownloadError(downloadFailureMessage(err));
       } finally {
-        setDownloadingId(null);
+        downloading.current.delete(documentId);
       }
     },
     [canActOnDocuments, root, recordId]
   );
 
   // ---------------------------------------------------------------------------
-  // Column definitions
+  // Row actions and row open (the grid's seams)
   // ---------------------------------------------------------------------------
 
-  const columns = React.useMemo(
-    (): TableColumnDefinition<ODataDocument>[] => [
-      // --- Name ---
-      createTableColumn<ODataDocument>({
-        columnId: 'name',
-        compare: (a, b) => (a.sprk_name ?? '').localeCompare(b.sprk_name ?? ''),
-        renderHeaderCell: () => 'Name',
-        renderCell: item => (
-          <div className={styles.documentName}>
-            <DocumentRegular className={styles.documentNameIcon} fontSize={16} />
-            <Text size={300} weight="semibold" truncate wrap={false}>
-              {item.sprk_name}
-            </Text>
-          </div>
-        ),
-      }),
-
-      // --- Type ---
-      createTableColumn<ODataDocument>({
-        columnId: 'type',
-        compare: (a, b) => (a.sprk_documenttype ?? '').localeCompare(b.sprk_documenttype ?? ''),
-        renderHeaderCell: () => 'Type',
-        renderCell: item =>
-          item.sprk_documenttype ? (
-            <Badge appearance="tint" size="small">
-              {item.sprk_documenttype}
-            </Badge>
-          ) : (
-            <Text size={200} className={styles.noSummaryText}>
-              —
-            </Text>
-          ),
-      }),
-
-      // --- Modified Date ---
-      createTableColumn<ODataDocument>({
-        columnId: 'modifiedDate',
-        compare: (a, b) => (a.createdon ?? '').localeCompare(b.createdon ?? ''),
-        renderHeaderCell: () => 'Date Added',
-        renderCell: item => (
-          <Text size={200} className={styles.versionLabel}>
-            {formatDate(item.createdon)}
-          </Text>
-        ),
-      }),
-
-      // --- AI Summary ---
-      createTableColumn<ODataDocument>({
-        columnId: 'aiSummary',
-        compare: (a, b) => (a.sprk_summary ?? '').localeCompare(b.sprk_summary ?? ''),
-        renderHeaderCell: () => 'AI Summary',
-        renderCell: item => {
-          if (!item.sprk_summary) {
-            return (
-              <Text className={styles.noSummaryText} size={200}>
-                No summary
-              </Text>
-            );
-          }
-          return (
-            <AiSummaryPopover
-              trigger={
-                <Button appearance="subtle" size="small" style={{ maxWidth: '300px' }}>
-                  <Text className={styles.summaryText} size={200}>
-                    {item.sprk_summary}
-                  </Text>
-                </Button>
-              }
-              onFetchSummary={() => Promise.resolve({ summary: item.sprk_summary ?? null, tldr: null })}
-              positioning="before"
-            />
-          );
-        },
-      }),
-
-      // --- Actions ---
-      ...(canActOnDocuments || caller
+  // Hide, don't disable (FR-06): an action is in the list only when the caller may use it at all, and `isVisible` hides it on
+  // the rows it does not apply to. R3 ISS-011 (#1886): a document with no file stays listed but offers neither Download nor
+  // Version history (both would answer 409 no_file_attached). Only an explicit false hides them: a BFF that does not send
+  // `hasFile` is an old BFF, and its rows keep today's behaviour (FR-15). Delete is in the list only for a caller whose
+  // write verdict is a known yes (`uploadAllowed`, the verdict that shows Upload: a View-only caller is offered no delete
+  // the server would refuse), and `isVisible` shows it only on a row the caller created (the server re-checks; a refusal
+  // is shown as an error).
+  const rowActions = React.useMemo(() => {
+    const hasFile = (row: Record<string, unknown>): boolean => row.hasFile !== false;
+    return [
+      ...(canActOnDocuments
         ? [
-            createTableColumn<ODataDocument>({
-              columnId: 'actions',
-              renderHeaderCell: () => '',
-              renderCell: item => (
-                <div className={styles.actionButtons}>
-                  {/* R3 ISS-011 (#1886): a document with no file stays listed but offers neither action (both would answer
-                      409 no_file_attached). Only an explicit false hides them: a BFF that does not send hasFile is an old
-                      BFF, and its rows keep today's behaviour. */}
-                  {canActOnDocuments && item.hasFile !== false && (
-                    <>
-                      <Tooltip content="Download" relationship="label">
-                        <Button
-                          appearance="subtle"
-                          size="small"
-                          icon={
-                            downloadingId === item.sprk_documentid ? <Spinner size="tiny" /> : <ArrowDownloadRegular />
-                          }
-                          disabled={downloadingId === item.sprk_documentid}
-                          onClick={() => void handleDownload(item)}
-                          aria-label={`Download ${item.sprk_name}`}
-                        />
-                      </Tooltip>
-                      <Tooltip content="Version history" relationship="label">
-                        <Button
-                          appearance="subtle"
-                          size="small"
-                          icon={<HistoryRegular />}
-                          onClick={() => setVersionHistoryDoc(item)}
-                          aria-label={`View version history for ${item.sprk_name}`}
-                        />
-                      </Tooltip>
-                    </>
-                  )}
-                  {/* Only a row the caller created (the server re-checks; a refusal is shown as an error). */}
-                  {isCreatedByCaller(item, caller) && (
-                    <Tooltip content="Delete" relationship="label">
-                      <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={<DeleteRegular />}
-                        onClick={() => askDelete(item, item.sprk_name)}
-                        aria-label={`Delete ${item.sprk_name}`}
-                      />
-                    </Tooltip>
-                  )}
-                </div>
-              ),
-            }),
+            { id: ACTION_DOWNLOAD, label: 'Download', icon: <ArrowDownloadRegular />, isVisible: hasFile },
+            { id: ACTION_VERSIONS, label: 'Version history', icon: <HistoryRegular />, isVisible: hasFile },
           ]
         : []),
-    ],
-    [
-      canActOnDocuments,
-      caller,
-      askDelete,
-      downloadingId,
-      handleDownload,
-      styles.documentName,
-      styles.documentNameIcon,
-      styles.noSummaryText,
-      styles.summaryText,
-      styles.versionLabel,
-      styles.actionButtons,
-    ]
+      ...(caller && uploadAllowed
+        ? [
+            {
+              id: ACTION_DELETE,
+              label: 'Delete',
+              icon: <DeleteRegular />,
+              isVisible: (row: Record<string, unknown>) => isCreatedByCaller(documentOfRow(row), caller),
+            },
+          ]
+        : []),
+    ];
+  }, [canActOnDocuments, caller, uploadAllowed]);
+
+  const handleRecordAction = React.useCallback<DocumentsRecordAction>(
+    (actionId, _recordId, row) => {
+      const doc = documentOfRow(row);
+      switch (actionId) {
+        case ACTION_DOWNLOAD:
+          void handleDownload(doc);
+          break;
+        case ACTION_VERSIONS:
+          versionInvoker.current = currentFocusTarget();
+          setVersionHistoryDoc(doc);
+          break;
+        case ACTION_DELETE:
+          askDelete(doc, doc.sprk_name);
+          break;
+        default:
+          break;
+      }
+    },
+    [handleDownload, askDelete]
   );
 
+  // The name is the grid's primary-name link. The record template opens the document's record over this one and the Project
+  // page through the shell's opener. With no opener the click is a no-op: the grid cannot draw the name as plain text, and
+  // its own default (Xrm navigation) must not run in this Xrm-free host, so a handler is always passed.
+  const handleRecordOpen = React.useCallback<DocumentsRecordOpen>(
+    documentId => {
+      if (!onOpenDocument) return;
+      const active = document.activeElement;
+      onOpenDocument(documentId, active instanceof HTMLElement && active !== document.body ? active : null);
+    },
+    [onOpenDocument]
+  );
+
+  // The grid's column widths and sort are remembered per browser and "Clear all" (which also clears the column filters) is a command of its toolbar (FR-19, task 032).
+  const { gridProps: gridSettingsProps, resetCommand } = useGridSettings(RECORD_DOCUMENTS_GRID);
+  const gridCommands = React.useMemo(() => [resetCommand], [resetCommand]);
+
   // ---------------------------------------------------------------------------
-  // Render — loading state
+  // Render
   // ---------------------------------------------------------------------------
 
-  if (loading) {
-    return (
-      <div className={styles.loadingContainer}>
-        <Spinner size="medium" label="Loading documents..." />
-      </div>
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render — error state
-  // ---------------------------------------------------------------------------
-
-  if (error) {
+  if (!recordId) {
     return (
       <MessageBar intent="error">
-        <MessageBarBody>{error}</MessageBarBody>
+        <MessageBarBody>Documents cannot be loaded: no record was given.</MessageBarBody>
       </MessageBar>
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Render — empty state
-  // ---------------------------------------------------------------------------
-
-  if (documents.length === 0) {
-    return (
-      <div className={styles.root}>
-        <TruncatedListNotice truncated={truncated} shown={0} noun="documents" />
-        <DeleteFailureNotice del={del} />
-        {/* Same slot as in the list render, so the children below keep their positions (and the delete confirmation its
-            state) when the last document is removed: React matches siblings by index. */}
-        {downloadError && (
-          <MessageBar intent="error" data-testid="document-download-error">
-            <MessageBarBody>{downloadError}</MessageBarBody>
-          </MessageBar>
-        )}
-        {/* Toolbar — show upload button even when empty so users can add their first doc */}
-        {showUpload && (
-          <div className={styles.toolbar}>
-            <div className={styles.toolbarLeft}>
-              <Text size={300} className={styles.emptyStateText}>
-                No documents found for this {noun}.
-              </Text>
-            </div>
-            <div className={styles.toolbarRight}>
-              <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
-                Upload Document
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Task 105: an incomplete empty list is not "no documents" — the notice above says it could not be read. */}
-        {!truncated && (
-          <div className={styles.emptyState}>
-            <DocumentRegular className={styles.emptyStateIcon} />
-            <Text size={400} weight="semibold">
-              No Documents
-            </Text>
-            <Text size={300} className={styles.emptyStateText}>
-              {showUpload
-                ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
-                : `No documents have been uploaded to this ${noun} yet.`}
-            </Text>
-          </div>
-        )}
-
-        {/* Upload dialog */}
-        <UploadDialog
-          root={root}
-          recordId={recordId}
-          open={uploadDialogOpen}
-          onClose={() => setUploadDialogOpen(false)}
-          onUploadComplete={() => void fetchDocuments()}
-        />
-        <DeleteOwnConfirm del={del} />
-      </div>
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render — document list
-  // ---------------------------------------------------------------------------
-
   return (
     <div className={styles.root}>
-      <TruncatedListNotice truncated={truncated} shown={documents.length} noun="documents" />
       <DeleteFailureNotice del={del} />
       {downloadError && (
         <MessageBar intent="error" data-testid="document-download-error">
@@ -1085,53 +938,55 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
         </MessageBar>
       )}
 
-      {/* Toolbar */}
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarLeft}>
-          <Text size={300} className={styles.versionLabel}>
-            {documents.length} document{documents.length !== 1 ? 's' : ''}
-          </Text>
+      {/* Toolbar: the list's own Upload (outside the template, once the list has answered). */}
+      {ownUploadButton && loadedOnce && !error && showUpload && (
+        <div className={styles.toolbar}>
+          <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={upload.show}>
+            Upload Document
+          </Button>
         </div>
-        <div className={styles.toolbarRight}>
-          {showUpload && (
-            <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
-              Upload Document
-            </Button>
-          )}
-        </div>
-      </div>
+      )}
 
-      {/* Document grid */}
-      <div className={styles.gridContainer}>
-        <DataGrid
-          items={documents}
-          columns={columns}
-          sortable
-          getRowId={item => item.sprk_documentid}
-          focusMode="composite"
-        >
-          <DataGridHeader>
-            <DataGridRow>
-              {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
-            </DataGridRow>
-          </DataGridHeader>
-          <DataGridBody<ODataDocument>>
-            {({ item, rowId }) => (
-              <DataGridRow<ODataDocument> key={rowId}>
-                {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
-              </DataGridRow>
-            )}
-          </DataGridBody>
-        </DataGrid>
+      {/* Document grid: columns, resize, ellipsis + tooltip, lazy scroll and the incomplete-list notice are the shared grid's. */}
+      <div className={styles.gridHost}>
+        <ExternalDataGrid
+          configId={RECORD_DOCUMENTS_GRID}
+          dataverseClient={gridDataverseClient}
+          theme={theme}
+          rowSource={loadRows}
+          rowSourceKey={rowSourceKey}
+          rowActions={rowActions}
+          onRecordAction={handleRecordAction}
+          onRecordOpen={handleRecordOpen}
+          truncateWithTooltip
+          hostCommands={gridCommands}
+          {...gridSettingsProps}
+          rowNoun={DOCUMENT_NOUN}
+          emptyState={
+            <EmptyState
+              size="compact"
+              icon={<DocumentRegular className={styles.emptyIcon} />}
+              heading="No Documents"
+              description={
+                uploadOffered
+                  ? ownUploadButton
+                    ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
+                    : `No documents have been uploaded to this ${noun} yet. Use Upload above to add your first document.`
+                  : `No documents have been uploaded to this ${noun} yet.`
+              }
+            />
+          }
+        />
       </div>
 
       {/* Upload dialog */}
       <UploadDialog
         root={root}
         recordId={recordId}
-        open={uploadDialogOpen}
-        onClose={() => setUploadDialogOpen(false)}
-        onUploadComplete={() => void fetchDocuments()}
+        open={upload.open}
+        onClose={upload.hide}
+        onUploadComplete={() => setReloadCount(n => n + 1)}
+        onBusyChange={onBusyChange}
       />
 
       {/* Delete confirmation (shared modal system, ADR-050) */}
@@ -1145,7 +1000,11 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           documentId={versionHistoryDoc.sprk_documentid}
           documentName={versionHistoryDoc.sprk_name}
           open={versionHistoryDoc !== null}
-          onClose={() => setVersionHistoryDoc(null)}
+          onClose={() => {
+            setVersionHistoryDoc(null);
+            restoreFocusTo(versionInvoker.current);
+            versionInvoker.current = null;
+          }}
         />
       )}
     </div>

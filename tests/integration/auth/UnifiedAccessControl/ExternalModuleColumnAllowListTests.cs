@@ -101,18 +101,18 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// optionally, an arbitrary primary-name declaration (default: the live <c>sprk_documentname</c>).</summary>
     private static ExternalModuleDescriptor DocumentsModuleWithColumns(
         IReadOnlySet<string>? columns, string primaryName = "sprk_documentname") => new()
-    {
-        Name = "documents",
-        RecordEntity = DocumentEntity,
-        PrimaryNameAttribute = primaryName,
-        ScopeDimensions = new[]
+        {
+            Name = "documents",
+            RecordEntity = DocumentEntity,
+            PrimaryNameAttribute = primaryName,
+            ScopeDimensions = new[]
         {
             new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
             new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
         },
-        ReadableColumns = columns!,
-    };
+            ReadableColumns = columns!,
+        };
 
     private static ExternalModuleDescriptor ProjectsModule() => new()
     {
@@ -758,6 +758,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// Each module's list as task 157 derived it from LIVE data (2026-10-01): (a) sprk_gridconfiguration
     /// columns (FetchXML attributes/conditions/orders, layoutXml cells, configjson column keys), (c) scope
     /// attributes, (d) EntityDefinitions primary id + primary name. Nothing else.
+    /// Exception to (a): grid 286be8b4 ("External record documents", spaarke-SPA-external-access-platform-r4 task 023b) has a
+    /// layout-only <c>sprk_summary</c> cell whose rows come from the record route, so <c>sprk_summary</c> is deliberately NOT
+    /// in the sprk_document list below. Do not add it when re-deriving from that grid.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string[]> LiveDerivedAllowLists = new Dictionary<string, string[]>
     {
@@ -766,6 +769,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon",
             // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 61711823.
             "sprk_projecttype_ref",
+            // spaarke-SPA-external-access-platform-r4 task 031 (FR-18, task 030's live check, owner 2026-11-23): NOT grid-derived,
+            // the Information section. UAC review: pending (relayed by main session).
+            "sprk_projectdescription", "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1",
         },
         ["sprk_document"] = new[]
         {
@@ -788,6 +794,11 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "statuscode",
             // r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
             "sprk_totalamount_base",
+            // ebilling-r1 082c-2 (owner 2026-11-04; uac-r2 approved with conditions): the partner-readable review detail, NOT grid-derived.
+            "sprk_reviewdetail",
+            // ebilling-r1 task 130-0 fix round 2 (K3, D-28; lead-approved, uac-r2 accepted with conditions): the work assignment
+            // scope dimension, NOT grid-derived; ValidateReadableColumns requires every dimension attribute to be readable.
+            "sprk_regardingworkassignment",
         },
         ["sprk_workassignment"] = new[]
         {
@@ -795,12 +806,17 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_responseduedate", "statuscode", "sprk_regardingproject",
             // r3 task 002 (owner 2026-10-29): grid columns on grid 42f4102c.
             "sprk_mattertype", "modifiedon",
+            // r4 task 031 (FR-18, owner 2026-11-23): NOT grid-derived, the Information section. UAC review: pending (relayed by main session).
+            "sprk_description", "sprk_assignedto", "sprk_regardingmatter",
         },
         ["sprk_matter"] = new[]
         {
             "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode",
             // r3 task 002 (owner 2026-10-29): grid columns on grid 583a2a33.
             "sprk_mattertype", "modifiedon",
+            // r4 task 031 (FR-18, owner 2026-11-23): NOT grid-derived, the Information section (createdon = the open date).
+            // UAC review: pending (relayed by main session).
+            "sprk_matterdescription", "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1", "createdon",
         },
         ["sprk_servicerequest"] = new[]
         {
@@ -829,6 +845,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
             "modifiedon", "createdon", "ownerid", "sprk_practicearea",
             "sprk_projecttype_ref", // task 134 admitted it by rule (b); r3 task 002 (owner 2026-10-29) re-admits it as a grid column, so it is on both sides
+            // r4 task 031 (FR-18) additions; on both sides so the shrink comparison is unchanged. sprk_practicearea is above: task 134
+            // admitted it by rule (b) and task 031 re-admits it for the Information section, so it is no longer in the drop set.
+            "sprk_projectdescription", "sprk_assignedattorney1", "sprk_assignedparalegal1",
         },
         // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps and the
         // r3 task 002 grid columns (sprk_filetype, modifiedon; owner 2026-10-29) are later, deliberate additions, so they
@@ -840,19 +859,25 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
             "statuscode", // the 2026-10-17 addition above; on both sides, so the shrink comparison is unchanged
             "sprk_totalamount_base", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
+            "sprk_reviewdetail", // ebilling-r1 082c-2 addition (owner 2026-11-04, uac-r2); on both sides so the shrink comparison is unchanged
+            "sprk_regardingworkassignment", // ebilling-r1 130-0 fix round 2 addition (K3, D-28); on both sides so the shrink comparison is unchanged
         },
         ["sprk_workassignment"] = new[]
         {
             "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
             "sprk_responseduedate", "statuscode", "statecode", "sprk_regardingproject", "createdon",
-            "ownerid", "sprk_assignedto",
+            "ownerid", "sprk_assignedto", // sprk_assignedto: rule (b) in task 134, re-admitted by r4 task 031 (FR-18), so no longer dropped
             "sprk_mattertype", "modifiedon", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
+            "sprk_description", "sprk_regardingmatter", // r4 task 031 (FR-18) additions; on both sides so the shrink comparison is unchanged
         },
         ["sprk_matter"] = new[]
         {
             "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "statecode",
+            // createdon and sprk_practicearea: rule (b) in task 134, re-admitted by r4 task 031 (FR-18), so no longer dropped.
             "createdon", "sprk_mattertype", "sprk_practicearea",
             "modifiedon", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
+            // r4 task 031 (FR-18) additions; on both sides so the shrink comparison is unchanged.
+            "sprk_matterdescription", "sprk_assignedattorney1", "sprk_assignedparalegal1",
         },
         // Task 134's service-request list was the task-157 derivation (no rule-(b) column); the 2026-10-12 statecode and the
         // r3 task 002 modifiedon are later, deliberate additions, so they are listed here on the "before" side too.
@@ -866,23 +891,24 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         ["sprk_gridconfiguration"] = LiveDerivedAllowLists["sprk_gridconfiguration"],
     };
 
-    /// <summary>The drop set: columns task 134 admitted ONLY by rule (b). Each must now be unreadable.</summary>
+    /// <summary>
+    /// The drop set: columns task 134 admitted ONLY by rule (b). Each must now be unreadable. Four rule-(b) columns left this set
+    /// when r4 task 031 (FR-18) re-admitted them for the Information section: sprk_project.sprk_practicearea,
+    /// sprk_matter.createdon, sprk_matter.sprk_practicearea and sprk_workassignment.sprk_assignedto (as r3 task 002 did for
+    /// sprk_projecttype_ref). The task 031 section below proves them readable and an unlisted sibling still refused.
+    /// </summary>
     public static TheoryData<string, string> RuleBOnlyColumns => new()
     {
         { "sprk_project", "statecode" },
         { "sprk_project", "createdon" },
         { "sprk_project", "ownerid" },
-        { "sprk_project", "sprk_practicearea" },
         { "sprk_invoice", "sprk_visibilitystate" },
         { "sprk_invoice", "modifiedon" },
         { "sprk_invoice", "statecode" },
         { "sprk_workassignment", "statecode" },
         { "sprk_workassignment", "createdon" },
         { "sprk_workassignment", "ownerid" },
-        { "sprk_workassignment", "sprk_assignedto" },
         { "sprk_matter", "statecode" },
-        { "sprk_matter", "createdon" },
-        { "sprk_matter", "sprk_practicearea" },
     };
 
     /// <summary>
@@ -1062,13 +1088,16 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "sprk_servicerequest", "modifiedon" },
     };
 
-    /// <summary>Columns beside the admitted ones that stay unreadable: (entity, column).</summary>
+    /// <summary>
+    /// Columns beside the admitted ones that stay unreadable: (entity, column). r4 task 031 made sprk_practicearea (matter,
+    /// project) and sprk_assignedto (work assignment) readable, so those rows are replaced by siblings that are still off the list.
+    /// </summary>
     public static TheoryData<string, string> Task002SiblingColumnsStillRefused => new()
     {
-        { "sprk_matter", "sprk_practicearea" },
-        { "sprk_project", "sprk_practicearea" },
+        { "sprk_matter", "ownerid" },
+        { "sprk_project", "createdon" },
         { "sprk_project", "ownerid" },
-        { "sprk_workassignment", "sprk_assignedto" },
+        { "sprk_workassignment", "ownerid" },
         { "sprk_document", "sprk_searchindexed" },
         { "sprk_invoice", "sprk_invoiceduedate" },
         // The currency columns Dataverse adds beside a Money column: not grid columns, so not readable.
@@ -1141,6 +1170,13 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         "sprk_totalamount_base" => new Money(1250.5m),
         "transactioncurrencyid" => new EntityReference("transactioncurrency", Guid.Parse("33333333-3333-3333-3333-333333333333")),
         "exchangerate" => 1.0m,
+        // r4 task 031 (Information section).
+        "sprk_projectdescription" or "sprk_matterdescription" or "sprk_description" => "Scope of the engagement.\nSecond line.",
+        "sprk_practicearea" => new EntityReference("sprk_practicearea_ref", Guid.Parse("44444444-4444-4444-4444-444444444444")),
+        "sprk_assignedattorney1" or "sprk_assignedparalegal1" or "sprk_assignedto" =>
+            new EntityReference("contact", Guid.Parse("55555555-5555-5555-5555-555555555555")),
+        "sprk_regardingmatter" => new EntityReference("sprk_matter", Guid.Parse("66666666-6666-6666-6666-666666666666")),
+        "createdon" => new DateTime(2026, 1, 15, 9, 30, 0, DateTimeKind.Utc),
         _ => throw new ArgumentOutOfRangeException(nameof(column), column, "no test value"),
     };
 
@@ -1258,12 +1294,13 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             ["sprk_mattername"] = "Alpha matter",
             ["sprk_matternumber"] = "MAT-0001",
             ["sprk_mattertype"] = matterType,
-            ["sprk_practicearea"] = new EntityReference("sprk_practicearea_ref", Guid.NewGuid()),
+            // The unadmitted lookup (r4 task 031 admitted sprk_practicearea, the lookup this test used before).
+            ["ownerid"] = new EntityReference("systemuser", Guid.NewGuid()),
             ["@logicalName"] = "sprk_matter",
             ["@formattedValues"] = new Dictionary<string, string>
             {
                 ["sprk_mattertype"] = "Litigation",
-                ["sprk_practicearea"] = "Employment",
+                ["ownerid"] = "Internal Owner",
             },
         };
         var dataverse = new FetchDouble(row);
@@ -1272,15 +1309,18 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
         var projected = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!.Entities.Should().ContainSingle().Subject;
         projected.Should().ContainKey("sprk_mattertype").WhoseValue.Should().Be(matterType);
-        projected.Should().NotContainKey("sprk_practicearea");
+        projected.Should().NotContainKey("ownerid");
         var formatted = projected["@formattedValues"].Should().BeAssignableTo<IReadOnlyDictionary<string, string>>().Subject;
         formatted.Should().ContainKey("sprk_mattertype").WhoseValue.Should().Be("Litigation");
-        formatted.Should().NotContainKey("sprk_practicearea", "a display value is a column value too");
+        formatted.Should().NotContainKey("ownerid", "a display value is a column value too");
     }
 
     [Theory]
     [InlineData("sprk_mattertype_ref")]
     [InlineData("sprk_projecttype_ref")]
+    // r4 task 031: the targets of the Information lookups. Their names come only as the lookup's display value.
+    [InlineData("sprk_practicearea_ref")]
+    [InlineData("contact")]
     public async Task GetScopedRecord_WhenTheEntityIsALookupTargetTableWithNoModule_IsRefusedWithoutReading(string entity)
     {
         var id = Guid.NewGuid();
@@ -1297,6 +1337,9 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     [Theory]
     [InlineData("sprk_mattertype_ref")]
     [InlineData("sprk_projecttype_ref")]
+    // r4 task 031: the targets of the Information lookups. Their names come only as the lookup's display value.
+    [InlineData("sprk_practicearea_ref")]
+    [InlineData("contact")]
     public async Task ExecuteScopedFetch_WhenTheEntityIsALookupTargetTableWithNoModule_IsRefusedWithoutQuerying(string entity)
     {
         var id = Guid.NewGuid();
@@ -1379,6 +1422,149 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             WorkforceContact(contact), registry, extractor, allowed.Execute, NoFlags, Narrow, NullLogger.Instance, CancellationToken.None);
         ok.Should().BeOfType<Ok<FetchResponseDto>>();
         allowed.Calls.Should().Be(1, "a workforce caller with a contact qualifies whatever the partner switch says");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // 8. r4 task 031 — Information section columns (FR-18, owner 2026-11-23)
+    // ═════════════════════════════════════════════════════════════════════════════
+    //
+    // Twelve columns became readable so the record template's Information section can show them. The list is exactly task 030's
+    // "Final list for task 031" (notes/task-030-information-fields.md): FOUND in live metadata, not field-secured, owner-approved.
+    // Each lookup reaches the caller as its id and its display name (@formattedValues, written by FetchService.ProjectEntity from
+    // the single-entity query); the referenced record is never read. contact and sprk_practicearea_ref have no module, so a read
+    // of either is refused (section 7's lookup-target theories); sprk_regardingmatter's target, sprk_matter, keeps its own
+    // Tier-2-scoped module, and the lookup carries only the matter's id and name.
+
+    /// <summary>The twelve (entity, column) pairs r4 task 031 admitted.</summary>
+    public static TheoryData<string, string> Task031InformationColumns => new()
+    {
+        { "sprk_matter", "sprk_matterdescription" },
+        { "sprk_matter", "sprk_practicearea" },
+        { "sprk_matter", "sprk_assignedattorney1" },
+        { "sprk_matter", "sprk_assignedparalegal1" },
+        { "sprk_matter", "createdon" },
+        { "sprk_project", "sprk_projectdescription" },
+        { "sprk_project", "sprk_practicearea" },
+        { "sprk_project", "sprk_assignedattorney1" },
+        { "sprk_project", "sprk_assignedparalegal1" },
+        { "sprk_workassignment", "sprk_description" },
+        { "sprk_workassignment", "sprk_assignedto" },
+        { "sprk_workassignment", "sprk_regardingmatter" },
+    };
+
+    /// <summary>
+    /// The columns the SPA's Information read asks for (src/client/external-spa/src/components/detail/RecordDetailFields.tsx
+    /// RECORD_DETAIL_ENTITIES: the id, then every field row), after task 031.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string[]> InformationReadColumns = new Dictionary<string, string[]>
+    {
+        ["sprk_matter"] = new[]
+        {
+            "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "createdon", "sprk_matterdescription",
+            "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1",
+        },
+        ["sprk_project"] = new[]
+        {
+            "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "sprk_projectdescription",
+            "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1", "modifiedon",
+        },
+        ["sprk_workassignment"] = new[]
+        {
+            "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority", "sprk_responseduedate",
+            "statuscode", "sprk_regardingproject", "sprk_regardingmatter", "sprk_assignedto", "sprk_description",
+        },
+    };
+
+    public static TheoryData<string> InformationEntities => new() { "sprk_matter", "sprk_project", "sprk_workassignment" };
+
+    /// <summary>
+    /// The FetchXML the SPA's Information read sends (recordReads.ts buildFetchXml: double-quoted attributes, an id filter),
+    /// optionally with one more column.
+    /// </summary>
+    private static string InformationReadFetchXml(string entity, Guid id, string? extraColumn = null)
+    {
+        var columns = InformationReadColumns[entity].AsEnumerable();
+        if (extraColumn is not null)
+        {
+            columns = columns.Append(extraColumn);
+        }
+        var attributes = string.Concat(columns.Select(c => $"<attribute name=\"{c}\"/>"));
+        return $"<fetch><entity name=\"{entity}\">{attributes}" +
+               $"<filter type=\"and\"><condition attribute=\"{entity}id\" operator=\"eq\" value=\"{id:D}\"/></filter>" +
+               "</entity></fetch>";
+    }
+
+    [Theory]
+    [MemberData(nameof(InformationEntities))]
+    public void ProductionModule_ForTheInformationRead_AdmitsTheSpasFetchXml(string entity)
+    {
+        var module = ProductionRegistry().FindByEntity(entity)!;
+
+        var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
+            InformationReadFetchXml(entity, Guid.NewGuid()), module.RecordEntity, module.ReadableColumns, new FetchXmlEntityExtractor());
+
+        result.Verdict.Should().Be(Verdict.Allowed, $"the Information read must not 400 (violation: {result.ColumnViolation})");
+    }
+
+    /// <summary>Must-fire (FR-18): each added column reads through the module fetch, with its display value.</summary>
+    [Theory]
+    [MemberData(nameof(Task031InformationColumns))]
+    public async Task ExecuteScopedFetch_WhenTheInformationReadCarriesATask031Column_ReturnsItWithItsDisplayValue(string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var value = ColumnValue(column);
+        var dataverse = new FetchDouble(RowCarrying(entity, id, (column, value)));
+
+        var result = await FetchGrantedEverywhere(entity, InformationReadFetchXml(entity, id), id, ProductionRegistry(), dataverse);
+
+        dataverse.Calls.Should().Be(1);
+        dataverse.ExecutedFetchXml.Should().NotContain("link-entity", "the name comes from the single-entity read, not a join");
+        var projected = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!.Entities.Should().ContainSingle().Subject;
+        projected.Should().ContainKey(column).WhoseValue.Should().Be(value, "the admitted column reaches the caller");
+        var formatted = projected["@formattedValues"].Should().BeAssignableTo<IReadOnlyDictionary<string, string>>().Subject;
+        formatted.Should().ContainKey(column).WhoseValue.Should().Be(FormattedColumnValue(column),
+            "a lookup's name reaches the SPA as its display value");
+    }
+
+    /// <summary>
+    /// Must-not-fire (FR-18): the same Information read plus one column still off the list is refused with 400 and its errorCode,
+    /// and Dataverse is never queried. ownerid is the representative: an internal lookup the owner did not approve.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(InformationEntities))]
+    public async Task ExecuteScopedFetch_WhenTheInformationReadAddsAnUnlistedColumn_Returns400AndNeverQueries(string entity)
+    {
+        var id = Guid.NewGuid();
+        var registry = ProductionRegistry();
+
+        // Positive control: the Information read alone runs for this caller, so the 400 below is the column.
+        var control = new FetchDouble(RowCarrying(entity, id));
+        (await FetchGrantedEverywhere(entity, InformationReadFetchXml(entity, id), id, registry, control))
+            .Should().BeOfType<Ok<FetchResponseDto>>();
+        control.Calls.Should().Be(1);
+
+        var dataverse = new FetchDouble();
+        var result = await FetchGrantedEverywhere(entity, InformationReadFetchXml(entity, id, "ownerid"), id, registry, dataverse);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    /// <summary>Must-not-fire on the record route: a <c>$select</c> naming an unlisted column is refused before any read.</summary>
+    [Theory]
+    [MemberData(nameof(InformationEntities))]
+    public async Task GetScopedRecord_WhenSelectAddsAnUnlistedColumnToTheInformationColumns_Returns400AndNeverReads(string entity)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new RecordDouble(new Dictionary<string, object?> { ["ownerid"] = "x" });
+        var select = string.Join(",", InformationReadColumns[entity].Append("ownerid"));
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, id, select, GrantedEverywhere(id), ProductionRegistry(), dataverse.Read,
+            NullLogger.Instance, CancellationToken.None);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorRecordColumnNotPermitted);
+        dataverse.Calls.Should().Be(0);
     }
 
     private static void ShouldBeNotRegistered(IResult result)

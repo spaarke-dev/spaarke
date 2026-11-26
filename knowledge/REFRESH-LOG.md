@@ -6,6 +6,16 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 
 ---
 
+## 2026-11-05 — Interim update: new reference topic `defender-for-storage-malware-scan/` (ebilling-r1)
+
+Added `knowledge/defender-for-storage-malware-scan/{README.md,SOURCE.md}` from Microsoft Learn (13 pages, fetched
+2026-11-05). Covers overwrite/rescan triggers (Put Blob / Put Block List raise `BlobCreated`; Set Metadata / Set Tags
+do not), index-tag behaviour, caps/throughput/size limits, not-scanned results, and the on-demand single-blob scan as a
+documented rescan alternative. Gaps recorded: overwrite-vs-existing-tags, Defender tag replace/merge, scan-time tag key,
+numeric latency, hash dedup, cap-hit result - all undocumented, need a live probe.
+
+---
+
 ## 2026-08-26 — Interim update: `sharepoint-embedded/` platform-currency refresh (task 061, `sdap-SPE-admin-app-r2`, FR-X01)
 
 Narrow, task-driven refresh of `knowledge/sharepoint-embedded/docs/` — not the full monthly cycle (still

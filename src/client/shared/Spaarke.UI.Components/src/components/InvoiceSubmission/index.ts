@@ -8,11 +8,23 @@ export { InvoiceSubmissionOutcome } from './InvoiceSubmissionOutcome';
 export type { InvoiceSubmissionOutcomeProps } from './InvoiceSubmissionOutcome';
 export { invoiceSubmissionErrorMessage } from './messages';
 export {
+  CORRECTION_NOTE_MAX_CHARS,
+  correctionNoteCount,
+  correctionNoteCounterText,
+  correctionNoteProblem,
+  correctionNoteToSend,
+} from './correctionNote';
+export {
   InvoiceSubmissionError,
   EBILLING_DISABLED_ERROR_CODE,
   FIRM_REQUIRED_ERROR_CODE,
+  CORRECTION_NOTE_REQUIRED_ERROR_CODE,
+  CORRECTION_NOT_ALLOWED_ERROR_CODE,
+  CORRECTION_UNAVAILABLE_ERROR_CODE,
   isEbillingDisabledError,
   isTerminalStatus,
+  invoiceSubmissionInvoiceIdOf,
+  invoiceSubmissionRecordOf,
 } from './types';
 export type {
   InvoiceCoreRecordKind,
@@ -21,8 +33,13 @@ export type {
   InvoiceRecordQuery,
   InvoiceFirmOption,
   InvoiceSubmissionInput,
+  InvoiceSubmissionCorrectionInput,
+  InvoiceCorrectionTarget,
   InvoiceSubmissionAccepted,
   InvoiceSubmissionStatusName,
   InvoiceSubmissionStatusView,
+  InvoiceSubmissionStatusCoreRecord,
+  InvoiceSubmissionRecordRef,
+  InvoiceSubmissionWarning,
   InvoiceSubmissionCallbacks,
 } from './types';

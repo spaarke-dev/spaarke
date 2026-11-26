@@ -198,6 +198,27 @@ public sealed class InvoiceCorrectionPrefillContractTests : IAsyncLifetime
         _world.Intake.Writes.Should().Be(0, "a read");
     }
 
+    [Fact(DisplayName = "095c-2 (seed-proof, contract section 10): a no-firm invoice's prefill is 200 with \"firm\": null (present, null), canCorrect true; no firm is read")]
+    public async Task NoFirmInvoice_Is200_WithFirmNull()
+    {
+        var invoice = Seed();
+        CorrectionSeed.WithoutFirm(invoice);
+        CorrectionSeed.WithoutFirm(_world.Intake.PriorSubmissions.Single());
+
+        var response = await GetAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await BodyAsync(response);
+        body.EnumerateObject().Select(p => p.Name).Should().Equal(
+            "invoiceId", "firm", "coreRecord", "invoiceStatus", "trackingNumber", "firmInvoiceNumber", "canCorrect", "reason", "replacedBy");
+        body.GetProperty("firm").ValueKind.Should().Be(JsonValueKind.Null, "the property is present and null, never { id: null, name: null }");
+        body.GetProperty("coreRecord").GetProperty("name").GetString().Should().Be("Acme v. Roe");
+        body.GetProperty("canCorrect").GetBoolean().Should().BeTrue("the intake corrects a no-firm invoice with no firm");
+        body.GetProperty("reason").ValueKind.Should().Be(JsonValueKind.Null);
+        _world.Intake.Entities.Verify(e => e.RetrieveAsync("sprk_organization", Moq.It.IsAny<Guid>(), Moq.It.IsAny<string[]>(), Moq.It.IsAny<CancellationToken>()),
+            Moq.Times.Never(), "there is no firm to name");
+    }
+
     [Fact(DisplayName = "097e: a submission with no tracking number answers trackingNumber null")]
     public async Task NoTrackingNumber_IsNull()
     {

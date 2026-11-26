@@ -95,6 +95,13 @@ public static class AppConfigSeedRejectionCodes
     /// blocks the run because we cannot compute a deterministic key without it.
     /// </summary>
     public const string ManifestNotFound = "appconfig-manifest-not-found";
+
+    /// <summary>
+    /// <c>run.Parameters.NonSecret["referenceDataPack"]</c> is neither <c>legal-standard</c> nor <c>none</c> (a run created
+    /// before POST /api/runs validated it, or written around the endpoint). Nothing is seeded; correct the run's parameter and
+    /// resume. Same allowed set as POST /api/runs (<c>IntakeParameterCatalog.AllowedReferenceDataPacks</c>).
+    /// </summary>
+    public const string InvalidReferenceDataPack = "appconfig-invalid-reference-data-pack";
 }
 
 /// <summary>

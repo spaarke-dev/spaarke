@@ -499,7 +499,10 @@ public class InsightsOrchestratorTests
                 It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Binding
             {
-                BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, ConsumerCode = "default", PlaybookId = defaultPlaybook,
+                BindingId = Guid.NewGuid(),
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = "default",
+                PlaybookId = defaultPlaybook,
             });
         _nodeServiceMock.Setup(n => n.GetNodesAsync(defaultPlaybook, It.IsAny<CancellationToken>())).ReturnsAsync(WritesToTheMatterSubject());
         var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();
@@ -1167,6 +1170,7 @@ public class InsightsOrchestratorTests
             new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>(MockBehavior.Strict).Object,
             new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict).Object,
             Sprk.Bff.Api.Tests.Services.Ai.Handlers.DocumentNarrowingReads.NeverCalled,
+            Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws,
             NullLogger<RetrievalAccessTrim>.Instance);
         _ragServiceMock
             .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))

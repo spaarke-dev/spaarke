@@ -1,66 +1,24 @@
 import * as React from "react";
-import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
-import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
-import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
-import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { useWizardPageBootstrap } from "@spaarke/ui-components/utils/useWizardPageBootstrap";
+import { mountWizardPage, WizardPageInitializing } from "@spaarke/ui-components/utils/mountWizardPage";
 import { WorkAssignmentWizardDialog } from "@spaarke/ui-components/components/CreateWorkAssignmentWizard";
-import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
-import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  const params = React.useMemo(() => parseDataParams(), []);
-  const [isAuthReady, setIsAuthReady] = React.useState(false);
-  const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
-  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>("");
-
-  React.useEffect(() => {
-    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
-  }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    async function initialize(): Promise<void> {
-      try {
-        const config = await resolveRuntimeConfig();
-        await initAuth({
-          clientId: config.msalClientId,
-          bffBaseUrl: config.bffBaseUrl,
-          bffApiScope: config.bffOAuthScope,
-          tenantId: config.tenantId || undefined,
-          proactiveRefresh: true,
-        });
-        if (!cancelled) {
-          setResolvedBffBaseUrl(config.bffBaseUrl);
-          setResolvedTenantId(config.tenantId ?? "");
-          setIsAuthReady(true);
-        }
-      } catch (err) {
-        console.error("[CreateWorkAssignmentWizard] Failed to initialize auth:", err);
-        if (!cancelled) setIsAuthReady(true);
-      }
-    }
-    void initialize();
-    return () => { cancelled = true; };
-  }, []);
-
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  const b = useWizardPageBootstrap("CreateWorkAssignmentWizard");
 
   // UAT R5-8 (the create-flow file leg): when launched from the Assistant "Assign Work" Quick Start
-  // card via the surface-launch envelope, read this page's hand-off and pass the session file refs
-  // so the wizard fetches + pre-attaches them. `undefined` on a direct open (no handoffId on the URL).
-  const handoff = React.useMemo(() => readHandoffFromUrl(), []);
+  // card via the surface-launch envelope, pass the hand-off's session file refs so the wizard fetches +
+  // pre-attaches them. `undefined` on a direct open (no handoffId on the URL).
   const initialFileRefs = React.useMemo(() => {
-    const seed = computeHandoffSeed(handoff);
+    const seed = b.handoffSeed;
     if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
-  }, [handoff]);
+  }, [b.handoffSeed]);
 
-  // Resolve SPE container ID from the user's business unit
+  // Resolve SPE container ID from the user's business unit. Kept per page (not the bootstrap's): this
+  // wizard fails loudly when the business unit has no container, where the shared one returns ''.
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
     // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,55 +34,27 @@ function App() {
     return containerId;
   }, []);
 
-  const handleClose = React.useCallback(() => {
-    navigationService.closeDialog({ confirmed: true });
-  }, [navigationService]);
-
-  // #1420 honest-ack (parity with the Create Matter/Project/Event code pages): on a SUCCESSFUL
-  // create, write the committed SurfaceHandoffResult (the new record id) for the active hand-off,
-  // then close. Just closes when opened directly (no hand-off). Cancellation is INFERRED by the
-  // orchestrator from the absence of a written result, so the cancel path (handleClose) writes nothing.
-  const handleComplete = React.useCallback((recordId?: string) => {
-    if (handoff?.handoffId) writeCompleteHandoff(handoff.handoffId, recordId);
-    navigationService.closeDialog({ confirmed: true });
-  }, [handoff, navigationService]);
-
-  if (!isAuthReady) {
-    return (
-      <FluentProvider theme={theme} style={{ height: "100%" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-          <span>Initializing...</span>
-        </div>
-      </FluentProvider>
-    );
-  }
+  if (!b.isAuthReady) return <WizardPageInitializing theme={b.theme} />;
 
   return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
+    <FluentProvider theme={b.theme} style={{ height: "100%" }}>
       <WorkAssignmentWizardDialog
-        dataService={dataService}
-        navigationService={navigationService}
+        dataService={b.dataService}
+        navigationService={b.navigationService}
+        emailComposeHandlers={b.emailComposeHandlers}
         embedded={true}
         open={true}
-        onClose={handleClose}
-        onComplete={handleComplete}
-        authenticatedFetch={authenticatedFetch}
-        bffBaseUrl={resolvedBffBaseUrl}
+        onClose={b.closeDialog}
+        // #1420 honest-ack: on a SUCCESSFUL create, write the committed hand-off result, then close.
+        onComplete={b.completeHandoff}
+        authenticatedFetch={b.authenticatedFetch}
+        bffBaseUrl={b.bffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
-        tenantId={resolvedTenantId}
+        tenantId={b.tenantId}
         initialFileRefs={initialFileRefs}
       />
     </FluentProvider>
   );
 }
 
-const rootElement = document.getElementById("root");
-if (rootElement) {
-  createRoot(rootElement).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  console.error("[CreateWorkAssignmentWizard] Root element not found");
-}
+mountWizardPage("CreateWorkAssignmentWizard", App);

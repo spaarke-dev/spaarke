@@ -49,12 +49,11 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// The substitution is at the <see cref="IAccessDataSource"/> boundary (a recording fake that answers "what may
 /// this caller do to record X of set S" and logs every question asked) and at the Dataverse service seams the
 /// handlers sit on. No HTTP handler is mocked (ADR-038).</para>
-/// <para><b>Why the finance recalculate 200 is not asserted here.</b> <see cref="FinanceRollupService"/> reads
-/// through a concrete Dataverse <c>ServiceClient</c> unwrapped from <see cref="IDataverseService"/>, which no
-/// in-process double can stand in for. The authorized finance route is therefore shown to REACH its handler
-/// (which then fails on the unwrappable double, a 500 that a denial can never produce); its 200 is proven by
-/// the task's manual live gate (b). The scorecard routes, whose reads go through an interface, are asserted
-/// 200 end to end.</para>
+/// <para><b>Why the finance recalculate 200 is not asserted here.</b> The authorized finance route is shown to REACH its
+/// handler, which then fails on the strict <see cref="IDataverseService"/> double with no reads set up (a 500 that a denial
+/// can never produce); its 200 is proven by the task's manual live gate (b). (Until task 165b-4 the rollup read through an
+/// unwrapped <c>ServiceClient</c>; it now reads through the interface, and its figures are tested in
+/// <c>SpendServerWrittenSourcesTests</c>.) The scorecard routes are asserted 200 end to end.</para>
 /// </remarks>
 public class FinanceEndpointsAuthorizationContractTests
 {
@@ -312,10 +311,28 @@ public class FinanceEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(BuildRequest(route, parentId));
 
-        // The filter let the request through: the handler ran FinanceRollupService, which cannot unwrap a
-        // ServiceClient from the in-process double and fails with the handler's own 500. A denial is a 404.
+        // The filter let the request through: the handler ran FinanceRollupService, whose first spend read hits the strict
+        // in-process double (no read is set up; task 165b-4 removed the ServiceClient unwrap) and fails with the handler's own 500.
+        // A denial is a 404.
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await response.Content.ReadAsStringAsync()).Should().Contain("An error occurred while recalculating financial fields");
+    }
+
+    [Theory(DisplayName = "095g review 2 (uniform-404 mode): a degraded Read on a faulted answer reaches the handler; no rights on a faulted answer is the uniform 404, as before")]
+    [InlineData("finance-matter-recalculate", Matters, AccessRights.Read, HttpStatusCode.InternalServerError)]
+    [InlineData("finance-project-recalculate", Projects, AccessRights.Read, HttpStatusCode.InternalServerError)]
+    [InlineData("finance-matter-recalculate", Matters, AccessRights.AppendTo, HttpStatusCode.NotFound)]
+    public async Task Recalculate_FaultedAnswer_DecidedByTheRightsItCarries(string route, string expectedSet, AccessRights granted, HttpStatusCode expected)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var parentId = Guid.NewGuid();
+        host.Access.Grant(expectedSet, parentId, granted);
+        host.Access.Fault(expectedSet, parentId);
+
+        var response = await host.SendAsync(BuildRequest(route, parentId));
+
+        // 500 is the handler's own (see Recalculate_FinanceReader_ReachesTheRollupHandler): the filter let the request through.
+        response.StatusCode.Should().Be(expected);
     }
 
     [Theory]
@@ -398,6 +415,37 @@ public class FinanceEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
         host.Access.Calls.Should().ContainSingle().Which.Set.Should().Be(Matters);
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact(DisplayName = "095g review 2 (must not fire): a Read-only route given a DEGRADED Read on a faulted answer is allowed - the request gets the rights it always did")]
+    public async Task Summary_DegradedReadOnAFault_Gets200()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, AccessRights.Read); // readable: the source's fallback answers Read, marked faulted
+        host.Access.Fault(Matters, matterId);
+        host.Summary.Setup(s => s.GetSummaryAsync(matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSummaryDto { MatterId = matterId, CurrentSpend = 10m });
+
+        var response = await host.SendAsync(BuildRequest("summary", matterId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Access.Calls.Should().ContainSingle().Which.Should().Be(new AccessCall(AccessPath.Record, Matters, matterId, HasToken: true));
+    }
+
+    [Fact(DisplayName = "095g review 2 control (must fire): the same route given NO rights on a faulted answer is refused as before (403 insufficient_rights)")]
+    public async Task Summary_NoRightsOnAFault_Gets403()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var matterId = Guid.NewGuid();
+        host.Access.Grant(Matters, matterId, AccessRights.AppendTo); // not readable: the fallback answers None, marked faulted
+        host.Access.Fault(Matters, matterId);
+
+        var response = await host.SendAsync(BuildRequest("summary", matterId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
         host.VerifyNoServiceWasInvoked();
     }
 
@@ -485,7 +533,6 @@ public class FinanceEndpointsAuthorizationContractTests
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
-        host.Probe.Hold(CreateInvoicePrivilege);
 
         var docRights = AccessRights.Read | AccessRights.Write | AccessRights.Append;
         var matterRights = AccessRights.Read | AccessRights.AppendTo;
@@ -517,7 +564,6 @@ public class FinanceEndpointsAuthorizationContractTests
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
-        host.Probe.Hold(CreateInvoicePrivilege);
         host.Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
         host.Access.Grant(Matters, body.MatterId, AccessRights.AppendTo);
         host.Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
@@ -545,56 +591,85 @@ public class FinanceEndpointsAuthorizationContractTests
         host.VerifyNoServiceWasInvoked();
     }
 
-    [Fact]
-    public async Task Confirm_CallerWithoutCreateOnSprkInvoice_Returns403_AndNothingIsCreated()
+    // ── ebilling-r1 050c (EB-D-264): confirm asks what the manual internal submission asks, and no Create on sprk_invoice ──
+
+    /// <summary>A confirm that reached the service answers with a submission receipt.</summary>
+    private static void ConfirmReachesTheService(FinanceAuthHost host, ConfirmBody body) =>
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(
+                It.Is<InvoiceReviewConfirmRequest>(q => q.DocumentId == body.DocumentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(Guid.NewGuid(), Guid.NewGuid(), "INV-7.1", body.DocumentId)));
+
+    [Fact(DisplayName = "050c / EB-D-264 (must fire): a caller with the submit rights but WITHOUT Create on sprk_invoice is 202, and the privilege is never asked")]
+    public async Task Confirm_CallerWithoutCreateOnSprkInvoice_ButWithTheSubmitRights_Is202_AndNoPrivilegeIsAsked()
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
         host.Probe.Release(CreateInvoicePrivilege); // every record right, but not the table privilege
+        ConfirmReachesTheService(host, body);
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        host.Probe.Calls.Should().BeEmpty("confirm no longer asks the caller's table privileges (the Create Invoice wizard does not either)");
+    }
+
+    [Fact(DisplayName = "050c / EB-D-264: a privilege probe that faults no longer decides a confirm (nothing asks it)")]
+    public async Task Confirm_PrivilegeProbeFaults_DoesNotDecideTheConfirm()
+    {
+        await using var faulting = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        faulting.GrantFullConfirm(body);
+        faulting.Probe.ThrowOnEveryCall = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable");
+        ConfirmReachesTheService(faulting, body);
+
+        (await faulting.SendAsync(Confirm(body))).StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact(DisplayName = "050c / EB-D-264: without AppendTo on the core record a confirm is still refused, even for a caller who holds Create on sprk_invoice")]
+    public async Task Confirm_WithoutAppendToOnTheCoreRecord_IsStillRefused_EvenForACallerHoldingCreate()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.Probe.Hold(CreateInvoicePrivilege); // holding Create does not stand in for the submit rights
+        host.Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
+        host.Access.Grant(Matters, body.MatterId, AccessRights.Read); // no AppendTo
+        host.Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
 
         var response = await host.SendAsync(Confirm(body));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_privilege");
-        host.Probe.Calls.Should().ContainSingle()
-            .Which.Should().Be(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true),
-                "the privilege is asked AS THE CALLER (their token forwarded), by its exact live name");
+        host.Access.Calls.Last().Should().Be(new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true));
         host.VerifyNoServiceWasInvoked();
     }
 
-    [Fact]
-    public async Task Confirm_PrivilegeCheckThrows_IsDenied()
+    [Fact(DisplayName = "050c / EB-D-263: a body that still sends invoiceDate and totalAmount is accepted (202); the contract carries neither member")]
+    public async Task Confirm_BodyWithInvoiceDateAndTotalAmount_IsAccepted_AndTheRequestCarriesNeither()
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
         host.GrantFullConfirm(body);
-        host.Probe.ThrowOnEveryCall = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable");
+        InvoiceReviewConfirmRequest? seen = null;
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<InvoiceReviewConfirmRequest, string, CancellationToken>((q, _, _) => seen = q)
+            .ReturnsAsync(InvoiceSubmissionOutcome.Received(new InvoiceSubmissionReceipt(Guid.NewGuid(), Guid.NewGuid(), "INV-7.1", body.DocumentId)));
 
-        var response = await host.SendAsync(Confirm(body));
+        var response = await host.SendAsync(WithJson(Authenticated(HttpMethod.Post, "/api/finance/invoice-review/confirm"), new
+        {
+            documentId = body.DocumentId,
+            matterId = body.MatterId,
+            vendorOrgId = body.VendorOrgId,
+            invoiceNumber = "INV-42",
+            invoiceDate = "2026-11-01T00:00:00Z",
+            totalAmount = 1234.56m,
+        }));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await ShouldCarryReasonCode(response, "sdap.access.error.system_failure");
-        host.VerifyNoServiceWasInvoked();
-    }
-
-    [Fact]
-    public async Task Confirm_NoPrivilegeProbeRegistered_IsDenied_NeverAllowed()
-    {
-        // A host whose container has no CallerRecordAccessProbe: the Privilege-path check cannot be asked, and a
-        // check that cannot be asked must deny (fail closed) — every record right is granted, so only that guard
-        // stands between this caller and an app-only invoice create.
-        await using var host = await FinanceAuthHost.StartAsync(registerProbe: false);
-        var body = ConfirmBody.New();
-        host.GrantFullConfirm(body);
-
-        var response = await host.SendAsync(Confirm(body));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        await ShouldCarryReasonCode(response, "sdap.access.error.system_failure");
-        host.Access.Calls.Should().HaveCount(4, "every record check ran and passed; the privilege check denied");
-        host.Probe.Calls.Should().BeEmpty("the probe is not registered, so it cannot have been asked");
-        host.VerifyNoServiceWasInvoked();
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        seen.Should().NotBeNull();
+        seen!.DocumentId.Should().Be(body.DocumentId);
+        seen.InvoiceNumber.Should().Be("INV-42");
+        typeof(InvoiceReviewConfirmRequest).GetProperties().Select(p => p.Name)
+            .Should().NotContain(["InvoiceDate", "TotalAmount"], "EB-D-263: the contract carries neither; the job reads them from the document");
     }
 
     // ── ebilling-r1 050a (D-134): confirm answers with the intake's outcome, rendered as the internal submission route renders it ──
@@ -739,7 +814,7 @@ public class FinanceEndpointsAuthorizationContractTests
             new AccessCall(AccessPath.Record, Documents, body.DocumentId, HasToken: true),
             new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true),
             new AccessCall(AccessPath.Record, VendorOrganizations, body.VendorOrgId, HasToken: true));
-        host.Probe.Calls.Should().Equal(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true));
+        host.Probe.Calls.Should().BeEmpty("050c / EB-D-264: confirm asks no table privilege");
     }
 
     // ── ebilling-r1 task 094 fix round: the confirm route's Submit Invoice step 1 (F4, F1-b) ──
@@ -1152,6 +1227,28 @@ public class FinanceEndpointsAuthorizationContractTests
         json.Should().NotContainKey("invoiceId");
     }
 
+    [Fact(DisplayName = "050c fix round 1 (F1): reject of a Failed attempt whose undo is unfinished is a retryable 503 with the confirm route's errorCode")]
+    public async Task Reject_EarlierAttemptBeingRemoved_Is503_WithTheConfirmRoutesErrorCode()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceReviewException(InvoiceReviewFailure.EarlierAttemptBeingRemoved, "still being removed; nothing was saved"));
+
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["errorCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved);
+        json["reasonCode"]!.GetValue<string>().Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved);
+        json.Should().NotContainKey("invoiceId");
+    }
+
     // =========================================================================================
     // Helpers
     // =========================================================================================
@@ -1246,6 +1343,31 @@ public class FinanceEndpointsAuthorizationContractTests
             return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
         }
 
+        /// <summary>Privileges whose question answers <see cref="CallerPrivilegeAnswer.Faulted"/> (an OBO, WhoAmI or privilege-read fault).</summary>
+        public HashSet<string> FaultFor { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The three-state question (ebilling-r1 task 095a review F1: the by-email route's fail-closed mode asks it). Held when the privilege is
+        /// held, NotHeld when it is not, Faulted for a privilege in <see cref="FaultFor"/> or with no caller token (as the real probe answers
+        /// it); <see cref="ThrowOnEveryCall"/> throws.
+        /// </summary>
+        public override Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            Calls.Add(new PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            if (ThrowOnEveryCall is not null)
+            {
+                return Task.FromException<CallerPrivilegeAnswer>(ThrowOnEveryCall);
+            }
+
+            if (string.IsNullOrEmpty(callerBearerToken) || FaultFor.Contains(privilegeName))
+            {
+                return Task.FromResult(CallerPrivilegeAnswer.Faulted);
+            }
+
+            return Task.FromResult(_held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld);
+        }
+
         /// <summary>
         /// What WhoAmI on the caller's OBO token answers (task 162 f1, the personal-analysis creator match). Null — the
         /// default, and the base class's answer without OBO configuration — means "the caller's systemuserid could not be
@@ -1293,7 +1415,9 @@ public class FinanceEndpointsAuthorizationContractTests
     internal sealed class RollupSeam : FinanceRollupService
     {
         public RollupSeam(IDataverseService reads, IFieldMappingDataverseService writes)
-            : base(reads, writes, NullLogger<FinanceRollupService>.Instance)
+            : base(reads, writes, new BillingDecisionRecorder(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness().Writer,
+                    new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object, NullLogger<BillingDecisionRecorder>.Instance),
+                NullLogger<FinanceRollupService>.Instance)
         {
         }
 
@@ -1338,7 +1462,11 @@ public class FinanceEndpointsAuthorizationContractTests
         /// <summary>The rights granted on a record (None when none were).</summary>
         public AccessRights RightsOf(string set, Guid id) => _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
 
-        /// <summary>Dataverse gave no answer for this record: rights None with <see cref="AccessSnapshot.Faulted"/> true (an unknown, not a denial).</summary>
+        /// <summary>
+        /// Dataverse gave no full answer for this record (<see cref="AccessSnapshot.Faulted"/> true: an unknown, not a denial), in the
+        /// shapes the production source emits: a degraded Read when the record is readable (rights granted here include Read), otherwise
+        /// None. Any other granted right is NOT returned on a fault.
+        /// </summary>
         public void Fault(string set, Guid id) => _faulted.Add((set, id));
 
         public Task<AccessSnapshot> GetUserAccessAsync(
@@ -1363,12 +1491,14 @@ public class FinanceEndpointsAuthorizationContractTests
                 return Task.FromException<AccessSnapshot>(ThrowOnEveryCall);
             }
 
+            var granted = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None;
+            var faulted = _faulted.Contains((set, id));
             return Task.FromResult(new AccessSnapshot
             {
                 UserId = userId,
                 ResourceId = id.ToString(),
-                AccessRights = _rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
-                Faulted = _faulted.Contains((set, id)),
+                AccessRights = faulted ? granted & AccessRights.Read : granted,
+                Faulted = faulted,
             });
         }
     }
@@ -1410,19 +1540,17 @@ public class FinanceEndpointsAuthorizationContractTests
             return entities;
         }
 
-        /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
-        /// — the configuration fault the Privilege path must deny on.</param>
         /// <param name="ebillingEnabled">The eBilling flag (050a: the confirm route is gated by it).</param>
         /// <param name="realProblemMiddleware">095 contract fix (2026-10-29): true runs the BFF's REAL pipeline
         /// (<c>UseSpaarkeMiddleware</c>, its global exception handler included), so a test sees an exception as the wire renders it.</param>
-        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true, bool ebillingEnabled = true, bool realProblemMiddleware = false)
+        public static async Task<FinanceAuthHost> StartAsync(bool ebillingEnabled = true, bool realProblemMiddleware = false)
         {
             var host = new FinanceAuthHost();
-            await host.InitializeAsync(registerProbe, ebillingEnabled, realProblemMiddleware);
+            await host.InitializeAsync(ebillingEnabled, realProblemMiddleware);
             return host;
         }
 
-        private async Task InitializeAsync(bool registerProbe, bool ebillingEnabled, bool realProblemMiddleware = false)
+        private async Task InitializeAsync(bool ebillingEnabled, bool realProblemMiddleware = false)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -1447,11 +1575,8 @@ public class FinanceEndpointsAuthorizationContractTests
             // Task 188 round 4b: what the app-only identity reads for THE external document narrowing. The caller is the
             // one StepZero states above (StatedCaller): step 0 and the narrowing ask the same two resolvers.
             builder.Services.AddNarrowingWorld(() => World);
-            if (registerProbe)
-            {
-                Probe.RecordRights = Access.RightsOf; // task 094 F4: step 1's own Read checks see the caller's same rights
-                builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
-            }
+            Probe.RecordRights = Access.RightsOf; // task 094 F4: step 1's own Read checks see the caller's same rights
+            builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
 
             builder.Services.AddSingleton(Review.Object);
             builder.Services.AddSingleton(Entities.Object);
@@ -1502,7 +1627,6 @@ public class FinanceEndpointsAuthorizationContractTests
             Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
             Access.Grant(Matters, body.MatterId, AccessRights.Read | AccessRights.AppendTo);
             Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
-            Probe.Hold(CreateInvoicePrivilege);
         }
 
         /// <summary>Every service and Dataverse seam behind the eight handlers was left untouched.</summary>

@@ -180,9 +180,11 @@ public class OfficeQuickCreateProjectContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
 
-        // One source read spanning every Copy field and every placeholder — never one read per rule.
+        // One source read spanning every Copy field and every placeholder — never one read per rule — plus the source's
+        // owner and secure flag (the mapping-source rule's own columns, read in the same request).
         requestedColumns.Single().Should().BeEquivalentTo(
-            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber");
+            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber",
+            "ownerid", "sprk_issecure", "sprk_accesspermission"); // task 022b: the Restricted-source check reads the source's access permission in the same request
 
         var project = created.Entity!;
         project.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
@@ -562,7 +564,7 @@ public class OfficeQuickCreateProjectContractTests
         factory.Entities
             .Setup(e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, string[], CancellationToken>((_, _, columns, _) => requests.Add(columns))
-            .ReturnsAsync(source);
+            .ReturnsAsync(source.WithGate());
         return requests;
     }
 

@@ -29,6 +29,7 @@ import {
 import { getProjectById, ODataProject } from '../api/web-api-client';
 import { ApiError } from '../types';
 import { AccessLevel } from '../types';
+import { ACCESS_LEVEL_LABELS } from '../components/record/recordAccess';
 import {
   PageContainer,
   NavigationBar,
@@ -36,11 +37,11 @@ import {
   ContactsOrganizations,
   DocumentLibrary,
   EventsCalendar,
-  SmartTodo,
   InviteUserDialog,
   IssuedGrantsList,
 } from '../components';
 import { canInvite, useAccessLevel } from '../hooks/useAccessLevel';
+import { useOpenRecord } from '../components/detail/RecordOpener';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -171,17 +172,9 @@ function getStatusColor(
   }
 }
 
+/** The Manage Access label of a level: the SPA's one label map (task 011, D-11). */
 function getAccessLevelLabel(value: number): string {
-  switch (value) {
-    case 100000000:
-      return 'View Only';
-    case 100000001:
-      return 'Collaborate';
-    case 100000002:
-      return 'Full Access';
-    default:
-      return 'Unknown';
-  }
+  return ACCESS_LEVEL_LABELS[value as AccessLevel] ?? 'Unknown';
 }
 
 function getAccessLevelColor(
@@ -218,6 +211,14 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
   writeAccessPerRecord,
 }) => {
   const styles = useStyles();
+  // A document's name opens the Document record through the shell's shared opener (the record template, task 013), as it
+  // does in a record's Documents section. Focus returns to the name when the record closes.
+  const openRecord = useOpenRecord();
+  const openDocument = React.useCallback(
+    (documentId: string, trigger: HTMLElement | null): void =>
+      openRecord({ entityName: 'sprk_document', recordId: documentId }, { returnFocusTo: trigger }),
+    [openRecord]
+  );
 
   return (
     <div className={styles.overviewTab}>
@@ -249,14 +250,19 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
 
       {/* DOCUMENTS */}
       <SectionCard title="Documents">
-        <DocumentLibrary projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
+        <DocumentLibrary
+          projectId={projectId}
+          accessLevel={accessLevel}
+          writeAccessPerRecord={writeAccessPerRecord}
+          onOpenDocument={openDocument}
+        />
       </SectionCard>
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// Calendar tab — EventsCalendar + SmartTodo
+// Calendar tab — EventsCalendar (external users work only with events; R4 task 009)
 // ---------------------------------------------------------------------------
 
 interface CalendarTabContentProps {
@@ -272,7 +278,6 @@ const CalendarTabContent: React.FC<CalendarTabContentProps> = ({ projectId, acce
   return (
     <div className={styles.calendarTab}>
       <EventsCalendar projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
-      <SmartTodo projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
     </div>
   );
 };
@@ -344,7 +349,7 @@ const ContactsTabContent: React.FC<ContactsTabContentProps> = ({ projectId, acce
  * │ OVERVIEW   CALENDAR   CONTACTS                               │
  * ├──────────────────────────────────────────────────────────────┤
  * │ Overview: Project Information (form) + Documents section     │
- * │ Calendar: EventsCalendar + SmartTodo                         │
+ * │ Calendar: EventsCalendar                                     │
  * │ Contacts: ContactsOrganizations + InviteUserDialog           │
  * └──────────────────────────────────────────────────────────────┘
  *

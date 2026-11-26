@@ -443,7 +443,8 @@ public class ChatSessionContinuityTests
             Messages: new List<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: files)
+        { OwnerOid = TestSessionOwner.Oid };
     }
 
     private void SetupCacheSetSuccess()

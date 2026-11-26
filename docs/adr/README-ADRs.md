@@ -79,10 +79,10 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 
 ## Guides
 
-- **[SDAP_Architecture_Simplification_Guide.md](SDAP_Architecture_Simplification_Guide.md)**  
+- **SDAP_Architecture_Simplification_Guide.md**  
   Consolidates the senior review, problem statements, accepted decisions, document edits, code changes, and AI-agent prompts.
 
-- **[SDAP_Refactor_Playbook_v2.md](SDAP_Refactor_Playbook_v2.md)**  
+- **SDAP_Refactor_Playbook_v2.md**  
   Step-by-step refactor plan that operationalizes ADR-007..010 (storage facade, endpoint-filter authorization, Redis-first caching, DI minimalism).
 
 ## Enforcement and guardrails

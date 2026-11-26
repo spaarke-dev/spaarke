@@ -220,7 +220,9 @@ public static partial class ProblemDetailsHelper
     /// The ONE 409 for a record-owner refusal (unified-access-control-r2 task 146): the write was not made because no
     /// owner resolves for the row — a named parent unreadable, a root flagged secure but not isolated, the Secure team
     /// missing. Carries the stable <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/> code as
-    /// <c>reasonCode</c>, so every HTTP writer reports the same condition the same way (ADR-019).
+    /// <c>reasonCode</c>, so every HTTP writer reports the same condition the same way (ADR-019). One code is not a conflict:
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.DirectTeamUnavailable"/> (the Direct message owner team
+    /// could not be read; retry) is answered 503 (fm task 054 piece 3b).
     /// </summary>
     /// <param name="refusalCode">The resolution's refusal code.</param>
     /// <param name="reason">The resolution's reason (names what is wrong; never a secure record's content).</param>
@@ -239,7 +241,13 @@ public static partial class ProblemDetailsHelper
 
         return Results.Problem(
             title: "Record owner unresolved",
-            statusCode: StatusCodes.Status409Conflict,
+            // fm task 056: the private-message write guard's read fault is retryable too.
+            statusCode: string.Equals(refusalCode, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.DirectTeamUnavailable,
+                StringComparison.Ordinal)
+                || string.Equals(refusalCode, Sprk.Bff.Api.Services.Communication.Access.PrivateMessageWriteGuard.CheckUnavailable,
+                    StringComparison.Ordinal)
+                ? StatusCodes.Status503ServiceUnavailable
+                : StatusCodes.Status409Conflict,
             detail: $"The {noun} was not saved: {reason ?? "no owner could be resolved"}.",
             extensions: extensions);
     }
@@ -613,12 +621,26 @@ public static partial class ProblemDetailsHelper
     /// <summary>
     /// OFFICE_002: Invalid association type.
     /// </summary>
-    public static IResult OfficeInvalidAssociationType(string? correlationId = null)
+    public static IResult OfficeInvalidAssociationType(IReadOnlyCollection<string> validTypes, string? correlationId = null)
     {
         return OfficeValidationError(
             "OFFICE_002",
             "Invalid Association Type",
-            "The specified association type is not recognized. Valid values are: Matter, Project, Invoice, Account, Contact.",
+            $"The specified association type is not recognized. Valid values are: {string.Join(", ", validTypes)}.",
+            correlationId);
+    }
+
+    /// <summary>
+    /// OFFICE_023: an Office save or quick-create that names an invoice (ebilling-r1 task 096). Invoices are created and filed
+    /// onto only by Submit Invoice; the answer carries no entity data and no input echo.
+    /// </summary>
+    public static IResult OfficeInvoiceTargetRetired(string? correlationId = null)
+    {
+        return OfficeValidationError(
+            "OFFICE_023",
+            "Invoice Target Not Supported",
+            "A document or record cannot be saved or created onto an invoice from Office. Use Submit Invoice to submit an invoice, "
+            + "and save the email or document to its matter, project or work assignment.",
             correlationId);
     }
 

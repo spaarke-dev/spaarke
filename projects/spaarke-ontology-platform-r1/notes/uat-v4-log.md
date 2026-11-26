@@ -113,6 +113,38 @@ Raw findings as the owner reported them. Each becomes a refinement below once tr
 | 5 | Create budget makes a budget with no auto-generated budget number. Two currency fields exist: `sprk_currency` (text, required, left blank) and `transactioncurrencyid`. Why is `sprk_currency` needed? | Under investigation (schema owner, readers) |
 | 6 | Add `sprk_budgetcategory`, `sprk_budgetyear`, `sprk_budgetstartdate`, `sprk_budgetenddate`, `sprk_budgetperiod` and Currency to the Create budget step. Currency defaults from the record's business unit Default Currency (`transactioncurrencyid`) | New request, after 5 |
 
+## Round 3 re-check — 2026-11-06 (owner, dev BFF `20669df6a9`)
+
+| Task | Owner result | Follow-up |
+|---|---|---|
+| 158 | ✅ pass | — |
+| 159 | ✅ pass (task created; the notification email arrived with the matter link, What to do, Due, Assigned by) | Finding F-R3-1 below |
+| 160 | Not reached: the budget inquiry is a step in the "Fee or scope change, no budget revision" item, and no such item is open on dev (all four resolved) | Owner re-check with a new item |
+| 161 | Not reached: same item ("Revise budget" step) | Owner re-check with a new item |
+| 162 | Not reached: the check is a file uploaded in the Create Work Assignment / Invoice / Project wizard appearing on the new record's Documents list | Owner re-check |
+| 163 | ✅ accepted by the owner on the tests and the deploy gate (live since `58ffc37da3`) | — |
+| 166 | ✅ pass (the budget is created and linked to the record) | — |
+
+**F-R3-1 (159 email footer):** the assign-task email footer reads "filed with Spaarke regarding sprk_matter {guid}" when the record's name is withheld. The owner rule (2026-10-23) is that the footer never shows a logical name or GUID. Fix: a neutral reference when the name is withheld.
+
+## Round 4 re-check — 2026-11-12 (owner, as testuser1 / Spaarke Core User, dev BFF `6dbe69b9e2`)
+
+| Item | Owner result | Follow-up |
+|---|---|---|
+| 162 uploads | ✅ New records with an uploaded file: the file's Document and the notification email's .eml Document are on the new record, the Communication shows in Messages, and its Related to is set | Task 162 closed |
+| #2394 project create as Core User | ✅ Project PRJ-000046 created as testuser1 | — |
+| 114 in-app wizards | ✅ Wizards look correct in-app and open from the command bar | Task 114 closed |
+| 111 row 4 external portal upload | ✅ Document upload from the portal works (it also shows in the Daily Briefing) | Task 111 closed; #1428 closed |
+| F-R3-1 Assign Task email footer | ✅ Footer reads "filed with Spaarke regarding a Spaarke record" plus the Ref token: no logical name, no GUID | — |
+| 160 / 161 | Exercised 2026-11-09 (DR-1167, REAL-2026-123456.02): Send budget inquiry Done (internal recipients got the app link to the matter), Revise budget Done (budget revision written), Approve variance Skipped. Create budget passed in round 3 (166). Owner asked what is left to test: explained 2026-11-12 | 160's visual checks move into the 176 test |
+| 176 budget inquiry filed under the matter | Not run: no open "Fee or scope change" item on dev | Needs a zz- test communication (owner's go) |
+| DEF-059 | Nothing to test in the UI (it is the BFF identity's own Decision Record read for spend counting); done by ebilling 2026-11-09 | — |
+
+**New findings (round 4), Create Project wizard, Assign Work and Send Email steps:**
+- **F-R4-1 (defect):** *Assigned Outside Counsel* finds nothing. `CreateProjectWizard.tsx:141-152` and `projectService.ts:187-197` query `sprk_organization` by `sprk_name`, which does not exist on dev (the column is `sprk_organizationname`; confirmed by query 2026-11-12), so every search fails. The Matter, Invoice and Event wizards use `matterService.searchOrganizationsAsLookup`, which is correct.
+- **F-R4-2 (request):** the *Assigned ...* fields in the create wizards' Assign Work step are inline type-ahead lookups; the owner wants the side-pane lookup (D-182 applies today to the decision wizard only).
+- **F-R4-3 (request):** the create wizards' *Send Email* step still uses the old email step, not the shared EmailComposer used by the budget inquiry (D-179).
+
 ## Owner completion statement
 
 (not yet given)

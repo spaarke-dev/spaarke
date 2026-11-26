@@ -82,7 +82,7 @@ public sealed class DataverseToolNameFreezeTests
             new Moq.Mock<IDataverseUserClient>().Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDescribeHandler>.Instance,
             HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled,
-                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled);
+                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().Contain(p => p.Name == "path" && p.Required,
@@ -99,7 +99,7 @@ public sealed class DataverseToolNameFreezeTests
             new Moq.Mock<IDataverseUserClient>().Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseReadQueryHandler>.Instance,
             HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled,
-                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled);
+                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().ContainSingle(because: "GA MCP read_query takes exactly one argument");
@@ -117,7 +117,7 @@ public sealed class DataverseToolNameFreezeTests
             new Moq.Mock<IDataverseUserClient>().Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseSearchDataHandler>.Instance,
             HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled,
-                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled);
+                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().Contain(p => p.Name == "query" && p.Required,
@@ -219,13 +219,13 @@ public sealed class DataverseToolNameFreezeTests
         {
             new DataverseDescribeHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDescribeHandler>.Instance,
                 HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled,
-                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled),
+                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws),
             new DataverseReadQueryHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseReadQueryHandler>.Instance,
                 HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled,
-                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled),
+                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws),
             new DataverseSearchDataHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseSearchDataHandler>.Instance,
                 HttpContextAccessor, CallerResolver, IdentityResolver, DocumentNarrowingReads.NeverCalled,
-                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled)
+                Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws)
         };
 
         foreach (var handler in handlers)

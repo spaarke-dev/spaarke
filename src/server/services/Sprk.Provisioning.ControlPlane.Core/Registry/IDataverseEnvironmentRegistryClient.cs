@@ -245,12 +245,31 @@ public sealed record RegistryCredentialModeUpdate(
 /// with this environment, if any. Populated when SetupStatus is
 /// <c>Running</c> or <c>WaitingOnGate</c>; may be null for terminal states.
 /// </param>
+/// <param name="ProvisionedOn">
+/// <c>sprk_provisionedon</c> — set by H13 when a run completes (the first provisioning, then every upgrade), null while
+/// the stamp has never been provisioned. POST /api/runs uses it to recognise an upgrade of an existing stamp (ISS-031).
+/// </param>
+/// <param name="EnvironmentType">
+/// <c>sprk_environmenttype</c> choice value (0 Development, 1 Demo, 2 Sandbox, 3 Trial, 4 Partner, 5 Training,
+/// 6 Production), or null when unset. H3 reads it to decide whether the Demo-only operator client is pre-authorized.
+/// </param>
+/// <param name="IsActive"><c>sprk_isactive</c>, or null when unset (never read as active).</param>
 public sealed record DataverseEnvironmentRegistrySnapshot(
     string EnvironmentId,
     string CustomerId,
     string TenantId,
     string SetupStatus,
-    string? CurrentRunId);
+    string? CurrentRunId,
+    DateTimeOffset? ProvisionedOn = null,
+    int? EnvironmentType = null,
+    bool? IsActive = null)
+{
+    /// <summary><c>sprk_environmenttype</c> option value for Demo.</summary>
+    public const int DemoEnvironmentType = 1;
+
+    /// <summary>True only for a row explicitly marked Environment Type = Demo AND active.</summary>
+    public bool IsActiveDemo => EnvironmentType == DemoEnvironmentType && IsActive == true;
+}
 
 /// <summary>
 /// Inputs to a single <see cref="IDataverseEnvironmentRegistryClient.UpdateSetupStatusAsync"/>

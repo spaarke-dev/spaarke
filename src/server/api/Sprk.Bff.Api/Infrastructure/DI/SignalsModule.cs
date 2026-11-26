@@ -1,6 +1,7 @@
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
@@ -131,8 +132,22 @@ public static class SignalsModule
         // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
         services.AddSingleton<DecisionPlanReadStamp>();
 
+        // spaarkeai-mcp-bff-api-r1 task 013 (B-1, FR-10 option C): the decision capability, the one entry point the worklist,
+        // decision-plan and suppression routes and the MCP tools (tasks 022-024) call. Scoped like the request-caller services it runs;
+        // unconditional like the routes that use it (bff-extensions.md F.1). An interface because two hosts consume it (REST, MCP).
+        services.AddScoped<IDecisionCapability, DecisionCapability>();
+        // spaarkeai-mcp-bff-api-r1 task 018 (FR-04, owner ruling 2026-11-08): the privilege flag of a Work Item, derived from its communications
+        // as the caller (one batched read per Decide-lane page). Existing: nothing derived it (the sprk_signal column is never written, DI-64);
+        // extension: a concrete (ADR-010), reused by ontology DI-143 for the Decision Record snapshot; cost of doing nothing: 022 reduces
+        // nothing and privileged detail reaches the model. Scoped like the capability; unconditional like it (bff-extensions.md F.1).
+        services.AddScoped<WorkItemPrivilege>();
+        // spaarkeai-mcp-bff-api-r1 task 016 (B-3, FR-07): the plan-driven lookup search the lookup route and the MCP lookup tool (task 023)
+        // call. Scoped like the caller client it reads through; unconditional like the route; an interface because two hosts consume it.
+        services.AddScoped<IDecisionLookupSearch, DecisionLookupSearch>();
+
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
-        // compiler and the shared sysadmin entity service, both singletons.
+        // compiler and the shared sysadmin entity service, both singletons. DI picks its scope-factory constructor (task 210): choice
+        // labels come from the scoped, Redis-cached MetadataService (AddDataverseMetadataServices), resolved per description.
         services.AddSingleton<RuleBodyDescriber>();
 
         // Task 100 (FR-57, D-22): the Ontology admin Rules routes' service. Scoped: it holds the CALLER's IDataverseUserClient, so every read
@@ -183,6 +198,17 @@ public static class SignalsModule
         // scope. Unconditional (bff-extensions.md F.1): JobSubmissionService, IGenericEntityService and IIdempotencyService are too.
         services.AddSingleton<GateDecisionRecordEnqueuer>();
         services.AddScoped<IJobHandler, GateDecisionRecordJobHandler>();
+
+        // ebilling-r1 task 084h-3 (EB-D-239 Q10): the repair of a per-record Procedure change whose inline Decision Record failed after the
+        // change committed. The enqueuer is 084h-2's optional IRecordProcedureDecisionEnqueuer (ProcedureAssignmentService takes it; with none
+        // registered a failed record answers NotRecorded); ONE ADR-004 IJobHandler writes the record through BillingDecisionRecorder
+        // (FinanceModule, singleton). Singleton enqueuer (JobSubmissionService is one); SCOPED handler (IIdempotencyService is). Unconditional,
+        // as the gate's pair above. The handler reads Ebilling:Enabled itself (ADR-018; FinanceModule's flag rule) through
+        // IOptionsMonitor<EbillingOptions>, bound by FinanceModule (084h-3 review round 1). CLAUDE.md section 11: Existing - the gate's
+        // pair above. Extension - bound to the gate entry and payload, so copied in shape, not widened. Cost of doing nothing - a
+        // post-commit record failure is a permanent gap no user can close.
+        services.AddSingleton<IRecordProcedureDecisionEnqueuer, RecordProcedureDecisionEnqueuer>();
+        services.AddScoped<IJobHandler, RecordProcedureDecisionJobHandler>();
         services.AddHealthChecks()
             .AddCatalogCheck<SignalEvaluatorHealthCheck>(
                 "signal-reevaluation",

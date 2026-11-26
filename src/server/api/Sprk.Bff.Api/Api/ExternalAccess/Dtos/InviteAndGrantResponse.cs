@@ -35,6 +35,24 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// Why <paramref name="EmailSent"/> is <c>false</c>: <see cref="GrantInviteStatus.EmailNotSentReasonCode"/> (attempted, not
 /// sent) or <see cref="ContactBindingDecision.InviteContactAlreadyHasAccount"/> (none due); otherwise <c>null</c>. Additive.
 /// </param>
+/// <param name="SharedWithUser">
+/// Task 193 (#2338): set when the email named an existing contact that represents exactly ONE internal user, so the record
+/// was SHARED with that user — never a CIAM invite, an email or a grant row. Then <paramref name="OnboardStatus"/> is
+/// <c>"SharedWithInternalUser"</c>, <paramref name="AccessRecordId"/> is <see cref="Guid.Empty"/>, <paramref name="PortalUrl"/>
+/// is empty (the colleague uses the model-driven app), <paramref name="EmailSent"/> is <c>null</c>, and the level fields
+/// describe the share. <c>null</c> otherwise. Additive.
+/// </param>
+/// <param name="ExpiryNotApplied">
+/// Task 193: <c>true</c> when the record was SHARED with <paramref name="SharedWithUser"/> and the request carried an expiry:
+/// a share has no end date (as when the colleague is picked directly), so the expiry was not applied. Absent otherwise
+/// (never sent as <c>false</c>). Since task 193 G1 it speaks for the SHARE only: the paired workforce-app grant takes the
+/// requested date (<paramref name="WorkforceApp"/>).
+/// </param>
+/// <param name="WorkforceApp">
+/// Task 193 G1 (owner F1-b, 2026-10-28): set whenever the record was SHARED with an internal colleague: whether their
+/// workforce-app access was given too (a contact grant on the contact that represents them, paired with the share), until
+/// when, and — when it was not — why. Absent otherwise. Additive.
+/// </param>
 public record InviteAndGrantResponse(
     Guid ContactId,
     string OnboardStatus,
@@ -44,4 +62,9 @@ public record InviteAndGrantResponse(
     bool Narrowed = false,
     bool NotificationFailed = false,
     bool? EmailSent = null,
-    string? EmailErrorCode = null);
+    string? EmailErrorCode = null,
+    SharedWithUser? SharedWithUser = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? ExpiryNotApplied = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    WorkforceAppAccess? WorkforceApp = null);

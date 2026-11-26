@@ -26,7 +26,9 @@
 
 import {
   buildRegardingSelectionPayload,
+  discoverNavProps,
   findHostNavPropForLookup,
+  _resetNavPropCacheForTests,
   CORE_ANCESTOR_LOOKUPS,
   type INavPropEntry,
   type IPolymorphicWebApi,
@@ -137,6 +139,52 @@ export const TODO_REGARDING_CATALOG: ReadonlyArray<ITodoRegardingTargetCatalogEn
   },
 ] as const;
 
+/**
+ * Parse an optional comma-separated allow-list of regarding target logical names
+ * (the manifest `regardingTargets` input of the RegardingResolver /
+ * CommunicationConnections controls) into the matching subset of
+ * {@link TODO_REGARDING_CATALOG}. Matching is case-insensitive and trims blanks.
+ * An empty / undefined / blank list returns the full canonical catalog.
+ *
+ * Shared by both PCF write handlers — each previously kept a byte-identical copy.
+ */
+export function resolveAllowedCatalog(
+  regardingTargetsRaw: string | null | undefined
+): readonly ITodoRegardingTargetCatalogEntry[] {
+  if (!regardingTargetsRaw || !regardingTargetsRaw.trim()) {
+    return TODO_REGARDING_CATALOG;
+  }
+  const allowed = new Set(
+    regardingTargetsRaw
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  return TODO_REGARDING_CATALOG.filter(c => allowed.has(c.entityType.toLowerCase()));
+}
+
+/**
+ * The catalog entry for a selected regarding target (exact, case-sensitive match
+ * on `entityType`), or `undefined` when the type is not in `catalog`. Callers
+ * turn `undefined` into their own "Unknown entity type" error.
+ */
+export function findRegardingCatalogEntry(
+  catalog: readonly ITodoRegardingTargetCatalogEntry[],
+  entityType: string
+): ITodoRegardingTargetCatalogEntry | undefined {
+  return catalog.find(c => c.entityType === entityType);
+}
+
+/** A regarding-target selection handed to a resolver write handler. */
+export interface IRegardingSelection {
+  /** Dataverse logical name of the selected parent entity (e.g., 'sprk_matter'). */
+  entityType: string;
+  /** GUID of the selected parent record (with or without braces / case). */
+  recordId: string;
+  /** Display name of the selected parent record (used for sprk_regardingrecordname). */
+  recordName: string;
+}
+
 // ---------------------------------------------------------------------------
 // Payload shape
 // ---------------------------------------------------------------------------
@@ -170,7 +218,7 @@ export type ITodoRegardingUpdate = Record<string, string | number | boolean | nu
  * @param webApi          — IPolymorphicWebApi (Xrm.WebApi-compatible) for
  *                          `sprk_recordtype_ref` lookup inside applyResolverFields.
  * @param navProps        — Nav-prop entries discovered for `sprk_todo` via the
- *                          ManyToOneRelationships metadata endpoint.
+ *                          shared `discoverNavProps` (`discoverTodoNavProps`).
  * @param target          — The chosen entity type (one of TODO_REGARDING_CATALOG).
  * @param recordId        — GUID of the selected parent record (with or without braces).
  * @param recordName      — Display name of the selected parent record.
@@ -222,16 +270,26 @@ export async function buildTodoRegardingUpdate(
     );
   }
 
-  return result.payload as ITodoRegardingUpdate;
+  const payload = result.payload as ITodoRegardingUpdate;
+
+  // The resolver writes the reference number only when the new target has one. An UPDATE must not leave the previous target's
+  // number beside the new id, so a target with no number clears the column (sprk_todo carries it). 045c.
+  if (payload['sprk_regardingrecordnumber'] === undefined) {
+    payload['sprk_regardingrecordnumber'] = null;
+  }
+
+  return payload;
 }
 
 /**
  * Build the Web API payload that CLEARS a `sprk_todo`'s regarding entirely.
  *
- * Per FR-13 + ADR-024, "no regarding" requires nulling all fifteen fields:
+ * Per FR-13 + ADR-024, "no regarding" requires nulling every regarding field:
  *   - The 11 entity-specific lookups (sprk_regardingmatter, …, sprk_regardingdocument)
- *   - The 4 resolver fields (sprk_regardingrecordtype, sprk_regardingrecordid,
- *     sprk_regardingrecordname, sprk_regardingrecordurl)
+ *   - The resolver fields: the pair (sprk_regardingrecordtype, sprk_regardingrecordid) and the
+ *     display columns that follow it (sprk_regardingrecordname, sprk_regardingrecordurl,
+ *     sprk_regardingrecordnumber). The number is cleared with the rest so none outlives the pair
+ *     (field-mapping-server-write-path-r1 045c).
  *
  * Resolver text/URL fields are set to `null` (Dataverse accepts null for
  * Text+URL fields). The two lookups (entity-specific + `sprk_regardingrecordtype`)
@@ -277,10 +335,11 @@ export function buildTodoRegardingClear(navProps: INavPropEntry[]): ITodoRegardi
   const recordTypeKey = recordTypeNavProp?.navPropName ?? 'sprk_RegardingRecordType';
   entity[`${recordTypeKey}@odata.bind`] = null;
 
-  // 3. Null the three resolver text/URL fields.
+  // 3. Null the four resolver text/URL fields (id, name, url and the reference number).
   entity['sprk_regardingrecordid'] = null;
   entity['sprk_regardingrecordname'] = null;
   entity['sprk_regardingrecordurl'] = null;
+  entity['sprk_regardingrecordnumber'] = null;
 
   return entity;
 }
@@ -290,61 +349,21 @@ export function buildTodoRegardingClear(navProps: INavPropEntry[]): ITodoRegardi
 // ---------------------------------------------------------------------------
 
 /**
- * Discover ManyToOne navigation properties for `sprk_todo`.
- *
- * Mirrors the `_discoverNavProps` pattern used by WorkAssignmentService and
- * EventService — kept inline here so SmartTodo doesn't have to import a
- * wizard service. Result is cached per logical name for the lifetime of the
- * page.
+ * Discover ManyToOne navigation properties for `sprk_todo` — the shared
+ * {@link discoverNavProps} (one metadata query and one cache for every writer
+ * of `sprk_todo` on the page). Kept as a named export for existing callers.
  *
  * @internal — exported for tests; the typical caller is `buildTodoRegardingUpdate`.
  */
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
-export async function discoverTodoNavProps(fetchImpl: typeof fetch = globalThis.fetch): Promise<INavPropEntry[]> {
-  const cacheKey = 'sprk_todo';
-  if (_navPropCache[cacheKey]) {
-    return _navPropCache[cacheKey];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${cacheKey}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetchImpl(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[TodoRegardingUpdateBuilder] Nav-prop discovery failed for ${cacheKey}: HTTP ${resp.status}`);
-      return [];
-    }
-
-    const json = (await resp.json()) as {
-      value?: Array<{
-        ReferencingAttribute: string;
-        ReferencingEntityNavigationPropertyName: string;
-        ReferencedEntity: string;
-      }>;
-    };
-
-    const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    _navPropCache[cacheKey] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[TodoRegardingUpdateBuilder] Nav-prop discovery error for ${cacheKey}:`, err);
-    return [];
-  }
+export function discoverTodoNavProps(fetchImpl: typeof fetch = globalThis.fetch): Promise<INavPropEntry[]> {
+  return discoverNavProps('sprk_todo', fetchImpl);
 }
 
 /**
- * Reset the nav-prop cache. Used by tests to ensure isolation.
+ * Reset the shared nav-prop cache entry for `sprk_todo`. Used by tests to ensure isolation.
  *
  * @internal
  */
 export function _resetTodoNavPropCacheForTests(): void {
-  delete _navPropCache['sprk_todo'];
+  _resetNavPropCacheForTests('sprk_todo');
 }

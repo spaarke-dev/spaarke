@@ -84,6 +84,11 @@ export interface IThreadListItemDto {
    */
   regardingEntityType?: string | null;
   regardingId?: string | null;
+  /**
+   * The other participant's full name (fm task 055). Set only on a `kind: 'direct'` list row: the server keeps a row only
+   * when the caller is one of the Direct pair's two participants, and names the other. Absent on every other row.
+   */
+  counterpartName?: string | null;
 }
 
 /** Mirrors `ThreadListResult` (`GET /api/communications/threads` response). */
@@ -93,6 +98,11 @@ export interface IThreadListResultDto {
   /** Opaque composite keyset cursor; null when there is no further page. */
   nextPageToken: string | null;
   hasMore: boolean;
+  /**
+   * Set only by {@link listThreadsByRegarding} (ontology task 221): the server's by-regarding read was cut by a bound, so
+   * the record's list is incomplete. A plain flag, never a count of what is missing. Absent on the `/threads` list.
+   */
+  truncated?: boolean;
 }
 
 /** Mirrors `UnreadCountResult` (`GET /threads/{threadId}/unread-count`). */
@@ -192,6 +202,16 @@ export interface IListThreadsOptions {
   top?: number;
   /** Opaque composite keyset cursor from a previous page's `nextPageToken`. */
   pageToken?: string;
+  /**
+   * `'direct'` lists only the caller's own 1:1 Direct conversations (the Messages view, fm task 055); each row carries
+   * `counterpartName`. Omitted (or `'all'`) is the all-threads list, unchanged.
+   */
+  kind?: 'all' | 'direct';
+  /**
+   * Private messages about a record (fm task 056): lists the caller's pair threads that hold at least one private message
+   * about this record, one row per counterpart (`counterpartName` set). Sent as `kind=direct&about={entityType}:{id}`.
+   */
+  about?: { entityType: string; id: string };
 }
 
 /**
@@ -211,6 +231,8 @@ export async function listThreads(
   if (options.search) params.set('search', options.search);
   if (options.top) params.set('top', String(options.top));
   if (options.pageToken) params.set('pageToken', options.pageToken);
+  if (options.kind === 'direct' || options.about) params.set('kind', 'direct');
+  if (options.about) params.set('about', `${options.about.entityType}:${options.about.id}`);
 
   const url = resolveUrl(client.bffBaseUrl, '/api/communications/threads', params);
   const response = await client.authenticatedFetch(url, { method: 'GET' });
@@ -236,6 +258,8 @@ interface IRegardingReadResultForListDto {
   recordId: string;
   threads: Array<{ threadId: string; name: string | null; isPinned?: boolean }>;
   threadCount: number;
+  /** `RegardingReadResult.Truncated` (ontology task 221): a bound cut the read. Absent from an older BFF (treated as false). */
+  truncated?: boolean;
 }
 
 function resolveByRegardingUrl(base: string | undefined, entityType: string, id: string): string {
@@ -289,6 +313,7 @@ export async function listThreadsByRegarding(
     count: body.threadCount,
     nextPageToken: null,
     hasMore: false,
+    truncated: body.truncated === true,
   };
 }
 

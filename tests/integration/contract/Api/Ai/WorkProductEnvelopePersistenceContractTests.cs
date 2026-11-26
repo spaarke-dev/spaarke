@@ -102,7 +102,8 @@ public class WorkProductEnvelopePersistenceContractTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>())
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             HostContext = new ChatHostContext("matter", HostRecordId.ToString("D")),
         };
 
@@ -196,6 +197,7 @@ public class WorkProductEnvelopePersistenceContractTests
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
     [InlineData("sprk_budgetrevision")]
+    [InlineData("sprk_invoicecorrection")]
     public async Task PersistAsync_ARegistryRowTargetingATableOnlyItsWriterChanges_IsRefused_AndNothingIsWritten(string table)
     {
         var events = new List<string>();

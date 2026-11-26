@@ -158,7 +158,7 @@ Per `node-routing-config.schema.json` ("additive properties on the existing node
 
 ### ❌ DeliverComposite's `sections[]` in configJson (also tech debt, but justified)
 
-`DeliverCompositeNodeExecutor` reads `sections[]` from configjson. The Deploy script lint exempts these nodes from the `actionCode` FK requirement at `Deploy-Playbook.ps1:333` because the executor is registered by ActionType, not FK. ADR-037 documents the design.
+`DeliverCompositeNodeExecutor` reads `sections[]` from configjson. The Deploy script lint exempts these nodes from the `actionCode` FK requirement at `Deploy-Playbook.ps1:333` because the executor is registered by `ExecutorType`, not FK. ADR-037 documents the design.
 
 The justification: `sections[]` is a per-instance composition decision (which playbook sections to package), not Action-intrinsic. It cannot live on the Action row. Whether it deserves first-class columns (`sprk_deliverysectionjson` or a child entity) is open for R6.
 
@@ -194,9 +194,9 @@ Re-stating from `ai-architecture-playbook-runtime.md` §6 with the boundary lens
 
 ---
 
-## 8. ActionType allocation policy (R5 will codify)
+## 8. ExecutorType allocation policy (R5 will codify)
 
-R4 adds `EntityNameValidator = 141` to the ActionType enum (`INodeExecutor.cs:251`). The slot was chosen per R4 spec "slots into post-LLM cluster (Sanitization=130, ObservationEmit=140)."
+R4 adds `EntityNameValidator = 141` to the `ExecutorType` enum (`INodeExecutor.cs:282`; the enum was named `ActionType` until commit `d2f768e8d5`, 2026-06-28). The slot was chosen per R4 spec "slots into post-LLM cluster (Sanitization=130, ObservationEmit=140)."
 
 **Current allocation ranges** (`INodeExecutor.cs:97-252`):
 
@@ -214,10 +214,10 @@ R4 adds `EntityNameValidator = 141` to the ActionType enum (`INodeExecutor.cs:25
 
 **Allocation policy** (proposed, to be codified in R5):
 
-1. New ActionType integers should slot into the appropriate cluster (don't scatter).
-2. Reserve gaps within clusters for future expansion (don't fill consecutively unless the new ActionType is conceptually adjacent).
+1. New `ExecutorType` integers should slot into the appropriate cluster (don't scatter).
+2. Reserve gaps within clusters for future expansion (don't fill consecutively unless the new value is conceptually adjacent).
 3. Update `INodeExecutor.cs` enum + `NodeExecutorRegistry` registration + Deploy-Playbook.ps1 reference in the same PR.
-4. New ActionType requires a corresponding `sprk_actiontype` Dataverse row, created directly via the `jps-action-create` skill / Dataverse MCP (`Seed-JpsActions.ps1` RETIRED 2026-07, ai-architecture-redesign-r1).
+4. A new `ExecutorType` value requires a corresponding `sprk_actiontype` Dataverse row, created directly via the `jps-action-create` skill / Dataverse MCP (`Seed-JpsActions.ps1` RETIRED 2026-07, ai-architecture-redesign-r1).
 
 The policy is not yet binding — capture in this doc so it's not lost between R4 and R5.
 
@@ -226,7 +226,7 @@ The policy is not yet binding — capture in this doc so it's not lost between R
 ## 8a. `sprk_analysisactiontype` lookup table — R7 disposition (FR-05)
 
 > **Added by**: spaarke-ai-platform-unification-r7 Wave 4 task 045 (FR-05)
-> **Status**: PRESERVED, repurposed as decorative. Wave 6 task 062 may rewrite the surrounding §8 "ActionType allocation policy" treatment to fully reflect the new model; this section is the binding interim disposition note.
+> **Status**: PRESERVED, repurposed as decorative. Wave 6 task 062 may rewrite the surrounding §8 "ExecutorType allocation policy" treatment to fully reflect the new model; this section is the binding interim disposition note.
 
 The `sprk_analysisactiontype` Dataverse lookup table is KEPT in R7 (not dropped) but its role changes fundamentally:
 

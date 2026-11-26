@@ -348,7 +348,7 @@ public class RelocationRecheckFixTests
         var payload = RelocationFixRoundTests.APayload(drive: T.CustomerAContainer);
 
         var processed = await new RelocationReleaseRetryJobHandler(rig.NewRelocator(logger: logger), NullLogger<RelocationReleaseRetryJobHandler>.Instance)
-            { LockWait = TimeSpan.Zero }.ProcessAsync(RelocationReleaseRetryJobHandler.NewJob(payload), CancellationToken.None);
+        { LockWait = TimeSpan.Zero }.ProcessAsync(RelocationReleaseRetryJobHandler.NewJob(payload), CancellationToken.None);
 
         processed.Status.Should().Be(JobStatus.Completed, "a retry would find the same");
         world.Updates.Should().BeEmpty();

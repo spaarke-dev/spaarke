@@ -63,7 +63,6 @@ The fix is a one-line casing change: `sprk_assignedto@odata.bind` → `sprk_Assi
 The convention is already applied correctly at:
 
 - `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx:759`
-- `src/solutions/SmartTodo/src/components/SmartToDo.tsx:680`
 - `src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx:636`
 - `src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts:263`
 

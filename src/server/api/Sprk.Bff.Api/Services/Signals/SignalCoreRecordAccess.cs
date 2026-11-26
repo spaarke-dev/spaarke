@@ -180,7 +180,13 @@ public sealed class SignalCoreRecordAccess
     /// carries its subject for that later call. (One method, not an overload: the route ledger requires every body of
     /// <c>AuthorizeAsync</c> to reach the caller-identity client.)
     /// </summary>
-    public async Task<SignalAccessDecision> AuthorizeAsync(Guid signalId, CancellationToken ct, bool enforceDoLaneMine = true)
+    /// <param name="signalId">The Signal.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <param name="enforceDoLaneMine">False only for the commit route (see above).</param>
+    /// <param name="coreReads">Ontology task 205 (DI-146): the commit route's memo for ONE request, so a row of items on one core record
+    /// reads that record's catalog row and asks the caller's Read on it once, not once per item. Only an answer that ALLOWED is kept, keyed
+    /// by the core record itself (table and id); every Signal row is still read as the caller. Null (every other route): nothing is kept.</param>
+    public async Task<SignalAccessDecision> AuthorizeAsync(Guid signalId, CancellationToken ct, bool enforceDoLaneMine = true, CoreReadMemo? coreReads = null)
     {
         if (signalId == Guid.Empty)
         {
@@ -230,10 +236,14 @@ public sealed class SignalCoreRecordAccess
                 return SignalAccessDecision.NotFound;
             }
 
-            var logicalName = (await _entities
-                .RetrieveAsync(RecordTypeRefEntity, coreTypeId, [RecordLogicalNameColumn], ct)
-                .ConfigureAwait(false))
-                .GetAttributeValue<string>(RecordLogicalNameColumn)?.Trim().ToLowerInvariant();
+            if (coreReads is null || !coreReads.Tables.TryGetValue(coreTypeId, out var logicalName))
+            {
+                logicalName = (await _entities
+                    .RetrieveAsync(RecordTypeRefEntity, coreTypeId, [RecordLogicalNameColumn], ct)
+                    .ConfigureAwait(false))
+                    .GetAttributeValue<string>(RecordLogicalNameColumn)?.Trim().ToLowerInvariant();
+            }
+
             if (string.IsNullOrEmpty(logicalName))
             {
                 _logger.LogWarning("Signal access: the core record type does not resolve to a table; denying.");
@@ -247,13 +257,21 @@ public sealed class SignalCoreRecordAccess
                 return SignalAccessDecision.NotFound;
             }
 
-            var entitySet = await _entities.GetEntitySetNameAsync(logicalName, ct).ConfigureAwait(false);
+            // Kept only once the catalog row named a core type (the checks above denied otherwise).
+            coreReads?.Tables.TryAdd(coreTypeId, logicalName);
 
-            // createdon exists on every Dataverse table; the value is not used, only whether the caller may read the row.
-            var core = await _userClient.GetAsync($"{entitySet}({coreId})?$select=createdon", ct).ConfigureAwait(false);
-            if (!core.IsSuccess)
+            if (coreReads is null || !coreReads.Readable.Contains((logicalName, coreId)))
             {
-                return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
+                var entitySet = await _entities.GetEntitySetNameAsync(logicalName, ct).ConfigureAwait(false);
+
+                // createdon exists on every Dataverse table; the value is not used, only whether the caller may read the row.
+                var core = await _userClient.GetAsync($"{entitySet}({coreId})?$select=createdon", ct).ConfigureAwait(false);
+                if (!core.IsSuccess)
+                {
+                    return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
+                }
+
+                coreReads?.Readable.Add((logicalName, coreId));
             }
 
             var allowed = new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId, CoreTable: logicalName);
@@ -755,6 +773,23 @@ public sealed class SignalCoreRecordAccess
 
     private static string? ReadString(JsonElement row, string name) =>
         row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    /// <summary>
+    /// Ontology task 205 (DI-146): what <see cref="AuthorizeAsync"/> may reuse within ONE commit request, as one caller, asked one Signal
+    /// after another: the table each core-record type's catalog row names (configuration), kept only once it passed the core-type check,
+    /// and each core record (table, id) the caller's own read ALLOWED. A denial, a fault or a missing catalog row is never kept, so it is
+    /// asked again (and denies again). Created per request by the commit route and never shared across requests or callers; not
+    /// thread-safe (the route asks sequentially).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: the per-call reads in <see cref="AuthorizeAsync"/>. Extension: this
+    /// is that method's optional parameter, not a new service; the route ledger keeps one <c>AuthorizeAsync</c> body. Cost of doing nothing:
+    /// a row decision reads the same matter and catalog row once per item (DI-146: 20 matter reads for 18 items on dev).</remarks>
+    public sealed class CoreReadMemo
+    {
+        internal Dictionary<Guid, string> Tables { get; } = new();
+
+        internal HashSet<(string Table, Guid Id)> Readable { get; } = new();
+    }
 }
 
 /// <summary>

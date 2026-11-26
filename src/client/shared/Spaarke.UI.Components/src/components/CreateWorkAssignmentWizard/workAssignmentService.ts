@@ -35,8 +35,6 @@ import {
   toNavPropMap,
   cleanGuid,
 } from '../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../services/FieldMappingService';
-import { getXrmUserId } from '../../utils/xrmUserId';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -46,6 +44,9 @@ export {
   searchOrganizationsAsLookup,
   searchUsersAsLookup,
 } from '../CreateMatterWizard/matterService';
+import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Metadata discovery (same pattern as MatterService/EventService)
@@ -55,22 +56,6 @@ export {
 // applyResolverFields are imported from the shared PolymorphicResolverService.
 // `discoverNavProps` was consolidated from a private per-service copy on
 // 2026-07-09 (task 011, Path A).
-
-/**
- * Resolve the current Dataverse user ID from the host Xrm global.
- *
- * Walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) for an `Xrm.Utility.getGlobalContext()`
- * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
- * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
- *
- * Kept module-private (not exported) so consumers cannot pass an arbitrary user ID; this
- * preserves the "current user" semantics of FR-WIZ-04.
- */
-function _getCurrentUserId(): string {
-  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
-  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
-  return getXrmUserId() ?? '';
-}
 
 /** Shown when a chosen Assigned To contact could not be sent (task 038 fix round 1). */
 const ASSIGNED_TO_NOT_SET_WARNING = 'Assigned To could not be set; the record uses its Assigned To Internal value.';
@@ -101,30 +86,13 @@ export class WorkAssignmentService {
     // UAC-r2 task 147 r1 (owner round 28 item 1): every CHILD create / re-file this service makes (and the file step's
     // documents) goes through the BFF (G5) — the server decides the owner; nothing is created as the user.
     this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
-    // Stored (not just forwarded to EntityCreationService) so createWorkAssignment
-    // can call the Field Mapping Framework engine (task 021 / FR-12) directly.
+    // Stored (not just forwarded to EntityCreationService): the work assignment and its follow-on event are created on the
+    // BFF route directly (they name a mapping source, which IDataService.createRecord cannot carry).
     this._authenticatedFetch = authenticatedFetch;
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
-    const webApiAdapter = {
-      createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await this._dataService.createRecord(entityName, data);
-        return { id };
-      },
-      retrieveRecord: (entityName: string, id: string, options?: string) =>
-        dataService.retrieveRecord(entityName, id, options),
-      retrieveMultipleRecords: (entityName: string, options?: string) =>
-        dataService.retrieveMultipleRecords(entityName, options),
-      updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await this._dataService.updateRecord(entityName, id, data);
-        return { id };
-      },
-      deleteRecord: async (entityName: string, id: string) => {
-        await dataService.deleteRecord(entityName, id);
-        return { id };
-      },
-    };
+    const webApiAdapter = createWebApiFromDataService(this._dataService);
     this._entityService = new EntityCreationService(webApiAdapter, authenticatedFetch, bffBaseUrl);
   }
 
@@ -402,28 +370,15 @@ export class WorkAssignmentService {
       }
     };
 
-    // FR-WIZ-04: Cascade `sprk_containerid` + `sprk_searchindexname` + Phase G `sprk_ai_search_index`
-    // lookup from the current user's owning Business Unit. INV-5 guards each scalar field
-    // independently. If the user's BU has any field unset, the corresponding payload field is
-    // left untouched and the BFF tenant-default chain takes over server-side.
-    try {
-      const currentUserId = _getCurrentUserId();
-      if (currentUserId) {
-        // IDataService is a structural superset of IWebApiLike (retrieveRecord, retrieveMultipleRecords).
-        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
-        EntityCreationService.applyUserBuDefaults(entity, defaults);
-        if (defaults.searchIndexId) {
-          bindLookup('sprk_aisearchindex', 'sprk_aisearchindexes', defaults.searchIndexId);
-        }
-      } else {
-        console.warn('[WorkAssignmentService] BU cascade skipped: current user ID could not be resolved.');
-      }
-    } catch (err) {
-      // Non-fatal: log and continue. BFF tenant-default chain handles routing if all fields are unset.
-      console.warn('[WorkAssignmentService] BU cascade failed (non-fatal):', err);
-    }
+    // No client defaults. The BU cascade this wizard used to write (FR-WIZ-04: `sprk_searchindexname` and the
+    // `sprk_ai_search_index` bind) is gone: `sprk_workassignment` is `SearchIndexed` in RecordTableRules, so both index
+    // columns are the server's (FR-38, FR-40) and a caller's value is dropped. The container was removed by task 076.
+    // Field mapping, owner, owning team and the creator-person stamp are applied by the server (FR-02, FR-09, FR-10).
 
     // Related record (matter, project, invoice, event)
+    // The server maps from this record only when the create NAMES it as the mapping source (sprk_workassignment is not in
+    // ChildRecordEndpoints.InferMappingSourceTables); no related record means no source and no mapping.
+    let mappingSource: { entity: string; id: string } | undefined;
     // Uses the shared Polymorphic Resolver pattern (ADR-024):
     //   Entity-specific lookup + 4 denormalized resolver fields
     if (form.recordId && form.recordType) {
@@ -452,28 +407,14 @@ export class WorkAssignmentService {
           refMapping.hint
         );
 
-        // Field-mapping engine (task 021 / FR-12): apply any configured
-        // `sprk_fieldmappingprofile` rules for {parent → sprk_workassignment}
-        // onto the entity payload. Runs AFTER applyResolverFields and BEFORE
-        // createRecord, on the SAME `entity` payload object — never wrapped in
-        // an abort-on-failure try/catch (applyFieldMappings itself never
-        // throws); its warnings append to this method's existing `warnings`.
-        const mappingResult = await applyFieldMappings({
-          sourceEntity: refMapping.refEntity,
-          sourceId: form.recordId,
-          targetEntity: 'sprk_workassignment',
-          payload: entity,
-          dataService: this._dataService,
-          authenticatedFetch: this._authenticatedFetch,
-          bffBaseUrl: this._bffBaseUrl,
-        });
-        warnings.push(...mappingResult.warnings);
+        mappingSource = { entity: refMapping.refEntity, id: form.recordId };
       }
     }
 
-    if (form.matterTypeId) bindLookup('sprk_mattertype_ref', 'sprk_mattertype_refs', form.matterTypeId, 'mattertype');
+    if (form.matterTypeId)
+      bindLookup('sprk_mattertype_ref', 'sprk_mattertype_refs', form.matterTypeId, 'sprk_mattertype');
     if (form.practiceAreaId)
-      bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
+      bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'sprk_practicearea');
 
     // Assigned To (contact) -- task 038 / FR-37. `sprk_workassignment.sprk_assignedto` targets CONTACT in the live
     // schema (nav prop `sprk_AssignedTo`); the entity also has look-alike contact lookups (assigned attorney /
@@ -495,15 +436,18 @@ export class WorkAssignmentService {
       }
     }
 
-    // Assign Work lookups (if provided)
+    // Assign Work lookups (if provided). The wizard has ONE of each, so each binds the PRIMARY slot (`1`) by its FULL
+    // logical name: the table also has Assigned Attorney 2 / Paralegal 2 / Law Firm 2, and findNavProp binds the first
+    // column CONTAINING a fragment, which would be whichever Dataverse lists first (task 024 found this on sprk_todo).
     if (assignWork) {
-      if (assignWork.assignedAttorneyId) bindLookup('contact', 'contacts', assignWork.assignedAttorneyId, 'attorney');
+      if (assignWork.assignedAttorneyId)
+        bindLookup('contact', 'contacts', assignWork.assignedAttorneyId, 'sprk_assignedattorney1');
       if (assignWork.assignedParalegalId)
-        bindLookup('contact', 'contacts', assignWork.assignedParalegalId, 'paralegal');
+        bindLookup('contact', 'contacts', assignWork.assignedParalegalId, 'sprk_assignedparalegal1');
       if (assignWork.assignedLawFirmId)
-        bindLookup('sprk_organization', 'sprk_organizations', assignWork.assignedLawFirmId, 'lawfirm');
+        bindLookup('sprk_organization', 'sprk_organizations', assignWork.assignedLawFirmId, 'sprk_assignedlawfirm1');
       if (assignWork.assignedLawFirmAttorneyId)
-        bindLookup('contact', 'contacts', assignWork.assignedLawFirmAttorneyId, 'lawfirmattorney');
+        bindLookup('contact', 'contacts', assignWork.assignedLawFirmAttorneyId, 'sprk_assignedlawfirmattorney1');
     }
 
     try {
@@ -517,7 +461,8 @@ export class WorkAssignmentService {
         this._authenticatedFetch,
         this._bffBaseUrl,
         'sprk_workassignment',
-        entity
+        entity,
+        mappingSource ? { mappingSource } : undefined
       );
       workAssignmentId = created.id;
       warnings.push(...created.warnings);
@@ -579,7 +524,7 @@ export class WorkAssignmentService {
           }
 
           // Trigger RAG indexing per file (canonical sync OBO path via
-          // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal.
+          // SdapApiClient.indexFile in services/sdap). Non-fatal.
           const indexingWarnings = await this._entityService.indexUploadedFiles(
             uploadResult.uploadedFiles,
             this._tenantId,
@@ -626,8 +571,9 @@ export class WorkAssignmentService {
    */
   async createFollowOnEvent(
     workAssignmentId: string,
-    eventState: ICreateFollowOnEventState
-  ): Promise<{ success: boolean; warning?: string }> {
+    eventState: ICreateFollowOnEventState,
+    workAssignmentName?: string
+  ): Promise<{ success: boolean; warning?: string; warnings?: string[] }> {
     try {
       const navProps = await discoverNavProps('sprk_event');
 
@@ -655,11 +601,25 @@ export class WorkAssignmentService {
       // launch the CreateTodoWizard separately and select the event as
       // the regarding record.
 
-      // Link to work assignment
-      const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'workassignment');
-      if (waNavProp) {
-        entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${cleanGuid(workAssignmentId)})`;
-      }
+      // File under the work assignment with the shared Polymorphic Resolver (ADR-024), as the work assignment itself is
+      // filed: the typed lookup `sprk_regardingworkassignment` (full name: `sprk_relatedworkassignment` is a look-alike)
+      // plus the regarding pair and its display columns (id, url, record type, name, number). Binding only the lookup left
+      // the event's Regarding blank (live check 2026-11-24). The name falls back to the wizard's work assignment name when
+      // the new row cannot be read yet.
+      const polyWebApi = {
+        retrieveMultipleRecords: (entityLogicalName: string, query: string) =>
+          this._dataService.retrieveMultipleRecords(entityLogicalName, query),
+      };
+      await applyResolverFields(
+        polyWebApi,
+        entity,
+        navProps,
+        'sprk_workassignment',
+        'sprk_workassignments',
+        workAssignmentId,
+        workAssignmentName?.trim() ?? '',
+        'sprk_regardingworkassignment'
+      );
 
       // Assigned To (contact) -- task 097. `sprk_event.sprk_assignedto` targets CONTACT
       // in the live schema (nav prop `sprk_AssignedTo`). The former
@@ -679,9 +639,17 @@ export class WorkAssignmentService {
         }
       }
 
-      // IDataService.createRecord returns Promise<string>
-      await this._dataService.createRecord('sprk_event', entity);
-      return { success: true };
+      // On the BFF route like the work assignment (FR-16): the event is filed under the work assignment, which is also its
+      // mapping source (sprk_event is not in InferMappingSourceTables, so the source must be named). The event is created
+      // AFTER the work assignment, in the same order as before. A server warning (a mapped value not written) comes back.
+      const created = await createRecordViaBffWithWarnings(
+        this._authenticatedFetch,
+        this._bffBaseUrl,
+        'sprk_event',
+        entity,
+        { mappingSource: { entity: 'sprk_workassignment', id: workAssignmentId } }
+      );
+      return { success: true, warnings: created.warnings };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       return {
@@ -694,23 +662,20 @@ export class WorkAssignmentService {
   // -- Send Email via BFF ----------------------------------------------------
 
   /**
-   * Send an email via the BFF communications endpoint.
+   * Send the composed email (task 182, D-219) through the composer's request path — From, To, Cc, Bcc, attachments and
+   * the composed body format — filed under the work assignment. Never throws; a failure is the returned warning.
    */
   async sendEmail(
     workAssignmentId: string,
     workAssignmentName: string,
-    to: string,
-    subject: string,
-    body: string,
-    cc?: string
+    email: IComposedEmail,
+    onResolveShareLink?: (documentId: string) => Promise<string | null>
   ): Promise<{ success: boolean; warning?: string }> {
-    return this._entityService.sendEmail({
-      to,
-      cc,
-      subject,
-      body,
-      bodyFormat: 'PlainText', // matches server enum BodyFormat (2026-05-25)
+    return sendComposedEmail(email, {
       associations: [{ entityType: 'sprk_workassignment', entityId: workAssignmentId, entityName: workAssignmentName }],
+      authenticatedFetch: this._authenticatedFetch,
+      bffBaseUrl: this._bffBaseUrl,
+      onResolveShareLink,
     });
   }
 }

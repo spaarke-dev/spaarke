@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095f-2a" project="ebilling-r1">
+  <metadata>
+    <title>Decision notes, part 2a: the lifecycle overload writing sprk_decisionnote, plus the reject, return and approve notes and the decision-note writers guard</title>
+    <phase>5 Partner surfaces — 095f part 2 (EB-D-236, EB-D-240)</phase>
+    <gate>095f-2s merged into work (the column on the pending list). Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF C#: a new member on IInvoiceLifecycleService (the single owner of invoice transitions), three decision routes, and a writers guard.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The lifecycle is the single transition owner (ADR-002); the note must land in the same conditional update as the status, and the no-note hash must stay byte-identical.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceLifecycleService and its test doubles, which 2c builds on.</parallel-reason>
+    <deps>095f-2s</deps>
+    <tags>bff-api, signals, decision-record, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build notes/095f-part2-decision-notes-design.md §1, §2 and §5.3 as settled by §14 and §15 (owner answers). Every "invoice column" in the design means sprk_invoice.sprk_decisionnote (EB-D-240), never sprk_correctionnote. Add TransitionAsync(invoiceId, target, decisionNote, ct) (the three-argument member forwards null); reject and return take note (body InvoiceDecisionRequest(Reason, Note)); approve takes an optional body InvoiceApprovalRequest(Note); Values["note"] only when a note is given; the column takes the note, or for reject and return with no note the required reason (EB-D-240); approve with no note leaves the column unchanged. Declare note as an optional catalog parameter on reject-invoice and return-to-firm (ontology-r1 light). The shared 400 codes ebilling.note_too_long and ebilling.note_invalid_characters. ArchTest InvoiceDecisionNoteWritersGuardTests (allowed: lifecycle, release transaction, totals path) plus a must-fire control that sprk_correctionnote's only writer stays the submission persister.</prompt>
+
+  <goal>Reject, return and approve can carry a short note recorded in the Decision Record and shown on the invoice's internal decision-note column, written atomically with the transition; a decision without a note behaves and hashes exactly as before.</goal>
+
+  <constraints>
+    <constraint source="design 1.1">The note is checked by InvoiceCorrectionNote.Check before any read or lock; never truncated or stripped.</constraint>
+    <constraint source="design 1.2, review item 3">A null or whitespace-only note adds no Values key; never note: null.</constraint>
+    <constraint source="design 2 Change 1">The decisionNote column is added to the same fields dictionary as the status, in the one conditional update; a version conflict writes neither. The parameter is a note, never an open column map.</constraint>
+    <constraint source="EB-D-240">sprk_correctionnote is never written by a decision path; sprk_decisionnote is never added to any firm-facing reader.</constraint>
+    <constraint source="design 2 Change 3, K-1">No new "note differs" refusal on the repeat path; K-1 behaviour is tested as designed.</constraint>
+    <constraint source="logging">No log line contains note text.</constraint>
+    <constraint source="project">No live call. Never run python. Never --no-verify. No bare git stash. Publish-size delta and CVE check in the notes.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Lifecycle: the note lands in the same update as the status; a concurrent change writes neither; the three-argument call writes no note column (must-not-fire).</criterion>
+    <criterion testable="true">Reject/return: note in Values and in sprk_decisionnote; no note gives the reason in the column, no Values key and a byte-identical hash (golden value per code); whitespace-only equals no note; 2000 accepted, 2001 and \u0007 refused before any lock; \n and \t accepted; both K-1 cases as in design §2 Tests.</criterion>
+    <criterion testable="true">Approve: no body and {} behave as today (byte-identical hash, column unchanged); a note is in Values and the column.</criterion>
+    <criterion testable="true">InvoiceDecisionNoteWritersGuardTests: a planted extra writer fails, the allowed set passes; the sprk_correctionnote writer control fails on a planted decision-path writer.</criterion>
+    <criterion testable="true">BFF build --warnaserror 0 warnings; Finance and Signals suites green; ArchTests green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

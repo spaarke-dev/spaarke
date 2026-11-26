@@ -146,6 +146,15 @@ describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Hearing A' }));
   }
 
+  // Tabster (Fluent's focus manager) hides the page behind an open dialog with aria-hidden, and both applies and removes
+  // it on a 250 ms timer (Modalizer.hiddenUpdate). A person always keeps the panel open longer than that; a fast test run
+  // need not, so it could open and close the panel without the page ever being hidden, while a slow CI run hid it and
+  // then queried the region before it was exposed again (#1906). The panel tests hold the panel open until the page is
+  // hidden, so every run takes the path a person takes, and then wait for the region to come back.
+  async function waitForPageHiddenBehindPanel() {
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Family' })).not.toBeInTheDocument());
+  }
+
   it('offers the actions on ticked rows, opens no panel and sends no push request before one is chosen', async () => {
     const { b, sent } = makePushBootstrap(LAUNCH);
     render(<FamilyPage b={b} />);
@@ -200,17 +209,19 @@ describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
     await tickHearing();
     fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
     await screen.findByRole('button', { name: 'Update 1 record' });
+    await waitForPageHiddenBehindPanel();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Update 1 record' })).not.toBeInTheDocument());
     expect(sent.filter(x => !x.preview)).toHaveLength(0);
     expect(b.closeDialog).not.toHaveBeenCalled();
-    expect(screen.getByRole('region', { name: 'Family' })).toBeInTheDocument();
+    // Exposed again: the panel is closed, not unmounted while open (which left the page aria-hidden for good, #1906).
+    expect(await screen.findByRole('region', { name: 'Family' })).toBeInTheDocument();
   });
 
   // The embedded modal's Escape handler sits on its region root, so Escape only reaches it while focus is inside the
-  // page. The panel unmounts when it closes; focus must come back or Escape would hit <body> and never close the dialog.
+  // page. When the panel closes, focus must come back or Escape would hit <body> and never close the dialog.
   it('after Cancel, focus returns inside the page and Escape still closes the platform dialog', async () => {
     const { b } = makePushBootstrap(LAUNCH);
     render(<FamilyPage b={b} />);
@@ -219,11 +230,12 @@ describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
     action.focus();
     fireEvent.click(action);
     await screen.findByRole('button', { name: 'Update 1 record' });
+    await waitForPageHiddenBehindPanel();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Update 1 record' })).not.toBeInTheDocument());
 
-    const region = screen.getByRole('region', { name: 'Family' });
+    const region = await screen.findByRole('region', { name: 'Family' });
     await waitFor(() => expect(region.contains(document.activeElement)).toBe(true));
     expect(document.activeElement).not.toBe(document.body);
     fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', bubbles: true });
@@ -237,6 +249,7 @@ describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
     await screen.findByRole('button', { name: 'Update 1 record' });
+    await waitForPageHiddenBehindPanel();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -252,17 +265,41 @@ describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
     fireEvent.click(action);
     fireEvent.click(await screen.findByRole('button', { name: 'Update 1 record' }));
     await screen.findByText('1 record was updated.');
+    await waitForPageHiddenBehindPanel();
 
-    // The panel's own Close button (the dialog is the last 'Close' in the DOM; the page also has one).
+    // The panel's footer Close button (the last 'Close' in the panel; the page behind is hidden now).
     const closes = screen.getAllByRole('button', { name: 'Close' });
     fireEvent.click(closes[closes.length - 1]);
     await waitFor(() => expect(screen.queryByText('1 record was updated.')).not.toBeInTheDocument());
 
-    const region = screen.getByRole('region', { name: 'Family' });
+    const region = await screen.findByRole('region', { name: 'Family' });
     await waitFor(() => expect(region.contains(document.activeElement)).toBe(true));
     expect(document.activeElement).not.toBe(document.body);
     fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', bubbles: true });
     expect(b.closeDialog).toHaveBeenCalledTimes(1);
+  });
+
+  // The panel stays mounted (closed) after it is used; choosing an action again must open a fresh panel that previews
+  // again, never one still showing the previous result.
+  it('choosing an action again after a finished push opens a fresh preview, not the previous result', async () => {
+    const { b, sent } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+    fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+    await waitForPageHiddenBehindPanel();
+    const closes = screen.getAllByRole('button', { name: 'Close' });
+    fireEvent.click(closes[closes.length - 1]);
+    await screen.findByRole('region', { name: 'Family' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update Assigned To' }));
+
+    expect(screen.queryByText('1 record was updated.')).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Update 1 record' });
+    const previews = sent.filter(x => x.preview);
+    expect(previews).toHaveLength(2);
+    expect(previews[1]).toMatchObject({ includeAssignedTo: true, childIds: [EVENT] });
   });
 });
 

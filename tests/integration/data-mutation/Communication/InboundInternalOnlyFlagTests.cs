@@ -679,6 +679,19 @@ public class InboundInternalOnlyFlagTests
     }
 
     [Fact]
+    public async Task Mailbox_ReplyToAnInquiry_IsNeverLowered_EvenWhereAnyOtherReplyWouldBe()
+    {
+        // Ontology task 176 (D-216): the same Open thread and explicitly shareable parent that lower the reply below keep a
+        // reply to an inquiry internal-only.
+        var world = Mailbox("open", parentFlag: "false");
+
+        await world.Processor.ResolveThreadAndShareabilityAsync(
+            CommId, ReplyEnvelope("<parent@contoso.com>"), "graph-1", CancellationToken.None, keepInternalOnly: true);
+
+        VerifyNeverLowered(world.Dv);
+    }
+
+    [Fact]
     public async Task Mailbox_ReplyWhoseParentIsExplicitlyNotInternal_IsLoweredToNotInternalOnly()
     {
         var world = Mailbox("open", parentFlag: "false");

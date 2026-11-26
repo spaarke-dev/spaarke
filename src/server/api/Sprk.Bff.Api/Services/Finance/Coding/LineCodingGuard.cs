@@ -43,9 +43,9 @@ internal static class LineCodingGuard
         {
             LineKey = line.LineKey,
             Status = LineCodingStatus.Coded,
-            Task = Slot(task, line.BilledTaskCode),
-            Activity = Slot(activity, line.BilledActivityCode),
-            Expense = Slot(expense, line.BilledExpenseCode),
+            Task = Slot(task, line.BilledTaskCode, set.CodeIdOf(BillingCodeKind.Task, task)),
+            Activity = Slot(activity, line.BilledActivityCode, set.CodeIdOf(BillingCodeKind.Activity, activity)),
+            Expense = Slot(expense, line.BilledExpenseCode, set.CodeIdOf(BillingCodeKind.Expense, expense)),
             Confidence = refused.Count > 0 ? 0m : returned.Confidence,
             Observations = observations,
             RefusedCodes = refused,
@@ -107,14 +107,15 @@ internal static class LineCodingGuard
         return canonical;
     }
 
-    /// <summary>The AI code next to the firm's. A mismatch needs both and a real difference (case and padding do not count).</summary>
-    private static LineCodeValue Slot(string? aiCode, string? firmCode)
+    /// <summary>The AI code next to the firm's. A mismatch needs both and a real difference (case and padding do not count). <paramref name="codeId"/> is the
+    /// AI code's row in the set (ISS-051), never set without a code: a refused code has none, so its lookup stays empty (FR-22).</summary>
+    private static LineCodeValue Slot(string? aiCode, string? firmCode, Guid? codeId = null)
     {
         var firm = Normalize(firmCode);
         var mismatch = aiCode is not null
             && firm is not null
             && !string.Equals(aiCode, firm, StringComparison.OrdinalIgnoreCase);
-        return new LineCodeValue(aiCode, firm, mismatch);
+        return new LineCodeValue(aiCode, firm, mismatch, aiCode is null ? null : codeId);
     }
 
     private static (List<InvoiceLineObservation> Kept, int Dropped) GroundObservations(
@@ -125,6 +126,13 @@ internal static class LineCodingGuard
         var dropped = 0;
         var haystack = CollapseWhitespace(narrative);
 
+        // LOAD-BEARING (uac-r2 ruling B, ebilling-r1 095d-2a-1): the kept quote is citable (AiObservation's `line.observation` value), so
+        // it reaches Signal evidence (sprk_signal.sprk_evidencerefs) and Invoice Review valuesRead. That is allowed only because this check
+        // keeps a quote that is text of the line's OWN narrative, and because (1) the narrative (sprk_billingevent.sprk_description) is not
+        // field-secured, and (2) Signal readers are a subset of line readers (every Signal-reading role carries Basic or Core with Read on
+        // billing events and invoices). If either changes, the quote must become non-citable (ruling option A). Evidence text is never
+        // app-logged and never indexed; Invoice Review valuesRead stays internal, behind the caller's invoice Read.
+        // Tests: LineCodingGuardTests (keep / drop), ObservationQuoteContainmentTests (end to end, seeded).
         foreach (var observation in observations)
         {
             var quote = CollapseWhitespace(observation.QuotedText);

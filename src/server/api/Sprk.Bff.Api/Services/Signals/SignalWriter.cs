@@ -109,6 +109,14 @@ public sealed record SignalWriteRequest(
     /// raised today: the nightly job and the event triggers (one evaluate-plan-write path, <see cref="SignalReevaluationJob"/>) act
     /// for nobody, so the row records no person. Server-derived only, never bound from a request body.</summary>
     public RecordRequester? RequestedBy { get; init; }
+
+    /// <summary>ebilling-r1 task 130e-1 (DEF-060, EB-D-212): the firm-facing description of the rule version that fired, written to
+    /// <c>sprk_firmreason</c> on CREATE only (never by the dedupe refresh, never on a Resolved row). <c>null</c> for every Signal except a billing
+    /// one: it is set only by the billing mapper and the billing plan replay, from the stored policy version after
+    /// <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules"/>, never from a request body, a fact value, a value read, the sentence or
+    /// AI output. It is not part of the dedupe key, the sentence or any fingerprint. A text that fails the rules is refused by the preflight
+    /// (<see cref="SignalWriteRefusal.FirmReasonInvalid"/>), which only a caller that bypasses the mapper can reach.</summary>
+    public string? FirmReason { get; init; }
 }
 
 /// <summary>The result of one <see cref="SignalWriter.WriteAsync"/> call.</summary>
@@ -280,6 +288,11 @@ public static class SignalWriteRefusal
 
     /// <summary><c>Episode</c> is not a whole number from 1 (D-13).</summary>
     public const string EpisodeInvalid = "episode_invalid";
+
+    /// <summary>ebilling-r1 task 130e-1 (ontology-r1 O2): <c>FirmReason</c> is set and fails
+    /// <see cref="Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(string?)"/>. Bypass detection only: the billing mapper and the plan
+    /// replay validate first and pass <c>null</c> for a text that fails, so their requests never get this code.</summary>
+    public const string FirmReasonInvalid = "firm_reason_invalid";
 
     /// <summary><c>MessageTemplate</c> is null or blank.</summary>
     public const string TemplateMissing = "template_missing";
@@ -535,9 +548,9 @@ public sealed partial class SignalWriter
     /// <param name="recordTypes">The <c>sprk_recordtype_ref</c> lookup the shared regarding builder types the pair from
     /// (<c>QueryRecordTypeRefAsync</c>; the same source <c>TaskActionCore</c> and the To Do writers hand it). Task 141.</param>
     /// <param name="scopes">Task 143: the scope this singleton resolves two SCOPED, already-registered services from, per call
-    /// (the <see cref="SignalSuppressionService"/> pattern): <see cref="AssignedAccessStore"/> for the D-134 assignee read
+    /// (the <see cref="SignalSuppressionService"/> pattern): <see cref="ContactUserRepresentation"/> for the D-134 assignee read
     /// (<see cref="PersonalToDoAssignee"/>) and <see cref="SecureChildReconciler"/> for the no-core re-own
-    /// (<see cref="ReassignNoCoreOwnerAsync"/>). No new registration.</param>
+    /// (<see cref="ReassignNoCoreOwnerAsync"/>).</param>
     public SignalWriter(
         OntologyWriterDataverseClient writerClient,
         IGenericEntityService sysadminClient,
@@ -943,8 +956,10 @@ public sealed partial class SignalWriter
     /// Task 031 (FR-16, FR-15): closes ONE Signal as a system resolution (<see cref="ResolutionConditionCleared"/>,
     /// <see cref="ResolutionSuperseded"/> or <see cref="ResolutionPolicyRetired"/>). <c>sprk_decisionrecord</c> and
     /// <c>sprk_resolvedby</c> are not written by the close. Task 153 (D-145b): after a Do-lane ConditionCleared close the job writes a
-    /// Routine Decision Record and links it with <see cref="LinkConditionClearedRecordAsync"/>; every other system closure (Superseded,
-    /// PolicyRetired, a Decide-lane ConditionCleared) stays record-free. The update is conditional on <paramref name="rowVersion"/>
+    /// Routine Decision Record and links it with <see cref="LinkConditionClearedRecordAsync"/>. ebilling-r1 095d-2b-2 (D-201 095d-2 Q1): after
+    /// the assign-firm re-run closes the invoice's shared Decide-lane Signal as ConditionCleared, it links the assign-firm Decision Record the
+    /// same way. Every other system closure (Superseded, PolicyRetired, any other Decide-lane ConditionCleared) stays record-free. The update
+    /// is conditional on <paramref name="rowVersion"/>
     /// (<c>sprk_signal</c> has optimistic concurrency enabled), so a Signal a person resolved after the evaluator read it is
     /// never closed a second time; that case returns <see cref="SignalCloseOutcome.ChangedSinceRead"/> and writes nothing.
     /// A failure is logged at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown.
@@ -1146,8 +1161,16 @@ public sealed partial class SignalWriter
     }
 
     /// <summary>
-    /// Task 153 (D-145b): links a Do-lane Signal the job closed as ConditionCleared to its Routine Decision Record: <c>sprk_decisionrecord</c>
-    /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Reads the Signal first and writes only
+    /// Links a Signal a system path closed as ConditionCleared to the Decision Record that cleared its condition: <c>sprk_decisionrecord</c>
+    /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Two uses:
+    /// <list type="bullet">
+    /// <item><b>Do lane</b> (task 153, D-145b): the job closed a Do-lane Signal and links its Routine Decision Record.</item>
+    /// <item><b>Decide lane</b> (ebilling-r1 095d-2b-2, D-201 095d-2 Q1): the assign-firm re-run closed the invoice's shared hold Signal
+    /// because the re-run started by the assign-firm decision found no hold reason left, and links that decision's record, with
+    /// <paramref name="resolvedBy"/> = the decider and <paramref name="expectedPriorRecordId"/> = null. The record's resolved set stays empty;
+    /// the link is the Signal pointing to the record. Only that run's close is linked: a Signal another path clears is not.</item>
+    /// </list>
+    /// Reads the Signal first and writes only
     /// when it is still Resolved as ConditionCleared, conditional on the version just read, so a person's decision that re-closed it in
     /// between (with its own record) is never overwritten.
     /// <para><b>Replacing the link (adversarial pass 1 F2, D-128 Q18).</b> A D-128 reminder or inquiry leaves the Signal Acknowledged and
@@ -1223,13 +1246,13 @@ public sealed partial class SignalWriter
 
     /// <summary>
     /// Task 153 (D-134): the one enabled user a personal To Do's Assigned To names (<see cref="PersonalToDoAssignee"/>, through the scoped
-    /// <see cref="AssignedAccessStore"/>), or null for no single user. A read fault propagates (the caller must not fall back).
+    /// <see cref="ContactUserRepresentation"/>), or null for no single user. A read fault propagates (the caller must not fall back).
     /// </summary>
     internal async Task<Guid?> PersonalToDoAssigneeAsync(Guid todoId, CancellationToken ct = default)
     {
         await using var scope = _scopes.CreateAsyncScope();
         return await PersonalToDoAssignee.ResolveAsync(
-            _sysadminClient, scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(), todoId, ct).ConfigureAwait(false);
+            _sysadminClient, scope.ServiceProvider.GetRequiredService<ContactUserRepresentation>(), todoId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1820,6 +1843,15 @@ public sealed partial class SignalWriter
             request.EvidenceRefs ?? Array.Empty<SignalEvidenceRef>(), EvidenceRefJsonOptions);
 
         entity["sprk_name"] = request.ShortHeadline;
+
+        // ebilling-r1 task 130e-1 (DEF-060, design 3.3 (a)(b)(c)): the firm description rides this one create, as the writer identity; no
+        // update path ever sends it (the dedupe refresh sends sprk_lastevaluated and, while open, sprk_duedate only). CheckRequest refused a
+        // text that fails FirmDescriptionRules before this point. Fix round 1 (a): the stored value is the validated, trimmed text, never the raw one.
+        if (Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(request.FirmReason).Text is { } firmReason)
+        {
+            entity["sprk_firmreason"] = firmReason;
+        }
+
         entity["sprk_signalstatus"] = new OptionSetValue(SignalStatusOpen);
         entity["sprk_firstdetected"] = nowUtc.UtcDateTime;
         entity["sprk_lastevaluated"] = nowUtc.UtcDateTime;
@@ -1988,7 +2020,7 @@ public sealed partial class SignalWriter
     /// It runs <see cref="CheckRequest"/>, the SAME method <see cref="WriteAsync"/> runs first, so the two cannot drift. Checked, in
     /// <see cref="WriteAsync"/>'s order: the request is not null; the subject name is a logical name; <c>SubjectId</c> is set;
     /// <c>PolicyCode</c> is set and at most 50 characters; <c>ShortHeadline</c> is set and at most 200; <c>Lane</c>, <c>Severity</c>
-    /// and <c>Episode</c> are valid; the template is set, <c>FactValues</c> is set, the template renders strictly from the snapshot
+    /// and <c>Episode</c> are valid; a set <c>FirmReason</c> passes the firm description rules; the template is set, <c>FactValues</c> is set, the template renders strictly from the snapshot
     /// (§0.3), and the rendered sentence is at most 2000 characters; the subject table is in <see cref="VerifiedSubjects"/>.
     /// <para><b>Not checked here, because each needs I/O:</b> the core record is derivable and unambiguous (the core-ancestor
     /// resolver reads Dataverse); the subject has an owner (the ownership resolver); the core record's table has a catalog row; the
@@ -2034,6 +2066,12 @@ public sealed partial class SignalWriter
         if (request.Episode < 1)
             return new(SignalWriteRefusal.EpisodeInvalid,
                 new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request)));
+
+        // ebilling-r1 task 130e-1 (O2): defence in depth only; the message names the rule's code, never the text.
+        if (request.FirmReason is not null
+            && Sprk.Bff.Api.Services.Finance.FirmDescriptionRules.Validate(request.FirmReason) is { IsValid: false } firmReason)
+            return new(SignalWriteRefusal.FirmReasonInvalid, new ArgumentException(
+                $"FirmReason fails the firm description rules ({firmReason.RefusalCode}).", nameof(request)));
 
         // R2 (second independent review): an unrenderable template is a logged, metered refusal in WriteAsync, so it is returned here
         // as the exception the write's catch clause reads. RenderSentence's own blank-template / null-snapshot guards are argument

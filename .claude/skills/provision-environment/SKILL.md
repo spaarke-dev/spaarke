@@ -111,7 +111,7 @@ Assertions:
 
 #### 0c. L2 API reachability + Operator role
 
-> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model2` / `customer-owned-model2` since task 225b). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
+> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model2` / `customer-owned-model2` since task 225b). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
 
 ```powershell
 # Acquire token — env is one of {dev, demo, prod}
@@ -273,7 +273,7 @@ If any FAIL: report the failure + resolution instructions + HARD STOP.
 
 ### Step 0.5: External Prerequisites Iteration (per `scripts/provisioning-prereqs/prereqs.yaml`) — HARD STOP on any failure
 
-Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
+Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
 
 #### 0.5a. YAML parser + environment fail-fast
 
@@ -285,7 +285,7 @@ if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
 Import-Module powershell-yaml
 ```
 
-If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
+If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
 
 **COMP-14 environment fail-fast (SESSION 16)** — Step 0.5b's substitution chain and its `$scopesToCheck += 'once_per_env'` branch both require a non-empty `$env`. When `$env` is null/empty, Step 0.5b silently degrades: `once_per_env` prereqs are skipped (invisible to the operator) and every `{env}` token substitutes to the empty string, producing malformed recipes that either fail with cryptic `az` parse errors OR — worse — false-PASS because the resulting name matches nothing.
 
@@ -540,7 +540,7 @@ Write-Host "  [ALL PASS] SPE topology verified — proceeding to Step 0.5d repor
 
 #### 0.5d. Report + HARD STOP
 
-Present results as a checklist. Any `Passed = $false` triggers HARD STOP with the id + name + recipe output (or exception message) + `consequence_of_absence` + `remediation` link pointing INTO [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) at the fragment matching the prereq id.
+Present results as a checklist. Any `Passed = $false` triggers HARD STOP with the id + name + recipe output (or exception message) + `consequence_of_absence` + `remediation` link pointing INTO [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../../docs/guides/PROVISIONING-PREREQUISITES.md) at the fragment matching the prereq id.
 
 ```
 EXTERNAL PREREQUISITES (from scripts/provisioning-prereqs/prereqs.yaml)
@@ -565,7 +565,7 @@ Collect the 4 inputs the L2 REST API requires. If the operator passed `{customer
 
 #### 1.0 Batch mode (`--batch <path.json>`) — added by task 203c per punch-list row A03
 
-For automated / non-interactive invocations. Consumes a JSON intake file validated against [`scripts/provisioning-prereqs/intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) (JSON Schema Draft 2020-12), pre-fills every field in 1a-1f, and skips all interactive prompts.
+For automated / non-interactive invocations. Consumes a JSON intake file validated against [`scripts/provisioning-prereqs/intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json) (JSON Schema Draft 2020-12), pre-fills every field in 1a-1f, and skips all interactive prompts.
 
 ```powershell
 # Skill invoked with --batch flag: $BatchIntakeFile is the JSON path
@@ -616,7 +616,9 @@ if ($BatchIntakeFile) {
   $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $solutionPackageType = $intake.solutionPackageType  # T218b — OPTIONAL: managed (default) | unmanaged on explicit instruction (Step 1b-quinquies)
+  $referenceDataPack = $intake.referenceDataPack  # D4 — OPTIONAL: legal-standard (default) | none (customer brings its own taxonomy) (Step 1b-quinquies-bis)
   $secureRecordSetupDryRun = $intake.secureRecordSetupDryRun  # T256 — OPTIONAL: true = H7b dry run (plan only; the run stops at H7b); absent/false = apply (Step 1b-sexies)
+  $buildId        = $intake.buildId             # ISS-036 — OPTIONAL: pin the BFF CI build H9 deploys (e.g. 2026.10.16-2); absent = latest.json. H9 refuses the run when it is not latest.json's buildId — set it on an upgrade that must not change the BFF
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
@@ -659,7 +661,7 @@ if ($BatchIntakeFile) {
 
 **Semantics**: when `-BatchIntakeFile` is passed, sub-steps 1a-1e and 1e-bis are non-interactive (values already assigned from the validated JSON; a missing or invalid value is a HARD STOP — the schema refuses it, and 1e-bis re-checks it in case a fallback validator skipped a conditional rule). Sub-step 1f (environmentId auto-create via Dataverse MCP / `pac data create`) still runs when `intake.environmentId` was omitted or null. The `--batch` path also honors `intake.skipExternalPrereqs` as a batch-native `-SkipStep0_5` equivalent (see Step 0.5c) — recorded in Step 7 lessons-learned.md when set.
 
-Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
+Sample intake (see [`intake.schema.json`](../../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
 
 ```json
 {
@@ -763,6 +765,17 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
     }
     $environmentId = $probe.rows[0].sprk_dataverseenvironmentid
     $script:IsUpgradeRun = $true
+    # ISS-031: the confirmation travels to L2 as intake upgradeOfProvisionedOn = the row's CURRENT sprk_provisionedon
+    # (every completed run rewrites it). POST /api/runs (REG-07) admits a run against an existing stamp only with it and
+    # leaves the Ready row as it is (H13 sets Ready again at the end); without it L2 answers 400
+    # registry-upgrade-not-acknowledged, naming the value to send. Read it through the Web API, not the MCP: the MCP may
+    # render the date in local time or without seconds, and L2 compares to the second. It is NOT `provisionedOn` — that key
+    # switches H0/H2a/H4/H4b to upgrade mode, which needs version inputs the skill does not send yet (ISS-038).
+    $dvUrl = $constants.name_templates.registryDvUrl.$environment
+    $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
+    $row = Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)?`$select=sprk_provisionedon" `
+      -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0" }
+    $script:UpgradeProvisionedOn = ([datetime]$row.sprk_provisionedon).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ', [cultureinfo]::InvariantCulture)
   } else {
     # Prior halt / quarantine / partial (placeholder exists, sprk_provisionedon still null) — recover
     Write-Host "customerId '$customerId' has a prior in-progress row (setupstatus=$($probe.rows[0].sprk_setupstatus)). See Fallback Matrix F1 recovery path."
@@ -770,7 +783,11 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
   ```
 
   Fallback if Dataverse MCP disconnected: `pac data query --entity sprk_dataverseenvironment --filter "sprk_customerid eq '$customerId'"` OR raw Web API GET with operator's `az` token. See Fallback Matrix F1.
-- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
+- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent. The confirmation is sent as
+  `upgradeOfProvisionedOn` (Step 4.0), and L2 admits the run against the Ready row as it is — never PATCH the row to
+  InProgress by hand (ISS-031). On 400 `registry-upgrade-provisioned-on-mismatch` the response names the row's exact
+  value: another run completed in between (it rewrites the value), so re-read it and confirm again. The handlers still
+  run in fresh-provision mode on an existing stamp, as every upgrade so far has (ISS-038).
 - If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
 
 #### 1a-bis. `displayName` (the customer's full name — also its Dataverse business unit)
@@ -881,6 +898,20 @@ environment that already holds the other type, so on an UPGRADE run send the typ
 ```powershell
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType") -and "$solutionPackageType" -cnotin @('managed','unmanaged')) {
   Write-Error "❌ solutionPackageType must be managed or unmanaged (exact case), or omitted for managed."; exit 1
+}
+```
+
+#### 1b-quinquies-bis. `referenceDataPack` (OPTIONAL — data-setup plan D4, owner decision B)
+
+H12b seeds the standard legal starter taxonomy (matter, matter subtype, practice-area, project, document, contact and
+organization types) into the stamp. Existing rows (matched by id, code or name, active or inactive) are never touched, but
+a pack row the customer DELETED is created again on every run. On a fresh run do not ask: send `none` only when the owner
+says the customer brings its own taxonomy. On an UPGRADE run (Step 1a) ask the operator whether the customer owns its
+taxonomy; if yes, send `none` (in batch mode the intake's value decides; absent = `legal-standard`).
+
+```powershell
+if (-not [string]::IsNullOrWhiteSpace("$referenceDataPack") -and "$referenceDataPack" -cnotin @('legal-standard','none')) {
+  Write-Error "❌ referenceDataPack must be legal-standard or none (exact case), or omitted for legal-standard."; exit 1
 }
 ```
 
@@ -1677,10 +1708,24 @@ if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
 if (-not [string]::IsNullOrWhiteSpace("$solutionPackageType")) {
   $runRequest.nonSecretParameters.solutionPackageType = "$solutionPackageType"
 }
+# D4 — the starter taxonomy pack (Step 1b-quinquies-bis): absent = legal-standard (L2 stores it); none = the customer's own.
+if (-not [string]::IsNullOrWhiteSpace("$referenceDataPack")) {
+  $runRequest.nonSecretParameters.referenceDataPack = "$referenceDataPack"
+}
+# ISS-031 — an UPGRADE run (Step 1a) sends the row's sprk_provisionedon as L2's existing-stamp acknowledgement. A fresh run
+# never sends it (L2 refuses it on a never-provisioned row). Never send it as `provisionedOn` (handler upgrade mode, ISS-038).
+if ($script:IsUpgradeRun) {
+  $runRequest.nonSecretParameters.upgradeOfProvisionedOn = "$script:UpgradeProvisionedOn"
+}
 # T256 — the H7b dry run (Step 1b-sexies): sent only when true; absent = apply. Exact lower case — L2 refuses anything
 # else with 400 secure_setup.dry_run_invalid.
 if ($secureRecordSetupDryRun -eq $true) {
   $runRequest.nonSecretParameters.secureRecordSetupDryRun = 'true'
+}
+# ISS-036 — the BFF build pin: sent only when the intake sets it; absent = H9 deploys latest.json's build. H9 is the
+# guard: it refuses the run (before any swap) when the value is not latest.json's own buildId.
+if (-not [string]::IsNullOrWhiteSpace("$buildId")) {
+  $runRequest.nonSecretParameters.buildId = "$buildId"
 }
 $body = $runRequest | ConvertTo-Json -Depth 5
 
@@ -2088,12 +2133,12 @@ $bffAppRegId        = $isv.bffAppRegId                 # H3 output — the custo
 $azureSubId         = $run.parameters.nonSecret.subscriptionId
 $deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
 $cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
-# sprk_solutionversion — ImportedSolutionSet (T218b): "SpaarkeMaster {version} ({managed|unmanaged})" from H6's
-# importedSolutions SpaarkeMaster entry ($null when absent or versionless).
+# sprk_solutionversion — ImportedSolutionSet (T218b; owner 2026-11-10): "SpaarkeMaster {Managed|Unmanaged} {version}"
+# from H6's importedSolutions SpaarkeMaster entry ($null when absent or versionless).
 $deployedSolutionVer = $null
 $pkg = @($isv.importedSolutions) | Where-Object { $_ -and "$($_.solutionUniqueName)".Trim() -ieq 'SpaarkeMaster' } | Select-Object -First 1
 if ($pkg -and -not [string]::IsNullOrWhiteSpace("$($pkg.version)")) {
-  $deployedSolutionVer = "SpaarkeMaster $("$($pkg.version)".Trim()) ($(if ($pkg.isManaged) { 'managed' } else { 'unmanaged' }))"
+  $deployedSolutionVer = "SpaarkeMaster $(if ($pkg.isManaged) { 'Managed' } else { 'Unmanaged' }) $("$($pkg.version)".Trim())"
 }
 
 # Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
@@ -2156,7 +2201,7 @@ if (-not $script:RegistryStale) {
   $fields = @{
     sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
     sprk_bffversion               = $deployedBffVersion  # run.interStepState.bffBuildId (H9)
-    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {version} ({type})" from run.interStepState.importedSolutions (H6, T218b)
+    sprk_solutionversion          = $deployedSolutionVer # "SpaarkeMaster {Managed|Unmanaged} {version}" from run.interStepState.importedSolutions (H6, T218b)
     sprk_azuresubscriptionid      = $azureSubId
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName
@@ -2508,7 +2553,7 @@ handoff, and continue.
 
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 
-Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
+Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
 
 Trigger conditions (each writes a distinct postmortem):
 - `Completed` (H13 acceptance passed; sprk_setupstatus=Ready reached) — capture what worked + manual gates encountered + recommendations

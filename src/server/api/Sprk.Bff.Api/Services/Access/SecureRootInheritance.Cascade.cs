@@ -406,7 +406,8 @@ internal sealed record AccessInheritance(
                 || (stored.OwnPermission is { } own && SecureRootInheritance.RankOf(own) < 0))
                 return (null, true);
             return (new AccessInheritance(stored.Parents, stored.FloorSecure, stored.FloorPermission, stored.OwnSecure,
-                stored.OwnPermission) { OwnProvisional = stored.OwnProvisional }, false);
+                stored.OwnPermission)
+            { OwnProvisional = stored.OwnProvisional }, false);
         }
         catch (JsonException)
         {
@@ -704,8 +705,10 @@ public sealed partial class SecureRootInheritance
         {
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Undetermined, ReasonCode = ReasonMarkerUnreadable,
-                Detail = $"its {AccessInheritance.Column} could not be read", Parents = parentStates,
+                Stop = FollowParentsOutcome.Undetermined,
+                ReasonCode = ReasonMarkerUnreadable,
+                Detail = $"its {AccessInheritance.Column} could not be read",
+                Parents = parentStates,
             };
         }
 
@@ -714,8 +717,10 @@ public sealed partial class SecureRootInheritance
         {
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Undetermined, ReasonCode = ReasonPermissionUnknown,
-                Detail = "it holds an Access Permission that is not Standard, Limited or Restricted", Parents = parentStates,
+                Stop = FollowParentsOutcome.Undetermined,
+                ReasonCode = ReasonPermissionUnknown,
+                Detail = "it holds an Access Permission that is not Standard, Limited or Restricted",
+                Parents = parentStates,
             };
         }
 
@@ -765,8 +770,11 @@ public sealed partial class SecureRootInheritance
                 storedSecure == true, storedRank > 0 ? storedPermission : null);
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Parentless, Marker = parentless, MarkerChanged = !parentless.SameAs(marker),
-                TargetSecure = storedSecure == true, TargetPermission = PermissionOf(storedRank),
+                Stop = FollowParentsOutcome.Parentless,
+                Marker = parentless,
+                MarkerChanged = !parentless.SameAs(marker),
+                TargetSecure = storedSecure == true,
+                TargetPermission = PermissionOf(storedRank),
             };
         }
 
@@ -776,8 +784,10 @@ public sealed partial class SecureRootInheritance
         {
             return new FollowDecision
             {
-                Stop = FollowParentsOutcome.Undetermined, ReasonCode = ReasonOwnFlagEmpty,
-                Detail = "its own secure flag is empty (empty is never read as either value)", Parents = parentStates,
+                Stop = FollowParentsOutcome.Undetermined,
+                ReasonCode = ReasonOwnFlagEmpty,
+                Detail = "its own secure flag is empty (empty is never read as either value)",
+                Parents = parentStates,
             };
         }
 
@@ -827,7 +837,9 @@ public sealed partial class SecureRootInheritance
             _logger.LogWarning(ex, "[FOLLOW-PARENT] {Table} {RecordId} could not be read; nothing was changed.", logical, recordId);
             return new FollowParentsResult(logical, recordId, FollowParentsOutcome.Undetermined)
             {
-                ReasonCode = ReasonRecordUnreadable, Detail = "the record could not be read", IsSecureAfter = true,
+                ReasonCode = ReasonRecordUnreadable,
+                Detail = "the record could not be read",
+                IsSecureAfter = true,
             };
         }
 
@@ -843,7 +855,10 @@ public sealed partial class SecureRootInheritance
                 logical, recordId, distrust.Detail, distrust.Code);
             return new FollowParentsResult(logical, recordId, FollowParentsOutcome.Undetermined)
             {
-                ReasonCode = distrust.Code, Detail = distrust.Detail, PermissionFrom = own.Permission, IsSecureAfter = own.Secure != false,
+                ReasonCode = distrust.Code,
+                Detail = distrust.Detail,
+                PermissionFrom = own.Permission,
+                IsSecureAfter = own.Secure != false,
             };
         }
 
@@ -1399,12 +1414,14 @@ public sealed partial class SecureRootInheritance
         {
             ColumnWrite.ChangedConcurrently => result with
             {
-                Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonChangedConcurrently,
+                Outcome = FollowParentsOutcome.Incomplete,
+                ReasonCode = ReasonChangedConcurrently,
                 Detail = $"{what} changed while it was being decided; nothing was written (the next run decides again)",
             },
             ColumnWrite.ReadsBackEmpty => result with
             {
-                Outcome = FollowParentsOutcome.Incomplete, ReasonCode = ReasonMarkerHidden,
+                Outcome = FollowParentsOutcome.Incomplete,
+                ReasonCode = ReasonMarkerHidden,
                 Detail = $"{what} was written but reads back empty: field-level security hides {AccessInheritance.Column} from the BFF",
             },
             _ => result with
@@ -2026,9 +2043,18 @@ public sealed partial class SecureRootInheritance
         var lines = new List<object>();
         FollowParentsRootOwners Summary() => new()
         {
-            WritesEnabled = writes, Planned = planned, Written = written, Refused = refused, Reported = reported,
-            Deferred = deferred, CrossUnit = crossUnit, WithGrants = withGrants, GrantsUnread = grantsUnread,
-            Resolved = resolves, Cursor = cursor, Changes = lines,
+            WritesEnabled = writes,
+            Planned = planned,
+            Written = written,
+            Refused = refused,
+            Reported = reported,
+            Deferred = deferred,
+            CrossUnit = crossUnit,
+            WithGrants = withGrants,
+            GrantsUnread = grantsUnread,
+            Resolved = resolves,
+            Cursor = cursor,
+            Changes = lines,
         };
 
         var ordinary = listed.Where(r => r.Secure == false)
@@ -2114,7 +2140,8 @@ public sealed partial class SecureRootInheritance
                     continue; // an unfiled root owned by a team is left alone
 
                 var question = (filed ? asked.Question : RecordOwnershipContext.ForUserTeam(row.OwningUser!.Value))
-                    with { LookupCache = lookupCache };
+                    with
+                { LookupCache = lookupCache };
                 if (!writes && plannedTeams.Count > 0)
                     question = question with { PlannedOwningTeams = new Dictionary<RecordOwnershipParent, Guid>(plannedTeams) };
                 owner = await _ownership.ResolveOwnerAsync(question, ct).ConfigureAwait(false);

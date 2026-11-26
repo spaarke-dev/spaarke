@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130e-1" project="ebilling-r1">
+  <metadata>
+    <title>DEF-060 writer (server): per-rule firm description on the policy version, copied onto the billing Signal's firm reason</title>
+    <phase>5 Partner surfaces; after 116 (on master) and the 130 batch (on work)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Partner-visible free text; changes ontology-r1's SignalWriter; the writer-identity-only column (sprk_signal.sprk_firmreason).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-owner change in Services/Signals with ten binding reviewer conditions (C1-C4, O1-O6) and a shared read/write predicate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <deps>116, 130a-130d</deps>
+    <tags>bff-api, signals, external-access, dataverse, testing</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the accepted DEF-060 design (projects/ebilling-r1/notes/def-060-firm-description-design.md, option A, EB-D-212, field security per EB-D-213) on the server side: the new column's idempotent schema script, the shared FirmDescriptionRules validator, the editor input and publish/copy carry-forward in RuleSetService and ProcedureAssignmentService, the mapper and replay copy onto SignalWriteRequest.FirmReason, the three SignalWriter changes, and the projection's code-matched override. The Rule Review page editor field is task 130e-2, not this task.</prompt>
+
+  <goal>A billing admin can set a firm description on a draft billing policy version through the BFF; publish freezes it; a billing Signal created from that version carries it in sprk_firmreason (written only by the ontology writer identity, on create only); the firm findings projection shows it for the matching reason code; invalid or name-bearing stored text is dropped with a code-only log and never changes or drops the Signal.</goal>
+
+  <context>
+    <background>Read the whole design note first, sections 11 (review outcomes) override sections 2-9 where they differ: C1 replaces the 3.2 "persisted plan" bullet (the plan persists the version id only and replay re-derives the text); EB-D-213 / O5 makes the column UNSECURED (uac-r2's Q1 write-as-app and -Verify no-other-writer sub-conditions are withdrawn; C2 still applies to the BFF path). EB-D-216: any draft-version read filters statecode eq 0 (DraftPolicyVersionStatecodeGuardTests).</background>
+    <relevant-files>
+      <file role="create">src/server/api/Sprk.Bff.Api/Services/Finance/FirmDescriptionRules.cs (Validate; the rune predicate moved from FirmRejectionFindings.IsInvisibleControl :369; the rule-set/policy name check C4)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/FirmRejectionFindings.cs (use the shared predicate)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (:84 SignalWriteRequest.FirmReason; BuildEntity create-only line; preflight firm_reason_invalid)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactLoader.cs (:93 BillingRuleCandidate.FirmDescription, plus the names C4 needs)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFindingSignalMapper.cs (RequestOf; never the preflight fallback request)</file>
+      <file role="modify">the replay path: InvoiceRuleSignalReconciler (Services/Finance/InvoiceCorrectionReevaluation.cs ~:894-932) and the plan writer/parser (InvoiceSubmissionPersister.BuildFindingsJson, StoredFindings.ParsePlanEntry)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/FirmFindingsProjection.cs (code-matched override from billing.reason evidence on WriterCreatedRecord rows; Duplicate never)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/RuleSetService.cs (column lists :439, writes :1766/:1904/:1982, copy :2887, read :3427; draft update input; C2 refusal on published; Q4 publish 422)</file>
+      <file role="modify">ProcedureAssignmentService.cs (reads and copies)</file>
+      <file role="create">scripts/ebilling/Deploy-EbillingFirmDescriptionColumn.ps1 on EbillingSchema.psm1 (O4 recipe: SchemaName sprk_FirmDescription, Memo 2000, MSCRM.SolutionUniqueName of sprk_policyversion's owning solution, publish sprk_policyversion only, -WhatIf, -Verify; Consistency: Strong) plus Pester 5.7.1 tests under tests/scripts/</file>
+      <file role="modify">tests: KEEP paths only (tests/CLAUDE.md); a widened ArchTest scan for O3 and the create-only sprk_firmreason line</file>
+      <file role="create">projects/ebilling-r1/notes/130e-firm-description-writer.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="design §3.2">FirmReason comes only from the stored policy version, after FirmDescriptionRules.Validate; never from a request body, FactValues, ValuesRead, the Signal sentence or AI output.</constraint>
+    <constraint source="C1">Replay re-reads sprk_firmdescription from the plan's policy version id and validates it; a firmReason in a plan is ignored.</constraint>
+    <constraint source="C2">The BFF draft-update path refuses a firmDescription change on a version the shared published predicate (DEF-061) calls published; nothing is written.</constraint>
+    <constraint source="C3, O2">Invalid stored text gives FirmReason = null on the mapper and replay paths; the Signal is kept with its sentence; the preflight fallback request carries no FirmReason; the writer's firm_reason_invalid refusal is reachable only by a non-mapper caller.</constraint>
+    <constraint source="C4, Q4">Text containing (case-insensitive) the version's own rule set name or policy name: 422 with a stable code at publish; dropped on mapper and replay.</constraint>
+    <constraint source="O1">FirmReason is not in the dedupe key, fingerprint, sentence or any hash; the dedupe refresh writes neither sprk_firmreason nor the policy-version lookup.</constraint>
+    <constraint source="design §3.3 (a)(b)(c)">sprk_firmreason rides the one existing OntologyWriterDataverseClient.CreateAsync; no second client, no BFF-identity write, no createdonbehalfby, never on update or a Resolved row.</constraint>
+    <constraint source="O3">FirmReason is assigned only in BillingFindingSignalMapper and the plan replay (ArchTest).</constraint>
+    <constraint source="uac-r2 Q2, Q3">Override evidence is read only from rows passing WriterCreatedRecord; only billing.reason entries are parsed (allow-list), codes checked against BillingRuleCatalogue; decided items take the Signals their decision resolved, never any Signal on the line.</constraint>
+    <constraint source="design §5">Duplicate never takes an override; the editor input refuses a description on a Duplicate-type version.</constraint>
+    <constraint source="logging">Refusals and drops log a stable code plus ids, never the text. A 422 never echoes the text.</constraint>
+    <constraint source="project">No live call to any environment. No SpaarkeMaster edits (079 syncs). Never run python. Never --no-verify. No bare git stash.</constraint>
+    <constraint source="public repository">Code, comments, notes, commits and test names describe the rule only; no identity, role or privilege names.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Writer: with FirmReason the create payload has sprk_firmreason; without it the key is absent; no createdonbehalfby; refresh and Resolved paths send no sprk_firmreason; firm_reason_invalid refuses an invalid FirmReason from a direct caller.</criterion>
+    <criterion testable="true">Mapper and replay: valid text reaches the request; blank is omitted; invalid or name-bearing text gives null with a code-only Warning and an unchanged sentence (must-fire: the preflight fallback is not taken); a plan whose firmReason differs from the version writes the version's text.</criterion>
+    <criterion testable="true">O1: a refresh under a newer version with a different description leaves the text and cited version unchanged.</criterion>
+    <criterion testable="true">Shared predicate: one theory runs validator and projection over the same cases (incl. U+061C, U+FEFF, U+E0041, U+1F600); 200 vs 201 runes; braces and angle brackets refused.</criterion>
+    <criterion testable="true">Projection: the override shows for its reason code and not for another code; unknown code falls back to the table text; Duplicate never overridden; decided-item text from resolved Signals only.</criterion>
+    <criterion testable="true">RuleSetService: published version edit refused (must-fire) and draft edit accepted (must-not-fire); publish, copy and Procedure assignment keep the column; inactive drafts are not read.</criterion>
+    <criterion testable="true">Schema script: Pester 5.7.1 green; -Verify asserts the column, type Memo and length 2000; the script consistency guard passes.</criterion>
+    <criterion testable="true">dotnet build of the BFF with --warnaserror: 0 warnings; affected test suites green; ArchTests green; publish-size delta against fresh master and CVE check recorded in the notes.</criterion>
+    <criterion testable="true">Negative: no change to sprk_signal schema, to SpaarkeMaster, or to any environment.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A path that would need sprk_firmreason written on update, by a second client, or by the BFF identity; a needed change to the dedupe key or sentence; or any conflict with C1-C4 / O1-O6: STOP and report.</trigger>
+  </escalation>
+</task>

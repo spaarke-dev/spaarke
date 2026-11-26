@@ -15,8 +15,10 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// Uses managed identity (app-only) tokens to read sprk_projects, sprk_documents,
 /// sprk_todos, contacts, and accounts from Dataverse.
 ///
-/// All data access is gated by the ExternalCallerAuthorizationFilter — only records
-/// belonging to projects in the caller's ExternalCallerContext.Participations are served.
+/// This service does not authorize. On the /api/v1/external routes the caller and its record
+/// scope are resolved upstream by the group-level CallerPrincipalAuthorizationFilter (a
+/// <see cref="CallerPrincipal"/>) and by each route's own checks; any other caller must
+/// authorize before it reads through this service.
 ///
 /// ADR-009: Redis caching not applied here — participation is cached by ExternalParticipationService.
 ///          Individual data queries are short-lived; add caching only if profiling shows need.
@@ -154,15 +156,30 @@ public class ExternalDataService
         [JsonPropertyName("sprk_documenttype")] public int? SprkDocumenttype { get; set; }
         [JsonPropertyName("sprk_documenttype@OData.Community.Display.V1.FormattedValue")] public string? SprkDocumenttypeLabel { get; set; }
         [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
-        [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
-        // Fix round for task 039: the other root links, read so the list can withhold a document also filed to a root the
+        // Fix round for task 039: the root links, read so the list can withhold a document also filed to a root the
         // caller cannot read (ExternalMultiRootRule). The typed column and its related twin, per root, are the roots in
         // DocumentLinkFields (the one declaration; pinned by test). Never mapped onto the wire DTO.
-        [JsonPropertyName("_sprk_relatedproject_value")] public string? SprkRelatedprojectValue { get; set; }
-        [JsonPropertyName("_sprk_matter_value")] public string? SprkMatterValue { get; set; }
-        [JsonPropertyName("_sprk_relatedmatter_value")] public string? SprkRelatedmatterValue { get; set; }
-        [JsonPropertyName("_sprk_workassignment_value")] public string? SprkWorkassignmentValue { get; set; }
-        [JsonPropertyName("_sprk_relatedworkassignment_value")] public string? SprkRelatedworkassignmentValue { get; set; }
+        // Task 130-0 fix round 3b: each setter records that its column was PRESENT in the row (an explicit JSON null included),
+        // so a column the read did not return is told apart from one that came back empty (see RootLinkOf).
+        private readonly HashSet<string> _rootColumnsRead = new(StringComparer.Ordinal);
+        private string? _project, _relatedProject, _matter, _relatedMatter, _workAssignment, _relatedWorkAssignment;
+
+        [JsonPropertyName("_sprk_project_value")]
+        public string? SprkProjectidValue { get => _project; set { _project = value; _rootColumnsRead.Add("_sprk_project_value"); } }
+        [JsonPropertyName("_sprk_relatedproject_value")]
+        public string? SprkRelatedprojectValue { get => _relatedProject; set { _relatedProject = value; _rootColumnsRead.Add("_sprk_relatedproject_value"); } }
+        [JsonPropertyName("_sprk_matter_value")]
+        public string? SprkMatterValue { get => _matter; set { _matter = value; _rootColumnsRead.Add("_sprk_matter_value"); } }
+        [JsonPropertyName("_sprk_relatedmatter_value")]
+        public string? SprkRelatedmatterValue { get => _relatedMatter; set { _relatedMatter = value; _rootColumnsRead.Add("_sprk_relatedmatter_value"); } }
+        [JsonPropertyName("_sprk_workassignment_value")]
+        public string? SprkWorkassignmentValue { get => _workAssignment; set { _workAssignment = value; _rootColumnsRead.Add("_sprk_workassignment_value"); } }
+        [JsonPropertyName("_sprk_relatedworkassignment_value")]
+        public string? SprkRelatedworkassignmentValue { get => _relatedWorkAssignment; set { _relatedWorkAssignment = value; _rootColumnsRead.Add("_sprk_relatedworkassignment_value"); } }
+
+        /// <summary>A root link as read: its value, or <see cref="DocumentRootLinks.Unreadable"/> when the column was not in the row.</summary>
+        internal string? RootLinkOf(string column, string? value) =>
+            _rootColumnsRead.Contains(column) ? value : DocumentRootLinks.Unreadable;
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
@@ -191,9 +208,22 @@ public class ExternalDataService
         [JsonPropertyName("statecode")] public int? Statecode { get; set; }
         [JsonPropertyName("statuscode")] public int? Statuscode { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
-        [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
-        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
-        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
+        // Task 130-0 fix round 3d: the three root stamps feed the multi-root rule, so each setter records that its column was PRESENT in
+        // the row (an explicit JSON null included); RootStamps() reads a column that was not returned as unreadable, never as "not filed".
+        private string? _regardingProject, _regardingMatter, _regardingWorkAssignment;
+        private bool _regardingProjectRead, _regardingMatterRead, _regardingWorkAssignmentRead;
+        [JsonPropertyName("_sprk_regardingproject_value")]
+        public string? SprkRegardingprojectValue { get => _regardingProject; set { _regardingProject = value; _regardingProjectRead = true; } }
+        [JsonPropertyName("_sprk_regardingmatter_value")]
+        public string? SprkRegardingmatterValue { get => _regardingMatter; set { _regardingMatter = value; _regardingMatterRead = true; } }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")]
+        public string? SprkRegardingworkassignmentValue { get => _regardingWorkAssignment; set { _regardingWorkAssignment = value; _regardingWorkAssignmentRead = true; } }
+
+        /// <summary>The three root stamps as multi-root rule input: a column the row did not carry is <see cref="ExternalMultiRootRule.UnreadableLookup"/>.</summary>
+        internal (ExternalGrantRootType Root, string? LookupValue)[] RootStamps() => ExternalMultiRootRule.Stamps(
+            ExternalMultiRootRule.StampOf(_regardingProjectRead, _regardingProject),
+            ExternalMultiRootRule.StampOf(_regardingMatterRead, _regardingMatter),
+            ExternalMultiRootRule.StampOf(_regardingWorkAssignmentRead, _regardingWorkAssignment));
         [JsonPropertyName("sprk_regardingrecordid")] public string? SprkRegardingrecordid { get; set; }
         [JsonPropertyName("sprk_regardingrecordname")] public string? SprkRegardingrecordname { get; set; }
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
@@ -220,6 +250,33 @@ public class ExternalDataService
     internal static readonly IReadOnlySet<int> ExternalCreatableStatuses =
         new HashSet<int> { EventStatusCode.Draft, EventStatusCode.Open };
 
+    /// <summary>
+    /// spaarke-SPA-external-access-platform-r4 task 008 (uac-r2 review 2026-11-13, condition B): the ONE event type an external
+    /// caller may create (<see cref="CreateExternalEventRequest.EventType"/>), matched exactly. It binds the Task row of
+    /// <c>sprk_eventtype_ref</c> (<see cref="EventTypeRef.Task"/>). The closed set is the authorization for a contact caller;
+    /// a Dataverse-decided caller is also asked AppendTo on that row by the create route.
+    /// </summary>
+    internal const string TaskEventType = "task";
+
+    /// <summary>The stable <c>errorCode</c> of a create whose <c>eventType</c> is outside the closed set (ADR-019).</summary>
+    internal const string EventTypeNotAllowedErrorCode = "sdap.event.type_not_allowed";
+
+    /// <summary>Whether <paramref name="eventType"/> may be sent on an external event create: omitted (null), or
+    /// <see cref="TaskEventType"/>. Anything else — another type, a different spelling, an empty string — is not.</summary>
+    internal static bool IsCreatableEventType(string? eventType) =>
+        eventType is null || string.Equals(eventType, TaskEventType, StringComparison.Ordinal);
+
+    /// <summary>The lookup value column of <c>sprk_event.sprk_eventtype_ref</c>: read server-side only, never on the wire (task 008).</summary>
+    internal const string EventTypeValueColumn = "_sprk_eventtype_ref_value";
+
+    /// <summary>
+    /// The create bind of <c>sprk_event.sprk_eventtype_ref</c>. An <c>@odata.bind</c> key is the NAVIGATION PROPERTY name and is
+    /// case-sensitive: it is <c>sprk_EventType_Ref</c> (verified against live relationship metadata, commit 9b32c1c8ab; the
+    /// internal event create in <c>DataverseWebApiService</c> writes the same key). The lowercase attribute name is refused by
+    /// Dataverse with a 400, which surfaced as a 500 on every typed external event create (R4 task 016 E2E, 2026-11-17).
+    /// </summary>
+    internal const string EventTypeBindKey = "sprk_EventType_Ref@odata.bind";
+
     private sealed class EventRow
     {
         [JsonPropertyName("sprk_eventid")] public string? SprkEventid { get; set; }
@@ -227,16 +284,102 @@ public class ExternalDataService
         [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
         [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
-        [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+        // Task 008 (uac-r2 C): compared to EventTypeRef.Task to derive ExternalEventDto.IsTask; the id itself is never mapped.
+        [JsonPropertyName(EventTypeValueColumn)] public string? EventTypeValue { get; set; }
         // Task 039: the other two root lookups, read so a list can withhold an event also filed to a record the caller
         // cannot read (see ReadableEvents). Never mapped onto the wire DTO.
-        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
-        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
+        // Task 130-0 fix round 3d: each setter records that its column was PRESENT in the row (an explicit JSON null included);
+        // RootStamps() reads a column that was not returned as unreadable, never as "not filed".
+        private string? _regardingProject, _regardingMatter, _regardingWorkAssignment;
+        private bool _regardingProjectRead, _regardingMatterRead, _regardingWorkAssignmentRead;
+        [JsonPropertyName("_sprk_regardingproject_value")]
+        public string? SprkRegardingprojectValue { get => _regardingProject; set { _regardingProject = value; _regardingProjectRead = true; } }
+        [JsonPropertyName("_sprk_regardingmatter_value")]
+        public string? SprkRegardingmatterValue { get => _regardingMatter; set { _regardingMatter = value; _regardingMatterRead = true; } }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")]
+        public string? SprkRegardingworkassignmentValue { get => _regardingWorkAssignment; set { _regardingWorkAssignment = value; _regardingWorkAssignmentRead = true; } }
+
+        /// <summary>The three root stamps as multi-root rule input: a column the row did not carry is <see cref="ExternalMultiRootRule.UnreadableLookup"/>.</summary>
+        internal (ExternalGrantRootType Root, string? LookupValue)[] RootStamps() => ExternalMultiRootRule.Stamps(
+            ExternalMultiRootRule.StampOf(_regardingProjectRead, _regardingProject),
+            ExternalMultiRootRule.StampOf(_regardingMatterRead, _regardingMatter),
+            ExternalMultiRootRule.StampOf(_regardingWorkAssignmentRead, _regardingWorkAssignment));
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
+
+        // R4 task 014b (FR-35/FR-36; uac-r2 review of task 014 C + Q5): the new readable columns (EventReadColumns). A lookup's
+        // NAME is its FormattedValue (the collection read's Prefer asks for them); the assignee's id is selected only as the
+        // annotation's anchor and never mapped onto the wire.
+        [JsonPropertyName(EventTypeValueColumn + FormattedValueSuffix)] public string? EventTypeName { get; set; }
+        [JsonPropertyName(EventDescriptionColumn)] public string? SprkDescription { get; set; }
+        [JsonPropertyName(EventPriorityColumn)] public int? SprkPriority { get; set; }
+        [JsonPropertyName(EventAssignedToValueColumn + FormattedValueSuffix)] public string? AssignedToName { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute + FormattedValueSuffix)] public string? CreatedByPersonName { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute + FormattedValueSuffix)] public string? CreatedByContactName { get; set; }
+        [JsonPropertyName("_sprk_regardingproject_value" + FormattedValueSuffix)] public string? RegardingProjectName { get; set; }
+        [JsonPropertyName("_sprk_regardingmatter_value" + FormattedValueSuffix)] public string? RegardingMatterName { get; set; }
+        [JsonPropertyName("_sprk_regardingworkassignment_value" + FormattedValueSuffix)] public string? RegardingWorkAssignmentName { get; set; }
+
         // Task 187: every other selected column, among them the row's live-parent lookups (ExternalMultiRootRule.LiveParentSelect),
         // read by name so the select and the rule share ONE list. Never mapped onto the wire DTO.
         [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+    }
+
+    /// <summary>The OData annotation suffix of a column's display label (Prefer <c>odata.include-annotations</c>).</summary>
+    internal const string FormattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
+
+    /// <summary><c>sprk_event.sprk_description</c> (2,000 characters; R4 task 014b).</summary>
+    internal const string EventDescriptionColumn = "sprk_description";
+
+    /// <summary><c>sprk_event.sprk_priority</c> (R4 task 014b).</summary>
+    internal const string EventPriorityColumn = "sprk_priority";
+
+    /// <summary>The read form of <c>sprk_event.sprk_assignedto</c> (a contact lookup; R4 task 014b).</summary>
+    internal const string EventAssignedToValueColumn = "_sprk_assignedto_value";
+
+    /// <summary>The create bind of <c>sprk_event.sprk_assignedto</c>: its navigation property, which the Web API matches
+    /// case-sensitively (the bind <c>EventDueAssigneeWrite.BuildPatchJson</c> writes).</summary>
+    internal const string EventAssignedToBindKey = "sprk_AssignedTo@odata.bind";
+
+    /// <summary>The longest <c>sprk_description</c> an event accepts (the column's max length).</summary>
+    internal const int EventDescriptionMaxLength = 2000;
+
+    /// <summary>R4 task 014b review pass 2 (K2): the length of <c>sprk_event.sprk_eventname</c> (Text, max 850;
+    /// docs/data-model/sprk_event-related-tables.md).</summary>
+    internal const int EventNameMaxLength = 850;
+
+    /// <summary>Normal: the priority an event is created with when none is sent (owner Q-4).</summary>
+    internal const int EventPriorityNormal = 100000001;
+
+    /// <summary>The four <c>sprk_event.sprk_priority</c> values (Low, Normal, High, Urgent).</summary>
+    internal static readonly IReadOnlySet<int> EventPriorities = new HashSet<int> { 100000000, 100000001, 100000002, 100000003 };
+
+    // ── R4 task 014b — the event's stable 400 errorCodes (ADR-019) ─────────────────────────────────────────────────────────
+    internal const string EventTypeRequiredErrorCode = "sdap.event.type_required";
+    internal const string EventTypeImmutableErrorCode = "sdap.event.type_immutable";
+    internal const string EventAssigneeNotAllowedErrorCode = "sdap.event.assignee_not_allowed";
+    /// <summary>R4 task 014c: an assignee change on an event that is not open work (<see cref="EventStatusCode.IsOpenWork"/>).</summary>
+    internal const string EventReassignNotOpenErrorCode = "sdap.event.reassign_not_open";
+    internal const string EventDueDateRequiredErrorCode = "sdap.event.due_date_required";
+    internal const string EventPriorityInvalidErrorCode = "sdap.event.priority_invalid";
+    internal const string EventDescriptionTooLongErrorCode = "sdap.event.description_too_long";
+    internal const string EventStatusInvalidErrorCode = "sdap.event.status_invalid";
+    internal const string EventNameRequiredErrorCode = "sdap.event.name_required";
+    internal const string EventNameTooLongErrorCode = "sdap.event.name_too_long";
+
+    /// <summary>
+    /// One <c>sprk_eventtype_ref</c> row (R4 task 014b, FR-35): its id, name, whether an event of it needs a due date
+    /// (<c>sprk_requiredduedate</c>), and whether the row is ACTIVE (only an active row can be picked; an existing event keeps a
+    /// type that was later deactivated, uac-r2 Q3).
+    /// </summary>
+    public sealed record EventTypeOption(Guid Id, string Name, bool RequiresDueDate, bool IsActive);
+
+    private sealed class EventTypeRow
+    {
+        [JsonPropertyName("sprk_eventtype_refid")] public string? Id { get; set; }
+        [JsonPropertyName("sprk_name")] public string? Name { get; set; }
+        [JsonPropertyName("sprk_requiredduedate")] public bool? RequiresDueDate { get; set; }
+        [JsonPropertyName("statecode")] public int? StateCode { get; set; }
     }
 
     private sealed class ContactRow
@@ -295,7 +438,8 @@ public class ExternalDataService
         ILogger<ExternalDataService> logger,
         IGenericEntityService? filing = null,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver? columns = null,
-        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null)
+        Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null,
+        AppOnlyExternalVisibility? visibility = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
@@ -303,6 +447,7 @@ public class ExternalDataService
         _logger = logger;
         _filing = filing;
         _identity = identity;
+        _visibility = visibility;
         // Task 187: which lineage lookups a parent table has in this environment (the 6h-cached metadata probe the stamp path
         // uses), so the live-parent walk never selects a column a later schema adds. Without one (a test double), every
         // lookup of the lineage map is taken as present.
@@ -322,6 +467,14 @@ public class ExternalDataService
     /// narrowed (fail closed).
     /// </summary>
     private readonly Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? _identity;
+
+    /// <summary>
+    /// uac-r2 task 191h: THE external visibility predicate (<see cref="AppOnlyExternalVisibility"/>) the to-do and event lists
+    /// ask for every caller who is not an internal systemuser. Registered in <c>AddExternalAccess</c>, so the typed-client factory
+    /// supplies it. Without one (a test double), every row of such a caller's list is hidden and the list says truncated (fail
+    /// closed).
+    /// </summary>
+    private readonly AppOnlyExternalVisibility? _visibility;
 
     /// <summary>Task 187: the column probe the live-parent walk reads parent tables through (see the constructor).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe _columnProbe;
@@ -393,8 +546,8 @@ public class ExternalDataService
     /// <remarks>
     /// <b>Invoice</b> (owner decision 2026-10-11, task 031 option A "inherit"): an invoice is not a root in the caller's
     /// accessible set, so its documents take the caller's rights on the invoice's PARENT records — the union over its
-    /// <c>sprk_matter</c> and <c>sprk_project</c> (<see cref="GetInvoiceParentsAsync"/>; the endpoint's rights arm), the
-    /// same "any accessible parent" rule the invoices module and the message routes apply.
+    /// <c>sprk_matter</c>, <c>sprk_project</c> and <c>sprk_regardingworkassignment</c> (<see cref="GetInvoiceParentsAsync"/>; the
+    /// endpoint's rights arm), the same "any accessible parent" rule the invoices module and the message routes apply.
     /// </remarks>
     public enum DocumentParentKind
     {
@@ -501,18 +654,202 @@ public class ExternalDataService
                 readable.Count - visible.Count, readable.Count, parentKind, parentId, narrowing.HiddenSummary(candidates));
         }
 
+        // #2669 (NFR-03): a row hidden because its parent chain cannot be known within the walk's bound is a cap, not a
+        // decision: it stays hidden, warns once, and the list says truncated.
+        var pastBound = ExternalDocumentNarrowing.ReportHiddenPastBound(narrowing, candidates, caller, _logger);
+
+        // F3b: a child document is decided by EVERY invoice link up its parent chain; a chain that cannot be read drops its rows.
+        var (documents, chainDropped) = await MapDocumentsWithAncestorLinksAsync(visible, ct).ConfigureAwait(false);
+
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
-            Value = visible.Select(MapDocument).ToList(),
+            Value = documents,
             Truncated = read.Truncated
                         || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count)
-                        || (narrowing.Faulted && visible.Count < readable.Count),
+                        || (narrowing.Faulted && visible.Count < readable.Count)
+                        || pastBound
+                        || chainDropped,
         };
     }
 
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b: the list's documents as DTOs, each carrying the invoice links of its own row AND of every row it is
+    /// filed under, up the chain (<see cref="ReadAncestorLinksOfRowsAsync"/>: its parent document, and since fix round 1 its related
+    /// communication, event, to-do, agreement and service request; one batched read per hop, <see cref="InvoiceLinks.MaxWalkHops"/>), so the page's invoice
+    /// decision (<see cref="HideInvoiceLinkedRowsAsync{T}"/>) hides a document of another firm's invoice work. A chain that cannot be
+    /// decided carries <see cref="ExternalDocumentNarrowing.UnreadableLink"/>, so the row is hidden. A chain read that FAILS drops the rows
+    /// that have a parent (fail closed) and says so (<c>Dropped</c>), so the list is flagged truncated. A document with no parent causes
+    /// no read.
+    /// </summary>
+    private async Task<(List<ExternalDocumentDto> Documents, bool Dropped)> MapDocumentsWithAncestorLinksAsync(
+        IReadOnlyList<DocumentRow> rows, CancellationToken ct)
+    {
+        // A row whose columns were not kept (no Extra) is undecidable: its parents read as unreadable.
+        var ancestors = await ReadAncestorLinksOfRowsAsync(
+            DocumentTable, rows.Select(row => (DocumentIdOf(row), (IReadOnlyDictionary<string, JsonElement>?)row.Extra)).ToList(), ct)
+            .ConfigureAwait(false);
+        var documents = rows
+            .Select((row, i) => (row, links: ancestors[i]))
+            .Where(r => r.links is not null)
+            .Select(r => MapDocument(r.row, r.links))
+            .ToList();
+        return (documents, documents.Count < rows.Count);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b fix round 1: for each Web API row of <paramref name="table"/> a REST list has ALREADY read (by
+    /// position), the invoices of every row it is filed under, up the chain (<see cref="InvoiceLinks.ReadAncestorInvoiceLinksAsync"/>:
+    /// every parent edge of the table, <see cref="InvoiceLinks.FirstParentsOf"/>; one batched read per hop, <see cref="InvoiceLinks.MaxWalkHops"/>). The
+    /// read's <c>$select</c> must carry <see cref="InvoiceLinks.ParentValueColumnsOf"/> (<see cref="WithInvoiceLinkColumns"/> adds them):
+    /// a parent column the row does not carry is undecidable, never "no parent". Per row: an empty list (no parent: no read), the
+    /// ancestors' invoices (with <see cref="ExternalDocumentNarrowing.UnreadableLink"/> when the chain cannot be decided), or
+    /// <see langword="null"/> when the chain read FAILED and the row has a parent: the caller drops that row and flags the list
+    /// truncated (fail closed). A table with no parent edge gives every row an empty list and reads nothing.
+    /// </summary>
+    internal async Task<IReadOnlyList<IReadOnlyList<Guid>?>> ReadAncestorLinksOfRowsAsync(
+        string table, IReadOnlyList<(Guid Id, IReadOnlyDictionary<string, JsonElement>? Row)> rows, CancellationToken ct)
+    {
+        var firsts = rows.Select(r => InvoiceLinks.FirstParentsOf(table, r.Id, r.Row)).ToList();
+        static IReadOnlyList<Guid> NoParent() => Array.Empty<Guid>();
+        if (firsts.All(f => f.Count == 0))
+            return rows.Select(_ => (IReadOnlyList<Guid>?)NoParent()).ToList();
+
+        IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains;
+        try
+        {
+            // A row id that is not a GUID (Guid.Empty) is never walked: it reads as undecidable below.
+            chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+                table, firsts.SelectMany(f => f).Where(f => f.Row != Guid.Empty).ToList(), QueryRowsOrThrowAsync, ct, _logger, RestPlane)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-DATA] {Table}: the filing chain of {Count} row(s) could not be read; they are dropped (fail closed).",
+                table, firsts.Count(f => f.Count > 0));
+            return firsts.Select(f => f.Count == 0 ? NoParent() : null).ToList();
+        }
+
+        return rows.Select((r, i) => firsts[i].Count == 0
+                ? NoParent()
+                : chains.TryGetValue(r.Id, out var chain)
+                    ? chain.Invoices
+                    : new[] { ExternalDocumentNarrowing.UnreadableLink }) // no answer for this row: undecidable
+            .ToList();
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b: the invoice links of the rows ABOVE the document <paramref name="documentId"/> (whose Web API
+    /// <paramref name="row"/> the caller already read with every parent column, <see cref="InvoiceLinks.ParentValueColumnsOf"/>), for the
+    /// single-document routes: the same walk and bound as the list (<see cref="ReadRowAncestorLinksAsync"/>).
+    /// </summary>
+    internal Task<InvoiceLinks.RowInvoiceLinks> ReadDocumentAncestorLinksAsync(
+        Guid documentId, IReadOnlyDictionary<string, JsonElement>? row, CancellationToken ct) =>
+        ReadRowAncestorLinksAsync(DocumentTable, documentId, row, ct);
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b fix round 1: the invoice links of the rows ABOVE ONE row of <paramref name="table"/> whose Web API
+    /// <paramref name="row"/> the caller already read (with <see cref="InvoiceLinks.ParentValueColumnsOf"/>), for a single-record route:
+    /// every parent edge, the list's walk and bound. No parent: no links, no read. A row that was not read, a parent column that is
+    /// absent or not a GUID, a cycle, a chain past the bound and a parent that does not come back are undecidable
+    /// (<see cref="InvoiceLinks.RowInvoiceLinks.ChainUndecidable"/>). A failed read THROWS <see cref="DataverseUnavailableException"/>
+    /// (the route answers "could not decide", never a refusal).
+    /// </summary>
+    internal async Task<InvoiceLinks.RowInvoiceLinks> ReadRowAncestorLinksAsync(
+        string table, Guid rowId, IReadOnlyDictionary<string, JsonElement>? row, CancellationToken ct)
+    {
+        var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
+        if (row is null || rowId == Guid.Empty)
+            return undecidable;
+        var firsts = InvoiceLinks.FirstParentsOf(table, rowId, row);
+        if (firsts.Count == 0)
+            return new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
+
+        IReadOnlyDictionary<Guid, InvoiceLinks.RowInvoiceLinks> chains;
+        try
+        {
+            chains = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(table, firsts, QueryRowsOrThrowAsync, ct, _logger, RestPlane)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataverseUnavailableException($"The filing chain of a {table} row could not be read.", ex);
+        }
+
+        return chains.TryGetValue(rowId, out var chain) ? chain : undecidable;
+    }
+
+    /// <summary>
+    /// F3b: <see cref="ReadRowAncestorLinksAsync"/> for the rows of a FetchXML (module) page of <paramref name="table"/>, keyed by
+    /// position: each row's parent edge attributes (<see cref="InvoiceLinks.ParentEdgesOf"/>, logical names) decide. FetchXML omits a
+    /// null attribute, so an absent attribute is "no parent" HERE: the module fetch therefore always projects every parent attribute
+    /// (<c>ExternalModuleDataEndpoints</c>' rule attributes; F3b fix round 1, K1). Same answers; a failed read says <c>Failed</c> and
+    /// every row that has a parent is undecidable.
+    /// </summary>
+    internal async Task<(IReadOnlyList<InvoiceLinks.RowInvoiceLinks> Chains, bool Failed)> ReadModuleDocumentAncestorLinksAsync(
+        string table, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string idAttribute, CancellationToken ct)
+    {
+        var none = new InvoiceLinks.RowInvoiceLinks(Array.Empty<Guid>(), false);
+        var undecidable = new InvoiceLinks.RowInvoiceLinks(new[] { ExternalDocumentNarrowing.UnreadableLink }, true);
+        var chains = rows.Select(_ => none).ToArray();
+        var asked = new List<(int Index, Guid Row, string Column, Guid Parent)>();
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var id = ExternalModuleDescriptor.TryGetAttributeId(rows[i], idAttribute, out var rowId) ? rowId : Guid.NewGuid();
+            foreach (var edge in InvoiceLinks.ParentEdgesOf(table))
+            {
+                if (!rows[i].TryGetValue(edge.Column, out var raw) || raw is null)
+                    continue; // FetchXML omits a null attribute: no parent through this edge
+                var parent = ExternalModuleDescriptor.TryGetAttributeId(rows[i], edge.Column, out var parentId)
+                    ? parentId
+                    : ExternalDocumentNarrowing.UnreadableLink;
+                asked.Add((i, id, edge.Column, parent));
+            }
+        }
+
+        if (asked.Count == 0)
+            return (chains, false);
+        try
+        {
+            var read = await InvoiceLinks.ReadAncestorInvoiceLinksAsync(
+                table, asked.Select(a => (a.Row, a.Column, a.Parent)).ToList(), QueryRowsOrThrowAsync, ct, _logger, RestPlane)
+                .ConfigureAwait(false);
+            foreach (var (index, row, _, _) in asked)
+                chains[index] = read.TryGetValue(row, out var chain) ? chain : undecidable;
+            return (chains, false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-DATA] module {Table}: the filing chain of {Count} row(s) could not be read; they are dropped (fail closed).",
+                table, asked.Select(a => a.Index).Distinct().Count());
+            foreach (var (index, _, _, _) in asked)
+                chains[index] = undecidable;
+            return (chains, true);
+        }
+    }
+
     /// <summary>A document row's id (<see cref="Guid.Empty"/> when it did not come back as a GUID: never visible).</summary>
-    private static Guid DocumentIdOf(DocumentRow row) =>
-        Guid.TryParse(row.SprkDocumentid, out var id) ? id : Guid.Empty;
+    private static Guid DocumentIdOf(DocumentRow row) => RowIdOf(row.SprkDocumentid);
+
+    /// <summary>A row id read as text (<see cref="Guid.Empty"/> when it is not a GUID: never walked, so undecidable).</summary>
+    private static Guid RowIdOf(string? id) => Guid.TryParse(id, out var parsed) ? parsed : Guid.Empty;
 
     /// <summary>
     /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
@@ -531,19 +868,27 @@ public class ExternalDataService
     private const string TodoTable = "sprk_todo";
     private const string EventTable = "sprk_event";
     private const string DocumentTable = "sprk_document";
+    private const string ServiceRequestTable = "sprk_servicerequest";
 
     /// <summary>Task 187: <c>,col1,col2...</c>, a child table's live-parent lookups to append to a list <c>$select</c>.</summary>
     private static string LiveParentSelectSuffix(string childTable) =>
         string.Concat(ExternalMultiRootRule.LiveParentSelect(childTable).Select(c => "," + c));
 
-    private static DocumentRootLinks DocumentLinksOf(DocumentRow row) =>
-        new(
-            row.SprkProjectidValue, row.SprkRelatedprojectValue,
-            row.SprkMatterValue, row.SprkRelatedmatterValue,
-            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue)
+    /// <summary>
+    /// The root links of one list row. A root link column that is ABSENT from the row was not read, so it is treated as unreadable
+    /// (<see cref="DocumentRootLinks.Unreadable"/>, which the multi-root rule withholds); an explicit null is "not filed there".
+    /// </summary>
+    private static DocumentRootLinks DocumentLinksOf(DocumentRow row)
+    {
+        var columns = DocumentRootLinks.SelectColumns;
+        return new(
+            row.RootLinkOf(columns[0], row.SprkProjectidValue), row.RootLinkOf(columns[1], row.SprkRelatedprojectValue),
+            row.RootLinkOf(columns[2], row.SprkMatterValue), row.RootLinkOf(columns[3], row.SprkRelatedmatterValue),
+            row.RootLinkOf(columns[4], row.SprkWorkassignmentValue), row.RootLinkOf(columns[5], row.SprkRelatedworkassignmentValue))
         {
             Row = row.Extra,
         };
+    }
 
     /// <summary>
     /// The six root links of a <c>sprk_document</c> (a typed lookup and its related twin, per root: project, matter, work
@@ -552,14 +897,20 @@ public class ExternalDataService
     /// single-document route (download, versions), so one document is not readable on one path and hidden on another.
     /// </summary>
     /// <remarks>
-    /// The columns are the root subset of <see cref="DocumentLinkFields"/> (pinned by test). A value that is null or blank
-    /// is "not filed to this root"; a value that is not a GUID reads as unreadable (fail closed).
+    /// The columns are the root subset of <see cref="DocumentLinkFields"/> (pinned by test). An explicit null (or a blank value)
+    /// is "not filed to this root"; a column that is ABSENT from a Web API row was not read and a value that is not a GUID cannot
+    /// be read: both are <see cref="Unreadable"/> (fail closed). Every Web API read that feeds this type selects all six
+    /// columns (<see cref="SelectColumns"/>; pinned by test). No FetchXML path feeds it: the module (FetchXML) reads take their
+    /// root links from <c>ExternalModuleDescriptor.RootLinks</c>.
     /// </remarks>
     public readonly record struct DocumentRootLinks(
         string? Project, string? RelatedProject,
         string? Matter, string? RelatedMatter,
         string? WorkAssignment, string? RelatedWorkAssignment)
     {
+        /// <summary>The link value the multi-root rule withholds: not a GUID, so it counts as a root the caller cannot read.</summary>
+        internal const string Unreadable = "malformed";
+
         /// <summary>The <c>_..._value</c> select columns of the six links, in the order of this record's members.</summary>
         internal static readonly IReadOnlyList<string> SelectColumns = new[]
         {
@@ -583,7 +934,8 @@ public class ExternalDataService
         /// Task 187: the document row as read. Its parent lookups that are NOT root links
         /// (<see cref="ExternalMultiRootRule.LiveParentLookupsOf"/> of <c>sprk_document</c>: the related event, communication,
         /// to-do, agreement, invoice, the parent and canonical document ...) join the rule with their LIVE roots; the rule
-        /// derives them from the row itself (<see cref="ChildRowRoots"/>). <c>null</c>: no such column came back.
+        /// derives them from the row itself (<see cref="ChildRowRoots"/>). <c>null</c>: no such column came back, so every one is
+        /// unreadable (fix round 3c: a parent lookup column that is absent from the row was not read).
         /// </summary>
         public IReadOnlyDictionary<string, JsonElement>? Row { get; init; }
 
@@ -611,7 +963,10 @@ public class ExternalDataService
         public bool SecureRootsReadableBy(CallerPrincipal caller, SecureRootFlags flags, LiveParentRoots? live = null) =>
             ExternalMultiRootRule.ChildRowReadable(caller, flags, RuleInput(live));
 
-        /// <summary>The links a single-row read returned. A present value that is not a JSON string reads as malformed.</summary>
+        /// <summary>
+        /// The links a single-row read returned. A column that is absent from the row was not read, and a present value that is not
+        /// a JSON string cannot be read: both are <see cref="Unreadable"/>. An explicit JSON null is "not filed there".
+        /// </summary>
         internal static DocumentRootLinks From(IReadOnlyDictionary<string, JsonElement> row) => new(
             Raw(row, SelectColumns[0]), Raw(row, SelectColumns[1]),
             Raw(row, SelectColumns[2]), Raw(row, SelectColumns[3]),
@@ -622,12 +977,12 @@ public class ExternalDataService
 
         private static string? Raw(IReadOnlyDictionary<string, JsonElement> row, string column)
         {
-            if (!row.TryGetValue(column, out var value)) return null;
+            if (!row.TryGetValue(column, out var value)) return Unreadable; // not read: never "not filed there"
             return value.ValueKind switch
             {
                 JsonValueKind.Null or JsonValueKind.Undefined => null,
                 JsonValueKind.String => value.GetString(),
-                _ => "malformed", // not a GUID: the multi-root rule withholds it (fail closed)
+                _ => Unreadable, // not a GUID: the multi-root rule withholds it (fail closed)
             };
         }
     }
@@ -675,6 +1030,8 @@ public class ExternalDataService
         // Task 188: the columns the document narrowing reads (the two lookups are already lineage parents; the own Access
         // Permission is not), each once.
         select = string.Join(",", select.Split(',').Concat(ExternalDocumentNarrowing.SelectColumns).Distinct(StringComparer.Ordinal));
+        // Task 130-0 fix round 1: every invoice link (sprk_invoice, sprk_relatedinvoice), so a document follows its invoice.
+        select = WithInvoiceLinkColumns(select, DocumentTable);
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
     }
@@ -941,6 +1298,10 @@ public class ExternalDataService
             .Concat(DocumentRootLinks.SelectColumns)
             .Concat(ExternalMultiRootRule.LiveParentSelect(DocumentTable)) // task 187
             .Concat(ExternalDocumentNarrowing.SelectColumns) // task 188: what the document narrowing reads
+            .Concat(InvoiceLinks.Tables.TryGetValue(DocumentTable, out var invoiceLinked)
+                ? invoiceLinked.ValueColumns
+                : Array.Empty<string>()) // task 130-0 fix round 1: a document follows its invoice
+            .Concat(InvoiceLinks.ParentValueColumnsOf(DocumentTable)) // F3b fix round 1: and the invoices of every row it is filed under
             .Distinct(StringComparer.Ordinal);
         var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
@@ -970,6 +1331,26 @@ public class ExternalDataService
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
         return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0b F3b: the invoices a service request links to (<c>sprk_regardinginvoice</c>, through
+    /// <see cref="InvoiceLinks.LinkColumnsOf"/>), so the single-request routes can apply the invoice rule to the request as to any child row.
+    /// An empty array: no invoice link. A row that is gone, a link column that was not returned and a link that is not a GUID read as
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (never visible). App-only. A read that FAILS throws
+    /// <see cref="DataverseUnavailableException"/> (the same rule as <see cref="GetServiceRequestRequesterAsync"/>). An array, so a
+    /// substituted service answers "no link" by default.
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<Guid[]> GetServiceRequestInvoiceLinksAsync(Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var columns = InvoiceLinks.LinkColumnsOf(ServiceRequestTable).Select(c => $"_{c}_value").ToArray();
+        if (columns.Length == 0)
+            return Array.Empty<Guid>();
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select={string.Join(",", columns)}";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return InvoiceLinksOf(ServiceRequestTable, row).ToArray();
     }
 
     /// <summary>
@@ -1201,13 +1582,18 @@ public class ExternalDataService
     /// never null — the same rule as <see cref="GetServiceRequestRequesterAsync"/>.
     /// </remarks>
     /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
-    public virtual async Task<(Guid? MatterId, Guid? ProjectId)?> GetInvoiceParentsAsync(
+    public virtual async Task<(Guid? MatterId, Guid? ProjectId, Guid? WorkAssignmentId)?> GetInvoiceParentsAsync(
         Guid invoiceId, CancellationToken ct = default)
     {
-        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select=_sprk_matter_value,_sprk_project_value";
+        // ebilling-r1 task 130-0 fix round 2 (K3, D-28): and its work-assignment core record.
+        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})" +
+                  "?$select=_sprk_matter_value,_sprk_project_value,_sprk_regardingworkassignment_value";
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
-        return row is null ? null : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"));
+        return row is null
+            ? null
+            : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"),
+                GuidValue(row, "_sprk_regardingworkassignment_value"));
     }
 
     /// <summary>
@@ -1224,22 +1610,48 @@ public class ExternalDataService
     /// </remarks>
     /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
     /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException">There is no such invoice.</exception>
-    public virtual async Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
-        Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default)
+    public virtual Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
+        Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default) =>
+        GetRowLookupsAsync("sprk_invoices", "sprk_invoice", invoiceId, lookups, ct);
+
+    /// <summary>
+    /// An invoice submission's <paramref name="lookups"/>, read app-only in the shape <see cref="GetInvoiceLookupsAsync"/> returns an
+    /// invoice's (ebilling-r1 task 130b fix round 6: the firm outcome route applies the secure-roots rule to the submission's own row).
+    /// A missing submission throws <see cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException"/>; a read that FAILS throws
+    /// <see cref="DataverseUnavailableException"/>, never an empty row.
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException">There is no such submission.</exception>
+    public virtual Task<IReadOnlyDictionary<string, object?>> GetSubmissionLookupsAsync(
+        Guid submissionId, IReadOnlyCollection<string> lookups, CancellationToken ct = default) =>
+        GetRowLookupsAsync(
+            Sprk.Bff.Api.Services.Access.SecureChildLineage.Children["sprk_invoicesubmission"].EntitySet,
+            "sprk_invoicesubmission", submissionId, lookups, ct);
+
+    private async Task<IReadOnlyDictionary<string, object?>> GetRowLookupsAsync(
+        string entitySet, string logicalName, Guid rowId, IReadOnlyCollection<string> lookups, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(lookups);
         var columns = lookups.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (columns.Count == 0 || columns.Any(c => !LookupNamePattern.IsMatch(c)))
             throw new ArgumentException("Lookup names must be logical names.", nameof(lookups));
 
-        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select={string.Join(",", columns.Select(c => $"_{c}_value"))}";
+        var url = $"{GetApiUrl()}/{entitySet}({rowId})?$select={string.Join(",", columns.Select(c => $"_{c}_value"))}";
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct)
-                  ?? throw new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException("sprk_invoice", invoiceId);
+                  ?? throw new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException(logicalName, rowId);
 
         var lookupsRead = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in columns)
         {
-            if (!row.TryGetValue($"_{column}_value", out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            // Fix round 3d: a lookup column that is ABSENT from the row was not read; it is passed through as a value that is not a GUID
+            // (the gate reads it as malformed and fails closed), never as "not filed there". Only an explicit JSON null is unset.
+            if (!row.TryGetValue($"_{column}_value", out var value))
+            {
+                lookupsRead[column] = ExternalMultiRootRule.UnreadableLookup;
+                continue;
+            }
+
+            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                 continue; // not filed there
             lookupsRead[column] = value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id)
                 ? id
@@ -1286,8 +1698,10 @@ public class ExternalDataService
     /// <summary>The recent-grants read: the rows, and whether it was cut short or failed (never silent).</summary>
     public sealed record RecentGrantsRead(IReadOnlyList<RecentGrant> Grants, bool Truncated);
 
-    /// <summary>One service request the caller requested: its id, name and requester.</summary>
-    public sealed record RequestedServiceRequest(Guid Id, string? Name, Guid RequestedBy);
+    /// <summary>One service request the caller requested: its id, name and requester. F3b fix round 1 (F2): and the invoices it links to
+    /// (<see cref="InvoiceLinksOf(string, IReadOnlyDictionary{string, JsonElement})"/>, read from the same row); <see langword="null"/>
+    /// means they were not read, which the feed decides as a link it cannot read (the request is not reported).</summary>
+    public sealed record RequestedServiceRequest(Guid Id, string? Name, Guid RequestedBy, IReadOnlyList<Guid>? InvoiceLinks = null);
 
     /// <summary>The caller's service requests, and whether the read was cut short or failed.</summary>
     public sealed record RequestedServiceRequestsRead(IReadOnlyList<RequestedServiceRequest> Requests, bool Truncated);
@@ -1407,51 +1821,71 @@ public class ExternalDataService
 
         var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
             "sprk_servicerequests", "_sprk_requestedby_value", ids,
-            "sprk_servicerequestid,sprk_name,_sprk_requestedby_value", "createdon desc", ct);
+            WithInvoiceLinkColumns("sprk_servicerequestid,sprk_name,_sprk_requestedby_value", ServiceRequestTable), "createdon desc", ct);
 
         var requests = read.Rows
             .Where(r => GuidValue(r, "sprk_servicerequestid") is not null && GuidValue(r, "_sprk_requestedby_value") is not null)
             .Select(r => new RequestedServiceRequest(
                 GuidValue(r, "sprk_servicerequestid")!.Value,
                 r.TryGetValue("sprk_name", out var name) && name.ValueKind == JsonValueKind.String ? name.GetString() : null,
-                GuidValue(r, "_sprk_requestedby_value")!.Value))
+                GuidValue(r, "_sprk_requestedby_value")!.Value,
+                InvoiceLinksOf(ServiceRequestTable, r))) // F3b fix round 1 (F2): the feed follows the request's invoice
             .ToList();
 
         return new RequestedServiceRequestsRead(requests, read.Truncated);
     }
 
     /// <summary>
-    /// The display names of the given project / matter / work-assignment records (their primary name columns, the same
-    /// ones the to-do regarding stamp reads), app-only and chunked. An entity outside those three yields an empty,
-    /// incomplete answer.
+    /// The display names of the given project / matter / work-assignment / invoice records (their primary name columns: for the
+    /// first three the same ones the to-do regarding stamp reads; an invoice's is its <c>sprk_name</c>, a column the external invoice
+    /// module already releases), app-only and chunked. An entity outside those four yields an empty, incomplete answer.
     /// </summary>
     public virtual async Task<RecordNamesRead> GetRecordNamesAsync(
         string entityLogicalName, IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
     {
-        var binding = RootBindings.Values.FirstOrDefault(
-            b => string.Equals(b.EntityLogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
+        var binding = NameBindingFor(entityLogicalName);
         var idList = ids.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToList();
         if (binding is null)
             return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: idList.Count == 0);
         if (idList.Count == 0)
             return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: true);
 
-        var idColumn = binding.EntityLogicalName + "id";
+        var idColumn = binding.Value.EntityLogicalName + "id";
         var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
-            binding.EntitySet, idColumn, idList, $"{idColumn},{binding.DisplayNameAttribute}", $"{idColumn} asc", ct);
+            binding.Value.EntitySet, idColumn, idList, $"{idColumn},{binding.Value.DisplayNameAttribute}", $"{idColumn} asc", ct);
 
         var names = new Dictionary<Guid, string?>();
         foreach (var row in read.Rows)
         {
             if (GuidValue(row, idColumn) is { } id)
             {
-                names[id] = row.TryGetValue(binding.DisplayNameAttribute, out var value) && value.ValueKind == JsonValueKind.String
+                names[id] = row.TryGetValue(binding.Value.DisplayNameAttribute, out var value) && value.ValueKind == JsonValueKind.String
                     ? value.GetString()
                     : null;
             }
         }
 
         return new RecordNamesRead(names, Complete: !read.Truncated);
+    }
+
+    /// <summary>The invoice's name column, the title of an invoice item on the notification feed (<c>sprk_name</c>; in the external invoice module's ReadableColumns).</summary>
+    internal const string InvoiceNameColumn = "sprk_name";
+
+    /// <summary>How one entity's display name is read: its logical name, entity set and the name column.</summary>
+    private readonly record struct NameBinding(string EntityLogicalName, string EntitySet, string DisplayNameAttribute);
+
+    /// <summary>
+    /// The name binding of an entity the notification feed titles: the three A-9 roots (their <see cref="RootBindings"/>) and the invoice
+    /// (ebilling-r1 task 132: an eBilling item is titled by the invoice's own <c>sprk_name</c>). Null for any other entity.
+    /// </summary>
+    private static NameBinding? NameBindingFor(string entityLogicalName)
+    {
+        if (string.Equals("sprk_invoice", entityLogicalName, StringComparison.OrdinalIgnoreCase))
+            return new NameBinding("sprk_invoice", "sprk_invoices", InvoiceNameColumn);
+
+        var root = RootBindings.Values.FirstOrDefault(
+            b => string.Equals(b.EntityLogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
+        return root is null ? null : new NameBinding(root.EntityLogicalName, root.EntitySet, root.DisplayNameAttribute);
     }
 
     /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
@@ -1619,12 +2053,18 @@ public class ExternalDataService
 
         static Guid? Parse(string? v) => Guid.TryParse(v, out var g) ? g : (Guid?)null;
 
-        var project = Parse(row.SprkRegardingprojectValue);
-        var matter = Parse(row.SprkRegardingmatterValue);
-        var workAssignment = Parse(row.SprkRegardingworkassignmentValue);
-
         // sprk_name is NOT NULL in Dataverse, so a non-null name is a reliable existence signal.
         var name = row.SprkName;
+
+        // Fix round 3d: a root stamp column that the row did not carry, or that is not a GUID, cannot be told from a second root, so the
+        // to-do is Ambiguous (a deny state). An explicit JSON null is "not filed to that root".
+        var stamps = row.RootStamps();
+        if (stamps.Any(s => !string.IsNullOrWhiteSpace(s.LookupValue) && !Guid.TryParse(s.LookupValue, out _)))
+            return (TodoRootKind.Ambiguous, null, name);
+
+        var project = Parse(stamps[0].LookupValue);
+        var matter = Parse(stamps[1].LookupValue);
+        var workAssignment = Parse(stamps[2].LookupValue);
 
         var populated = new (TodoRootKind Kind, Guid? Id)[]
         {
@@ -1683,25 +2123,35 @@ public class ExternalDataService
         // ordinary M, its sprk_regardingcommunication a communication under secure X) and a stale copy are withheld.
         var live = await ReadLiveParentRootsAsync(read.Rows.Select(r => ExternalMultiRootRule.LiveParentsOf(TodoTable, r.Extra)), ct);
         var roots = read.Rows
-            .Select(r => ChildRowRoots.Of(
-                TodoTable, r.Extra,
-                ExternalMultiRootRule.Stamps(
-                    r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
-                live))
+            .Select(r => ChildRowRoots.Of(TodoTable, r.Extra, r.RootStamps(), live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
-        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
-        if (readable.Count != read.Rows.Count)
+        var rootReadable = read.Rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList();
+        if (rootReadable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
                 "[EXT-DATA] todos: {Withheld} of {Total} to-do(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
-                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+                read.Rows.Count - rootReadable.Count, read.Rows.Count, rootKind, rootId);
         }
+
+        // uac-r2 task 191h (#2179 design §3.10, #2189): a to-do regarding an internal-only communication, a hidden document or a
+        // Restricted root (through ANY lineage parent, not only the stamp) is not shown to a caller who is not an internal
+        // systemuser: THE external visibility predicate, one call for the page; Undecided drops the row and says truncated.
+        var (readable, undecided) = await HideExternallyHiddenRowsAsync(
+            caller, TodoTable, rootReadable, r => RowIdOf(r.SprkTodoid), "todos", ct);
+
+        // F3b fix round 1: a to-do follows the invoices of every row it is filed under (its event, document, communication, analysis,
+        // agreement or service request, up the chain); a chain read that fails drops the to-dos that have a parent and says truncated.
+        var ancestors = await ReadAncestorLinksOfRowsAsync(
+            TodoTable, readable.Select(r => (RowIdOf(r.SprkTodoid), (IReadOnlyDictionary<string, JsonElement>?)r.Extra)).ToList(), ct);
+        var todos = readable.Select((r, i) => (Row: r, Links: ancestors[i])).Where(r => r.Links is not null)
+            .Select(r => MapTodo(r.Row, r.Links)).ToList();
 
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
-            Value = readable.Select(MapTodo).ToList(),
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
+            Value = todos,
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - rootReadable.Count)
+                        || undecided || todos.Count < readable.Count,
         };
     }
 
@@ -1733,6 +2183,7 @@ public class ExternalDataService
                      "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl," +
                      CreatorStampSelect + // task 032 (FR-26): the SPA offers Delete only on the caller's own to-dos
                      LiveParentSelectSuffix(TodoTable); // task 187: the parents whose live roots the rule takes in
+        select = WithInvoiceLinkColumns(select, TodoTable); // task 130-0 fix round 1: a to-do follows its invoice
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
 
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
@@ -1764,21 +2215,67 @@ public class ExternalDataService
     {
         ArgumentNullException.ThrowIfNull(caller);
         var url = $"{GetApiUrl()}/{BuildEventsQuery(rootKind, rootId)}";
+        return await ReadEventRowsAsync(url, caller, $"{rootKind} {rootId}", ct);
+    }
 
+    /// <summary>
+    /// R4 task 014b (FR-36, owner Q-7): ONE event by id, through the SAME read and the SAME withholding as the events lists
+    /// (<see cref="GetEventsAsync"/>: the multi-root rule and THE external visibility predicate). Like the lists it only READS the
+    /// row's invoice links (<see cref="ExternalEventDto.InvoiceLinks"/>): it does NOT hide an invoice-linked event — the route
+    /// applies the caller-aware invoice hiding, the same call the lists make (review pass 2, F1). The value is empty when the event
+    /// does not exist or is withheld; <c>Truncated</c> when a rule could not be decided (the route's 503, never a 200). The route
+    /// has ALREADY checked the caller's Read on every parent (the delete rule's parent check).
+    /// </summary>
+    // `virtual` per ADR-038 section 4 (substitution seam), as GetEventsAsync.
+    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventByIdAsync(
+        Guid eventId, CallerPrincipal caller, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var url = $"{GetApiUrl()}/{BuildEventByIdQuery(eventId)}";
+        return await ReadEventRowsAsync(url, caller, $"event {eventId}", ct);
+    }
+
+    /// <summary>The relative query <see cref="GetEventByIdAsync"/> sends: the list's columns, filtered to one id. Pure.</summary>
+    internal static string BuildEventByIdQuery(Guid eventId)
+    {
+        if (eventId == Guid.Empty)
+            throw new ArgumentException("Event id must be a non-empty GUID.", nameof(eventId));
+        var filter = Uri.EscapeDataString($"sprk_eventid eq {eventId}");
+        return $"sprk_events?$filter={filter}&$select={EventSelect()}";
+    }
+
+    /// <summary>The events read shared by the lists and the single read: page, withhold, hide, follow the invoice chain.</summary>
+    private async Task<ExternalCollectionResponse<ExternalEventDto>> ReadEventRowsAsync(
+        string url, CallerPrincipal caller, string scope, CancellationToken ct)
+    {
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
-        var (readable, flags, live) = await ReadableEventsAsync(read.Rows, caller, ct);
-        if (readable.Count != read.Rows.Count)
+        var (rootReadable, flags, live) = await ReadableEventsAsync(read.Rows, caller, ct);
+        if (rootReadable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
-                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
-                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {Scope} withheld - also filed to a secure record the caller cannot read",
+                read.Rows.Count - rootReadable.Count, read.Rows.Count, scope);
         }
+
+        // uac-r2 task 191h (#2179 design §3.10, #2189): an event regarding an internal-only communication (an event built from an
+        // email copies its subject, sender and recipients), a hidden document or a Restricted root is not shown to a caller who is
+        // not an internal systemuser (THE external visibility predicate; see GetTodosAsync).
+        var (readable, undecided) = await HideExternallyHiddenRowsAsync(
+            caller, EventTable, rootReadable, r => RowIdOf(r.SprkEventid), "events", ct);
+
+        // F3b fix round 1: an event follows the invoices of every row it is filed under (an event, a document, a communication ...,
+        // up the chain); a chain read that fails drops the events that have a parent and says truncated.
+        var ancestors = await ReadAncestorLinksOfRowsAsync(
+            EventTable, readable.Select(r => (RowIdOf(r.SprkEventid), (IReadOnlyDictionary<string, JsonElement>?)r.Extra)).ToList(), ct);
+        var events = readable.Select((r, i) => (Row: r, Links: ancestors[i])).Where(r => r.Links is not null)
+            .Select(r => MapEvent(r.Row, r.Links)).ToList();
 
         return new ExternalCollectionResponse<ExternalEventDto>
         {
-            Value = readable.Select(MapEvent).ToList(),
-            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - readable.Count),
+            Value = events,
+            Truncated = read.Truncated || RuleReadCutListShort(flags, live, read.Rows.Count - rootReadable.Count)
+                        || undecided || events.Count < readable.Count,
         };
     }
 
@@ -1801,11 +2298,7 @@ public class ExternalDataService
         // Task 187: the stamped roots plus the live roots of the event's parents (see GetTodosAsync).
         var live = await ReadLiveParentRootsAsync(rows.Select(r => ExternalMultiRootRule.LiveParentsOf(EventTable, r.Extra)), ct);
         var roots = rows
-            .Select(r => ChildRowRoots.Of(
-                EventTable, r.Extra,
-                ExternalMultiRootRule.Stamps(
-                    r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue),
-                live))
+            .Select(r => ChildRowRoots.Of(EventTable, r.Extra, r.RootStamps(), live))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, roots.Select(r => (IEnumerable<(ExternalGrantRootType, string?)>)r), ct);
         return (rows.Where((_, i) => ExternalMultiRootRule.ChildRowReadable(caller, flags, roots[i])).ToList(), flags, live);
@@ -1854,6 +2347,119 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// uac-r2 task 191h (#2179 design §3.3 "Callers", §3.10; #2189): the rows of ONE list page THE external visibility predicate
+    /// (<see cref="AppOnlyExternalVisibility"/>) shows to <paramref name="caller"/>. An internal systemuser (the test
+    /// <see cref="NarrowDocumentsAsync"/> uses) is not narrowed and nothing is asked, so an internal caller's list is unchanged;
+    /// every other caller's rows (a contact, a systemuser flagged external, one whose flag cannot be read) are asked in ONE call
+    /// and only a Visible row stays. A row a rule hides is dropped; a row the predicate could not decide (Undecided: a closure past
+    /// a bound, a row or parent that does not come back, a fault; or no seam, or a seam that throws) is dropped AND the list says
+    /// truncated (ruling D-70: on a list a fault hides the rows and sets truncated). Logs carry counts and reason codes only (ADR-015).
+    /// </summary>
+    internal async Task<(List<T> Visible, bool Undecided)> HideExternallyHiddenRowsAsync<T>(
+        CallerPrincipal caller, string table, IReadOnlyList<T> rows, Func<T, Guid> idOf, string surface, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
+            return (rows.ToList(), false);
+
+        var asked = rows.Select(idOf).Where(id => id != Guid.Empty).Distinct().Select(id => (table, id)).ToList();
+        var answer = ExternalRowVisibility.NothingDecided;
+        if (_visibility is null)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Surface}: no external visibility predicate is configured; all {Total} row(s) hidden (fail closed).",
+                surface, rows.Count);
+        }
+        else if (asked.Count > 0)
+        {
+            try
+            {
+                answer = await _visibility(asked, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    "[EXT-VISIBILITY] {Surface}: the external visibility decision failed ({ErrorType}); all {Total} row(s) hidden (fail closed).",
+                    surface, ex.GetType().Name, rows.Count);
+            }
+        }
+
+        var visible = rows.Where(r => answer.IsVisible(table, idOf(r))).ToList();
+        var undecided = rows.Any(r => !answer.IsVisible(table, idOf(r)) && answer.IsUndecided(table, idOf(r)));
+        if (visible.Count != rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-VISIBILITY] {Surface}: {Hidden} of {Total} row(s) hidden by the external visibility predicate (faulted={Faulted}; {Reasons}).",
+                surface, rows.Count - visible.Count, rows.Count, answer.Faulted, answer.Summary(asked));
+        }
+
+        return (visible, undecided);
+    }
+
+    /// <summary>
+    /// uac-r2 task 191h fix round 1 (adversarial pass 2, F1): the single-row form of <see cref="HideExternallyHiddenRowsAsync{T}"/>
+    /// for the routes that CHANGE one to-do or event (the to-do PATCH and the to-do / event delete-own routes): "a caller cannot
+    /// change what it cannot see" (ebilling-r1 task 130-0), so a row the lists hide is not written either. An internal systemuser is
+    /// <see cref="LiveParentDecision.Readable"/> and nothing is asked. For every other caller: Visible is
+    /// <see cref="LiveParentDecision.Readable"/>; Hidden and Undecided are ONE answer, <see cref="LiveParentDecision.Withheld"/>
+    /// (the route's same 403, so hidden never reads differently from absent, NFR-01); no seam, a seam that throws, or a faulted
+    /// decision that did not show the row is <see cref="LiveParentDecision.Unavailable"/> (the route's 503, nothing written).
+    /// </summary>
+    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam), as <see cref="CheckLiveParentsAsync"/>.</remarks>
+    public virtual async Task<LiveParentDecision> CheckExternalVisibilityAsync(
+        DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var table = kind switch
+        {
+            DeletableKind.Todo => TodoTable,
+            DeletableKind.Event => EventTable,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "The external visibility write check covers to-dos and events."),
+        };
+
+        if (await IsInternalSystemUserAsync(caller, ct))
+            return LiveParentDecision.Readable;
+        if (id == Guid.Empty)
+            return LiveParentDecision.Withheld;
+        if (_visibility is null)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Kind} write: no external visibility predicate is configured; nothing written (fail closed).", kind);
+            return LiveParentDecision.Unavailable;
+        }
+
+        ExternalRowVisibility answer;
+        try
+        {
+            answer = await _visibility(new[] { (table, id) }, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Kind} write: the external visibility decision failed ({ErrorType}); nothing written (fail closed).",
+                kind, ex.GetType().Name);
+            return LiveParentDecision.Unavailable;
+        }
+
+        if (answer.IsVisible(table, id))
+            return LiveParentDecision.Readable;
+
+        _logger.LogInformation(
+            "[EXT-VISIBILITY] {Kind} write refused by the external visibility predicate (faulted={Faulted}; {Reasons}).",
+            kind, answer.Faulted, answer.Summary(new[] { (table, id) }));
+        return answer.Faulted ? LiveParentDecision.Unavailable : LiveParentDecision.Withheld;
+    }
+
+    /// <summary>
     /// Task 188 (main-session decision 2026-10-20): the assistant's <c>dataverse.*</c> tools' document narrowing
     /// (<see cref="AppOnlyDocumentNarrowing"/>). The documents are re-read BY ID and decided APP-ONLY through the same reader as
     /// the external plane, so a column field security masks for the user can never read as "no link". The tool has already
@@ -1878,6 +2484,10 @@ public class ExternalDataService
 
     /// <summary>The cost line's plane for <see cref="InternalRouteDocumentNarrowing"/> (task 188 round 3 slice B).</summary>
     internal const string InternalRoutesPlane = "internal-routes";
+
+    /// <summary>EB-D-215 (C1): the plane label of the external REST routes (the lists, single records, module fetch, messages and the
+    /// feed) on the invoice walk's past-the-bound warning (<see cref="InvoiceLinks.WalkPastTheBoundEvent"/>).</summary>
+    internal const string RestPlane = "rest";
 
     /// <summary>Reads above which a request's narrowing cost line is logged at Information (Debug otherwise).</summary>
     internal const int NarrowingCostInformationThreshold = 20;
@@ -1919,25 +2529,269 @@ public class ExternalDataService
         return false;
     }
 
+    // ---------------------------------------------------------------------------
+    // ebilling-r1 task 130-0, fix round 1 (design.md:414, uac-r2 rulings 2026-11-08): a partner sees only invoices of its own
+    // firms, and what belongs to them. A child row (a to-do, an event, a document ...) that links to an invoice the caller may
+    // not see is hidden on every external route, even when it is also filed under a shared record. Which columns are invoice
+    // links comes from InvoiceLinks (the edge registries), never a hand list.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Task 130-0 fix round 1: the invoices one Web API row of <paramref name="table"/> links to, through every invoice link
+    /// column of that table (<see cref="InvoiceLinks.LinkColumnsOf"/>, read as <c>_col_value</c>). An explicit JSON null is "no link": the
+    /// Web API returns a selected lookup that is not set as null. A column that is ABSENT from the row was not read, so it reads as
+    /// <see cref="ExternalDocumentNarrowing.UnreadableLink"/> (never visible): the read's own <c>$select</c> is not the boundary. A value
+    /// that is not a GUID reads the same way (fail closed). A table with no invoice link reads as an empty list whatever the row holds.
+    /// </summary>
+    internal static IReadOnlyList<Guid> InvoiceLinksOf(string table, IReadOnlyDictionary<string, JsonElement>? row)
+    {
+        var links = new List<Guid>();
+        foreach (var column in InvoiceLinks.LinkColumnsOf(table))
+        {
+            if (row is null || !row.TryGetValue($"_{column}_value", out var value))
+            {
+                links.Add(ExternalDocumentNarrowing.UnreadableLink); // not read: never "no link"
+                continue;
+            }
+
+            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                continue;
+
+            links.Add(value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id) && id != Guid.Empty
+                ? id
+                : ExternalDocumentNarrowing.UnreadableLink);
+        }
+
+        return links.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 1: <see cref="InvoiceLinksOf(string, IReadOnlyDictionary{string, JsonElement})"/> for a FetchXML (module)
+    /// row, keyed by logical name. A present value that is not a lookup id reads as <see cref="ExternalDocumentNarrowing.UnreadableLink"/>.
+    /// Unlike the Web API overload, an absent attribute IS "no link" here: FetchXML omits a null attribute. The attribute list of every
+    /// caller must therefore carry <see cref="InvoiceLinks.LinkColumnsOf"/> of the table (pinned by
+    /// <c>ExternalInvoiceLinkedChildListTests.EveryFetchXmlChildModule_ProjectsEveryRegistryLinkColumn</c>).
+    /// </summary>
+    internal static IReadOnlyList<Guid> InvoiceLinksOf(string table, IReadOnlyDictionary<string, object?> row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var links = new List<Guid>();
+        foreach (var column in InvoiceLinks.LinkColumnsOf(table))
+        {
+            if (!row.TryGetValue(column, out var raw) || raw is null)
+                continue;
+            links.Add(ExternalModuleDescriptor.TryGetAttributeId(row, column, out var id) ? id : ExternalDocumentNarrowing.UnreadableLink);
+        }
+
+        return links.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 1: <paramref name="select"/> plus the invoice link columns of <paramref name="table"/> it does not already
+    /// name (<see cref="InvoiceLinks.LinkedTable.ValueColumns"/>), so a list read always carries what the invoice filter reads.
+    /// </summary>
+    /// <remarks>F3b fix round 1: and the parent edge columns of <paramref name="table"/> (<see cref="InvoiceLinks.ParentValueColumnsOf"/>),
+    /// so the rows can be put to the ancestor walk (<see cref="ReadAncestorLinksOfRowsAsync"/>), where a column that was not read is
+    /// undecidable, never "no parent".</remarks>
+    internal static string WithInvoiceLinkColumns(string select, string table)
+    {
+        var columns = (InvoiceLinks.Tables.TryGetValue(table, out var linked) ? linked.ValueColumns : Array.Empty<string>())
+            .Concat(InvoiceLinks.ParentValueColumnsOf(table))
+            .ToList();
+        if (columns.Count == 0)
+            return select;
+        var present = select.Split(',').ToHashSet(StringComparer.Ordinal);
+        return string.Concat(columns.Distinct(StringComparer.Ordinal).Where(c => !present.Contains(c)).Select(c => "," + c).Prepend(select));
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 1: the rows of ONE page that the invoice decision leaves visible to <paramref name="caller"/>. Every
+    /// invoice the page links to is put to <paramref name="hideInvoices"/> (the caller-aware seam, <see cref="ExternalInvoiceHiding"/>)
+    /// in ONE call; none linked means no call. A row with no invoice link is unaffected. A row is hidden when ANY invoice it links to is
+    /// not visible (or its link is unreadable). No seam, a seam that throws and a faulted decision hide EVERY invoice-linked row of the
+    /// page (fail closed), and the answer says <c>Truncated</c> when that dropped a row. Logs carry counts only.
+    /// </summary>
+    /// <param name="undecidableTruncates">EB-D-215 (ruling D-70: on a list a fault hides the rows and sets truncated): a row hidden
+    /// because a link it decides on cannot be decided (<see cref="ExternalDocumentNarrowing.UnreadableLink"/>: a chain past the bound, a
+    /// cycle, an unreadable link or a parent that does not come back) is a fault, not an answer, so the list says <c>Truncated</c>.
+    /// True for every list; false only for a single-record decision, which keeps its uniform hidden answer.</param>
+    internal static async Task<(List<T> Visible, bool Truncated)> HideInvoiceLinkedRowsAsync<T>(
+        CallerPrincipal caller,
+        IReadOnlyList<T> rows,
+        Func<T, IReadOnlyList<Guid>> invoiceLinksOf,
+        ExternalInvoiceHiding? hideInvoices,
+        ILogger logger,
+        string surface,
+        CancellationToken ct,
+        bool undecidableTruncates = true)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(invoiceLinksOf);
+        var links = rows.Select(invoiceLinksOf).ToList();
+        var (decision, faulted) = await AskInvoiceDecisionAsync(caller, links, hideInvoices, logger, surface, ct).ConfigureAwait(false);
+
+        var visible = rows
+            .Where((_, i) => links[i].Count == 0 || (!faulted && decision is not null && links[i].All(decision.IsVisible)))
+            .ToList();
+        if (visible.Count != rows.Count)
+        {
+            logger.LogInformation(
+                "[EXT-INVOICE-LINKED] {Surface}: {Hidden} of {Total} row(s) hidden by the invoice they belong to (faulted={Faulted}; {Reasons}).",
+                surface, rows.Count - visible.Count, rows.Count, faulted, decision?.HiddenSummary() ?? "");
+        }
+
+        // Task 130-0 fix round 3b: a row dropped for an invoice whose decision could not be made (the whole read, or that invoice's own
+        // decision) says Truncated; a row dropped for a decided "not visible" does not.
+        var droppedForFault = faulted || (decision is not null && rows.Where((_, i) => links[i].Count > 0
+            && !links[i].All(decision.IsVisible) && links[i].Any(decision.IsFaultedFor)).Any());
+        // EB-D-215: a row dropped because a link it decides on cannot be decided (the unreadable link is never visible) says Truncated too.
+        var droppedUndecidable = undecidableTruncates && links.Any(l => l.Contains(ExternalDocumentNarrowing.UnreadableLink));
+        return (visible, (droppedForFault || droppedUndecidable) && visible.Count != rows.Count);
+    }
+
+    /// <summary>
+    /// The one question to the caller-aware seam for <paramref name="links"/> (the invoices of one or more rows): every distinct usable
+    /// invoice in ONE call; none usable means no call. <c>Faulted</c> when no seam is configured, the seam throws, or the decision says
+    /// it failed (<see cref="InvoiceVisibilityResult.Faulted"/>). Shared by the page filter and the single-record decision.
+    /// </summary>
+    private static async Task<(InvoiceVisibilityResult? Decision, bool Faulted)> AskInvoiceDecisionAsync(
+        CallerPrincipal caller, IEnumerable<IReadOnlyList<Guid>> links, ExternalInvoiceHiding? hideInvoices, ILogger logger,
+        string surface, CancellationToken ct)
+    {
+        var asked = links
+            .SelectMany(l => l)
+            .Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink)
+            .Distinct()
+            .ToList();
+        if (asked.Count == 0)
+            return (null, false);
+
+        if (hideInvoices is null)
+        {
+            logger.LogError(
+                "[EXT-INVOICE-LINKED] {Surface}: no invoice predicate is configured; every row linked to one of {Count} invoice(s) is hidden (fail closed).",
+                surface, asked.Count);
+            return (null, true);
+        }
+
+        try
+        {
+            var decision = await hideInvoices(caller, asked, ct).ConfigureAwait(false);
+            return (decision, decision.Faulted);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[EXT-INVOICE-LINKED] {Surface}: the invoice decision for {Count} invoice(s) failed; every invoice-linked row is hidden (fail closed).",
+                surface, asked.Count);
+            return (null, true);
+        }
+    }
+
+    /// <summary>What a SINGLE invoice-linked record read is told about its invoices (task 130-0 fix round 3, Q2).</summary>
+    internal enum InvoiceLinkedRowState
+    {
+        /// <summary>No invoice link, or every linked invoice is visible to the caller.</summary>
+        Visible,
+
+        /// <summary>A linked invoice is decided not visible (or its link cannot be read): the route's uniform refusal.</summary>
+        Hidden,
+
+        /// <summary>The decision could not be made (the caller's firms, or a linked invoice's own decision, could not be read): the
+        /// route's retryable unavailable answer, never the refusal.</summary>
+        Faulted,
+    }
+
+    /// <summary>
+    /// Task 130-0 fix round 3 (Q2): the decision for ONE record (a single-record read) that links to <paramref name="links"/>. A
+    /// record with no link is <see cref="InvoiceLinkedRowState.Visible"/> and asks nothing. Otherwise the linked invoices are put to
+    /// <paramref name="hideInvoices"/> in one call: all visible is Visible; a decision that could not be made (no seam, a throw, a whole
+    /// failed read, or a linked invoice whose own decision failed) is <see cref="InvoiceLinkedRowState.Faulted"/> unless another linked
+    /// invoice is decidedly not visible (or a link cannot be read), which is <see cref="InvoiceLinkedRowState.Hidden"/>: that answer does
+    /// not depend on the fault. Collections keep hiding a row in every such case (<see cref="HideInvoiceLinkedRowsAsync{T}"/>).
+    /// </summary>
+    /// <param name="chainUndecidable">F3b: the chain of rows the record hangs from (a child document's parent documents) could not be
+    /// decided (a cycle, past the bound, a parent that does not come back, an unreadable link). <paramref name="links"/> then holds the
+    /// invoices that WERE read. The record is Visible never; it is Hidden when one of those invoices is decided not visible (that
+    /// answer does not depend on the chain), otherwise Faulted.</param>
+    internal static async Task<InvoiceLinkedRowState> DecideInvoiceLinkedRowAsync(
+        CallerPrincipal caller, IReadOnlyList<Guid> links, ExternalInvoiceHiding? hideInvoices, ILogger logger, string surface,
+        CancellationToken ct, bool chainUndecidable = false)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(links);
+        if (links.Count == 0 && !chainUndecidable)
+            return InvoiceLinkedRowState.Visible;
+
+        var (decision, faulted) = await AskInvoiceDecisionAsync(caller, new[] { links }, hideInvoices, logger, surface, ct)
+            .ConfigureAwait(false);
+        if (faulted)
+            return InvoiceLinkedRowState.Faulted;
+        if (!chainUndecidable && decision is not null && links.All(decision.IsVisible))
+            return InvoiceLinkedRowState.Visible;
+
+        var anyDecidedHidden = links.Any(link =>
+            link == ExternalDocumentNarrowing.UnreadableLink || link == Guid.Empty
+            || decision is null || (!decision.IsVisible(link) && !decision.IsFaultedFor(link)));
+        if (!anyDecidedHidden)
+        {
+            logger.LogWarning(
+                "[EXT-INVOICE-LINKED] {Surface}: a linked invoice's own decision failed ({Reasons}); answered as unavailable.",
+                surface, decision?.HiddenSummary() ?? "");
+            return InvoiceLinkedRowState.Faulted;
+        }
+
+        return InvoiceLinkedRowState.Hidden;
+    }
+
     /// <summary>
     /// ebilling-r1 task 098: THE invoice (a′) predicate (<see cref="ExternalInvoiceVisibility"/>) for <paramref name="caller"/>,
     /// read app-only. An internal systemuser (the same test as <see cref="NarrowDocumentsAsync"/>) hides nothing; every other
     /// caller — a CIAM contact, a flagged systemuser, an unresolvable one, one whose lookup FAILED (unknown is never internal)
     /// — gets the predicate. A failed read hides every asked invoice (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
     /// <see cref="ExternalInvoiceHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
+    /// Task 130-0 (design.md:414): a partner sees only invoices of its own firms. The caller's firms are read ONCE per call through
+    /// <paramref name="callerFirms"/>, after the internal check (an internal systemuser causes no firm read). Firms that are unknown
+    /// (a throw, a null answer, <see cref="CallerFirmsState.Unknown"/>) hide every asked invoice as a failed read; a caller known to be
+    /// a member of no firm sees no invoice (owner decision 2026-11-08).
     /// </summary>
     internal async Task<InvoiceVisibilityResult> HideInvoicesForAsync(
-        CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+        CallerPrincipal caller, IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CallerFirmReader callerFirms,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(invoiceIds);
         ArgumentNullException.ThrowIfNull(rootFlags);
+        ArgumentNullException.ThrowIfNull(callerFirms);
         var asked = invoiceIds.Where(id => id != Guid.Empty).Distinct().ToList();
         if (asked.Count == 0 || await IsInternalSystemUserAsync(caller, ct))
             return InvoiceVisibilityResult.NotHidden(asked);
         try
         {
-            var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags), ct);
+            var firms = await callerFirms(caller, ct) ?? CallerFirms.Unknown;
+            switch (firms.State)
+            {
+                case CallerFirmsState.Known:
+                    break;
+                case CallerFirmsState.NoFirm:
+                    // Owner decision 2026-11-08: a caller who is a member of no firm sees no invoice. THE one place this is decided.
+                    _logger.LogInformation(
+                        "[EXT-INVOICE-VISIBILITY] The caller is a member of no firm: {Count} invoice(s) hidden (firm_not_callers).", asked.Count);
+                    return new InvoiceVisibilityResult(
+                        asked, asked.ToDictionary(id => id, _ => InvoiceHiddenReason.FirmNotCallers), faulted: false);
+                default:
+                    _logger.LogWarning(
+                        "[EXT-INVOICE-VISIBILITY] The caller's firms are unknown. Failing CLOSED: none of {Count} invoice(s) is shown.",
+                        asked.Count);
+                    return InvoiceVisibilityResult.ReadFailed(asked);
+            }
+
+            var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
             LogInvoiceVisibilityCost("external", asked.Count, decision);
             return decision;
         }
@@ -1956,8 +2810,8 @@ public class ExternalDataService
 
     /// <summary>
     /// ebilling-r1 task 098 review round 4b: THE decision of the external submission routes (list and single read) for
-    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): with an
-    /// invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
+    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): no firm,
+    /// withheld; with an invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
     /// (the same test as <see cref="HideInvoicesForAsync"/>) sees every one and causes no read; every other caller gets the
     /// decision. A failed read withholds every asked submission (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
     /// <see cref="ExternalInvoiceSubmissionHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
@@ -1994,30 +2848,270 @@ public class ExternalDataService
     /// <summary>
     /// ebilling-r1 task 098 surface (d): the assistant tools' taint closure (<see cref="AppOnlyInvoiceFamilyHiding"/>): of
     /// <paramref name="rowIds"/> (rows of an invoice-family table), the ids hidden because their invoice is. The caller is
-    /// already known to be external. Read app-only; a failed read THROWS (the tool call fails with no data).
+    /// already known to be external. Read app-only.
+    /// Task 130-0b (design.md:414): a partner sees only invoices of its own firms. The caller's firms come from
+    /// <paramref name="caller"/>, read through <paramref name="systemUserFirms"/> at most ONCE per tool call. Known firms apply the
+    /// own-firms rule (the firm hold decides first, firm_missing; then firm_not_callers; a submission row is also hidden when its own
+    /// firm is not one of the caller's). A caller KNOWN to be in no firm hides every asked row, with no row read (an answer).
+    /// F3b (uac-r2 ruling): firms that cannot be read (a throw, a null answer, <see cref="CallerFirmsState.Unknown"/>) are a whole-read
+    /// failure: this THROWS <see cref="DataverseUnavailableException"/> and the tool call fails with no data (<see cref="UnknownFirmsFailTheCall"/>).
+    /// With the firms known, a fault on the decided rows hides them (the asked rows) and does not throw, on the family path too.
+    /// Task 130-0b step 2: rows of a CHILD table with an invoice link, and (F3b) of a DESCENDANT of one, go to
+    /// <see cref="HideInvoiceLinkedChildRowsAsync"/> (decided by the invoices they link to; a fault there hides rather than throws).
+    /// Task 130-0b step 3: rows of a ROOT with an invoice link go to <see cref="RootRowsWithInvoiceLinkBlankedAsync"/>; for such a table
+    /// the returned ids are the rows whose invoice link is blanked, never rows to hide.
     /// </summary>
     internal async Task<IReadOnlySet<Guid>> HideInvoiceFamilyRowsAsync(
-        string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags, CancellationToken ct = default)
+        InvoiceFamilyCaller caller, string table, IReadOnlyCollection<Guid> rowIds, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(rowIds);
         ArgumentNullException.ThrowIfNull(rootFlags);
-        var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(table, rowIds, InvoiceVisibilityReadersOver(rootFlags), ct);
-        _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
-            AssistantPlane, table, rowIds.Count, hidden.Count);
-        return hidden;
+        ArgumentNullException.ThrowIfNull(systemUserFirms);
+        var asked = rowIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (asked.Count == 0)
+            return new HashSet<Guid>();
+
+        // Task 130-0b step 2: a child row with an invoice link (to-do, event, document, communication, analysis, memo...) is decided by
+        // its invoices; it does not take the family path below.
+        if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(table))
+            return await HideInvoiceLinkedChildRowsAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
+
+        // Task 130-0b step 3: a ROOT with an invoice link (InvoiceLinks; today the work assignment) is never hidden by it. The rows
+        // returned are the ones whose invoice link the tool blanks; the row itself is shown (a root is decided by its grant).
+        if (InvoiceLinks.IsRootWithInvoiceLink(table))
+            return await RootRowsWithInvoiceLinkBlankedAsync(caller, table, asked, rootFlags, systemUserFirms, ct).ConfigureAwait(false);
+
+        var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
+            .ConfigureAwait(false);
+        if (firms.State == CallerFirmsState.Unknown)
+            throw UnknownFirmsFailTheCall(asked.Count, table);
+        if (firms.State != CallerFirmsState.Known)
+        {
+            _logger.LogInformation(
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} {Table} row(s) hidden (plane={Plane}).",
+                firms.State, asked.Count, table, AssistantPlane);
+            return asked.ToHashSet();
+        }
+
+        // F3b (uac-r2 ruling): a fault on the decided rows hides them, on the family path too; it no longer throws. The caller's firms
+        // being unreadable (above) is the whole-read failure that fails the call.
+        try
+        {
+            var hidden = await ExternalInvoiceVisibility.HiddenFamilyRowsAsync(
+                table, asked, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct);
+            _logger.LogDebug("[EXT-INVOICE-VISIBILITY] cost plane={Plane} table={Table} rows={Rows} hidden={Hidden}",
+                AssistantPlane, table, asked.Count, hidden.Count);
+            return hidden;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The decision for {Count} {Table} row(s) failed. Failing CLOSED: every one is hidden (plane={Plane}).",
+                asked.Count, table, AssistantPlane);
+            return asked.ToHashSet();
+        }
     }
+
+    /// <summary>
+    /// F3b (uac-r2 ruling): firms that cannot be read (a failed or null read, <see cref="CallerFirmsState.Unknown"/>) are a whole-read
+    /// failure of the assistant plane: the tool call fails with no data, never a partial answer. A caller KNOWN to be in no firm is not
+    /// this case: it hides every invoice-linked row.
+    /// </summary>
+    private DataverseUnavailableException UnknownFirmsFailTheCall(int count, string table)
+    {
+        _logger.LogWarning(
+            "[EXT-INVOICE-VISIBILITY] The caller's firms are unknown: the call fails for {Count} {Table} row(s) (plane={Plane}).",
+            count, table, AssistantPlane);
+        return new DataverseUnavailableException("The caller's firms could not be read; the invoice rule cannot be applied.");
+    }
+
+    /// <summary>
+    /// Task 130-0b step 2 (design.md:414): of <paramref name="asked"/> (rows of a CHILD table with an invoice link,
+    /// <see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>), the rows hidden because an invoice they link to is. The links
+    /// are read app-only through <see cref="InvoiceLinks.ReadLinkedInvoicesAsync"/> (one read per chunk); then ONE invoice decision over
+    /// the union of the linked invoices, with the caller's firms from <paramref name="caller"/> (the same decision as
+    /// <see cref="HideInvoicesForAsync"/>: firm hold, firm_not_callers, (a′)). A row is hidden when ANY linked invoice is not visible or
+    /// cannot be decided (<see cref="ExternalDocumentNarrowing.UnreadableLink"/>); a row with no invoice link is not hidden, and the firms
+    /// are not read when no asked row has one. Fail closed: a failed link read hides every asked row (which of them link to an invoice
+    /// is unknown) and a failed or faulted decision hides every asked row that links to one, neither throwing; a caller known to be in
+    /// no firm has every invoice-linked row hidden; firms that CANNOT be read (<see cref="CallerFirmsState.Unknown"/>) fail the call
+    /// (<see cref="UnknownFirmsFailTheCall"/>) when some asked row links to an invoice.
+    /// </summary>
+    private Task<IReadOnlySet<Guid>> HideInvoiceLinkedChildRowsAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct) =>
+        RowsLinkedToAnInvoiceNotVisibleAsync(caller, table, asked, rootFlags, systemUserFirms, "hidden", ct);
+
+    /// <summary>
+    /// Task 130-0b step 3 (design.md:414): of <paramref name="asked"/> (rows of a ROOT with an invoice link,
+    /// <see cref="InvoiceLinks.IsRootWithInvoiceLink"/>; today the work assignment), the rows whose invoice link the tool must BLANK. A
+    /// root is decided by its grant and is never hidden by its invoice link; its invoice link is shown only when that invoice is visible.
+    /// The decision is the child rule's, with the same reads (one app-only link read, then ONE invoice decision with the firms from
+    /// <paramref name="caller"/>): a row whose linked invoice is not visible or cannot be decided is returned; a row with no invoice
+    /// link is not, and the firms are not read when no asked row has one. Fail closed: a failed link read returns every asked row, and
+    /// a failed or faulted decision (or a caller known to be in no firm) returns every asked row that links to an invoice, neither
+    /// throwing; firms that CANNOT be read fail the call (<see cref="UnknownFirmsFailTheCall"/>) when some asked row links to an invoice.
+    /// </summary>
+    private Task<IReadOnlySet<Guid>> RootRowsWithInvoiceLinkBlankedAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, CancellationToken ct) =>
+        RowsLinkedToAnInvoiceNotVisibleAsync(caller, table, asked, rootFlags, systemUserFirms, "shown with the invoice link blanked", ct);
+
+    /// <summary>
+    /// Task 130-0b steps 2 and 3: of <paramref name="asked"/> (rows of a table with an invoice link), the rows that link to an invoice
+    /// that is not visible or cannot be decided, or whose links cannot be read. <paramref name="consequence"/> only labels the log
+    /// lines (a child row is hidden; a root row is shown with its invoice link blanked).
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> RowsLinkedToAnInvoiceNotVisibleAsync(
+        InvoiceFamilyCaller caller, string table, IReadOnlyList<Guid> asked, EffectiveRootFlagReader rootFlags,
+        Func<Guid, CancellationToken, Task<CallerFirms>> systemUserFirms, string consequence, CancellationToken ct)
+    {
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> linksOf;
+        try
+        {
+            linksOf = await InvoiceLinks.ReadLinkedInvoicesAsync(table, asked, QueryRowsOrThrowAsync, ct, _logger, AssistantPlane)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The invoice links of {Count} {Table} row(s) could not be read. Failing CLOSED: every one is {Consequence} (plane={Plane}).",
+                asked.Count, table, consequence, AssistantPlane);
+            return asked.ToHashSet();
+        }
+
+        var linked = linksOf.Where(kv => kv.Value.Count > 0).ToList();
+        if (linked.Count == 0)
+            return new HashSet<Guid>();
+        var linkedRows = linked.Select(kv => kv.Key).ToHashSet();
+
+        var firms = await caller.FirmsAsync((systemUserId, token) => ReadSystemUserFirmsOrUnknownAsync(systemUserFirms, systemUserId, token), ct)
+            .ConfigureAwait(false);
+        if (firms.State == CallerFirmsState.Unknown)
+            throw UnknownFirmsFailTheCall(linkedRows.Count, table); // F3b: the whole read failed; the tool call fails
+        if (firms.State != CallerFirmsState.Known)
+        {
+            _logger.LogInformation(
+                "[EXT-INVOICE-VISIBILITY] The caller's firms are {State}: {Count} invoice-linked {Table} row(s) {Consequence} (plane={Plane}).",
+                firms.State, linkedRows.Count, table, consequence, AssistantPlane);
+            return linkedRows;
+        }
+
+        var invoices = linked.SelectMany(kv => kv.Value).Where(id => id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
+        InvoiceVisibilityResult? decision = null;
+        if (invoices.Count > 0)
+        {
+            try
+            {
+                decision = await ExternalInvoiceVisibility.DecideAsync(invoices, InvoiceVisibilityReadersOver(rootFlags, firms.Firms), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[EXT-INVOICE-VISIBILITY] The decision for {Count} invoice(s) linked from {Table} failed. Failing CLOSED: every invoice-linked row is {Consequence} (plane={Plane}).",
+                    invoices.Count, table, consequence, AssistantPlane);
+                return linkedRows;
+            }
+
+            LogInvoiceVisibilityCost(AssistantPlane, invoices.Count, decision);
+            if (decision.Faulted)
+                return linkedRows;
+        }
+
+        return linked
+            .Where(kv => kv.Value.Any(invoice => invoice == ExternalDocumentNarrowing.UnreadableLink
+                || decision is null || !decision.IsVisible(invoice)))
+            .Select(kv => kv.Key)
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// Task 130-0b: the assistant caller's firms through <paramref name="read"/>; a throw or a null answer is
+    /// <see cref="CallerFirms.Unknown"/>, which the decision paths turn into a whole-read failure (<see cref="UnknownFirmsFailTheCall"/>).
+    /// Cancellation propagates.
+    /// </summary>
+    private async Task<CallerFirms> ReadSystemUserFirmsOrUnknownAsync(
+        Func<Guid, CancellationToken, Task<CallerFirms>> read, Guid systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            return await read(systemUserId, ct).ConfigureAwait(false) ?? CallerFirms.Unknown;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVOICE-VISIBILITY] The firms of systemuser {SystemUserId} could not be read. Failing CLOSED: no invoice-family row is shown.",
+                systemUserId);
+            return CallerFirms.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// uac-r2 task 191c (191b handoff): the CALLER-LESS (a′) decision for <c>ExternalVisibility</c>'s invoice rule, read app-only
+    /// through the same readers as every other (a′) decision, without the own-firms rule (the External Collaborators team is no
+    /// firm's caller: an invoice visible to some partner is not thereby hidden). A failed read THROWS, which the predicate turns
+    /// into an Undecided row (fail closed). Bound by <c>AddExternalAccess</c>'s <c>ExternalVisibilityDecider</c>.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> DecideInvoicesWithoutCallerAsync(
+        IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = invoiceIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags), ct);
+        LogInvoiceVisibilityCost(ExternalTeamSharePlane, asked.Count, decision);
+        return decision;
+    }
+
+    /// <summary>uac-r2 task 191c: the cost lines' plane for the External-team share's reads (<c>ExternalVisibilityDecider</c>).</summary>
+    internal const string ExternalTeamSharePlane = "external-team-share";
+
+    /// <summary>
+    /// uac-r2 task 191c: the app-only OData reader <c>ExternalVisibility</c> reads the 065 rule and thread privacy through (the
+    /// same reader as the document narrowing). A failed read THROWS.
+    /// </summary>
+    internal Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryVisibilityRowsAsync(
+        string entitySet, string odata, CancellationToken ct) => QueryRowsOrThrowAsync(entitySet, odata, ct);
 
     /// <summary>
     /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
     /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
-    /// the live-parent walk and <paramref name="rootFlags"/>.
+    /// the live-parent walk and <paramref name="rootFlags"/>. Task 130-0: <paramref name="callerFirms"/> only from
+    /// <see cref="HideInvoicesForAsync"/> and (task 130-0b) <see cref="HideInvoiceFamilyRowsAsync"/> (the own-firms rule); <c>null</c> on
+    /// the submission routes' seam.
     /// </summary>
-    private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(EffectiveRootFlagReader rootFlags) => new(
+    private InvoiceVisibilityReaders InvoiceVisibilityReadersOver(
+        EffectiveRootFlagReader rootFlags, IReadOnlySet<Guid>? callerFirms = null) => new(
         QueryRowsOrThrowAsync,
         (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, QueryRowsOrThrowAsync, ct, honourSubmissionMarker: true),
         GetLiveParentRootsAsync,
         rootFlags,
-        _logger);
+        _logger,
+        // 095d-2b-1: the invoice's field-secured firm hold, read through the app-only IGenericEntityService. Without one (a test double),
+        // the read throws and every asked invoice and submission is hidden (fail closed).
+        (invoiceIds, ct) => _filing is null
+            ? throw new InvalidOperationException("No app-only reader for the invoice firm hold; failing closed.")
+            : ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync(_filing, invoiceIds, ct),
+        callerFirms);
 
     /// <summary>The ONE (a′) cost line per request: invoices checked and hidden, reads per level. Counts only (ADR-015).</summary>
     private void LogInvoiceVisibilityCost(string plane, int invoices, InvoiceVisibilityResult decision)
@@ -2212,8 +3306,9 @@ public class ExternalDataService
         var stamps = kind == DeletableKind.Document
             ? DocumentRootLinks.From(row).Links
             : ExternalMultiRootRule.Stamps(
-                RawLookup(row, "_sprk_regardingproject_value"), RawLookup(row, "_sprk_regardingmatter_value"),
-                RawLookup(row, "_sprk_regardingworkassignment_value"));
+                ExternalMultiRootRule.LookupOf(row, "_sprk_regardingproject_value"),
+                ExternalMultiRootRule.LookupOf(row, "_sprk_regardingmatter_value"),
+                ExternalMultiRootRule.LookupOf(row, "_sprk_regardingworkassignment_value")); // fix round 3d: an unread stamp is unreadable, never "not filed"
         var live = await ReadLiveParentRootsAsync(new[] { ExternalMultiRootRule.LiveParentsOf(binding.EntityLogicalName, row) }, ct);
         var roots = ChildRowRoots.Of(binding.EntityLogicalName, row, stamps, live);
         var flags = await ReadSecureRootFlagsAsync(caller, new[] { (IEnumerable<(ExternalGrantRootType, string?)>)roots }, ct);
@@ -2222,11 +3317,6 @@ public class ExternalDataService
 
         // Withheld for its roots, or only because a read could not decide: a write route answers the second as unavailable.
         return live.Faulted || !flags.IsComplete ? LiveParentDecision.Unavailable : LiveParentDecision.Withheld;
-
-        static string? RawLookup(IReadOnlyDictionary<string, JsonElement> r, string column) =>
-            !r.TryGetValue(column, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
-                ? null
-                : v.ValueKind == JsonValueKind.String ? v.GetString() : ExternalMultiRootRule.UnresolvedParent;
     }
 
     /// <summary>
@@ -2351,21 +3441,27 @@ public class ExternalDataService
     private const string SecureFlagColumn = "sprk_issecure";
 
     /// <summary>
-    /// Creates a new <c>sprk_event</c> record associated with the supplied project via
-    /// <c>sprk_regardingproject</c>.
+    /// Creates a new <c>sprk_event</c> record associated with the supplied accessible ROOT — project, matter or work
+    /// assignment — via that root's regarding lookup (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>,
+    /// <c>sprk_regardingworkassignment</c>).
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="CreateTodoAsync"/> this does NOT apply the four ADR-024 resolver fields:
-    /// those are a <c>sprk_todo</c> construct (the 11-entity regarding model). <c>sprk_event</c>
-    /// carries a direct project lookup only.
+    /// <para>Unlike <see cref="CreateTodoAsync"/> this does NOT yet write the ADR-024 resolver fields
+    /// (<c>sprk_regardingrecordid</c>/<c>…name</c>/<c>…url</c>/<c>sprk_RegardingRecordType</c>), although
+    /// <c>sprk_event</c> has them and the internal <c>EventEndpoints</c> create writes them: an event created here
+    /// carries the direct root lookup only, so a read keyed on the resolver fields misses it. Known gap, recorded in
+    /// R4 <c>notes/defer-issues.md</c> (task 002 review, F1); out of task 002's scope.</para>
+    /// <para><b>spaarke-SPA-external-access-platform-r4 task 002 (FR-08) widened this from project-only</b>, as task 029
+    /// widened the to-do create: the root kind comes from the ROUTE, and the bind from
+    /// <see cref="TryGetRootBinding"/>, never from the request.</para>
     /// </remarks>
     // `virtual` per ADR-038 §4 (substitution seam), added by task 146 so the endpoint tests can assert the owner the
     // route resolved reached the create — and that a refused owner never reached Dataverse at all.
     public virtual async Task<ExternalEventDto> CreateEventAsync(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+        TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
         CancellationToken ct = default)
     {
-        var body = BuildEventCreatePayload(projectId, request, owningTeamId);
+        var body = BuildEventCreatePayload(rootKind, rootId, request, owningTeamId);
         StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
@@ -2386,8 +3482,8 @@ public class ExternalDataService
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning("[EXT-DATA] Create event failed for project {ProjectId}: {Status} — {Body}",
-                projectId, response.StatusCode, errorBody);
+            _logger.LogWarning("[EXT-DATA] Create event failed for {RootKind} {RootId}: {Status} — {Body}",
+                rootKind, rootId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to create event: {response.StatusCode}");
         }
 
@@ -2409,32 +3505,120 @@ public class ExternalDataService
                 "Events can only be listed for a project, matter or work assignment. None/Ambiguous are deny states - a "
                 + "caller reaching here with one has skipped its authorization gate.");
 
-        // Task 032 (FR-26): both creator stamps, so the SPA offers Delete only on the caller's own events.
-        // Task 039: all three root lookups, so a row also filed to a root the caller cannot read can be withheld.
+        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
+        // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
+        return $"sprk_events?$filter={filter}&$select={EventSelect()}&$orderby=sprk_duedate asc,sprk_eventid asc";
+    }
+
+    /// <summary>
+    /// THE readable columns of the external event read — the lists and <c>GET /events/{id}</c> (R4 task 014b). <c>sprk_event</c>
+    /// has no external module, so this list (not <c>ExternalAccessModule</c>'s <c>ReadableColumns</c>, which would open the
+    /// generic grid and record seam to <c>sprk_event</c>) is the allow-list this plane reads events through, each entry with its
+    /// review. Pinned by <c>ExternalEventFormsContractTests.EventReadColumns_AddTheFormFields_AndNoSecurityOrPersonColumn</c> (the
+    /// allow-list) and <c>ExternalRootEventReadTests.BuildEventsQuery_ForTheProject_IsTheShippedQueryPlusTheTwoOtherLookups</c> (the
+    /// exact select); the single read's withholding runs for real in <c>ExternalRootEventReadTests.GetEventById_*</c>.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>id, name, due date, status, created on — the shipped list (tasks 097/098).</item>
+    /// <item>the three regarding lookups — task 039 (multi-root rule); since 014b also their FormattedValue names, for the
+    /// regarding record on <c>GET /events/{id}</c> (the caller holds Read on every one of them by then).</item>
+    /// <item>the two creator stamps — task 032 (delete-own); since 014b also their FormattedValue as <c>createdByName</c>
+    /// (uac-r2 Q5: needs the owner's OK as its own column — owner approved 2026-11-16, "Yes, show it").</item>
+    /// <item><c>sprk_eventtype_ref</c> — task 008 (uac-r2 C: <c>isTask</c>); since 014b the id and its FormattedValue name are on
+    /// the wire as <c>eventTypeId</c>/<c>eventTypeName</c> (uac-r2 approved the column names 2026-11-16, review of task 014 C).</item>
+    /// <item><c>sprk_description</c>, <c>sprk_priority</c> — 014b (uac-r2 review of task 014 C, approved 2026-11-16).</item>
+    /// <item><c>sprk_assignedto</c> — 014b, NAME ONLY (<c>assignedToName</c>, the FormattedValue; uac-r2 review C, approved
+    /// 2026-11-16). The contact id is selected only as the annotation's anchor and never mapped (owner S-2: the assignable-people
+    /// route is the only one that returns contact ids).</item>
+    /// <item>the live-parent lookups (task 187) and the invoice link columns (task 130-0) — read for the withholding rules,
+    /// never mapped.</item>
+    /// </list>
+    /// </remarks>
+    internal static string EventSelect()
+    {
         var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,"
                      + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
                      + CreatorStampSelect
+                     + "," + EventTypeValueColumn
+                     + "," + EventDescriptionColumn + "," + EventPriorityColumn + "," + EventAssignedToValueColumn
                      + LiveParentSelectSuffix(EventTable); // task 187: the parents whose live roots the rule takes in
-        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
-        // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
-        return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
+        return WithInvoiceLinkColumns(select, EventTable); // task 130-0 fix round 1: an event follows its invoice
     }
+
+    /// <summary>
+    /// Every <c>sprk_eventtype_ref</c> row, active and inactive (R4 task 014b, FR-35): the creatable set is the active ones
+    /// (<see cref="CreatableEventTypes"/>), and a PATCH that clears a due date asks the event's own type, which may since have
+    /// been deactivated (uac-r2 Q3). One paged app-only read through this service's own client.
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read did not complete (any failed or capped page): the type set is
+    /// never guessed from part of it.</exception>
+    // `virtual` per ADR-038 section 4 (substitution seam).
+    public virtual async Task<IReadOnlyList<EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/{EventTypeRef.EntitySet}?$select=sprk_eventtype_refid,sprk_name,sprk_requiredduedate,statecode"
+                  + "&$orderby=sprk_name asc,sprk_eventtype_refid asc";
+        var read = await GetCollectionAsync<EventTypeRow>(url, ct);
+        if (read.Truncated)
+            throw new DataverseUnavailableException("The event types could not be read completely.");
+
+        return read.Rows
+            .Where(r => Guid.TryParse(r.Id, out _))
+            .Select(r => new EventTypeOption(
+                Guid.Parse(r.Id!), r.Name ?? "", r.RequiresDueDate == true, r.StateCode == 0))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The configured narrowing of the creatable event types (<c>ExternalAccess:EventTypes:Allowed</c>, a GUID list; owner
+    /// Q-1's fallback is Task + Reminder). <see langword="null"/> when nothing is configured (every active type). Fail closed:
+    /// a configured entry that is not a GUID allows nothing in its place, so a list of only bad entries allows nothing. Pure.
+    /// </summary>
+    internal static IReadOnlySet<Guid>? AllowedEventTypeIds(IConfiguration configuration)
+    {
+        var entries = configuration.GetSection("ExternalAccess:EventTypes:Allowed").GetChildren()
+            .Select(c => c.Value).Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+        if (entries.Count == 0)
+            return null;
+        return entries.Select(v => Guid.TryParse(v, out var id) ? id : Guid.Empty).Where(id => id != Guid.Empty).ToHashSet();
+    }
+
+    /// <summary>
+    /// THE creatable event-type set (R4 task 014b, owner Q-1, uac-r2 Q3): the ACTIVE rows of <paramref name="types"/>, narrowed
+    /// to <paramref name="allowed"/> when one is configured, and — for a caller whose access Dataverse decides — to the rows
+    /// <paramref name="appendTo"/> answers <see langword="true"/> (an unanswered row is left out). A contact passes
+    /// <see langword="null"/>: every active row (an event type confers no access). Ordered as read. Pure.
+    /// </summary>
+    internal static IReadOnlyList<EventTypeOption> CreatableEventTypes(
+        IReadOnlyList<EventTypeOption> types, IReadOnlySet<Guid>? allowed, IReadOnlyDictionary<Guid, bool?>? appendTo) =>
+        types.Where(t => t.IsActive
+                         && (allowed is null || allowed.Contains(t.Id))
+                         && (appendTo is null || (appendTo.TryGetValue(t.Id, out var holds) && holds == true)))
+            .ToList();
 
     /// <summary>The project form of <see cref="BuildEventsQuery(TodoRootKind, Guid)"/> (the shipped query, plus the two extra lookups).</summary>
     internal static string BuildEventsQuery(Guid projectId) => BuildEventsQuery(TodoRootKind.Project, projectId);
 
     /// <summary>
-    /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
-    /// OWNER the route resolved from the project (task 146 — the named Secure team for a secure project). Pure so a
+    /// The COMPLETE create payload for an external calendar event: the caller's fields, the ROOT bind, and the
+    /// OWNER the route resolved from the root (task 146 — the named Secure team for a secure root). Pure so a
     /// test can read it. Task 097: the DTO's sprk_name / sprk_status are written to the LIVE sprk_eventname / statuscode
     /// (with the paired statecode) — sprk_event has neither sprk_name nor sprk_status, so the former body was a 400.
-    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>.</exception>
+    /// R4 task 002 (FR-08): the bind comes from <see cref="TryGetRootBinding"/> for the route's root kind — the same row
+    /// the to-do create and the events list use; <c>sprk_event</c>'s three regarding lookups carry the same schema names
+    /// as <c>sprk_todo</c>'s (<c>docs/data-model/sprk_event-related-tables.md</c>).
+    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>, or
+    /// <paramref name="rootKind"/> is a deny state (None/Ambiguous).</exception>
     /// </summary>
     internal static Dictionary<string, object?> BuildEventCreatePayload(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId)
+        TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        var binding = TryGetRootBinding(rootKind)
+            ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
+                "Events can only be created against a project, matter or work assignment. "
+                + "None/Ambiguous are deny states — a caller reaching here has skipped its gate.");
+        if (rootId == Guid.Empty)
+            throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
         ArgumentNullException.ThrowIfNull(request);
         RequireOwner(owningTeamId, "sprk_event");
 
@@ -2442,6 +3626,20 @@ public class ExternalDataService
         if (!ExternalCreatableStatuses.Contains(status))
             throw new ArgumentOutOfRangeException(nameof(request), status,
                 "sprk_status must be Draft (1) or Open (659490001).");
+
+        // R4 task 008 (uac-r2 B): the closed event-type set, enforced here too — the route refuses first with a 400.
+        if (!IsCreatableEventType(request.EventType))
+            throw new ArgumentOutOfRangeException(nameof(request), request.EventType,
+                "eventType must be \"task\" or omitted.");
+
+        // R4 task 014b: the route has validated every new field against its rule (the type against the creatable set, the
+        // assignee against the assignable set); the builder refuses what is out of shape, so a skipped gate fails loudly.
+        var priority = request.SprkPriority ?? EventPriorityNormal;
+        if (!EventPriorities.Contains(priority))
+            throw new ArgumentOutOfRangeException(nameof(request), priority, "sprk_priority must be one of the four priorities.");
+        if (request.SprkDescription is { Length: > EventDescriptionMaxLength })
+            throw new ArgumentOutOfRangeException(nameof(request), "sprk_description is longer than 2,000 characters.");
+        var eventTypeId = EventTypeIdOf(request);
 
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
@@ -2454,10 +3652,160 @@ public class ExternalDataService
         body[EventStatusColumn] = status;
         body["statecode"] = EventStatusCode.GetStateCode(status);
 
-        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
-        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses. ONE root, ONE bind: the key
+        // and the entity set come from the same binding row (R4 task 002).
+        body[binding.BindKey] = $"/{binding.EntitySet}({rootId})";
         body[OwnerBindKey] = $"/teams({owningTeamId})";
+
+        // R4 task 008 / 014b: the type the route validated — eventTypeId, or "task" mapped to the Task row (one release).
+        if (eventTypeId is { } typeId)
+            body[EventTypeBindKey] = $"/{EventTypeRef.EntitySet}({typeId})";
+
+        // R4 task 014b (owner Q-4, S-2): priority (Normal when not sent), description, and the first assignee — a plain bind of
+        // the contact the route found in the record's assignable set (setting the first assignee is not a reassign).
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the legacy untyped body writes exactly the
+        // pre-014b payload, so no priority; when the legacy shapes are removed in R5, write the priority unconditionally.
+        if (!request.IsLegacyUntypedCreate)
+            body[EventPriorityColumn] = priority;
+        if (!string.IsNullOrEmpty(request.SprkDescription))
+            body[EventDescriptionColumn] = request.SprkDescription;
+        if (request.AssignedToContactId is { } assignee && assignee != Guid.Empty)
+            body[EventAssignedToBindKey] = $"/contacts({assignee})";
         return body;
+    }
+
+    /// <summary>
+    /// The type an event create names (R4 task 014b): <see cref="CreateExternalEventRequest.EventTypeId"/>, or
+    /// <c>eventType: "task"</c> mapped to <see cref="EventTypeRef.Task"/> (accepted for one release). <see langword="null"/>
+    /// when neither is sent. Both sent and naming different types is a contradiction: thrown (the route answers 400 first).
+    /// </summary>
+    internal static Guid? EventTypeIdOf(CreateExternalEventRequest request)
+    {
+        // LEGACY-EVENT-CREATE-R4 (CreateExternalEventRequest.IsLegacyUntypedCreate): the "task" alias; remove in R5 with the
+        // legacy untyped body.
+        var legacy = request.EventType is TaskEventType ? EventTypeRef.Task : (Guid?)null;
+        if (request.EventTypeId is { } id && id != Guid.Empty)
+        {
+            if (legacy is { } task && task != id)
+                throw new ArgumentOutOfRangeException(nameof(request), "eventType and eventTypeId name different types.");
+            return id;
+        }
+
+        return legacy;
+    }
+
+    /// <summary>
+    /// The COMPLETE PATCH body of an external event edit (R4 task 014b, FR-36): ONLY the agreed columns — <c>sprk_eventname</c>,
+    /// <c>sprk_duedate</c>, <c>sprk_priority</c>, <c>sprk_description</c>, <c>statuscode</c> with its paired <c>statecode</c>
+    /// (owner S-3) — and only those the request SENT. Never ownership, a core-ancestor stamp, <c>sprk_accesspermission</c>,
+    /// <c>sprk_issecure</c> or the event type (S-4) (uac-r2 2026-11-16, condition 3). The assignee is never emitted HERE: the
+    /// route adds the internal reassign's columns (R4 task 014c, <c>ExternalProjectDataEndpoints.BuildEventUpdateWithReassign</c>)
+    /// only after its own checks. Pure; the route has validated each value first, and anything out of shape throws here.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildEventUpdatePayload(UpdateExternalEventRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.EventTypeIdSent)
+            throw new ArgumentOutOfRangeException(nameof(request), "The event type is not written by this update.");
+
+        var body = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (request.NameSent)
+        {
+            if (string.IsNullOrWhiteSpace(request.SprkName))
+                throw new ArgumentOutOfRangeException(nameof(request), "sprk_name cannot be cleared.");
+            body[EventNameColumn] = request.SprkName;
+        }
+
+        if (request.DueDateSent)
+            body["sprk_duedate"] = request.SprkDuedate is null
+                ? null
+                : DataverseDateOnly.Format(DataverseDateOnly.Parse(request.SprkDuedate));
+
+        if (request.PrioritySent)
+        {
+            if (request.SprkPriority is not { } priority || !EventPriorities.Contains(priority))
+                throw new ArgumentOutOfRangeException(nameof(request), request.SprkPriority, "sprk_priority must be one of the four priorities.");
+            body[EventPriorityColumn] = priority;
+        }
+
+        if (request.DescriptionSent)
+        {
+            if (request.SprkDescription is { Length: > EventDescriptionMaxLength })
+                throw new ArgumentOutOfRangeException(nameof(request), "sprk_description is longer than 2,000 characters.");
+            body[EventDescriptionColumn] = string.IsNullOrEmpty(request.SprkDescription) ? null : request.SprkDescription;
+        }
+
+        if (request.StatusSent)
+        {
+            if (request.SprkStatus is not { } status || !EventStatusCode.IsDefined(status))
+                throw new ArgumentOutOfRangeException(nameof(request), request.SprkStatus, "sprk_status must be a sprk_event statuscode.");
+            body[EventStatusColumn] = status;
+            body["statecode"] = EventStatusCode.GetStateCode(status);
+        }
+
+        return body;
+    }
+
+    /// <summary>
+    /// The columns an external event PATCH may ever write (<see cref="UpdateEventAsync"/>'s allow-list; pinned by tests):
+    /// <see cref="BuildEventUpdatePayload"/>'s, plus — R4 task 014c, uac-r2 condition — ONLY the internal reassign's assignee,
+    /// reassigned-date and reassigned-by, named exactly as <c>EventDueAssigneeWrite.AddReassignColumns</c> emits them (the
+    /// lookups' case-sensitive navigation-property binds). Its <c>statuscode</c> is already here.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> EventUpdateColumns = new HashSet<string>(StringComparer.Ordinal)
+    {
+        EventNameColumn, "sprk_duedate", EventPriorityColumn, EventDescriptionColumn, EventStatusColumn, "statecode",
+        "sprk_AssignedTo@odata.bind", "sprk_reassigneddate", "sprk_ReassignedBy@odata.bind",
+    };
+
+    /// <summary>
+    /// The app-only PATCH of an external event edit (R4 task 014b). Call ONLY after the route's edit check passed (uac-r2 Q1, G5:
+    /// checked as the user, written as the app). <see langword="false"/> when the row is gone (404).
+    /// </summary>
+    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam): a deny test must be able to assert no write was sent.</remarks>
+    /// <exception cref="DataverseUnavailableException">Dataverse refused or could not complete the write.</exception>
+    public virtual async Task<bool> UpdateEventAsync(Guid eventId, IReadOnlyDictionary<string, object?> payload, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (payload.Keys.Any(k => !EventUpdateColumns.Contains(k)))
+            throw new ArgumentOutOfRangeException(nameof(payload), "The event update names a column outside its allow-list.");
+
+        var url = $"{GetApiUrl()}/sprk_events({eventId})";
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Patch, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Add("If-Match", "*"); // an update, never an upsert that would create a row
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return false;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] Update event {EventId} failed: {Status}", eventId, response.StatusCode);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode} to the event update.");
+            }
+
+            return true;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Update event {EventId} could not be sent", eventId);
+            throw new DataverseUnavailableException("The event update could not be completed.", ex);
+        }
     }
 
     /// <summary>
@@ -2901,10 +4249,13 @@ public class ExternalDataService
     /// <remarks>
     /// <paramref name="HasUnreadableParentLink"/> (fix round for task 039): a parent lookup carried a value that is not a
     /// GUID. The delete is refused (fail closed): the row names a parent the caller's rights cannot be checked against.
+    /// <para><paramref name="InvoiceLinks"/> (ebilling-r1 task 130-0 fix round 2, F1): the invoices the row links to, through every
+    /// invoice link column of its table (<see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.LinkColumnsOf"/>). Null means
+    /// the links were not read, and the write is refused as if one linked an invoice the caller cannot see (fail closed by type).</para>
     /// </remarks>
     public sealed record DeleteTarget(
         Guid? CreatedByPerson, Guid? CreatedByContact, IReadOnlyList<DeleteTargetParent> Parents,
-        bool HasUnreadableParentLink = false);
+        bool HasUnreadableParentLink = false, IReadOnlyList<Guid>? InvoiceLinks = null);
 
     /// <summary>
     /// Reads a deletable row's creator stamps and parent lookups, app-only (FR-26). Null when the row does not exist
@@ -2925,15 +4276,29 @@ public class ExternalDataService
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(
             BuildDeleteTargetUrl(GetApiUrl(), kind, id), ct);
-        return row is null ? null : ParseDeleteTarget(kind, row);
+        if (row is null)
+            return null;
+        var target = ParseDeleteTarget(kind, row);
+        // F3b fix round 1: a write follows the invoices of every row the target is filed under too (its event, document,
+        // communication ..., up the chain). A chain that cannot be decided carries the unreadable link (refused); a chain read that
+        // fails throws DataverseUnavailableException (the route's 503).
+        var table = GetDeletableBinding(kind).EntityLogicalName;
+        var ancestors = await ReadRowAncestorLinksAsync(table, id, row, ct).ConfigureAwait(false);
+        return ancestors.Invoices.Count == 0 || target.InvoiceLinks is null
+            ? target
+            : target with { InvoiceLinks = target.InvoiceLinks.Concat(ancestors.Invoices).Distinct().ToList() };
     }
 
     /// <summary>The single-row read <see cref="GetDeleteTargetAsync"/> sends: both stamps and every parent lookup. Pure.</summary>
     internal static string BuildDeleteTargetUrl(string apiUrl, DeletableKind kind, Guid id)
     {
         var binding = GetDeletableBinding(kind);
+        // Task 130-0 fix round 2 (F1): and every invoice link column of the table, so a write can follow the invoice.
         var columns = new[] { CreatedByPersonValueAttribute, CreatedByContactValueAttribute }
-            .Concat(binding.Parents.Select(p => p.LookupValueAttribute));
+            .Concat(binding.Parents.Select(p => p.LookupValueAttribute))
+            .Concat(InvoiceLinks.LinkColumnsOf(binding.EntityLogicalName).Select(c => $"_{c}_value"))
+            .Concat(InvoiceLinks.ParentValueColumnsOf(binding.EntityLogicalName)) // F3b fix round 1: the rows it is filed under
+            .Distinct(StringComparer.Ordinal);
         return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
     }
 
@@ -2946,17 +4311,18 @@ public class ExternalDataService
         {
             if (GuidValue(row, lookup.LookupValueAttribute) is { } parentId)
                 parents.Add(new DeleteTargetParent(lookup.Parent, parentId));
-            else if (row.TryGetValue(lookup.LookupValueAttribute, out var raw)
-                     && raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
-                     && !(raw.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(raw.GetString())))
-                unreadable = true; // present, but not a GUID
+            else if (!row.TryGetValue(lookup.LookupValueAttribute, out var raw)
+                     || (raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                         && !(raw.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(raw.GetString()))))
+                unreadable = true; // fix round 3d: absent (never read), or present but not a GUID; only an explicit null is "not filed there"
         }
 
         return new DeleteTarget(
             GuidValue(row, CreatedByPersonValueAttribute),
             GuidValue(row, CreatedByContactValueAttribute),
             parents,
-            unreadable);
+            unreadable,
+            InvoiceLinksOf(GetDeletableBinding(kind).EntityLogicalName, row));
     }
 
     /// <summary>
@@ -3299,7 +4665,7 @@ public class ExternalDataService
             // Task 105 (found in passing): the column is sprk_recordlogicalname. The former `sprk_recordentitylogicalname`
             // does not exist (live 2026-10-08: 400 0x80060888), so every external to-do create logged "not found" and
             // left sprk_RegardingRecordType unset — three of ADR-024's four resolver fields, not four.
-            // Active rows only, like every sibling lookup of this table (PolymorphicResolverService.ts, FieldMappingHandler.ts):
+            // Active rows only, like every sibling lookup of this table (PolymorphicResolverService.ts):
             // a deactivated type row is not a type to bind.
             var filter = Uri.EscapeDataString($"sprk_recordlogicalname eq '{entityLogicalName}' and statecode eq 0");
             // Task 105: no $top=1 — GetCollectionAsync refuses $top (it suppresses @odata.nextLink). The filter names one
@@ -3690,7 +5056,7 @@ public class ExternalDataService
         Modifiedon = r.Modifiedon,
     };
 
-    private static ExternalDocumentDto MapDocument(DocumentRow r) => new()
+    private static ExternalDocumentDto MapDocument(DocumentRow r, IReadOnlyList<Guid>? ancestorLinks = null) => new()
     {
         SprkDocumentid = r.SprkDocumentid ?? "",
         SprkName = r.SprkName ?? "",
@@ -3706,9 +5072,13 @@ public class ExternalDataService
         // R3 ISS-011 (#1886): the same truth the download and versions routes use (DocumentStorageResolver.GetSpePointersAsync:
         // a usable drive id AND item id; sprk_hasfile is a hint that can be stale). Only the boolean leaves the BFF.
         HasFile = Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver.HasUsablePointers(r.SprkGraphdriveid, r.SprkGraphitemid),
+        // task 130-0 fix round 1; never serialized. F3b: plus the invoices of the ancestors on the parent document chain.
+        InvoiceLinks = ancestorLinks is null
+            ? InvoiceLinksOf(DocumentTable, r.Extra)
+            : InvoiceLinksOf(DocumentTable, r.Extra).Concat(ancestorLinks).Distinct().ToList(),
     };
 
-    private static ExternalTodoDto MapTodo(TodoRow r) => new()
+    private static ExternalTodoDto MapTodo(TodoRow r, IReadOnlyList<Guid>? ancestorLinks = null) => new()
     {
         SprkTodoid = r.SprkTodoid ?? "",
         SprkName = r.SprkName ?? "",
@@ -3727,9 +5097,11 @@ public class ExternalDataService
         SprkRegardingrecordurl = r.SprkRegardingrecordurl,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        // task 130-0 fix round 1; never serialized. F3b fix round 1: plus the invoices of the rows it is filed under.
+        InvoiceLinks = InvoiceLinksOf(TodoTable, r.Extra).Concat(ancestorLinks ?? Array.Empty<Guid>()).Distinct().ToList(),
     };
 
-    private static ExternalEventDto MapEvent(EventRow r) => new()
+    private static ExternalEventDto MapEvent(EventRow r, IReadOnlyList<Guid>? ancestorLinks = null) => new()
     {
         SprkEventid = r.SprkEventid ?? "",
         SprkName = r.SprkName ?? "",
@@ -3741,7 +5113,36 @@ public class ExternalDataService
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        // R4 task 008 (uac-r2 C): only the comparison leaves; an absent, null or unparsable lookup is not a Task.
+        IsTask = Guid.TryParse(r.EventTypeValue, out var eventType) && eventType == EventTypeRef.Task,
+        // R4 task 014b (EventSelect's review notes): the type row's id and name, description, priority; the assignee's and the
+        // creator's NAMES only (FormattedValue), never their ids.
+        EventTypeId = Guid.TryParse(r.EventTypeValue, out var typeId) ? typeId.ToString("D") : null,
+        EventTypeName = Guid.TryParse(r.EventTypeValue, out _) ? r.EventTypeName : null,
+        SprkDescription = r.SprkDescription,
+        SprkPriority = r.SprkPriority,
+        AssignedToName = r.AssignedToName,
+        CreatedByName = !string.IsNullOrWhiteSpace(r.CreatedByPersonName) ? r.CreatedByPersonName : r.CreatedByContactName,
+        Parents = ParentsOf(r),
+        // task 130-0 fix round 1; never serialized. F3b fix round 1: plus the invoices of the rows it is filed under.
+        InvoiceLinks = InvoiceLinksOf(EventTable, r.Extra).Concat(ancestorLinks ?? Array.Empty<Guid>()).Distinct().ToList(),
     };
+
+    /// <summary>R4 task 014b: the roots an event row is filed under, with their names (server-side only).</summary>
+    private static IReadOnlyList<ExternalEventParent> ParentsOf(EventRow r)
+    {
+        var parents = new List<ExternalEventParent>(3);
+        Add(TodoRootKind.Project, r.SprkRegardingprojectValue, r.RegardingProjectName);
+        Add(TodoRootKind.Matter, r.SprkRegardingmatterValue, r.RegardingMatterName);
+        Add(TodoRootKind.WorkAssignment, r.SprkRegardingworkassignmentValue, r.RegardingWorkAssignmentName);
+        return parents;
+
+        void Add(TodoRootKind kind, string? value, string? name)
+        {
+            if (Guid.TryParse(value, out var id) && id != Guid.Empty)
+                parents.Add(new ExternalEventParent(kind, id, name));
+        }
+    }
 
     private static ExternalContactDto MapContact(ContactRow r) => new()
     {

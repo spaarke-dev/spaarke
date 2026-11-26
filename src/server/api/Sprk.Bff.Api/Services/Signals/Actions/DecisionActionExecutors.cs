@@ -51,6 +51,17 @@ public enum DecisionActionStatus
     Failed,
 }
 
+/// <summary>Ontology task 191 (D-223): what is known about a message a <see cref="DecisionActionStatus.Failed"/> step did not finish
+/// sending. Only the budget inquiry reports it (its service request landed before the send).</summary>
+public enum DecisionSendFailure
+{
+    /// <summary>The message provably did not go out: sending it once more cannot deliver it twice.</summary>
+    NotSent,
+
+    /// <summary>The message may have gone out (a 5xx, a 408, a timeout, a cancellation or a transport fault after it left).</summary>
+    Unknown,
+}
+
 /// <summary>A record an executor wrote.</summary>
 public sealed record DecisionRecordRef(string Entity, Guid Id);
 
@@ -69,26 +80,33 @@ public sealed record DecisionCoreRecord(string Entity, Guid Id, Guid? RecordType
 /// <param name="Core">The core record the Signal groups under; null for a no-core Do item (D-35).</param>
 /// <param name="MatterId">The Signal's grouping matter; null when it has none.</param>
 /// <param name="Parameters">The wizard's answers, keyed by the catalog's parameter codes.</param>
+/// <param name="Landed">Ontology task 191 (D-223): on a resume, the records an earlier attempt of THIS step confirmed (the budget
+/// inquiry's service request, from the route's stored step); null on a first attempt. Never from the request body.</param>
 public sealed record DecisionActionRequest(
     HttpContext Http,
     Guid SignalId,
     DecisionRecordRef? Subject,
     DecisionCoreRecord? Core,
     Guid? MatterId,
-    IReadOnlyDictionary<string, string?> Parameters)
+    IReadOnlyDictionary<string, string?> Parameters,
+    IReadOnlyList<DecisionRecordRef>? Landed = null)
 {
     public string? Param(string code) =>
         Parameters.TryGetValue(code, out var value) && !string.IsNullOrWhiteSpace(value) ? value.Trim() : null;
 }
 
 /// <summary>An executor's answer.</summary>
+/// <param name="SendFailure">Ontology task 191 (D-223): set only on a <see cref="DecisionActionStatus.Failed"/> step whose message did
+/// not finish sending: whether it provably did not go out, or may have.</param>
 public sealed record DecisionActionOutcome(
     string Code,
     DecisionActionStatus Status,
     IReadOnlyList<DecisionRecordRef> Written,
     string? ReasonCode = null,
     string? Detail = null,
-    IReadOnlyList<DecisionRecordRef>? PossiblyWrittenRecords = null)
+    IReadOnlyList<DecisionRecordRef>? PossiblyWrittenRecords = null,
+    string? Warning = null,
+    DecisionSendFailure? SendFailure = null)
 {
     /// <summary>Records whose write got no clear answer (5xx, timeout, transport failure): they MAY have changed. Empty unless
     /// <see cref="DecisionActionStatus.Failed"/>.</summary>
@@ -196,11 +214,12 @@ internal static class DecisionExec
     internal const string TodoSet = "sprk_todos";
     internal const string WorkAssignmentSet = "sprk_workassignments";
     internal const string ContactSet = "contacts";
-    internal const string EventTypeRefSet = "sprk_eventtype_refs";
+    internal const string EventTypeRefSet = EventTypeRef.EntitySet;
 
-    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (task 159, D-178): reference data shared across environments, verified on
-    /// spaarkedev1 2026-10-22. The ONE copy inside Signals (the AI nodes and the workspace carry their own private ones).</summary>
-    internal const string TaskEventTypeId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c> (task 159, D-178). Since spaarke-SPA-external-access-platform-r4 task
+    /// 008 (uac-r2 review B) this is <see cref="EventTypeRef.TaskId"/>, the ONE definition Signals and the external event create
+    /// and lists share; no second literal.</summary>
+    internal const string TaskEventTypeId = EventTypeRef.TaskId;
 
     /// <summary>The longest name a row takes from the first line of a free-text description (<c>sprk_name</c> / <c>sprk_eventname</c>).</summary>
     private const int NameMaxLength = 200;
@@ -1278,7 +1297,7 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
         payload[$"sprk_regarding{suffix}@odata.bind"] = $"/{set}({core.Id:D})";
         payload["sprk_regardingrecordid"] = core.Id.ToString("D");
         if (core.Name is { } name) payload["sprk_regardingrecordname"] = name;
-        if (core.RecordTypeRefId is { } typeRef) payload["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
+        if (core.RecordTypeRefId is { } typeRef) payload[$"{OwnedChildWrite.RegardingRecordTypeNavigationPropertyOf(Table)}@odata.bind"] = $"/sprk_recordtype_refs({typeRef:D})";
         return null;
     }
 
@@ -1499,6 +1518,10 @@ public sealed class AssignTaskExecutor : ChildCreateExecutorBase
 /// and AppendTo as the caller, the secure-matter decision; no write). Outcomes: Sent is Done (the service request and the
 /// communication); NotConfirmed, Invalid and Refused are Refused; CreateFailed is Failed with nothing written; SendFailed is
 /// Failed with the service request written.
+/// <para>Ontology task 191 (D-223): SendFailed (the email provably did not go out) carries <see cref="DecisionSendFailure.NotSent"/>
+/// and SendOutcomeUnknown (it may have) <see cref="DecisionSendFailure.Unknown"/>, both with the service request written. A resume
+/// hands the stored service request back in <see cref="DecisionActionRequest.Landed"/>, and the inquiry then only SENDS
+/// (<see cref="BudgetInquiryExecutor.SendOnlyAsync"/>): no second service request.</para>
 /// </summary>
 public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
 {
@@ -1528,8 +1551,17 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
         var (inquiry, refusal) = Map(request);
         if (refusal is not null || inquiry is null)
             return refusal ?? DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "The inquiry could not be prepared.");
+
+        // D-223: a resume of an inquiry whose service request already landed SENDS ONLY, with that row; it never creates a second.
+        if (LandedServiceRequest(request) is { } landed)
+            return ToOutcome(await _inquiry.SendOnlyAsync(inquiry, landed, ct).ConfigureAwait(false), _logger);
+
         return ToOutcome(await _inquiry.ExecuteAsync(inquiry, ct).ConfigureAwait(false), _logger);
     }
+
+    /// <summary>D-223: the service request an earlier attempt of this step created, from the route's stored step; null otherwise.</summary>
+    internal static Guid? LandedServiceRequest(DecisionActionRequest request) =>
+        request.Landed?.FirstOrDefault(r => string.Equals(r.Entity, BudgetInquiryExecutor.Table, StringComparison.OrdinalIgnoreCase) && r.Id != Guid.Empty)?.Id;
 
     /// <summary>The inquiry request for a decision action. <c>Confirmed</c> is true because the commit route runs an executor only
     /// for a review the wizard's Confirm step confirmed (D-52); the route refuses an unconfirmed review before any executor runs.</summary>
@@ -1550,6 +1582,19 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
         if (to.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
                 "A recipient is not a valid email address. Check the To field."));
+        // Task 190 (D-222): Cc and Bcc are optional and validated exactly as To, before the preflight and before any write. An address
+        // already in To is not repeated in Cc or Bcc, and one in Cc is not repeated in Bcc, so a recipient gets one copy.
+        var cc = SplitRecipients(request.Param("cc"));
+        if (cc.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
+                "A recipient is not a valid email address. Check the Cc field."));
+        var bcc = SplitRecipients(request.Param("bcc"));
+        if (bcc.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
+                "A recipient is not a valid email address. Check the Bcc field."));
+        cc = cc.Where(a => !to.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
+        bcc = bcc.Where(a => !to.Contains(a, StringComparer.OrdinalIgnoreCase) && !cc.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
+
         if (request.Param("subject") is not { } subject)
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Give the inquiry a subject."));
         if (request.Param("body") is not { } body)
@@ -1563,8 +1608,15 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
             firm = firmId;
         }
 
-        return (new BudgetInquiryRequest(matterId, to, subject, body, Confirmed: true, firm), null);
+        return (new BudgetInquiryRequest(matterId, to, subject, body, Confirmed: true, firm, cc.Count > 0 ? cc : null, bcc.Count > 0 ? bcc : null), null);
     }
+
+    /// <summary>The distinct (any case) addresses of a recipient field, split on the composer's separators.</summary>
+    private static List<string> SplitRecipients(string? text) =>
+        (text ?? string.Empty)
+            .Split(RecipientSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     /// <summary>070's outcome as a decision-action outcome (the mapping the #1512/#1515 reviews fixed).</summary>
     /// <remarks>uac-r2 K4 on #1665: 070's <see cref="BudgetInquiryResult.Error"/> can carry Dataverse's own error text (a client
@@ -1581,7 +1633,9 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
                 var written = new List<DecisionRecordRef>();
                 if (result.ServiceRequestId is { } request) written.Add(new DecisionRecordRef(BudgetInquiryExecutor.Table, request));
                 if (result.CommunicationId is { } communication) written.Add(new DecisionRecordRef("sprk_communication", communication));
-                return DecisionActionOutcome.Done(code, [.. written]);
+                // D-216: a sent inquiry whose .eml was not archived is still Done (the email is out), with a commit warning.
+                var done = DecisionActionOutcome.Done(code, [.. written]);
+                return string.IsNullOrWhiteSpace(result.ArchivalWarning) ? done : done with { Warning = BudgetInquiryExecutor.EmailNotArchivedWarning };
             case BudgetInquiryOutcome.NotConfirmed or BudgetInquiryOutcome.Invalid:
                 return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter,
                     Fixed("The inquiry is not complete; nothing was created or sent.", DecisionActionReasons.InvalidParameter));
@@ -1591,7 +1645,16 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
             case BudgetInquiryOutcome.SendFailed:
                 return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
                     Fixed("The service request was created but the email was not sent.", DecisionActionReasons.WriteFailed),
-                    written: result.ServiceRequestId is { } created ? [new DecisionRecordRef(BudgetInquiryExecutor.Table, created)] : null);
+                    written: result.ServiceRequestId is { } created ? [new DecisionRecordRef(BudgetInquiryExecutor.Table, created)] : null)
+                    with
+                { SendFailure = DecisionSendFailure.NotSent };
+            case BudgetInquiryOutcome.SendOutcomeUnknown:
+                // D-223: the email MAY have gone out. The person chooses (send again, or record without sending); never automatic.
+                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
+                    Fixed("The service request was created; the email may have been sent.", DecisionActionReasons.WriteFailed),
+                    written: result.ServiceRequestId is { } maybe ? [new DecisionRecordRef(BudgetInquiryExecutor.Table, maybe)] : null)
+                    with
+                { SendFailure = DecisionSendFailure.Unknown };
             default:
                 return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
                     Fixed("The inquiry could not be created; nothing was sent.", DecisionActionReasons.WriteFailed));

@@ -37,7 +37,7 @@
 import { createChildRecordViaBff, isBffChildCreateTable } from '../utils/adapters/bffChildWriteAdapter';
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
-import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
+import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from './sdap';
 import { cleanGuid } from '../utils/guid';
 import type { ResponseFetchFn } from '../utils/fetchTypes';
 // PolymorphicResolverService not needed — document records use canonical field set only
@@ -49,12 +49,10 @@ import type { ResponseFetchFn } from '../utils/fetchTypes';
 /**
  * Cascade defaults derived from the current user's owning Business Unit.
  *
- * Per spaarke-multi-container-multi-index-r1 spec (FR-WIZ-01..05) the 5 parent-record
- * wizards (Matter, Project, Invoice, WorkAssignment, Event) and DocumentUploadWizard
- * cascade SEARCH-INDEX ROUTING fields from `businessunit` onto the create payload:
- *
- *   - `sprk_searchindexname` — Azure AI Search index name (text, soak-only — Phase G/110 drop)
- *   - `sprk_ai_search_index` — `sprk_aisearchindex` lookup (canonical Phase G post-2026-06-10)
+ * 🔴 **No search index is read from the business unit or written by any client** (field-mapping-server-write-path-r1
+ * FR-40, task 035). The index follows the record's content type and is the server's to set; `sprk_searchindexname`
+ * and the `sprk_ai_search_index` bind are neither selected here nor sent on a create or an index-file call, and the
+ * server logs a warning (`client_search_index_dropped`) if one arrives.
  *
  * 🔴 **`sprk_containerid` is NO LONGER cascaded onto any create payload** (task 076, 2026-09-03).
  * A storage location is not the client's to choose; the server derives it from the record. The
@@ -62,21 +60,11 @@ import type { ResponseFetchFn } from '../utils/fetchTypes';
  * the create-payload path read it (notably Compose's `resolveContainer`) — but nothing writes it
  * to `sprk_containerid` any more, and nothing should.
  *
- * These fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
- * leave the corresponding payload field untouched and the BFF tenant-default
- * chain (or downstream backfill) takes over server-side.
+ * The container field is OPTIONAL on `businessunit`; when unset it is `undefined`.
  */
 export interface IUserBuCascadeDefaults {
   /** `businessunit.sprk_containerid` for the current user's owning BU, or undefined if unset. */
   containerId?: string;
-  /** `businessunit.sprk_searchindexname` for the current user's owning BU, or undefined if unset. */
-  searchIndexName?: string;
-  /**
-   * GUID of `businessunit.sprk_ai_search_index` lookup target for the current user's owning BU,
-   * or undefined if unset. Phase G canonical field — wizards bind this as `sprk_aisearchindexes(<guid>)`
-   * via `@odata.bind` on the child entity's `sprk_AI_Search_Index` nav property.
-   */
-  searchIndexId?: string;
   /** GUID of the user's owning Business Unit (always set when the lookup succeeded). */
   businessUnitId?: string;
 }
@@ -206,7 +194,7 @@ export class EntityCreationService {
    * Trigger RAG indexing for files uploaded via {@link uploadFilesToSpe}.
    *
    * Iterates `uploadedFiles` and posts one `POST /api/ai/rag/index-file` per file
-   * via `@spaarke/sdap-client.SdapApiClient.indexFile()`. Indexing runs under
+   * via `SdapApiClient.indexFile()` (`services/sdap`). Indexing runs under
    * the caller's OBO identity inside the BFF request — same canonical path as
    * DocumentUploadWizard's `triggerRagIndexing` and the "Send to Index" ribbon
    * command. Pattern 4 compliant (writer-identity matching).
@@ -222,16 +210,13 @@ export class EntityCreationService {
    * @param createdDocumentIds Optional Dataverse document GUIDs in the same order as
    *   `uploadedFiles` (returned by `createDocumentRecords`). When provided, the BFF
    *   updates `sprk_searchindexed` + tracking fields on each document.
-   * @param searchIndexName Optional explicit index name (e.g. from BU cascade). When
-   *   omitted, the BFF resolver chain (parent → BU → tenant default) decides.
    * @returns Warnings array describing per-file failures (empty when all succeed).
    */
   async indexUploadedFiles(
     uploadedFiles: ISpeFileMetadata[],
     tenantId: string,
     parentEntity?: { entityType: string; entityId: string; entityName: string },
-    createdDocumentIds?: string[],
-    searchIndexName?: string
+    createdDocumentIds?: string[]
   ): Promise<string[]> {
     const warnings: string[] = [];
     if (uploadedFiles.length === 0) return warnings;
@@ -278,7 +263,6 @@ export class EntityCreationService {
         tenantId,
         documentId: createdDocumentIds?.[i],
         parentEntity: normalizedParentEntity,
-        searchIndexName,
       };
 
       try {
@@ -313,22 +297,6 @@ export class EntityCreationService {
   }
 
   /**
-   * Returns true when the entity payload has a non-empty value for the given field.
-   *
-   * "Non-empty" means: not `undefined`, not `null`, and not an empty/whitespace-only string.
-   * Booleans and numbers (including `false` / `0`) count as non-empty since they are explicit values.
-   *
-   * Per design.md INV-5: explicit override values are sacred — never overwrite.
-   */
-  private static _hasExplicitValue(entity: Record<string, unknown>, fieldLogicalName: string): boolean {
-    if (!(fieldLogicalName in entity)) return false;
-    const v = entity[fieldLogicalName];
-    if (v === null || v === undefined) return false;
-    if (typeof v === 'string' && v.trim() === '') return false;
-    return true;
-  }
-
-  /**
    * 🔴 **`applyDefaultContainerId` was DELETED 2026-09-03 by unified-access-control-r2 task 076
    * (harmful write "W1"). Do not reintroduce it.**
    *
@@ -346,71 +314,18 @@ export class EntityCreationService {
    */
 
   /**
-   * Apply a default `sprk_searchindexname` to the create payload IF AND ONLY IF the payload
-   * does not already have an explicit value for that field (INV-5).
-   *
-   * Cascades from the current user's owning Business Unit per FR-WIZ-01..05. When the BU has no
-   * configured index name, callers should pass `undefined` here and the field will be left unset on
-   * the payload (the BFF tenant-default chain handles the fallback server-side).
-   *
-   * ⚠️ This field is a SEARCH-INDEX ROUTING hint, not a storage location — which is why it survived
-   * the task-076 cutover while its former sibling `applyDefaultContainerId` did not.
-   *
-   * @param entity Create payload (mutated in place).
-   * @param searchIndexName BU-derived index name; passing `undefined` / `null` / `''` is a no-op.
-   * @returns `true` if the value was set, `false` if it was skipped (already present, or input empty).
-   *
-   * @see design.md INV-5
-   * @see spec.md FR-WIZ-01..05 (parent-record wizards)
-   * @see spec.md FR-WIZ-07 (DocumentUploadWizard payload)
-   * @see spec.md FR-WIZ-08 (INV-5 preservation across all wizards)
+   * 🔴 **`applyDefaultSearchIndexName` and `applyUserBuDefaults` were DELETED by field-mapping-server-write-path-r1
+   * task 035 (FR-40). Do not reintroduce them.** They stamped the acting user's business-unit search index onto the
+   * create payload. The index follows the record's content type and is the server's to set; the server drops a client
+   * value and logs a warning when one arrives.
    */
-  static applyDefaultSearchIndexName(
-    entity: Record<string, unknown>,
-    searchIndexName: string | null | undefined
-  ): boolean {
-    if (searchIndexName === null || searchIndexName === undefined || searchIndexName === '') return false;
-    if (this._hasExplicitValue(entity, 'sprk_searchindexname')) return false;
-    entity['sprk_searchindexname'] = searchIndexName;
-    return true;
-  }
 
   /**
-   * Apply the BU-derived defaults to the create payload, guarded by INV-5, for the 5 parent-record
-   * wizards (Matter, Project, Invoice, WorkAssignment, Event).
-   *
-   * **Narrowed 2026-09-03 (task 076, W1).** This used to apply TWO fields; the `sprk_containerid`
-   * half is gone along with `applyDefaultContainerId` — see the block comment above it for why. The
-   * returned object no longer carries `containerIdSet`, which is deliberate: dropping the property
-   * turns every caller that branched on it into a COMPILE ERROR rather than a silently-always-false
-   * condition.
-   *
-   * @param entity Create payload (mutated in place).
-   * @param defaults BU-derived defaults; `searchIndexName` may be undefined.
-   * @returns Object reporting whether the field was set (vs. skipped by INV-5 or empty input).
-   *
-   * @see spec.md FR-WIZ-01..05
-   * @see spec.md FR-WIZ-08 (INV-5)
-   */
-  static applyUserBuDefaults(
-    entity: Record<string, unknown>,
-    defaults: IUserBuCascadeDefaults | null | undefined
-  ): { searchIndexNameSet: boolean } {
-    if (!defaults) {
-      return { searchIndexNameSet: false };
-    }
-    return {
-      searchIndexNameSet: EntityCreationService.applyDefaultSearchIndexName(entity, defaults.searchIndexName),
-    };
-  }
-
-  /**
-   * Resolve the current user's owning Business Unit defaults for cascade fields
-   * (`sprk_containerid`, `sprk_searchindexname`).
+   * Resolve the current user's owning Business Unit and its container (`sprk_containerid`). No search index column is read.
    *
    * Chain (matches the SemanticSearchControl NavigationService + SummarizeFilesWizard pattern):
    *   systemuser(userId) → `_businessunitid_value` → businessunit(buId)
-   *     → `sprk_containerid`, `sprk_searchindexname`
+   *     → `sprk_containerid`
    *
    * Caller responsibilities:
    *   - Determine `userId` upstream (e.g. via `Xrm.Utility.getUserId()` in a Code Page / PCF host).
@@ -418,16 +333,16 @@ export class EntityCreationService {
    *     a real Xrm global.
    *
    * Behavior:
-   *   - Returns `{ containerId: undefined, searchIndexName: undefined, businessUnitId: undefined }`
+   *   - Returns `{ containerId: undefined, businessUnitId: undefined }`
    *     if the user has no `_businessunitid_value` (rare).
-   *   - Returns either field as `undefined` when the BU exists but the field is unset
+   *   - Returns `containerId` as `undefined` when the BU exists but the field is unset
    *     (Spaarke Dev 1 / Test 1 case per Phase A.5 — operator setup may lag).
    *   - Returns trimmed-empty strings as `undefined` (treated as unset).
    *   - Never throws on Dataverse "field exists but is null" — only network / 4xx errors propagate.
    *
    * @param webApi Xrm.WebApi-compatible interface (PCF context.webAPI or wrapped Xrm.WebApi).
    * @param userId GUID of the current user (with or without surrounding braces).
-   * @returns Cascade defaults from the user's BU; fields may be `undefined` if unset on the BU.
+   * @returns The user's BU id and container; `containerId` may be `undefined` if unset on the BU.
    *
    * @see spec.md FR-WIZ-01..05
    * @see design.md §5.0 (BU cascade source)
@@ -440,15 +355,11 @@ export class EntityCreationService {
     const rawBuId = userRecord['_businessunitid_value'];
     const buId = typeof rawBuId === 'string' && rawBuId.trim() !== '' ? rawBuId : undefined;
     if (!buId) {
-      return { containerId: undefined, searchIndexName: undefined, businessUnitId: undefined };
+      return { containerId: undefined, businessUnitId: undefined };
     }
 
     // Step 2: BU → cascade fields
-    const buRecord = await webApi.retrieveRecord(
-      'businessunit',
-      buId,
-      '?$select=sprk_containerid,sprk_searchindexname,_sprk_ai_search_index_value'
-    );
+    const buRecord = await webApi.retrieveRecord('businessunit', buId, '?$select=sprk_containerid');
 
     const normalize = (v: unknown): string | undefined => {
       if (typeof v !== 'string') return undefined;
@@ -459,8 +370,6 @@ export class EntityCreationService {
     return {
       businessUnitId: buId,
       containerId: normalize(buRecord['sprk_containerid']),
-      searchIndexName: normalize(buRecord['sprk_searchindexname']),
-      searchIndexId: normalize(buRecord['_sprk_ai_search_index_value']),
     };
   }
 

@@ -24,15 +24,7 @@
                         <labels>
                           <label description="" languagecode="1033" />
                         </labels>
-                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
-                      </cell>
-                    </row>
-                    <row>
-                      <cell id="{253B321A-D232-4E98-8688-428D857A090E}">
-                        <labels>
-                          <label description="" languagecode="1033" />
-                        </labels>
-                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                        <control id="sprk_senttoapdate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_senttoapdate" disabled="true" />
                       </cell>
                     </row>
                   </rows>

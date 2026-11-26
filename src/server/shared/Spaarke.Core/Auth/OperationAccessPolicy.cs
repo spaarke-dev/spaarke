@@ -177,8 +177,9 @@ public static class OperationAccessPolicy
         // confirm and /reject, through the document path (AuthorizeAsync). Both MUTATE the document's own
         // state (review status → Confirmed / RejectedNotInvoice), so Write is the requirement. NOT Create
         // on the document: confirm creates an sprk_invoice, which is a DIFFERENT entity. The caller's
-        // Create privilege on sprk_invoice IS consulted for confirm (owner decision G5, 2026-10-01), but as
-        // a table privilege, not through this key — see FinanceAuthorizationFilter's Privilege path.
+        // Create privilege on sprk_invoice was consulted for confirm (owner decision G5, 2026-10-01) until
+        // ebilling-r1 task 050c (EB-D-264): confirm now asks what the manual internal submission asks
+        // ("finance.submit_invoice" on the core record, "finance.attach_invoice" on the firm) and no table privilege.
         ["finance.confirm"] = AccessRights.Write,
 
         // "finance.attach_invoice" — AppendTo on each PARENT record the new sprk_invoice's own lookups point
@@ -205,7 +206,8 @@ public static class OperationAccessPolicy
         // .../lines/accept-clean (ebilling-r1 task 100, FR-31, D-77: any user with Write on the invoice decides its lines, not only the
         // eligible approvers). Deciding a line changes the invoice's lines and totals, which is a Write on the invoice (the
         // "finance.confirm" reasoning); a Read-only viewer cannot decide. Tasks 101-104 (corrections, adjustments, approval, reject /
-        // return) reuse this one key for their invoice-level writes. A separate key from "finance.confirm" (which names a DOCUMENT) so a
+        // return) reuse this one key for their invoice-level writes, and so does Add line (task 164,
+        // POST /api/finance/invoices/{invoiceId}/lines, EB-D-188). A separate key from "finance.confirm" (which names a DOCUMENT) so a
         // deny log names the act.
         ["ebilling.invoice.decide"] = AccessRights.Write,
         // "ebilling.submission.decide" — Read AND Write on the SUBMISSION (sprk_invoicesubmissions) named by the route of
@@ -215,6 +217,35 @@ public static class OperationAccessPolicy
         // this (no privilege); Override needs this AND the "eBilling Override" table privilege, which the service asks of the caller
         // separately (EbillingOverridePrivilege). A separate key so deny logs name the act.
         ["ebilling.submission.decide"] = AccessRights.Read | AccessRights.Write,
+        // "ebilling.record.override" — Write AND AppendTo on the CORE RECORD (sprk_matters / sprk_projects / sprk_workassignments) named by
+        // the route of /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude
+        // (ebilling-r1 task 089b, procedure model 5.1 F1-c, 6.2, 6.3). Assigning, pinning or excluding a Procedure, or excluding a rule,
+        // changes how that record's invoices are checked (Write on the record), and the application then creates a row whose lookup
+        // attaches it TO the record (AppendTo, the "finance.submit_invoice" reasoning). Task 089c's change-rule and remove routes reuse it.
+        // A separate key so deny logs name the act.
+        ["ebilling.record.override"] = AccessRights.Write | AccessRights.AppendTo,
+        // "ebilling.invoice.assign_firm" — Write on the INVOICE (sprk_invoices, route invoiceId) of POST /api/finance/invoices/{invoiceId}/firm
+        // (ebilling-r1 task 095d-1b, notes/095c-from-email-firm-optional.md 16.4): Set firm on a held no-firm invoice. The application then
+        // writes the invoice's firm, tracking number and hold, and renames its lines, approval and files, so the caller must be able to
+        // change the invoice (the "ebilling.invoice.decide" reasoning). The invoice also HOLDS the firm lookup (sprk_vendororg) this route
+        // sets, and in Dataverse the row that holds a lookup needs Append, which Write does not imply (the "finance.link_invoice"
+        // reasoning; uac-r2 review of #2822, F4). Known limit: the lines, approval and files also carry the firm lookup and are written
+        // under the invoice's Write and Append, with no per-row check (the same rule as task 095g's R1). The firm in the body is asked
+        // separately ("read" and "finance.attach_invoice"). Write and Append are existing rights: no new privilege or role. A separate
+        // key so deny logs name the act.
+        ["ebilling.invoice.assign_firm"] = AccessRights.Write | AccessRights.Append,
+        // "ebilling.record.assign_firm" — Read, Write AND Append on the CORE RECORD (sprk_matters / sprk_projects / sprk_workassignments)
+        // named by the route of POST /api/finance/core-records/{entityType}/{entityId}/firms when the body ADDS a firm (an add or a replace;
+        // ebilling-r1 task 095g, EB-D-224). The application then sets an Assigned Law Firm lookup ON the record: Write for the column update,
+        // and Append because the record HOLDS the lookup (the "finance.link_invoice" reasoning; Append is not implied by Write). Read because
+        // every answer tells the caller about the record: its assigned firms by name, and whether a firm is on it (uac-r2 review of 095g).
+        // All three come from ONE caller snapshot. The firm in the body is asked separately ("read" and "finance.attach_invoice"). A separate
+        // key so deny logs name the act.
+        ["ebilling.record.assign_firm"] = AccessRights.Read | AccessRights.Write | AccessRights.Append,
+        // "ebilling.record.remove_firm" — Read AND Write on the CORE RECORD of the same route when the body only CLEARS a firm (ebilling-r1
+        // task 095g): clearing a lookup sets nothing to attach, so Append is not asked. Read for the same reason as the add: the answer says
+        // whether the named firm was on the record and lists its firms. A separate key so deny logs name the act.
+        ["ebilling.record.remove_firm"] = AccessRights.Read | AccessRights.Write,
 
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
@@ -466,9 +497,10 @@ public static class OperationAccessPolicy
     }
 
     /// <summary>
-    /// Converts AccessRights flags to human-readable string.
+    /// Converts AccessRights flags to a human-readable string ("Read, Write, ..."; "None" when empty).
+    /// Display only. Public so the permissions endpoint shows the same text instead of keeping its own copy.
     /// </summary>
-    private static string GetAccessRightsDescription(AccessRights rights)
+    public static string GetAccessRightsDescription(AccessRights rights)
     {
         if (rights == AccessRights.None)
         {

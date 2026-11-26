@@ -241,7 +241,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 "sprk_communication", OntologyCommunication,
                 Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matter:D})" }),
                 _user, _world.Resolver(), restamper, Children(), HttpContextOfCaller(), NullLogger<Program>.Instance,
-                CancellationToken.None, filingOnly: true);
+                CancellationToken.None, filingOnly: true, appOnlyEntities: GuardReaderOverTheWorld());
             Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
             return result;
         }
@@ -253,14 +253,16 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 _user, new CoreAncestorAfterWriteRestamp(restamper),
                 NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance, _world.Resolver(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>())
+                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+                appOnlyEntities: GuardReaderOverTheWorld())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
                 {
                     tablename = "sprk_communication",
                     recordId = OntologyCommunication,
                     item = new Dictionary<string, JsonElement> { ["sprk_regardingmatter"] = Lookup("sprk_regardingmatter", "sprk_matter", matter).Value },
-                })) with { UserId = Guid.NewGuid().ToString() },
+                })) with
+                { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler)), CancellationToken.None);
         tool.Success.Should().BeTrue(tool.ErrorMessage);
         return null;

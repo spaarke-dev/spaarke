@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -185,6 +186,16 @@ public class EntityAccessFilter : IEndpointFilter
     }
 
     /// <summary>
+    /// Whether <paramref name="entityType"/> names an invoice, in any casing and either spelling this table accepts
+    /// (<c>invoice</c>, <c>sprk_invoice</c>). The one predicate behind <c>OFFICE_023</c> on a save (ebilling-r1 task 096): this filter
+    /// answers it first, and <c>OfficeEndpoints.ValidateSaveRequest</c> answers it again for a caller that bypasses the filter.
+    /// </summary>
+    internal static bool IsRetiredInvoiceTarget(string? entityType) =>
+        !string.IsNullOrWhiteSpace(entityType)
+        && (string.Equals(entityType.Trim(), "invoice", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityType.Trim(), "sprk_invoice", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// Every type spelling this table accepts — for the LOCKSTEP guard only
     /// (<c>AssociationTypeLockstepTests</c>, task 151 review), which must enumerate the keys to prove each one is
     /// also a <c>DocumentAssociationMap</c> spelling naming the SAME entity. Internal (test assembly via
@@ -241,6 +252,19 @@ public class EntityAccessFilter : IEndpointFilter
             // Per spec, association is required - but let the endpoint handle validation
             // This filter is for authorization only
             return await next(context);
+        }
+
+        // ebilling-r1 task 096 (owner L, FR-17 / FR-20): an invoice is never a filing target from Office. Refused FIRST — before the
+        // rights probe reads anything — so every caller gets the same stable 400, not a 403 that depends on their rights to a record
+        // this route no longer files onto. The table below keeps its invoice rows: the other routes that share it (the record-keyed
+        // upload route, Compose) and DocumentAssociationMap's lockstep still name the invoice.
+        if (IsRetiredInvoiceTarget(targetEntity.EntityType))
+        {
+            _logger?.LogWarning(
+                "Entity access refused: an invoice is not a save target (OFFICE_023). CorrelationId: {CorrelationId}",
+                httpContext.TraceIdentifier);
+
+            return ProblemDetailsHelper.OfficeInvoiceTargetRetired(httpContext.TraceIdentifier);
         }
 
         // Resolve the target's Dataverse collection. A type with no entry is rejected — validating the

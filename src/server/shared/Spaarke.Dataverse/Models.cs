@@ -112,11 +112,73 @@ public class CreateDocumentRequest
     /// </summary>
     [JsonIgnore]
     public bool RestrictedBySubmission { get; set; }
+
+    /// <summary>
+    /// The record the new document is filed to (its association lookup), written IN the create
+    /// (field-mapping-server-write-path-r1 task 030b, FR-18, word gaps G1/G2). Set only through
+    /// <see cref="DocumentAssociationMap.TryApply(CreateDocumentRequest, string?, Guid?)"/>; null files the document nowhere.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why in the create.</b> A document has no stamp column of its own: its root (write-path invariant I-1) is read
+    /// from this lookup, and its owner (I-6) is decided over it. Written in a follow-up update, a document existed, however
+    /// briefly, filed nowhere, and stayed so when that update failed.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen association would
+    /// file a document to a record whose AppendTo nobody checked.</para>
+    /// <para>The setter is internal: outside this assembly the association is set only through
+    /// <see cref="DocumentAssociationMap.TryApply(CreateDocumentRequest, string?, Guid?)"/>, and the create's stager refuses a
+    /// column that is not one of the map's.</para>
+    /// </remarks>
+    [JsonIgnore]
+    public DocumentAssociationBind? Association { get; internal set; }
+
+    /// <summary>
+    /// The document this one belongs to (an email attachment's email document), written as <c>sprk_parentdocument</c> IN the
+    /// create (field-mapping-server-write-path-r1 task 034). An attachment carries its parent link in the create; null for
+    /// every caller that has no parent document.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen parent would
+    /// attach a document to one the caller cannot see.
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? ParentDocumentLookup { get; set; }
+
+    /// <summary>
+    /// The SharePoint Embedded file the new document points at, written IN the create (field-mapping-server-write-path-r1
+    /// task 030b): <c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c> with its field-secured copy
+    /// (<see cref="DocumentPointerBinding.BoundItemIdColumn"/>, same write, same value), and <c>sprk_filepath</c> when known.
+    /// The Office creates set it: their upload runs before the create, so the pointer is final when the row is written.
+    /// Null for every other caller.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and only the server places a file.
+    /// </remarks>
+    [JsonIgnore]
+    public DocumentFilePointer? FilePointer { get; set; }
 }
 
 /// <summary>
-/// The ONE place that maps a caller-supplied association type onto an
-/// <see cref="UpdateDocumentRequest"/>'s lookup field.
+/// The SharePoint Embedded file a <see cref="CreateDocumentRequest"/> points its new document at (task 030b).
+/// </summary>
+/// <param name="DriveId">The container's drive id (<c>sprk_graphdriveid</c>).</param>
+/// <param name="ItemId">The drive item id (<c>sprk_graphitemid</c> and its bound copy).</param>
+/// <param name="WebUrl">The item's web URL (<c>sprk_filepath</c>); null writes nothing.</param>
+public sealed record DocumentFilePointer(string DriveId, string ItemId, string? WebUrl);
+
+/// <summary>
+/// One <c>sprk_document</c> association lookup and the record it points at, as a create writes it (task 030b):
+/// <c>document[Field.LogicalName] = EntityReference(Field.TargetEntityLogicalName, RecordId)</c>.
+/// </summary>
+/// <param name="Field">The lookup, always an entry of <see cref="DocumentLinkFields.All"/>.</param>
+/// <param name="RecordId">The record the document is filed to.</param>
+public sealed record DocumentAssociationBind(DocumentLinkField Field, Guid RecordId);
+
+/// <summary>
+/// The ONE place that maps a caller-supplied association type onto a document's lookup field: an
+/// <see cref="UpdateDocumentRequest"/>'s, or (task 030b) the association a <see cref="CreateDocumentRequest"/> is created with.
 /// </summary>
 /// <remarks>
 /// <para>Created 2026-09-03 (unified-access-control-r2 item 7). It replaces <b>four</b> hand-written
@@ -149,7 +211,7 @@ public static class DocumentAssociationMap
 {
     /// <summary>
     /// Every association spelling a caller may send, mapped to the entity's logical name. The ONE alias table:
-    /// <see cref="TryApply"/> resolves through it, and so does record ownership (task 080), which needs the
+    /// <see cref="TryApply(UpdateDocumentRequest, string?, Guid?)"/> resolves through it, and so does record ownership (task 080), which needs the
     /// target's logical name to read its business unit. Two tables would drift exactly the way the four
     /// switches this class replaced did.
     /// </summary>
@@ -246,6 +308,91 @@ public static class DocumentAssociationMap
                 return false;
         }
     }
+
+    /// <summary>
+    /// The association column a create writes for each logical name, the same column
+    /// <see cref="TryApply(UpdateDocumentRequest, string?, Guid?)"/>'s property is written to
+    /// (<c>DataverseServiceClientImpl.UpdateDocumentAsync</c>). Event, To Do and contact are in the <c>sprk_related*</c> family.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> AssociationColumnByLogicalName =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matter"] = "sprk_matter",
+            ["sprk_project"] = "sprk_project",
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_workassignment"] = "sprk_workassignment",
+            ["sprk_event"] = "sprk_relatedevent",
+            ["sprk_todo"] = "sprk_relatedtodo",
+            ["contact"] = "sprk_relatedcontact",
+        };
+
+    /// <summary>
+    /// Field-mapping-server-write-path-r1 task 030b (FR-18): put the association on the CREATE, so the document is filed
+    /// from its first write. Same spellings and same columns as the update overload; the column is the
+    /// <see cref="DocumentLinkFields.All"/> entry, so its target table is the verified one.
+    /// </summary>
+    /// <returns>As the update overload: <see langword="false"/> when the type has no <c>sprk_document</c> column or the id
+    /// is empty, and nothing is set.</returns>
+    public static bool TryApply(CreateDocumentRequest request, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!TryResolveAssociationField(entityTypeOrAlias, recordId, out var field))
+            return false;
+
+        request.Association = new DocumentAssociationBind(field, recordId!.Value);
+        return true;
+    }
+
+    /// <summary>
+    /// Ontology task 177 A3 (D-218, uac-r2 Option A): the raw-row form of the create's association — the same choice of column
+    /// and verified target as <see cref="TryApply(CreateDocumentRequest, string?, Guid?)"/>, staged onto a <c>sprk_document</c>
+    /// <see cref="Microsoft.Xrm.Sdk.Entity"/> as <c>[column] = EntityReference(target table, id)</c>, exactly as
+    /// <c>DataverseServiceClientImpl.StageDocumentAssociation</c> writes it. For a create that builds its row itself because
+    /// its columns are not on <see cref="CreateDocumentRequest"/> (the archived outgoing <c>.eml</c>). It sets the link and
+    /// touches nothing else; this map stays the only thing that chooses the field and its target.
+    /// </summary>
+    /// <returns>As the request overloads: <see langword="false"/> when the type has no <c>sprk_document</c> column or the id is
+    /// empty, and nothing is set.</returns>
+    /// <exception cref="ArgumentException"><paramref name="document"/> is not a <c>sprk_document</c> row.</exception>
+    public static bool TryApply(Microsoft.Xrm.Sdk.Entity document, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!string.Equals(document.LogicalName, "sprk_document", StringComparison.Ordinal))
+            throw new ArgumentException("A document association is staged only onto a sprk_document row.", nameof(document));
+
+        if (!TryResolveAssociationField(entityTypeOrAlias, recordId, out var field))
+            return false;
+
+        document[field.LogicalName] = new Microsoft.Xrm.Sdk.EntityReference(field.TargetEntityLogicalName, recordId!.Value);
+        return true;
+    }
+
+    /// <summary>The one choice both create forms make: the <see cref="DocumentLinkFields.All"/> entry of the association column
+    /// for <paramref name="entityTypeOrAlias"/>, or <see langword="false"/> when the type has none or the id is empty.</summary>
+    private static bool TryResolveAssociationField(string? entityTypeOrAlias, Guid? recordId, out DocumentLinkField field)
+    {
+        field = null!;
+        if (!recordId.HasValue || recordId.Value == Guid.Empty)
+            return false;
+
+        if (ToLogicalName(entityTypeOrAlias) is not { } logicalName
+            || !AssociationColumnByLogicalName.TryGetValue(logicalName, out var column))
+            return false;
+
+        field = DocumentLinkFields.All.Single(f => string.Equals(f.LogicalName, column, StringComparison.Ordinal));
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="field"/> is one of the association columns a create may write, with its verified target: an
+    /// <see cref="AssociationColumnByLogicalName"/> column, as its <see cref="DocumentLinkFields.All"/> entry names it. The
+    /// create's stager (<c>DataverseServiceClientImpl.StageDocumentAssociation</c>) refuses any other.
+    /// </summary>
+    internal static bool IsAssociationField(DocumentLinkField field) =>
+        field is not null
+        && AssociationColumnByLogicalName.Values.Contains(field.LogicalName, StringComparer.Ordinal)
+        && DocumentLinkFields.All.Contains(field);
 }
 
 /// <summary>
@@ -812,6 +959,55 @@ public record LookupNavigationMetadata
 }
 
 /// <summary>
+/// One column of a table as its metadata declares it (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>). A
+/// <c>null</c> flag is one the metadata did not state; a reader treats it as unknown and fails closed.
+/// </summary>
+/// <param name="LogicalName">The column's logical name.</param>
+/// <param name="AttributeType">The SDK <c>AttributeTypeCode</c> name (<c>String</c>, <c>Money</c>, <c>Lookup</c>, ...), the same
+/// names as the Web API's <c>AttributeType</c>; <c>null</c> when the metadata gives none.</param>
+/// <param name="IsValidForUpdate">Whether an update may set the column.</param>
+/// <param name="IsSecured">Whether the column is field-secured (column security).</param>
+/// <param name="MaxLength">A text or memo column's maximum length in characters; <c>null</c> for any other column.</param>
+/// <param name="MinValue">A number or Money column's smallest value; <c>null</c> for any other column, or when not stated.</param>
+/// <param name="MaxValue">A number or Money column's largest value; <c>null</c> for any other column, or when not stated.</param>
+/// <param name="Targets">A lookup column's target tables (logical names); <c>null</c> for any other column, or when not stated.</param>
+/// <param name="OptionValues">A choice column's option values (choice, multi-select choice, state, status); <c>null</c> for any
+/// other column, or when not stated.</param>
+/// <param name="ColumnNumber">The column's number in the table (<c>AttributeMetadata.ColumnNumber</c>), the number an update
+/// audit's <c>attributemask</c> lists for a changed column; <c>null</c> when not stated (field-mapping-server-write-path-r1
+/// task 052d: the repair pass's core-pair report decides from it whether an update changed a pair column).</param>
+/// <param name="IsAuditEnabled">Whether the column's changes are audited (<c>AttributeMetadata.IsAuditEnabled</c>); <c>null</c> when
+/// not stated, which a reader treats as "not audited" (fail closed): the core-pair report reads no change history of a column
+/// that is not audited and would otherwise report "no change".</param>
+public sealed record ColumnMetadata(
+    string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength,
+    decimal? MinValue = null, decimal? MaxValue = null, IReadOnlyList<string>? Targets = null,
+    IReadOnlyList<int>? OptionValues = null, int? ColumnNumber = null, bool? IsAuditEnabled = null);
+
+/// <summary>
+/// A table's audit facts as its metadata declares them (<see cref="IGenericEntityService.GetTableAuditMetadataAsync"/>). A
+/// <c>null</c> is a fact the metadata did not state; a reader treats it as unknown and fails closed.
+/// </summary>
+/// <param name="ObjectTypeCode">The table's numeric object type code, the value an <c>audit</c> row's <c>objecttypecode</c> is
+/// filtered by (a custom table's code differs per environment, so it is read, never written into code).</param>
+/// <param name="IsAuditEnabled">Whether auditing is on for the table itself.</param>
+public sealed record TableAuditMetadata(int? ObjectTypeCode, bool? IsAuditEnabled);
+
+/// <summary>
+/// A one-to-many relationship of a table along which an Assign (an <c>ownerid</c> write) cascades to the child rows
+/// (<see cref="IGenericEntityService.GetAssignCascadesAsync"/>).
+/// </summary>
+/// <param name="SchemaName">The relationship's schema name.</param>
+/// <param name="ReferencingEntity">The child table (logical name).</param>
+/// <param name="Assign">The relationship's Assign cascade as its metadata states it (<c>Cascade</c>, <c>Active</c>,
+/// <c>UserOwned</c>, ...); <c>null</c> when the metadata does not state it.</param>
+/// <param name="ReferencingAttribute">The child table's lookup column that holds the parent (logical name), from the same
+/// metadata read; <c>null</c> when the metadata does not state it. Field-mapping-server-write-path-r1 task 052f: Repair reads a
+/// row's children along this column, and a relationship without it is read as unknown, never as "no children".</param>
+public sealed record AssignCascadeRelationship(
+    string SchemaName, string ReferencingEntity, string? Assign, string? ReferencingAttribute = null);
+
+/// <summary>
 /// Analysis entity model (sprk_analysis)
 /// </summary>
 public class AnalysisEntity
@@ -1220,6 +1416,28 @@ public static class EventStatusCode
 
         return "Unknown";
     }
+}
+
+/// <summary>
+/// The <c>sprk_eventtype_ref</c> rows the BFF writes or compares by id: reference data shared across environments.
+/// </summary>
+/// <remarks>
+/// <para>ONE definition for Signals' <c>assign-task</c> (ontology task 159, D-178) and the external event create and lists
+/// (spaarke-SPA-external-access-platform-r4 task 008; uac-r2 review 2026-11-13, condition B), so the two cannot name
+/// different rows. Verified on spaarkedev1 2026-10-22.</para>
+/// <para>Other private copies of the same id remain in the AI task node, the Daily Briefing collector and the workspace
+/// portfolio service; they are not part of this definition yet.</para>
+/// </remarks>
+public static class EventTypeRef
+{
+    /// <summary>The entity SET name of <c>sprk_eventtype_ref</c> (live metadata "Collection Name").</summary>
+    public const string EntitySet = "sprk_eventtype_refs";
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c>.</summary>
+    public const string TaskId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The Task row id as a <see cref="Guid"/>.</summary>
+    public static readonly Guid Task = new(TaskId);
 }
 
 /// <summary>

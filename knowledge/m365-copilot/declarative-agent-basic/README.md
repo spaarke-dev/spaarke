@@ -1,12 +1,12 @@
 # Rubber Duck Debugging Assistant 🐤
 
-![Rubber Duck](assets/da-RubberDuck-screenshot.png)
+*(image not included in this snapshot: Rubber Duck)*
 
 ## Summary
 
 Meet your new debugging companion! This declarative agent acts as a "rubber duck" - inspired by the classic programming practice where developers explain their code problems out loud to uncover issues and clarify their thinking. Instead of talking to an actual rubber duck on your desk, you can now interact with an AI-powered debugging assistant that listens patiently and asks thoughtful questions to guide you toward solutions.
 
-![Rubber Duck in use](assets/da-RubberDuck.gif)
+*(image not included in this snapshot: Rubber Duck in use)*
 
 ### What is Rubber Duck Debugging?
 

@@ -816,7 +816,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 new Azure.AzureKeyCredential("test-api-key")));
 
             // IOpenAiClient is conditionally registered (DocumentIntelligence:Enabled=true only),
-            // but FinanceModule services (InvoiceAnalysisService, InvoiceSearchService, etc.) always
+            // but FinanceModule services (InvoiceSearchService, etc.) always
             // depend on it. Register a stub to prevent InvalidOperationException during scope activation.
             services.RemoveAll<Sprk.Bff.Api.Services.Ai.IOpenAiClient>();
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(Moq.MockBehavior.Loose).Object);
@@ -1011,7 +1011,8 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "msg-002", TestSessionId, ChatMessageRole.Assistant,
                         "Hi there!", 10, now.AddMinutes(-1), 2)
-                ]) { OwnerOid = IntegrationTestConstants.TestUserId });
+                ])
+            { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // GetSessionAsync — returns null for any other session ID (triggers 404)
         MockDataverseRepository
@@ -1041,7 +1042,8 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 PlaybookId: TestPlaybookId,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = IntegrationTestConstants.TestUserId });
+                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())
+            { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // GetSessionAsync — TestHistorySessionId: a read-only session carrying EXACTLY two
         // messages, for GetHistory_ReturnsMessages_WhenAuthenticated.
@@ -1077,7 +1079,8 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "hist-002", TestHistorySessionId, ChatMessageRole.Assistant,
                         "Hi there!", 10, now.AddMinutes(-1), 2)
-                ]) { OwnerOid = IntegrationTestConstants.TestUserId });
+                ])
+            { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // ArchiveSessionAsync — no-op (called by DeleteSessionAsync)
         MockDataverseRepository

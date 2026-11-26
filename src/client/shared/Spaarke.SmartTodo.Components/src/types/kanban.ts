@@ -85,10 +85,9 @@ export type { IKanbanColumn, KanbanOrientation } from '@spaarke/ui-components';
  * Minimal Dataverse service surface the hoisted hook requires to persist
  * column moves, pin toggles, and recalculate batches.
  *
- * The Code Page's existing `DataverseService` (in
- * `src/solutions/SmartTodo/src/services/DataverseService.ts`) is structurally
- * compatible — its three methods return `IResult<...>` which carries a
- * `success: boolean` field, matching this contract.
+ * The package's `TodoDataverseService` (`../services/TodoDataverseService.ts`,
+ * #2972) implements it; its methods return `ITodoServiceResult<...>`, which
+ * carries the `success: boolean` field this contract reads.
  *
  * The widget call site does NOT pass a service (the widget renders grouped
  * lists only — no drag-drop, no mutations per task 101 scope). When omitted,

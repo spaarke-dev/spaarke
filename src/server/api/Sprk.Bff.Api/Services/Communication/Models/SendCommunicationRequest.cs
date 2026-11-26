@@ -72,7 +72,8 @@ public sealed record SendCommunicationRequest
 
     /// <summary>
     /// Whether to archive the sent email as .eml in SharePoint Embedded.
-    /// Default false.
+    /// Default false. Ontology task 177 (D-217): an email whose created communication is filed to a record is archived
+    /// whatever this says (<c>CommunicationService.ShouldArchiveOutgoing</c>); this flag still opts a record-less send in.
     /// </summary>
     public bool ArchiveToSpe { get; init; } = false;
 
@@ -135,6 +136,17 @@ public sealed record SendCommunicationRequest
     public bool? IsInternalOnly { get; init; }
 
     /// <summary>
+    /// fm task 056 (private messages in a record's context): the one core record a private message is about, or <c>null</c> for
+    /// every other send (the default; every other send is unchanged). Valid only on a <see cref="Models.CommunicationType.Message"/>
+    /// send into the caller's own strict 1:1 Direct thread (<see cref="ThreadId"/>), with no To/Cc/Bcc, no
+    /// <see cref="Associations"/>, no <see cref="InheritRegardingFromCommunicationId"/> and no reply into another thread; anything
+    /// else is a 400. The message stays a Direct message of that pair: the reference decides where it is shown to the two
+    /// participants, never who reads it. Both participants must hold Read on the record before anything is sent
+    /// (<c>Access.PrivateMessageSendGate</c>). Optional.
+    /// </summary>
+    public PrivateMessageContext? PrivateContext { get; init; }
+
+    /// <summary>
     /// Task 185 (owner round 98 Q4): the system-mail (secret-bearing) send option, or <c>null</c> for a normal send (the
     /// default; every other send is unchanged). See <see cref="SystemMailOptions"/>. Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>:
     /// server code sets it, a request body never can.
@@ -149,4 +161,27 @@ public sealed record SendCommunicationRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     internal ServerSendOptions? ServerSend { get; init; }
+
+    /// <summary>
+    /// Ontology task 176 (D-216; review round 2 item 7): when the send's find-or-create step CREATES the email's thread, it is
+    /// created Private (<see cref="ThreadResolutionRequest.CreatePrivate"/>), so a follow-up posted into it with the composer's
+    /// External default is still stored internal-only. Only the budget inquiry send sets it (<c>InquiryEmailSender.Build</c>).
+    /// No effect on a send into an existing thread. Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>:
+    /// server code sets it, a request body never can.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal bool CreateThreadPrivate { get; init; }
+}
+
+/// <summary>
+/// fm task 056: the record a private message is about (<see cref="SendCommunicationRequest.PrivateContext"/>). JSON
+/// <c>{ "entityType": "sprk_matter", "id": "…" }</c>.
+/// </summary>
+public sealed record PrivateMessageContext
+{
+    /// <summary>The record's table: <c>sprk_matter</c>, <c>sprk_project</c> or <c>sprk_workassignment</c>. Anything else is a 400.</summary>
+    public string? EntityType { get; init; }
+
+    /// <summary>The record's id. An empty id is a 400.</summary>
+    public Guid Id { get; init; }
 }

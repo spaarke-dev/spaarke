@@ -180,3 +180,28 @@ Known limits added in fix round 1 (left as is):
 - None outstanding from this task. The two wall-clock sensitive tests above and the ArchTest guards are reported, not changed.
 
 rework: 3 (the three ArchTests guards fixed after the first full run); fix round 1: 1
+
+## Live checks on dev (2026-11-07, after UAC-r2's deploy of cc11294300)
+
+The owner gave the go in fm's main session for new FMSWP- rows. Scripted HTTP through the dev BFF, with one delegated token per resource (the owner's admin account). No token is recorded here. The window ran 17:19:18–17:21:07Z.
+
+| Check | Request | Result |
+|---|---|---|
+| Setup | `POST /api/v1/child-records/sprk_matter` "FMSWP-075-push-src", attorney 1 = contact A | 201, 4147 ms, matter `33873a1a-dc61-481d-aae4-d736679305c6` |
+| Setup | `POST /api/v1/child-records/sprk_project` "FMSWP-075-push-child", filed under the matter by its regarding pair, attorney 1 = contact B (caller wins) | 201, 5919 ms, project `8c788447-7ae7-4886-ba44-4a91d61db52b`; read back with attorney 1 = B |
+| (b) preview, plain push | `push` preview, Matter → Project | 200, nothing to push: all 8 rules are Assigned-To rules (`skippedRuleCount` 8, warning "None of this profile's rules is set to be pushed.") |
+| (b) preview, Update Assigned To | `push` preview + `includeAssignedTo` | 200, 1 record, 1 change: `sprk_assignedattorney1` B → A |
+| (b) apply | `push` + `includeAssignedTo` + `childIds` [project] | 200, `updatedCount` 1, 5803 ms; read back attorney 1 = A |
+| (b) idempotent | the same preview again | 200, 0 changes |
+| (d) no Filing edge | `push` preview + `includeAssignedTo`, Project → Matter (a matter is never filed under a project) | **409** `field_mapping_parent_lookup_missing`, "Nothing was updated." |
+| (d) note | the same without `includeAssignedTo` | 200, "None of this profile's rules is set to be pushed." The no-rule answer comes before the edge test; nothing is read or written. **K4, known limit.** |
+
+(a) the Push Updates button opens the `sprk_recordfamily` page, and (c) a failed form save opens nothing. Both need a browser; the owner clicks through them.
+
+**Owner browser checks (2026-11-08):**
+- **(a) PASS.** Push Updates opens the Record Family page and lists the family. The owner ran it on Matter PAT-477689.
+- **(c) not run as written.** Instead, the owner ticked rows of several tables and chose "Push field updates". The preview failed as a whole: `No field mapping profile found for source entity 'sprk_matter' and target entity 'sprk_document'`.
+  - **Defect, fixed in scope (task 076c).** The panel treated only the 409 no-Filing-edge answer per table. The 404 for a table with no profile from the source failed every table.
+  - **Fix:** the push 404 gains the reason code `field_mapping_profile_missing`, an additive change. The panel lists such a table as having nothing set up to push, and still previews the rest. A 404 without the code (source not found) still fails the whole preview.
+
+**Rows to clean up later:** matter `33873a1a-dc61-481d-aae4-d736679305c6` and project `8c788447-7ae7-4886-ba44-4a91d61db52b`. They join the FMSWP-021 cleanup list in `task-021-live.md`.

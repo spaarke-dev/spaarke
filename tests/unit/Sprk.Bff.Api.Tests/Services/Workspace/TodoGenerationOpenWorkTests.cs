@@ -139,7 +139,10 @@ public class TodoGenerationOpenWorkTests
     {
         var overdue = Enumerable.Range(1, 150).Select(i => new EventEntity
         {
-            Id = Guid.NewGuid(), Name = $"Overdue {i:000}", StatusCode = EventStatusCode.Open, DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-2)),
+            Id = Guid.NewGuid(),
+            Name = $"Overdue {i:000}",
+            StatusCode = EventStatusCode.Open,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-2)),
         }).ToArray();
         StoreManyEventsForRules1And3(overdue, Array.Empty<EventEntity>());
 
@@ -154,7 +157,10 @@ public class TodoGenerationOpenWorkTests
     {
         var upcoming = Enumerable.Range(1, 150).Select(i => new EventEntity
         {
-            Id = Guid.NewGuid(), Name = $"Hearing {i:000}", StatusCode = EventStatusCode.Open, DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(3)),
+            Id = Guid.NewGuid(),
+            Name = $"Hearing {i:000}",
+            StatusCode = EventStatusCode.Open,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(3)),
         }).ToArray();
         StoreManyEventsForRules1And3(Array.Empty<EventEntity>(), upcoming);
 
@@ -169,7 +175,8 @@ public class TodoGenerationOpenWorkTests
     {
         StoreRows("sprk_matter", Enumerable.Range(1, 150).Select(i => new Entity("sprk_matter", Guid.NewGuid())
         {
-            ["sprk_name"] = $"Matter {i:000}", ["sprk_utilizationpercent"] = 120m,
+            ["sprk_name"] = $"Matter {i:000}",
+            ["sprk_utilizationpercent"] = 120m,
         }).ToArray());
 
         await CreateService().RunGenerationPassAsync(CancellationToken.None);
@@ -271,7 +278,10 @@ public class TodoGenerationOpenWorkTests
     {
         StoreEventsForRules1And3(overdue: new EventEntity
         {
-            Id = EventId, Name = "Filing", StatusCode = status, DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-3)),
+            Id = EventId,
+            Name = "Filing",
+            StatusCode = status,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(-3)),
         }, upcoming: null);
 
         await CreateService(eventSourced: true).RunGenerationPassAsync(CancellationToken.None);
@@ -285,7 +295,10 @@ public class TodoGenerationOpenWorkTests
     {
         StoreEventsForRules1And3(overdue: null, upcoming: new EventEntity
         {
-            Id = EventId, Name = "Hearing", StatusCode = status, DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(4)),
+            Id = EventId,
+            Name = "Hearing",
+            StatusCode = status,
+            DueDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(4)),
         });
 
         await CreateService(eventSourced: true).RunGenerationPassAsync(CancellationToken.None);

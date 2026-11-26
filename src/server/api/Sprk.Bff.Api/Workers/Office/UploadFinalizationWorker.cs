@@ -68,6 +68,16 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private const string IndexingQueueName = "office-indexing";
     private const int MaxConcurrentCalls = 5;
     private static readonly TimeSpan IdempotencyKeyTtl = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// The cache resource of the "processed" mark a finished finalization sets under its message key. Shared with
+    /// <see cref="EmailAttachmentAddPlanner"/>, which reads the mark to tell a finalization that has not finished from one
+    /// that has (task 138): one definition, so the writer and the reader cannot drift apart.
+    /// </summary>
+    internal const string ProcessedMarkResource = "office-upload-processed";
+
+    /// <summary>The schema version of the <see cref="ProcessedMarkResource"/> mark.</summary>
+    internal const int ProcessedMarkVersion = 1;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -275,6 +285,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var driveId = parts[0];
             var itemId = parts[1];
 
+            // Task 138 (#2209): a re-save that adds attachments to an email already saved. Only the missing children.
+            if (payload.AttachmentsOnly)
+            {
+                return await ProcessAttachmentsOnlyAsync(message, payload, driveId, itemId, cancellationToken);
+            }
+
             _logger.LogInformation(
                 "File already uploaded to SPE, skipping upload. DriveId={DriveId}, ItemId={ItemId}",
                 driveId, itemId);
@@ -432,6 +448,60 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         }
     }
 
+    /// <summary>
+    /// Task 138 (#2209): the attachments-only finalization of a re-save that adds attachments to an email already saved as
+    /// the <c>.eml</c> document the payload names. Creates the missing attachment children through the SAME
+    /// <see cref="ProcessEmailAttachmentsAsync"/> → <see cref="ProcessSingleAttachmentAsync"/> as a first save, which skips
+    /// any child that already exists (read again here, just before creating). Nothing else: the <c>.eml</c>, its email
+    /// artifact and its profile/index were made by the first save.
+    /// </summary>
+    private async Task<JobOutcome> ProcessAttachmentsOnlyAsync(
+        OfficeJobMessage message,
+        UploadFinalizationPayload payload,
+        string driveId,
+        string itemId,
+        CancellationToken cancellationToken)
+    {
+        if (payload.ContentType != SaveContentType.Email
+            || payload.DocumentId is not { } emlDocumentId
+            || emlDocumentId == Guid.Empty)
+        {
+            // Never the fallback create: that would make a second .eml.
+            return JobOutcome.Failure(
+                "OFFICE_INTERNAL",
+                "An attachments-only finalization names the existing .eml document of an Email save.",
+                retryable: false);
+        }
+
+        await UpdateJobStatusAsync(message.JobId, JobStatus.Running, "AddingAttachments", 50, cancellationToken);
+
+        await ProcessEmailAttachmentsAsync(
+            driveId,
+            itemId,
+            emlDocumentId,
+            payload,
+            message.UserId,
+            message.JobId,
+            cancellationToken);
+
+        await MarkAsProcessedAsync(message.IdempotencyKey, emlDocumentId, cancellationToken);
+
+        await UpdateJobStatusAsync(
+            message.JobId,
+            JobStatus.Completed,
+            "AttachmentsAdded",
+            100,
+            cancellationToken,
+            emlDocumentId);
+
+        _logger.LogInformation(
+            "Attachments-only finalization completed for job {JobId} under .eml document {DocumentId}",
+            message.JobId,
+            emlDocumentId);
+
+        return JobOutcome.Success();
+    }
+
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
         _logger.LogWarning(
@@ -566,9 +636,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var tenantId = GetTenantIdForCache();
         var cached = await _cache.GetAsync<string>(
             tenantId,
-            resource: "office-upload-processed",
+            resource: ProcessedMarkResource,
             id: idempotencyKey,
-            version: 1,
+            version: ProcessedMarkVersion,
             ct: cancellationToken);
         return !string.IsNullOrEmpty(cached);
     }
@@ -581,9 +651,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var tenantId = GetTenantIdForCache();
         await _cache.SetAsync<string>(
             tenantId,
-            resource: "office-upload-processed",
+            resource: ProcessedMarkResource,
             id: idempotencyKey,
-            version: 1,
+            version: ProcessedMarkVersion,
             value: documentId.ToString(),
             ttl: IdempotencyKeyTtl,
             ct: cancellationToken);
@@ -595,9 +665,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// is the BFF's own AAD tenant (TENANT_ID or AzureAd:TenantId).
     /// Falls back to "bff" if neither is configured (defensive — should not happen in deployed envs).
     /// </summary>
-    private string GetTenantIdForCache()
+    private string GetTenantIdForCache() => TenantIdForCache(_configuration);
+
+    /// <summary>The cache tenant id, for the readers of the <see cref="ProcessedMarkResource"/> mark.</summary>
+    internal static string TenantIdForCache(IConfiguration configuration)
     {
-        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"];
+        var tenantId = configuration["TENANT_ID"] ?? configuration["AzureAd:TenantId"];
         return string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
     }
 
@@ -654,7 +727,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             OwningTeamId = owningTeamId,
             // Task 146 c1-r1 (owner round 13 item 9): the saving user, carried by SaveAsync with the team.
             CreatedByPersonId = payload.CreatedByPersonId,
+            // Task 030b: the SPE pointer is part of the CREATE; the item was uploaded before this runs.
+            FilePointer = new Spaarke.Dataverse.DocumentFilePointer(driveId, itemId, webUrl),
         };
+
+        // Task 030b (FR-18): the association is part of the create, the same column the owner question above was asked over
+        // (shared with attachment children so they inherit the same "File to" association).
+        ApplyAssociationLookup(createRequest, payload.AssociationType, payload.AssociationId);
 
         // Task 130 (#2126): an Email or Attachment document is created linked to the email's communication the save
         // carried, or Restricted when it carried none — the same rule as the save's own create.
@@ -677,22 +756,15 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             "Document record created in Dataverse: DocumentId={DocumentId}",
             documentId);
 
-        // Step 2: Update the document with SPE pointers and association lookups
+        // Step 2: Update the document with its metadata (never the association or the SPE pointer: task 030b, both are in the create)
         var updateRequest = new Spaarke.Dataverse.UpdateDocumentRequest
         {
-            GraphDriveId = driveId,
-            GraphItemId = itemId,
             FileName = payload.FileName,
             FileSize = payload.FileSize,
             MimeType = payload.MimeType,
-            FilePath = webUrl,
             FileType = ExtractFileExtension(payload.FileName),
             HasFile = true
         };
-
-        // Set entity association lookup based on AssociationType (shared with attachment children
-        // so they inherit the same "File to" association).
-        ApplyAssociationLookup(updateRequest, payload.AssociationType, payload.AssociationId);
 
         // Set email-specific fields if this is an email save
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
@@ -710,7 +782,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         await _documentService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
 
         _logger.LogInformation(
-            "Document record updated with SPE pointers and metadata: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
+            "Document record updated with metadata (pointer written in the create): DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             documentId,
             driveId,
             itemId);
@@ -1023,6 +1095,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var emlConverter = scope.ServiceProvider.GetRequiredService<IEmailToEmlConverter>();
             var attachmentFilterService = scope.ServiceProvider.GetRequiredService<AttachmentFilterService>();
 
+            // Respect user's attachment selection (if provided)
+            // - null: Process all attachments (backward compatible)
+            // - empty array: Process NO attachments (user deselected all)
+            // - array with names: Process only those attachments
+            if (payload.EmailMetadata?.SelectedAttachmentFileNames is { Count: 0 })
+            {
+                // User explicitly deselected all attachments
+                _logger.LogInformation(
+                    "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
+                    parentDocumentId);
+                return; // Skip all attachment processing
+            }
+
             // Download the .eml file from SPE
             var emlStream = await speFileStore.DownloadFileAsync(driveId, itemId, cancellationToken);
             if (emlStream == null)
@@ -1033,12 +1118,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 return;
             }
 
-            // Extract attachments using IEmailToEmlConverter
-            IReadOnlyList<EmailAttachmentInfo> attachments;
+            // Task 138: the ONE selection (extract, drop noise, apply the user's selection, keep what can become a document),
+            // shared with the save's "what is not yet saved" answer.
+            EmailAttachmentAddPlanner.EmailAttachmentSelection chosen;
             using (emlStream)
             {
-                attachments = emlConverter.ExtractAttachments(emlStream);
+                chosen = EmailAttachmentAddPlanner.SelectAttachments(
+                    emlStream, emlConverter, attachmentFilterService, payload.EmailMetadata?.SelectedAttachmentFileNames);
             }
+
+            var attachments = chosen.All;
+            var filteredAttachments = chosen.Wanted;
+            var filteredCount = attachments.Count - filteredAttachments.Count;
 
             if (attachments.Count == 0)
             {
@@ -1050,30 +1141,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 "Extracted {Count} attachments from .eml for document {DocumentId}",
                 attachments.Count, parentDocumentId);
 
-            // Filter out noise (signatures, tracking pixels, etc.)
-            var filteredAttachments = attachmentFilterService.FilterAttachments(attachments);
-            var filteredCount = attachments.Count - filteredAttachments.Count;
-
-            // Respect user's attachment selection (if provided)
-            // - null: Process all attachments (backward compatible)
-            // - empty array: Process NO attachments (user deselected all)
-            // - array with names: Process only those attachments
             if (payload.EmailMetadata?.SelectedAttachmentFileNames != null)
             {
-                if (payload.EmailMetadata.SelectedAttachmentFileNames.Count == 0)
-                {
-                    // User explicitly deselected all attachments
-                    _logger.LogInformation(
-                        "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
-                        parentDocumentId);
-                    return; // Skip all attachment processing
-                }
-
-                var selectedNames = new HashSet<string>(payload.EmailMetadata.SelectedAttachmentFileNames, StringComparer.OrdinalIgnoreCase);
-                filteredAttachments = filteredAttachments
-                    .Where(a => selectedNames.Contains(a.FileName))
-                    .ToList();
-
                 _logger.LogInformation(
                     "User selected {SelectedCount} attachments for document {DocumentId}: {SelectedNames}",
                     filteredAttachments.Count,
@@ -1086,6 +1155,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     "No attachment selection provided - processing all {Count} attachments for document {DocumentId}",
                     filteredAttachments.Count,
                     parentDocumentId);
+            }
+
+            if (payload.AttachmentsOnly)
+            {
+                // Task 138: a re-save adds only what the .eml does not already have. Read just before creating, so a
+                // second add of the same attachment that runs after this one creates nothing (two at the same moment
+                // upload to the same drive item, and the second create is refused by sprk_graphitemid_uk).
+                var existingChildren = await _documentService.GetDocumentsByParentAsync(parentDocumentId, cancellationToken);
+                var notYetSaved = EmailAttachmentAddPlanner.ExcludeAlreadySaved(filteredAttachments, existingChildren);
+                _logger.LogInformation(
+                    "Attachments-only finalization for document {DocumentId}: {AlreadySaved} already saved, {ToCreate} to create",
+                    parentDocumentId, filteredAttachments.Count - notYetSaved.Count, notYetSaved.Count);
+                filteredAttachments = notYetSaved;
             }
 
             _logger.LogInformation(
@@ -1182,17 +1264,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     }
 
     /// <summary>
-    /// Process a single attachment: upload to SPE and create child Document record.
-    /// </summary>
-    /// <summary>
-    /// Applies the Matter/Project/Invoice association lookup (from the save's AssociationType +
-    /// AssociationId) onto an <see cref="Spaarke.Dataverse.UpdateDocumentRequest"/>. Shared by the
-    /// parent email document and its attachment children so attachments inherit the same "File to"
-    /// association as the email. No-op when there is no association. Account/Contact have no document
-    /// lookup field yet (see UpdateDocumentRequest).
+    /// Applies the save's association (AssociationType + AssociationId) onto the CREATE of a document this worker makes
+    /// (task 030b, FR-18: in the create, never a follow-up update). Shared by the fallback create and the attachment
+    /// children so attachments inherit the same "File to" association as the email. No-op when there is no association;
+    /// a type with no <c>sprk_document</c> column (account) is logged and the document is created unassociated.
     /// </summary>
     private void ApplyAssociationLookup(
-        Spaarke.Dataverse.UpdateDocumentRequest request,
+        Spaarke.Dataverse.CreateDocumentRequest request,
         string? associationType,
         Guid? associationId)
     {
@@ -1204,14 +1282,17 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // association while the very same token applied fine in OfficeDocumentPersistence.
         if (!DocumentAssociationMap.TryApply(request, associationType, associationId))
         {
+            // No id exists yet (the create follows), and the name is not logged: it can come from a received email.
             _logger.LogWarning(
-                "Association type {AssociationType} has no sprk_document lookup — document {DocumentId} " +
-                "will be created UNASSOCIATED. Known gap: account (no column exists).",
-                associationType,
-                request.GraphItemId);
+                "Association type {AssociationType} has no sprk_document lookup — the document will be " +
+                "created UNASSOCIATED. Known gap: account (no column exists).",
+                associationType);
         }
     }
 
+    /// <summary>
+    /// Process a single attachment: upload to SPE and create child Document record.
+    /// </summary>
     private async Task ProcessSingleAttachmentAsync(
         EmailAttachmentInfo attachment,
         Guid parentDocumentId,
@@ -1248,7 +1329,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // only thing keeping two emails' identically-named attachments apart — image001.png being the
         // canonical case — because UploadSmallAsync is Graph's path-keyed simple PUT, which accepts no
         // @microsoft.graph.conflictBehavior and therefore replaces silently and unconditionally. So the id
-        // moves into the name rather than being dropped (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
+        // moves into the name rather than being dropped (as in IncomingCommunicationProcessor's attachment upload).
         //
         // SANITIZED 2026-08-29: attachment.FileName originates in an email the mailbox RECEIVED, so it is
         // attacker-influenced. A '/' in it makes Graph create that folder; folding the parent id in front
@@ -1278,7 +1359,14 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Description = $"Email attachment from {parentFileName}",
             OwningTeamId = owningTeamId, // task 080 — the parent email's team
             CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
+            // Task 030b: an attachment child carries its parent link and its SPE pointer in the create.
+            ParentDocumentLookup = parentDocumentId,
+            FilePointer = new DocumentFilePointer(driveId, fileHandle.Id, fileHandle.WebUrl),
         };
+
+        // Task 030b (FR-18): inherit the parent email's "File to" association (Matter/Project/Invoice) IN the create, so
+        // the attachment document is filed to the same record as the .eml from its first write.
+        ApplyAssociationLookup(createRequest, associationType, associationId);
 
         // Task 130 (#2126, UAC D7 T8): the child is created linked to its parent email's communication — or Restricted
         // when the parent email could not be identified (the parent itself was created Restricted). In the create.
@@ -1297,21 +1385,17 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 _logger, childDocumentId, jobId, OfficeDocumentPersistence.HasUsableMessageId(internetMessageId));
         }
 
-        // Update child document with file info and parent relationship
+        // Update child document with file info and the parent's details (the parent link and the pointer are in the create)
         var updateRequest = new UpdateDocumentRequest
         {
             FileName = attachment.FileName,
             FileSize = attachment.SizeBytes,
             MimeType = attachment.MimeType,
             FileType = ExtractFileExtension(attachment.FileName),
-            GraphItemId = fileHandle.Id,
-            GraphDriveId = driveId,
-            FilePath = fileHandle.WebUrl,
             HasFile = true,
             DocumentType = DocumentTypeEmailAttachment,
 
-            // Parent relationship
-            ParentDocumentLookup = parentDocumentId,
+            // Parent relationship details
             ParentFileName = parentFileName,
             ParentGraphItemId = parentGraphItemId,
             RelationshipType = RelationshipTypeEmailAttachment,
@@ -1325,10 +1409,6 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Copy parent email's internetMessageId for relationship tracking
             EmailParentId = internetMessageId
         };
-
-        // Inherit the parent email's "File to" association (Matter/Project/Invoice) so the attachment
-        // Documents file to the same record as the .eml.
-        ApplyAssociationLookup(updateRequest, associationType, associationId);
 
         await _documentService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
 

@@ -261,11 +261,11 @@ public class InvoiceReviewWritePathTests
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
         using var cancel = new CancellationTokenSource();
-        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                 It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
             {
-                _intake.Allocations.Add((id, firm, number, fields));
+                _intake.Allocations.Add((id, firm!.Value, number, fields));
                 cancel.Cancel(); // the caller goes away once the submission is created
                 return TrackingNumberResult.Created("INV-42.1", 1);
             });
@@ -286,11 +286,11 @@ public class InvoiceReviewWritePathTests
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
-        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                 It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-            .Returns(async (Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            .Returns(async (Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
             {
-                _intake.Allocations.Add((id, firm, number, fields));
+                _intake.Allocations.Add((id, firm!.Value, number, fields));
                 // The reject read the document before the submission existed (its submission read finds none), and writes now.
                 await Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = request.DocumentId, Notes = "statement" }, "corr-r");
                 return TrackingNumberResult.Created("INV-42.1", 1);
@@ -350,11 +350,11 @@ public class InvoiceReviewWritePathTests
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
-        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                 It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
             {
-                _intake.Allocations.Add((id, firm, number, fields));
+                _intake.Allocations.Add((id, firm!.Value, number, fields));
                 _records.Remove("sprk_document", request.DocumentId);
                 return TrackingNumberResult.Created("INV-42.1", 1);
             });
@@ -550,6 +550,175 @@ public class InvoiceReviewWritePathTests
             .Which.Failure.Should().Be(InvoiceReviewFailure.DocumentChangedConcurrently);
         attempts.Should().Be(3);
         _records.Writes.Should().BeEmpty();
+    }
+
+    // ── ebilling-r1 050c (EB-D-262): a reject is allowed once the confirm submission has ended Failed ──
+
+    /// <summary>The confirm submission of <paramref name="documentId"/>, attempt <paramref name="generation"/>, as Dataverse holds it with <paramref name="status"/>.</summary>
+    /// <remarks>050c fix round 1: <paramref name="reasonCode"/> and <paramref name="invoiceId"/> are the columns the commit gate's undo leaves on a Failed attempt.</remarks>
+    private void TheConfirmAttempt(
+        Guid documentId, int generation, InvoiceSubmissionStatus status, string? reasonCode = null, Guid? invoiceId = null)
+    {
+        var id = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId, generation);
+        var row = new Entity("sprk_invoicesubmission", id)
+        {
+            ["sprk_processingstatus"] = new OptionSetValue((int)status),
+            ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
+            ["sprk_document"] = new EntityReference("sprk_document", documentId),
+        };
+        if (reasonCode is not null)
+        {
+            row["sprk_outcomereasoncode"] = reasonCode;
+        }
+
+        if (invoiceId is { } invoice)
+        {
+            row[InvoiceSubmissionService.InvoiceColumn] = new EntityReference("sprk_invoice", invoice);
+        }
+
+        _intake.Submissions[id] = row;
+    }
+
+    [Fact(DisplayName = "050c / EB-D-262 (must fire): a reject of a document whose confirm submission ended Failed (no invoice was created) succeeds and writes only the review status")]
+    public async Task Reject_AfterTheConfirmSubmissionFailed_Succeeds_AndWritesOnlyTheReviewStatus()
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed);
+
+        var result = await Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId, Notes = "not an invoice" }, "corr-050c-1");
+
+        result.Status.Should().Be("Rejected");
+        var write = _records.Writes.Should().ContainSingle().Subject;
+        write.Kind.Should().Be(WriteKind.UpdateIfUnchanged);
+        write.Entity.Should().Be("sprk_document");
+        write.Fields.Keys.Should().BeEquivalentTo(["sprk_invoicereviewstatus", "sprk_invoicereviewedon", "sprk_invoicereviewnotes"],
+            "the reject writes only the document's review decision");
+        _records.StatusOf(documentId).Should().Be(Rejected);
+        _intake.Allocations.Should().BeEmpty("a reject creates no submission");
+        _intake.JobsSent.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "050c / EB-D-262 (must fire): a confirm submission that is Received, Processing, Accepted or Rejected still refuses the reject: 409 DocumentLinkedToInvoice, nothing written")]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    [InlineData(InvoiceSubmissionStatus.Rejected)]
+    public async Task Reject_WhileTheConfirmSubmissionIsNotFailed_Is409_AndWritesNothing(InvoiceSubmissionStatus status)
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, status);
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-2");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.DocumentLinkedToInvoice);
+        failure.SubmissionId.Should().BeNull("a refusal names nothing");
+        _records.Writes.Should().BeEmpty();
+        _records.StatusOf(documentId).Should().Be(Confirmed);
+    }
+
+    [Theory(DisplayName = "050c / EB-D-262 + EB-D-167: the LATEST attempt decides: a Failed first attempt does not let a reject past a later attempt that is not Failed")]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    [InlineData(InvoiceSubmissionStatus.Rejected)]
+    public async Task Reject_AFailedAttemptFollowedByALaterOneThatIsNotFailed_Is409(InvoiceSubmissionStatus later)
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed);
+        TheConfirmAttempt(documentId, 2, later);
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-3");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>()).Which.Failure.Should().Be(InvoiceReviewFailure.DocumentLinkedToInvoice);
+        _records.Writes.Should().BeEmpty();
+        _records.StatusOf(documentId).Should().Be(Confirmed);
+    }
+
+    [Fact(DisplayName = "050c / EB-D-262 + EB-D-167: every attempt of the confirm ended Failed: the reject succeeds")]
+    public async Task Reject_EveryConfirmAttemptFailed_Succeeds()
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed);
+        TheConfirmAttempt(documentId, 2, InvoiceSubmissionStatus.Failed);
+
+        await Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-4");
+
+        _records.Writes.Should().ContainSingle();
+        _records.StatusOf(documentId).Should().Be(Rejected);
+        _intake.SubmissionReads.Should().Equal(
+            InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId, 1),
+            InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId, 2),
+            InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId, 3));
+    }
+
+    [Theory(DisplayName = "050c fix round 1 (F1, must fire): a Failed confirm attempt whose undo is unfinished (undo reason code, sprk_invoice still set) refuses the reject: 503 EarlierAttemptBeingRemoved, nothing written")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed)]
+    [InlineData(SubmissionReasonCodes.FileUnservable)]
+    public async Task Reject_FailedAttemptWithAnUnfinishedUndo_Is503_AndWritesNothing(string undoReasonCode)
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed, undoReasonCode, Guid.NewGuid());
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-f1a");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.EarlierAttemptBeingRemoved);
+        failure.ReasonCode.Should().Be(InvoiceSubmissionErrors.EarlierAttemptBeingRemoved, "the code the confirm route answers for the same state");
+        failure.SubmissionId.Should().BeNull("a refusal names nothing");
+        _records.Writes.Should().BeEmpty();
+        _records.StatusOf(documentId).Should().Be(Confirmed, "the document's review status is not written");
+    }
+
+    [Fact(DisplayName = "050c fix round 1 (F1, must fire): the same on a LATER attempt (generation 2 Failed, undo unfinished, after a finished generation 1): 503, nothing written")]
+    public async Task Reject_LaterFailedAttemptWithAnUnfinishedUndo_Is503_AndWritesNothing()
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed);
+        TheConfirmAttempt(documentId, 2, InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.SourceCheckFailed, Guid.NewGuid());
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-f1b");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>()).Which.Failure.Should().Be(InvoiceReviewFailure.EarlierAttemptBeingRemoved);
+        _records.Writes.Should().BeEmpty();
+        _records.StatusOf(documentId).Should().Be(Confirmed);
+    }
+
+    [Theory(DisplayName = "050c fix round 1 (F1, must NOT fire): a Failed attempt whose undo finished (no invoice id) or whose reason is not an undo reason still lets the reject through")]
+    [InlineData(SubmissionReasonCodes.SourceCheckFailed, false)]
+    [InlineData("ebilling.submission.some_other_failure", true)]
+    public async Task Reject_FailedAttemptWithAFinishedUndoOrNoUndoReason_Succeeds(string reasonCode, bool withInvoiceId)
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed, reasonCode, withInvoiceId ? Guid.NewGuid() : null);
+
+        var result = await Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-f1c");
+
+        result.Status.Should().Be("Rejected");
+        _records.Writes.Should().ContainSingle();
+        _records.StatusOf(documentId).Should().Be(Rejected);
+    }
+
+    [Fact(DisplayName = "050c / EB-D-262: a Failed confirm submission whose document is hand-linked to an invoice (sprk_document.sprk_invoice set) is still 409: the link is checked first")]
+    public async Task Reject_FailedSubmission_ButTheDocumentIsHandLinked_Is409_AndWritesNothing()
+    {
+        // Since task 094 nothing the app does links the document, so this is a hand-linked document; the unfinished-undo case is the 503 tests above.
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, linkedInvoiceId: Guid.NewGuid(), reviewStatus: Confirmed);
+        TheConfirmAttempt(documentId, 1, InvoiceSubmissionStatus.Failed);
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-050c-5");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>()).Which.Failure.Should().Be(InvoiceReviewFailure.DocumentLinkedToInvoice);
+        _records.Writes.Should().BeEmpty();
+        _intake.SubmissionReads.Should().BeEmpty("the link refuses before the submission is read");
     }
 
     // =========================================================================================

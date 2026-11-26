@@ -18,13 +18,17 @@
  *
  * Dependencies are injected via props (no solution-specific imports):
  *   - dataService: IDataService for Dataverse operations (contact/org search)
+ *   - navigationService (optional): host INavigationService. With it the eight lookups open the Dataverse side pane
+ *     (owner D-219, 2026-11-12), the six contact fields limited to active contacts; without it they keep the
+ *     inline search fields.
  *
  * @see IDataService — high-level data access abstraction
  * @see AssignWorkFollowOnStep.tsx — sectioned layout + LookupField pattern reference
  */
 import * as React from 'react';
 import { Text, Input, Textarea, Field, makeStyles, tokens } from '@fluentui/react-components';
-import { LookupField } from '../LookupField/LookupField';
+import { DataverseLookupField } from '../LookupField/DataverseLookupField';
+import { ACTIVE_CONTACT_LOOKUP_FILTERS } from '../LookupField/lookupFilters';
 import type { ILookupItem } from '../../types/LookupTypes';
 import {
   searchContactsAsLookup,
@@ -32,7 +36,7 @@ import {
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import { buildEmptyReportCardForm } from './formTypes';
 import type { ICreateReportCardFormState } from './formTypes';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -40,6 +44,8 @@ import type { IDataService } from '../../types/serviceInterfaces';
 
 export interface ICreateReportCardStepProps {
   dataService: IDataService;
+  /** Host navigation service: when present the lookups open the Dataverse side pane (owner D-219). */
+  navigationService?: INavigationService;
   onValidChange: (isValid: boolean) => void;
   onFormValues: (values: ICreateReportCardFormState) => void;
   initialFormValues?: ICreateReportCardFormState;
@@ -99,6 +105,7 @@ const useStyles = makeStyles({
 
 export const CreateReportCardStep: React.FC<ICreateReportCardStepProps> = ({
   dataService,
+  navigationService,
   onValidChange,
   onFormValues,
   initialFormValues,
@@ -261,73 +268,95 @@ export const CreateReportCardStep: React.FC<ICreateReportCardStepProps> = ({
         </Text>
         <div className={styles.sectionFields}>
           <div className={styles.twoColumn}>
-            <LookupField
+            <DataverseLookupField
               label="Assigned Attorney 1"
+              entityType="contact"
               placeholder="Search contacts..."
               value={attorney1Value}
               onChange={handleAttorney1Change}
+              navigationService={navigationService}
+              filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
               onSearch={handleSearchContacts}
               minSearchLength={2}
             />
-            <LookupField
+            <DataverseLookupField
               label="Assigned Attorney 2"
+              entityType="contact"
               placeholder="Search contacts..."
               value={attorney2Value}
               onChange={handleAttorney2Change}
+              navigationService={navigationService}
+              filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
               onSearch={handleSearchContacts}
               minSearchLength={2}
             />
           </div>
           <div className={styles.twoColumn}>
-            <LookupField
+            <DataverseLookupField
               label="Assigned Paralegal 1"
+              entityType="contact"
               placeholder="Search contacts..."
               value={paralegal1Value}
               onChange={handleParalegal1Change}
+              navigationService={navigationService}
+              filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
               onSearch={handleSearchContacts}
               minSearchLength={2}
             />
-            <LookupField
+            <DataverseLookupField
               label="Assigned Paralegal 2"
+              entityType="contact"
               placeholder="Search contacts..."
               value={paralegal2Value}
               onChange={handleParalegal2Change}
+              navigationService={navigationService}
+              filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
               onSearch={handleSearchContacts}
               minSearchLength={2}
             />
           </div>
           <div className={styles.twoColumn}>
-            <LookupField
+            <DataverseLookupField
               label="Assigned Law Firm 1"
+              entityType="sprk_organization"
               placeholder="Search organizations..."
               value={lawFirm1Value}
               onChange={handleLawFirm1Change}
+              navigationService={navigationService}
               onSearch={handleSearchOrganizations}
               minSearchLength={2}
             />
-            <LookupField
+            <DataverseLookupField
               label="Assigned Law Firm 2"
+              entityType="sprk_organization"
               placeholder="Search organizations..."
               value={lawFirm2Value}
               onChange={handleLawFirm2Change}
+              navigationService={navigationService}
               onSearch={handleSearchOrganizations}
               minSearchLength={2}
             />
           </div>
           <div className={styles.twoColumn}>
-            <LookupField
+            <DataverseLookupField
               label="Assigned External"
+              entityType="contact"
               placeholder="Search contacts..."
               value={externalValue}
               onChange={handleExternalChange}
+              navigationService={navigationService}
+              filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
               onSearch={handleSearchContacts}
               minSearchLength={2}
             />
-            <LookupField
+            <DataverseLookupField
               label="Assigned Internal"
+              entityType="contact"
               placeholder="Search contacts..."
               value={internalValue}
               onChange={handleInternalChange}
+              navigationService={navigationService}
+              filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
               onSearch={handleSearchContacts}
               minSearchLength={2}
             />

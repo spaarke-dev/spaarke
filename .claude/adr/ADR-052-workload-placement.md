@@ -86,7 +86,7 @@ provisioning + CI/CD); Flex cost and limits.
 |---|---|
 | No Functions / Durable Task packages or Function-attributed types, methods or parameters in the BFF assembly | `ADR001_MinimalApiTests` |
 | No contradicting placement phrasing outside marked historical regions | `WorkloadPlacementDocDriftTests` |
-| No new hand-rolled timer `BackgroundService` (ratchet) · `IScheduledJob` host-neutrality · Functions projects under `src/server/functions/`, not referencing `Sprk.Bff.Api`, no confidential-client / assertion / OBO types, impersonation only through the shared helper | `WorkloadPlacementGuardTests` |
+| No new hand-rolled timer `BackgroundService` (ratchet) · `IScheduledJob` host-neutrality · Functions projects under `src/server/functions/<Name>/`, not referencing `Sprk.Bff.Api`, no confidential-client / assertion / OBO types, impersonation only through the shared helper | `WorkloadPlacementGuardTests` |
 | Host choice recorded with signals + costs | Placement Justification; `code-review` / `adr-check` |
 
 ## Integration with Other ADRs
@@ -94,7 +94,7 @@ provisioning + CI/CD); Flex cost and limits.
 | ADR | Relationship |
 |---|---|
 | [ADR-001](ADR-001-minimal-api.md) | BFF runtime (Minimal API, one pipeline); its Functions provisions are superseded here |
-| [ADR-004](ADR-004-job-contract.md) | Mechanism for queue-driven work in the BFF; its Durable prohibition is superseded here |
+| [ADR-004](ADR-004-job-contract.md) | Mechanism for queue-driven work in the BFF; its Durable prohibition is superseded here. Its A2 sets the guarantees a queue consumer in a Function or Container Apps Job meets without `IJobHandler` |
 | [ADR-036](ADR-036-background-job-infrastructure.md) | Mechanism for scheduled work in the BFF; the distributed lease |
 | [ADR-028](ADR-028-spaarke-auth-architecture.md) | A4: the app-only row a Function uses; the confidential-client row it must not. A5: the conditional impersonation (scope extended 2026-09-15 to BFF-initiated jobs) |
 | [ADR-032](ADR-032-bff-nullobject-kill-switch.md) | Kill switch when moving a workload out of the BFF |

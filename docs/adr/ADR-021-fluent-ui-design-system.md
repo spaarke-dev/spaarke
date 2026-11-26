@@ -13,7 +13,7 @@
 
 **AI-Optimized Versions** (load these for efficient context):
 - [ADR-021 Concise](../../.claude/adr/ADR-021-fluent-design-system.md) - ~120 lines, decision + constraints
-- [PCF V9 Packaging Guide](../guides/PCF-V9-PACKAGING.md) - Bundle optimization and platform libraries
+- [PCF V9 Packaging Guide](../guides/PCF-DEPLOYMENT-GUIDE.md) - Bundle optimization and platform libraries
 - [ADR-012 Shared Components](./ADR-012-shared-component-library.md) - Component library implementation
 
 **When to load this full ADR**: Icon standards, typography details, ribbon customization patterns, dark mode implementation
@@ -290,7 +290,7 @@ PCF controls must externalize React and Fluent to reduce bundle size and ensure 
 - Use React 18.x APIs (`createRoot`, `hydrateRoot`, concurrent features) — platform provides React 16/17 only
 - Import from `react-dom/client` (React 18 entry point)
 
-See [PCF V9 Packaging Guide](../guides/PCF-V9-PACKAGING.md) for detailed instructions.
+See [PCF V9 Packaging Guide](../guides/PCF-DEPLOYMENT-GUIDE.md) for detailed instructions.
 
 ---
 

@@ -1,0 +1,69 @@
+# Expected-failures baseline for the mcp-conformance job (spaarkeai-mcp-bff-api-r1 task 025, NFR-09).
+#
+# Suite: @modelcontextprotocol/conformance 0.2.0-alpha.12, run as
+#   conformance server --url <injected-port url> --spec-version 2026-07-28 --suite all --expected-failures <this file>
+#
+# HOW THE BASELINE WORKS (the suite's own rules): a check listed here may fail and the run still exits 0; a check NOT listed that
+# fails exits 1 (a regression); a listed check that PASSES exits 1 (stale: delete the line). Entries are per check, never per
+# scenario, so every scenario's `wire-schema-valid` check (each message the server sent, validated against the spec's JSON schema)
+# stays enforced even where the scenario's own check cannot run.
+#
+# WHY SO MANY. The suite is written against its own reference "everything" server, which carries fixtures: tools named test_*,
+# resources test://*, prompts, completion and diagnostic tools. The Spaarke MCP server is purpose-built: five decision tools and one
+# widget resource (spec FR-01, FR-03, MUST NOT expose anything else), so a scenario that first calls a fixture reports "Unknown tool"
+# or "Method not available" and says nothing about our transport. Adding the fixtures to the production server would put test
+# surface on a customer endpoint; adding them to this test host would test the fixtures. Neither is done. What stays enforced is
+# everything the suite can check against OUR surface: initialize/discover, tools/list and annotations, resources/list, resource-not-found,
+# header validation, SSE streams, stateless request metadata, caching hints, and wire-schema validity of every message.
+#
+# Delete an entry the day its feature ships (prompts, completion, an x-mcp-header tool); the stale-baseline rule will say when.
+server:
+  # ---- Group 1: the scenario needs a reference fixture the Spaarke server does not (and must not) have --------------------------------
+  - completion-complete:completion-complete # no completion capability
+  - tools-call-simple-text:tools-call-simple-text # test_simple_text
+  - tools-call-image:tools-call-image # test_image_content
+  - tools-call-audio:tools-call-audio # test_audio_content
+  - tools-call-embedded-resource:tools-call-embedded-resource # test_embedded_resource
+  - tools-call-mixed-content:tools-call-mixed-content # test_multiple_content_types
+  - tools-call-error:tools-call-error # test_error_handling
+  - tools-call-with-progress:tools-call-with-progress # test_tool_with_progress
+  - json-schema-2020-12:json-schema-2020-12-tool-found # json_schema_2020_12_tool
+  - resources-read-text:resources-read-text # test://static-text
+  - resources-read-binary:resources-read-binary # test://static-binary
+  - resources-templates-read:resources-templates-read # test://template/{id}/data
+  - prompts-list:prompts-list # no prompts capability (FR-01: tools and one widget only)
+  - prompts-get-simple:prompts-get-simple
+  - prompts-get-with-args:prompts-get-with-args
+  - prompts-get-embedded-resource:prompts-get-embedded-resource
+  - prompts-get-with-image:prompts-get-with-image
+  - caching:sep-2549-prompts-list-caching-hints # prompts/list is not served; the other five caching checks pass
+  - http-custom-header-server-validation:sep-2243-server-no-xmcp-tool # no tool carries an x-mcp-header annotation
+  - http-custom-header-server-validation:sep-2243-server-decode-base64
+  - http-custom-header-server-validation:sep-2243-server-validate-param-match
+  - http-custom-header-server-validation:sep-2243-server-reject-invalid-param-chars
+  - http-custom-header-server-validation:sep-2243-server-reject-param-mismatch
+  - server-stateless:sep-2575-server-rejects-undeclared-capability # needs diagnostic tool test_missing_capability
+  - server-stateless:sep-2575-missing-capability-http-400
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream # needs test_streaming_elicitation
+  - server-stateless:sep-2575-server-no-log-without-loglevel # needs test_logging_tool
+  - input-required-result-basic-elicitation:sep-2322-elicitation-incomplete # every input-required scenario calls a test_input_required_* tool
+  - input-required-result-basic-sampling:sep-2322-sampling-incomplete
+  - input-required-result-basic-list-roots:sep-2322-list-roots-incomplete
+  - input-required-result-request-state:sep-2322-request-state-incomplete
+  - input-required-result-multiple-input-requests:sep-2322-multiple-inputs-incomplete
+  - input-required-result-multi-round:sep-2322-multi-round-r1
+  - input-required-result-non-tool-request:sep-2322-non-tool-incomplete
+  - input-required-result-result-type:sep-2322-result-type-included
+  - input-required-result-tampered-state:sep-2322-reject-tampered-state
+  - input-required-result-capability-check:sep-2322-respect-client-capabilities
+  # SHOULD-level warnings. The runner counts a warning as a failure under a baseline.
+  - input-required-result-missing-input-response:sep-2322-missing-response-rerequests # calls a test_input_required_* tool; "SHOULD re-request"
+  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params # same fixture tool
+  - sep-2164-resource-not-found:sep-2164-data-uri # SHOULD: error data.uri echoes the URI. The SDK (ModelContextProtocol 2.3.1) omits it; not ours to fix
+
+  # ---- Group 2: a REAL gap, reported to the owner (notes/nfr-measurements.md "Conformance"); fix is a route change, not a test change ----
+  # The suite sends Host and Origin set to evil.example.com to a localhost URL and expects HTTP 4xx. The MCP route accepts any Host and
+  # Origin (AllowedHosts is "*" in appsettings.template.json; nothing on /mcp/* checks Origin). MCP transport spec 2025-11-25 asks a
+  # server to validate Origin. Risk is low on the deployed BFF (bearer-token auth, no ambient credentials, Azure front end), which is
+  # why this is baselined and not fixed under task 025 (a transport/route change needs its own decision). Remove this line when it ships.
+  - dns-rebinding-protection:localhost-host-rebinding-rejected

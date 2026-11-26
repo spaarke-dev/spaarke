@@ -1445,54 +1445,54 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         GraphServiceClient graph, string appObjectId, IReadOnlyList<FicSpec> specs, EntraAppRegRequest request,
         CancellationToken ct)
     {
-            FederatedIdentityCredentialCollectionResponse? existing;
-            using (var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                readCts.CancelAfter(_options.GraphRequestTimeout);
-                existing = await graph.Applications[appObjectId].FederatedIdentityCredentials
-                    .GetAsync(cancellationToken: readCts.Token).ConfigureAwait(false);
-            }
-
-            var plan = PlanFederatedCredentials(existing?.Value, specs);
-            foreach (var stale in plan.Deletes)
-            {
-                if (string.IsNullOrWhiteSpace(stale.Id))
-                {
-                    return new EntraAppRegOutcome.Failure(
-                        $"Federated credential '{stale.Name}' on app object {appObjectId} must be replaced but Graph " +
-                        $"returned it without an id. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
-                }
-
-                _logger.LogWarning(
-                    "FIC '{FicName}' (subject {Subject}) does not match the credential H3 keeps under its name, or carries " +
-                    "another managed credential's triple — drift; deleting before re-creating (provisioning-run " +
-                    "Force-equivalent, A42 parity contract §4). appObjectId={AppObjectId} customerId={CustomerId}",
-                    stale.Name, stale.Subject, appObjectId, request.CustomerId);
-                using var deleteCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                deleteCts.CancelAfter(_options.GraphRequestTimeout);
-                await graph.Applications[appObjectId].FederatedIdentityCredentials[stale.Id]
-                    .DeleteAsync(cancellationToken: deleteCts.Token).ConfigureAwait(false);
-            }
-
-            foreach (var spec in plan.Creates)
-            {
-                using var createCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                createCts.CancelAfter(_options.GraphRequestTimeout);
-                await graph.Applications[appObjectId].FederatedIdentityCredentials.PostAsync(new FederatedIdentityCredential
-                {
-                    Name = spec.Name,
-                    Issuer = spec.Issuer,
-                    Subject = spec.Subject,
-                    Audiences = new List<string> { spec.Audience },
-                    Description = spec.Description,
-                }, cancellationToken: createCts.Token).ConfigureAwait(false);
-                _logger.LogInformation(
-                    "H3 created FIC '{FicName}' (subject {Subject}) on appObjectId={AppObjectId} customerId={CustomerId}",
-                    spec.Name, spec.Subject, appObjectId, request.CustomerId);
-            }
-
-            return null;
+        FederatedIdentityCredentialCollectionResponse? existing;
+        using (var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            readCts.CancelAfter(_options.GraphRequestTimeout);
+            existing = await graph.Applications[appObjectId].FederatedIdentityCredentials
+                .GetAsync(cancellationToken: readCts.Token).ConfigureAwait(false);
         }
+
+        var plan = PlanFederatedCredentials(existing?.Value, specs);
+        foreach (var stale in plan.Deletes)
+        {
+            if (string.IsNullOrWhiteSpace(stale.Id))
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Federated credential '{stale.Name}' on app object {appObjectId} must be replaced but Graph " +
+                    $"returned it without an id. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
+            }
+
+            _logger.LogWarning(
+                "FIC '{FicName}' (subject {Subject}) does not match the credential H3 keeps under its name, or carries " +
+                "another managed credential's triple — drift; deleting before re-creating (provisioning-run " +
+                "Force-equivalent, A42 parity contract §4). appObjectId={AppObjectId} customerId={CustomerId}",
+                stale.Name, stale.Subject, appObjectId, request.CustomerId);
+            using var deleteCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deleteCts.CancelAfter(_options.GraphRequestTimeout);
+            await graph.Applications[appObjectId].FederatedIdentityCredentials[stale.Id]
+                .DeleteAsync(cancellationToken: deleteCts.Token).ConfigureAwait(false);
+        }
+
+        foreach (var spec in plan.Creates)
+        {
+            using var createCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            createCts.CancelAfter(_options.GraphRequestTimeout);
+            await graph.Applications[appObjectId].FederatedIdentityCredentials.PostAsync(new FederatedIdentityCredential
+            {
+                Name = spec.Name,
+                Issuer = spec.Issuer,
+                Subject = spec.Subject,
+                Audiences = new List<string> { spec.Audience },
+                Description = spec.Description,
+            }, cancellationToken: createCts.Token).ConfigureAwait(false);
+            _logger.LogInformation(
+                "H3 created FIC '{FicName}' (subject {Subject}) on appObjectId={AppObjectId} customerId={CustomerId}",
+                spec.Name, spec.Subject, appObjectId, request.CustomerId);
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Ensures the registration carries every credential in <paramref name="specs"/>

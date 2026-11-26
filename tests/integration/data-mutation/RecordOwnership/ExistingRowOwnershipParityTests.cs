@@ -54,7 +54,7 @@ public class ExistingRowOwnershipParityTests
     private readonly AssignedAccessTestDoubles.FakeAssignedAccessStore _links = new();
 
     /// <summary>One pass's reads (194b fix round K5): a fresh set per question unless a test shares one.</summary>
-    private ExistingRowReads Reads() => new(Entities, CoreAncestors, _links);
+    private ExistingRowReads Reads() => new(Entities, CoreAncestors, AssignedAccessTestDoubles.Representation(_links));
 
     private Task<ExistingRowOwnership> QuestionAsync(Entity row, ExistingRowReads? reads = null) =>
         RecordOwnershipContext.ForExistingRowAsync(row, reads ?? Reads(), CancellationToken.None);
@@ -64,7 +64,7 @@ public class ExistingRowOwnershipParityTests
     private SignalWriter SignalWriter()
     {
         var services = new ServiceCollection();
-        services.AddScoped<AssignedAccessStore>(_ => _links);
+        services.AddScoped(_ => AssignedAccessTestDoubles.Representation(_links)); // task 193: the assignee rule reads through ContactUserRepresentation
         return new SignalWriter(
             new OntologyWriterDataverseClient(() => throw new InvalidOperationException("194b parity: no write"),
                 NullLogger<OntologyWriterDataverseClient>.Instance),
@@ -259,7 +259,7 @@ public class ExistingRowOwnershipParityTests
 
         question.Context.Parents.Should().Equal(writer.Parents);
         question.NoCoreOwnerRule.Should().Contain("TodoAssigneeOwnerReconciliationJob");
-        (await TodoAssigneeOwnerReconciliationJob.SelectsAsync(row, Entities, _links, CoreAncestors, CancellationToken.None))
+        (await TodoAssigneeOwnerReconciliationJob.SelectsAsync(row, Entities, AssignedAccessTestDoubles.Representation(_links), CoreAncestors, CancellationToken.None))
             .Should().BeTrue("the rule is set exactly when the job's own predicate selects the row");
     }
 
@@ -294,7 +294,7 @@ public class ExistingRowOwnershipParityTests
         question.NoCoreOwnerRule.Should().BeNull("the job classifies a cored To Do's rows as the re-file rule's (SkippedCored)");
         question.Undetermined.Should().BeNull();
         question.Context.Parents.Should().Equal(new RecordOwnershipParent("sprk_todo", todo));
-        (await TodoAssigneeOwnerReconciliationJob.SelectsAsync(row, Entities, _links, CoreAncestors, CancellationToken.None)).Should().BeFalse();
+        (await TodoAssigneeOwnerReconciliationJob.SelectsAsync(row, Entities, AssignedAccessTestDoubles.Representation(_links), CoreAncestors, CancellationToken.None)).Should().BeFalse();
     }
 
     [Fact(DisplayName = "194b F1-c must fire: a gate Decision Record about an UNFILED communication has no assignee rule (it is no To Do's)")]
@@ -319,7 +319,7 @@ public class ExistingRowOwnershipParityTests
         _world.OrdinaryChild("sprk_todo", todo);
         var (row, _) = RowBothWays("sprk_signal", ("sprk_regardingtodo", Ref("sprk_todo", todo)), ("sprk_regardingrecordid", todo.ToString("D")));
 
-        (await QuestionAsync(row, new ExistingRowReads(Entities, CoreAncestors, links: null))).Undetermined.Should().NotBeNull();
+        (await QuestionAsync(row, new ExistingRowReads(Entities, CoreAncestors, people: null))).Undetermined.Should().NotBeNull();
         _world.FailingRowReadsOf("sprk_todo", todo);
         var faulted = await QuestionAsync(row);
         faulted.Undetermined.Should().NotBeNull();
@@ -335,7 +335,7 @@ public class ExistingRowOwnershipParityTests
             ("sprk_corerecordtype", Ref("sprk_recordtype_ref", unknownType)), ("sprk_corerecordid", Guid.NewGuid().ToString("D")));
 
         (await QuestionAsync(row)).Undetermined.Should().NotBeNull();
-        (await QuestionAsync(row, new ExistingRowReads(Entities, coreAncestors: null, _links))).Undetermined.Should().NotBeNull();
+        (await QuestionAsync(row, new ExistingRowReads(Entities, coreAncestors: null, AssignedAccessTestDoubles.Representation(_links)))).Undetermined.Should().NotBeNull();
     }
 
     // ── DecisionRecordWriter ──────────────────────────────────────────────────────────────────────────────────────

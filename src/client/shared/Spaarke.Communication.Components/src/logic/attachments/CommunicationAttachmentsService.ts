@@ -139,8 +139,10 @@ export class CommunicationAttachmentsService {
    * Reads `sprk_hasfile` + `sprk_graphitemid` for the referenced `sprk_document`
    * records in ONE additional `context.webAPI` read (an OR-filter over the
    * distinct document ids) — NOT a BFF call, and NOT a per-row query. Mutates
-   * `items` in place. Failures degrade gracefully: rows keep `uploaded = false`
-   * (rendered as "not uploaded") rather than breaking the whole list.
+   * `items` in place. The same read also carries `sprk_documenttype` (ebilling-r1 task 118:
+   * the "Invoice" flag), so the query count is unchanged. Failures degrade gracefully: rows keep
+   * `uploaded = false` (rendered as "not uploaded") and no document type rather than breaking the
+   * whole list.
    */
   private async enrichUploadStatus(items: IAttachmentItem[]): Promise<void> {
     const docIds = Array.from(
@@ -149,17 +151,21 @@ export class CommunicationAttachmentsService {
     if (docIds.length === 0) return;
 
     const filter = docIds.map(id => `sprk_documentid eq ${id}`).join(' or ');
-    const query = `?$select=sprk_documentid,sprk_hasfile,sprk_graphitemid&$filter=${filter}`;
+    const query = `?$select=sprk_documentid,sprk_hasfile,sprk_graphitemid,sprk_documenttype&$filter=${filter}`;
 
     try {
       const res = await this.webApi.retrieveMultipleRecords<IDocumentRecord>('sprk_document', query);
       const uploadedById = new Map<string, boolean>();
+      const typeById = new Map<string, number | null>();
       for (const doc of res.entities ?? []) {
-        uploadedById.set(cleanGuid(doc.sprk_documentid), isDocumentUploaded(doc));
+        const key = cleanGuid(doc.sprk_documentid);
+        uploadedById.set(key, isDocumentUploaded(doc));
+        typeById.set(key, typeof doc.sprk_documenttype === 'number' ? doc.sprk_documenttype : null);
       }
       for (const item of items) {
         if (item.documentId) {
           item.uploaded = uploadedById.get(cleanGuid(item.documentId)) ?? false;
+          item.documentType = typeById.get(cleanGuid(item.documentId)) ?? null;
         }
       }
     } catch (err) {

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -17,9 +18,11 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// core record (<see cref="EligibleApproverResolver"/>): a caller with Write who is not an eligible approver gets 403
 /// <c>ebilling.approver.not_eligible</c> and nothing is written. The stored eligible-approver set never grants. The kill switch
 /// (<c>RequireEbillingEnabled</c>, ADR-018) follows the authorization filter and never replaces it.</para>
-/// <para><b>Nothing is trusted from the request.</b> Approve takes no body: the decider is the caller's <c>systemuserid</c> resolved from the
-/// caller's own token, and the decision id is derived from the approval portion so every attempt by every approver is one decision.</para>
-/// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 401; 403 (route, not eligible by the
+/// <para><b>Nothing is trusted from the request but the note.</b> Approve takes an optional body holding only a note (task 095f-2a,
+/// <see cref="InvoiceApprovalRequest"/>; no body means no note): the decider is the caller's <c>systemuserid</c> resolved from the caller's own
+/// token, and the decision id is derived from the approval portion so every attempt by every approver is one decision.</para>
+/// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 400 <c>ebilling.note_too_long</c> /
+/// <c>ebilling.note_invalid_characters</c>; 401; 403 (route, not eligible by the
 /// caller's own contact or no contact (EB-D-171), identity unproven, or the rights to close the invoice's or the bulk accept's Signals); 404
 /// uniform; 409 (lines open with counts, held, not In Review, no or ambiguous approval portion, unknown approval status, already decided,
 /// approval changed or claimed by another approver, another person's unrecorded line decision, another decision in progress, a correction
@@ -61,8 +64,33 @@ public static class InvoiceApprovalEndpoints
                 "Any one eligible approver approves. Refused while a line is Pending or Flagged (409 with counts), the invoice is held, or a saved " +
                 "correction did not finish (409, repeat it). Undecided " +
                 "Clean lines are accepted in bulk. Moves the invoice to Approved, freezes the approved total on the approval and records one " +
-                "Decision Record naming the approver. A second approve is a no-op.")
+                "Decision Record naming the approver. A second approve is a no-op. An optional body { note } records an approval note " +
+                "(at most 2000 characters); no body means no note.")
             .Produces<InvoiceApprovalResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // POST /api/finance/invoices/{invoiceId}/firm - Set firm on a held no-firm invoice (task 095d-1b). Two filters, both as the caller:
+        // Write on the invoice (uniform 404), then Read and AppendTo on the body's firm (403). The kill switch follows them.
+        group.MapPost("/invoices/{invoiceId:guid}/firm", AssignFirm)
+            .AddFinanceAuthorizationFilter("ebilling.invoice.assign_firm", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId", FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ResolveAssignFirmTargets)
+            .RequireEbillingEnabled()
+            .WithName("AssignInvoiceFirm")
+            .WithSummary("Set the firm of an invoice submitted without one")
+            .WithDescription(
+                "The reviewer names a firm linked to the invoice's core record. Refused unless the invoice is In Review, has no firm and is held " +
+                "for one. In one transaction: the submission is renumbered into the firm's scope, the firm and the new number are set on the " +
+                "invoice, its lines, its approval and its files, the hold is cleared and the decision is stored; then the Decision Record is " +
+                "written. If the record is not written, 503 ebilling.assign_firm.incomplete names the failedStep; repeating with the same firm " +
+                "finishes it without applying again (and is otherwise a no-op); with another firm it is refused.")
+            .Produces<AssignFirmResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -71,6 +99,75 @@ public static class InvoiceApprovalEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return app;
+    }
+
+    /// <summary>
+    /// Task 095d-1b: the Set-firm route's firm checks, from the BOUND body: Read (<c>read</c>) and AppendTo (<c>finance.attach_invoice</c>,
+    /// the invoice's firm lookup attaches to it) on the firm, as the caller. A body that names no firm is the 400 before any rights query on it.
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveAssignFirmTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<AssignFirmRequest>().FirstOrDefault();
+        if (request?.FirmId is not { } firmId || firmId == Guid.Empty)
+        {
+            return FinanceAuthorizationTargets.Reject(
+                InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, AssignFirmCodes.FirmRequired, "A firm is required."));
+        }
+
+        return FinanceAuthorizationTargets.Authorize(
+            new FinanceAuthorizationCheck
+            {
+                Path = FinanceCheckPath.Record,
+                EntitySetName = FinanceAuthorizationFilter.VendorOrganizationEntitySet,
+                RecordId = firmId,
+                Operation = "read",
+                Source = "body.firmId",
+            },
+            new FinanceAuthorizationCheck
+            {
+                Path = FinanceCheckPath.Record,
+                EntitySetName = FinanceAuthorizationFilter.VendorOrganizationEntitySet,
+                RecordId = firmId,
+                Operation = "finance.attach_invoice",
+                Source = "body.firmId",
+            });
+    }
+
+    /// <summary>
+    /// The service is <c>[FromServices]</c> so a host that maps this file without registering it still starts (the approval contract hosts);
+    /// the route then answers 500 only when it is called.
+    /// </summary>
+    private static async Task<IResult> AssignFirm(
+        Guid invoiceId, [FromBody] AssignFirmRequest request, [FromServices] InvoiceAssignFirmService service, HttpContext httpContext, CancellationToken ct)
+    {
+        if (await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct) is not { } caller)
+        {
+            return ProblemDetailsHelper.Forbidden(
+                AssignFirmCodes.DeciderUnresolved, "Your user could not be identified, so the firm was not set.", httpContext.TraceIdentifier);
+        }
+
+        var result = await service.SetFirmAsync(
+            invoiceId, request.FirmId ?? Guid.Empty, request.Note, caller, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+
+        return result switch
+        {
+            { Outcome: AssignFirmOutcome.Assigned or AssignFirmOutcome.AlreadyAssigned } => TypedResults.Ok(new AssignFirmResponse(
+                result.Outcome == AssignFirmOutcome.Assigned ? "assigned" : "alreadyAssigned",
+                result.DecisionId, result.TrackingNumber, result.PreviousTrackingNumber, result.RulesRerun)),
+            // 095d-1c: the firm is set, its Decision Record is not. The step and the fixed sentence only: no id, no exception text.
+            { Outcome: AssignFirmOutcome.Incomplete } => Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: result.Detail,
+                extensions: new Dictionary<string, object?> { ["errorCode"] = result.Code, ["failedStep"] = result.FailedStep }),
+            { Status: StatusCodes.Status404NotFound } => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
+            // Rights the caller lacks on the core record: the body of the route's own firm-rights refusal (the filter's 403), so a caller without
+            // those rights is told the same thing whatever firm it names - one the filter refuses (missing or unreadable) or one the service reaches.
+            { Status: StatusCodes.Status403Forbidden, Code: AssignFirmCodes.NotAuthorized } =>
+                ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.InsufficientRightsReasonCode, traceId: httpContext.TraceIdentifier),
+            { Status: StatusCodes.Status403Forbidden } =>
+                ProblemDetailsHelper.Forbidden(result.Code, result.Detail ?? "Not allowed.", httpContext.TraceIdentifier),
+            _ => InvoiceLineReviewEndpoints.Refused(result.Status, result.Code, result.Detail),
+        };
     }
 
     private static async Task<IResult> GetApproval(Guid invoiceId, InvoiceApprovalService service, HttpContext httpContext, CancellationToken ct)
@@ -90,7 +187,9 @@ public static class InvoiceApprovalEndpoints
         return state is null ? FinanceAuthorizationFilter.UniformRecordNotFound(httpContext) : TypedResults.Ok(state);
     }
 
-    private static async Task<IResult> Approve(Guid invoiceId, InvoiceApprovalService service, HttpContext httpContext, CancellationToken ct)
+    private static async Task<IResult> Approve(
+        Guid invoiceId, InvoiceApprovalRequest? body, InvoiceApprovalService service, HttpContext httpContext,
+        [FromServices] EbillingNotificationEnqueuer? notifications, CancellationToken ct)
     {
         if (await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct) is not { } caller)
         {
@@ -98,7 +197,15 @@ public static class InvoiceApprovalEndpoints
                 InvoiceApprovalCodes.DeciderUnresolved, "Your user could not be identified, so the invoice was not approved.", httpContext.TraceIdentifier);
         }
 
-        var result = await service.ApproveAsync(invoiceId, caller, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+        var result = await service.ApproveAsync(invoiceId, caller, body?.Note, TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+        if (result.Outcome == ApprovalOutcome.Approved)
+        {
+            // Task 132 (FR-39, FR-50): enqueued on EVERY approval, once it is committed. Whether it carries an adjustment is decided once, by the
+            // notice composer over the 130 projection: without one the job sends no email. Never fails the approval (the enqueuer logs and returns).
+            if (notifications is not null) await notifications.EnqueueAsync(
+                EbillingNotificationEvent.ApprovedWithAdjustments, EbillingNotificationSubject.Invoice, invoiceId, correlationId: httpContext.TraceIdentifier);
+        }
+
         if (result.Outcome is ApprovalOutcome.Approved or ApprovalOutcome.AlreadyApproved)
         {
             // The current state, best effort: the approval already succeeded or was a no-op, so a failed read never turns it into an error.
@@ -160,6 +267,19 @@ public static class InvoiceApprovalEndpoints
     };
 }
 
+/// <summary>Task 095f-2a (EB-D-236, design 5.3): the optional body of approve. No body, or <c>{}</c>, means no note and an approval exactly as
+/// before; a note is at most 2000 characters (400 <c>ebilling.note_too_long</c> / <c>ebilling.note_invalid_characters</c>).</summary>
+public sealed record InvoiceApprovalRequest(string? Note);
+
 /// <summary>200 body of approve: <c>approved</c> (this call approved) or <c>alreadyApproved</c> (a no-op), the decision and its record, and the
 /// current state (null when it could not be read after the approval).</summary>
 public sealed record InvoiceApprovalResponse(string Outcome, Guid? DecisionId, Guid? DecisionRecordId, InvoiceApprovalStateDto? State);
+
+/// <summary>Body of Set firm (task 095d-1b): the firm (required) and an optional note (at most 2000 characters).</summary>
+public sealed record AssignFirmRequest(Guid? FirmId, string? Note);
+
+/// <summary>200 body of Set firm: <c>assigned</c> (this call applied it) or <c>alreadyAssigned</c> (a repeat: nothing applied), the decision id,
+/// the new and the previous tracking number, and <c>rulesRerun</c> (<c>pending</c> until the queued re-run commits, then <c>completed</c>;
+/// EB-D-187 Q8). Since 095d-1c a 200 means the Decision Record exists (written now or found); since 095d-2b-1 a 200 with <c>pending</c> also
+/// means the re-run is queued (a failed enqueue is 503 <c>incomplete</c> with <c>failedStep</c> <c>rerun</c>).</summary>
+public sealed record AssignFirmResponse(string Outcome, Guid? DecisionId, string? TrackingNumber, string? PreviousTrackingNumber, string? RulesRerun);

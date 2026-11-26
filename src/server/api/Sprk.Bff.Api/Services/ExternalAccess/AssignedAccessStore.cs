@@ -141,6 +141,14 @@ public static class AssignedAccessReason
     public const string AssignmentEnded = "assignment-ended";
 
     /// <summary>
+    /// Task 193 G4b: the assignment ended and its share is gone, but the grant paired with that share could not be confirmed
+    /// ended, so the row stays <see cref="AssignedAccessState.Shared"/> for the next pass to retry. The share's absence is
+    /// this rule's own doing, never an operator's removal: if the subject is assigned again before the retry, the rule shares
+    /// again instead of recording a decline (owner rule (b), 2026-10-28).
+    /// </summary>
+    public const string ShareEndedPairedGrantPending = "share-ended-paired-grant-pending";
+
+    /// <summary>
     /// Owner round 71 (2026-10-06): the row's record (project, matter or work assignment) was DELETED — its root lookup was
     /// emptied by the relationship's RemoveLink cascade and a read of the record its key names answered "not found". Written
     /// with <see cref="AssignedAccessState.Revoked"/> by <see cref="AssignedAccessReconciliationJob"/>; no access is changed
@@ -185,6 +193,14 @@ public static class AssignedAccessReason
     /// removal that then fails is recorded covered again.
     /// </summary>
     public const string CoveringShareEnded = "covering-share-ended";
+
+    /// <summary>
+    /// Task 193 G4a (A-F1): an inherited-share row whose share the secure-root inheritance REMOVED, but whose paired
+    /// workforce-app grant ("Add person") could not be confirmed ended. The row stays <see cref="AssignedAccessState.Shared"/>
+    /// (live) with this reason, so the next pass — or a repeated unshare — ends the grant, then the row. A KNOWN cause: the
+    /// share missing is never read as <see cref="RemovedOutOfBand"/>.
+    /// </summary>
+    public const string PairedGrantPending = "paired-grant-pending";
 
     /// <summary>
     /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
@@ -841,7 +857,9 @@ public class AssignedAccessStore
     /// <summary>
     /// The systemusers that may be represented by <paramref name="contactId"/>: those whose task-141 link
     /// (<c>sprk_primarycontact</c>) names it, and those whose Entra oid the contact's binding carries. The caller decides
-    /// which of them the contact really represents. Exceptions propagate.
+    /// which of them the contact really represents, so the answer is the COMPLETE set: at most <see cref="MaxScanRows"/>
+    /// users; one more throws <see cref="InvalidOperationException"/> (never a silent prefix, on which a caller's "exactly one
+    /// eligible user" could be wrong — #3120; the caller reports "could not tell" and fails closed). Exceptions propagate.
     /// </summary>
     internal virtual async Task<IReadOnlyList<AssignedLinkCandidate>> ReadLinkCandidatesAsync(
         Guid contactId, Guid? boundOid, CancellationToken ct)
@@ -851,7 +869,12 @@ public class AssignedAccessStore
             filter += $" or azureactivedirectoryobjectid eq {oid:D}";
 
         var rows = await _dataverse.QueryAsync<LinkCandidateRow>(
-            "systemusers", filter: filter, select: LinkCandidateSelect, top: 10, cancellationToken: ct).ConfigureAwait(false);
+            "systemusers", filter: filter, select: LinkCandidateSelect, top: MaxScanRows + 1, cancellationToken: ct)
+            .ConfigureAwait(false);
+        if (rows.Count > MaxScanRows)
+            throw new InvalidOperationException(
+                $"Contact {contactId:D} may represent more than {MaxScanRows} systemusers; the rest were not read, so who it " +
+                "represents is not known.");
 
         return rows
             .Where(r => r.SystemUserId != Guid.Empty)

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>BFF: event types, richer create, event read/deep link, PATCH edit + status, assignable people (FR-35, FR-36, FR-37; owner retest round 3)</title>
+    <phase>1 Record template and actions (post-E2E rework, round 3)</phase>
+    <gate>(1) uac-r2's #2845 (PR #2847) merged to master — Infrastructure/ExternalAccess/** is held until then; (2) uac-r2 UAC review of the proposal (notes/event-forms-design.md §4) recorded BEFORE any BFF code</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code; new external WRITE route and new rights (auth-adjacent); new readable columns</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared external-access surface; a new external write route with a grant-based right; must not widen what is readable or writable beyond the owner's decisions</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares ExternalDataService.cs / ExternalProjectDataEndpoints.cs with uac-r2 and ebilling-r1; run /conflict-check first</parallel-reason>
+    <deps>018</deps>
+    <tags>bff-api, api, auth, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Give the external SPA what the owner's Event decisions (2026-11-15, Q-1–Q-8, S-1–S-4) need: an Event Type lookup, description/priority/assignee on create, an event read and deep link, edit and status change, and an assignable-people list.</prompt>
+  <role>SPAARKE BFF developer, external-access plane. Follow ADRs, the UAC review and the owner decisions exactly.</role>
+  <goal>Events lists carry `creatableEventTypes` and the new fields and rights; create accepts type/priority/assignee/description; `GET /api/v1/external/events/{id}` and `PATCH /api/v1/external/events/{id}` exist with the owner's rights; `GET /api/v1/external/{root}/{id}/assignable-people` exists; every right has a must-fire and must-not-fire contract test.</goal>
+
+  <context>
+    <background>Design and every file:line: `notes/event-forms-design.md` §1 and §4 (read it first). Spec FR-35/FR-36/FR-37. Today: create closed set {"task"} (`ExternalDataService.cs:259-267`), payload `BuildEventCreatePayload` (`:3412`), list `MapEvent` (`:4749`), DTOs `ExternalProjectDtos.cs:427-512`, routes `ExternalProjectDataEndpoints.cs:387-510`, handlers `ListEventsForRoot` `:2329` / `CreateEventForRoot` `:2440`, `canCreate`/`canCreateTask` `:2354/2361`, AppendTo on a type row `TaskTypeAppendToAsync` `:2564`, delete's every-parent read check `AuthorizeDeleteOwnAsync` `:2833`. Internal reference for writing due date/assignee: `Api/Events/EventEndpoints.cs:188`. Per-request memo: `RequestAccessMemo` (`Infrastructure/ExternalAccess/RequestAccessMemo.cs`, from PR #2847): get-or-add with a `remember` predicate; own key prefix covering every input; lock `context.Items` inside a composition; clear on any in-request access-state write. Re-verify line numbers after #2847 merges.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalProjectDtos.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/RequestAccessMemo.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalRootEventCreateContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="UAC review">Implement only the shape uac-r2 approves; record the approval and any changes in notes/task-014-notes.md before code.</constraint>
+    <constraint source="Owner Q-1">`creatableEventTypes` = every ACTIVE `sprk_eventtype_ref` row the caller has AppendTo on (DataverseConfirmsWrites callers probed; contacts: every active row). Optional config `ExternalAccess:EventTypes:Allowed` (GUID list, empty = all) narrows it; named fallback Task + Reminder. One batched read per request through `RequestAccessMemo`; memoize only a complete answer.</constraint>
+    <constraint source="Owner Q-2 / Q-4">Create: `eventTypeId` required (400 when missing); `sprk_priority` one of 100000000–100000003 (default Normal); `sprk_description` ≤ 2,000; due date required when the type's `sprk_requiredduedate` is Yes. Keep accepting `eventType: "task"` for one release (maps to the Task id).</constraint>
+    <constraint source="Owner S-1">Edit/status right = Collaborate or Full Access on EVERY parent the event is filed under, from the same level resolution `/me` and the lists use. View Only never. `canEdit`/`canChangeStatus` on each list row come from the same check.</constraint>
+    <constraint source="Owner S-3">PATCH `sprk_status` may be ANY `sprk_event` statuscode; pair `statecode` with `EventStatusCode.GetStateCode` as create does.</constraint>
+    <constraint source="Owner S-4">The event type is immutable: a PATCH carrying `eventTypeId` → 400 `sdap.event.type_immutable`.</constraint>
+    <constraint source="Owner S-2 / Q-3 / Q-8">Assignee column = `sprk_assignedto` (contact). Assignable set = contacts with an active grant on that record, including the caller; internal staff never. Create/PATCH with an assignee outside the set → 400 `sdap.event.assignee_not_allowed`. The assignable-people route is the ONLY place contact ids reach the SPA; names only, never email/UPN.</constraint>
+    <constraint source="Owner Q-7">`GET /events/{id}`: readable only when the caller can read EVERY parent (the delete rule's parent check); otherwise the uniform 404 `sdap.access.deny.record_unavailable`. Same DTO as the list plus the regarding record (kind, id, name).</constraint>
+    <constraint source="ADR-008 / ADR-019">New routes in the existing external group with the same filters and workforce ceilings as the event routes; ProblemDetails with stable codes.</constraint>
+    <constraint source="#2845 memo">The PATCH clears `RequestAccessMemo` after a write that can change access state (assignee). No R4 edit in Infrastructure/ExternalAccess/** before PR #2847 merges.</constraint>
+    <constraint source="FR-18 / NFR-04">Every new readable column (type id/name, description, priority, assignee name, creator name) gets a ReadableColumns entry with UAC's review noted. No tenant, oid, UPN, email or token in logs or errors.</constraint>
+    <constraint source="project CLAUDE.md §6">Route ledger updated for the three new routes; DELETE routes unchanged, so `TheExternalPlane_MapsExactlyFourDeleteRoutes` still passes.</constraint>
+    <constraint source="NFR-05 / bff-extensions">No new DI registration, package or background work beyond what uac-r2 approves; publish-size delta against a fresh master build; no new HIGH CVE.</constraint>
+    <constraint source="root CLAUDE.md §8.5">Two adversarial review passes (external write route / auth).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/notes/event-forms-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/data-model/sprk_event-related-tables.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Gates: confirm PR #2847 is merged; merge master; send uac-r2 the proposal (design §4) and record its review in notes/task-014-notes.md.</step>
+    <step order="2">Rigor/model declaration; /conflict-check (shared external-access surface).</step>
+    <step order="3">`creatableEventTypes` on the three events lists (memoized batched AppendTo); create validation and new create fields; contract tests incl. must-fire/must-not-fire and a call-count test.</step>
+    <step order="4">New list fields + `canEdit`/`canChangeStatus`/`allowedStatuses`; `GET /events/{id}`; tests (reader, non-reader of one parent, multi-parent).</step>
+    <step order="5">`GET /{root}/{id}/assignable-people`; assignee validation on create; tests.</step>
+    <step order="6">`PATCH /events/{id}` (fields, any status with paired statecode, type immutable, right S-1, memo clear); tests (View Only 403, Collaborate 200, Full 200, out-of-set assignee 400, type change 400).</step>
+    <step order="7">Build; external-access unit/contract tests; route-ledger arch tests; publish-size delta; vulnerable-package check; two adversarial passes; fix every F-class finding.</step>
+    <step order="8">TASK-INDEX, POML status, drift check, notes; hand uac-r2 the SHA for the dev deploy (owner go per SHA).</step>
+  </steps>
+
+  <justification>
+    <existing>Events list/create routes and DTOs; internal `PATCH /events/{id}/due-assignee` and `POST /events/{id}/complete`; `/me` levels; grant lists.</existing>
+    <extension>Yes for types, fields and rights (additive on existing routes and DTOs). No for the three new routes: a deep link has no list context; the internal update routes are workforce-plane OBO routes; no route lists a record's people for an external caller (design §4.6).</extension>
+    <cost-of-doing-nothing>Events stay type-less; external users cannot enter description, priority or assignee, cannot open, link, edit or complete an event (owner Q-1–Q-7).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">The events list returns `creatableEventTypes` (active types the caller has AppendTo on, narrowed by the config list when set); a caller without AppendTo on a type does not get it (must-fire) and one with it does (must-not-fire); the read is one batched call per request.</criterion>
+    <criterion testable="true">Create with an allowed type, priority, description and an assignable contact writes all of them; a missing type, a disallowed type, a priority outside the set, a due date missing for a type that requires one, or an assignee outside the set each give 400 with its stable code and create nothing; `eventType: "task"` still works.</criterion>
+    <criterion testable="true">`GET /events/{id}` returns the event for a caller who can read every parent and the uniform 404 for one who cannot read one of them.</criterion>
+    <criterion testable="true">PATCH: View Only → 403 and nothing written; Collaborate and Full Access → 200; any status accepted with the matching statecode; `eventTypeId` → 400 `sdap.event.type_immutable`; list `canEdit`/`canChangeStatus` agree with PATCH for each level.</criterion>
+    <criterion testable="true">`assignable-people` lists only contacts granted on the record (including the caller), names only; a View Only caller gets 403.</criterion>
+    <criterion testable="true">uac-r2's review is recorded; BFF builds; external-access and route-ledger tests pass; the DELETE pin is unchanged; publish-size delta and CVE check recorded; two adversarial passes with no open F-class finding.</criterion>
+  </acceptance-criteria>
+
+  <notes></notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

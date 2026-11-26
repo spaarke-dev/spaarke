@@ -4,7 +4,7 @@
  *
  * TWO JOBS, BOTH CONVENIENCE (the server is the authority):
  *
- *  1. WHICH ROWS TO OFFER Delete ON. The external list reads (documents, to-dos, events) return the two task-030 creator
+ *  1. WHICH ROWS TO OFFER Delete ON. The external list reads (documents, events) return the two task-030 creator
  *     stamps on every row: `_sprk_createdbycontact_value` (a contact creator) and `_sprk_createdbyperson_value` (a
  *     systemuser creator). The server's own rule (`ExternalDataService.IsCreatedByCaller`) is mirrored here:
  *       - a contact principal matches `createdbycontact` = its contact id, and NEVER a person stamp;
@@ -20,6 +20,7 @@
  */
 import { accessFailureOf } from '../components/auth/BffAccessState';
 import { messageProblemOf } from './messages-client';
+import { rawWholeNumberOf } from '../utils/rawWholeNumber';
 
 // ---------------------------------------------------------------------------
 // Who the caller is (for "created by me")
@@ -109,11 +110,12 @@ export function isRequestedByCaller(
 /**
  * True when a service request is closed: `statecode` 1 (inactive) or `statuscode` 2 (the closed status reason). A closed
  * request cannot be deleted (the server answers 409 `service_request_closed`), so Delete is not offered. Unknown state
- * (the column was not read) is treated as open: the server's gate is the authority.
+ * (the column was not read) is treated as open: the server's gate is the authority. A raw value may be a number or the module
+ * fetch's SDK object (`{ value: 1, extensionData: null }`); both are read.
  */
 export function isServiceRequestClosed(record: Record<string, unknown> | null | undefined): boolean {
   if (!record) return false;
-  return Number(record.statecode) === 1 || Number(record.statuscode) === 2;
+  return rawWholeNumberOf(record.statecode) === 1 || rawWholeNumberOf(record.statuscode) === 2;
 }
 
 // ---------------------------------------------------------------------------

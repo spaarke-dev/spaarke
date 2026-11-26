@@ -198,6 +198,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_IsCreated_WhenTheCallerHoldsItsAppendToPrivilege()
     {
+        // Task 045a fix round 1 (F3): the catalog row names its table, as a real matter type's does (a row naming none is
+        // now cleared by step 4½); the to-do's matter then completes the pair.
+        CatalogKnowsTheMatterType();
+
         var result = await CreateChild("sprk_todo", new()
         {
             ["sprk_name"] = "Call back",
@@ -437,11 +441,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [InlineData("sprk_servicerequest")]
     [InlineData("sprk_communication")]
     [InlineData("account")]
+    // ebilling-r1 task 096b (EB-D-201): invoices and their lines are created only by submission, Add line and extraction.
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_billingevent")]
     public async Task ChildCreate_OfATableOutsideTheCensus_IsRefused400(string table)
     {
         var result = await CreateChild(table, new() { ["sprk_name"] = "x" });
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        _user.Posts.Should().BeEmpty("no write as the caller");
         ReasonCode(result).Should().Be(ChildRecordEndpoints.UnsupportedTableCode);
         _appCreates.Should().BeEmpty();
     }
@@ -454,13 +462,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         { "sprk_todo", "sprk_RegardingMatter" },
         { "sprk_event", "sprk_RegardingMatter" },
         { "sprk_memo", "sprk_RegardingMatter" },
-        { "sprk_invoice", "sprk_Matter" },
         { "sprk_reportcard", "sprk_RegardingMatter" },
         { "sprk_analysis", "sprk_RegardingMatter" },
         { "sprk_document", "sprk_Matter" },
         { "sprk_budget", "sprk_Matter" },
         { "sprk_kpiassessment", "sprk_Matter" },
-        { "sprk_billingevent", "sprk_matter" },
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): sprk_billingevent left the route; its refusal is in
+        // SecureChildOwnershipAiToolTests.InvoiceFamilyGuard.cs. Task 096b (EB-D-201): so did sprk_invoice (the same file, and
+        // ChildCreate_OfATableOutsideTheCensus_IsRefused400).
     };
 
     [Fact]
@@ -723,7 +732,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             ["sprk_RegardingProject@odata.bind"] = null,
             ["sprk_regardingrecordid"] = OrdinaryMatter.ToString("D"),
             ["sprk_regardingrecordname"] = "Smith v. Jones",
-            ["sprk_regardingrecordurl"] = "/main.aspx?etn=sprk_matter",
+            ["sprk_regardingrecordurl"] = $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter:D}",
         });
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
@@ -733,9 +742,13 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // PROPERTY's null bind — its logical name (sprk_regardingproject) is not a Web API property, and a body naming it
         // is refused (0x80060888), which is what broke every resolver selection on a saved host.
         var body = BodyOf(patch.Body);
+        // Task 045b (owner ruling Q7): the move clears the display column the payload did not send (the row's type is unread
+        // here, so the number cannot be re-derived) — it never keeps the old record's number.
         body.Keys.Should().BeEquivalentTo(
             "sprk_RegardingMatter@odata.bind", "sprk_RegardingProject@odata.bind",
-            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl");
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber");
+        body["sprk_regardingrecordnumber"].ValueKind.Should().Be(JsonValueKind.Null);
+        body["sprk_regardingrecordname"].GetString().Should().Be("Smith v. Jones", "a display column the payload sends is its own");
         body["sprk_RegardingProject@odata.bind"].ValueKind.Should().Be(JsonValueKind.Null);
         body["sprk_RegardingMatter@odata.bind"].GetString().Should().Be($"/sprk_matters({OrdinaryMatter:D})");
         _user.RefusedBodies.Should().BeEmpty();
@@ -1295,12 +1308,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _shareTable.Seed("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee), CollaborateMask);
     }
 
-    /// <summary>Every table re-filed through <c>PATCH /api/v1/child-records/{table}/{id}</c>, with its matter lookup.</summary>
+    /// <summary>
+    /// Every table moved through <c>PATCH /api/v1/child-records/{table}/{id}</c>, with its matter lookup. An invoice is on the
+    /// route but never moved (task 045g rule 1, owner EB-D-231): its cases are <see cref="ChildRefile_AnInvoice_IsNeverMovedUnderAnotherMatter_AndKeepsItsOwnerAndShares"/>.
+    /// </summary>
     public static TheoryData<string, string, string> CensusRefileTablesUnderAMatter => new()
     {
         { "sprk_todo", "sprk_RegardingMatter", "sprk_regardingmatter" },
         { "sprk_memo", "sprk_RegardingMatter", "sprk_regardingmatter" },
-        { "sprk_invoice", "sprk_Matter", "sprk_matter" },
         { "sprk_reportcard", "sprk_RegardingMatter", "sprk_regardingmatter" },
         { "sprk_analysis", "sprk_RegardingMatter", "sprk_regardingmatter" },
     };
@@ -1308,8 +1323,31 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public void TheRefileTheory_CoversEveryRefileTable()
     {
-        CensusRefileTablesUnderAMatter.Select(row => (string)row[0]).Should()
+        CensusRefileTablesUnderAMatter.Select(row => (string)row[0]).Append("sprk_invoice").Should()
             .BeEquivalentTo(ChildRecordEndpoints.RefileTables, "a table added to the re-file route gets its cases");
+    }
+
+    [Theory]
+    [InlineData("into a secure matter")]
+    [InlineData("out of a secure matter")]
+    [InlineData("under a matter the caller cannot append to")]
+    public async Task ChildRefile_AnInvoice_IsNeverMovedUnderAnotherMatter_AndKeepsItsOwnerAndShares(string move)
+    {
+        var row = Guid.Parse("a2470000-0000-4000-8000-00000000000a");
+        var (from, to) = move == "out of a secure matter" ? (SecureMatter, OrdinaryMatter) : (OrdinaryMatter, SecureMatter);
+        _user.RowValues[row] = new Dictionary<string, object?> { ["_sprk_matter_value"] = from.ToString("D") };
+        _world.WithRecord("sprk_invoice", row, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", from) });
+        if (move == "under a matter the caller cannot append to")
+            _user.NoAppendTo.Add(SecureMatter);
+
+        var result = await RefileChild("sprk_invoice", row, new() { ["sprk_Matter@odata.bind"] = $"/sprk_matters({to:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        Detail(result).Should().NotContain(to.ToString("D")).And.NotContain(from.ToString("D"));
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
     }
 
     [Theory]
@@ -1480,7 +1518,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance,
                 _world.Resolver(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
-                scopes)
+                scopes, appOnlyEntities: GuardReaderOverTheWorld())
             .ExecuteChatAsync(
                 BuildChatInvocationContext(
                     toolArgumentsJson: JsonSerializer.Serialize(new
@@ -1738,15 +1776,18 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(threads),
-            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true,
+            appOnlyEntities: GuardReaderOverTheWorld());
 
     private static CoreAncestorRestamper Restamper() =>
         new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper;
 
     private static JsonElement Payload(Dictionary<string, object?> payload) => JsonSerializer.SerializeToElement(payload);
 
-    private static HttpContext HttpContextOfCaller() => new DefaultHttpContext
+    /// <remarks>#2799: with the host's application writer of locked invoice-family columns in its request services.</remarks>
+    private HttpContext HttpContextOfCaller() => new DefaultHttpContext
     {
+        RequestServices = LockedWriteServices(),
         User = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("oid", CallerOid.ToString()),

@@ -1,6 +1,7 @@
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
@@ -39,7 +40,8 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// <para><b>Why it exists.</b> <c>RecordCreationService</c> reads the named source record <b>app-only</b> to apply the
 /// Field Mapping Framework, then writes the mapped values onto a new matter the caller OWNS. Without this filter any
 /// authenticated caller could name any record id and read its mapped fields back through their own new matter. The
-/// client engine never had that exposure because it reads through <c>Xrm.WebApi</c> as the user.</para>
+/// former client engine (deleted in field-mapping-server-write-path-r1 task 035) did not have that exposure because it read
+/// through <c>Xrm.WebApi</c> as the user.</para>
 ///
 /// <para><b>What is shared (CLAUDE.md §11).</b> Mechanism and tables are reused, not re-declared: the SAME
 /// <see cref="CallerRecordAccessProbe"/> (OBO <c>RetrievePrincipalAccess</c>), the SAME logical-name → entity-set
@@ -73,9 +75,9 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// (<see cref="MappingSourceCallerMask"/>) before any rule is applied; this filter is unchanged.</para>
 ///
 /// <para><b>The TARGET table's Create privilege (unified-access-control-r2 task 166, sweep finding S-69; owner G5).</b>
-/// Matter, project and invoice are created APP-ONLY and team-owned (the server invariant G5 keeps), so until this
+/// Matter and project are created APP-ONLY and team-owned (the server invariant G5 keeps), so until this
 /// task a caller who could not create a matter in the Dataverse UI could create one here. After the source half
-/// passes, a request for <c>matter</c>, <c>project</c> or <c>invoice</c> now also requires the CALLER to hold that
+/// passes, a request for <c>matter</c> or <c>project</c> now also requires the CALLER to hold that
 /// table's live Create privilege (<see cref="CreatePrivilegeFor"/>), asked through
 /// <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> (OBO WhoAmI +
 /// <c>RetrieveUserSetOfPrivilegesByNames</c>, uncached, fail closed) — the task 130 pattern. Not held, a throw and
@@ -83,6 +85,10 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// <c>contact</c> and an unparseable type are not created by this route (the service returns null / the handler
 /// 400s), so they pass through unchanged with no privilege query. The source half runs FIRST and is unchanged:
 /// an unreadable named source is refused before any privilege is asked.</para>
+///
+/// <para><b>An invoice is refused first (ebilling-r1 task 096, owner L).</b> An invoice is created only by submission (FR-17, FR-20),
+/// so a request whose <c>entityType</c> parses to <see cref="QuickCreateEntityType.Invoice"/> is answered 400 <c>OFFICE_023</c> before
+/// the source Read, the privilege query or the contact Read. The invoice has no Create privilege row here any more.</para>
 /// </remarks>
 public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
 {
@@ -107,14 +113,13 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
 
     /// <summary>
     /// The Create privilege a quick-create of <paramref name="entityType"/> costs, or <see langword="null"/> when this
-    /// route creates no row of that type (account, contact). Invoice REUSES
-    /// <see cref="FinanceAuthorizationFilter.CreateInvoicePrivilege"/> — one spelling of one privilege.
+    /// route creates no row of that type (account, contact, and — since ebilling-r1 task 096 — invoice, which is refused before
+    /// this is asked).
     /// </summary>
     internal static string? CreatePrivilegeFor(QuickCreateEntityType entityType) => entityType switch
     {
         QuickCreateEntityType.Matter => CreateMatterPrivilege,
         QuickCreateEntityType.Project => CreateProjectPrivilege,
-        QuickCreateEntityType.Invoice => FinanceAuthorizationFilter.CreateInvoicePrivilege,
         _ => null,
     };
 
@@ -150,7 +155,19 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Half 1 — the SOURCE record (task 030), unchanged and FIRST.
+        // Half 0 — ebilling-r1 task 096 (owner L, FR-17 / FR-20): an invoice is created only by submission. Refused before ANY read:
+        // no source Read, no privilege query, no contact Read. Parsed the way the handler parses it (the enum, so a numeric or
+        // comma-joined spelling that parses to Invoice is refused too), so the filter and the handler cannot disagree.
+        if (RequestsRetiredInvoiceCreate(httpContext))
+        {
+            _logger?.LogWarning(
+                "[QUICKCREATE-INVOICE] Refused: an invoice is not created by this route (OFFICE_023). CorrelationId: {CorrelationId}",
+                httpContext.TraceIdentifier);
+
+            return ProblemDetailsHelper.OfficeInvoiceTargetRetired(httpContext.TraceIdentifier);
+        }
+
+        // Half 1 — the SOURCE record (task 030), unchanged and FIRST of the reads.
         var sourceDenied = await AuthorizeSourceAsync(context, httpContext);
         if (sourceDenied is not null)
         {
@@ -174,8 +191,16 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
         return await next(context);
     }
 
+    /// <summary>Whether the route's <c>entityType</c> value parses (as the handler parses it) to <see cref="QuickCreateEntityType.Invoice"/>.</summary>
+    private static bool RequestsRetiredInvoiceCreate(HttpContext httpContext) =>
+        httpContext.Request.RouteValues.TryGetValue(EntityTypeRouteValue, out var raw)
+        && raw?.ToString() is { } rawEntityType
+        && !string.IsNullOrWhiteSpace(rawEntityType)
+        && QuickCreateFieldRequirements.TryParse(rawEntityType, out var parsed)
+        && parsed == QuickCreateEntityType.Invoice;
+
     /// <summary>
-    /// Task 166 (S-69): for matter / project / invoice, the CALLER must hold the table's Create privilege. Returns the
+    /// Task 166 (S-69): for matter / project, the CALLER must hold the table's Create privilege. Returns the
     /// 403 to return, or <see langword="null"/> to proceed. An unparseable type and account / contact pass through
     /// (the handler answers them exactly as before, and this route creates no such row).
     /// </summary>

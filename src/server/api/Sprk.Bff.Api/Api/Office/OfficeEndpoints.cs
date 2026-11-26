@@ -33,6 +33,13 @@ namespace Sprk.Bff.Api.Api.Office;
 public static class OfficeEndpoints
 {
     /// <summary>
+    /// The target types an Office save accepts (lower case; the compare is case-insensitive). The ONE list: the save validation and the
+    /// OFFICE_002 detail both read it, so the error never names a type the save refuses (ebilling-r1 task 096 review F2: it still
+    /// listed Invoice and Account).
+    /// </summary>
+    internal static readonly string[] SaveTargetEntityTypes = ["matter", "project", "workassignment", "event", "todo", "contact"];
+
+    /// <summary>
     /// Maps all Office-related endpoints to the application.
     /// </summary>
     /// <param name="app">The endpoint route builder.</param>
@@ -250,9 +257,13 @@ public static class OfficeEndpoints
         HttpContext context,
         // Task 055 (#1005): the collision refusal's display fields are gated on the caller's Read access to
         // the colliding document. The gate lives HERE, not in OfficeService — ADR-008 puts resource
-        // authorization at the endpoint, OfficeService has no authorization concern among its fifteen
-        // dependencies, and every caller-scoped check in this codebase is handler-side
+        // authorization at the endpoint, and every caller-scoped check in this codebase is handler-side
         // (ChatDocumentEndpoints, RecordSearchEndpoints). See notes/055-collision-names-its-target.md §2.
+        // Task 055 found OfficeService had no authorization concern. Since task 138 (#2209) it has one, for ONE path: an email
+        // re-save that would add attachments checks the caller's current "write" on the saved .eml before anything runs
+        // (OfficeService.AuthorizeEmailAttachmentAddAsync), because that path is decided inside the save, after the
+        // idempotency lookup, where no route filter can see it — ADR-008 Amendment A1 (a resource only the service's own
+        // lookup identifies is checked where it is found). Every other check stays at the endpoint.
         AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {
@@ -441,17 +452,26 @@ public static class OfficeEndpoints
             // lookup in either column family, so every account-filed save was persisted unassociated.
             // "todo" ADDED — sprk_relatedtodo exists and always did; the earlier record calling a
             // to-do "unmappable" came from checking only the bare sprk_{type} family.
-            var validEntityTypes = new[]
+            //
+            // 2026-11-23 (ebilling-r1 task 096, owner L): "invoice" REMOVED. An invoice is created and filed onto only by Submit Invoice
+            // (FR-17, FR-20); the add-in dropped its Invoice save target in word-add-in-r1 slice C. The refusal below is its own answer
+            // (OFFICE_023, not OFFICE_002: the type is recognised). The shared DocumentAssociationMap keeps its invoice column (the
+            // collision report, other routes); this list is only what THIS route will file onto.
+            if (EntityAccessFilter.IsRetiredInvoiceTarget(request.TargetEntity.EntityType))
             {
-                "matter", "project", "invoice", "workassignment", "event", "todo", "contact"
-            };
-            if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
+                logger.LogWarning(
+                    "Save request names an invoice as its target (OFFICE_023), correlation {CorrelationId}",
+                    correlationId);
+                return ProblemDetailsHelper.OfficeInvoiceTargetRetired(correlationId);
+            }
+
+            if (!SaveTargetEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
             {
                 logger.LogWarning(
                     "Save request has invalid association type {EntityType}, correlation {CorrelationId}",
                     request.TargetEntity.EntityType,
                     correlationId);
-                return ProblemDetailsHelper.OfficeInvalidAssociationType(correlationId);
+                return ProblemDetailsHelper.OfficeInvalidAssociationType(SaveTargetEntityTypes, correlationId);
             }
 
             // Validate association entity ID is not empty
@@ -673,7 +693,11 @@ public static class OfficeEndpoints
             "OFFICE_003" => ProblemDetailsHelper.OfficeAssociationRequired(correlationId),
             "OFFICE_006" => ProblemDetailsHelper.OfficeInvalidAssociationTarget("entity", correlationId),
             "OFFICE_007" => ProblemDetailsHelper.OfficeAssociationTargetNotFound("entity", Guid.Empty, correlationId),
-            "OFFICE_009" => ProblemDetailsHelper.OfficeAccessDenied(correlationId),
+            // Task 138 (#2209): the save's own refusal text is the detail (an email re-save refused for rights it no longer
+            // holds says so, and what was not saved); the fixed sentence stays for a refusal that carries none.
+            "OFFICE_009" => string.IsNullOrWhiteSpace(error.Message)
+                ? ProblemDetailsHelper.OfficeAccessDenied(correlationId)
+                : ProblemDetailsHelper.OfficeForbidden("OFFICE_009", "Access Denied", error.Message, correlationId),
             "OFFICE_012" => ProblemDetailsHelper.OfficeSpeUploadFailed(error.Message, correlationId),
             // FR-11 version save (word-add-in-r1 task 023) — refusals that wrote nothing; see OfficeErrorCodes.
             OfficeErrorCodes.VersionTargetNotFound => ProblemDetailsHelper.OfficeNotFound(
@@ -1386,7 +1410,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — an owner the record's place decides (see below; an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. The matter and project numbers (sprk_matternumber, sprk_projectnumber — each entity's primary name attribute) are assigned by Dataverse's platform autonumber on create (MAT-###### / PRJ-######; interim until a numbering function, task 076); the request never carries one. A create the number's alternate key refuses is retried with the next number; after 3 refusals it is refused with 409 record_number_unavailable and no row is written. A record that comes back without a number is still returned, with a warning. Task 100 adds the create form's fields: practiceAreaId (Matter) and projectTypeId (Project) are set when they resolve and dropped with a warning when they do not (never a rejection, like matterTypeId); assignedToContactId names the Assigned To contact (sprk_assignedtointernal on a Matter or Project, sprk_assignedto1 on an Invoice) and requires the caller to hold Read and Append To on that contact — otherwise 403 OFFICE_009 reasonCode assignee_inaccessible (title Forbidden), with one body whether the contact is unreadable, nonexistent, or readable but not appendable, and no row written. Without it a Matter or Project is assigned to the maker's linked contact and an Invoice is left unassigned. Invoice is written on the minimal path: name, description and Assigned To. Ownership is record-first: an unfiled Matter or Invoice is owned by the caller's business-unit default owner team (task 080); a Project filed under a matter is owned by that matter's business-unit team, or by the Secure Record Owners team under a secure matter; when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
+            .WithDescription("Creates a new Matter or Project with minimal required fields, for inline creation from the Office add-in. An Invoice is never created here (ebilling-r1 task 096: an invoice is created only by submission): entityType invoice is refused with 400 OFFICE_023 before any read or write. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — an owner the record's place decides (see below; an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. The matter and project numbers (sprk_matternumber, sprk_projectnumber — each entity's primary name attribute) are assigned by Dataverse's platform autonumber on create (MAT-###### / PRJ-######; interim until a numbering function, task 076); the request never carries one. A create the number's alternate key refuses is retried with the next number; after 3 refusals it is refused with 409 record_number_unavailable and no row is written. A record that comes back without a number is still returned, with a warning. Task 100 adds the create form's fields: practiceAreaId (Matter) and projectTypeId (Project) are set when they resolve and dropped with a warning when they do not (never a rejection, like matterTypeId); assignedToContactId names the Assigned To contact (sprk_assignedtointernal on a Matter or Project) and requires the caller to hold Read and Append To on that contact — otherwise 403 OFFICE_009 reasonCode assignee_inaccessible (title Forbidden), with one body whether the contact is unreadable, nonexistent, or readable but not appendable, and no row written. Without it a Matter or Project is assigned to the maker's linked contact. Ownership is record-first: an unfiled Matter is owned by the caller's business-unit default owner team (task 080); a Project filed under a matter is owned by that matter's business-unit team, or by the Secure Record Owners team under a secure matter; when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1832,14 +1856,24 @@ public static class OfficeEndpoints
             return Results.Problem(
                 type: "https://spaarke.com/errors/office/invalid-entity-type",
                 title: "Invalid Entity Type",
-                detail: $"Entity type '{entityType}' is not valid. Valid types are: matter, project, invoice, account, contact.",
+                detail: $"Entity type '{entityType}' is not valid. Valid types are: matter, project, account, contact.",
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?>
                 {
                     ["errorCode"] = "OFFICE_002",
                     ["correlationId"] = traceId,
-                    ["validTypes"] = new[] { "matter", "project", "invoice", "account", "contact" }
+                    ["validTypes"] = new[] { "matter", "project", "account", "contact" }
                 });
+        }
+
+        // ebilling-r1 task 096 (owner L, FR-17 / FR-20): an invoice is created only by submission, never by this route. A recognised
+        // type with its own stable answer (OFFICE_023), refused before the field validation, the owner lookup or any write.
+        // QuickCreateSourceAccessFilter answers it first (before any read); this is the same answer for a caller that bypasses it.
+        if (parsedEntityType == QuickCreateEntityType.Invoice)
+        {
+            logger.LogWarning(
+                "Quick create requested for an invoice (OFFICE_023), CorrelationId={CorrelationId}", traceId);
+            return ProblemDetailsHelper.OfficeInvoiceTargetRetired(traceId);
         }
 
         // Validate required fields per entity type

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -241,7 +242,8 @@ public class MappingSourceReadProbeTests
             {
                 _events.Add($"narrowing {id}");
                 throw new HttpRequestException("narrowing read failed: upstream-secret");
-            },
+            }
+            ,
             _ => (Func<Guid, CancellationToken, Task<bool>>?)null,
         };
 
@@ -330,10 +332,128 @@ public class MappingSourceReadProbeTests
         _events.Should().Equal($"probe sprk_matters({Readable})", $"read sprk_matter({Readable})");
     }
 
+    // ── Task 028 review: an analysis is a mapping source only for a reader that carries the analysis decision ───────
+
+    private const string Analysis = "sprk_analysis";
+
+    [Fact]
+    public async Task ReadAsync_AnAnalysisTheCallerCanRead_AndTheDecisionShows_IsAskedOnTheAnalysisSet_ThenDecided_ThenRead()
+    {
+        var probe = new RightsProbe(AccessRights.Read, _events);
+
+        var result = await Read(
+            MappingSourceReader.ForCaller(probe, "caller-token", analysisShown: Shows(true)), Analysis, Readable);
+
+        result.Readable.Should().BeTrue();
+        result.Record!.LogicalName.Should().Be(Analysis);
+        _events.Should().Equal(
+            $"probe sprk_analysises({Readable})", $"narrowing {Readable}", $"read sprk_analysis({Readable})");
+    }
+
+    public static TheoryData<string> AnalysisNotShown => new() { "hidden", "decision-faults" };
+
+    [Theory]
+    [MemberData(nameof(AnalysisNotShown))]
+    public async Task ReadAsync_AnAnalysisWhoseSourceDocumentIsHiddenFromTheCaller_IsTheOneUnavailable_AndIsNeverRead(string shape)
+    {
+        var probe = new RightsProbe(AccessRights.Read, _events);
+        Func<Guid, CancellationToken, Task<bool>> decision = shape == "hidden"
+            ? Shows(false)
+            : (id, _) =>
+            {
+                _events.Add($"narrowing {id}");
+                throw new HttpRequestException("narrowing read failed: upstream-secret");
+            };
+
+        var result = await Read(MappingSourceReader.ForCaller(probe, "caller-token", analysisShown: decision), Analysis, Readable);
+
+        result.Should().BeSameAs(MappingSourceRead.Unavailable);
+        _events.Should().Equal($"probe sprk_analysises({Readable})", $"narrowing {Readable}");
+        _appOnly.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReadAsync_AnAnalysisOnAReadWithNoAnalysisDecision_IsTheOneUnavailable_WithNothingAsked()
+    {
+        // The create and the push give no analysis decision: an analysis maps nothing there, and neither the caller-rights probe
+        // nor the read runs. The answer depends only on the route and the table, so a readable, a denied and a missing analysis
+        // are all the same result after the same (no) work.
+        foreach (var id in new[] { Readable, Denied, Missing })
+        {
+            var probe = new RightsProbe(AccessRights.Read, _events);
+
+            var result = await Read(MappingSourceReader.ForCaller(probe, "caller-token", Shows(true)), Analysis, id);
+
+            result.Should().BeSameAs(MappingSourceRead.Unavailable);
+        }
+
+        _events.Should().BeEmpty("no probe, no decision and no read (a document decision is not an analysis decision)");
+        _appOnly.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReadAsync_AnAnalysisTheCallerCannotRead_IsUnavailable_BeforeTheDecisionIsAsked()
+    {
+        var probe = new RightsProbe(AccessRights.Write, _events);
+
+        var result = await Read(MappingSourceReader.ForCaller(probe, "caller-token", analysisShown: Shows(true)), Analysis, Denied);
+
+        result.Should().BeSameAs(MappingSourceRead.Unavailable);
+        _events.Should().Equal($"probe sprk_analysises({Denied})");
+    }
+
+    [Fact]
+    public async Task ReadAsync_ASourceThatIsNotAnAnalysis_NeverAsksTheAnalysisDecision()
+    {
+        var probe = new RightsProbe(AccessRights.Read, _events);
+
+        var result = await Read(MappingSourceReader.ForCaller(probe, "caller-token", analysisShown: Shows(false)), "sprk_matter", Readable);
+
+        result.Readable.Should().BeTrue("the analysis decision is about analyses; a matter is decided by the caller's Read alone");
+        _events.Should().Equal($"probe sprk_matters({Readable})", $"read sprk_matter({Readable})");
+    }
+
+    [Fact]
+    public async Task ReadAsync_AnAnalysisReadByTheSystemPrincipal_IsReadAppOnlyWithNoDecision()
+    {
+        var result = await Read(MappingSourceReader.System, Analysis, Readable);
+
+        result.Readable.Should().BeTrue("a system creator has no caller to ask (unchanged)");
+        _events.Should().Equal($"read sprk_analysis({Readable})");
+    }
+
+    [Fact]
+    public async Task CheckCallerReadOfSourceAsync_AnAnalysis_IsNotAuthorizable_UnlessTheReaderAsksForIt()
+    {
+        var probe = new RightsProbe(AccessRights.Read, _events);
+
+        var push = await MappingSourceReadProbe.CheckCallerReadOfSourceAsync(probe, "caller-token", Analysis, Readable, default);
+        var send = await MappingSourceReadProbe.CheckCallerReadOfSourceAsync(probe, "caller-token", Analysis, Readable, default, includeAnalysis: true);
+
+        push.Decision.Should().Be(CallerReadDecision.EntityTypeNotAuthorizable, "the push's source check does not authorize an analysis");
+        send.Decision.Should().Be(CallerReadDecision.Allowed);
+        _events.Should().Equal($"probe sprk_analysises({Readable})");
+    }
+
+    [Fact]
+    public async Task PushSourceCheck_AnAnalysisSource_IsDenied_AndNeverAsksTheCallersRights()
+    {
+        var probe = new RightsProbe(AccessRights.Read, _events);
+        var http = new DefaultHttpContext();
+        http.Request.Headers.Authorization = "Bearer caller-token";
+
+        var systemUserId = await Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.AuthorizePushSourceAsync(
+            new Sprk.Bff.Api.Api.FieldMappings.Dtos.PushFieldMappingsRequest { SourceEntity = Analysis, SourceRecordId = Readable, TargetEntity = "sprk_event" },
+            probe, http, NullLogger.Instance, CancellationToken.None);
+
+        systemUserId.Should().BeNull("a push from an analysis is refused, as before the send fill");
+        _events.Should().BeEmpty();
+    }
+
     // ── Task 043 AC7 (must not fire): every other table resolves and is decided exactly as before ─────────────────
 
     [Fact]
-    public void TryResolveSourceEntitySet_AgreesWithTheAssociationMapOnEveryEntry_AndAddsOnlyTheDocument()
+    public void TryResolveSourceEntitySet_AgreesWithTheAssociationMapOnEveryEntry_AndAddsOnlyTheDocument_AndTheAnalysisOnlyWhenAsked()
     {
         foreach (var type in Sprk.Bff.Api.Api.Filters.EntityAccessFilter.SupportedEntityTypes)
         {
@@ -344,6 +464,16 @@ public class MappingSourceReadProbeTests
 
         MappingSourceReadProbe.TryResolveSourceEntitySet(" SPRK_Document ", out var documents).Should().BeTrue();
         documents.Should().Be(Sprk.Bff.Api.Api.Filters.FinanceAuthorizationFilter.DocumentEntitySet);
+        // Field-mapping task 028: the analysis is the second source outside that map (live-verified set name), logical name only,
+        // and only for a reader that carries an analysis decision (the send fill): the create and the push leave it a miss.
+        MappingSourceReadProbe.TryResolveSourceEntitySet(" SPRK_Analysis ", out var withheld).Should().BeFalse(
+            "a reader that gives no analysis decision cannot authorize an analysis");
+        withheld.Should().BeEmpty();
+        MappingSourceReadProbe.TryResolveSourceEntitySet(" SPRK_Analysis ", out var analyses, includeAnalysis: true).Should().BeTrue();
+        analyses.Should().Be("sprk_analysises");
+        MappingSourceReadProbe.TryResolveSourceEntitySet("analysis", out _, includeAnalysis: true).Should().BeFalse("only the logical name, no alias");
+        Sprk.Bff.Api.Api.Filters.EntityAccessFilter.TryResolveEntitySet("sprk_analysis", out _).Should().BeFalse(
+            "the association lockstep map itself is unchanged");
         MappingSourceReadProbe.TryResolveSourceEntitySet("sprk_unmappedtable", out var none).Should().BeFalse();
         none.Should().BeEmpty();
         MappingSourceReadProbe.TryResolveSourceEntitySet("document", out _).Should().BeFalse("only the logical name, no alias");

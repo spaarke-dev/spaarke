@@ -150,6 +150,9 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     [InlineData("sprk_matter", "sprk_containerid", "b!forged", InheritedAccessPermission.AppOnlySecureRootWriteReasonCode)]
     [InlineData("systemuser", "sprk_primarycontact@odata.bind", "/contacts(22570000-0000-4000-8000-00000000c0c0)",
         InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)]
+    // #2250: a root's Assigned-To column (it would cause an Assigned-To grant), even AS the run's person.
+    [InlineData("sprk_matter", "sprk_assignedattorney1@odata.bind", "/contacts(22570000-0000-4000-8000-00000000c0c0)",
+        InheritedAccessPermission.PlaybookAssignedToWriteReasonCode)]
     public async Task APersonsRun_ANodeThatWritesAnAccessTableOrColumn_IsRefused_AndNothingIsWritten(
         string table, string column, string value, string code)
     {
@@ -269,7 +272,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     {
         // The default is fail closed: a context built without StartedBy is a person's run.
         var context = Context(LegacyConfig("sprk_matter", Matter, "sprk_performancesummary", "x"), PlaybookRunStartedBy.Person, null)
-            with { StartedBy = default };
+            with
+        { StartedBy = default };
 
         var result = await Executor().ExecuteAsync(context, CancellationToken.None);
 

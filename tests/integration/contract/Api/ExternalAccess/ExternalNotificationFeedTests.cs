@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -81,6 +82,9 @@ public class ExternalNotificationFeedTests
         // lineage lookup of sprk_communication), so the live-parent walk reads it app-only and withholds the row when the thread
         // does not come back (fail closed). The shared Open thread therefore exists in the filing world too, filed under nothing.
         _roots.AddFilingRow("sprk_communicationthread", AppOnlySelectProjection.OpenThreadId);
+        // ebilling-r1 task 130-0b F3b fix round 1: the same thread on the Web API side, where the invoice ancestor walk reads it by
+        // key (it links to no invoice and is filed under nothing).
+        _roots.AddThread(AppOnlySelectProjection.OpenThreadId, 100000000);
     }
 
     // ── principals ──────────────────────────────────────────────────────────────────────────────────
@@ -175,6 +179,76 @@ public class ExternalNotificationFeedTests
         _queries.Should().BeEmpty("no message is read without Read on sprk_communication");
     }
 
+    // ── eBilling items (ebilling-r1 task 132, FR-39, EB-D-258): the existing "message" item shape, no new kind ──
+
+    private static EbillingFeedSource BillingSource(Guid invoice, DateTimeOffset at, List<int>? reads = null) => new(
+        () => true,
+        (_, _) => Task.FromResult(((IReadOnlyList<Guid>)[Guid.NewGuid()], false)),
+        (_, _, _) => Task.FromResult<IReadOnlyList<Guid>>([]),
+        (contact, _, _, _, _) =>
+        {
+            reads?.Add(1);
+            // The caller is the invoice's submitter, so the audience re-check passes (the audience rules have their own suite, EbillingFeedSourceTests).
+            return Task.FromResult<IReadOnlyList<Microsoft.Xrm.Sdk.Entity>>([new Microsoft.Xrm.Sdk.Entity("sprk_invoice", invoice)
+            {
+                ["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(659490003),
+                ["modifiedon"] = at.UtcDateTime,
+                ["sprk_submittedby"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contact),
+            }]);
+        },
+        (_, _, rows, _) => Task.FromResult<IReadOnlyDictionary<Guid, InvoiceFeedDecision>>(rows.ToDictionary(r => r.Id, _ => InvoiceFeedDecision.Visible)),
+        (_, _) => Task.FromResult<Sprk.Bff.Api.Services.Finance.FirmOutcome?>(null),
+        NullLogger<EbillingFeedSource>.Instance);
+
+    private Task<IResult> FeedWithBilling(CallerPrincipal caller, EbillingFeedSource? source, Func<string, bool>? canRead = null) =>
+        ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
+            caller, Tenant, ProductionRegistry(), _data, ReadService(), _cache, Now, NullLogger.Instance, CancellationToken.None,
+            canRead, _invoiceHiding.Seam, source);
+
+    [Fact(DisplayName = "132 feed: an eBilling item is a 'message' item on the 'invoices' route with the fixed sender, titled by the invoice's name; the SPA contract is unchanged")]
+    public async Task EbillingItem_HasTheExistingMessageShape()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Name(invoice, "INV-2026-001");
+
+        var feed = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3))));
+
+        var item = feed.Value.Should().ContainSingle().Subject;
+        item.Kind.Should().Be("message");
+        item.Id.Should().Be(invoice.ToString("D"));
+        item.RecordType.Should().Be("invoices");
+        item.RecordId.Should().Be(invoice.ToString("D"));
+        item.SenderName.Should().Be("Billing");
+        item.RecordTitle.Should().Be("INV-2026-001", "an invoice is titled by its name (ExternalDataService.GetRecordNamesAsync knows sprk_invoice)");
+        feed.Truncated.Should().BeFalse("a title the read could not give would set truncated; the production read does give this one");
+    }
+
+    [Fact(DisplayName = "132 feed: with no eBilling source registered, or when the ceiling cannot Read sprk_invoice, there is no eBilling item and the source is not read")]
+    public async Task EbillingItem_IsAbsent_WithoutASource_OrWithoutInvoiceRead()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Name(invoice, "INV-2026-001");
+        var reads = new List<int>();
+
+        var noSource = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), null));
+        var noRead = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3), reads), table => table != "sprk_invoice"));
+
+        noSource.Value.Should().BeEmpty();
+        noRead.Value.Should().BeEmpty();
+        reads.Should().BeEmpty("a table the role cannot Read is not read");
+    }
+
+    [Fact(DisplayName = "132 feed: an eBilling item whose invoice no longer exists (a complete title read does not return it) is dropped")]
+    public async Task EbillingItem_ForAnInvoiceThatIsGone_IsDropped()
+    {
+        var invoice = Guid.NewGuid();
+        _data.Delete(invoice);
+
+        var feed = Body(await FeedWithBilling(Ciam(Guid.NewGuid()), BillingSource(invoice, Now.AddHours(-3))));
+
+        feed.Value.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Ceiling_WithoutProjectRead_DropsTheProjectsGrantAndMessages()
     {
@@ -248,7 +322,9 @@ public class ExternalNotificationFeedTests
         Mock.Of<ICallerSystemUserResolver>(MockBehavior.Strict),
         _identity.Object,
         Mock.Of<ILogger<CommunicationThreadReadService>>(),
-        _appOnly.Object);
+        _appOnly.Object,
+        // fm task 056: an environment without the private-message reference columns, so the read is unchanged.
+        entities: CommunicationSchemaDouble.WithoutReferenceColumns());
 
     private Task<IResult> Feed(CallerPrincipal caller, ExternalModuleRegistry? registry = null, DateTimeOffset? now = null) =>
         ExternalNotificationFeedEndpoints.GetFeedCoreAsync(
@@ -497,6 +573,9 @@ public class ExternalNotificationFeedTests
         feed.Value.Select(i => i.Id).Should().Equal(IdOf(plain));
         feed.UnreadCount.Should().Be(1);
         _invoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(invoice);
+        // ebilling-r1 task 130-0 fix round 2 (F2): a hidden invoice is an answer; a fault says truncated (unreadCount stays the
+        // count of the items returned).
+        feed.Truncated.Should().Be(kind == "fault", "a fault must not read as 'there is nothing more to report'");
     }
 
     [Fact]
@@ -512,6 +591,32 @@ public class ExternalNotificationFeedTests
         _invoiceHiding = InvoiceHidingStub.Hiding(Guid.NewGuid());
 
         Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(aboutInvoice));
+    }
+
+    // ── ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms, through the REAL seam ──
+
+    [Fact(DisplayName = "130-0 notification feed (must fire): a message regarding another firm's invoice on a shared project never appears nor counts; one regarding the caller's own firm's invoice appears")]
+    public async Task Task130_OwnFirms_AMessageRegardingAnotherFirmsInvoice_NeverAppears_NorCounts()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var project = Guid.NewGuid();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, Guid.Parse("13000000-0000-4000-8000-0000000000b2"));
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        _roots.AddFilingRow("sprk_invoice", own, ("sprk_project", "sprk_project", project));
+        _roots.AddFilingRow("sprk_invoice", other, ("sprk_project", "sprk_project", project));
+        var aboutOwn = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        aboutOwn["_sprk_regardinginvoice_value"] = El(own.ToString("D"));
+        var aboutOther = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        aboutOther["_sprk_regardinginvoice_value"] = El(other.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+
+        var feed = Body(await Feed(caller));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(aboutOwn));
+        feed.UnreadCount.Should().Be(1);
     }
 
     [Theory]
@@ -715,6 +820,60 @@ public class ExternalNotificationFeedTests
 
         Body(await Feed(Ciam(me), ProductionRegistry(partnerServiceRequestsEnabled: true))).Value
             .Select(i => i.Id).Should().Equal(IdOf(onMine));
+    }
+
+    // ── ebilling-r1 task 130-0b F3b fix round 1 (F2): the caller's own service requests follow the invoice rule on the feed ──
+    // Through the REAL caller-aware seam over an InvoiceWorld (the caller's firms are the world's).
+
+    private static readonly Guid AnotherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "F3b fix round 1 feed (must fire / must not fire): the caller's service request linked to another firm's invoice is absent and its messages are not read; an unlinked request and one linked to the caller's own firm's invoice appear")]
+    public async Task F3b_AServiceRequestLinkedToAnotherFirmsInvoice_IsAbsent_UnlinkedAndOwnFirmsAppear()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var ownInvoice = world.OwnedInvoice();
+        var otherInvoice = world.OwnedInvoice();
+        world.InvoiceFirm(otherInvoice, AnotherFirm);
+        var me = Guid.NewGuid();
+        var ofOther = _data.AddServiceRequest(requestedBy: me, "Other firm's", invoice: otherInvoice);
+        var ofOwn = _data.AddServiceRequest(requestedBy: me, "Own firm's", invoice: ownInvoice);
+        var unlinked = _data.AddServiceRequest(requestedBy: me, "Unlinked");
+        Message("sprk_regardingservicerequest", ofOther, Now.AddHours(-1), senderName: "Legal");
+        var onOwn = Message("sprk_regardingservicerequest", ofOwn, Now.AddHours(-2), senderName: "Legal");
+        var onUnlinked = Message("sprk_regardingservicerequest", unlinked, Now.AddHours(-3), senderName: "Legal");
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+
+        var feed = Body(await Feed(WorkforceContact(me)));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(onOwn), IdOf(onUnlinked));
+        feed.Value.Should().NotContain(i => i.RecordId == ofOther.ToString("D"));
+        feed.Value.Select(i => i.RecordTitle).Should().Equal("Own firm's", "Unlinked");
+        feed.UnreadCount.Should().Be(2);
+        feed.Truncated.Should().BeFalse("a request withheld by the firm rule is an answer, not a read failure");
+        _queries.Single().Should().NotContain(ofOther.ToString(), "the messages of a withheld request are not read");
+    }
+
+    [Fact(DisplayName = "F3b fix round 1 feed (firm read fails, must fire): the caller's invoice-linked service requests are withheld and the feed says truncated; an unlinked request still appears")]
+    public async Task F3b_WhenTheCallersFirmsCannotBeRead_LinkedServiceRequestsAreWithheld_AndTheFeedSaysTruncated()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld
+        {
+            CallerFirmsFault = new TimeoutException("The caller-firm read failed (test)."),
+        };
+        var ownInvoice = world.OwnedInvoice();
+        var me = Guid.NewGuid();
+        var linked = _data.AddServiceRequest(requestedBy: me, "Linked", invoice: ownInvoice);
+        var unlinked = _data.AddServiceRequest(requestedBy: me, "Unlinked");
+        Message("sprk_regardingservicerequest", linked, Now.AddHours(-1), senderName: "Legal");
+        var onUnlinked = Message("sprk_regardingservicerequest", unlinked, Now.AddHours(-2), senderName: "Legal");
+        _invoiceHiding = InvoiceHidingStub.Real(world);
+
+        var feed = Body(await Feed(WorkforceContact(me)));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(onUnlinked));
+        feed.UnreadCount.Should().Be(1);
+        feed.Truncated.Should().BeTrue("a decision that could not be made must not read as 'there is nothing more to report'");
+        _queries.Single().Should().NotContain(linked.ToString());
     }
 
     // ── deleted records (task 032) never break the feed ─────────────────────────────────────────────
@@ -1077,7 +1236,7 @@ public class ExternalNotificationFeedTests
             case "throws": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagReadThrows = true; break;
             case "fault": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagFault = System.Net.HttpStatusCode.ServiceUnavailable; break;
             case "flag-null": _roots.AddRoot(ExternalGrantRootType.Matter, matter, isSecure: null); break;
-            // "missing": no matter record; "malformed": the stamp is not a GUID.
+                // "missing": no matter record; "malformed": the stamp is not a GUID.
         }
 
         var caller = Ciam(Guid.NewGuid(), project: project);
@@ -1218,7 +1377,9 @@ public class ExternalNotificationFeedTests
             "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_communicationthread_value," +
             "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value," +
             "_sprk_regardinganalysis_value,_sprk_regardingbudget_value,_sprk_regardingevent_value," +
-            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value");
+            "_sprk_regardinginvoice_value,_sprk_regardingreportcard_value," +
+            // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is not selected above.
+            "_sprk_regardingservicerequest_value");
         select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
         // Task 062 rework: createdby is expanded to its applicationid + accessmode so the sender-name fallback can tell a
         // person from the BFF's application user (nothing else of the user is read).
@@ -1252,6 +1413,16 @@ public class ExternalNotificationFeedTests
         json.Should().NotContain(sender.ToString()).And.NotContain("Body").And.NotContain("Subject");
     }
 
+    [Fact]
+    public void ExternalNotificationDto_PropertySet_IsPinned_SoAThreadIdCanNeverLeakIntoTheFeedSilently()
+    {
+        // Task 035 (FR-22) gave ThreadMessageDto a ThreadId that ExternalNotificationFeedEndpoints reads its messages through.
+        // The feed's wire shape is unchanged by it: a property added here (a thread id among them) must be added on purpose.
+        typeof(ExternalNotificationDto).GetProperties()
+            .Select(p => ((JsonPropertyNameAttribute?)Attribute.GetCustomAttribute(p, typeof(JsonPropertyNameAttribute)))?.Name ?? p.Name)
+            .Should().BeEquivalentTo("kind", "id", "recordType", "recordId", "recordTitle", "occurredOn", "senderName", "isUnread");
+    }
+
     // =====================================================================
     // In-memory ExternalDataService: the three feed reads
     // =====================================================================
@@ -1274,7 +1445,10 @@ public class ExternalNotificationFeedTests
                 NullLogger<ExternalDataService>.Instance,
                 dataverse.FilingReader)
         {
+            _dataverse = dataverse;
         }
+
+        private readonly ExternalRootEventReadTests.FakeDataverse _dataverse;
 
         public List<(Guid Contact, DateOnly Since, DateOnly Today)> GrantReads { get; } = new();
         public List<DateTimeOffset?> ModifiedSinceReads { get; } = new();
@@ -1288,6 +1462,12 @@ public class ExternalNotificationFeedTests
         public List<string> NameReads { get; } = new();
         public bool NamesReadFails { get; set; }
 
+        /// <summary>The entities the production title read knows (<c>ExternalDataService.NameBindingFor</c>).</summary>
+        private static readonly HashSet<string> NamedEntities = new(StringComparer.Ordinal)
+        {
+            "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice",
+        };
+
         public Guid AddGrant(Guid contact, ExternalGrantRootType rootType, Guid rootId, DateTimeOffset grantedOn,
             DateTimeOffset? renewedOn = null)
         {
@@ -1297,10 +1477,18 @@ public class ExternalNotificationFeedTests
             return id;
         }
 
-        public Guid AddServiceRequest(Guid requestedBy, string name)
+        public Guid AddServiceRequest(Guid requestedBy, string name, Guid? invoice = null)
         {
             var id = Guid.NewGuid();
-            _requests.Add(new RequestedServiceRequest(id, name, requestedBy));
+            // F3b fix round 1 (F2): as the real read parses the row, a request with no invoice link carries an empty list (never null,
+            // which means "not read").
+            _requests.Add(new RequestedServiceRequest(
+                id, name, requestedBy, invoice is { } link ? new[] { link } : Array.Empty<Guid>()));
+            // F3b fix round 1: the same request on the Web API side, where the invoice ancestor walk of a message filed under it reads
+            // it by key (with the same invoice link).
+            _dataverse.AddServiceRequest(id, requestedBy);
+            if (invoice is { } linked)
+                _dataverse.SetColumn("sprk_servicerequests", "sprk_servicerequestid", id.ToString(), "_sprk_regardinginvoice_value", linked.ToString());
             return id;
         }
 
@@ -1341,6 +1529,11 @@ public class ExternalNotificationFeedTests
         {
             NameReads.Add(entityLogicalName);
             if (NamesReadFails)
+                return Task.FromResult(new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: false));
+
+            // As the production read: only the entities it has a binding for are read; any other entity is an incomplete read (no title),
+            // so a test that names a record the real service could not title cannot pass here (ebilling-r1 132 review F1: sprk_invoice was unknown).
+            if (!NamedEntities.Contains(entityLogicalName))
                 return Task.FromResult(new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: false));
 
             var names = ids.Where(id => !_deleted.Contains(id))

@@ -223,7 +223,10 @@ public class DocumentIndexParentResolverTests
     {
         var document = new DocumentEntity
         {
-            Id = Document.ToString(), Name = "memo.docx", MatterId = Guid.NewGuid().ToString(), ProjectId = Guid.NewGuid().ToString(),
+            Id = Document.ToString(),
+            Name = "memo.docx",
+            MatterId = Guid.NewGuid().ToString(),
+            ProjectId = Guid.NewGuid().ToString(),
         };
         DocumentRow(("sprk_workassignment", "sprk_workassignment", Linked, "Diligence"));
 

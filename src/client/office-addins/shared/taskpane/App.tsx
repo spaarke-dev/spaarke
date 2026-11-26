@@ -1,5 +1,14 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { FluentProvider, Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  FluentProvider,
+  Spinner,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
@@ -16,14 +25,20 @@ import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
 import { InvoiceView } from './components/views/InvoiceView';
 import {
+  addFirmToRecord,
   createInvoiceSubmitHandler,
   createPreviousSubmissionFollower,
   createPreviousSubmissionLoader,
   hostAdapterInvoiceEmailSource,
+  listLawFirms,
   loadCorrectionPrefill,
   loadInvoiceFirms,
 } from './services/invoiceSubmissionService';
-import { invoiceFiledRecord, type InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
+import {
+  invoiceFiledRecord,
+  type InvoiceSubmissionTarget,
+  type ListLawFirmsArgs,
+} from './services/invoiceSubmissionSeam';
 import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
@@ -54,7 +69,29 @@ import {
 import { fileNameFromWebUrl } from './services/quickSaveHelpers';
 import { canOpenSpaarkeRecords } from './services/openRecordLauncher';
 import { cleanGuid } from '@spaarke/ui-components/guid';
-import { describeFetchFailure } from './utils/errorMessages';
+import { describeFetchFailure, describeStartupFailure, type StartupFailure } from './utils/errorMessages';
+import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
+
+/**
+ * #1571: the pane's own BFF calls retry once on 401 through the auth service, like every other call. A 401 that
+ * survives the retry means the session cannot be renewed silently, and the only interactive sign-in is the Sign in
+ * click: the pane shows the sign-in prompt with this text, never a server error.
+ */
+const SIGN_IN_EXPIRED_MESSAGE = 'Your Spaarke sign-in has expired. Sign in again to continue.';
+
+/** #1571 review F3: a contact search that failed (not "no contacts match"). */
+const CONTACT_SEARCH_FAILED_MESSAGE = 'Could not search contacts.';
+
+/** A failed contact search; its message is what the picker shows. */
+class ContactSearchError extends Error {}
+
+/**
+ * The single-retry-on-401 config for the pane's own calls: re-acquire silently. `authenticatedJsonFetch` clears the
+ * token cache first, which makes the re-acquire ask Entra for a new token (#1571 review F1).
+ */
+const paneRetry = {
+  getRetryToken: async () => (await authService.getAccessToken()) ?? '',
+};
 
 // Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
 // rich-text editor, which Outlook (no Email tab) and Word with the tab held off would otherwise download and parse
@@ -150,6 +187,12 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalS,
   },
+  signInBanner: {
+    marginBottom: tokens.spacingVerticalS,
+  },
+  startupFailure: {
+    padding: tokens.spacingVerticalM,
+  },
 });
 
 export interface AppProps {
@@ -221,7 +264,15 @@ export const App: React.FC<AppProps> = ({
   // State
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Task 139: why the pane could not start (host adapter failure, no email selected). Its own state — a start-up
+  // failure is not a sign-in failure, so it is never handed to the Sign in screen.
+  const [startupFailure, setStartupFailure] = useState<StartupFailure | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // #1571 review F2/F1: the session ended mid-use. The sign-in prompt shows as a banner ABOVE the signed-in tabs,
+  // which stay mounted, so a half-filled To Do (#2607) or Save survives the sign-in.
+  const [signInRequired, setSignInRequired] = useState(false);
+  // #1571 review F2: a Sign in click is in progress (the button is disabled; a second click does nothing).
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [, setHostContext] = useState<IHostContext | null>(null);
   // Task 133: true while the Invoice view runs a submission or shows a result that carries a tracking number. The tab
   // bar is hidden then, so a tab press cannot unmount the view and lose either. Only the Invoice tab sets it.
@@ -296,16 +347,33 @@ export const App: React.FC<AppProps> = ({
     try {
       setIsInitializing(true);
       setError(null);
+      setStartupFailure(null);
       setConnectionStatus('connecting');
+
+      // Task 139: the sign-in state does not depend on the item. Read it first, so a failure reading the item can
+      // never turn a signed-in user into the Sign in screen. It is applied below, at the point it always was.
+      const authenticated = authService.isAuthenticated();
 
       // Initialize host adapter (may already be initialized in index.tsx)
       if (!hostAdapter.isInitialized()) {
         await hostAdapter.initialize();
       }
 
-      // Build host context from new adapter methods
-      const itemId = await hostAdapter.getItemId();
-      const subject = await hostAdapter.getSubject();
+      // Build host context from new adapter methods. Task 139 (review F2): these reads only feed `hostContext`, so
+      // their failure is not a reason to refuse to start (a new unsaved compose draft has no item id; an older
+      // client has no getItemIdAsync). The one exception is NO_ITEM_SELECTED: with no email there is nothing to
+      // work on, and the pane says so with Retry.
+      let itemId = '';
+      let subject = '';
+      try {
+        itemId = await hostAdapter.getItemId();
+        subject = await hostAdapter.getSubject();
+      } catch (itemError) {
+        if ((itemError as { code?: unknown } | null | undefined)?.code === 'NO_ITEM_SELECTED') {
+          throw itemError;
+        }
+        console.warn('[Spaarke] Could not read the item id / subject at start-up; continuing', itemError);
+      }
       const itemType = hostAdapter.getItemType();
 
       const context: IHostContext = {
@@ -318,13 +386,20 @@ export const App: React.FC<AppProps> = ({
       };
       setHostContext(context);
 
-      // Check authentication status
-      setIsAuthenticated(authService.isAuthenticated());
+      // Authentication status (read before the item, above)
+      setIsAuthenticated(authenticated);
       setConnectionStatus('connected');
 
       setIsInitializing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to initialize');
+      // Task 139: keep the failure's own text (adapter errors are plain `{ code, message }` objects, not `Error`s)
+      // and keep the sign-in state true to the session, whatever failed. The failure view offers Retry.
+      setStartupFailure(describeStartupFailure(err));
+      try {
+        setIsAuthenticated(authService.isAuthenticated());
+      } catch {
+        /* sign-in state unknown: leave it as it was */
+      }
       setConnectionStatus('disconnected');
       setIsInitializing(false);
     }
@@ -334,21 +409,41 @@ export const App: React.FC<AppProps> = ({
     initializeApp();
   }, [initializeApp]);
 
-  // Sign in handler
+  // Sign in handler — the one interactive sign-in (#1571). A click while one is running does nothing.
+  const signingInRef = useRef(false);
   const handleSignIn = async () => {
+    if (signingInRef.current) return;
+    signingInRef.current = true;
+    setIsSigningIn(true);
     try {
       setError(null);
       await authService.signIn();
       setIsAuthenticated(authService.isAuthenticated());
+      setSignInRequired(false);
     } catch (err) {
+      // #1571 review F2: a click that did not sign in says so (AuthService explains a blocked pop-up).
       setError(err instanceof Error ? err.message : 'Sign in failed');
+    } finally {
+      signingInRef.current = false;
+      setIsSigningIn(false);
     }
   };
+
+  // #1571: the session cannot be renewed silently (a 401 that survived the single retry, or no token at all) — show
+  // the sign-in prompt, whose click is the interactive sign-in. It never unmounts the signed-in tabs (review F1).
+  const showSignInPrompt = useCallback(() => {
+    setSignInRequired(true);
+  }, []);
+
+  // #1571 review F2: ONE route to the sign-in prompt for every request the pane makes (Save, Find, Invoice, Email,
+  // the save stream): the auth service raises it when it has no token, or when a request is refused after its retry.
+  useEffect(() => authService.onSignInRequired?.(showSignInPrompt), [showSignInPrompt]);
 
   // Sign out handler
   const handleSignOut = async () => {
     await authService.signOut();
     setIsAuthenticated(false);
+    setSignInRequired(false);
     setCurrentTab('save'); // Reset to default tab
   };
 
@@ -463,8 +558,11 @@ export const App: React.FC<AppProps> = ({
 
   // Runs once per pane session, after authentication (the resolver call needs a token), so it also covers
   // the "sign in after pane load" path — "do not resolve on every render" (task 013 step 6).
+  // Task 139 (review F1): also only once the pane has STARTED. The adapter's capabilities depend on its item mode,
+  // which is unknown while start-up has failed (no item); after a successful Retry the mode is known, so the
+  // lookup must run then (`isInitializing` / `startupFailure` are dependencies for that reason).
   useEffect(() => {
-    if (!isAuthenticated || identityResolutionAttempted.current) {
+    if (!isAuthenticated || isInitializing || startupFailure || identityResolutionAttempted.current) {
       return;
     }
     const capabilities = hostAdapter.getCapabilities();
@@ -475,7 +573,14 @@ export const App: React.FC<AppProps> = ({
       identityResolutionAttempted.current = true;
       void resolveOpenEmailIdentity();
     }
-  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity, resolveOpenEmailIdentity]);
+  }, [
+    isAuthenticated,
+    isInitializing,
+    startupFailure,
+    hostAdapter,
+    resolveOpenDocumentIdentity,
+    resolveOpenEmailIdentity,
+  ]);
 
   // Task 111: the Save tab filed the open document to a record. The identity (which the card and the green box read)
   // and the saved context (Create To Do's regarding) take the record at once — no reload, no re-resolve.
@@ -529,28 +634,36 @@ export const App: React.FC<AppProps> = ({
       // Outlook counterpart. A demo-prefixed communicationId (browser harness) is never sent to the
       // server — the real-communicationId path returns above before reaching this call.
       try {
-        const token = await authService.getAccessToken();
-        const res = await fetch(`${apiBaseUrl}/api/office/todo`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        const token = (await authService.getAccessToken()) ?? '';
+        const res = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/office/todo`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: input.name,
+              description: input.description,
+              assignedToContactId: input.assignedToContactId,
+              dueDate: input.dueDate,
+              priorityScore: input.priorityScore,
+              effortScore: input.effortScore,
+              regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
+              regardingRecordId: savedContext.regardingRecordId,
+              regardingRecordName: savedContext.relatedRecord?.displayName ?? savedContext.regardingName,
+              // ADR-044: canonicalize every GUID crossing this boundary to bare-lowercase.
+              ...(savedContext.documentId ? { documentId: cleanGuid(savedContext.documentId) } : {}),
+              ...(savedContext.communicationId ? { communicationId: cleanGuid(savedContext.communicationId) } : {}),
+            }),
           },
-          body: JSON.stringify({
-            name: input.name,
-            description: input.description,
-            assignedToContactId: input.assignedToContactId,
-            dueDate: input.dueDate,
-            priorityScore: input.priorityScore,
-            effortScore: input.effortScore,
-            regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
-            regardingRecordId: savedContext.regardingRecordId,
-            regardingRecordName: savedContext.relatedRecord?.displayName ?? savedContext.regardingName,
-            // ADR-044: canonicalize every GUID crossing this boundary to bare-lowercase.
-            ...(savedContext.documentId ? { documentId: cleanGuid(savedContext.documentId) } : {}),
-            ...(savedContext.communicationId ? { communicationId: cleanGuid(savedContext.communicationId) } : {}),
-          }),
-        });
+          token,
+          paneRetry
+        );
+        if (res.status === 401) {
+          // #1571: the retry could not renew the session — the sign-in prompt, not a server error. A 403 is a
+          // refusal of THIS To Do (Assigned To, owner team…) and keeps the server's own reason below.
+          showSignInPrompt();
+          return { ok: false, error: SIGN_IN_EXPIRED_MESSAGE };
+        }
         if (!res.ok) {
           // Task 091 (UAT-2, negative case): show the server's own reason, not a bare status code.
           const described = await describeFetchFailure(res);
@@ -564,7 +677,7 @@ export const App: React.FC<AppProps> = ({
         return { ok: false, error: err instanceof Error ? err.message : 'Create failed.' };
       }
     },
-    [savedContext, apiBaseUrl]
+    [savedContext, apiBaseUrl, showSignInPrompt]
   );
 
   // Assigned-To (Contact) lookup — reuses the Office entity search scoped to Contact.
@@ -595,13 +708,24 @@ export const App: React.FC<AppProps> = ({
         return demo.filter(c => c.name.toLowerCase().includes(q));
       }
       try {
-        const token = await authService.getAccessToken();
-        const res = await fetch(
+        const token = (await authService.getAccessToken()) ?? '';
+        const res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=Contact&top=10`,
-          { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+          {},
+          token,
+          paneRetry
         );
+        if (res.status === 401) {
+          // #1571: the retry could not renew the session — the sign-in prompt (a banner: the form stays as typed),
+          // and the search says it failed rather than showing an empty result list.
+          showSignInPrompt();
+          throw new ContactSearchError(`${CONTACT_SEARCH_FAILED_MESSAGE} ${SIGN_IN_EXPIRED_MESSAGE}`);
+        }
         if (!res.ok) {
-          return [];
+          // #1571 review F3: a refusal (403) or a server fault is not "no contacts match" — say so, with the server's
+          // own reason.
+          const described = await describeFetchFailure(res);
+          throw new ContactSearchError(`${CONTACT_SEARCH_FAILED_MESSAGE} ${described.message}`);
         }
         const data = (await res.json()) as {
           results?: { id: string; name: string; displayInfo?: string; email?: string }[];
@@ -613,11 +737,13 @@ export const App: React.FC<AppProps> = ({
           // Task 091 (UAT-2): additive, from the server's new EntitySearchResult.Email.
           ...(r.email ? { email: r.email } : {}),
         }));
-      } catch {
-        return [];
+      } catch (err) {
+        // A failed search rejects (the pickers show "could not search contacts"); never an empty list.
+        if (err instanceof ContactSearchError) throw err;
+        throw new ContactSearchError(`${CONTACT_SEARCH_FAILED_MESSAGE} Check your connection and try again.`);
       }
     },
-    [savedContext, apiBaseUrl]
+    [savedContext, apiBaseUrl, showSignInPrompt]
   );
 
   // Send Email (task 036 / FR-15). Capability-gated (NFR-10, never a `hostType` conditional) via
@@ -690,6 +816,18 @@ export const App: React.FC<AppProps> = ({
   const loadFirms = useCallback(
     (target: InvoiceSubmissionTarget) =>
       loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+  // Task 134 slice C (ebilling 095g): list the law firms a record can be given, and add one. The add alone: the pane
+  // never removes a firm.
+  const listLawFirmsForRecord = useCallback(
+    (args: ListLawFirmsArgs, signal?: AbortSignal) =>
+      listLawFirms(args, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }, signal),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+  const addFirmToCoreRecord = useCallback(
+    (target: InvoiceSubmissionTarget, firmId: string) =>
+      addFirmToRecord(target, firmId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
   const loadPrefill = useCallback(
@@ -818,6 +956,42 @@ export const App: React.FC<AppProps> = ({
     );
   }
 
+  // Task 139: the pane could not start. Say why and offer Retry — never the Sign in screen, which is for a user who
+  // is not signed in. "No email selected" is information, not an add-in fault.
+  if (startupFailure) {
+    return (
+      <FluentProvider theme={theme}>
+        <TaskPaneShell
+          title={displayTitle}
+          hostType={hostType}
+          isAuthenticated={isAuthenticated}
+          {...(isAuthenticated ? { onSignOut: handleSignOut } : {})}
+          version={version}
+          {...(buildDate !== undefined ? { buildDate } : {})}
+          connectionStatus={connectionStatus}
+          showNavigation={false}
+          themePreference={preference}
+          onThemeChange={setPreference}
+          showErrorDetails={showErrorDetails}
+          onError={handleError}
+        >
+          <MessageBar
+            intent={startupFailure.noItemSelected ? 'info' : 'error'}
+            layout="multiline"
+            className={styles.startupFailure}
+          >
+            <MessageBarBody>{startupFailure.message}</MessageBarBody>
+            <MessageBarActions>
+              <Button appearance="primary" size="small" onClick={() => void initializeApp()}>
+                Retry
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        </TaskPaneShell>
+      </FluentProvider>
+    );
+  }
+
   // Not authenticated - show sign in view
   if (!isAuthenticated) {
     return (
@@ -835,7 +1009,7 @@ export const App: React.FC<AppProps> = ({
           showErrorDetails={showErrorDetails}
           onError={handleError}
         >
-          <SignInView onSignIn={handleSignIn} error={error} />
+          <SignInView onSignIn={handleSignIn} isLoading={isSigningIn} error={error} />
         </TaskPaneShell>
       </FluentProvider>
     );
@@ -877,6 +1051,28 @@ export const App: React.FC<AppProps> = ({
           : {})}
         {...(DIAGNOSTICS_ENABLED ? { onShowDiagnostics: openDiagnostics } : {})}
       >
+        {/* #1571 review F1/F2: the session ended mid-use. A banner, not the sign-in page: the tabs below stay mounted,
+            so what the user typed (a To Do, a Save) is still there after signing in. */}
+        {signInRequired && (
+          <MessageBar intent="warning" layout="multiline" className={styles.signInBanner}>
+            <MessageBarBody>
+              {SIGN_IN_EXPIRED_MESSAGE}
+              {error ? ` ${error}` : ''}
+            </MessageBarBody>
+            <MessageBarActions>
+              <Button
+                appearance="primary"
+                size="small"
+                onClick={() => void handleSignIn()}
+                disabled={isSigningIn}
+                {...(isSigningIn ? { icon: <Spinner size="tiny" /> } : {})}
+              >
+                {isSigningIn ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        )}
+
         {DIAGNOSTICS_ENABLED && showDiagnostics && (
           <Suspense fallback={<Spinner size="small" label="Loading diagnostics…" />}>
             <DiagnosticsView
@@ -934,6 +1130,8 @@ export const App: React.FC<AppProps> = ({
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            listLawFirms={listLawFirmsForRecord}
+            addFirmToRecord={addFirmToCoreRecord}
             correctionAvailable
             loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
@@ -1010,7 +1208,6 @@ export const App: React.FC<AppProps> = ({
                 Project: 'sprk_project',
                 Account: 'account',
                 Contact: 'contact',
-                Invoice: 'invoice',
               };
               const logicalName = entityMap[entityType] || entityType.toLowerCase();
               // Open quick create form in Dataverse

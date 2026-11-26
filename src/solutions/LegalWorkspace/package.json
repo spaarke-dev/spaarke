@@ -3,9 +3,14 @@
   "version": "1.0.2",
   "description": "Legal Operations Workspace - Home Corporate Custom Page",
   "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/corporateworkspace.html');\"",
+    "typecheck": "node ../../../scripts/tsc-surface-gate.mjs --baseline tsc-baseline.json",
+    "build": "node ../../../scripts/tsc-surface-gate.mjs --baseline tsc-baseline.json && vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/corporateworkspace.html');\"",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
@@ -31,14 +36,12 @@
     "@lexical/rich-text": "^0.41.0",
     "@lexical/selection": "^0.41.0",
     "@microsoft/applicationinsights-web": "^3.3.11",
-    "@spaarke/ai-outputs": "file:../../client/shared/Spaarke.AI.Outputs",
     "@spaarke/ai-widgets": "file:../../client/shared/Spaarke.AI.Widgets",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
     "@spaarke/communication-components": "file:../../client/shared/Spaarke.Communication.Components",
     "@spaarke/compose-components": "file:../../client/shared/Spaarke.Compose.Components",
     "@spaarke/daily-briefing-components": "file:../../client/shared/Spaarke.DailyBriefing.Components",
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
-    "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
     "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "@tiptap/core": "^2.10.3",
@@ -62,11 +65,17 @@
     "lexical": "^0.41.0",
     "mammoth": "^1.12.0",
     "marked": "^17.0.4",
+    "pdfjs-dist": "^6.5.438",
     "react-window": "^1.8.11",
     "scheduler": "^0.27.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/d3-force": "^3.0.10",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.20.5",
+    "@types/powerapps-component-framework": "^1.3.18",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.2.1",

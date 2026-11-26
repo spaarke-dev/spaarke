@@ -61,6 +61,48 @@ public sealed record BillingDecision(
     bool PrivilegeFlagged = false,
     DateTimeOffset? DecidedOn = null);
 
+/// <summary>
+/// ebilling-r1 task 084h-2 (EB-D-238, EB-D-239; design notes/084h section 4, 7.3): ONE per-record Procedure change that committed, for
+/// <see cref="BillingDecisionRecorder.RecordProcedureAsync"/>. It is also the repair payload: the Procedure service hands the SAME value to
+/// <see cref="IRecordProcedureDecisionEnqueuer"/> when the inline record fails, so the repair job rebuilds the identical writer request (and
+/// hash) from it and never re-reads the override row (design section 7.3, review item 4).
+/// </summary>
+/// <param name="DecisionId">Minted by the service once per change, before the preflight; the record's idempotency key with the core record.</param>
+/// <param name="ActionCode">A per-record Procedure code (<c>DecisionActionCatalog.RecordProcedureActions</c>).</param>
+/// <param name="CoreTable">The core table: <c>sprk_matter</c>, <c>sprk_project</c> or <c>sprk_workassignment</c>.</param>
+/// <param name="RecordId">The core record the change was made on.</param>
+/// <param name="DeciderSystemUserId">The deciding user (<c>systemuserid</c>), resolved from the caller by the route; never request input.</param>
+/// <param name="DeciderRole">The decider's role, recorded in the fact snapshot.</param>
+/// <param name="Values">The decided content keyed by the catalog parameter codes (design section 4.1) plus the undeclared ids; <c>note</c>
+/// only when a note was given.</param>
+/// <param name="Outcome">What the change did (<c>Assigned</c>, <c>Pinned</c>, <c>Excluded</c>, <c>Changed</c>, <c>Unpinned</c>, <c>Removed</c>).</param>
+/// <param name="Reason">The change's reason as stored on the override row (the POST codes); null for an unpin or a removal.</param>
+/// <param name="DecidedOn">When the change was made (fixed by the service, so a repair records the same instant).</param>
+/// <param name="Written">The override row the change wrote or removed.</param>
+public sealed record RecordProcedureDecision(
+    Guid DecisionId,
+    string ActionCode,
+    string CoreTable,
+    Guid RecordId,
+    Guid DeciderSystemUserId,
+    string DeciderRole,
+    IReadOnlyDictionary<string, object?> Values,
+    string Outcome,
+    string? Reason,
+    DateTimeOffset DecidedOn,
+    IReadOnlyList<DecisionRecordRef>? Written = null);
+
+/// <summary>
+/// ebilling-r1 task 084h-2 (design notes/084h section 7.3, EB-D-239 Q10): queues the repair of a per-record Procedure change whose inline
+/// Decision Record failed after the change committed. Task 084h-3 implements it (an ADR-004 job: payload, enqueuer, handler, registration).
+/// Until that registration exists the Procedure service has no enqueuer and answers <c>NotRecorded</c>, never <c>Queued</c>.
+/// </summary>
+public interface IRecordProcedureDecisionEnqueuer
+{
+    /// <summary>Queues <paramref name="decision"/> for the repair job, unchanged. Throws when it could not be queued.</summary>
+    Task EnqueueAsync(RecordProcedureDecision decision, CancellationToken ct);
+}
+
 /// <summary>The recorded decision: the Decision Record the caller links its findings to.</summary>
 /// <param name="RecordId">The <c>sprk_decisionrecord</c> id (the existing one when <paramref name="AlreadyRecorded"/>).</param>
 /// <param name="AlreadyRecorded">True when this decision id was recorded before and nothing was written.</param>
@@ -118,10 +160,58 @@ public sealed class BillingDecisionRecorder
         // check. A true retry is then answered even while the identity read faults; a new decision with a faulting read is still refused
         // before anything is written.
         Func<CancellationToken, Task<Guid?>>? contact = decision.Decider.SystemUserId is { } user && user != Guid.Empty
-            ? token => DeciderContactAsync(user, token)
+            ? token => DeciderContactAsync(user, DecisionRecordRefusalReason.BillingRecordLookupFailed, "Billing decision", token)
             : null;
         var result = await _writer.WriteBillingDecisionAsync(request, contact, ct).ConfigureAwait(false);
         return new BillingDecisionRecordResult(result.RecordId, result.AlreadyRecorded, result.RecordClass);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 084h-2 (EB-D-238; design notes/084h sections 3.2, 6): writes a per-record Procedure change's one Decision Record through
+    /// the writer's Procedure entry (<see cref="DecisionRecordWriter.WriteRecordProcedureDecisionAsync(RecordProcedureDecisionRecordRequest, CancellationToken)"/>),
+    /// or finds the one already written for its decision id. The deciding user's linked contact is read lazily, as <see cref="RecordAsync"/>
+    /// reads it, and an unreadable contact is refused as <see cref="DecisionRecordRefusalReason.RecordProcedureLookupFailed"/> (084h-1 hand-off
+    /// H-1), never with the billing reason.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">The writer refused, or the deciding user's contact could not be read. Nothing written.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
+    public async Task<BillingDecisionRecordResult> RecordProcedureAsync(RecordProcedureDecision decision, CancellationToken ct = default)
+    {
+        var request = ToRequest(decision);
+        _writer.PreflightRecordProcedureDecision(request);
+        Func<CancellationToken, Task<Guid?>>? contact = decision.DeciderSystemUserId != Guid.Empty
+            ? token => DeciderContactAsync(decision.DeciderSystemUserId, DecisionRecordRefusalReason.RecordProcedureLookupFailed, "Procedure change", token)
+            : null;
+        var result = await _writer.WriteRecordProcedureDecisionAsync(request, contact, ct).ConfigureAwait(false);
+        return new BillingDecisionRecordResult(result.RecordId, result.AlreadyRecorded, result.RecordClass);
+    }
+
+    /// <summary>Every refusal <see cref="RecordProcedureAsync"/> can give without I/O (task 084h-2: the Procedure service runs it before its
+    /// transaction). Reads and writes nothing.</summary>
+    /// <exception cref="DecisionRecordRefusedException">The change as given would be refused.</exception>
+    public void PreflightProcedure(RecordProcedureDecision decision) => _writer.PreflightRecordProcedureDecision(ToRequest(decision));
+
+    /// <summary>
+    /// The writer request of a per-record Procedure change: the subject is the core record, the facts are the core table and the record id
+    /// (design section 4.2: no counts, no close state), and the deciding contact is never the caller's (it is looked up, K3). Pure, so the
+    /// 084h-3 repair job rebuilds the identical request (and hash) from the queued <see cref="RecordProcedureDecision"/>.
+    /// </summary>
+    internal static RecordProcedureDecisionRecordRequest ToRequest(RecordProcedureDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        return new RecordProcedureDecisionRecordRequest(
+            decision.DecisionId,
+            decision.ActionCode,
+            new DecisionRecordRef(decision.CoreTable, decision.RecordId),
+            decision.DeciderSystemUserId,
+            decision.DeciderRole,
+            decision.Values,
+            decision.Outcome,
+            new Dictionary<string, object?> { ["coreTable"] = decision.CoreTable, ["recordId"] = decision.RecordId },
+            decision.Reason,
+            decision.Written,
+            DeciderContactId: null, // looked up from the decider (K3); never the caller's
+            decision.DecidedOn);
     }
 
     /// <summary>
@@ -130,9 +220,11 @@ public sealed class BillingDecisionRecorder
     /// record's Assigned To Internal stays empty and the decision is still recorded); refused when the read FAULTED, because the answer is
     /// unknown.
     /// </summary>
-    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the contact could
-    /// not be read. Nothing is written; a retry may succeed.</exception>
-    private async Task<Guid?> DeciderContactAsync(Guid systemUserId, CancellationToken ct)
+    /// <exception cref="DecisionRecordRefusedException"><paramref name="refusalReason"/> (the billing path's
+    /// <see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>, the Procedure path's
+    /// <see cref="DecisionRecordRefusalReason.RecordProcedureLookupFailed"/>): the contact could not be read. Nothing is written; a retry may
+    /// succeed.</exception>
+    private async Task<Guid?> DeciderContactAsync(Guid systemUserId, string refusalReason, string what, CancellationToken ct)
     {
         PersonIdentity identity;
         try
@@ -141,9 +233,9 @@ public sealed class BillingDecisionRecorder
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Billing decision: the deciding user's linked contact could not be read ({ExceptionType}); refusing before any write.",
-                ex.GetType().Name);
-            throw DeciderUnreadable(ex);
+            _logger.LogWarning("{What}: the deciding user's linked contact could not be read ({ExceptionType}); refusing before any write.",
+                what, ex.GetType().Name);
+            throw DeciderUnreadable(refusalReason, ex);
         }
 
         if (identity.ContactId is { } contactId && contactId != Guid.Empty)
@@ -153,19 +245,25 @@ public sealed class BillingDecisionRecorder
 
         if (identity.ContactUnreadable)
         {
-            _logger.LogWarning("Billing decision: the deciding user's linked contact could not be read (identity read faults: {Faults}); refusing before any write.",
-                identity.Faults);
-            throw DeciderUnreadable(innerException: null);
+            _logger.LogWarning("{What}: the deciding user's linked contact could not be read (identity read faults: {Faults}); refusing before any write.",
+                what, identity.Faults);
+            throw DeciderUnreadable(refusalReason, innerException: null);
         }
 
-        _logger.LogWarning("Billing decision: the deciding user has no linked internal contact; the Decision Record's Assigned To Internal is left empty.");
+        _logger.LogWarning("{What}: the deciding user has no linked internal contact; the Decision Record's Assigned To Internal is left empty.", what);
         return null;
     }
 
-    private static DecisionRecordRefusedException DeciderUnreadable(Exception? innerException) => new(
-        DecisionRecordRefusalReason.BillingRecordLookupFailed,
+    private static DecisionRecordRefusedException DeciderUnreadable(string refusalReason, Exception? innerException) => new(
+        refusalReason,
         "The deciding user's linked contact could not be read, so the decision was not recorded; nothing was written.",
         innerException: innerException);
+
+    /// <summary>
+    /// Task 165b: the <c>systemuserid</c> of the identity that creates every Decision Record (<see cref="DecisionRecordWriter.WriterUserIdAsync"/>),
+    /// so a Finance reader can trust only a record that identity wrote (<c>createdby</c>). A fault propagates: the caller refuses.
+    /// </summary>
+    internal Task<Guid> WriterUserIdAsync(CancellationToken ct) => _writer.WriterUserIdAsync(ct);
 
     /// <summary>
     /// The D-122 set a decision already recorded under <paramref name="decisionId"/> stored with its record (ebilling-r1 task 100: a retry
@@ -191,6 +289,23 @@ public sealed class BillingDecisionRecorder
     /// <summary>Every refusal <see cref="RecordAsync"/> can give without I/O. Reads and writes nothing.</summary>
     /// <exception cref="DecisionRecordRefusedException">The decision as given would be refused.</exception>
     public void Preflight(BillingDecision decision) => _writer.PreflightBillingDecision(ToRequest(decision));
+
+    /// <summary>
+    /// ebilling-r1 iss029 (ISS-029): when <paramref name="stored"/> is the record already written under the decision's subject and decision id
+    /// (read by <see cref="FindStoredResolvedSetsAsync"/>), the writer's own "already recorded" comparison of the decision against it
+    /// (<see cref="DecisionRecordWriter.PreflightBillingRepeat"/>), before the caller's first write: the same rules and refusals <see cref="RecordAsync"/>
+    /// would give, so a caller can refuse a decision id that is recorded with another decision before it changes anything. Null
+    /// <paramref name="stored"/> (a first attempt) passes. Reads and writes nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>: another billing code, other content
+    /// (<see cref="DecisionRecordRefusedException.IsOtherContent"/>), or a recorded content that cannot be read.</exception>
+    internal static void PreflightRepeat(BillingDecision decision, DecisionRecordWriter.BillingStoredResolvedSet? stored)
+    {
+        if (stored is not null)
+        {
+            DecisionRecordWriter.PreflightBillingRepeat(ToRequest(decision), stored);
+        }
+    }
 
     private static BillingDecisionRecordRequest ToRequest(BillingDecision decision)
     {

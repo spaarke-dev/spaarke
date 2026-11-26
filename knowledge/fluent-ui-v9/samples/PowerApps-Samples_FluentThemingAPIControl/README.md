@@ -40,7 +40,7 @@ This sample was created by the Power Apps component framework team.
 
 ## Try this sample
 
-Follow the steps in the [README.md](../README.md) to generate solutions containing the controls so you can import and try the sample components in your model-driven or canvas app.
+Follow the steps in the README.md to generate solutions containing the controls so you can import and try the sample components in your model-driven or canvas app.
 
 ## Related information
 

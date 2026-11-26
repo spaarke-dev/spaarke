@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.ExternalAccess;
@@ -62,6 +63,11 @@ public static class ExternalAccessModule
         Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
         Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
         Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (workforce; CIAM only when the partner switch is on - task 028 / r3 task 011)
+        // spaarke-SPA-external-access-platform-r4 task 023b (owner 2026-11-22): the record template's Documents list, a NEW grid
+        // configuration row (not 3af4102c, which also backs the workspace widget). Defined in
+        // config/external-record-documents.gridconfiguration.json, created by scripts/Apply-ExternalRecordDocumentsGridConfiguration.ps1.
+        // Its rows come from the record route, not this module's fetch, so no scope, column or route change goes with it.
+        Guid.Parse("286be8b4-f96f-4d5a-b1d5-82fd83ca9693"), // External record documents
     };
 
     /// <summary>
@@ -74,6 +80,13 @@ public static class ExternalAccessModule
         // MembershipModule / CommunicationModule — whichever module loads first wins, the rest no-op.
         // Registered HERE so the grant routes do not depend on an unrelated module having been added.
         services.TryAddSingleton(TimeProvider.System);
+
+        // #2845 F1: the ONE process-wide gate on the access evaluator's concurrent app-only Dataverse reads (Dataverse limits
+        // concurrent requests per identity; a 429 reads as "unknown" and fails a record closed). Shared by the two reader
+        // clients below (through DataverseThrottlingHandler, which also retries a throttled read briefly) and the filing
+        // walk's reads (through the request memo). Sized by the optional Dataverse:MaxConcurrentRequests (default 24).
+        services.TryAddSingleton(sp => DataverseConcurrencyGate.FromConfiguration(sp.GetService<IConfiguration>()));
+        services.TryAddTransient<DataverseThrottlingHandler>();
 
         // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL): the
         // grant-DATA reader. (Contact resolution moved to ContactIdentityBinder below — task 141.)
@@ -88,7 +101,7 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1: the process-wide read gate + throttle retry
 
         // Data service — queries project data (projects, documents, events, contacts, organizations)
         // for external SPA users using managed identity app-only access.
@@ -103,7 +116,8 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1 (round 2 follow-up, r4 014b): the same process-wide gate;
+                                                                // a throttled GET is retried, a write is sent once and its 429/503 returned
 
         // unified-access-control-r2 task 188 (main-session decision 2026-10-20): the assistant's dataverse.* tools decide a
         // document with THE external document narrowing APP-ONLY, through the reader above, so a link field security masks
@@ -125,17 +139,37 @@ public static class ExternalAccessModule
         // systemuser hides nothing; a fault hides every asked invoice); AppOnlyInvoiceFamilyHiding is the assistant tools'
         // hide-only seam for invoice-family rows (the tool has decided the caller is external; a fault throws). Both resolve
         // their readers lazily, on the first call.
+        // Task 130-0 (design.md:414): with the caller's firms, read once per call through the one definition the submission routes
+        // and /me use (ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync), so a partner sees only its own firms' invoices.
         services.AddScoped<ExternalInvoiceHiding>(sp =>
             (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
-                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,
+                async (principal, token) =>
+                {
+                    var (firms, unreadable) = await Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(
+                        principal, sp.GetRequiredService<ExternalParticipationService>(),
+                        sp.GetRequiredService<ILogger<ExternalDataService>>(), token).ConfigureAwait(false);
+                    return CallerFirms.From(firms, unreadable);
+                }, ct));
         // Review round 4b: the external submission routes' seam (list and single read): with an invoice, the predicate above;
         // without one, the submission's own source. Same caller rule and fault rule as ExternalInvoiceHiding.
         services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>
             (caller, submissions, ct) => sp.GetRequiredService<ExternalDataService>().HideSubmissionsForAsync(
                 caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        // Task 130-0b (design.md:414): with the firms of the tool call's systemuser, through the same contact-keyed core
+        // (ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync), read at most once per tool call (InvoiceFamilyCaller).
+        // Step 2: the same seam also decides rows of a child table with an invoice link (InvoiceLinks), by the invoices they link to.
         services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
-            (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
-                table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+            (caller, table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
+                caller, table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,
+                async (systemUserId, token) =>
+                {
+                    var (firms, unreadable) = await Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync(
+                        systemUserId, sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(),
+                        sp.GetRequiredService<ExternalParticipationService>(),
+                        sp.GetRequiredService<ILogger<ExternalDataService>>(), token).ConfigureAwait(false);
+                    return CallerFirms.From(firms, unreadable);
+                }, ct));
 
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
@@ -297,7 +331,7 @@ public static class ExternalAccessModule
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");
             }
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<DataverseThrottlingHandler>(); // #2845 F1: the process-wide read gate + throttle retry
         services.AddTransient<INoAccessListReader>(sp => sp.GetRequiredService<NoAccessListReader>());
 
         // unified-access-control-r2 task 143 (owner Q4) — the No Access list for INTERNAL users on secure records.
@@ -346,6 +380,31 @@ public static class ExternalAccessModule
         // store, the guard, the share seam, the tenant cache), so no Null-Object is needed.
         services.AddScoped<AssignedAccessStore>();
         services.AddScoped<AssignedAccessMaterializer>();
+        // Task 193 G2b (#2338): the ONE grant revoke, resolvable so every path that removes a share because the person must no
+        // longer see the record (/unshare-user, the No Access enforcer, the Restricted remover, the secure-root inheritance,
+        // the materializer) ends the grant PAIRED with that share through the same call (RevokePairedWithAsync).
+        // §11 — Existing: ExternalGrantRevocationService, built by hand by each caller. Extension: this registers that class
+        // as it is; no new type. Cost of doing nothing: each share-removal path would build its own copy from eight
+        // dependencies, or leave the paired grant (workforce-app access) active with nothing to end it: the reconciliation job's
+        // R5 deactivates one only with ExternalAccess:Reconciliation:WritesEnabled on (report-only by default), never retrying
+        // file access.
+        // Every dependency is registered unconditionally (ADR-032); the logger is the class's own (its constructor takes ILogger).
+        services.AddScoped(sp => new Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService(
+            sp.GetRequiredService<DataverseWebApiClient>(),
+            sp.GetRequiredService<SpeContainerMembershipService>(),
+            sp.GetRequiredService<ExternalParticipationService>(),
+            sp.GetRequiredService<AssignedAccessMaterializer>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IContactIdentityStore>(),
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>()));
+        // Task 193 (#2338): the ONE contact -> user rule (who a contact represents), over the identity store, the store above
+        // and the participation service — all unconditional, so this is too (ADR-032). The personal To Do assignee's callers
+        // and Manage Access's /grant resolve it; the materializer and the grant notifier build it from the same stores.
+        services.AddScoped<ContactUserRepresentation>();
+        // Task 193 (#2338) step 3: the share-or-grant decision for a contact grantee (/grant and /invite-and-grant) — the
+        // resolver above plus the /share-user write core. Every dependency is registered unconditionally (ADR-032).
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare>();
 
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
@@ -414,6 +473,11 @@ public static class ExternalAccessModule
         // layoutXml cells and the configjson columns map); (c) the scope-dimension attributes; (d) the
         // /record default projection (primary id + primary name, from EntityDefinitions — each descriptor
         // DECLARES its PrimaryNameAttribute and Register refuses a list missing either). NOTHING ELSE.
+        // EXCEPTION to rule (a) (spaarke-SPA-external-access-platform-r4 task 023b, 2026-11-22): grid 286be8b4 ("External
+        // record documents") has a layout-only cell `sprk_summary`. That grid's rows come from the record route
+        // (/{root}/{id}/documents, which projects the summary itself), never from this module's fetch, so `sprk_summary` is
+        // deliberately NOT readable here. A re-derivation must not add it from that grid; widening the documents module to AI
+        // summaries needs its own UAC review.
         // Task 134's rule (b) — the columns of the internal MDA sibling views the grid's ViewSelector offered
         // — is GONE: inside the external SPA the shared DataGrid itself shows no view picker and never lists
         // the saved queries, whatever props reach it (DataGridExternalHost.tsx: the provider at the SPA root
@@ -452,6 +516,12 @@ public static class ExternalAccessModule
                 "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 61711823.
                 "sprk_projecttype_ref",
+                // spaarke-SPA-external-access-platform-r4 task 031 (FR-18; columns verified live in task 030, owner 2026-11-23): NOT
+                // grid-derived: Information section. The description (Memo), the practice area (lookup to the reference table
+                // sprk_practicearea_ref, which has no module), and the assigned attorney and paralegal (lookups to contact, which has
+                // no module: the internal person's name comes only as the lookup's @formattedValues entry, owner 2026-11-08/11-23).
+                // UAC review: APPROVED by uac-r2 2026-11-23 (R4 notes/task-031-notes.md).
+                "sprk_projectdescription", "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1",
             },
         });
 
@@ -512,10 +582,15 @@ public static class ExternalAccessModule
             Name = "invoices",
             RecordEntity = "sprk_invoice",
             RequireReadOnSecureRoots = true,
+            // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work
+            // assignment, so it is also reached through its work assignment, and that work assignment joins the secure-roots rule
+            // through the scope dimension below (RootLinks types sprk_regardingworkassignment as a work assignment root; the registry
+            // refuses a module whose root dimension RootLinks does not type). Projected server-side with the other rule attributes.
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+                new ScopeDimension { Attribute = "sprk_regardingworkassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
             },
             // Grid 3ff4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
@@ -529,6 +604,9 @@ public static class ExternalAccessModule
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                // ebilling-r1 task 130-0 fix round 2 (K3): a scope dimension must be readable (ExternalModuleRegistry.ValidateReadableColumns),
+                // like its matter and project siblings. Not on the grid; projected server-side for the scope and the secure-roots rule.
+                "sprk_regardingworkassignment",
                 // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
                 // grid-derived. The invoice status is statuscode; the SPA record detail reads it. The retired invoice-status
                 // column was removed from this list by r3 task 002 (#2450) with ebilling's OK on 2026-10-29 (grid 3ff4102c moved
@@ -536,6 +614,12 @@ public static class ExternalAccessModule
                 "statuscode",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
                 "sprk_totalamount_base",
+                // ebilling-r1 082c-2 (owner 2026-11-04 "In Review with a description"; uac-r2 APPROVED with conditions 2026-11-04): NOT
+                // grid-derived. The review detail: a local choice naming which kind of review a held invoice is in (blank = normal review).
+                // Partner-safe closed labels, derived server-side from the holds; never an access-deciding column. It IS listed in ParentLineage
+                // AccessColumns["sprk_invoice"] (fix round 1, F4), but only so that app-only generic writes refuse it: it decides no access and only
+                // its typed writers derive it. External Access R4 renders it only while statuscode is In Review.
+                "sprk_reviewdetail",
             },
         });
 
@@ -559,6 +643,13 @@ public static class ExternalAccessModule
                 "sprk_responseduedate", "statuscode", "sprk_regardingproject",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 42f4102c.
                 "sprk_mattertype", "modifiedon",
+                // spaarke-SPA-external-access-platform-r4 task 031 (FR-18; columns verified live in task 030, owner 2026-11-23): NOT
+                // grid-derived: Information section. The description (Memo), the assignee (lookup to contact, which has no module:
+                // the internal person's name comes only as the lookup's @formattedValues entry), and the regarding matter (lookup
+                // to sprk_matter: its id and name only, never a matter read; like sprk_regardingproject above, the name shows
+                // whether or not the caller holds a grant on that matter - the disclosure question put to UAC).
+                // UAC review: sprk_description, sprk_assignedto APPROVED by uac-r2 2026-11-23; sprk_regardingmatter held by uac-r2, ACCEPTED by the owner 2026-11-23 (uac-r2 notes/decisions.md).
+                "sprk_description", "sprk_assignedto", "sprk_regardingmatter",
             },
         });
 
@@ -582,6 +673,13 @@ public static class ExternalAccessModule
                 "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 583a2a33.
                 "sprk_mattertype", "modifiedon",
+                // spaarke-SPA-external-access-platform-r4 task 031 (FR-18; columns verified live in task 030, owner 2026-11-23): NOT
+                // grid-derived: Information section. The description (Memo), the practice area (lookup to the reference table
+                // sprk_practicearea_ref, which has no module), the assigned attorney and paralegal (lookups to contact, which has no
+                // module: the internal person's name comes only as the lookup's @formattedValues entry, owner 2026-11-08/11-23), and
+                // createdon, shown as the matter's open date (sprk_opendate does not exist; owner 2026-11-23).
+                // UAC review: APPROVED by uac-r2 2026-11-23 (R4 notes/task-031-notes.md).
+                "sprk_matterdescription", "sprk_practicearea", "sprk_assignedattorney1", "sprk_assignedparalegal1", "createdon",
             },
         });
 
@@ -626,6 +724,13 @@ public static class ExternalAccessModule
         // AI-internal types (broker-only, NFR-02). Scoped: ExternalParticipationService is a typed
         // HttpClient (scoped), so this composer is scoped too.
         services.AddScoped<IAccessibleRecordSetService, AccessibleRecordSetService>();
+
+        // spaarke-SPA-external-access-platform-r4 task 014a (uac-r2 review of task 014, Q2.8: one owner, beside the evaluator)
+        // — the contacts with EFFECTIVE external access to one root record, over the evaluator's own readers (grant rows,
+        // effective flags, organization members and memberships, contact state, removed marker, the No Access check). The
+        // assignable-people route (014b) consumes it. Concrete (ADR-010): its tests run it over the readers' existing seams.
+        // Scoped, like the evaluator it calls; every dependency is registered unconditionally (ADR-032).
+        services.AddScoped<RecordContactAccessService>();
 
         // Cross-tenant CIAM Graph client (app-only) for admin-initiated external-user provisioning
         // (task 022; consumed by the provisioner in task 025). Singleton: caches a per-authority MSAL
@@ -693,6 +798,16 @@ public static class ExternalAccessModule
         // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
         services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 191e (#2179 design 3.13; owner rounds 114-115 Q5, Q7 = a) — every 2 minutes, moves
+        // each systemuser whose stored sprk_isexternal reads true into the External Collaborators unit and assigns it the
+        // Spaarke External Collaborator role from that unit, then reads both back; one-way, never application users,
+        // disabled users or administrators; alerts (Critical) only on a failed placement. ENABLED but REPORT-ONLY: writes
+        // need FlaggedUserPlacementJob.WritesEnabledConfigKey = true (absent, empty or unparseable = report-only); turning
+        // it on is an owner go per environment (task 191i). ADR-052 places it in the BFF on the in-process scheduler
+        // (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, IConfiguration and TimeProvider are
+        // unconditional, and IGenericEntityService, resolved per run from a scope, is too.
+        services.AddScheduledJob<FlaggedUserPlacementJob>(FlaggedUserPlacementJob.DefaultCronSchedule);
+
         // unified-access-control-r2 task 149 (C10 part 2, sharees; ships with task 146) — the ONE synchronizer that keeps
         // every child of a secure record shared with exactly its root's internal sharees (never wider; Share and Assign
         // never mirrored). Called by /share-user and /unshare-user (fan-out in the request), by secure provisioning, and by
@@ -703,6 +818,52 @@ public static class ExternalAccessModule
         // dependency — IGenericEntityService, the one POA seam IDataverseRecordShareService, the guard — is registered
         // unconditionally. Placement + §11 justification: notes/task-149-secure-child-sharee-access.md §6 and §13.
         services.AddScoped<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+
+        // unified-access-control-r2 task 191c (#2179 design §3.4): THE predicate (task 191b) over the BFF's app-only readers —
+        // the external plane's OData reader (the 065 rule, thread privacy), task 188's app-only document narrowing, the effective
+        // root flags and ebilling's caller-less (a′) decision — and the External-team mode of the
+        // share synchronizer that asks it. The readers are built on the first decision, so a request that never decides builds no
+        // client. SCOPED, like the synchronizer, the reconciler and the Restricted remover that take the engine as an optional
+        // collaborator (default null in test compositions). Its writes are OFF unless ExternalAccess:ExternalTeamShare:WritesEnabled
+        // (and, for the re-own, ReownWritesEnabled) is true. §10/§11: notes/task-191c-external-team-share-job.md.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>(sp =>
+        {
+            ExternalVisibility.Readers? readers = null;
+            return (rows, ct) =>
+            {
+                if (readers is null)
+                {
+                    var data = sp.GetRequiredService<ExternalDataService>();
+                    EffectiveRootFlagReader rootFlags = sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync;
+                    readers = new ExternalVisibility.Readers(
+                        sp.GetRequiredService<IGenericEntityService>(),
+                        data.QueryVisibilityRowsAsync,
+                        sp.GetRequiredService<AppOnlyDocumentNarrowing>(),
+                        rootFlags,
+                        (invoiceIds, token) => data.DecideInvoicesWithoutCallerAsync(invoiceIds, rootFlags, token),
+                        sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer>>());
+                }
+
+                return ExternalVisibility.DecideAsync(rows, readers, ct);
+            };
+        });
+        // unified-access-control-r2 task 191h (#2179 design §3.3 "Callers", §3.10; #2189; #2369 part 2): the same decider as a
+        // public HIDE decision for the external SPA's to-do and event lists (ExternalDataService), the assistant's dataverse.* read
+        // tools and the AI retrieval trim. A binding of the decider above, not a second predicate: the tools and the trim are
+        // public classes and cannot take the internal decider. Resolved per call, so a request that never decides builds nothing.
+        // Its consumers are an allow-list (ExternalDocumentNarrowingGuardTests, K7). §10/§11: notes/task-191h-spa-and-ai-parity.md.
+        services.AddScoped<AppOnlyExternalVisibility>(sp => async (rows, ct) =>
+            new ExternalRowVisibility(await sp.GetRequiredService<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>()(rows, ct)
+                .ConfigureAwait(false)));
+        services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer(
+            sp.GetRequiredService<IGenericEntityService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer>>(),
+            sp.GetService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(),
+            sp.GetService<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>(),
+            sp.GetService<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>()));
 
         // Task 149 — the scheduled safety net and the mechanism for every writer that does not pass through the share
         // endpoints: children created or re-filed under a secure record, and model-driven-app Share/Unshare of a secure root
@@ -778,7 +939,8 @@ public static class ExternalAccessModule
         // that replaces hand-adding users. Every removal is limited to roles this code recorded (marked grants). ADR-052
         // places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): the engine's
         // dependencies (IGenericEntityService, SpeContainerMembershipService, ISecurableEntityRegistry,
-        // IDataverseRecordShareService) are registered unconditionally.
+        // IDataverseRecordShareService) are registered unconditionally; task 191g adds AppOnlyExternalVisibility (191h, above) and
+        // IConfiguration (ExternalAccess:FlaggedOfficeEdit:Enabled).
         services.AddScoped<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync>();
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSyncJob>(
             Sprk.Bff.Api.Services.Access.SpeContainerMembershipSyncJob.DefaultCronSchedule);

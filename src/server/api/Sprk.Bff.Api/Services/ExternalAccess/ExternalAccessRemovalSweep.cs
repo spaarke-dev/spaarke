@@ -355,6 +355,16 @@ internal sealed class ExternalAccessRemovalSweep
             report.ScanTruncated |= grants.Count > MaxCandidatesPerQuery;
             foreach (var grant in grants.Take(MaxCandidatesPerQuery))
             {
+                if (!grant.ContactRead)
+                {
+                    // Fix round 3g: a grant row that did not carry the contact column names a person who cannot be told, so
+                    // it is not "a grant with no contact". The scan is incomplete: the run reports it and decides no contact
+                    // (the scan-failed path), and the next run reads again.
+                    report.ScanFailed = true;
+                    report.ScanError = $"access record {grant.Id} did not carry the contact column";
+                    return ids;
+                }
+
                 if (grant.ContactId is { } id && id != Guid.Empty && seen.Add(id)) ids.Add(id);
             }
 

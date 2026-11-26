@@ -22,6 +22,12 @@ export interface SprkModalNav {
    * Lifted from `BrowseModal` into the shell so every `nav` consumer (`BrowseModal`, `WizardShell`) gets it.
    */
   onBeforeNavigate?: (dir: 'prev' | 'next') => boolean | Promise<boolean>;
+  /**
+   * When `true` both ‹ › buttons are disabled and a navigation request does nothing (neither the guard nor `onNavigate` runs).
+   * For a host that must not move to another record while work on the current one is in flight (`WizardShell` sets it while
+   * `onFinish` runs). Default `false`: the buttons follow `index` / `total` only.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -74,13 +80,23 @@ export interface SprkModalProps {
    * When the pane cannot be layered above it, the surface moves left so its
    * right edge clears the pane instead. The modal reads as sitting behind the lookup
    * instead of disappearing (owner test feedback 2026-10-07, Manage Access).
-   * Used together with `nonBlocking`. Ignored when `hidden` is `true`. Default `false`.
+   * While yielding, a BLOCKING modal (no `nonBlocking`, `dismiss: 'alert'` included) renders as Fluent `non-modal`:
+   * its full-window backdrop and focus trap are dropped so nothing of the modal sits over the pane (task 198), and
+   * it blocks again, backdrop and all, when the flag clears; the body and surface are not remounted. `nonBlocking`
+   * is therefore optional here (a host that is nonBlocking anyway is unaffected). Ignored when `hidden` is `true`.
+   * Default `false`.
    */
   yieldToSidePane?: boolean;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */
   uiScale?: number;
   /** Whether the maximize/restore control is shown (default true). */
   maximizable?: boolean;
+  /**
+   * Opens the modal MAXIMIZED (the `full` size), with the restore control still shown so the user can return to {@link size}. It
+   * applies on every open: closing and reopening starts maximized again. Ignored when {@link maximizable} is `false` (the modal stays
+   * at `size`). Default `false`.
+   */
+  defaultMaximized?: boolean;
   /** Optional browse navigation ("N of M") in the header-left. */
   nav?: SprkModalNav;
   /** Optional header-right actions (rendered before the window controls). */

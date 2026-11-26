@@ -7,17 +7,27 @@
  *                          Two header toggles: "Send Document Links" and
  *                          "Attach Files". Size warning at > 25 MB.
  *   2. Summary           — TL;DR / summary preview for each kept doc.
- *   3. Compose           — Reuses the shared `SendEmailStep` (with the
- *                          combined users+contacts picker).
+ *   3. Compose           — The shared `EmailComposer` (compose-only, through
+ *                          `SendEmailFollowOnStep`): From (My mailbox / Spaarke
+ *                          shared mailbox), To, Cc, Bcc, attachments, template
+ *                          picker and AI draft (spaarke-ontology-platform-r1
+ *                          task 183, owner D-219). The kept documents are the
+ *                          composer's attachment rows (Attach / Link per row);
+ *                          the two step-1 toggles set those rows' defaults.
  *
- * On finish the wizard calls {@link sendCommunication} with:
- *   - `attachmentDocumentIds`: the `documentId` of each kept doc (only when
- *     "Attach Files" is on). See `services/communicationApi.ts` for the
+ * On finish the wizard sends with {@link sendComposedEmail} (the composer's own
+ * request path, `sendCommunication` underneath):
+ *   - `attachmentDocumentIds`: the `documentId` of each attachment row that is
+ *     still ticked "Attach". See `services/communicationApi.ts` for the
  *     important note about driveItem-vs-sprk_document semantics.
- *   - Composed subject/body — links appended when "Send Document Links" is on.
+ *   - Composed subject/body — a "Linked documents" block is appended for the
+ *     rows ticked "Link".
  *   - `associations: [{entityType: parentEntityType, entityId: parentEntityId}]`
  *     when the caller supplied a parent.
- *   - `sendMode: 'sharedMailbox'`.
+ *   - `sendMode`: the From choice; it starts on the shared mailbox, as before.
+ *   - `archiveToSpe: false`, as before (a send filed to a record is archived either way).
+ * A failed send keeps the wizard open on the Compose step with the composer's own
+ * failure wording, so the user can fix it and send again.
  *
  * Authentication and dataverse access are injected via props so the wizard
  * remains usable from both PCF (React 16/17 + Xrm WebApi adapter) and Code
@@ -41,16 +51,19 @@ import { WizardShell } from '../Wizard/WizardShell';
 import type { SprkModalSize } from '../SprkModal/sizes';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
-import { SendEmailStep } from '../EmailStep/SendEmailStep';
-import { extractEmailFromUserName } from '../EmailStep/emailHelpers';
+import { SendEmailFollowOnStep } from '../WizardFollowOns/steps/SendEmailFollowOnStep';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
+import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import type { IAttachmentItem } from '../EmailComposer/EmailComposer.types';
 
 import { searchUsersAndContacts } from '../../services/userLookup';
-import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
-import type { ICommunicationAssociation, SendCommunicationOptions } from '../../services/communicationApi';
+import type { ICommunicationAssociation } from '../../services/communicationApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
 import { readSseStream, parseSseEvent, describeStreamError } from '../../hooks/useSseStream';
 import { getXrm } from '../../utils/xrmContext';
+import { parseSummaryStream } from './summaryStream';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -110,6 +123,31 @@ export interface IDocumentEmailWizardProps {
    */
   dataService?: IDataService;
   /**
+   * Host-built composer handlers (`createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl })` in a Dataverse host):
+   * the recipient side pane, record lookup, file upload, template picker, AI draft and record-link resolver. The wizard
+   * never touches Xrm (ADR-012); a handler the host leaves out hides its feature in the composer, so every host passes them.
+   *
+   * @since ontology task 183 (owner D-219)
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
+  /**
+   * For a host that renders the wizard in the same document as the host's lookup side pane (a PCF on a Dataverse form):
+   * the wizard renders non-blocking and, while a To/Cc/Bcc or record lookup from `emailComposeHandlers` is open, yields
+   * to the pane (dimmed, inert, layered just below it), then returns to its normal layer on the pick, a cancel or a
+   * failure. The `SendEmailDialog` `nonBlocking` contract. Modal mode only. Default `false` (unchanged).
+   *
+   * @since ontology task 194
+   */
+  nonBlocking?: boolean;
+  /**
+   * Called with `true` when a lookup from `emailComposeHandlers` opens and `false` when it settles (pick, cancel or
+   * failure). For a host whose OUTER surface must yield instead of the wizard: a page in an iframe inside its parent's
+   * dialog (the Document Relationship Viewer passes `postSidePaneLookupToParent`). Default: not called.
+   *
+   * @since ontology task 194
+   */
+  onSidePaneLookupChange?: (open: boolean) => void;
+  /**
    * Dataverse client URL (e.g. `https://contoso.crm.dynamics.com`). Used to
    * construct deep links when "Send Document Links" is enabled. When omitted
    * the wizard falls back to `Xrm.Utility.getGlobalContext().getClientUrl()`
@@ -164,6 +202,23 @@ const _SUMMARY_PREVIEW_CHAR_CAP = 600;
  *   `4a72f99c-a119-f111-8343-7ced8d1dc988` — Summarize New File(s) playbook.
  */
 const SUMMARIZE_NEW_FILES_PLAYBOOK_ID = '4a72f99c-a119-f111-8343-7ced8d1dc988';
+
+// ---------------------------------------------------------------------------
+// Summary step activation
+// ---------------------------------------------------------------------------
+
+/**
+ * Starts the combined summary when the Summary step is on screen. `WizardShell` calls a step's `renderContent` DURING its
+ * own render, so starting the run there (which sets this wizard's state) made React warn "Cannot update a component
+ * while rendering a different component". An effect runs after the step has rendered; `onActivate` is idempotent per
+ * selection (the wizard's `summaryRanForRef` guard), so a re-render or a back-and-forth never starts a second run.
+ */
+const SummaryStepActivator: React.FC<{ onActivate: () => void }> = ({ onActivate }) => {
+  React.useEffect(() => {
+    onActivate();
+  }, [onActivate]);
+  return null;
+};
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -341,6 +396,79 @@ export function buildDefaultBody(kept: IDocumentEmailWizardItem[], includeLinks:
   return body;
 }
 
+/** Prefix of the composer attachment id of a kept document (`doc:{documentId}`); anything else the user added themselves. */
+const DOCUMENT_ATTACHMENT_PREFIX = 'doc:';
+
+const isDocumentAttachment = (a: IAttachmentItem): boolean => a.id.startsWith(DOCUMENT_ATTACHMENT_PREFIX);
+
+/**
+ * The kept documents as the composer's attachment rows. `attachFiles` / `sendLinks` (the step-1 toggles) set each row's
+ * Attach / Link ticks. A row is offered a link only when the record link can be built (a client URL is known): a
+ * relative link would be dead in a mail client.
+ *
+ * Exported for unit-testing.
+ */
+export function buildDocumentAttachments(
+  docs: IDocumentEmailWizardItem[],
+  attachFiles: boolean,
+  sendLinks: boolean,
+  clientUrl: string
+): IAttachmentItem[] {
+  return docs.map(d => {
+    const linkUrl = clientUrl ? buildDocumentRecordLink(clientUrl, d.documentId) : undefined;
+    return {
+      id: `${DOCUMENT_ATTACHMENT_PREFIX}${d.documentId}`,
+      source: 'wizard',
+      fileName: d.name,
+      sizeBytes: d.fileSizeBytes ?? 0,
+      documentId: d.documentId,
+      selected: attachFiles,
+      linkSelected: sendLinks && !!linkUrl,
+      linkUrl,
+    };
+  });
+}
+
+/** Re-applies the step-1 toggles to the kept documents' rows; rows the user added in the composer are left alone. */
+function applyDocumentToggles(
+  attachments: IAttachmentItem[],
+  attachFiles: boolean,
+  sendLinks: boolean
+): IAttachmentItem[] {
+  return attachments.map(a =>
+    isDocumentAttachment(a) ? { ...a, selected: attachFiles, linkSelected: sendLinks && !!a.linkUrl } : a
+  );
+}
+
+/**
+ * The email as it starts: nothing chosen yet, the default subject and body for the kept documents (plain text, as before;
+ * the composer appends the "Linked documents" block for ticked links), the kept documents as attachment rows, and the
+ * shared mailbox in From (the mailbox this wizard has always sent from).
+ *
+ * Exported for unit-testing.
+ */
+export function buildInitialEmail(
+  docs: IDocumentEmailWizardItem[],
+  attachFiles: boolean,
+  sendLinks: boolean,
+  clientUrl: string
+): IComposedEmail {
+  return {
+    ...EMPTY_COMPOSED_EMAIL,
+    subject: buildDefaultSubject(docs),
+    body: buildDefaultBody(docs, false, clientUrl),
+    bodyFormat: 'PlainText',
+    attachments: buildDocumentAttachments(docs, attachFiles, sendLinks, clientUrl),
+  };
+}
+
+/** Label of the wizard's Finish button; a sign-in failure names it as the button that sends again. */
+const FINISH_LABEL = 'Send';
+
+/** Shown when the host gave the wizard no authenticated fetch: the email cannot be sent, so the step says so. */
+const NO_EMAIL_SERVICE_MESSAGE =
+  'This page has no connection to the Spaarke email service, so the email cannot be sent from here.';
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -375,6 +503,9 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   dataService,
+  emailComposeHandlers,
+  nonBlocking,
+  onSidePaneLookupChange,
   clientUrl,
   // v1.1.63 — sizing pass-through (defaults left undefined so WizardShell's
   // own defaults — 95vw / 70vh — apply when consumers don't override).
@@ -383,32 +514,74 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
+  // -- Host lookup side pane (ontology task 194) ---------------------------
+  // While the host's lookup pane (To/Cc/Bcc, link a record) is open, a `nonBlocking` wizard yields to it (WizardShell →
+  // SprkModal `yieldToSidePane`, as SendEmailDialog's `wrapLookup` does) and `onSidePaneLookupChange` is told, for a host
+  // whose outer dialog must yield instead. The pick, a cancel and a failure all end it; the failure still reaches the
+  // composer, which treats it as a cancel. With neither prop the handlers reach the composer unchanged.
+  const [lookupOpen, setLookupOpen] = React.useState(false);
+  const lookupChangeRef = React.useRef(onSidePaneLookupChange);
+  lookupChangeRef.current = onSidePaneLookupChange;
+  const tracksLookup = Boolean(nonBlocking || onSidePaneLookupChange);
+  const composeHandlers = React.useMemo<IEmailComposeHandlers | undefined>(() => {
+    if (!emailComposeHandlers || !tracksLookup) return emailComposeHandlers;
+    function wrapLookup<A extends unknown[], R>(
+      fn?: (...args: A) => Promise<R>
+    ): ((...args: A) => Promise<R>) | undefined {
+      if (!fn) return fn;
+      return async (...args: A): Promise<R> => {
+        setLookupOpen(true);
+        lookupChangeRef.current?.(true);
+        try {
+          return await fn(...args);
+        } finally {
+          setLookupOpen(false);
+          lookupChangeRef.current?.(false);
+        }
+      };
+    }
+    return {
+      ...emailComposeHandlers,
+      onLookupRecipients: wrapLookup(emailComposeHandlers.onLookupRecipients),
+      onLookupRecord: wrapLookup(emailComposeHandlers.onLookupRecord),
+    };
+  }, [emailComposeHandlers, tracksLookup]);
+
   // -- Kept (in-wizard) document state -----------------------------------
   const [kept, setKept] = React.useState<IDocumentEmailWizardItem[]>(() => [...selectedDocuments]);
 
   // -- Toggles ------------------------------------------------------------
+  // They set the Attach / Link ticks of the kept documents' rows in the composer.
   const [sendLinks, setSendLinks] = React.useState<boolean>(true);
   const [attachFiles, setAttachFiles] = React.useState<boolean>(true);
-
-  // -- Email form state ---------------------------------------------------
-  const [emailTo, setEmailTo] = React.useState<string>('');
-  const [emailSubject, setEmailSubject] = React.useState<string>('');
-  const [emailBody, setEmailBody] = React.useState<string>('');
 
   // Resolved client URL (lazy: try prop, then Xrm global, else '').
   const resolvedClientUrl = React.useMemo<string>(() => {
     return clientUrl ?? resolveClientUrlSafe();
   }, [clientUrl]);
 
+  // -- Email state: the composer's fields, lifted (SendEmailFollowOnStep) -----
+  // Starts with the default subject/body and the kept documents as attachment rows, so a user who only picks a recipient
+  // sends what the wizard always sent.
+  const [email, setEmail] = React.useState<IComposedEmail>(() =>
+    buildInitialEmail(selectedDocuments, true, true, clientUrl ?? resolveClientUrlSafe())
+  );
+  // The subject/body the wizard itself wrote last: while the email still holds them, the user has not written their own,
+  // and a change to the kept documents rewrites them.
+  const seededRef = React.useRef<{ subject: string; body: string }>({
+    subject: email.subject,
+    body: email.body,
+  });
+
   // -- Reset on (re)open --------------------------------------------------
   React.useEffect(() => {
     if (open) {
+      const initial = buildInitialEmail(selectedDocuments, true, true, resolvedClientUrl);
       setKept([...selectedDocuments]);
       setSendLinks(true);
       setAttachFiles(true);
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
+      setEmail(initial);
+      seededRef.current = { subject: initial.subject, body: initial.body };
     }
     // We deliberately omit `selectedDocuments` from the dep array — we only
     // reset when the dialog transitions from closed → open; otherwise users
@@ -423,27 +596,11 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   sendLinksRef.current = sendLinks;
   const attachFilesRef = React.useRef(attachFiles);
   attachFilesRef.current = attachFiles;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
-
-  // -- Default subject / body once compose step is reached -----------------
-  // We seed on first render of the compose step rather than eagerly so the
-  // user's typed input wins after they've touched a field.
-  const composeSeededRef = React.useRef<boolean>(false);
-  const seedComposeFields = React.useCallback(() => {
-    if (composeSeededRef.current) return;
-    if (!emailSubjectRef.current) {
-      setEmailSubject(buildDefaultSubject(keptRef.current));
-    }
-    if (!emailBodyRef.current) {
-      setEmailBody(buildDefaultBody(keptRef.current, sendLinksRef.current, resolvedClientUrl));
-    }
-    composeSeededRef.current = true;
-  }, [resolvedClientUrl]);
+  const emailRef = React.useRef(email);
+  emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
 
   // -- Recipient picker bridge --------------------------------------------
   const handleSearchRecipients = React.useCallback(
@@ -452,35 +609,66 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
   );
 
   // -- Per-row deselect ----------------------------------------------------
-  const deselect = React.useCallback((documentId: string) => {
-    setKept(prev => prev.filter(d => d.documentId !== documentId));
+  // The removed document leaves the composer's attachment rows too, and the subject/body the wizard wrote are rewritten
+  // for the documents that remain (unless the user wrote their own).
+  const deselect = React.useCallback(
+    (documentId: string) => {
+      const remaining = keptRef.current.filter(d => d.documentId !== documentId);
+      const current = emailRef.current;
+      const seeded = seededRef.current;
+      const defaults = buildInitialEmail(remaining, attachFilesRef.current, sendLinksRef.current, resolvedClientUrl);
+      const rewriteSubject = current.subject === seeded.subject;
+      const rewriteBody = current.body === seeded.body;
+      seededRef.current = {
+        subject: rewriteSubject ? defaults.subject : seeded.subject,
+        body: rewriteBody ? defaults.body : seeded.body,
+      };
+      setKept(remaining);
+      setEmail({
+        ...current,
+        subject: rewriteSubject ? defaults.subject : current.subject,
+        // The wizard rewrote the body: plain text, whatever the composer last held.
+        ...(rewriteBody ? { body: defaults.body, bodyFormat: 'PlainText' as const } : {}),
+        attachments: current.attachments.filter(a => a.id !== `${DOCUMENT_ATTACHMENT_PREFIX}${documentId}`),
+      });
+    },
+    [resolvedClientUrl]
+  );
+
+  const handleSendLinksChange = React.useCallback((next: boolean) => {
+    setSendLinks(next);
+    setEmail(prev => ({ ...prev, attachments: applyDocumentToggles(prev.attachments, attachFilesRef.current, next) }));
   }, []);
+
+  const handleAttachFilesChange = React.useCallback((next: boolean) => {
+    setAttachFiles(next);
+    setEmail(prev => ({ ...prev, attachments: applyDocumentToggles(prev.attachments, next, sendLinksRef.current) }));
+  }, []);
+
+  // True when the host gave the wizard a way to reach the BFF; without it the email cannot be sent.
+  const canSend = typeof authenticatedFetch === 'function';
 
   // -- onFinish -----------------------------------------------------------
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     const currentKept = keptRef.current;
-    const currentAttach = attachFilesRef.current;
-    const currentSendLinks = sendLinksRef.current;
-    const subject = emailSubjectRef.current.trim();
-    const body = emailBodyRef.current;
-    const toRaw = emailToRef.current;
+    const current = emailRef.current;
 
-    // Recipients can be a single LookupField selection ("Name (email)") OR
-    // a typed comma/semicolon-separated list. Be tolerant of both.
-    const recipients = toRaw
-      .split(/[;,]/)
-      .map(s => s.trim())
-      .map(s => extractEmailFromUserName(s) || s)
-      .filter(Boolean);
-
-    if (recipients.length === 0) {
+    if (!canSend) {
+      throw new Error(NO_EMAIL_SERVICE_MESSAGE);
+    }
+    if (current.to.length === 0) {
       throw new Error('At least one recipient is required.');
     }
-    if (!subject) {
+    if (!current.subject.trim()) {
       throw new Error('Subject is required.');
     }
     if (currentKept.length === 0) {
       throw new Error('At least one document must be kept in the selection.');
+    }
+    if (!isComposedEmailReady(current)) {
+      throw new Error(
+        'The email is not ready to send: check the recipient addresses and the body, and wait for uploads to finish.'
+      );
     }
 
     const associations: ICommunicationAssociation[] = [];
@@ -488,44 +676,34 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       associations.push({ entityType: parentEntityType, entityId: parentEntityId });
     }
 
-    // Optionally append per-document links onto the body. We do not mutate
-    // `emailBody` state to avoid surprising the user if they go back and edit.
-    let finalBody = body;
-    if (currentSendLinks) {
-      const linkLines = currentKept
-        .map(d => `  ${d.name}: ${buildDocumentRecordLink(resolvedClientUrl, d.documentId)}`)
-        .join('\n');
-      if (linkLines && !finalBody.includes('main.aspx?etn=sprk_document')) {
-        finalBody += `\n\nLinks:\n${linkLines}\n`;
-      }
+    // The composer's own request path: ticked links are resolved to Spaarke record links and appended to the body, ticked
+    // documents travel as `attachmentDocumentIds`, From is `sendMode`. It never throws: a failure comes back as the
+    // composer's wording (an unconfirmed send says the email "may have been sent"), which the shell shows on this step
+    // with the composer still filled in.
+    const result = await sendComposedEmail(current, {
+      associations,
+      authenticatedFetch,
+      bffBaseUrl,
+      onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+      // As before: no archive request of its own (a send filed to a record is archived either way).
+      archiveToSpe: false,
+      // The composer stays open after a failed send; the wizard's own Finish button sends it again.
+      retryLabel: FINISH_LABEL,
+    });
+    if (!result.success) {
+      throw new Error(result.warning ?? 'The email was not sent.');
     }
+    if (result.communicationId) onSent?.(result.communicationId);
 
-    const opts: SendCommunicationOptions = {
-      to: recipients,
-      subject,
-      body: finalBody,
-      bodyFormat: 'text',
-      attachmentDocumentIds: currentAttach ? currentKept.map(d => d.documentId) : undefined,
-      associations: associations.length > 0 ? associations : undefined,
-      sendMode: 'sharedMailbox',
-    };
-
-    let result: { communicationId: string };
-    try {
-      result = await sendCommunication(opts, { authenticatedFetch, bffBaseUrl });
-    } catch (err) {
-      // The wizard shell shows `message`; a refused send's sentence for the user is its `detail`
-      // (`message` is the developer form "sendCommunication failed (status): …").
-      throw err instanceof SendCommunicationError ? new Error(err.detail) : err;
-    }
-    onSent?.(result.communicationId);
-
+    const attachedCount = current.attachments.filter(a => a.selected !== false && a.documentId).length;
     return {
       icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: 'Email sent',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          Your message and {currentKept.length} document{currentKept.length === 1 ? '' : 's'} have been sent.
+          {attachedCount > 0
+            ? `Your message and ${attachedCount} document${attachedCount === 1 ? '' : 's'} have been sent.`
+            : 'Your message has been sent.'}
         </Text>
       ),
       actions: (
@@ -534,7 +712,16 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         </Button>
       ),
     };
-  }, [authenticatedFetch, bffBaseUrl, onClose, onSent, parentEntityId, parentEntityType, resolvedClientUrl]);
+  }, [
+    authenticatedFetch,
+    bffBaseUrl,
+    canSend,
+    emailComposeHandlers,
+    onClose,
+    onSent,
+    parentEntityId,
+    parentEntityType,
+  ]);
 
   // ---------------------------------------------------------------------
   // Step 1 — Confirm Selection
@@ -558,10 +745,14 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         <div className={styles.togglesRow}>
           <Checkbox
             checked={sendLinks}
-            onChange={(_, data) => setSendLinks(!!data.checked)}
+            onChange={(_, data) => handleSendLinksChange(!!data.checked)}
             label="Send document links"
           />
-          <Checkbox checked={attachFiles} onChange={(_, data) => setAttachFiles(!!data.checked)} label="Attach files" />
+          <Checkbox
+            checked={attachFiles}
+            onChange={(_, data) => handleAttachFilesChange(!!data.checked)}
+            label="Attach files"
+          />
         </div>
 
         {oversized && (
@@ -604,7 +795,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         )}
       </div>
     );
-  }, [attachFiles, deselect, kept, sendLinks, styles]);
+  }, [attachFiles, deselect, handleAttachFilesChange, handleSendLinksChange, kept, sendLinks, styles]);
 
   // ---------------------------------------------------------------------
   // Step 2 — Combined AI Summary via the Document Profile playbook.
@@ -737,16 +928,24 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
     return () => summaryAbortRef.current?.abort();
   }, []);
 
-  const renderSummaryStep = React.useCallback(() => {
-    // Trigger the combined-summary call the first time this step renders for
-    // the current selection.
-    void runCombinedSummary();
+  // The playbook streams JSON (and then repeats it): show its tldr and summary once, not the raw text (task 195).
+  // Parsed once per change of the text or the status, not on every render of the step.
+  const streamedSummary = React.useMemo(
+    () => parseSummaryStream(combinedSummary, summaryStatus !== 'running' && summaryStatus !== 'idle'),
+    [combinedSummary, summaryStatus]
+  );
 
+  const renderSummaryStep = React.useCallback(() => {
+    const streamed = streamedSummary;
     const isStreaming = summaryStatus === 'running';
+    // 'idle' is the one render between the step appearing and its effect starting the run.
+    const isWaiting = isStreaming || summaryStatus === 'idle';
     const hasError = summaryStatus === 'error';
 
     return (
       <div className={styles.stepRoot}>
+        {/* Starts the run from an effect, once this step is on screen (never while WizardShell is rendering). */}
+        <SummaryStepActivator onActivate={runCombinedSummary} />
         <div className={styles.stepHeader}>
           <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
             Combined Summary
@@ -779,19 +978,41 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
                 Could not generate summary: {summaryError}
               </Text>
             )}
-            {!hasError && combinedSummary ? (
-              <Text size={200} className={styles.summaryBody}>
-                {combinedSummary}
-              </Text>
-            ) : (
-              !hasError &&
-              !isStreaming && (
-                <Text size={200} className={styles.summaryEmpty}>
-                  (no summary available)
-                </Text>
-              )
+            {!hasError && streamed.kind === 'structured' && (
+              <>
+                {streamed.tldr && (
+                  <div data-testid="summary-tldr">
+                    <Text size={200} weight="semibold" className={styles.summaryHeader} block>
+                      TL;DR
+                    </Text>
+                    <Text size={200} className={styles.summaryBody} block>
+                      {streamed.tldr}
+                    </Text>
+                  </div>
+                )}
+                {streamed.summary && streamed.summary !== streamed.tldr && (
+                  <div data-testid="summary-body">
+                    <Text size={200} weight="semibold" className={styles.summaryHeader} block>
+                      Summary
+                    </Text>
+                    <Text size={200} className={styles.summaryBody} block>
+                      {streamed.summary}
+                    </Text>
+                  </div>
+                )}
+              </>
             )}
-            {!hasError && !combinedSummary && isStreaming && (
+            {!hasError && streamed.kind === 'text' && (
+              <Text size={200} className={styles.summaryBody} data-testid="summary-text">
+                {streamed.text}
+              </Text>
+            )}
+            {!hasError && !isWaiting && (streamed.kind === 'pending' || streamed.kind === 'empty') && (
+              <Text size={200} className={styles.summaryEmpty}>
+                (no summary available)
+              </Text>
+            )}
+            {!hasError && isWaiting && (streamed.kind === 'pending' || streamed.kind === 'empty') && (
               <Text size={200} className={styles.summaryEmpty}>
                 Generating combined summary…
               </Text>
@@ -800,49 +1021,33 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         )}
       </div>
     );
-  }, [kept, styles, runCombinedSummary, combinedSummary, summaryStatus, summaryError]);
+  }, [kept, styles, runCombinedSummary, streamedSummary, summaryStatus, summaryError]);
 
   // ---------------------------------------------------------------------
   // Step 3 — Compose
   // ---------------------------------------------------------------------
   const renderComposeStep = React.useCallback(() => {
-    // Seed defaults the first time the user lands here. Subsequent visits
-    // preserve any edits.
-    seedComposeFields();
-
     const docCount = kept.length;
     return (
-      <SendEmailStep
+      <SendEmailFollowOnStep
         title="Compose email"
-        subtitle={`Sending ${docCount} document${docCount === 1 ? '' : 's'} to:`}
-        emailTo={emailTo}
-        onEmailToChange={setEmailTo}
-        emailSubject={emailSubject}
-        onEmailSubjectChange={setEmailSubject}
-        emailBody={emailBody}
-        onEmailBodyChange={setEmailBody}
-        onSearchUsers={handleSearchRecipients}
-        regardingEntityType={parentEntityType}
-        regardingId={parentEntityId}
+        subtitle={`Sending ${docCount} document${docCount === 1 ? '' : 's'}. The email is sent when you finish, from the mailbox chosen in From${
+          parentEntityType ? ', and is saved as a Communication record on the parent record' : ''
+        }.`}
+        value={email}
+        onChange={setEmail}
+        composeHandlers={composeHandlers}
+        onSearchRecipients={handleSearchRecipients}
         headerContent={
-          <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-            This message will be saved as a Communication record
-            {parentEntityType ? ' on the parent record' : ''}.
-          </Text>
+          canSend ? undefined : (
+            <MessageBar intent="warning" data-testid="email-service-unavailable">
+              <MessageBarBody>{NO_EMAIL_SERVICE_MESSAGE}</MessageBarBody>
+            </MessageBar>
+          )
         }
-        infoNote="The email is sent via the Spaarke shared mailbox."
       />
     );
-  }, [
-    emailBody,
-    emailSubject,
-    emailTo,
-    handleSearchRecipients,
-    kept.length,
-    parentEntityId,
-    parentEntityType,
-    seedComposeFields,
-  ]);
+  }, [canSend, composeHandlers, email, handleSearchRecipients, kept.length, parentEntityType]);
 
   // -- Step configurations -----------------------------------------------
   const stepConfigs: IWizardStepConfig[] = React.useMemo(
@@ -863,13 +1068,12 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
         id: 'compose',
         label: 'Compose',
         renderContent: renderComposeStep,
-        canAdvance: () => {
-          // Require recipient + subject + non-empty body.
-          return emailTo.trim() !== '' && emailSubject.trim() !== '' && emailBody.trim() !== '';
-        },
+        // A recipient, a subject, a body, valid addresses and every attachment uploaded (uploads still running keep
+        // Finish off); without a way to reach the email service nothing can be sent.
+        canAdvance: () => canSend && kept.length > 0 && isComposedEmailReady(email),
       },
     ],
-    [emailBody, emailSubject, emailTo, kept.length, renderComposeStep, renderConfirmStep, renderSummaryStep]
+    [canSend, email, kept.length, renderComposeStep, renderConfirmStep, renderSummaryStep]
   );
 
   return (
@@ -880,13 +1084,18 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       ariaLabel="Email documents"
       steps={stepConfigs}
       onClose={onClose}
-      onFinish={handleFinish}
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish={() => holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}
       finishingLabel="Sending…"
-      finishLabel="Send"
+      finishLabel={FINISH_LABEL}
       embedded={embedded}
       hideTitle={embedded}
       // Named size; when omitted WizardShell uses its `wizard` default.
       size={size}
+      // Task 194: a same-document host's lookup pane opens above the wizard (modal mode only).
+      nonBlocking={nonBlocking}
+      yieldToSidePane={Boolean(nonBlocking) && lookupOpen}
     />
   );
 };

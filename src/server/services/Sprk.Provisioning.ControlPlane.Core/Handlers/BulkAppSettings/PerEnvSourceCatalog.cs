@@ -73,11 +73,21 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:content_safety_endpoint", HandlerIds.H2a, nameof(InterStepState.ContentSafetyEndpoint), r => r.InterStepState.ContentSafetyEndpoint),
         // T186 follow-up: SessionFileStore:BlobEndpoint — the stamp's chat session-file store; container defaults to ai-chunks.
         Output("from-h2a-output:storage_blob_endpoint", HandlerIds.H2a, nameof(InterStepState.StorageBlobEndpoint), r => r.InterStepState.StorageBlobEndpoint),
+        // Task 266 (#2605): Ontology__Writer__ManagedIdentityClientId — the BFF Signal / Decision Record writer's own UAMI.
+        Output("from-h2a-output:ontology_writer_client_id", HandlerIds.H2a, nameof(InterStepState.OntologyWriterClientId), r => r.InterStepState.OntologyWriterClientId),
         // T258 (204e-F6): the stamp BFF's own public URL, PublicConfig__BffUrl — derived from H2a's App Service name
         // with the one derivation H9 records as BffApiUrl (StampBffUrl), so H4b needs nothing from H9 (which runs after it).
         new("from-h2a-output:bff_url", "bff_url", HandlerIds.H2a,
             $"InterStepState.{nameof(InterStepState.AppServiceName)} ({HandlerIds.H2a} output) as https://{{name}}.azurewebsites.net",
             r => string.IsNullOrWhiteSpace(r.InterStepState.AppServiceName) ? null : StampBffUrl.Production(r.InterStepState.AppServiceName)),
+        // ISS-022 (plan D36): keyless SignalR on a stamp — read by `required: false` entries, so a stamp whose SignalR
+        // is not deployed (no host name) writes neither setting and the BFF keeps its Null-Object delivery service.
+        new("from-h2a-output:signalr_msi_connection_string", "signalr_msi_connection_string", HandlerIds.H2a,
+            $"InterStepState.{nameof(InterStepState.SignalRHostName)} + InterStepState.{nameof(InterStepState.MiClientId)} ({HandlerIds.H2a} outputs) as a managed-identity connection string",
+            r => StampSignalRConnection.ManagedIdentityConnectionString(r.InterStepState.SignalRHostName, r.InterStepState.MiClientId)),
+        new("from-h2a-output:signalr_enabled", "signalr_enabled", HandlerIds.H2a,
+            $"InterStepState.{nameof(InterStepState.SignalRHostName)} ({HandlerIds.H2a} output) — \"true\" when SignalR was deployed",
+            r => StampSignalRConnection.EnabledValue(r.InterStepState.SignalRHostName)),
         Output("from-h3-output:bff_app_client_id", HandlerIds.H3, nameof(InterStepState.BffAppRegId), r => r.InterStepState.BffAppRegId),
         // T245b: the Dataverse environment URL — a plain app setting (it was a KV secret H4 could never
         // write: H5 runs after H4). H4b ← H5 in the DAG.

@@ -62,9 +62,30 @@ internal static class InvoiceSubmissionHttp
             return new SubmissionForm(null, null, null,
                 Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FileRequired, "The request body is not valid multipart/form-data."));
         }
+        catch (IOException ex) when (!ct.IsCancellationRequested && ex is not Microsoft.AspNetCore.Connections.ConnectionResetException)
+        {
+            // ISS-043: a truncated multipart body or part headers, or a body that is not multipart under a multipart content type, ends the
+            // parser's stream early with an IOException. It is a client error too (the 400 above), unless the client abandoned the request
+            // (its token is cancelled) or reset the connection (ConnectionResetException): those pass through like the cancellation they are,
+            // never a 400 logged at Error. Fix round 1 (F1): the same IOException type is a server-side temp-disk fault when the parser
+            // buffers a file part over 64 KB, so the 400 is logged at Warning with the exception type and HResult only (never the message,
+            // which can echo request content).
+            request.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(InvoiceSubmissionHttp).FullName!)
+                .LogWarning(
+                    "A multipart request body could not be read ({ExceptionType}, HResult 0x{HResult:X8}); answered 400.", ex.GetType().Name, ex.HResult);
+            return new SubmissionForm(null, null, null,
+                Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FileRequired, "The request body is not valid multipart/form-data."));
+        }
 
-        var number = form["firmInvoiceNumber"].ToString();
-        var po = form["poNumber"].ToString();
+        // ISS-035: a field sent more than once is a field error, never joined into "A,B" and stored as one value (the Correction fields' rule).
+        var fieldErrors = new Dictionary<string, string[]>();
+        var number = SingleFormValue(form, "firmInvoiceNumber", fieldErrors) ?? string.Empty;
+        var po = SingleFormValue(form, "poNumber", fieldErrors) ?? string.Empty;
+        if (fieldErrors.Count > 0)
+        {
+            return new SubmissionForm(null, null, null, ProblemDetailsHelper.ValidationProblem(fieldErrors));
+        }
+
         var part = form.Files.GetFile("file");
         if (part is null || part.Length == 0)
         {
@@ -87,36 +108,82 @@ internal static class InvoiceSubmissionHttp
         return new SubmissionForm(new InvoiceSubmissionFile(part.FileName, part.ContentType, bytes), number, po, null);
     }
 
+    /// <summary>
+    /// The "sent at most once" rule of a multipart text field (ISS-035; one source for this reader and
+    /// the internal route's Correction fields reader): null when the field is not sent; its value when sent once (empty stays empty);
+    /// sent more than once, a field error naming it is added to <paramref name="errors"/> and null is returned (never joined or picked).
+    /// </summary>
+    internal static string? SingleFormValue(IFormCollection form, string name, Dictionary<string, string[]> errors)
+    {
+        if (!form.TryGetValue(name, out var values) || values.Count == 0)
+        {
+            return null;
+        }
+
+        if (values.Count > 1)
+        {
+            errors[name] = [$"{name} is sent at most once."];
+            return null;
+        }
+
+        return values[0] ?? string.Empty;
+    }
+
     /// <summary>The OpenAPI contract of a submit route (documentation only; authorization is on each route's own chain).</summary>
-    internal static RouteHandlerBuilder WithSubmitContract(this RouteHandlerBuilder builder, string coreNoun) => builder
-        .Accepts<IFormFile>("multipart/form-data")
-        .WithSummary($"Submit an invoice PDF against a {coreNoun}")
-        .WithDescription(
-            "Stores the PDF in the record's container, creates the document (type Invoice) and the submission (Received, with its " +
-            "tracking number) and enqueues processing. Form: file (PDF), firmInvoiceNumber (required), poNumber. Query: firmId. " +
-            "Refusals are ProblemDetails with errorCode: 400 not_pdf, file_required, firm_invoice_number_required, firm_invalid; " +
-            "403 without the rights the route needs; 413 too_large; 503 ebilling.disabled.")
-        .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
-        .ProducesProblem(StatusCodes.Status400BadRequest)
-        .ProducesProblem(StatusCodes.Status401Unauthorized)
-        .ProducesProblem(StatusCodes.Status403Forbidden)
-        .ProducesProblem(StatusCodes.Status409Conflict)
-        .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
-        .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
-        .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+    /// <remarks>Task 095f-2e2a (EB-D-245): <paramref name="acceptsCorrection"/> is set by the internal routes only, which also take a Correction;
+    /// it appends <see cref="CorrectionContract"/> and lists 404. The external route passes nothing, so its contract is unchanged.</remarks>
+    internal static RouteHandlerBuilder WithSubmitContract(this RouteHandlerBuilder builder, string coreNoun, bool acceptsCorrection = false)
+    {
+        builder
+            .Accepts<IFormFile>("multipart/form-data")
+            .WithSummary($"Submit an invoice PDF against a {coreNoun}")
+            .WithDescription(
+                "Stores the PDF in the record's container, creates the document (type Invoice) and the submission (Received, with its " +
+                "tracking number) and enqueues processing. Form: file (PDF), firmInvoiceNumber (required), poNumber. Query: firmId. " +
+                "Refusals are ProblemDetails with errorCode: 400 not_pdf, file_required, firm_invoice_number_required, firm_invalid; " +
+                "403 without the rights the route needs; 413 too_large; 503 ebilling.disabled." +
+                (acceptsCorrection ? CorrectionContract : string.Empty))
+            .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+        if (acceptsCorrection)
+        {
+            builder.ProducesProblem(StatusCodes.Status404NotFound);
+        }
+
+        return builder;
+    }
+
+    /// <summary>Task 095f-2e2a: the Correction part of the internal submit routes' contract (the from-document route's fields and refusals).</summary>
+    internal const string CorrectionContract =
+        " Correction (internal routes only): form fields mode (New, the default, or Correction, exact case), invoiceId (required for " +
+        "Correction: the In Review invoice it replaces, same firm, record and firm invoice number; not sent for New) and correctionNote " +
+        "(required for Correction, at most 2000 characters, no control characters other than a line break or a tab: why the invoice is " +
+        "corrected; not sent for New); each field at most once. A Correction also needs Write on the invoice it replaces; the new " +
+        "submission gets the next tracking number of the same firm invoice number and supersedes that invoice when it is accepted. " +
+        "Its refusals: 400 validation (errors on mode, invoiceId or correctionNote), correction_note_required (a Correction with no note); " +
+        "404 (reasonCode record_unavailable) the invoice is not one the caller can Write; 409 correction_not_allowed (reason); " +
+        "503 record_unavailable.";
 
     /// <summary>202 with <c>Location</c> = the channel's status URL, or the refusal as ProblemDetails (ADR-019).</summary>
-    internal static IResult ToResult(InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId) => outcome.Kind switch
-    {
-        InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId)),
-        InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
-            ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
-            : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
-        _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
-    };
+    /// <remarks>ebilling-r1 082c-3: <paramref name="warning"/> is the external route's provisional pre-check warning, carried only on a 202; a refusal never carries it.</remarks>
+    internal static IResult ToResult(
+        InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId, SubmissionHoldWarning? warning = null) => outcome.Kind switch
+        {
+            InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId), warning),
+            InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
+                ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
+                : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
+            _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
+        };
 
-    private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl) =>
-        Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl));
+    private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl, SubmissionHoldWarning? warning) =>
+        Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl, warning));
 
     /// <summary>
     /// The route's own refusal: ProblemDetails with a top-level <c>errorCode</c>. <paramref name="filingKept"/> (contract section 6, "After step A",

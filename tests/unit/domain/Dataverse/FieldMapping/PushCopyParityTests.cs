@@ -179,6 +179,7 @@ public class PushCopyParityTests
         var log = new CapturingLogger();
 
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             writes.Object,
             new StampWorld().Restamper,
             [Dto("Text", "Text")],
@@ -209,6 +210,7 @@ public class PushCopyParityTests
             .ThrowsAsync(new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_event", "record_owner_parent_unresolved", reason));
 
         var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             writes.Object, new StampWorld().Restamper, [Dto("Text", "Text")],
             new Dictionary<string, object?> { ["sprk_source"] = "value" }, "sprk_event", [ChildId], CallerId,
             NullLogger.Instance, CancellationToken.None);
@@ -264,6 +266,7 @@ public class PushCopyParityTests
         var log = new CapturingLogger();
 
         var (_, _, _, _, fieldResults) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             writes.Object, new StampWorld().Restamper, [Dto("Text", "Text")],
             new Dictionary<string, object?> { ["sprk_source"] = new ThrowsWhenRendered() }, "sprk_event", [ChildId], CallerId,
             log, CancellationToken.None);

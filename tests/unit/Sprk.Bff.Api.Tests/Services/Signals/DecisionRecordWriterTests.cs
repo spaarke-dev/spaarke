@@ -85,6 +85,9 @@ public sealed partial class DecisionRecordWriterTests
         /// <summary>Task 149: when set, the lookup throws it (a Dataverse fault on the read).</summary>
         public Exception? LookupFault { get; set; }
 
+        /// <summary>Task 084h-5 review round 2: when set, called with each query and its token; a non-null answer is thrown as that query's fault.</summary>
+        public Func<QueryExpression, CancellationToken, Exception?>? QueryFault { get; set; }
+
         /// <summary>Adversarial pass 2 F1: when set, WhoAmI on the writer's connection throws it.</summary>
         public Exception? WhoAmIFault { get; set; }
 
@@ -130,13 +133,79 @@ public sealed partial class DecisionRecordWriterTests
             };
         });
 
+        /// <summary>Task 084h-5: runs inside the create, before the primary-id check (a concurrent attempt's row landing just before this one).</summary>
+        public Action<Entity>? BeforeCreate { get; set; }
+
+        /// <summary>Task 084h-5: every create Dataverse refused because its primary id was taken.</summary>
+        public int DuplicateRefusals;
+
+        /// <summary>Task 084h-5: Dataverse's DuplicateRecord fault ("Cannot insert duplicate key"), as the SDK raises it.</summary>
+        internal static Exception DuplicateRecordFault() => new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040237), Message = "Cannot insert duplicate key." },
+            new System.ServiceModel.FaultReason("Cannot insert duplicate key."));
+
+        private int _keyedLookupsToHold;
+        private int _keyedLookupsArrived;
+        private readonly TaskCompletionSource _keyedLookupsReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Task 084h-5: the first <paramref name="count"/> "already recorded" lookups (a query on a key in <c>sprk_steps</c>) each wait until
+        /// all of them have arrived, so concurrent attempts of one decision all pass the lookup before any of them creates. Later lookups (the
+        /// re-read after a refused create) do not wait.</summary>
+        public void HoldKeyedLookupsUntil(int count) => _keyedLookupsToHold = count;
+
+        /// <summary>Task 084h-5: the barrier of <see cref="HoldKeyedLookupsUntil"/>; returns at once for any other query.</summary>
+        internal Task HoldIfKeyedAsync(QueryExpression query)
+        {
+            var keyed = query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_steps" && c.Values.SingleOrDefault() is string p && p.Contains("\"reviewId\"", StringComparison.Ordinal));
+            if (!keyed || _keyedLookupsToHold == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            var arrived = Interlocked.Increment(ref _keyedLookupsArrived);
+            if (arrived > _keyedLookupsToHold)
+            {
+                return Task.CompletedTask;
+            }
+
+            if (arrived == _keyedLookupsToHold)
+            {
+                _keyedLookupsReleased.TrySetResult();
+            }
+
+            return _keyedLookupsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
         /// <param name="participantShares">Task 042b (D-169): the participant-share helper the writer calls after a gate create; null = a double over
         /// an empty world.</param>
-        public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null, GateDecisionRecordSharing? participantShares = null)
+        /// <param name="derivedRecordIds">Task 084h-5: the keyed entry points that create with a derived record id; null = the production default.</param>
+        public Harness(
+            RecordOwnerResolution? ownership = null,
+            IRecordOwnershipResolver? realResolver = null,
+            GateDecisionRecordSharing? participantShares = null,
+            IReadOnlySet<DecisionRecordWriter.KeyedEntry>? derivedRecordIds = null)
         {
+            // Task 084h-5: as Dataverse creates. A create naming a primary id that is already stored is refused with the typed DuplicateRecord
+            // fault and stores nothing; a create naming a free id stores the row under it and answers that id; a create naming none answers NewId.
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-                .Callback<Entity, CancellationToken>((e, _) => Created.Add(e))
-                .ReturnsAsync(NewId);
+                .Returns((Entity e, CancellationToken _) =>
+                {
+                    lock (Created)
+                    {
+                        BeforeCreate?.Invoke(e);
+                        if (e.Id != Guid.Empty
+                            && (Created.Any(c => c.Id == e.Id)
+                                || Seeded.Any(s => s.LogicalName == e.LogicalName && s.Id == e.Id)
+                                || Rows.Values.Any(r => r.LogicalName == e.LogicalName && r.Id == e.Id)))
+                        {
+                            Interlocked.Increment(ref DuplicateRefusals);
+                            return Task.FromException<Guid>(DuplicateRecordFault());
+                        }
+
+                        Created.Add(e);
+                        return Task.FromResult(e.Id != Guid.Empty ? e.Id : NewId);
+                    }
+                });
             Org.Setup(o => o.ExecuteAsync(It.IsAny<WhoAmIRequest>(), It.IsAny<CancellationToken>()))
                 .Returns(() =>
                 {
@@ -161,22 +230,34 @@ public sealed partial class DecisionRecordWriterTests
             // conditions are EVALUATED (an equality on a lookup, a LIKE on a memo), so a lookup that asks the wrong question finds nothing
             // (or everything) instead of passing. A record this harness created is found by a later lookup, as Dataverse would.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .Returns((QueryExpression query, CancellationToken _) =>
+                .Returns(async (QueryExpression query, CancellationToken queryToken) =>
                 {
-                    Lookups.Add(query);
-                    if (LookupFault is { } lookupFault)
+                    List<Entity> stored;
+                    lock (Created)
                     {
-                        return Task.FromException<EntityCollection>(lookupFault);
+                        Lookups.Add(query);
+                        if (LookupFault is { } lookupFault)
+                        {
+                            throw lookupFault;
+                        }
+
+                        if (QueryFault?.Invoke(query, queryToken) is { } queryFault)
+                        {
+                            throw queryFault;
+                        }
+
+                        stored = Created
+                            .Select(c => AsStoredByTheWriter(c, c.Id == Guid.Empty ? NewId : c.Id))
+                            .Concat(Seeded)
+                            .Concat(Rows.Values)
+                            .Where(row => row.LogicalName == query.EntityName && Satisfies(query, row))
+                            .Take(query.TopCount ?? int.MaxValue)
+                            .ToList();
                     }
 
-                    var stored = Created
-                        .Select(c => AsStoredByTheWriter(c, c.Id == Guid.Empty ? NewId : c.Id))
-                        .Concat(Seeded)
-                        .Concat(Rows.Values)
-                        .Where(row => row.LogicalName == query.EntityName && Satisfies(query, row))
-                        .Take(query.TopCount ?? int.MaxValue)
-                        .ToList();
-                    return Task.FromResult(new EntityCollection(stored));
+                    // Task 084h-5: answered, then held, so concurrent attempts have all read before any of them creates.
+                    await HoldIfKeyedAsync(query);
+                    return new EntityCollection(stored);
                 });
 
             var client = new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
@@ -193,7 +274,10 @@ public sealed partial class DecisionRecordWriterTests
                 },
                 NullLogger<CoreAncestorResolver>.Instance);
             Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, Entities.Object, RecordTypes, new FakeTimeProvider(Now), Log,
-                participantShares ?? new GateSharingWorld().Sharing);
+                participantShares ?? new GateSharingWorld().Sharing)
+            {
+                DerivedRecordIdEntries = derivedRecordIds ?? DecisionRecordWriter.DerivedRecordIdEntriesByDefault,
+            };
         }
 
         public Entity Row => Created.Single();
@@ -448,7 +532,8 @@ public sealed partial class DecisionRecordWriterTests
     {
         var h = new Harness();
         var act = () => h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")], reason: "not-material - Not material")
-            with { UnnamedNextSteps = ["revise-budget"] });
+            with
+        { UnnamedNextSteps = ["revise-budget"] });
 
         (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
             .Should().Be(DecisionRecordRefusalReason.RecordClassUnderivable);
@@ -460,7 +545,8 @@ public sealed partial class DecisionRecordWriterTests
     {
         var h = new Harness();
         var result = await h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")])
-            with { UnnamedNextSteps = ["send-email"] });
+            with
+        { UnnamedNextSteps = ["send-email"] });
 
         result.RecordClass.Should().Be(RecordedDecisionClass.Judgement, "a notification went out; this is not a dismissal");
         using var followOns = JsonDocument.Parse(h.Row.GetAttributeValue<string>("sprk_followons"));
@@ -1058,10 +1144,14 @@ public sealed partial class DecisionRecordWriterTests
     [Fact]
     public async Task Cancellation_IsNotSwallowedOrWrapped()
     {
+        // Review F2 (084h-5): a cancellation is the caller's only when the caller's token says so; the same exception with a live token
+        // (an HTTP timeout) is a failed create (DerivedId_ATimeoutCancellation_* tests).
         var h = new Harness();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
         h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
 
-        var act = () => h.Writer.WriteAsync(Request());
+        var act = () => h.Writer.WriteAsync(Request(), cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

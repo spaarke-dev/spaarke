@@ -52,6 +52,24 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task S23_TheRuntimeRoleGoesToInterStepStateSystemUserId_NotToTheAppRegistrationUser()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles.Keys.Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser, dv.WriterAppUser },
+            "systemUserId is the managed identity's application user; (T266 S24) ontologyWriterSystemUserId is the writer's; " +
+            "(S29) both BFF users hold the Decision Record Reader");
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.DecisionReaderRoleId },
+            "the app registration's user never gets the ontology role, only the reader");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId, dv.DecisionReaderRoleId });
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.WriterOntologyRoleId }, "task 267: its own unit's copy");
+    }
+
+    [Fact]
     public async Task AbsentInviteCodeHash_IsRecordedInTheVerifiedGateEvidence_NotFailed()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);   // SpaarkeMaster 1.2.2.0: no sprk_externalinvitecodehash yet
@@ -67,10 +85,18 @@ public sealed class H7bSecureRecordSetupHandlerTests
             .Concat(SecureRecordSetupProcedure.BffOnlyColumns)
             .Append(SecureRecordSetupProcedure.AccessRemovedOnColumn)
             .ToArray();
-        recorded.Should().HaveCount(absentColumns.Length);
+        // Task 270 (S28): plus the optional message-access columns, which provisioning never creates: the direct recipient
+        // (the Direct-message feature stays off) and the three private-context references (field-mapping 056b).
+        recorded.Should().HaveCount(absentColumns.Length + SecureRecordSetupProcedure.OptionalMessageAccessColumns.Count);
         foreach (var column in absentColumns)
         {
             recorded.Should().ContainSingle(n => n.Contains(column) && n.Contains("absent"));
+        }
+        recorded.Should().ContainSingle(n => n.Contains("sprk_communication.sprk_directrecipient: not in this environment")
+                                             && n.Contains("the Direct-message feature stays off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset"));
+        foreach (var (_, column, _) in SecureRecordSetupProcedure.OptionalMessageAccessColumns.Where(o => o.Column != SecureRecordSetupProcedure.DirectRecipientColumnName))
+        {
+            recorded.Should().ContainSingle(n => n.Contains($"sprk_communication.{column}: not in this environment") && n.Contains("Set-PrivateContextSchema.ps1 not run"));
         }
     }
 
@@ -204,6 +230,26 @@ public sealed class H7bSecureRecordSetupHandlerTests
         dv.Reads.Should().Be(0);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("not-a-guid")]
+    public async Task CustomerUnitNotRecorded_Refuses_BeforeAnyDataverseCall_NeverSkipsS1sIdCheck(string recorded)
+    {
+        // S1's id comparison needs H10's customer unit: a run state without it (pre-T259, or lost) is refused, never run
+        // with the check silently skipped.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var run = BuildRun(dv);
+        run.InterStepState.CustomerBusinessUnitId = recorded;
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>()
+            .Which.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.MissingUpstreamState);
+        dv.Reads.Should().Be(0);
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task OwnerDecisionRefusal_QuarantinesTheRun()
     {
@@ -285,8 +331,292 @@ public sealed class H7bSecureRecordSetupHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v1Hash);
         dv.ProfileUsers[dv.LinkWriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
-        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(dv.Teams.Where(t => t.IsDefault).Select(t => t.Id));
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(
+            dv.Teams.Where(t => t.IsDefault && t.Id != dv.WriterDefaultTeamId).Select(t => t.Id));
         dv.Writes.Should().OnlyContain(w => w.StartsWith("AssociateProfile", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion5_DoesNotShortCircuit_AndAssignsTheOntologyServiceRole()
+    {
+        // An environment H7b configured before S23: the run row records the phase under the v5 key.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles[dv.MiAppUser].Remove(dv.OntologyRoleId);
+        dv.Writes.Clear();
+        var v5Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=5\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v5Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v5Hash);
+        dv.UserRoles[dv.MiAppUser].Should().Contain(dv.OntologyRoleId);
+        dv.Writes.Should().ContainSingle().Which.Should().StartWith("AssociateUserRole");
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion6_DoesNotShortCircuit_AndConfiguresTheOntologyWriter()
+    {
+        // An environment H7b configured before S24 (#2605): the run row records the phase under the v6 key, and the writer
+        // holds neither its role nor a profile membership.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles.Remove(dv.WriterAppUser);
+        dv.ProfileUsers[dv.OntologyWriterFieldWritersProfileId].Clear();
+        dv.ProfileUsers[dv.OntologyWriterFirmReasonProfileId].Clear();
+        dv.Writes.Clear();
+        var v6Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=6\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v6Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v6Hash);
+        dv.UserRoles[dv.WriterAppUser].Should().BeEquivalentTo(new[] { dv.WriterOntologyRoleId });
+        dv.ProfileUsers[dv.OntologyWriterFieldWritersProfileId].Should().BeEquivalentTo(new[] { dv.WriterAppUser });
+        dv.ProfileUsers[dv.OntologyWriterFirmReasonProfileId].Should().BeEquivalentTo(new[] { dv.WriterAppUser });
+        dv.Writes.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion7_DoesNotShortCircuit_AndGivesTheCustomerDefaultTeamBasicUser()
+    {
+        // An environment H7b configured before task 267 (#2618): the run row records the phase under the v7 key, and the
+        // customer unit's default team holds no "Spaarke Basic User".
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Clear();
+        dv.Writes.Clear();
+        var v7Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=7\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v7Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v7Hash);
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Should().BeEquivalentTo(new[] { dv.BasicUserRoleId });
+        dv.Writes.Should().Equal($"AssociateTeamRole {dv.CustomerDefaultTeamId} {dv.BasicUserRoleId}");
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion8_DoesNotShortCircuit_AndChecksTheInvoiceMoneyLock()
+    {
+        // An environment H7b configured before task 268, whose package predates ebilling task 166: the run row records the
+        // phase under the v8 key, and sprk_invoice.sprk_totalamount is not secured. The re-run reaches S26 and refuses.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(
+            SecureRecordSetupProcedure.InvoiceMoneyTable, "sprk_totalamount")] = false;
+        dv.Writes.Clear();
+        var v8Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=8\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v8Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion9_DoesNotShortCircuit_AndChecksTheInvoiceFamilyLock()
+    {
+        // Task 270: an environment H7b configured before S27, whose package predates the #2799 lock: the run row records the
+        // phase under the v9 key, and sprk_billingevent.sprk_invoice is not secured. The re-run reaches S27 and refuses.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_billingevent", "sprk_invoice")] = false;
+        dv.Writes.Clear();
+        var v9Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=9\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v9Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion10_DoesNotShortCircuit_AndChecksThePrivateContextLock()
+    {
+        // Field-mapping 056b: an environment H7b configured before S28 covered the private-context columns, where
+        // Set-PrivateContextSchema.ps1 has since run but the columns' lock is not whole. The re-run reaches S28 and refuses.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.AddPrivateContextColumns();
+        dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_communication", "sprk_privatecontextmatter")] = false;
+        dv.Writes.Clear();
+        var v10Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=10\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v10Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion11_DoesNotShortCircuit_AndChecksTheInviteCodeHashExposure()
+    {
+        // ISS-025 / #1803: an environment H7b configured before S22 verified audit and Advanced Find on the invite-code hash,
+        // where either has since been turned on. The re-run reaches S22 and refuses; nothing is written.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        dv.AddInviteCodeHash();
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.ColumnExposure[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash")] =
+            new SecureSetupAttributeExposure(IsAuditEnabled: true, IsValidForAdvancedFind: false);
+        dv.Writes.Clear();
+        var v11Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=11\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v11Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARunCompletedUnderProcedureVersion12_DoesNotShortCircuit_AndAssignsTheDecisionRecordReader()
+    {
+        // DEF-059: an environment H7b configured before S29 has the BFF's two application users without the reader role.
+        // The re-run must reach S29 and assign it (the version is part of the idempotency hash).
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles[dv.BffAppUser].Remove(dv.DecisionReaderRoleId);
+        dv.UserRoles[dv.MiAppUser].Remove(dv.DecisionReaderRoleId);
+        dv.Writes.Clear();
+        var v12Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=12\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v12Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.BffAppUser} {dv.DecisionReaderRoleId}");
+        dv.Writes.Should().Contain($"AssociateUserRole {dv.MiAppUser} {dv.DecisionReaderRoleId}");
+        H7bSecureRecordSetupHandler.ProcedureVersion.Should().Be("secure-setup-procedure=13");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task AMissingOntologyWriterBusinessUnit_IsResumable_TellingTheOperatorToStartANewRun_AndWritesNothing(string? unit)
+    {
+        // A run whose H10 completed before task 267 never recorded the writer's unit; H7b reads its absence as Guid.Empty.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var run = BuildRun(dv);
+        run.InterStepState.OntologyWriterBusinessUnitId = unit;
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitUnresolved);
+        failure.Diagnostic.Should().Contain("start a new run");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task AMissingOntologyWriter_IsResumable_TellingTheOperatorToStartANewRun_AndWritesNothing(string? writer)
+    {
+        // A run whose H10 completed before task 266 has no writer App User; H7b reads its absence as Guid.Empty.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var run = BuildRun(dv);
+        run.InterStepState.OntologyWriterSystemUserId = writer;
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.OntologyWriterUnresolved);
+        failure.Diagnostic.Should().Contain("start a new run");
+        dv.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -473,6 +803,8 @@ public sealed class H7bSecureRecordSetupHandlerTests
         run.InterStepState.BffAppRegSystemUserId = dv.BffAppUser.ToString();
         run.InterStepState.SystemUserId = dv.MiAppUser.ToString();
         run.InterStepState.CustomerBusinessUnitId = dv.CustomerUnitId.ToString();   // T259 (H10)
+        run.InterStepState.OntologyWriterSystemUserId = dv.WriterAppUser.ToString();  // T266 (H10)
+        run.InterStepState.OntologyWriterBusinessUnitId = dv.WriterUnitId.ToString(); // task 267 (H10)
         return run;
     }
 

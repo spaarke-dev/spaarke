@@ -347,6 +347,173 @@ public sealed class IntakeSchemaProfileParityTests
     }
 
     /// <summary>
+    /// Data-setup plan D4: referenceDataPack is OPTIONAL (legal-standard is the default, owner decision B) and the schema's enum is
+    /// exactly the set POST /api/runs and H12b accept (IntakeParameterCatalog.AllowedReferenceDataPacks).
+    /// </summary>
+    [Fact]
+    public void D4_ReferenceDataPack_IsOptional_WithTheIntakeValues_AndTheDefaultIsLegalStandard()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties")
+            .GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.ReferenceDataPack);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("referenceDataPack", "legal-standard is the default");
+        property.GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.AllowedReferenceDataPacks);
+        property.GetProperty("default").GetString()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.LegalStandardReferenceDataPack);
+    }
+
+    // -------------------------------------------------------------------------
+    // ISS-036 (#2987): every IntakeParameterCatalog key an operator may set must be in the schema.
+    // The catalog accepted `buildId` (H9 pin) but intake.schema.json (additionalProperties:false) did not list it,
+    // so the only guard on a Dataverse-only upgrade run could not be written into a schema-valid intake.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Catalog keys the intake FILE names differently. The skill (Step 1.0 / Step 4.0) renames them at the boundary; the
+    /// value is the schema property that carries each. Each target must exist in the schema (asserted below).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> RenamedInTheIntakeFile =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["openAiLocation"] = "openAiRegion",   // Bicep param name vs intake field (SKILL.md Step 4.0)
+            ["usersJson"] = "users",               // the skill serialises the users array to a JSON string
+        };
+
+    /// <summary>
+    /// Catalog keys that are deliberately NOT intake-file properties, each with the reason. A key is here only if no
+    /// operator writes it in a batch intake file; anything an operator supplies belongs in the schema, not here.
+    /// The test fails when an entry is no longer a catalog key or has since been added to the schema, so this list
+    /// can only shrink.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> NotInTheIntakeFile =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // Produced by the /provision-environment skill, not typed by the operator.
+            ["containerTypeId"] = "skill reads it from spaarke-constants.yaml per_env_constants (Step 0.5b)",
+            ["intakeFileSha256"] = "skill computes it from the intake file (audit hash)",
+            ["operatorUpn"] = "skill reads it from `az ad signed-in-user` (an intake value would spoof NFR-11 audit)",
+            // Not sent by the skill: L2 stores the default or the handler owns the default; direct POST /api/runs only.
+            ["environmentName"] = "L2 stores 'prod' (owner D6: customer staging/dev stamps are out of scope; the intake has no override)",
+            ["location"] = "H2a default (westus2); the intake's `region` is the operator-facing region",
+            ["signalrEnabled"] = "H2a default (false); no operator-facing intake field",
+            ["requestedIndexes"] = "H2b default (all indexes); no operator-facing intake field",
+            ["speContainerDisplayName"] = "H8 default; no operator-facing intake field",
+            ["healthCheckPath"] = "H9 default (/healthz); no operator-facing intake field",
+            ["openaiPinFreshnessMinDays"] = "H0 probe-tuning default; no operator-facing intake field",
+            ["rotate"] = "H4 secret rotation switch for a direct POST; the skill never sets it",
+            ["ficOmitSecretNames"] = "H4 secret-free-stamp switch for a direct POST; the skill never sets it",
+            ["msalClientId"] = "H7 env-var override for a direct POST; H7 resolves it itself",
+            ["shareLinkBaseUrl"] = "H7 env-var override for a direct POST; H7 resolves it itself",
+            // Upgrade-mode compatibility inputs: the skill does not send them (it has an `acknowledgeUpgradeMode` flag only).
+            ["provisionedOn"] = "handler upgrade-mode input (H0, H2a, H4, H4b); the skill never sends it until upgrade mode works (ISS-038)",
+            ["upgradeOfProvisionedOn"] = "existing-stamp acknowledgement; never an intake-file value — on an upgrade the skill copies it from the registry row (ISS-031)",
+            ["currentBffVersion"] = "upgrade-mode H0 input; the skill does not send it",
+            ["currentSolutionVersion"] = "upgrade-mode H0 input; the skill does not send it",
+            ["targetBffVersion"] = "upgrade-mode H0 input; the skill does not send it",
+            ["targetSolutionVersion"] = "upgrade-mode H0 input; the skill does not send it",
+        };
+
+    /// <summary>
+    /// The catalog keys that no schema property carries (directly, or through <paramref name="renamed"/>) and that are not
+    /// on the <paramref name="notInTheIntakeFile"/> list. Pure, so the controls below can feed it a synthetic catalog.
+    /// </summary>
+    private static IReadOnlyList<string> CatalogKeysMissingFromSchema(
+        IEnumerable<string> catalogKeys,
+        ISet<string> schemaProperties,
+        IReadOnlyDictionary<string, string> renamed,
+        IReadOnlyDictionary<string, string> notInTheIntakeFile)
+        => catalogKeys
+            .Where(key => !schemaProperties.Contains(renamed.TryGetValue(key, out var schemaName) ? schemaName : key)
+                          && !notInTheIntakeFile.ContainsKey(key))
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToList();
+
+    private static HashSet<string> ReadSchemaPropertyNames()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        return doc.RootElement.GetProperty("properties").EnumerateObject()
+            .Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void EveryCatalogKeyAnOperatorMaySet_IsAPropertyOfTheIntakeSchema()
+    {
+        var missing = CatalogKeysMissingFromSchema(
+            IntakeParameterCatalog.All.Keys, ReadSchemaPropertyNames(), RenamedInTheIntakeFile, NotInTheIntakeFile);
+
+        missing.Should().BeEmpty(
+            "POST /api/runs accepts these IntakeParameterCatalog keys but intake.schema.json (additionalProperties:false) " +
+            "does not list them, so a schema-valid batch intake cannot carry them (ISS-036 — buildId). Add each to the " +
+            "schema (operator-supplied) or to NotInTheIntakeFile with a reason (skill/server-produced).");
+    }
+
+    [Fact]
+    public void ParityLists_HaveNoStaleEntries()
+    {
+        var schemaProperties = ReadSchemaPropertyNames();
+        var catalogKeys = IntakeParameterCatalog.All.Keys.ToHashSet(StringComparer.Ordinal);
+
+        catalogKeys.Should().Contain(RenamedInTheIntakeFile.Keys, "a renamed key must still be a catalog key");
+        schemaProperties.Should().Contain(RenamedInTheIntakeFile.Values, "a rename target must be a schema property");
+        catalogKeys.Should().Contain(NotInTheIntakeFile.Keys, "an allow-listed key must still be a catalog key");
+        schemaProperties.Intersect(NotInTheIntakeFile.Keys).Should().BeEmpty(
+            "a key the schema now carries must come off the NotInTheIntakeFile list — the list only shrinks");
+    }
+
+    /// <summary>Must-fire control: a catalog key absent from the schema and from both lists is reported.</summary>
+    [Fact]
+    public void ParityCheck_ReportsACatalogKeyTheSchemaLacks()
+    {
+        var missing = CatalogKeysMissingFromSchema(
+            ["tenantId", "syntheticOperatorKey"],
+            new HashSet<string>(StringComparer.Ordinal) { "tenantId" },
+            RenamedInTheIntakeFile, NotInTheIntakeFile);
+
+        missing.Should().Equal("syntheticOperatorKey");
+    }
+
+    /// <summary>Must-not-fire control: a direct match, a renamed key and an allow-listed key are all accepted.</summary>
+    [Fact]
+    public void ParityCheck_AcceptsDirectRenamedAndAllowListedKeys()
+    {
+        var missing = CatalogKeysMissingFromSchema(
+            ["tenantId", "usersJson", "operatorUpn"],
+            new HashSet<string>(StringComparer.Ordinal) { "tenantId", "users" },
+            RenamedInTheIntakeFile, NotInTheIntakeFile);
+
+        missing.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ISS-036: buildId is an OPTIONAL string whose pattern accepts the CI buildId format (publish-bff-artifact.yml:
+    /// `yyyy.MM.dd-{run_number}`) and nothing that could not equal a manifest buildId.
+    /// </summary>
+    [Theory]
+    [InlineData("2026.10.16-2", true)]
+    [InlineData("2026.10.16-123", true)]
+    [InlineData("latest", false)]
+    [InlineData("2026.10.16", false)]
+    [InlineData("2026.10.16-", false)]
+    [InlineData("2026.10.16-2\n", false)]
+    [InlineData("v2026.10.16-2", false)]
+    [InlineData("", false)]
+    public void ISS036_BuildId_IsAnOptionalString_WithTheCiBuildIdPattern(string value, bool accepted)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties").GetProperty("buildId");
+
+        ReadStringArrayFromSchema("required").Should().NotContain("buildId", "an omitted buildId means latest.json");
+        property.GetProperty("type").GetString().Should().Be("string");
+
+        // JSON Schema `pattern` is an unanchored ECMAScript match with `$` at the end of input only; .NET's `$` also
+        // matches before a final newline, so test with the same `\z` semantics ajv applies.
+        var pattern = property.GetProperty("pattern").GetString()!.Replace("$", "\\z");
+        System.Text.RegularExpressions.Regex.IsMatch(value, pattern).Should().Be(accepted);
+    }
+
+    /// <summary>
     /// T256: secureRecordSetupDryRun is OPTIONAL (apply is the default), a boolean in the intake file — sent as the
     /// exact lower-case 'true' / 'false' strings SecureRecordSetupIntake accepts, under the same key.
     /// </summary>
@@ -408,8 +575,11 @@ public sealed class IntakeSchemaProfileParityTests
     /// <summary>
     /// T259 (ISS-010): displayName — the customer business unit's name H10 creates — is sent to POST /api/runs under the
     /// same key and refused there by CustomerBusinessUnitIntake. The schema keeps it optional (the skill defaults it to the
-    /// customerId, which always passes), and is never looser than the endpoint: the same length limit, no leading/trailing
-    /// whitespace or control character, and never the Secure Record unit's name in any case.
+    /// customerId, which always passes), with the same length limit, no leading/trailing whitespace or control character, and
+    /// never a reserved unit's name (Secure Record, the ontology writer's unit) in any ASCII case. One known gap, stated in the
+    /// schema's description: the schema's reserved-name pattern ignores ASCII case only, while the endpoint also folds accents,
+    /// so an accented spelling ("Sécure Record") passes the schema and is refused by POST /api/runs. The schema is therefore
+    /// looser than the endpoint on accents only; the endpoint stays the authority.
     /// </summary>
     [Fact]
     public void T259_DisplayName_SchemaBoundsAreTheEndpointRule()
@@ -432,11 +602,17 @@ public sealed class IntakeSchemaProfileParityTests
         secureName.IsMatch(secureUnit).Should().BeTrue();
         secureName.IsMatch(secureUnit.ToUpperInvariant()).Should().BeTrue();
         secureName.IsMatch("Secure Records Ltd").Should().BeFalse();
+        // Task 267: the ontology writer's own unit is reserved too, at intake as at the endpoint.
+        var writerUnit = Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordSetupProcedure.OntologyWriterBusinessUnitName;
+        secureName.IsMatch(writerUnit).Should().BeTrue();
+        secureName.IsMatch(writerUnit.ToLowerInvariant()).Should().BeTrue();
+        secureName.IsMatch(writerUnit + "s").Should().BeFalse();
 
         foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
         {
             Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.Validate(
-                    new Dictionary<string, string> { ["displayName"] = example.GetProperty("displayName").GetString()! }, secureUnit)
+                    new Dictionary<string, string> { ["displayName"] = example.GetProperty("displayName").GetString()! },
+                    Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.ReservedBusinessUnitNames)
                 .Should().BeOfType<Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntakeOutcome.Valid>();
         }
     }

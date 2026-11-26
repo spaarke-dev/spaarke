@@ -312,7 +312,7 @@ Neither column confers access (section 5.2).
 ### 4.2 Blob layout and protection
 
 - **Containers:** `procedures`, `invoice-files`, `billing-exports`. **Path:** `{tenantId}/{parent table}/{parent id}/{file id}`.
-- **Write-once:** a file is never overwritten; a new file is a new row.
+- **Write-once per content:** a file is never overwritten with different content; a new file is a new row. The same verified bytes may be rewritten on reuse (a retry of the same deterministic id), so the blob's ETag and Last-Modified move and Defender scans it again (DEF-044, owner 2026-11-05).
 - **Malware scanning (Defender for Storage, on upload):**
   - The scan result is a blob index tag. The download route and every processing step read it on demand; nothing is queued, and there is no Event Grid receiver in R1.
   - Pending means wait (firm list: "Checking file…", content 409 `file_scan_pending`); Malicious means refuse (the file drops out of lists, content 404).
@@ -372,7 +372,7 @@ Neither column confers access (section 5.2).
 | `sprk_procedureassignment` | the record | typed lookups `sprk_matter` / `sprk_project` / `sprk_workassignment` (one per core type in the shared list), exactly one set | Yes: lineage on the record lookups; `CitationLookups` = procedure, pinned version, excluded policy; role JSON with a live probe; census; delete planner | **Never** | Yes |
 | `sprk_ruleset` (record-scoped) | the record | typed lookups per core type, exactly one set, **RemoveLink**; `sprk_scope` = Record (100000002) or Firm record (100000003, with `sprk_firm`); a no-plugin sweep retires sets whose record is gone (O-17), cleanup only | Yes, at Deep | **Never** (firms see clauses only through the findings DTO) | Yes (S9) |
 | `sprk_policy`, `sprk_policyversion` of a record-scoped set | `sprk_ruleset` → `sprk_policy` | via the set | Yes (edges `sprk_policy` → `sprk_ruleset`, `sprk_policyversion` → `sprk_policy`) | **Never** | Yes |
-| `sprk_storedfile` (invoice purposes) | `sprk_invoice` | via the invoice: `sprk_matter` / `sprk_project` / the work-assignment regarding stamp (`InvoiceFamilyCoreRecordGuard.CoreRecordLookups`) | Yes: lineage on `sprk_invoice` only; role, census, person entries; a leaf | **Follows the invoice**; Firm-visible = No hides a copy | Yes (K6) |
+| `sprk_storedfile` (invoice purposes) | `sprk_invoice` | via the invoice: `sprk_matter` / `sprk_project` / the work-assignment regarding stamp (`InvoiceFamilyCoreRecordGuard.CoreRecordLookups`) | Yes: lineage on `sprk_invoice` only; role, census, person entries; a leaf | **Never externally readable as rows** (the registry marks the whole table hard-deny); the firm reads its own invoice's file only through the firm file route. *(Amended 2026-11-25, task 189, uac-r2: was "Follows the invoice; Firm-visible = No hides a copy".)* | Yes (K6) |
 | `sprk_storedfile` (export) | `sprk_billingexport` | none | No (F4-c) | **Never** until section 15's export question is answered | Yes |
 | `sprk_storedfile` (Procedure source) | `sprk_procedureversion` | none | No | **Never** | Yes |
 | `sprk_invoice` | core record | existing | existing | **The (a′) predicate** (9.1) | existing |
@@ -510,9 +510,9 @@ procs    = (Applies to = All records
             ∪ manually assigned on the chain)
            AND (Procedure.Firm is empty OR Procedure.Firm = invoice firm)      // firm condition, every source
          − Excluded (nearer row wins; between two d1 parents Exclude wins)
-for each procedure (status Active, with at least one Active version — a Draft-only Procedure is not Active; proposed):
+for each procedure (status Active, with at least one version that opened a window: Active or Superseded, or Retired with at least one Published policy version or a published rate card [D-203 (5a), (9)] — a Draft-only Procedure, or one whose Drafts were only ever retired, is not Active; proposed):
     procVersion = the Pin (nearer wins; two different d1 pins → blocking gap)
-                  OR the Active Procedure Version with from ≤ workDate < to (two found → fault)
+                  OR the Procedure Version in force (Active or Superseded) with from ≤ workDate < to (two found → fault)
     if none:  contributes nothing for this subject AND raises a gap (below)
     level    = Manual d0 | Manual d1 | Firm | All records
     rules   += for each enabled policy of the Procedure's rule set: its policy version for procVersion (7.2)
@@ -525,8 +525,8 @@ rules    += record rules of the chain's record-scoped rule sets whose scope is R
 ```
 
 - **Fails closed.** Any failed read of chain, assignment, override, Procedure or version rows faults the evaluation; the job retries; nothing is judged on a partial set (`BillingFactLoader.cs:243-244`).
-- **What counts as a gap — confirmed by the owner 2026-10-21 (ontology F2-d).** A Procedure applies from its **first Active version's effective-from**: work dated before that is *not applicable*, not a gap. A gap is a hole **between** Active versions, or a date after an end with no successor. **A version whose window ends with no successor raises the gap hold only for work dated after that end.** A Procedure with only Draft versions is not Active.
-- **A gap holds the invoice (O-22).** When an applicable Procedure has no version in force on the date (as read above), a pinned version is retired, or two d1 pins conflict, the system raises a **blocking internal finding** on `BILL-SYSTEM-SUBMISSION` (the D-115 pattern) naming the Procedure and date, and the invoice shows **"No procedure associated with this invoice"**. The hold is raised when the invoice is checked (submission, or a correction under task 101), never by a later Procedure change (O-21 revised). The invoice cannot be approved until a check clears the gap; whether an Override may release it is open (section 15).
+- **What counts as a gap — confirmed by the owner 2026-10-21 (ontology F2-d).** A Procedure applies from the effective-from of its **first version that opened a window** (7.1 pseudo code: Active or Superseded, or Retired with a Published policy version or a published rate card; D-203 (5a), (9)): work dated before that is *not applicable*, not a gap. A gap is a hole **between** versions in force (Active or Superseded), or a date after an end with no successor. **A version whose window ends with no successor raises the gap hold only for work dated after that end.** A Procedure with only Draft versions is not Active.
+- **A gap holds the invoice (O-22).** When an applicable Procedure has no version in force on the date (as read above), a pinned version is retired, or two d1 pins conflict, the system raises a **blocking internal finding** on `BILL-SYSTEM-SUBMISSION` (the D-115 pattern) naming the Procedure and date, and the invoice shows **"No procedure associated with this invoice"**. The hold is raised when the invoice is checked (submission, or a correction under task 101), never by a later Procedure change (O-21 revised). The invoice cannot be approved until a check clears the gap, or a recorded Override releases it for that invoice (section 15, item 3).
 - **`BILL-SYSTEM-SUBMISSION` is exempt** from the Procedure model (ontology blocking 2b): it has no rule set (D-125) and keeps its `sprk_currentversion` pointer chain.
 - It replaces today's rule-set eligibility (`BillingFactLoader`, ClientDefault and Firm) and the planned 082 selection.
 

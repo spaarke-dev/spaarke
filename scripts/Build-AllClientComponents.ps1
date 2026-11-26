@@ -4,10 +4,8 @@
 
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
-    1. Shared libraries (14 packages in src/client/shared/, in dependency order -- the $SharedLibs list
+    1. Shared libraries (12 packages in src/client/shared/, in dependency order -- the $SharedLibs list
        below is authoritative; it includes Spaarke.DailyBriefing.Components)
-       NOTE: Spaarke.LegalWorkspace is intentionally excluded -- it is a source-only lib (tsc --noEmit)
-       with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
     3. Webpack code pages (3 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/*) - ONE PCF AT A TIME, in production mode (`npm run build:prod`)
@@ -90,20 +88,12 @@ Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF bui
 # rather than silently shipped (the 2026-06-28 TS2307 failure was the peer-only-deps root cause,
 # now fixed in the lib's package.json/tsconfig.json).
 #
-# Spaarke.LegalWorkspace is intentionally EXCLUDED on the same basis (added 2026-07-02 by
-# spaarke-dataset-grid-framework-r2 task 024 / FR-10). Task 020 scaffolded the package; task 021
-# populated src/index.ts as a RE-EXPORT barrel of files that stay under src/solutions/LegalWorkspace/src/.
-# Its `@spaarke/*` deps are peerDependencies and `npm run build` is `tsc --noEmit`; standalone
-# type-check fails with TS2307 "Cannot find module '@spaarke/*'" -- verified in task 020. Type-check
-# is performed by each consumer's tsc pass (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard).
+# (The Spaarke.LegalWorkspace facade, excluded here from 2026-07-02, was retired on 2026-11-13;
+# SpaarkeAi now depends on the LegalWorkspace solution directly.)
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
     @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep -> builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry -> fresh-master SpaarkeAi builds failed on the unbuilt lib).
-    @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
-    @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # type-only, no @spaarke/* deps (auth dep dropped 2026-10-03, reuse audit C-14)
-    @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
-    @{ Name = "Spaarke.DocumentOperations";   Path = "$RepoRoot\src\client\shared\Spaarke.DocumentOperations" }   # depends on Auth (added 2026-06-29 by spaarkeai-compose-r1 task 030)
-    @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
+    @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth (SdapClient folded in 2026-11-24, DEF-001)
     # Events.Components and SmartTodo.Components MUST come AFTER UI.Components (moved 2026-10-04,
     # spaarke-ontology-platform-r1 task 094). Events.Components imports UI.Components SOURCE by relative
     # path (CalendarWorkspaceWidget -> ../Spaarke.UI.Components/src/...), so tsc needs UI.Components'
@@ -115,9 +105,9 @@ $SharedLibs = @(
     @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" } # depends on UI.Components (dist)
     @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) -> MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above -- its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
     @{ Name = "Spaarke.Visuals";              Path = "$RepoRoot\src\client\shared\Spaarke.Visuals" }              # no @spaarke/* deps; `build` is `tsc --noEmit`. Consumed FROM SOURCE (main: ./src/index.ts) by PCF VisualHost via a file: dep, so its OWN node_modules must exist: webpack/ts-loader resolve its bare imports (@fluentui/*) from its real path, never from VisualHost's node_modules. Added 2026-10-04 by task 092 (PR #1123) - same reason Spaarke.Communication.Components is here for the Communication PCFs.
-    @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
+    @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components (AI.Outputs folded into src/outputs 2026-11-24, DEF-006)
     @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth + UI.Components; standalone build restored 2026-07-08 (supersedes PR #506)
-    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets -- re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
+    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + UI.Components (useDocumentActions; the DocumentOperations package was retired 2026-11-13) + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets -- re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
 )
 
 # Expand the "SharedLibs" special shortcut into the actual lib names so the filter at line ~113 matches.

@@ -383,8 +383,8 @@ public sealed class InvoiceSubmissionRefusalWireContractTests : IAsyncLifetime
 
         public Task<FromEmailSubmitResult> SubmitAsync(FromEmailSubmitInput input, CancellationToken ct) => Current.SubmitAsync(input, ct);
 
-        public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct) =>
-            Current.RequeueAsync(submissionId, jobId, correlationId, ct);
+        public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, string? correctionNote, CancellationToken ct) =>
+            Current.RequeueAsync(submissionId, jobId, correlationId, correctionNote, ct);
 
         public Task<FromEmailAttemptSource?> ReadAttemptSourceAsync(Guid submissionId, CancellationToken ct) =>
             Current.ReadAttemptSourceAsync(submissionId, ct);
@@ -408,7 +408,11 @@ public sealed class InvoiceSubmissionRefusalWireContractTests : IAsyncLifetime
         public Task<RateLimitResult> CheckAndIncrementAsync(string tenantId, string userId, OfficeRateLimitCategory category) =>
             Task.FromResult(new RateLimitResult
             {
-                IsAllowed = true, Limit = 10, Remaining = 9, ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30), RetryAfterSeconds = 30,
+                IsAllowed = true,
+                Limit = 10,
+                Remaining = 9,
+                ResetTimestamp = DateTimeOffset.UtcNow.AddSeconds(30),
+                RetryAfterSeconds = 30,
             });
     }
 }

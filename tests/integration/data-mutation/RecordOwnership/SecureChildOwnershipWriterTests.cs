@@ -172,7 +172,7 @@ public class SecureChildOwnershipWriterTests
             World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)),
             FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice));
 
-        var (_, owner, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-1", CancellationToken.None);
+        var (_, owner, _, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-1", CancellationToken.None);
 
         owner.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
     }
@@ -193,7 +193,7 @@ public class SecureChildOwnershipWriterTests
             World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)),
             FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice), communications.Object);
 
-        var (_, owner, filing) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-4", CancellationToken.None);
+        var (_, owner, filing, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-4", CancellationToken.None);
         await processor.CreateCommunicationRecordAsync(
             new Microsoft.Graph.Models.Message { Subject = "Invoice 1042", InternetMessageId = "<m-146@vendor.example>" },
             "intake@contoso.com", "graph-4", owner, filing, CancellationToken.None);
@@ -535,39 +535,6 @@ public class SecureChildOwnershipWriterTests
     }
 
     // =====================================================================================
-    // Inbound attachment documents — EmailAttachmentProcessor
-    // =====================================================================================
-
-    [Fact]
-    public async Task EmailAttachment_OfAnEmailDocumentFiledToASecureMatter_IsOwnedByTheNamedTeam()
-    {
-        var parentDocument = Guid.NewGuid();
-        var (processor, creates) = AttachmentProcessor(World()
-            .WithRecord("sprk_document", parentDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam)
-            .Resolver());
-
-        await processor.ProcessAttachmentsAsync(AttachmentRequest(parentDocument, "sprk_matter", SecureMatter), CancellationToken.None);
-
-        creates.Should().ContainSingle().Which.OwningTeamId.Should().Be(Directory.SecureNamedTeam,
-            "secure-if-any over the parent email document and the record it is filed to");
-    }
-
-    [Fact]
-    public async Task EmailAttachment_FiledToAFlaggedButNotIsolatedProject_CreatesNoDocument()
-    {
-        var parentDocument = Guid.NewGuid();
-        var (processor, creates) = AttachmentProcessor(World()
-            .WithRecord("sprk_document", parentDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam)
-            .Resolver());
-
-        var result = await processor.ProcessAttachmentsAsync(
-            AttachmentRequest(parentDocument, "sprk_project", FlaggedNotIsolatedProject), CancellationToken.None);
-
-        creates.Should().BeEmpty();
-        result.FailedCount.Should().Be(1, "this writer's per-attachment refusal contract");
-    }
-
-    // =====================================================================================
     // Harness
     // =====================================================================================
 
@@ -717,61 +684,6 @@ public class SecureChildOwnershipWriterTests
                 privilegeFlagged = false,
             }),
         };
-    }
-
-    private static ProcessAttachmentsRequest AttachmentRequest(Guid parentDocument, string associatedType, Guid associatedId) => new()
-    {
-        EmailId = Guid.NewGuid(),
-        ParentDocumentId = parentDocument,
-        ContainerId = "b!container",
-        DriveId = "drive-1",
-        QueueForAiProcessing = false,
-        AssociatedEntityType = associatedType,
-        AssociatedEntityId = associatedId,
-        Attachments = new[]
-        {
-            new EmailAttachmentDto
-            {
-                FileName = "contract.pdf",
-                ContentType = "application/pdf",
-                SizeBytes = 50_000,
-                Content = new MemoryStream(new byte[] { 1, 2, 3 }),
-            },
-        },
-    };
-
-    private static (EmailAttachmentProcessor Processor, List<CreateDocumentRequest> Creates) AttachmentProcessor(
-        IRecordOwnershipResolver ownership)
-    {
-        var creates = new List<CreateDocumentRequest>();
-        var documents = new Mock<IDocumentDataverseService>(MockBehavior.Loose);
-        documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<CreateDocumentRequest, CancellationToken>((r, _) => creates.Add(r))
-            .ReturnsAsync(() => Guid.NewGuid().ToString());
-
-        var processor = new EmailAttachmentProcessor(
-            new UploadingSpeFileStore(), documents.Object, ownership,
-            Options.Create(new EmailProcessingOptions()), NullLogger<EmailAttachmentProcessor>.Instance);
-        return (processor, creates);
-    }
-
-    /// <summary>The SPE byte store at its virtual upload seam: every upload succeeds with a fresh item id.</summary>
-    private sealed class UploadingSpeFileStore : SpeFileStore
-    {
-        private static readonly IGraphClientFactory Graph = Mock.Of<IGraphClientFactory>();
-
-        public UploadingSpeFileStore()
-            : base(
-                new ContainerOperations(Graph, TestSpeOwnership.AllowAll(Graph), NullLogger<ContainerOperations>.Instance),
-                new DriveItemOperations(Graph, TestSpeOwnership.AllowAll(Graph), NullLogger<DriveItemOperations>.Instance),
-                new UploadSessionManager(Graph, TestSpeOwnership.AllowAll(Graph), Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance),
-                new UserOperations(Graph, NullLogger<UserOperations>.Instance))
-        {
-        }
-
-        public override Task<FileHandleDto?> UploadSmallAsync(string driveId, string path, Stream content, CancellationToken ct = default) =>
-            Task.FromResult<FileHandleDto?>(new FileHandleDto(
-                Guid.NewGuid().ToString("N"), path, null, 3, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, null, driveId));
     }
 
     private static SendCommunicationRequest SendFiledTo(string entity, Guid id) => new()

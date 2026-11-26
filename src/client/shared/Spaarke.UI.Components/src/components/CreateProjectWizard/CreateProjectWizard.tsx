@@ -33,23 +33,27 @@ import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { CreateProjectStep } from './CreateProjectStep';
 import { ProjectService } from './projectService';
+import { searchOrganizationsAsLookup } from '../CreateMatterWizard/matterService';
 import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
+import { discoverNavProps } from '../../services/PolymorphicResolverService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { describeHeldBackForSecure, provisionSecureProject, type IProvisionProjectResult } from './provisioningService';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
 import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AssociationResult } from '../AssociateToStep/types';
 import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
+import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
+import { searchContactsAsLookup, searchUsersAsLookup } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -93,31 +97,11 @@ async function associateProjectWithAccount(
   projectId: string,
   accountId: string
 ): Promise<void> {
-  // Attempt to discover the nav-prop for the account relationship.
-  // Fall back to a known column name if metadata is unavailable.
-  let navPropBind = `sprk_Account@odata.bind`;
-  try {
-    const orgUrl = window.location.origin;
-    const resp = await fetch(
-      `${orgUrl}/api/data/v9.0/EntityDefinitions(LogicalName='sprk_project')/ManyToOneRelationships` +
-        `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`,
-      { credentials: 'include' }
-    );
-    if (resp.ok) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const json = (await resp.json()) as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rels: Array<any> = json.value ?? [];
-      const accountRel = rels.find((r: { ReferencedEntity: string }) => r.ReferencedEntity === 'account');
-      if (accountRel?.ReferencingEntityNavigationPropertyName) {
-        navPropBind = `${accountRel.ReferencingEntityNavigationPropertyName}@odata.bind`;
-      }
-    }
-  } catch {
-    // Use fallback column name
-  }
+  // The nav-prop of the project's account lookup, from the shared discovery (#2909: one query and one cache per
+  // entity for the page). It never throws; when metadata is unavailable it returns [] and the known column name stands.
+  const accountRel = (await discoverNavProps('sprk_project')).find(e => e.referencedEntity === 'account');
+  const navPropBind = `${accountRel?.navPropName || 'sprk_Account'}@odata.bind`;
 
-  const _orgUrl = window.location.origin;
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,
   });
@@ -127,47 +111,7 @@ async function associateProjectWithAccount(
 // Search helper functions (use IDataService instead of IWebApi)
 // ---------------------------------------------------------------------------
 
-async function searchContactsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safeFilter}')` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map(e => ({
-    id: e['contactid'] as string,
-    name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
-  }));
-}
-
-async function searchOrganizationsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=sprk_organizationid,sprk_name` +
-    `&$filter=contains(sprk_name,'${safeFilter}')` +
-    `&$orderby=sprk_name asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('sprk_organization', options);
-  return result.entities.map(e => ({
-    id: e['sprk_organizationid'] as string,
-    name: e['sprk_name'] as string,
-  }));
-}
-
-async function searchUsersAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map(e => ({
-    id: e['systemuserid'] as string,
-    name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-  }));
-}
+// Contact and user search: the shared services/userLookup implementations (#2866).
 
 async function searchMatterTypesAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < 1) return [];
@@ -212,6 +156,11 @@ export interface ICreateProjectWizardProps {
   uploadService?: IUploadService;
   /** Optional INavigationService for opening records after creation. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
   /**
@@ -229,21 +178,8 @@ export interface ICreateProjectWizardProps {
    */
   resolveSpeContainerId?: () => Promise<string>;
   /**
-   * Optional callback to resolve BU-derived cascade defaults
-   * (`sprk_containerid`, `sprk_searchindexname`) at finish time.
-   * Called once just before the Project record is created so the wizard can
-   * stamp both fields from the current user's owning Business Unit
-   * (FR-WIZ-02 / G2 latent-gap fix). When omitted, the cascade step is skipped
-   * and the BFF backfill chain handles the fields server-side.
-   *
-   * Implementations typically resolve `userId` from
-   * `Xrm.Utility.getGlobalContext().userSettings.userId` and call
-   * {@link EntityCreationService.resolveUserBuDefaults}.
-   */
-  resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
-  /**
    * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
-   * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
+   * post-upload RAG indexing via the SDAP client (`services/sdap`) can route to the
    * correct multi-tenant index. When omitted, indexing is skipped (files still
    * upload to SPE successfully). Typically sourced from solution
    * `config.tenantId` in `main.tsx`.
@@ -332,25 +268,6 @@ function handoffFileToUploaded(file: File): IUploadedFile | null {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // CreateProjectWizard
 // ---------------------------------------------------------------------------
 
@@ -360,12 +277,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   dataService,
   uploadService: _uploadService,
   navigationService,
+  emailComposeHandlers,
   embedded,
   uiScale,
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
-  resolveUserBuDefaults,
   tenantId,
   initialFormValues,
   initialFileRefs,
@@ -441,6 +358,49 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
     }
   }, [open, seededFormState]);
 
+  // ── Secure parent (preview only) ────────────────────────────────────────
+  // A project under a secure matter is secure too: when the Matter chosen in "Associate To" is secure, the Secure
+  // toggle is turned on and locked. A non-secure matter, an account, no association or a failed read leaves it
+  // editable; the server still decides the create. Only the latest association's answer is applied.
+  const [parentSecure, setParentSecure] = React.useState(false);
+  const associationRequestRef = React.useRef(0);
+  const handleAssociationChange = React.useCallback(
+    (association: AssociationResult | null) => {
+      const request = ++associationRequestRef.current;
+      setParentSecure(false);
+      if (association?.entityType !== 'sprk_matter' || !association.recordId) return;
+      void (async () => {
+        try {
+          const matter = (await dataService.retrieveRecord(
+            'sprk_matter',
+            association.recordId,
+            '?$select=sprk_issecure'
+          )) as { sprk_issecure?: unknown } | null;
+          if (request === associationRequestRef.current) setParentSecure(matter?.sprk_issecure === true);
+          // eslint-disable-next-line no-restricted-syntax -- an unreadable parent leaves the secure toggle editable; this read only presets the UI and the server's mapping-source rule decides on create (task 022)
+        } catch {
+          // Unknown: leave the toggle editable (the server's rule still applies).
+        }
+      })();
+    },
+    [dataService]
+  );
+
+  // Task 022 fix round 4: the lock forces Secure on (CreateProjectStep); when a parent change releases it, Secure goes back
+  // to the value it had before the lock (off if it was never set). A choice made while unlocked is that value, so it is
+  // kept. Held here, not in the step: the step remounts with the wizard's values, and the parent changes on another step.
+  const secureBeforeLockRef = React.useRef<boolean | null>(null);
+  React.useEffect(() => {
+    if (parentSecure) {
+      if (secureBeforeLockRef.current === null) secureBeforeLockRef.current = formValuesRef.current.isSecure === true;
+      return;
+    }
+    if (secureBeforeLockRef.current === null) return;
+    const restored = secureBeforeLockRef.current;
+    secureBeforeLockRef.current = null;
+    setFormValues(prev => (prev.isSecure === restored ? prev : { ...prev, isSecure: restored }));
+  }, [parentSecure]);
+
   // ── Search callbacks ────────────────────────────────────────────────────
   const handleSearchContacts = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
@@ -464,7 +424,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   );
 
   // ── WebApi adapter for CreateRecordWizard ─────────────────────────────
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // ── Wizard config ───────────────────────────────────────────────────────
   const config: ICreateRecordWizardConfig = React.useMemo(
@@ -495,6 +455,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               navigationService,
               initialAssociation,
               lockAssociation,
+              onAssociationChange: handleAssociationChange,
             },
           }
         : {}),
@@ -513,6 +474,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             authenticatedFetch={authFetch}
             bffBaseUrl={bffBaseUrl}
             navigationService={navigationService}
+            parentSecure={parentSecure}
           />
         ),
       },
@@ -522,6 +484,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       searchUsers: handleSearchUsers,
       searchMatterTypes: handleSearchMatterTypes,
       searchPracticeAreas: handleSearchPracticeAreas,
+
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
+      // Send Email follow-on: the host's composer handlers (task 182, D-219).
+      emailComposeHandlers,
 
       getAssignWorkDefaults: () => ({
         // Projects don't have a matterTypeId; seed practice area from the project form
@@ -560,30 +528,20 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const currentFormValues = formValuesRef.current;
         const mergedFormValues: ICreateProjectFormState = { ...currentFormValues };
 
-        // 1. Resolve BU-derived cascade defaults (FR-WIZ-02 / G2 fix).
-        // Non-fatal: if resolution fails, we still create the project — the BFF
-        // backfill chain handles `sprk_containerid` / `sprk_searchindexname` server-side.
-        let cascadeDefaults: IUserBuCascadeDefaults | undefined;
-        if (resolveUserBuDefaults) {
-          try {
-            cascadeDefaults = await resolveUserBuDefaults();
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            console.warn('[CreateProjectWizard] BU cascade resolution failed (non-fatal):', message);
-            warnings.push(
-              `Could not resolve Business Unit defaults for container/index (${message}). ` +
-                'The project was still created — fields will be populated by server-side backfill.'
-            );
-          }
-        }
+        // 1. No BU-derived defaults are resolved (task 022, FR-16, FR-38/FR-40): the project's index and container
+        // columns are the server's, and the uploaded files are indexed without naming an index.
 
-        // 2. Create sprk_project record (with INV-5-safe BU cascade applied inside the service)
-        // Task 020 (spec FR-12): pass authFetch/bffBaseUrl + the AssociateToStep
-        // selection so ProjectService can drive the Field Mapping Framework
-        // engine (graceful no-op when the host omits either, there's no
-        // association, or no configured profile for the pair).
+        // 2. Create the sprk_project record through the BFF child-records route (task 022, FR-16): only the user's
+        // values travel; the server maps (fill-only), owns and numbers the project. The AssociateToStep selection is the
+        // explicit mapping source, and a secure request is created secure from creation (task 049 fix round 2). Without
+        // authFetch/bffBaseUrl the service refuses the create (it never falls back to Xrm.WebApi).
         const projectService = new ProjectService(dataService, authFetch, bffBaseUrl);
-        const result = await projectService.createProject(mergedFormValues, cascadeDefaults, context.association);
+        const result = await projectService.createProject(
+          mergedFormValues,
+          undefined,
+          context.association,
+          parentSecure
+        );
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create project');
         }
@@ -593,10 +551,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         warnings.push(...result.warnings);
 
         // 1a. Provision Secure Project infrastructure when the Secure Project toggle is enabled — FIRST, before any
-        //     child record or file (task 150). The server marks the project secure (sprk_issecure is field-secured;
-        //     this client never writes it), shares it to the creator (task 061; task 133 issues it BEFORE the move and
-        //     proves it after), assigns it to the Secure Record business unit's named owner team, then provisions its
-        //     own SPE container and records it. No business unit or account is created (BFF task 021).
+        //     child record or file (task 150). Since task 022 every secure-requested project is created secure from
+        //     creation (task 049 fix round 2: flagged, owned by the Secure Record business unit's named owner team and
+        //     shared to the creator in the create itself), so this call does only what is left — normally nothing
+        //     (`already_provisioned`, success), else the container the create could not finish. A failure keeps the
+        //     hold-back below. No business unit or account is created (BFF task 021).
         let provisioningWarning: string | undefined;
         let provisioningSucceeded = false;
         // Task 133: a failure the SAME caller can finish is rendered with its "Try securing again" action instead of
@@ -638,16 +597,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               provisioningWarning = provisionResult.errorMessage;
             }
           }
-        } else if (mergedFormValues.isSecure) {
-          // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
-          // authenticated fetch or a base URL. This branch used to fall through silently and then
-          // announce "Secure Project created!", which named a designation the record did not have.
-          // Same user-visible situation as an unconfigured environment, so it gets the same
-          // treatment: say what did not happen, in copy written for the person reading it.
-          // (Task 150: now literally true — the client no longer writes the flag, so the record is not marked secure.)
-          provisioningWarning =
-            'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
         }
+        // Task 022: "secure requested but no BFF to ask" cannot reach this point — `ProjectService.createProject` refuses
+        // the create without `authFetch`/`bffBaseUrl` (no Xrm.WebApi fallback), so the condition above only narrows types.
+        // Were it ever reached, `provisioningSucceeded` stays false: the hold-back below holds and the title is not
+        // "Secure Project created!".
 
         // Task 150 — THE ORDERING TRAP. The client no longer writes sprk_issecure, so a secure-requested project whose
         // provisioning stopped BEFORE the server marked it secure is an ordinary record: an upload or a child created
@@ -736,8 +690,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               description: context.followOn.createEventDescription,
               regardingRecordId: projectId,
               regardingRecordName: projectName,
-              assignedToId: '',
-              assignedToName: '',
+              assignedToId: context.followOn.createEventAssignedToId,
+              assignedToName: context.followOn.createEventAssignedToName,
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_project');
             if (eventResult.warnings.length > 0) warnings.push(...eventResult.warnings);
@@ -809,13 +763,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           }
         }
 
-        // 1e. Task 142 (owner Q5 + A3): a project created SECURE is synced only now, after provisioning, so the
-        //     Assigned-To rule sees the secure flag and suggests its people in Manage Access instead of granting them
-        //     before the record was secured. (A non-secure project was synced by ProjectService at create.) Task 150
-        //     moved provisioning to step 1a, first; this sync still runs after it.
-        if (mergedFormValues.isSecure) {
-          await syncAssignedAccess(authFetch, bffBaseUrl, 'project', projectId);
-        }
+        // 1e. No client access sync (task 022). The "Assigned *" pass is the server's, run by the create itself: on a
+        //     secure-from-creation project it runs once the record is secured, so the Assigned-To rule sees the secure
+        //     flag and suggests its people in Manage Access (task 142, owner A3); when the create could not finish the
+        //     securing, the assigned-access reconciliation job runs it (task 049 fix round 1). The client's
+        //     `/assigned-access/sync` call that stood here only repeated that pass.
 
         // 2. Upload files to SPE + create document records
         //
@@ -856,8 +808,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               }
 
               // Trigger RAG indexing per file (canonical sync OBO path via
-              // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal —
-              // file uploads already succeeded; indexing is best-effort.
+              // SdapApiClient.indexFile in services/sdap). Non-fatal —
+              // file uploads already succeeded; indexing is best-effort. No index is named (task 022, as task 021
+              // fix round 1): the server's FileIndexRequest has no searchIndexName, the index follows the content
+              // type (FR-40).
               const indexingWarnings = await entityService.indexUploadedFiles(
                 uploadResult.uploadedFiles,
                 tenantId ?? '',
@@ -866,8 +820,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                   entityId: projectId,
                   entityName: projectName,
                 },
-                docResult.createdDocumentIds,
-                cascadeDefaults?.searchIndexName
+                docResult.createdDocumentIds
               );
               if (indexingWarnings.length > 0) {
                 warnings.push(...indexingWarnings);
@@ -882,17 +835,19 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 3. Send email (if selected) — the sent message is recorded against the project, so it is held back too.
-        const wantsEmail = context.selectedActions.includes('send-email') && !!context.followOn.emailTo.trim();
+        const wantsEmail = context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0;
         if (secureBlocked && wantsEmail) skippedForSecure.push('the email');
         if (!secureBlocked && wantsEmail && authFetch && bffBaseUrl) {
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: context.followOn.emailTo,
-            subject: context.followOn.emailSubject,
-            body: context.followOn.emailBody,
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the project.
+          const emailResult = await sendComposedEmail(context.followOn.email, {
             associations: [{ entityType: 'sprk_project', entityId: projectId, entityName: projectName }],
+            authenticatedFetch: authFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (!secureBlocked && wantsEmail) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         // Surface a provisioning refusal as the designed state the service classified, VERBATIM.
@@ -997,12 +952,14 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       authFetch,
       bffBaseUrl,
       navigationService,
+      emailComposeHandlers,
       resolveSpeContainerId,
-      resolveUserBuDefaults,
       webApiAdapter,
       handoffFiles,
       initialAssociation,
       lockAssociation,
+      handleAssociationChange,
+      parentSecure,
     ]
   );
 

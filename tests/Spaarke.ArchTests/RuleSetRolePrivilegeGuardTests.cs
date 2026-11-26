@@ -13,7 +13,9 @@ namespace Spaarke.ArchTests;
 /// <item>"Spaarke Billing Administrator" holds exactly Read at Deep (EB-D-162) and Create, Write, Append and AppendTo at Basic on
 /// <c>sprk_ruleset</c>, <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c>, and nothing else beyond the platform defaults every Spaarke role
 /// export carries, plus Read on <c>sprk_procedure</c> at Deep (task 089e, owner 2026-11-04: the Procedure override removal and preview ask the
-/// caller's Read on that Procedure; the depth of the rule-set Read). No Delete, Assign or Share; nothing else on the Procedure tables (task
+/// caller's Read on that Procedure; the depth of the rule-set Read), plus Read on <c>sprk_procedureversion</c> and
+/// <c>sprk_procedureassignment</c> at Deep (task 084f, EB-D-220: the record-level Procedure routes ask the caller's Read on every row they
+/// expose). No Delete, Assign or Share; nothing else on the Procedure tables (task
 /// 121 adds those after uac-r2 task 191). Basic, not
 /// Global (uac-r2 review of task 120): the BFF asks for Create / Write only as markers at any depth (D-108) and writes these tables
 /// app-only (D-173); at Global a billing admin could create or edit any rule set or policy natively, past RuleSetService (ADR-002).</item>
@@ -39,13 +41,26 @@ public class RuleSetRolePrivilegeGuardTests
     /// </summary>
     private static readonly Dictionary<string, string> BillingAdminSet = new(StringComparer.Ordinal)
     {
-        ["prvReadsprk_ruleset"] = "Deep", ["prvReadsprk_Policy"] = "Deep", ["prvReadsprk_PolicyVersion"] = "Deep",
-        ["prvCreatesprk_ruleset"] = "Basic", ["prvWritesprk_ruleset"] = "Basic", ["prvAppendsprk_ruleset"] = "Basic", ["prvAppendTosprk_ruleset"] = "Basic",
-        ["prvCreatesprk_Policy"] = "Basic", ["prvWritesprk_Policy"] = "Basic", ["prvAppendsprk_Policy"] = "Basic", ["prvAppendTosprk_Policy"] = "Basic",
-        ["prvCreatesprk_PolicyVersion"] = "Basic", ["prvWritesprk_PolicyVersion"] = "Basic", ["prvAppendsprk_PolicyVersion"] = "Basic",
+        ["prvReadsprk_ruleset"] = "Deep",
+        ["prvReadsprk_Policy"] = "Deep",
+        ["prvReadsprk_PolicyVersion"] = "Deep",
+        ["prvCreatesprk_ruleset"] = "Basic",
+        ["prvWritesprk_ruleset"] = "Basic",
+        ["prvAppendsprk_ruleset"] = "Basic",
+        ["prvAppendTosprk_ruleset"] = "Basic",
+        ["prvCreatesprk_Policy"] = "Basic",
+        ["prvWritesprk_Policy"] = "Basic",
+        ["prvAppendsprk_Policy"] = "Basic",
+        ["prvAppendTosprk_Policy"] = "Basic",
+        ["prvCreatesprk_PolicyVersion"] = "Basic",
+        ["prvWritesprk_PolicyVersion"] = "Basic",
+        ["prvAppendsprk_PolicyVersion"] = "Basic",
         ["prvAppendTosprk_PolicyVersion"] = "Basic",
         // Task 089e (owner 2026-11-04, "Add to role file + apply on dev"): Read on the Procedure, at the rule-set Read's depth.
         ["prvReadsprk_procedure"] = "Deep",
+        // Task 084f (EB-D-220, owner 2026-11-12; uac-r2 agreed): Read on the Procedure Version and the Procedure Assignment, at Deep.
+        ["prvReadsprk_procedureversion"] = "Deep",
+        ["prvReadsprk_procedureassignment"] = "Deep",
     };
 
     /// <summary>
@@ -82,7 +97,7 @@ public class RuleSetRolePrivilegeGuardTests
         Assert.True(missing.Count == 0 && extra.Count == 0,
             $"{role.RelativePath} must hold exactly Read at Deep (EB-D-162) and Create, Write, Append and AppendTo at Basic on sprk_ruleset, sprk_Policy "
             + "and sprk_PolicyVersion (live name casing; uac-r2: Global markers would let a billing admin write past RuleSetService), plus only "
-            + "the platform defaults and Read at Deep on sprk_procedure (089e); no Delete, Assign or Share, and nothing else on the Procedure "
+            + "the platform defaults and Read at Deep on sprk_procedure (089e), sprk_procedureversion and sprk_procedureassignment (084f); no Delete, Assign or Share, and nothing else on the Procedure "
             + "tables until task 121.\n  missing or at another "
             + "depth: " + string.Join(", ", missing)
             + "\n  not allowed: " + string.Join(", ", extra));
@@ -132,6 +147,19 @@ public class RuleSetRolePrivilegeGuardTests
         Assert.Equal("prvReadsprk_procedure at Deep (held at Global)", Assert.Single(globalProcedureRead.Missing));
         var procedureWrite = ExactSetFindings(BillingAdminRole(exact.Append(("prvWritesprk_procedure", "Basic")).ToList()));
         Assert.Equal("prvWritesprk_procedure (Basic)", Assert.Single(procedureWrite.Extra));
+
+        // Task 084f: the Procedure Version and Procedure Assignment Reads are part of the set too: missing, or at Global, they are reported;
+        // any other privilege on them is an extra.
+        foreach (var table in new[] { "sprk_procedureversion", "sprk_procedureassignment" })
+        {
+            var read = "prvRead" + table;
+            var missingRead = ExactSetFindings(BillingAdminRole(exact.Where(p => p.Item1 != read).ToList()));
+            Assert.Equal(read + " at Deep", Assert.Single(missingRead.Missing));
+            var globalRead = ExactSetFindings(BillingAdminRole(exact.Select(p => p.Item1 == read ? (p.Item1, "Global") : p).ToList()));
+            Assert.Equal(read + " at Deep (held at Global)", Assert.Single(globalRead.Missing));
+            var write = ExactSetFindings(BillingAdminRole(exact.Append(("prvWrite" + table, "Basic")).ToList()));
+            Assert.Equal("prvWrite" + table + " (Basic)", Assert.Single(write.Extra));
+        }
     }
 
     [Fact(DisplayName = "120 must-not-fire: the holder check skips the Billing Administrator role by name")]

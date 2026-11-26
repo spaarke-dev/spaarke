@@ -27,7 +27,9 @@ export type {
   // because the host file had been reviewed and never compiled — the first production build of
   // v1.0.31 failed on TS2305 for exactly these two names.
   IUserPick,
-  IUserPickOptions,
+  // Task 193: the one "Add person" pick and what the modal asks of it (they replaced IUserPickOptions).
+  IPersonPick,
+  IPersonPickOptions,
   ISecureOwnerInfo,
   ExternalGrantRootType,
   IAccessLevelOption,
@@ -50,3 +52,15 @@ export {
 } from './followsParent';
 export type { AccessValueOrigin } from './followsParent';
 export { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
+// Task 196: the "Email members" recipients (role contacts + active grants + user shares, No Access applied).
+export {
+  resolveEmailMembersRecipients,
+  EMAIL_MEMBERS_EMPTY_MESSAGE,
+  EMAIL_MEMBERS_FAILED_MESSAGE,
+} from './emailMembers';
+export type {
+  EmailMembersResolution,
+  EmailReader,
+  IEmailMembersSources,
+  IEmailMembersRootSources,
+} from './emailMembers';

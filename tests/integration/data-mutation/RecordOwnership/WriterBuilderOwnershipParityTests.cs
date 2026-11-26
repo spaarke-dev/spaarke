@@ -4,8 +4,8 @@
 //   - Justification: UAC task 194b fix round, slice 3 — the reconciler's question about an EXISTING analysis or email document
 //     (RecordOwnershipContext.ForExistingRowAsync) is the one its WRITER asked: pinned against the writers' OWN builders
 //     (AppOnlyAnalysisService.OwnershipOfNewAnalysis, AnalysisEndpoints.OwnershipOfPromotedAnalysis,
-//     EmailAttachmentProcessor.OwnershipOfAttachmentDocument, IncomingCommunicationProcessor.ArchivedEmlDocument and
-//     IncomingAssociationResolver.OwnershipContextOf), never a copy of them, in either attribute order.
+//     IncomingCommunicationProcessor.ArchivedEmlDocument and IncomingAssociationResolver.OwnershipContextOf), never a
+//     copy of them, in either attribute order.
 //
 // Doubles are module boundaries only (ADR-038 §4): the REAL resolver and the REAL CoreAncestorResolver over task 148's world.
 
@@ -19,7 +19,6 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
-using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -64,7 +63,7 @@ public class WriterBuilderOwnershipParityTests
 
     private async Task<ExistingRowOwnership> QuestionAsync(Entity row) =>
         await RecordOwnershipContext.ForExistingRowAsync(
-            row, new ExistingRowReads(Entities, CoreAncestors, new AssignedAccessTestDoubles.FakeAssignedAccessStore()),
+            row, new ExistingRowReads(Entities, CoreAncestors, AssignedAccessTestDoubles.Representation(new AssignedAccessTestDoubles.FakeAssignedAccessStore())),
             CancellationToken.None);
 
     private async Task<IReadOnlyList<RecordOwnershipParent>> ExistingParentsAsync(Entity row)
@@ -131,22 +130,6 @@ public class WriterBuilderOwnershipParityTests
     }
 
     // ── The email document writers ────────────────────────────────────────────────────────────────────────────────
-
-    [Theory(DisplayName = "194b parity: an attachment document asks about its parent document first, then the associated record, as EmailAttachmentProcessor's builder does — whichever spelling the request used")]
-    [InlineData("matter")]
-    [InlineData("sprk_matter")]
-    public async Task AnAttachmentDocument_IsAskedAsEmailAttachmentProcessorAsks(string associatedType)
-    {
-        var (parentDocument, matter) = (Guid.NewGuid(), Guid.NewGuid());
-        var writer = EmailAttachmentProcessor.OwnershipOfAttachmentDocument(parentDocument, associatedType, matter);
-        // The processor's update writes ParentDocumentLookup and, through DocumentAssociationMap, the matter's lookup.
-        var (row, reversed) = RowBothWays("sprk_document",
-            ("sprk_matter", Ref("sprk_matter", matter)), ("sprk_parentdocument", Ref("sprk_document", parentDocument)));
-
-        writer.Parents.Should().HaveElementAt(0, new RecordOwnershipParent("sprk_document", parentDocument));
-        (await ExistingParentsAsync(row)).Should().Equal(writer.Parents);
-        (await ExistingParentsAsync(reversed)).Should().Equal(writer.Parents);
-    }
 
     [Theory(DisplayName = "194b parity: an .eml document built by IncomingCommunicationProcessor is owned as its communication is, and the reconciler's question about it gives the same owner — in either attribute order")]
     [InlineData(true)]  // the communication kept its user owner (run-as-user, client-created, pre-146): looked through (I-6)
@@ -315,6 +298,9 @@ public class WriterBuilderOwnershipParityTests
     {
         var world = new CreateParityWorld();
         world.RecordThreadUnder(world.SecureMatter);
+        // fm task 054b: a message's thread lookup is written only by the BFF's typed writers, so the create carries it as a
+        // server-set lookup (a system create naming it otherwise is refused at step 2).
+        world.ServerSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_communicationthread" };
 
         var (outcome, written) = await world.CreateAsync("sprk_communication",
             ("sprk_regardingmatter", "sprk_matter", world.MatterInY),
@@ -424,6 +410,9 @@ public class WriterBuilderOwnershipParityTests
                     [RecordThreadFiling.ThreadTypeColumn] = new OptionSetValue(100000000),
                 });
 
+        /// <summary>The lookups the server set itself (the request's <c>ServerSetLookupColumns</c>); none unless a test sets them.</summary>
+        public IReadOnlySet<string>? ServerSet { get; set; }
+
         /// <summary>Creates a <paramref name="table"/> row naming <paramref name="lookups"/>, as the system principal; the written row (null when refused).</summary>
         public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsync(
             string table, params (string Column, string Target, Guid Id)[] lookups) =>
@@ -458,7 +447,8 @@ public class WriterBuilderOwnershipParityTests
                     Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities())
                 .CreateAsync(
                     new RecordCreationRequest(
-                        table, new RecordCreationPayload.Mapped(item)),
+                        table, new RecordCreationPayload.Mapped(item))
+                    { ServerSetLookupColumns = ServerSet },
                     principal, CancellationToken.None);
             var written = outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null;
 

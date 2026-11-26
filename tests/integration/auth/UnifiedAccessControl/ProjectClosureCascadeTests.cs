@@ -804,6 +804,68 @@ public class ProjectClosureCascadeTests
         confirmations.Should().Equal(true);
     }
 
+    /// <summary>
+    /// Fix round 3e: makes the revoked organization's membership read return one row that did not carry the contact column (a
+    /// column the read did not return, not an explicit null) or, with <paramref name="explicitNull"/>, one that names no contact.
+    /// </summary>
+    private static void ArrangeMembershipRow(Mock<DataverseWebApiClient> client, bool explicitNull) =>
+        client.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(
+                ExternalOrganizationMembership.EntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalOrganizationMembership.ContactOrganizationRow>
+            {
+                System.Text.Json.JsonSerializer.Deserialize<ExternalOrganizationMembership.ContactOrganizationRow>(
+                    explicitNull ? "{\"_sprk_contact_value\":null}" : "{}",
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!,
+            });
+
+    /// <summary>
+    /// Fix round 3e: a membership row of a revoked organization whose contact column was not returned names a member who cannot
+    /// be resolved. It is counted with the other grantees that could not be enumerated (<c>unresolved</c>), so the closure goes to
+    /// the container-wide confirmation and, failing that, reports container_not_cleared (not complete, retried). Must fire.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenAMembershipRowDidNotCarryTheContactColumn_ReportsContainerNotCleared()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeMembershipRow(client, explicitNull: false);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var confirmations = new List<bool>();
+        var spe = SpeAnswering(_ => Removed, calls, confirmations: confirmations);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        Problem(result).ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason, "an unresolved member is not \"no members\"");
+        calls.Should().ContainSingle().Which.Emails.Should().BeEmpty();
+        confirmations.Should().Equal(true);
+    }
+
+    /// <summary>Fix round 3e, must not fire: a row that names no contact (an explicit null) is not unresolved; the closure completes.</summary>
+    [Fact]
+    public async Task CloseProject_SecureProject_WhenAMembershipRowNamesNoContact_IsNotUnresolved()
+    {
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+        ArrangeMembershipRow(client, explicitNull: true);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var confirmations = new List<bool>();
+        var spe = SpeAnswering(_ => Removed, calls, confirmations: confirmations);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        result.Should().NotBeOfType<ProblemHttpResult>("an explicit null names no member, so there is nothing unresolved");
+    }
+
     /// <summary>Makes every revoked organization larger than one closure may sweep.</summary>
     private static void ArrangeOversizedOrganization(Mock<DataverseWebApiClient> client) =>
         client.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(

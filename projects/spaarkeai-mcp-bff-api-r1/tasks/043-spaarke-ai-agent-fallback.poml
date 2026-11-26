@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Spaarke AI agent fallback on MCP (if T1 fails)</title>
+    <phase>D Registration, deploy and live E2E</phase>
+    <gate>Conditional: built only if notes/phase0-results.md records T1 = no widget in Copilot Chat through the connector; otherwise cancelled by 003</gate>
+    <status>cancelled</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies manifest and package files with explicit constraints in the deployment phase; no .cs/.ts code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Package rebuild on documented schemas (DA v1.9, plugin v2.4, manifest 1.30) from the existing Spaarke AI agent</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Owner-run deployment of an existing tenant app; runs alone</parallel-reason>
+    <deps>003, 041</deps>
+    <tags>config, deploy, e2e-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Only if T1 failed: rebuild the existing 'Spaarke AI' declarative agent (src/solutions/CopilotAgent/) on DA v1.9, plugin v2.4 and app manifest 1.30 with one MCP runtime action pointing at /mcp/legal-operations, remove its OpenAPI action, and prove @Spaarke AI renders the widget and resolves a Work Item in Copilot Chat.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Microsoft 365 Copilot declarative agents and MCP runtime actions.</role>
+  <goal>The Spaarke AI package has exactly one MCP action and no OpenAPI action; deployed to the dev tenant by the owner, @Spaarke AI in Chat renders the widget and resolves a Work Item (record id captured).</goal>
+
+  <context>
+    <background>Spec FR-17; design §5.2 and B-9: the April surface stays except the OpenAPI action, which must go if this fallback is built because the two would compete for prompts. O-6: start from the existing 'Spaarke AI' agent. Risk R1.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/CopilotAgent/declarativeAgent.json (→ v1.9; one MCP runtime action)</file>
+      <file role="modify">src/solutions/CopilotAgent/appPackage/manifest.json (→ 1.30)</file>
+      <file role="modify">src/solutions/CopilotAgent/spaarke-api-plugin.json (→ plugin v2.4 with a RemoteMCPServer runtime)</file>
+      <file role="modify">src/solutions/CopilotAgent/spaarke-bff-openapi.yaml (removed)</file>
+      <file role="canonical-reference">knowledge/declarative-agents (DA manifests incl. declarative-agent-foodbank-mcp)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md (T1)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">T1 result decides whether this task runs</dependency>
+      <dependency task="041" status="pending">BFF with /mcp/legal-operations on dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run only if notes/phase0-results.md records T1 as 'no widget in Chat through the connector'; if T1 passed, this task is cancelled (status cancelled, TASK-INDEX 🚫 [cancelled]) and nothing here is built.</constraint>
+    <constraint source="project">The rebuilt package keeps the agent name 'Spaarke AI' and has exactly one runtime action (MCP, /mcp/legal-operations); the OpenAPI action and its spec file are removed; /api/agent/* and the April BFF code stay (O-15, #2575).</constraint>
+    <constraint source="ADR-028">The MCP action uses the A10 OAuth registration from 002, never Entra SSO; no secret or tenant id is written to any package file.</constraint>
+    <constraint source="project">The owner deploys and approves the package in the dev tenant; this task prepares and verifies.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/declarative-agent/SKILL.md</file>
+      <file>knowledge/declarative-agents</file>
+      <file>knowledge/m365-copilot</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read T1 in notes/phase0-results.md; if T1 passed, set this task to cancelled and stop.</step>
+    <step order="2">Upgrade declarativeAgent.json to v1.9, the plugin to v2.4 with one RemoteMCPServer runtime at {bffBaseUrl}/mcp/legal-operations using the A10 OAuth reference, and the manifest to 1.30.</step>
+    <step order="3">Remove the OpenAPI runtime and spaarke-bff-openapi.yaml; validate the package.</step>
+    <step order="4">Hand the package to the owner for upload and approval in the dev tenant.</step>
+    <step order="5">With a licensed non-admin user, run @Spaarke AI in Chat: the widget renders and one Work Item is resolved; capture the Decision Record id in notes/fr17-agent-fallback.md.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If T1's result is missing or ambiguous, STOP and ask the owner whether to build.</trigger>
+    <trigger>If the agent cannot reference the MCP server through the A10 registration, STOP and escalate.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="@Spaarke AI renders the widget in Chat">
+      <url>https://m365.cloud.microsoft/chat</url>
+      <steps>
+        <step>Sign in as the licensed non-admin test user</step>
+        <step>Type @Spaarke AI what decisions are waiting on me</step>
+        <step>Verify the Decide lane widget renders</step>
+        <step>Resolve one Work Item through the wizard</step>
+        <step>Check the browser console for errors from the widget frame</step>
+      </steps>
+      <expected>The widget renders and the Decision Record is written (id captured)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host (Cowork or the local MCP Apps host) to dark theme</step>
+        <step>Verify backgrounds adapt (no white surface in dark mode) and text adapts (no black text in dark mode)</step>
+        <step>Verify icons use currentColor</step>
+        <step>Switch back to light theme and verify the widget follows without reload</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens driven by host context (ADR-021); nothing is stored</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">Run shell commands (grep, wc, git diff)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/CopilotAgent/</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/fr17-agent-fallback.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">If T1 passed: this task's status is cancelled, its TASK-INDEX cell shows 🚫 [cancelled], and no file under src/solutions/CopilotAgent/ changed.</criterion>
+    <criterion testable="true">If built: the package validates with DA v1.9, plugin v2.4 and manifest 1.30, and has exactly one runtime action (MCP) and no OpenAPI action or spec file.</criterion>
+    <criterion testable="true">If built: @Spaarke AI in Copilot Chat renders the widget and resolves one Work Item for a licensed non-admin user; the Decision Record id is recorded.</criterion>
+    <criterion testable="true">Negative: no secret or tenant id appears in any package file (grep evidence).</criterion>
+  </acceptance-criteria>
+
+  <notes>If built, 051 updates the declarative-agent skill to these schemas. Re-check T1 after Ignite (17–20 Nov 2026) before building if T1 failed before Ignite.
+
+Cancelled 2026-11-12 by task 003 (T1 gate): the spike widget rendered inline in Copilot Chat (web) through the "Spaarke MCP" federated connector, with an app-initiated callServerTool round trip (evidence: notes/phase0-results.md, T1 Chat row). FR-17 builds this fallback only if Chat cannot render the widget. If a post-Ignite re-check of T1 (17–20 Nov 2026) fails, reopen this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -46,7 +46,8 @@ export interface DecisionParameter {
   options?: DecisionOption[] | null;
   optionsSource?: string | null;
   /** Task 167 (D-193): the server's starting value (a Choice's option value), shown as a prefilled default and never a choice. Task 168
-   * (D-194): a Boolean's fixed default ("true": Assign Task's Send email notification starts ticked). */
+   * (D-194): a Boolean's fixed default ("true": Assign Task's Send email notification starts ticked). Task 192 (D-224): a Text or
+   * TextArea's starting value (the budget inquiry's standard Subject and Message); it takes the place of the client's generic template. */
   defaultValue?: string | null;
   /** Task 167 (D-193): the code of a Date parameter of the same step this one must not be earlier than (End date after Start date). */
   notBefore?: string | null;
@@ -107,6 +108,22 @@ export interface DecisionPlan {
   dismissalReasons: DismissalReason[];
   /** The rule body in words ("How this was determined"); null when the body could not be described. */
   ruleDescription?: { clauses: RuleClauseDescription[] } | null;
+  /**
+   * Task 191 fix round 1 (criterion 134): the caller's unfinished review of this item (an attempt that failed after writes
+   * landed). The wizard resumes it: the review is posted again unchanged with `retry`, never as a new review id.
+   */
+  unfinished?: DecisionUnfinishedReview | null;
+}
+
+/** Task 191 fix round 1: an unfinished review as the plan read returns it. */
+export interface DecisionUnfinishedReview {
+  reviewId: string;
+  /** Task 191 fix round 2: the item the review was posted to; it is finished there, also when opened from an "also resolve" item. */
+  signalId: string;
+  /** The review exactly as it was posted (no `retry`, no `sendChoice`). */
+  review: DecisionReview;
+  /** Its stored failure (replayed): the steps, what landed, whether it can resume and whether a send choice is needed. */
+  failure: DecisionCommitFailure;
 }
 
 /** Task 034: the (policy, core record) dismissal count the dismissal step shows. */
@@ -158,7 +175,15 @@ export interface DecisionReview {
   because?: string;
   /** Resume a review whose first attempt failed before its record. */
   retry?: boolean;
+  /**
+   * Task 191 (D-223): the person's answer when the earlier attempt's inquiry email MAY have been sent (`sendChoiceRequired`):
+   * send it again, or record the decision without sending. Sent only with `retry` on that review; not part of its content.
+   */
+  sendChoice?: DecisionSendChoice;
 }
+
+/** Task 191 (D-223): the two answers the item offers for an inquiry email that may have been sent. */
+export type DecisionSendChoice = 'send-again' | 'record-without-sending';
 
 export interface DecisionCommitRef {
   entity: string;
@@ -169,7 +194,7 @@ export interface DecisionCommitStep {
   key: string;
   code: string;
   phase: number;
-  /** `Done`, `Refused` or `Failed`. */
+  /** `Done`, `Refused` or `Failed`; `NotSentByChoice` for an inquiry recorded without sending (task 191). */
   status: string;
   written: DecisionCommitRef[];
   possiblyWritten: DecisionCommitRef[];
@@ -219,6 +244,11 @@ export interface DecisionCommitFailure {
   sentButNotRecorded: boolean;
   /** A failed first attempt that `retry: true` may resume. */
   resumable: boolean;
+  /**
+   * Task 191 (D-223): the inquiry email may have been sent, so the attempt resumes only with the person's `sendChoice`; a retry
+   * without one is answered with this failure again and does nothing.
+   */
+  sendChoiceRequired?: boolean;
   replayed: boolean;
 }
 
@@ -322,6 +352,20 @@ export interface DecisionWizardItem {
   otherOpenItems: WorklistItem[];
   /** Present when the item is already closed; absent while it is open. */
   resolution?: DecisionResolution | null;
+  /**
+   * Optional seam: the host's `evidence` holds only the first lines of what the item stores (the MCP plan tool bounds a row for its
+   * result size). Present: What was found says "Showing N of M" under the lines instead of passing them off as all of them. Absent
+   * (the Console, which holds every line): nothing is said, as before.
+   */
+  evidenceTruncation?: DecisionEvidenceTruncation;
+}
+
+/** How much of an item's evidence the host could bring. */
+export interface DecisionEvidenceTruncation {
+  /** How many lines the item stores. Absent or not above what is shown: the note says some are not shown, without a count. */
+  total?: number;
+  /** Where the rest can be read (the host opens the Console). Absent: the note has no link. */
+  openAll?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,9 +383,25 @@ export interface DecisionLookupRequest {
   query: string;
   /** The item's core record, for scoping (the matter's budgets). Null for a Not filed item. */
   core: { recordType: string; recordId: string } | null;
+  /**
+   * The Signal the wizard is deciding. Optional seam: a host whose search is scoped by the Work Item rather than by the core record
+   * (the MCP widget's `spaarke_search_decision_lookup` takes a signal id) reads it; the Console's search ignores it.
+   */
+  signalId?: string;
 }
 
-export type DecisionLookupSearch = (request: DecisionLookupRequest) => Promise<ILookupItem[]>;
+export type DecisionLookupSearch = ((request: DecisionLookupRequest) => Promise<ILookupItem[]>) & {
+  /**
+   * Optional seam: the fewest characters worth searching. Below it the field asks nothing and says "Type at least N letters" instead of
+   * "No results found". Absent: any text is searched, as before (the Console).
+   */
+  minChars?: number;
+  /**
+   * Optional seam: what the field says when this search REJECTS (throttled, offline), instead of "No results found". Absent: a failed
+   * search reads as no results, as before (the Console).
+   */
+  failureText?: string;
+};
 
 /**
  * What the host needs to open the platform's side-pane lookup for one Person / Lookup field (D-182). The host builds the row

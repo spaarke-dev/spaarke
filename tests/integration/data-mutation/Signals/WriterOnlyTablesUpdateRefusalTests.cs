@@ -35,7 +35,7 @@ public class WriterOnlyTablesUpdateRefusalTests
     // Strict: any call (a read or a write) the refusal should have prevented fails the test with the call named.
     private readonly Mock<IFieldMappingDataverseService> _writes = new(MockBehavior.Strict);
 
-    public static TheoryData<string> WriterOnlyTables => new() { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision" };
+    public static TheoryData<string> WriterOnlyTables => new() { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection" };
 
     // ── The Update Record node ───────────────────────────────────────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ public class WriterOnlyTablesUpdateRefusalTests
     public static TheoryData<string, string> EveryTableAndSource()
     {
         var data = new TheoryData<string, string>();
-        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision" })
+        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection" })
         {
             data.Add(table, "configuration-app-only");
             data.Add(table, "configuration-as-person");
@@ -116,7 +116,7 @@ public class WriterOnlyTablesUpdateRefusalTests
     public static TheoryData<string, ConcurrencyMode, bool> EveryTableModeAndIdentity()
     {
         var data = new TheoryData<string, ConcurrencyMode, bool>();
-        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision" })
+        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_invoicecorrection" })
         {
             foreach (var mode in new[] { ConcurrencyMode.None, ConcurrencyMode.Optimistic })
             {
@@ -175,6 +175,7 @@ public class WriterOnlyTablesUpdateRefusalTests
         var world = World(table);
 
         var (updated, failed, skipped, errors, _) = await Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper,
             [new Sprk.Bff.Api.Models.FieldMapping.FieldMappingRuleDto
             {

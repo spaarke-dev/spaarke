@@ -1,6 +1,7 @@
 /**
  * Rule set API client (ebilling-r1 task 077, FR-28): every call the Rule Review page makes to the BFF routes under
- * `/api/finance/rulesets` (task 076) and the drafting trigger (task 075), through `authenticatedFetch` (ADR-028).
+ * `/api/finance/rulesets` (task 076), through `authenticatedFetch` (ADR-028). The page does not create or draft a rule set: a rule
+ * set is created with its Procedure (081, 089) and drafted from a Procedure Version's file (116).
  *
  * The page never writes Dataverse policy rows itself (ADR-002, DATA-ACCESS-DECISION-CRITERIA): authorization (admin only,
  * D-76), validation, the domain filter and the version rules all live in the server. This module only carries the calls and
@@ -18,7 +19,6 @@ import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from 
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RuleSetScope = 'ClientDefault' | 'Firm';
-export type RuleSetSourceKind = 'Guideline' | 'RateCard' | 'InternalProcedure';
 export type ProposalState = 'Proposed' | 'Accepted' | 'Rejected';
 export type Consequence = 'Reject' | 'Flag' | 'SuggestAdjustment';
 
@@ -73,30 +73,18 @@ export interface ProposalView {
    * firm, and the page only ever shows it on the draft detail.
    */
   rejectionReason: string | null;
+  /**
+   * The text a firm sees when this rule rejects its invoice (130e-1, DEF-060), as stored on the working version; null when there is none.
+   * Never carries a rule name (the server refuses one). A Duplicate rule never has one.
+   */
+  firmDescription: string | null;
 }
 
 export interface RuleSetDetail {
   ruleSet: RuleSetSummary;
-  sourceDocumentId: string | null;
   /** Null until a drafting run has finished; `[]` for a run that left nothing out; a raw string if the stored list was not JSON. */
   notConverted: NotConvertedClause[] | string | null;
   proposals: ProposalView[];
-}
-
-export interface RuleSetCreated {
-  ruleSetId: string;
-  sourceDocumentId: string;
-  status: string;
-  scope: string;
-  firmId: string | null;
-  sourceKind: string;
-  visibleToFirms: boolean;
-}
-
-export interface RuleDraftAccepted {
-  ruleSetId: string;
-  jobId: string;
-  statusUrl: string;
 }
 
 export interface ProposalEdited {
@@ -130,15 +118,11 @@ export interface RuleEdit {
   consequence?: Consequence;
   clauseReference?: string;
   clauseLocation?: string;
-}
-
-export interface CreateRuleSetInput {
-  name: string;
-  sourceKind: RuleSetSourceKind;
-  scope: RuleSetScope;
-  firmId?: string | null;
-  file: File | Blob;
-  fileName: string;
+  /**
+   * The firm description (130e-2). Sent ONLY when the admin changed it: the new text as typed (the server trims it), or `""` to clear it.
+   * Left out when untouched, so it is never null by accident (`firmDescriptionToSend`).
+   */
+  firmDescription?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,7 +160,6 @@ export const MAX_REJECTION_REASON = 2000;
 
 export const CODE_CONCURRENT_EDIT = 'ruleset.concurrent_edit';
 export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
-export const CODE_ALREADY_DRAFTED = 'ruleset.already_drafted';
 
 export const isForbidden = (f: ApiFailure): boolean => f.status === 403;
 
@@ -254,8 +237,6 @@ export function describeFailure(f: ApiFailure): string {
 export interface RuleSetApi {
   list(): Promise<ApiResult<RuleSetSummary[]>>;
   get(ruleSetId: string): Promise<ApiResult<RuleSetDetail>>;
-  create(input: CreateRuleSetInput): Promise<ApiResult<RuleSetCreated>>;
-  draft(ruleSetId: string): Promise<ApiResult<RuleDraftAccepted>>;
   edit(ruleSetId: string, policyId: string, edit: RuleEdit): Promise<ApiResult<ProposalEdited>>;
   /** `rowVersion` is the token the page was shown for this rule ({@link ProposalView.rowVersion}). */
   accept(ruleSetId: string, policyId: string, rowVersion: string): Promise<ApiResult<ProposalView>>;
@@ -290,17 +271,6 @@ export function createRuleSetApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: stri
   return {
     list: () => call<RuleSetSummary[]>(base),
     get: id => call<RuleSetDetail>(`${base}/${enc(id)}`),
-
-    create(input) {
-      // Metadata in the query string, the file in the multipart body (076 decision 9).
-      const query = new URLSearchParams({ name: input.name, sourceKind: input.sourceKind, scope: input.scope });
-      if (input.scope === 'Firm' && input.firmId) query.set('firmId', input.firmId);
-      const form = new FormData();
-      form.append('file', input.file, input.fileName);
-      return call<RuleSetCreated>(`${base}?${query.toString()}`, { method: 'POST', body: form });
-    },
-
-    draft: id => call<RuleDraftAccepted>(`${base}/${enc(id)}/draft`, { method: 'POST' }),
 
     edit: (id, policyId, edit) =>
       call<ProposalEdited>(`${base}/${enc(id)}/proposals/${enc(policyId)}`, json('PATCH', edit)),

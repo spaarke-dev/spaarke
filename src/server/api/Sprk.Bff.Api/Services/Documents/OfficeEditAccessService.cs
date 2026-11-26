@@ -14,7 +14,8 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// <param name="CanEdit">The caller holds (or was just granted) an editing role, or is a standing writer of this
 /// business-unit container (an enabled internal person whose own business unit maps to it).</param>
 /// <param name="Role">"standing" (a standing writer of this business-unit container), "member" (already held an editing
-/// role), "writer-jit" (granted now),
+/// role, or an item permission of ours that still stands), "writer-jit" (granted now), "item-writer-jit" (a flagged-external
+/// caller granted a write permission on this ONE file now — task 191g),
 /// "member-read-only" (already holds a role that cannot edit — e.g. a hand-granted reader), "none" (secure container, no
 /// Write on its record, or an external user on a Restricted record), or "unknown" (the container could not be
 /// classified).</param>
@@ -37,6 +38,14 @@ public sealed record OfficeEditAccess(bool CanEdit, string Role);
 /// <c>SpeContainerMembershipSyncJob</c>; nothing is granted on an edit-open.</para>
 /// <para><b>Removal.</b> <c>SpeContainerMembershipSyncJob</c> removes the grant once Dataverse positively answers that
 /// the holder no longer has Write on the record (or the holder is disabled).</para>
+/// <para><b>A flagged-external caller never gets a container role</b> (uac-r2 task 191g, owner Q2 = b, design §3.12). A
+/// caller whose stored <c>sprk_isexternal</c> is true is routed to <see cref="PrepareFlaggedAsync"/>: with Write on the
+/// secure record, the record not Restricted (effective through filing) and the document externally visible
+/// (<see cref="ExternalVisibility"/>, through 191h's public seam <see cref="AppOnlyExternalVisibility"/>), the caller is granted a WRITE
+/// permission on that ONE file (<see cref="SpeContainerMembershipService.GrantMarkedItemWriterAsync"/>), read back and
+/// recorded; otherwise view only. The item grant is off unless <see cref="FlaggedOfficeEditEnabledConfigKey"/> is true;
+/// off, a flagged caller gets view only (never a container role either way). A caller whose flag cannot be read gets no
+/// grant at all (fail closed).</para>
 /// <para><b>Why a class of its own</b> (CLAUDE.md §11): the decision combines the container classification
 /// (<see cref="RecordContainerResolver"/>), the caller's Dataverse rights (<see cref="CallerRecordAccessProbe"/>) and
 /// the grant primitive (<see cref="SpeContainerMembershipService"/>), and two routes need exactly the same decision.
@@ -44,10 +53,23 @@ public sealed record OfficeEditAccess(bool CanEdit, string Role);
 /// </remarks>
 public class OfficeEditAccessService
 {
+    /// <summary>
+    /// Task 191g: the item-level Office edit grant for flagged-external callers, and the sync's removal of flagged users'
+    /// container roles on secure containers. Absent, empty or unparseable = off. Off, a flagged caller gets view only.
+    /// Turning it on is design §3.19 step 8 (its own owner go).
+    /// </summary>
+    internal const string FlaggedOfficeEditEnabledConfigKey = "ExternalAccess:FlaggedOfficeEdit:Enabled";
+
+    /// <summary>Whether <see cref="FlaggedOfficeEditEnabledConfigKey"/> parses to <c>true</c> in <paramref name="configuration"/>.</summary>
+    internal static bool FlaggedOfficeEditEnabled(IConfiguration configuration)
+        => bool.TryParse(configuration[FlaggedOfficeEditEnabledConfigKey]?.Trim(), out var on) && on;
+
     private readonly RecordContainerResolver _containerResolver;
     private readonly CallerRecordAccessProbe _probe;
     private readonly SpeContainerMembershipService _membership;
     private readonly IGenericEntityService _entities;
+    private readonly AppOnlyExternalVisibility _visibility;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<OfficeEditAccessService> _logger;
 
     public OfficeEditAccessService(
@@ -55,12 +77,16 @@ public class OfficeEditAccessService
         CallerRecordAccessProbe probe,
         SpeContainerMembershipService membership,
         IGenericEntityService entities,
+        AppOnlyExternalVisibility visibility,
+        IConfiguration configuration,
         ILogger<OfficeEditAccessService> logger)
     {
         _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _membership = membership ?? throw new ArgumentNullException(nameof(membership));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -73,8 +99,11 @@ public class OfficeEditAccessService
     /// <param name="describeSharedContainer">When <see langword="false"/> (the caller only needs the grant side — e.g.
     /// <c>/open-links</c>, which returns no edit verdict), a SHARED container is answered <c>not-evaluated</c> without
     /// reading anything: nothing is ever granted there, so the reads would buy nothing.</param>
+    /// <param name="itemId">The document's drive item (<c>sprk_graphitemid</c>, already pointer-checked by the route): the one
+    /// file a flagged-external caller may be granted (task 191g). Not used for any other caller.</param>
     public virtual async Task<OfficeEditAccess> PrepareAsync(
-        Guid documentId, string driveId, HttpContext httpContext, CancellationToken ct = default, bool describeSharedContainer = true)
+        Guid documentId, string driveId, HttpContext httpContext, CancellationToken ct = default, bool describeSharedContainer = true,
+        string? itemId = null)
     {
         OwningSecureRecord? secureOwner;
         try
@@ -117,9 +146,24 @@ public class OfficeEditAccessService
         }
 
         var systemUserId = await _probe.GetCallerSystemUserIdAsync(token, ct).ConfigureAwait(false);
-        var user = systemUserId is { } id
-            ? await _entities.RetrieveAsync("systemuser", id, ["domainname", "azureactivedirectoryobjectid", "sprk_isexternal"], ct).ConfigureAwait(false)
-            : null;
+        Microsoft.Xrm.Sdk.Entity? user;
+        try
+        {
+            user = systemUserId is { } id
+                ? await _entities.RetrieveAsync("systemuser", id, ["domainname", "azureactivedirectoryobjectid", "sprk_isexternal"], ct).ConfigureAwait(false)
+                : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Task 191g: the caller's sprk_isexternal cannot be read, so whether a container role is allowed is unknown —
+            // no grant of any kind (fail closed), and an honest 503 like the unresolved-user branch below (never links that
+            // look usable and that Office then refuses).
+            _logger.LogWarning(ex,
+                "[OFFICE-EDIT] Document {DocumentId}: the caller's Dataverse user could not be read; no edit access is granted.",
+                documentId);
+            throw Unavailable(documentId, "the caller's Dataverse user could not be read");
+        }
+
         var upn = user?.GetAttributeValue<string>("domainname");
         var objectId = user?.GetAttributeValue<Guid?>("azureactivedirectoryobjectid");
         if (user is null || systemUserId is null || string.IsNullOrWhiteSpace(upn))
@@ -127,15 +171,11 @@ public class OfficeEditAccessService
             throw Unavailable(documentId, "the caller's Dataverse user (and its sign-in name) could not be resolved");
         }
 
-        // Round 67: a Restricted record admits no external user. SpeContainerMembershipSync removes exactly such a grant,
-        // so it is never made here (a record whose flag cannot be read gets no grant either — fail closed).
-        if (user.GetAttributeValue<bool?>("sprk_isexternal") == true
-            && await IsRestrictedOrUnreadableAsync(secureOwner, ct).ConfigureAwait(false))
+        // Task 191g (owner Q2 = b): a flagged-external caller NEVER reaches the container grant below.
+        if (user.GetAttributeValue<bool?>("sprk_isexternal") == true)
         {
-            _logger.LogInformation(
-                "[OFFICE-EDIT] Document {DocumentId}: an external caller on Restricted (or unreadable) {Entity} {RecordId}; no grant.",
-                documentId, secureOwner.EntityLogicalName, secureOwner.RecordId);
-            return new OfficeEditAccess(false, "none");
+            return await PrepareFlaggedAsync(documentId, driveId, itemId, secureOwner, systemUserId.Value, objectId, ct)
+                .ConfigureAwait(false);
         }
 
         var access = await _membership.ReadAccessAsync(driveId, ct).ConfigureAwait(false)
@@ -169,6 +209,73 @@ public class OfficeEditAccessService
     /// </summary>
     protected virtual Task<OwningSecureRecord?> ResolveSecureOwnerAsync(string driveId, CancellationToken ct)
         => _containerResolver.ResolveOwningRecordAsync(driveId, ct);
+
+    /// <summary>
+    /// Task 191g (owner Q2 = b, design §3.12): Office edit for a flagged-external caller who already holds Write on the secure
+    /// record (asked as the caller, above). Never a container role. An item write permission on <paramref name="itemId"/> only
+    /// when the setting is on, the record is not Restricted (effective through filing; unreadable counts as Restricted) and
+    /// <see cref="ExternalVisibility"/> answers Visible for the document (Hidden and Undecided are not visible). Otherwise view
+    /// only. A grant that cannot be made, read back or recorded is 503 <c>edit_access_unavailable</c>.
+    /// </summary>
+    private async Task<OfficeEditAccess> PrepareFlaggedAsync(
+        Guid documentId, string driveId, string? itemId, OwningSecureRecord secureOwner, Guid systemUserId, Guid? objectId,
+        CancellationToken ct)
+    {
+        // Round 67 / Q4 = a: a Restricted record admits no flagged user (a record whose flag cannot be read counts as Restricted).
+        if (await IsRestrictedOrUnreadableAsync(secureOwner, ct).ConfigureAwait(false))
+        {
+            _logger.LogInformation(
+                "[OFFICE-EDIT] Document {DocumentId}: a flagged-external caller on Restricted (or unreadable) {Entity} {RecordId}; no grant.",
+                documentId, secureOwner.EntityLogicalName, secureOwner.RecordId);
+            return new OfficeEditAccess(false, "none");
+        }
+
+        if (!FlaggedOfficeEditEnabled(_configuration))
+        {
+            _logger.LogInformation(
+                "[OFFICE-EDIT] Document {DocumentId}: a flagged-external caller; the item-level grant is off ({Setting}), view only.",
+                documentId, FlaggedOfficeEditEnabledConfigKey);
+            return new OfficeEditAccess(false, "none");
+        }
+
+        ExternalRowVisibility visibility;
+        (string Table, Guid Id)[] row = [("sprk_document", documentId)];
+        try
+        {
+            visibility = await _visibility(row, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "[OFFICE-EDIT] Document {DocumentId}: its external visibility could not be decided; no item grant (view only).", documentId);
+            return new OfficeEditAccess(false, "none");
+        }
+
+        // Only a decision that did not fault counts as Visible (a faulted one makes every row ReadFailed; trust nothing else in it).
+        if (visibility.Faulted || !visibility.IsVisible("sprk_document", documentId))
+        {
+            _logger.LogInformation(
+                "[OFFICE-EDIT] Document {DocumentId}: not externally visible ({Summary}, faulted={Faulted}); no item grant (view only).",
+                documentId, visibility.Summary(row), visibility.Faulted);
+            return new OfficeEditAccess(false, "none");
+        }
+
+        if (string.IsNullOrWhiteSpace(itemId) || objectId is not { } oid || oid == Guid.Empty)
+        {
+            throw Unavailable(documentId, "the document's file or the caller's sign-in identity is unknown, so no item grant can be made");
+        }
+
+        var outcome = await _membership.GrantMarkedItemWriterAsync(driveId, itemId, documentId, systemUserId, oid, ct)
+            .ConfigureAwait(false);
+        return outcome switch
+        {
+            SpeContainerMembershipService.ItemGrantOutcome.Granted => new OfficeEditAccess(true, "item-writer-jit"),
+            SpeContainerMembershipService.ItemGrantOutcome.Reused => new OfficeEditAccess(true, "member"),
+            SpeContainerMembershipService.ItemGrantOutcome.HeldByOther => new OfficeEditAccess(true, "member"),
+            SpeContainerMembershipService.ItemGrantOutcome.HeldReadOnly => new OfficeEditAccess(false, "member-read-only"),
+            _ => throw Unavailable(documentId, "the item edit grant could not be made"),
+        };
+    }
 
     /// <summary>
     /// What a caller can do in Office on a SHARED (business-unit / environment) container — reported, never granted

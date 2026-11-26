@@ -31,7 +31,6 @@ import { Dismiss16Regular } from '@fluentui/react-icons';
 import type {
   SearchDomain,
   SearchFilters,
-  HybridMode,
   ViewMode,
   VisualizationColorBy,
   TimelineDateField,
@@ -50,7 +49,7 @@ import { SearchResultsTreemap } from './components/SearchResultsTreemap';
 import { SearchResultsTimeline } from './components/SearchResultsTimeline';
 import { VisualizationSettings } from './components/VisualizationSettings';
 import { useSavedSearches } from './hooks/useSavedSearches';
-import { useDocumentActions } from '@spaarke/document-operations';
+import { useDocumentActions } from '@spaarke/ui-components/hooks/useDocumentActions';
 import { getBffBaseUrl } from './services/apiBase';
 import { useSemanticSearch } from './hooks/useSemanticSearch';
 import { useRecordSearch } from './hooks/useRecordSearch';
@@ -62,6 +61,7 @@ import { DocumentPreviewDialog } from './components/DocumentPreviewDialog';
 import { SearchResultsGrid } from './components/SearchResultsGrid';
 import { listActiveSearchIndexes, type AiSearchIndexRow } from './services/aiSearchIndexService';
 import { buildSearchRequestFragment, type SearchRequestFragment } from './services/targetEntityNormalize';
+import { DEFAULT_FILTERS, buildInitialFilters } from './utils/initialFilters';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -93,15 +93,6 @@ export interface AppProps {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const DEFAULT_FILTERS: SearchFilters = {
-  documentTypes: [],
-  fileTypes: [],
-  matterTypes: [],
-  dateRange: { from: null, to: null },
-  threshold: 50,
-  searchMode: 'rrf',
-};
 
 /** Maps non-document domains to their Dataverse entity logical names */
 const DOMAIN_RECORD_TYPES: Record<SearchDomain, string[]> = {
@@ -142,42 +133,6 @@ function deriveSearchDomain(fragment: SearchRequestFragment | null | undefined):
       // all flow through useSemanticSearch.
       return 'documents';
   }
-}
-
-/**
- * Map the envelope `searchMode` literal (PCF/URL) to the API `HybridMode`
- * literal used by request bodies. See `EnvelopeSearchMode` doc-comment in
- * `types/index.ts` — `hybrid` is the envelope alias for the API's `rrf`.
- */
-function envelopeSearchModeToHybridMode(mode: AppUrlParams['searchMode']): HybridMode | undefined {
-  if (mode === 'hybrid') return 'rrf';
-  if (mode === 'vectorOnly') return 'vectorOnly';
-  if (mode === 'keywordOnly') return 'keywordOnly';
-  return undefined;
-}
-
-/**
- * Seed `SearchFilters` state from URL-derived envelope params (FR-CP-03).
- * Used as the lazy `useState` initializer so values are present BEFORE the
- * first render commits and the auto-search effect fires — guaranteeing the
- * very first network POST uses URL-derived filters.
- *
- * Missing/undefined URL values fall back to `DEFAULT_FILTERS` so the page
- * still renders correctly when opened without any envelope.
- */
-function buildInitialFilters(urlParams: AppUrlParams | undefined): SearchFilters {
-  if (!urlParams) return DEFAULT_FILTERS;
-  const mappedSearchMode = envelopeSearchModeToHybridMode(urlParams.searchMode);
-  return {
-    ...DEFAULT_FILTERS,
-    fileTypes: urlParams.fileTypes ?? DEFAULT_FILTERS.fileTypes,
-    dateRange: {
-      from: urlParams.dateFrom ?? null,
-      to: urlParams.dateTo ?? null,
-    },
-    threshold: urlParams.threshold ?? DEFAULT_FILTERS.threshold,
-    searchMode: mappedSearchMode ?? DEFAULT_FILTERS.searchMode,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -308,8 +263,9 @@ export const App: React.FC<AppProps> = ({
   // `activeDomain` is now DERIVED from the selected row's fragment. We still
   // keep it as state so existing code that branches on the domain (grid
   // columns, gridRecords adapter, visualization defaults) works unchanged.
-  // The legacy `initialDomain` URL envelope is honored only as a fallback
-  // when no rows are loaded yet (first render before the catalog fetch).
+  // `initialDomain` (the URL envelope's `domain`) holds until the catalog
+  // loads; then the selection below keeps a requested domain when an index of
+  // that domain exists (#3171), and otherwise takes the selected row's domain.
   const [activeDomain, setActiveDomain] = useState<SearchDomain>(initialDomain);
 
   // Column-picker state lifted out of SearchResultsGrid so the unified
@@ -374,8 +330,8 @@ export const App: React.FC<AppProps> = ({
   const { savedSearches, isLoading: isSavedSearchesLoading, saveSearch } = useSavedSearches();
 
   // --- Document Actions ---
-  // Hook lives in @spaarke/document-operations (moved by task 031, consumed
-  // directly here by task 032 — local shim deleted, no behavior change).
+  // Hook lives in @spaarke/ui-components (shared with Compose; moved there from the retired
+  // document-operations package by reuse-governance-tightening-r1 task 033, no behavior change).
   // `actionError` ("Couldn't delete the document: <reason>") is shown in the main area's error bar below —
   // without it a failed open / download / delete / email-link / send-to-index showed the user nothing.
   const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex, actionError } =
@@ -709,9 +665,10 @@ export const App: React.FC<AppProps> = ({
   //
   // Default-selection precedence (spec §6):
   //   1. URL envelope `searchIndexName` matches a row → select that row
-  //   2. Row with `sprk_isdefault === true` → select it
-  //   3. First row in `sprk_displayorder` order → select it
-  //   4. Empty list → leave `selectedSearchIndexId === ''` (UI disables)
+  //   2. URL envelope `domain` has rows of that domain → select one of them (#3171)
+  //   3. Row with `sprk_isdefault === true` → select it
+  //   4. First row in `sprk_displayorder` order → select it
+  //   Empty list → leave `selectedSearchIndexId === ''` (UI disables)
   //
   // The catalog load is fire-and-forget (errors logged in the service); the
   // effect runs ONCE on mount because all deps are stable initial values.
@@ -749,7 +706,30 @@ export const App: React.FC<AppProps> = ({
         }
       }
 
-      // 2. `sprk_isdefault === true`
+      // 2. The domain the caller asked for (`domain` in the URL envelope, e.g. the Console's
+      //    search criteria with Matters chosen). Pick an index of that domain: the default row
+      //    when it is one; else a general one (tenant-wide or Document — an Events or Work
+      //    Assignment index also derives to 'documents' but searches less); else the first in
+      //    display order. Without this, step 3 replaced the requested domain with the default
+      //    index's domain once the list loaded (#3171). With no index for that domain, fall
+      //    through: the catalog decides what is searchable.
+      const requestedDomain = urlParams?.domain;
+      if (requestedDomain) {
+        const domainRows = rows.filter(r => deriveSearchDomain(buildSearchRequestFragment(r)) === requestedDomain);
+        if (domainRows.length > 0) {
+          const isGeneral = (r: AiSearchIndexRow): boolean => {
+            const fragment = buildSearchRequestFragment(r);
+            return fragment.scope === 'all' || fragment.entityType === 'document';
+          };
+          const domainRow =
+            domainRows.find(r => r.sprk_isdefault === true) ?? domainRows.find(isGeneral) ?? domainRows[0];
+          setSelectedSearchIndexId(domainRow.sprk_aisearchindexid);
+          setActiveDomain(requestedDomain);
+          return;
+        }
+      }
+
+      // 3. `sprk_isdefault === true`
       const defaultRow = rows.find(r => r.sprk_isdefault === true);
       if (defaultRow) {
         setSelectedSearchIndexId(defaultRow.sprk_aisearchindexid);
@@ -757,7 +737,7 @@ export const App: React.FC<AppProps> = ({
         return;
       }
 
-      // 3. First row in displayorder/displayname order (already sorted by
+      // 4. First row in displayorder/displayname order (already sorted by
       // the OData query).
       const firstRow = rows[0];
       setSelectedSearchIndexId(firstRow.sprk_aisearchindexid);

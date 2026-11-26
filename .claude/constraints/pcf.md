@@ -72,7 +72,7 @@ Load when:
   and the maker recipe in [`docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](../../docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md).
 
   > 🔴 **Corrected 2026-09-01** (`unified-access-control-r2`). This read: *"**MUST**
-  > implement/extend `src/client/pcf/UniversalDatasetGrid/`"* — **a directory that does not exist.**
+  > implement/extend src/client/pcf/UniversalDatasetGrid/"* — **a directory that does not exist.**
   > `UniversalDatasetGrid` was deleted when the DataGrid framework superseded it. A binding **MUST**
   > commanding a dead path is worse than a missing rule: an agent either invents the folder or stalls,
   > and either way the DataGrid framework gets bypassed. This is
@@ -192,8 +192,9 @@ const documentId = params.get("documentId") ?? "";
 src/solutions/{Page}/                       # React Code Pages — where new pages go (bundled React 19)
 src/client/
 ├── pcf/{Control}/                          # Field-bound PCF controls (platform React 16.14.0)
-├── code-pages/                             # Four older code pages (CommunicationPage,
-│                                           #   DocumentRelationshipViewer, PlaybookBuilder, SemanticSearch)
+├── code-pages/                             # Three older code pages (DocumentRelationshipViewer,
+│                                           #   PlaybookBuilder, SemanticSearch); CommunicationPage retired
+│                                           #   2026-11-22 to docs/archive/code-pages/ (#2908)
 ├── shared/                                 # Shared TS packages (@spaarke/ui-components, @spaarke/auth, …)
 └── office-addins/                          # Office add-ins (React 19)
 

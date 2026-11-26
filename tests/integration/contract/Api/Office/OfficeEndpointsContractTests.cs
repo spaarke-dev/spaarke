@@ -1189,6 +1189,12 @@ public sealed class OfficeVersionSaveWorld
         /// Matter, and modelling the other three would be fixture surface no test reads.
         /// </summary>
         public Guid? MatterId { get; set; }
+
+        /// <summary>Task 138: the row's <c>sprk_relatedmatter</c> (the second family a document's filing may sit in).</summary>
+        public Guid? RelatedMatterId { get; set; }
+
+        /// <summary>Task 138: the row's <c>sprk_parentdocument</c> (an email attachment's <c>.eml</c>), written in the create.</summary>
+        public Guid? ParentDocumentId { get; set; }
     }
 
     public sealed class SpeItem
@@ -1269,18 +1275,18 @@ public sealed class OfficeVersionSaveWorld
     public static SaveRequest VersionSave(
         Guid existingDocumentId, byte[] bytes, bool isNewVersion = true, string fileName = "Brief.docx",
         string? comment = "Second draft") => new()
-    {
-        ContentType = SaveContentType.Document,
-        TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
-        Document = new DocumentMetadata
         {
-            FileName = fileName,
-            ContentBase64 = Convert.ToBase64String(bytes),
-            IsNewVersion = isNewVersion,
-            ExistingDocumentId = existingDocumentId,
-            VersionComment = comment,
-        },
-    };
+            ContentType = SaveContentType.Document,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+            Document = new DocumentMetadata
+            {
+                FileName = fileName,
+                ContentBase64 = Convert.ToBase64String(bytes),
+                IsNewVersion = isNewVersion,
+                ExistingDocumentId = existingDocumentId,
+                VersionComment = comment,
+            },
+        };
 
     /// <summary>The refusal invariant: no row, no SPE item, no SPE version, no job, no finalization.</summary>
     public void ShouldHaveWrittenNothing()
@@ -1406,13 +1412,19 @@ public sealed class OfficeVersionSaveWorld
         {
             lock (_gate)
             {
-                if (Documents.ContainsKey(id))
+                if (Documents.TryGetValue(id, out var row))
                 {
-                    return new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, id)
+                    var document = new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, id)
                     {
                         ["createdby"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", PointerCreator),
                         ["owningbusinessunit"] = new Microsoft.Xrm.Sdk.EntityReference("businessunit", PointerRootBusinessUnit),
                     };
+                    // Task 138: the row's CURRENT filing — the planner reads it to see the .eml is still filed to the request's record.
+                    if (row.MatterId is { } matterId)
+                        document["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matterId);
+                    if (row.RelatedMatterId is { } relatedMatterId)
+                        document["sprk_relatedmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", relatedMatterId);
+                    return document;
                 }
             }
         }
@@ -1444,7 +1456,24 @@ public sealed class OfficeVersionSaveWorld
             // Task 055: the create's Name is the user-facing sprk_documentname, which task 020 split from
             // sprk_filename. The fixture previously recorded it ONLY as FileName, so a save-created row had
             // no display name at all — invisible until the collision refusal began reporting one.
-            Documents[id] = new DocumentRow { Id = id, FileName = request.Name, DocumentName = request.Name };
+            Documents[id] = new DocumentRow
+            {
+                Id = id,
+                FileName = request.Name,
+                DocumentName = request.Name,
+                ParentDocumentId = request.ParentDocumentLookup,
+            };
+            // Field-mapping task 030b: the save's association moved from the follow-up update into the CREATE
+            // (CreateDocumentRequest.Association), so the world files the row to its matter here, as Dataverse does.
+            if (request.Association is { Field.LogicalName: "sprk_matter" } association)
+                Documents[id].MatterId = association.RecordId;
+            // Task 030b: the SPE pointer moved into the CREATE too (CreateDocumentRequest.FilePointer).
+            if (request.FilePointer is { } pointer)
+            {
+                Documents[id].DriveId = pointer.DriveId;
+                Documents[id].ItemId = pointer.ItemId;
+                Documents[id].FilePath = pointer.WebUrl;
+            }
             // Task 055: the SAVER holds rights on the document they just created. In real Dataverse that is
             // simply true — the row is created in their business unit and their role grants Read/Write on
             // sprk_document. This world granted rights ONLY through SeedDocument, so every save-created
@@ -1476,7 +1505,8 @@ public sealed class OfficeVersionSaveWorld
             row.FileSize = update.FileSize ?? row.FileSize;
             row.FilePath = update.FilePath ?? row.FilePath;
             row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
-            // Task 055: the ASSOCIATION the save writes. DocumentAssociationMap.TryApply puts it on the
+            // Task 055: the ASSOCIATION the save writes. (Since field-mapping task 030b the save puts it on the CREATE,
+            // read above; this line stays for any update that still carries one.) DocumentAssociationMap.TryApply put it on the
             // UPDATE (Spaarke.Dataverse/Models.cs:78-110) and DataverseServiceClientImpl:922-931 writes it to
             // sprk_matter — so a document saved to a matter genuinely IS filed to that matter. This world
             // discarded the lookups, so every save-created row was filed nowhere.
@@ -1506,6 +1536,49 @@ public sealed class OfficeVersionSaveWorld
                     GraphItemId = row.ItemId,
                 }
                 : null;
+        }
+    }
+
+    /// <summary>
+    /// Task 138: the child documents of <paramref name="parentId"/> (<c>GetDocumentsByParentAsync</c>), as Dataverse returns
+    /// them: <c>sprk_documentname</c> and <c>sprk_filename</c>.
+    /// </summary>
+    internal IEnumerable<DocumentEntity> ChildrenOf(Guid parentId)
+    {
+        lock (_gate)
+        {
+            return Documents.Values
+                .Where(r => r.ParentDocumentId == parentId)
+                .Select(r => new DocumentEntity
+                {
+                    Id = r.Id.ToString("D"),
+                    Name = r.DocumentName ?? r.FileName ?? "document",
+                    FileName = r.FileName,
+                    GraphDriveId = r.DriveId,
+                    GraphItemId = r.ItemId,
+                })
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// Task 138: seeds the attachment child the upload-finalization worker creates for an email save — named by the
+    /// attachment, a child of <paramref name="emlDocumentId"/>.
+    /// </summary>
+    public Guid SeedAttachmentChild(Guid emlDocumentId, string attachmentName)
+    {
+        lock (_gate)
+        {
+            var id = Guid.NewGuid();
+            Documents[id] = new DocumentRow
+            {
+                Id = id,
+                FileName = attachmentName,
+                DocumentName = attachmentName,
+                ParentDocumentId = emlDocumentId,
+                ItemId = $"item-{Guid.NewGuid():N}",
+            };
+            return id;
         }
     }
 
@@ -2033,8 +2106,36 @@ public sealed class OfficeVersionSaveWorld
         }
     }
 
-    internal void RecordFinalization(string messageJson)
+    /// <summary>
+    /// Task 138 (H2): whether the finalization workers this world does not run are taken to FINISH as soon as their message is
+    /// queued, i.e. their "processed" mark is set (the default: every test that is not about a worker still running sees the
+    /// workers done, as it did before the re-save waited on the mark). A test of "the first save's worker has not finished"
+    /// sets it false and sets the marks itself (<see cref="OfficeVersionSaveTestWebAppFactory.MarkFinalizationProcessedAsync"/>).
+    /// </summary>
+    public bool WorkersFinishInstantly { get; set; } = true;
+
+    /// <summary>
+    /// Task 138 (H2): makes the saved job look <paramref name="age"/> old to the code that reads it back. The effective view
+    /// takes its age from the save's own view (<c>sprk_result</c>, <c>createdAt</c>), not from the row's <c>createdon</c>, so
+    /// it is the view that is rewritten.
+    /// </summary>
+    public void AgeJob(Guid jobId, TimeSpan age)
     {
+        lock (_gate)
+        {
+            var row = JobRows[jobId];
+            var view = System.Text.Json.Nodes.JsonNode.Parse((string)row["Result"]!)!.AsObject();
+            view["createdAt"] = DateTimeOffset.UtcNow.Subtract(age).ToString("O");
+            row["Result"] = view.ToJsonString();
+        }
+    }
+
+    /// <summary>Task 138: the message key (<c>IdempotencyKey</c>) of every finalization message queued, in order.</summary>
+    public List<string> FinalizationMessageKeys { get; } = new();
+
+    internal string? RecordFinalization(string messageJson)
+    {
+        string? messageKey = null;
         using var document = JsonDocument.Parse(messageJson);
         foreach (var property in document.RootElement.EnumerateObject())
         {
@@ -2045,7 +2146,18 @@ public sealed class OfficeVersionSaveWorld
                     FinalizationPayloads.Add(property.Value.Clone());
                 }
             }
+            else if (string.Equals(property.Name, "IdempotencyKey", StringComparison.OrdinalIgnoreCase)
+                     && property.Value.ValueKind == JsonValueKind.String)
+            {
+                messageKey = property.Value.GetString();
+                lock (_gate)
+                {
+                    FinalizationMessageKeys.Add(messageKey!);
+                }
+            }
         }
+
+        return messageKey;
     }
 
     internal static byte[] ReadAll(Stream content)
@@ -2101,6 +2213,23 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-caller-token");
     }
 
+    /// <summary>
+    /// Task 138: sets the "processed" mark the upload-finalization worker sets when it has finished a message, under that
+    /// message's key — through the same cache resource, version and tenant id the worker uses, so the re-save's read sees it.
+    /// </summary>
+    public async Task MarkFinalizationProcessedAsync(string messageKey)
+    {
+        var cache = Services.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
+        var configuration = Services.GetRequiredService<IConfiguration>();
+        await cache.SetAsync<string>(
+            Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker.TenantIdForCache(configuration),
+            Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker.ProcessedMarkResource,
+            messageKey,
+            Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker.ProcessedMarkVersion,
+            Guid.NewGuid().ToString(),
+            TimeSpan.FromDays(7));
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -2121,6 +2250,10 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string id, CancellationToken _) => world.ReadDocument(id));
+            // Task 138: an email's attachment children (the loose mock answered an empty list before, so nothing else changes).
+            dataverse
+                .Setup(d => d.GetDocumentsByParentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid parentId, CancellationToken _) => world.ChildrenOf(parentId));
             dataverse
                 .Setup(d => d.CreateProcessingJobAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((object job, CancellationToken _) => world.RecordJob(job));
@@ -2249,8 +2382,14 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             var sender = new Mock<ServiceBusSender>();
             sender
                 .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
-                .Callback((ServiceBusMessage message, CancellationToken _) => world.RecordFinalization(message.Body.ToString()))
-                .Returns(Task.CompletedTask);
+                // Awaited, never blocked on: a sync-over-async wait here held a thread-pool thread inside every save request
+                // and added about 1.8 s to each test that queues a finalization.
+                .Returns(async (ServiceBusMessage message, CancellationToken _) =>
+                {
+                    var messageKey = world.RecordFinalization(message.Body.ToString());
+                    if (world.WorkersFinishInstantly && messageKey is not null)
+                        await MarkFinalizationProcessedAsync(messageKey);
+                });
             var serviceBus = new Mock<ServiceBusClient>();
             serviceBus.Setup(c => c.CreateSender(It.IsAny<string>())).Returns(sender.Object);
             services.RemoveAll<OfficeJobQueue>();

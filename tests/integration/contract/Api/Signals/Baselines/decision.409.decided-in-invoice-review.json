@@ -1,0 +1,16 @@
+{
+  "case": "decision.409.decided-in-invoice-review",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"Invoice and invoice-line items are decided in Invoice Review. Open the invoice there; nothing was done.\",\"reasonCode\":\"ontology.decision.decided_in_invoice_review\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000012\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "Conflict",
+    "status": 409,
+    "detail": "Invoice and invoice-line items are decided in Invoice Review. Open the invoice there; nothing was done.",
+    "reasonCode": "ontology.decision.decided_in_invoice_review",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000012",
+    "actionCode": null
+  }
+}

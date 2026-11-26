@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>B-1 decision capability: commit</title>
+    <phase>A BFF rework</phase>
+    <gate>after 013</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; adds the capability commit member and modifies the commit endpoint (.cs) on the single completion-invariant owner's entry</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-risk in the Risk Register (byte-for-byte invariants through B-1) on the single completion-invariant owner; migration of its entry point</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns DecisionCapability.Commit.cs, IDecisionCapability.cs and DecisionCommitEndpoints.cs (and leaves DecisionCommitService.cs untouched); 003 and 016 touch none of them</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api, api, refactoring, migration, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the commit operation to the decision capability as a direct delegation to the unchanged DecisionCommitService.CommitAsync(signalId, review, http, ct), passing the request HttpContext, so that REST and MCP commit through the same entry. Every invariant stays byte-for-byte unchanged and is stated in the PR.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in behaviour-preserving refactors of transactional C# services with idempotency and locking.</role>
+  <goal>DecisionCommitService.cs is unchanged; IDecisionCapability.CommitAsync(HttpContext, signalId, review, ct) delegates to it; the commit endpoint is a thin adapter; every invariant is listed in the PR with before/after file:line; all existing commit tests pass unchanged.</goal>
+
+  <context>
+    <background>Spec MUST rule (ontology's list): commit order (1a) readability as the caller → uniform 404; ledger replay; (1c) app-only Signal read; (1c-billing); PrepareAsync; (1c′) CallerMayDecideAsync; preflight; writes; locks released in finally. Replay decided server-side only. D-197 CheckVersionOwnerAsync stays put. SignalWriter, DecisionRecordWriter, DecisionCallerRights untouched. Ontology condition 2: the MCP commit goes only through this entry, never a second route that skips 1c-billing. Caller context (FR-10 as amended 2026-11-07, owner option C; ICallerContext deferred, 012 cancelled): DecisionCommitService keeps its HttpContext parameter; REST passes the endpoint's HttpContext and the MCP tool (024) passes IHttpContextAccessor.HttpContext.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (NOT edited: CommitAsync L439 keeps its HttpContext parameter, as do helpers L622, L770, L927, L1578, L1966; FR-10 option C)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.Commit.cs (partial class: CommitAsync(HttpContext, …) delegating to DecisionCommitService)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs (add CommitAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionCommitEndpoints.cs (thin adapter: capability → DecisionResultMapper)</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/b1-commit-invariants.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs L974-996 (1c-billing), IsBillingSubject ~L1684, sprk_privilegeflagged select L313</file>
+      <file role="canonical-reference">tests/integration/data-mutation/Signals/DecisionCommitServiceTests.InvoiceReview.cs (13 Task174_* cases)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/Signals/DecisionCommitServiceTests.CallerIdentityCount.cs (T170)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">IDecisionCapability and DecisionCapability exist</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Every step inside DecisionCommitService stays where it is and in the same order: this task does not edit DecisionCommitService.cs at all (git diff of the file is empty). DecisionCommitService remains the single owner of the completion invariant.</constraint>
+    <constraint source="ADR-002">This task adds no billing-refusal check of its own: D-207 (ontology.decision.decided_in_invoice_review) applies only through DecisionCommitService's existing (1c-billing) step (DecisionCommitService.cs:974-996).</constraint>
+    <constraint source="project">The PR body lists each invariant from the spec MUST rule (commit order 1a…finally, server-side replay, D-197 CheckVersionOwnerAsync, untouched writers and DecisionCallerRights) with before and after file:line, copied from notes/b1-commit-invariants.md.</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes takes the caller from the request. Capability methods receive the HttpContext the REST endpoint already has (or its ClaimsPrincipal where that is enough) and pass it to the existing decision services unchanged. A null HttpContext or an unauthenticated caller returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED), and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
+    <constraint source="ADR-019">The REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision stay byte-for-byte unchanged: task 011's contract baseline tests pass with no golden-file edit (FR-09).</constraint>
+    <constraint source="ADR-002">In every file this task touches, SignalReadService read rules and DecisionCommitService validation, idempotency and execution order are unchanged; DecisionCommitService stays the single owner of completion; SignalWriter, DecisionRecordWriter and DecisionCallerRights are not edited.</constraint>
+    <constraint source="project">File ownership: this task owns DecisionCapability.Commit.cs, IDecisionCapability.cs and DecisionCommitEndpoints.cs in its wave; it does not edit DecisionCommitService.cs, SignalsModule.cs, DecisionPlanEndpoints.cs or SignalReadService.cs.</constraint>
+    <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">D-17 partial-write facts reach MCP (ontology review of 017, 2026-11-07, binding).
+- `DecisionResultMapper.ToToolError(DecisionCommitResult)` for `Failed` currently returns only code, message and status.
+- Extend `DecisionToolError` with an optional `Partial` payload carrying `failedStep`, `landed`, `possiblyLanded`, `recordMayExist`, `sentButNotRecorded`, `resumable` and `replayed`, exactly as the REST Failed extensions carry them.
+- Use only step and action codes, record ids, booleans and the step list. Never record text (ADR-015).
+- REST bytes are unchanged (011 baselines).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/pre-pipeline-context.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Write notes/b1-commit-invariants.md: each spec invariant with its current file:line in DecisionCommitService.cs.</step>
+    <step order="2">Leave DecisionCommitService.cs untouched. CommitAsync(signalId, review, http, ct) (L439) and its helpers (L622, L770, L927, L1578, L1966) keep their HttpContext parameters (FR-10 as amended 2026-11-07, option C).</step>
+    <step order="3">Add CommitAsync(HttpContext http, Guid signalId, DecisionReview review, CancellationToken ct) to IDecisionCapability. Implement it in DecisionCapability.Commit.cs as a direct delegation to DecisionCommitService.CommitAsync(signalId, review, http, ct). The only addition is a fail-closed guard: a null HttpContext or an unauthenticated principal returns UserContextRequired before the service is called.</step>
+    <step order="4">Make DecisionCommitEndpoints call the capability with its HttpContext, then DecisionResultMapper.ToHttp.</step>
+    <step order="5">Run 011's commit baselines, all DecisionCommitServiceTests partials (incl. Task174_* and T170), the Signals suites and the ArchTests.</step>
+    <step order="6">Add after-line numbers to notes/b1-commit-invariants.md (they equal the before-line numbers, because the service is not edited); confirm git diff of DecisionCommitService.cs is empty.</step>
+    <step order="7">Measure the publish-size delta; open the PR with the invariant list for ontology review.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any invariant cannot be kept in place without reordering or moving a statement, STOP and escalate to the owner and ontology (root CLAUDE.md §6.5) rather than adapting.</trigger>
+    <trigger>If any Task174_* or T170 test fails, STOP; do not edit the test (AP-9).</trigger>
+    <trigger>If ontology review requests a change to the commit order, STOP and escalate: the order is frozen by spec.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DecisionCommitService.CommitAsync (DecisionCommitService.cs:439) is the existing single commit entry; DecisionCommitEndpoints.cs calls it with HttpContext.</existing>
+    <extension>Yes, it extends it: DecisionCapability.Commit.cs is a one-line delegation plus the fail-closed caller guard, and the service is not changed.</extension>
+    <cost-of-doing-nothing>The MCP tool would call DecisionCommitService from tool code with its own caller check and result mapping, or through a second entry that might skip 1c-billing. Either violates ontology condition 2 and ADR-002's single owner.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.Commit.cs</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/b1-commit-invariants.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DecisionCommitService.cs is unchanged (its git diff is empty, stated in the PR), and IDecisionCapability.CommitAsync delegates to DecisionCommitService.CommitAsync with the request HttpContext.</criterion>
+    <criterion testable="true">DecisionCommitEndpoints.cs calls only the capability and DecisionResultMapper.ToHttp; no commit logic remains in the endpoint.</criterion>
+    <criterion testable="true">The PR lists every spec invariant with before and after file:line (from notes/b1-commit-invariants.md).</criterion>
+    <criterion testable="true">All 13 Task174_* cases, T170 (WhoAmIs == 1) and every DecisionCommitServiceTests partial pass with no test edits.</criterion>
+    <criterion testable="true">011's commit baselines pass with no golden change, including 409 ontology.decision.decided_in_invoice_review.</criterion>
+    <criterion testable="true">Negative: a capability commit with a null HttpContext or an unauthenticated principal returns UserContextRequired, writes nothing and does not touch the ledger.</criterion>
+    <criterion testable="true">Negative: a capability commit with no prior plan read returns the existing refusal reason code; a billing Signal returns 409 decided_in_invoice_review with nothing written and the rights probe not called.</criterion>
+    <criterion testable="true">grep shows IsBillingSubject is called only from DecisionCommitService (no new billing check).</criterion>
+    <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and ontology's approval.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">A unit test pins that the tool error for a `Failed` `DecisionCommitResult` lists `landed`, `possiblyLanded` and the `resumable` flag, with the same values REST returns in its D-17 extensions. Negative case: the payload contains no record text (no Detail, no field values).</criterion>
+  </acceptance-criteria>
+
+  <notes>Ontology condition 2; plan high-risk item 'byte-for-byte invariants through B-1'. If the PR needs a re-merge of ontology branches, merge, never rebase (condition 3).
+
+Completion (2026-11-07, commits d5bee692a6, 5ef152c1cd, d133bfcfcb):
+- DecisionCapability.CommitAsync(HttpContext?, Guid, DecisionReview, ct) (new DecisionCapability.Commit.cs; member on IDecisionCapability) delegates unchanged to DecisionCommitService.CommitAsync(signalId, review, http, ct); the only addition is the no-caller guard (null context or no authenticated identity returns DecisionCapability.UserContextRequiredCommitResult, 401 DATAVERSE_USER_CONTEXT_REQUIRED on both hosts, matched by reference; a service-built CallerUnresolved stays the single 403). POST /api/v1/signals/{signalId}/decision now calls the capability. DecisionCommitService.cs, SignalWriter.cs, DecisionRecordWriter.cs, DecisionCallerRights.cs, SignalsModule.cs: empty diff. Invariant table with before/after file:line: notes/b1-commit-invariants.md. Deviations and decisions: notes/decisions.md "2026-11-07 — Task 014".
+- Binding addition (ontology, D-17): DecisionToolError gains optional Partial (DecisionToolPartial: failedStep, landed, possiblyLanded, steps without Detail, recordMayExist, sentButNotRecorded, resumable, replayed), set only for Failed; codes, ids and flags only, never record text. REST bytes unchanged.
+- Escalation triggers: none fired. 011 golden baselines unchanged and passing (ContractBaseline 54/54); no golden file edited. T170 WhoAmI = 1 per commit, and = 1 through the capability.
+- Tests: new DecisionToolErrorPartialTests (unit/domain; parity with REST extensions, no record text, no Partial on non-Failed, 401 vs 403) and DecisionCommitServiceTests.Capability.cs (integration/data-mutation; no-caller theory touches no Dataverse, lease or ledger; invoice / invoice-line 409 before rights or writes; no-plan-read signal_not_open + positive control; WhoAmI = 1). Fail-before (mutation): guard narrowed, 401 arm removed, Partial unset fails 7 of 17 new tests. Sprk.Bff.Api.Tests Signals/ContractBaseline/mapper filter 4291 -> 4308 pass (2 skip); DecisionCommitServiceTests 303/303; IntegrationTests Signal 142/142 (2 skip); ArchTests 1998/1998. Test-helper edits: DecisionCommitServiceTests ThroughTheRoute (one line) and DecisionCapabilityFixtures (optional commits).
+- ArchTest: RouteAuthorizationGuard keeps MaxHandlerDecisionHops = 2; only the commit route (ThreeHopHandlerDecisionRoutes) may declare 3 (must-fire control: 4 hops on it fails; with the pin removed the real route fails at 3).
+- Build: Sprk.Bff.Api 0 warnings, 0 errors.
+- Publish size (dotnet publish -c Release, Compress-Archive Optimal over deploy/api-publish/*, PDBs included, fresh worktrees C:\wt014m / C:\wt014b, 191 files each side): master 23567b2f93 = 41,168,034 B (39.26 MB); branch 5ef152c1cd (BFF identical at d133bfcfcb) = 41,183,506 B; delta +15,472 B. Under 55/60 MB. dotnet list package --vulnerable --include-transitive: no vulnerable packages.
+- Quality gates: adversarial review (opus), one pass: no F-class finding. K2 fixed (global hop cap narrowed to the pinned route). Known limits: K3, read routes now construct the commit service graph (scoped DecisionCapability takes DecisionCommitService; changing it needs SignalsModule, out of scope); K1, the documented test-helper deviation; K4, Partial omits reviewId/actionCode per spec, and serializes "partial": null on non-Failed errors (note for 024). adr-check: ADR-001/002/008/010/015/019/028/029/038/041/052 compliant.
+- Defect filed: ISS-004 (#2628), the spec says a commit needs a prior plan read, the service treats no stamp as review start now; owner decision (service edit is forbidden here).
+- Master sync: origin/master 23567b2f93 already merged; no overlap. Ontology reviews Services/Signals/** and Api/Signals/** (noted in commit bodies).
+rework: fix-round-1 task 014</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

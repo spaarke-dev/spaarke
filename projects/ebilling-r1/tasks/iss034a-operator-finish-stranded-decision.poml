@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss034a" project="ebilling-r1">
+  <metadata>
+    <title>ISS-034 (#2888), server: an operator route that finishes a stranded blocked Override or Return as recorded</title>
+    <phase>Defect fix (owner question (f), EB-D-244)</phase>
+    <gate>Branch from work/ebilling-r1 at the sha named in the agent brief.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF decision write path and a new authorization surface (.cs); acting on another person's recorded decision.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>iss031</deps>
+    <tags>bff-api, finance, auth, data-mutation, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement EB-D-244 (projects/ebilling-r1/notes/decisions-log.md) for ISS-034 (notes/defer-issues.md). A blocked submission's Override or Return can be recorded (its writer-created Decision Record exists) and then fail before it finishes; only its own decider may repeat it (SubmissionOverrideService.DecideLockedAsync, the stored-decider check), and the other verb is refused (ISS-031), so a decider who is gone strands the invoice. Add POST /api/finance/submissions/{submissionId}/finish-stranded (body: reason required, note optional, checked by the same rules as the decisions) in SubmissionOverrideEndpoints.cs, served by a new public method on SubmissionOverrideService that reuses DecideAsync / DecideLockedAsync (one code path, with a parameter that marks an operator finish), never a copy of them.</prompt>
+
+  <goal>A billing admin can finish another person's stranded blocked decision exactly as it was recorded, and the Decision Record trail shows both the original decider and the operator who finished it.</goal>
+
+  <constraints>
+    <constraint source="EB-D-244">Authorization, all asked as the caller and failing closed (a probe fault denies): the route's existing finance filter (Read and Write on the submission, as the decide routes); the billing-admin marker (reuse BillingAdminAuthorization.Admin(), no new privilege, no role names); for a stranded Override ALSO the eBilling Override privilege (EbillingOverridePrivilege.HoldsAsync); and the FR-51 close rights (AuthorizeCloseAsync) asked as the operator. A refusal of the admin marker or the verb privilege is 403 with a new stable code ebilling.blocked.operator_not_permitted. The admin marker is asked before anything about the submission is read.</constraint>
+    <constraint source="EB-D-244">Which verb is stranded is derived server-side, never from the request: exactly one of the two writer-created records (OverrideDecisionIdFor / ReturnDecisionIdFor via _findStored) exists while the submission is still held. Neither: 409 new code ebilling.blocked.nothing_stranded, nothing written. Both: 409 (no finish either way, as ISS-031). The caller is the stored decider: 409 telling them to repeat their own decision, no operator record. A decision already finished answers as today's repeat (already_overridden / already_returned, with the existing repair and reclose of a repeat), with no operator record.</constraint>
+    <constraint source="EB-D-244">The finish is the original decision as recorded: the stored reason, note, Signal set and stored decider (Signal closes keep crediting recordedSet.ConfirmedByUserId), and the same firm gate, holds derivation, release, transition and notification as the decider's own repeat. The operator's reason and note never replace the stored ones. Same invoice lock (LockKey) and the same re-read under it.</constraint>
+    <constraint source="EB-D-244">The operator's step is one new append-only Decision Record through DecisionRecordWriter.WriteBillingDecisionAsync: a new catalog entry finish-stranded-decision in Services/Signals/Actions/DecisionActionCatalog.cs (Decide lane, Judgement class, required reason, optional note, values naming the finished verb and the finished record id; follow the add-adjustment / remove-adjustment entries of 095f-2b), subject the invoice, ConfirmedBy the operator, decision id derived server-side as InvoiceSubmissionPersister.IdOf("ebilling-operator-finish-{submissionId:D}-{verb}"). It is written after every no-write refusal (rights, firm gate, row version) and before the first write of the finish, so it exists for every finish; a repeat finds it (AlreadyRecorded) and writes no second one. Amend ontology-r1's exact-set catalog tests the way 095f-2b did and say so in the notes (ontology-r1 reviews the catalog change).</constraint>
+    <constraint source="EB-D-244">GET .../blocked gains StrandedDecision (verb, record id, whether the caller is its decider) when exactly one record exists and the submission is held, and CanFinishAsOperator (the caller passes the admin marker and the verb privilege and is not the stored decider; any fault gives false). These are read-only hints; the POST still decides.</constraint>
+    <constraint source="decider rule (095f-2c)">The existing routes are unchanged: another person's repeat of a stranded decision still answers 409 decision_conflict, the other verb still answers other_decision_pending, golden hashes unchanged.</constraint>
+    <constraint source="repo is public">Notes, comments and commits describe the route and its checks; never which roles hold which privileges, and never an access-gap mechanism.</constraint>
+    <constraint source="project">Only SubmissionOverrideService.cs, SubmissionOverrideEndpoints.cs, DecisionActionCatalog.cs and its exact-set tests, the RouteAuthorizationGuard ArchTest entry for the new route, new tests, and notes/iss034a-operator-finish-stranded-decision.md. No client change (task iss034b). No DI change expected (the service already exists); if one is needed, justify it per root CLAUDE.md section 11. No package change.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Data-mutation tests: a stranded Override (record written, release failed) by decider A is finished by operator B: invoice released, A's record unchanged, Signals closed crediting A, one finish-stranded-decision record by B naming A's record; the same for a stranded blocked Return. The new tests fail before the change.</criterion>
+    <criterion testable="true">Refusals write nothing: B without the admin marker, B without the Override privilege on a stranded Override, a privilege-probe fault (all 403 operator_not_permitted); B without FR-51 rights (403 as today); nothing stranded (409 nothing_stranded); both records (409); B is the stored decider (409); a lookup fault (503).</criterion>
+    <criterion testable="true">A repeat of the operator route after a full finish answers as an already-decided repeat with no second operator record; a finish interrupted after the operator record completes on the next call with still exactly one operator record.</criterion>
+    <criterion testable="true">Must-not-fire: the existing Override and Return routes behave exactly as before (decision_conflict, other_decision_pending, own-decider repeat), golden hashes unchanged.</criterion>
+    <criterion testable="true">GET blocked: StrandedDecision and CanFinishAsOperator are present and correct for the operator, and absent or false for the decider, a non-admin and a probe fault.</criterion>
+    <criterion testable="true">Catalog exact-set tests amended; RouteAuthorizationGuard covers the new route; filtered SubmissionOverride|DecisionNote|DecisionRecord|DecisionActionCatalog|BlockedSubmission|InvoiceRejectReturn tests, the Invoice|Decision|RouteAuthorization ArchTests and the --warnaserror build pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

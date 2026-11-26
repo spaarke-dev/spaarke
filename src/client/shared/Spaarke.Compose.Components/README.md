@@ -2,6 +2,15 @@
 
 TipTap-based ComposeWorkspace + ComposeEditor + ComposeToolbar widgets for the Spaarke Compose drafting workspace (spaarkeai-compose-r1). Mounts inside the LegalWorkspace section shim at `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts` (Pattern D / Calendar precedent — same shape as `@spaarke/events-components`, `@spaarke/daily-briefing-components`, `@spaarke/smart-todo-components`).
 
+## Governance (ADR-012, 2026-11-24 amendment)
+
+Sanctioned shared package: the single home of the Compose document-editing model (TipTap document, DOCX bridge, checkout / heartbeat, comments). Binding rules, enforced by `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs`:
+
+- **TipTap quarantine** — only this package's non-test source imports `@tiptap/*` / `prosemirror-*`; no other shared package and no PCF declares them.
+- **Entity map** — every Dataverse name lives in `src/types/composeDocumentSchema.ts` (`COMPOSE_DOCUMENT_SCHEMA`); no other source file names a `sprk_` entity or column in code.
+- **Editor split** — document editing goes here (`ComposeEditor`); a rich-text field uses `RichTextEditor` (Lexical) in `@spaarke/ui-components`.
+- Never delete `src/utils/docxBridge.ts`.
+
 ## Status
 
 **Phase 1b scaffold (Wave 1b follow-up, 2026-06-29)**: empty package skeleton only. Real widgets land in Phase 4 (tasks 042–046).
@@ -18,10 +27,9 @@ TipTap-based ComposeWorkspace + ComposeEditor + ComposeToolbar widgets for the S
 
 - **React 19** (peer dependency)
 - **TipTap 2.10.x core + StarterKit + 11 standard MIT extensions** ONLY (no TipTap Pro)
-- **mammoth ^1.8.0** (BSD-2-Clause) — DOCX → HTML → TipTap import bridge
-- **docx ^9.0.3** (MIT) — TipTap JSON → DOCX export bridge
+- DOCX import and export run on the BFF (`ComposeDocxProjectionBuilder`, the server `.docx` renderer); `src/utils/docxBridge.ts` builds the content model the renderer consumes. The client `mammoth` import path was removed in Compose R4.5 and the dependency in 2026-11 (ADR-012 P-14); the package has no `docx` dependency.
 - **@spaarke/auth** (dependency — provides `authenticatedFetch` for BFF calls)
-- **@spaarke/document-operations** (dependency — Open-in-Word handoff per FR-12)
+- **@spaarke/ui-components** (dependency — `useDocumentActions` for the Open-in-Word handoff per FR-12, plus shared dialogs)
 - TypeScript 5.3+ strict mode
 - NOT PCF-safe (React 19)
 

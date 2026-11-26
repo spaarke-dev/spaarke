@@ -31,8 +31,10 @@ import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
 import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
-import { useRelatedRecord, type RelatedRecordView } from '../hooks/useRelatedRecord';
+import { useRelatedRecord, type RelatedRecordOutcome, type RelatedRecordView } from '../hooks/useRelatedRecord';
 import {
+  SAVE_TARGET_TYPES,
+  isSaveTargetType,
   useSaveFlow,
   type SaveFlowContext,
   type SaveTarget,
@@ -43,6 +45,7 @@ import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/d
 import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
+import { describeAttachmentsAdded, describeAttachmentsNotStored } from '../services/attachmentsAddedNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
   clearReferenceListCache,
@@ -328,6 +331,15 @@ const useStyles = makeStyles({
 type FiledTo = string | null | undefined;
 
 /**
+ * The record a save was filed to, as the confirmation bar's "Open in Spaarke" needs it: the Dataverse logical name and
+ * the record id. `null` / absent = none known (a document-only save, or a filing the pane never resolved): no link.
+ */
+interface FiledRecordRef {
+  entityType: string;
+  id: string;
+}
+
+/**
  * Task 111: what the green confirmation box shows. Built from the document this pane just saved (the post-save
  * state) OR from a document that was already in Spaarke when the pane opened (the resolved state) — one box, so the
  * two cannot drift. `filingUnknown` = the pane cannot tell which record the document is filed to (a stamp-only
@@ -337,6 +349,8 @@ interface SavedBarModel {
   documentId: string;
   title: string;
   filedTo: FiledTo;
+  /** The record `filedTo` names, for the bar's "Open in Spaarke" (only the post-save bar sets it). */
+  filedRecord?: FiledRecordRef | null;
   filingUnknown?: boolean;
   /** The wording for `filedTo === null`. */
   notFiledText: string;
@@ -352,6 +366,7 @@ interface PendingSaveSnapshot {
   /** The Document Name field's value at submission — "Saved" again once the field is reverted to it. */
   name: string;
   filedTo: FiledTo;
+  filedRecord?: FiledRecordRef | null;
   mode: SaveTarget['mode'];
 }
 
@@ -361,6 +376,8 @@ export interface SavedDocumentState {
   documentId: string;
   savedName: string;
   filedTo: FiledTo;
+  /** The record `filedTo` names (its logical name and id), for the confirmation bar's "Open in Spaarke". */
+  filedRecord?: FiledRecordRef | null;
   /** Whether the save that produced this state created the document or added a version to it. */
   lastSave: SaveTarget['mode'];
   /**
@@ -369,6 +386,16 @@ export interface SavedDocumentState {
    * document, so the notice survives a tab switch like the confirmation bar does.
    */
   emailFilingProblem?: EmailFilingProblem;
+  /**
+   * Task 138 (#2209): set when the save added attachments to an email already saved to the record — how many. The
+   * confirmation then reads "Added N attachments to the saved email". Absent otherwise.
+   */
+  attachmentsAdded?: number;
+  /**
+   * Task 138 (#2209): the attachments the save was asked to add that the saved email does not hold (not saved with it the
+   * first time): their names. A warning beside the confirmation says they could not be added. Absent otherwise.
+   */
+  attachmentsNotStored?: string[];
 }
 
 /**
@@ -401,6 +428,15 @@ export const DEFAULT_SAVED_DOCUMENT_PANE_STATE: SavedDocumentPaneState = {
 /** Task 088: the confirmation bar's name for the record a resolved document is filed to. */
 function relatedRecordLabel(view: RelatedRecordView): string {
   return view.displayName || view.number || view.type;
+}
+
+/**
+ * The record a resolved document is filed to, as the confirmation bar's "Open in Spaarke" needs it (logical name + id).
+ * `null` when the document is not known to be filed to a record. One rule for the save path (`filingRecordOf`) and the
+ * Refresh path, so the link cannot name a different record than the "Filed to" text beside it.
+ */
+function relatedRecordRef(view: RelatedRecordOutcome): FiledRecordRef | null {
+  return view.kind === 'associated' ? { entityType: view.entityType, id: view.id } : null;
 }
 
 /**
@@ -680,15 +716,18 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     () => ({
       apiBaseUrl,
       getAccessToken,
-      onComplete: (docId, docUrl, emailFilingProblem) => {
+      onComplete: (docId, docUrl, emailFilingProblem, attachmentsAdded, attachmentsNotStored) => {
         const pending = pendingSaveRef.current;
         updateSavedState(prev => ({
           savedDocument: {
             documentId: cleanGuid(docId) || docId,
             savedName: pending?.name ?? '',
             filedTo: pending?.filedTo,
+            ...(pending?.filedRecord ? { filedRecord: pending.filedRecord } : {}),
             lastSave: pending?.mode ?? 'create',
             ...(emailFilingProblem ? { emailFilingProblem } : {}),
+            ...(attachmentsAdded ? { attachmentsAdded } : {}),
+            ...(attachmentsNotStored?.length ? { attachmentsNotStored } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -960,6 +999,31 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     }
   }, []);
 
+  // The confirmation bar's "Open in Spaarke" for the record the save was filed to: the same opener as every other
+  // open-record affordance (`openRecord`, which falls back to `window.open` from the click on Office on the web).
+  // A failed open (a blocked pop-up) is said where a sighted user looks, beside the link, as well as to the live region.
+  // It describes one attempt at one record: a different saved document or filed record clears it.
+  const [filedRecordOpenFailure, setFiledRecordOpenFailure] = useState<string | null>(null);
+  const filedRecordKey = `${savedDocument?.documentId ?? ''}|${savedDocument?.filedRecord?.id ?? ''}`;
+  useEffect(() => {
+    setFiledRecordOpenFailure(null);
+  }, [filedRecordKey]);
+  const handleOpenFiledRecord = useCallback(
+    (record: FiledRecordRef | null | undefined) => {
+      if (!record) return;
+      const result = openRecord({ orgUrl: process.env.ORG_URL, entityType: record.entityType, recordId: record.id });
+      if (result.opened) {
+        hasOpenedExternalRecordRef.current = true;
+        setFiledRecordOpenFailure(null);
+      } else {
+        const reason = result.reason ?? "Couldn't open the record.";
+        setFiledRecordOpenFailure(reason);
+        announce(reason, 'assertive');
+      }
+    },
+    [announce]
+  );
+
   // Task 105: transient per-button feedback state ('done' = check + "Copied"/"Opened", 'failed' = error label).
   const [buttonFeedback, setButtonFeedback] = useState<{
     copy?: 'done' | 'failed';
@@ -1027,6 +1091,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleFileTargetSelect = useCallback(
     (entity: EntitySearchResult | null) => {
       if (entity?.canFile === false) return; // same backstop as handleEntitySelect (task 084)
+      if (entity && !isSaveTargetType(entity.entityType)) return; // task 133 slice C: never an invoice
       setFileTarget(entity);
       setFilingError(null);
       if (entity) {
@@ -1047,8 +1112,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       entityType: fileTarget.entityType,
       recordId: fileTarget.id,
       recordName: fileTarget.name,
-      // `displayInfo` is the record's number for a Matter/Project; an Invoice's is not a number.
-      recordNumber: fileTarget.entityType === 'Invoice' ? null : (fileTarget.displayInfo ?? null),
+      // `displayInfo` is the record's number (a filing target is a Matter or Project: SAVE_TARGET_TYPES).
+      recordNumber: fileTarget.displayInfo ?? null,
     });
     setFiling(false);
     if (outcome.ok) {
@@ -1121,11 +1186,25 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [selectedEntity, savedDocument, resolvedRelatedRecord]
   );
 
+  // The record a save to `target` is filed to, by logical name and id, for the bar's "Open in Spaarke" (null: none known).
+  const filingRecordOf = useCallback(
+    (target: SaveTarget): FiledRecordRef | null => {
+      if (target.mode === 'create') {
+        return selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null;
+      }
+      if (savedDocument && cleanGuid(target.existingDocumentId) === savedDocument.documentId) {
+        return savedDocument.filedRecord ?? null;
+      }
+      return relatedRecordRef(resolvedRelatedRecord);
+    },
+    [selectedEntity, savedDocument, resolvedRelatedRecord]
+  );
+
   // Task 088: every submission records what the confirmation bar and the "Saved" comparison will need once it
   // completes. `retry()` resends the last context, so the snapshot taken for that context still applies.
   const submitSave = useCallback(
-    (context: SaveFlowContext, filedTo: FiledTo) => {
-      pendingSaveRef.current = { name: documentName, filedTo, mode: context.saveTarget?.mode ?? 'create' };
+    (context: SaveFlowContext, filedTo: FiledTo, filedRecord: FiledRecordRef | null = null) => {
+      pendingSaveRef.current = { name: documentName, filedTo, filedRecord, mode: context.saveTarget?.mode ?? 'create' };
       void startSave(context);
     },
     [documentName, startSave]
@@ -1179,8 +1258,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleSave = useCallback(() => {
     if (!activeTarget) return;
     setSubmittedTarget(activeTarget);
-    submitSave(buildSaveContext(), filingOf(activeTarget));
-  }, [activeTarget, buildSaveContext, filingOf, submitSave]);
+    submitSave(buildSaveContext(), filingOf(activeTarget), filingRecordOf(activeTarget));
+  }, [activeTarget, buildSaveContext, filingOf, filingRecordOf, submitSave]);
 
   // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
   // the identity's default. Task 088: in the saved state it also leaves that state — the pane returns to an
@@ -1230,7 +1309,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             savedDocument: {
               ...prev.savedDocument,
               ...(refreshedName ? { savedName: refreshedName } : {}),
-              ...(refreshedFiledTo !== undefined ? { filedTo: refreshedFiledTo } : {}),
+              // filedTo and the record its "Open in Spaarke" opens move together: the link never names a record the
+              // "Filed to" text no longer does (an unknown filing changes neither).
+              ...(refreshedFiledTo !== undefined
+                ? { filedTo: refreshedFiledTo, filedRecord: relatedRecordRef(resolvedRelatedRecord) }
+                : {}),
             },
           }
         : prev
@@ -1263,7 +1346,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // instead of refusing again.
   const handleKeepBoth = useCallback(() => {
     clearError();
-    submitSave({ ...buildSaveContext(), allowRename: true }, selectedEntity?.name ?? null);
+    submitSave(
+      { ...buildSaveContext(), allowRename: true },
+      selectedEntity?.name ?? null,
+      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null
+    );
     announce('Saving under a new name.', 'polite');
   }, [buildSaveContext, clearError, submitSave, selectedEntity, announce]);
 
@@ -1278,7 +1365,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     // canSaveAsVersion means that document is filed to the selected record, so the bar can name it.
     submitSave(
       { ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } },
-      selectedEntity?.name ?? null
+      selectedEntity?.name ?? null,
+      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null
     );
     announce('Saving as a new version of the existing document.', 'polite');
   }, [buildSaveContext, clearError, submitSave, selectedEntity, announce, error]);
@@ -1363,6 +1451,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       // Task 084: a record the caller cannot file to is never selected, whatever path asked for it. The
       // picker already offers no way to select one; this is the pane-level backstop.
       if (entity?.canFile === false) return;
+      // Task 133 slice C: Save files to Matter/Project only. The hook ignores any other type; returning here as well
+      // keeps the screen reader from announcing a selection that did not happen.
+      if (entity && !isSaveTargetType(entity.entityType)) return;
       setSelectedEntity(entity);
       if (entity) {
         announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
@@ -1474,7 +1565,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           record: {
             id: `demo-new-${Date.now()}`,
             entityType: type,
-            logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
+            logicalName: type === 'Project' ? 'sprk_project' : 'sprk_matter',
             name,
             displayInfo: 'New',
           },
@@ -1651,6 +1742,27 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                 ) : (
                   <>
                     Filed to <Text weight="semibold">{bar.filedTo}</Text>.
+                    {/* NFR-10: the same gate as View Document (ORG_URL + a way to open a tab), never rendered disabled. */}
+                    {openRecordAvailable && bar.filedRecord && (
+                      <Button
+                        appearance="transparent"
+                        size="small"
+                        icon={<OpenRegular />}
+                        onClick={() => handleOpenFiledRecord(bar.filedRecord)}
+                        data-testid="saved-bar-open-filed-record"
+                      >
+                        Open in Spaarke
+                      </Button>
+                    )}
+                    {openRecordAvailable && bar.filedRecord && filedRecordOpenFailure && (
+                      <Text
+                        size={200}
+                        className={styles.savedBarDetail}
+                        data-testid="saved-bar-open-filed-record-error"
+                      >
+                        {filedRecordOpenFailure}
+                      </Text>
+                    )}
                   </>
                 )}
               </Text>
@@ -1714,6 +1826,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       </MessageBar>
     ) : null;
 
+  // Task 138 (#2209): the save asked to add attachments the saved email does not hold (the first save left them out), and
+  // nothing was created for them. A non-blocking warning beside the confirmation; the same single announcement channel as
+  // the email-filing notice (Fluent's MessageBar announces itself).
+  const renderAttachmentsNotStoredNotice = (names: string[] | undefined) =>
+    names && names.length > 0 ? (
+      <MessageBar intent="warning" layout="multiline">
+        <MessageBarBody>{describeAttachmentsNotStored(names)}</MessageBarBody>
+      </MessageBar>
+    ) : null;
+
   // Task 117 (O3/W1): what Copy Link copies — the document's Spaarke record link, built exactly like View Document's
   // (`buildOpenRecordUrl`, ORG_URL + SPAARKE_APP_NAME). `null` when ORG_URL is unset: Copy Link is then HIDDEN, never
   // a fallback to the stored file's URL.
@@ -1727,8 +1849,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // The box for a save this pane just made.
   const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
     documentId: saved.documentId,
-    title: saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke',
+    title:
+      saved.lastSave === 'version'
+        ? 'New version saved to Spaarke'
+        : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
     filedTo: saved.filedTo,
+    filedRecord: saved.filedRecord ?? null,
     notFiledText: 'Not filed to a record.',
     copyUrl: documentRecordLinkOf(saved.documentId),
   });
@@ -1964,8 +2090,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               candidatesLoading={candidatesLoading}
               onSearch={relatedSearch}
               onCreateRecord={createRelatedRecord}
-              // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
-              allowedTypes={['Matter', 'Project', 'Invoice']}
+              // Matter and Project only (Account/Contact removed — UI feedback 2026-09-02; Invoice left Save and
+              // "+ New" in task 133 slice C — an invoice comes only from the Invoice tab's submission).
+              allowedTypes={[...SAVE_TARGET_TYPES]}
               defaultType="Matter"
               createForm={createFormData}
               {...(onSearchContacts ? { onSearchContacts } : {})}
@@ -2187,7 +2314,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           candidatesLoading={candidatesLoading}
           onSearch={relatedSearch}
           onCreateRecord={createRelatedRecord}
-          allowedTypes={['Matter', 'Project', 'Invoice']}
+          allowedTypes={[...SAVE_TARGET_TYPES]}
           defaultType="Matter"
           createForm={createFormData}
           {...(onSearchContacts ? { onSearchContacts } : {})}
@@ -2288,6 +2415,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       <>
         {renderSavedBar(savedBarOf(saved))}
         {renderEmailFilingNotice(saved.emailFilingProblem)}
+        {renderAttachmentsNotStoredNotice(saved.attachmentsNotStored)}
         {renderDocumentHeader(canSaveNewVersion ? 'locked' : 'readonly', lockedName)}
         <div className={styles.section}>
           <DocumentProfileSection

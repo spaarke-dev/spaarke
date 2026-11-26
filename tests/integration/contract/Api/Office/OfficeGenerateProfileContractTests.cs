@@ -271,7 +271,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
 /// module boundaries doubled locally for the Generate Profile contract — configured entirely in THIS file,
 /// per the task's boundary ("configure your test class locally", do not modify shared fixture files).
 /// </summary>
-public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFactory
+public class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFactory
 {
     private readonly Dictionary<string, Spaarke.Dataverse.AccessRights> _grants = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<JobContract> _queuedJobs = new();
@@ -288,8 +288,13 @@ public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFac
         _grants.Clear();
         _queuedJobs.Clear();
         _refuseNextSubmit = false;
+        OnSubmit = null;
         ProfileAi.Invocations.Clear();
     }
+
+    /// <summary>Runs at the start of each submit, before it records or refuses the job (task 137: a test makes a submit
+    /// throw something else, or changes the document while the send is in progress).</summary>
+    public Action<JobContract>? OnSubmit { get; set; }
 
     /// <summary>The next submit fails as a busy Service Bus namespace does.</summary>
     public void RefuseNextSubmit() => _refuseNextSubmit = true;
@@ -334,6 +339,8 @@ public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFac
                 .Setup(q => q.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
                 .Returns((JobContract job, CancellationToken _) =>
                 {
+                    OnSubmit?.Invoke(job);
+
                     if (_refuseNextSubmit)
                     {
                         _refuseNextSubmit = false;

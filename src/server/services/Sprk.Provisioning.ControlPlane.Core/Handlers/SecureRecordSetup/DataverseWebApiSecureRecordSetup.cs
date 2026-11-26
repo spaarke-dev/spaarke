@@ -154,6 +154,34 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
         => Session(target).FindRolesAsync(name, businessUnitId, cancellationToken);
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
+        => Session(target).FindRoleCopiesAsync(name, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(SecureRecordSetupTarget target, Guid roleId, CancellationToken cancellationToken)
+        => Session(target).ListRoleUsersAsync(roleId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).ListUserRolesAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).ListUserTeamsAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).ListUserProfilesAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
+        => Session(target).ListTeamProfilesAsync(teamId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
+        => Session(target).AssociateUserRoleAsync(systemUserId, roleId, cancellationToken);
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
         => Session(target).ListTeamRolesAsync(teamId, cancellationToken);
 
@@ -192,6 +220,10 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
     /// <inheritdoc/>
     public Task<bool?> IsAttributeSecuredAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
         => Session(target).IsAttributeSecuredAsync(tableLogicalName, attributeLogicalName, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
+        => Session(target).GetAttributeExposureAsync(tableLogicalName, attributeLogicalName, cancellationToken);
 
     /// <inheritdoc/>
     public Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken)
@@ -376,6 +408,42 @@ internal sealed class SecureRecordSetupWebApi
                 $"Reading role '{name}'", ct).ConfigureAwait(false))
             .Select(Role).ToArray();
 
+    internal async Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(string name, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"roles?$filter=name eq '{Literal(name)}'" +
+                "&$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
+                $"Reading every copy of role '{name}'", ct).ConfigureAwait(false))
+            .Select(Role).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(Guid roleId, CancellationToken ct)
+        => (await GetAllValuesAsync($"roles({roleId})/systemuserroles_association?$select=systemuserid,applicationid",
+                "Reading the role's users", ct).ConfigureAwait(false))
+            .Select(r => new SecureSetupRoleUser(Id(r, "systemuserid"), OptionalId(r, "applicationid"))).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(Guid systemUserId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"systemusers({systemUserId})/systemuserroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
+                "Reading the user's roles", ct).ConfigureAwait(false))
+            .Select(Role).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(Guid systemUserId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"systemusers({systemUserId})/teammembership_association?$select=teamid,name,_businessunitid_value,isdefault",
+                "Reading the user's teams", ct).ConfigureAwait(false))
+            .Select(Team).ToArray();
+
+    internal async Task<IReadOnlyList<Guid>> ListUserProfilesAsync(Guid systemUserId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"systemusers({systemUserId})/systemuserprofiles_association?$select=fieldsecurityprofileid",
+                "Reading the user's field-security profiles", ct).ConfigureAwait(false))
+            .Select(r => Id(r, "fieldsecurityprofileid")).ToArray();
+
+    internal async Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(Guid teamId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"teams({teamId})/teamprofiles_association?$select=fieldsecurityprofileid",
+                "Reading the team's field-security profiles", ct).ConfigureAwait(false))
+            .Select(r => Id(r, "fieldsecurityprofileid")).ToArray();
+
     internal async Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(Guid teamId, CancellationToken ct)
         => (await GetAllValuesAsync(
                 $"teams({teamId})/teamroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
@@ -463,6 +531,37 @@ internal sealed class SecureRecordSetupWebApi
         return document.RootElement.TryGetProperty("IsSecured", out var secured) && secured.ValueKind == JsonValueKind.True;
     }
 
+    /// <summary>
+    /// <c>IsAuditEnabled</c> and <c>IsValidForAdvancedFind</c> are managed properties (<c>{"Value":false,"CanBeChanged":..}</c>); the
+    /// <c>Value</c> is read. A property that is missing or not a boolean throws: an unreadable answer is never "off".
+    /// </summary>
+    internal async Task<SecureSetupAttributeExposure?> GetAttributeExposureAsync(string tableLogicalName, string attributeLogicalName, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get,
+            $"EntityDefinitions(LogicalName='{Literal(tableLogicalName)}')/Attributes(LogicalName='{Literal(attributeLogicalName)}')?$select=IsAuditEnabled,IsValidForAdvancedFind",
+            null, ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        EnsureSuccess(response, $"Reading the audit and Advanced Find settings of {tableLogicalName}.{attributeLogicalName}");
+        using var document = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        return new SecureSetupAttributeExposure(
+            ManagedBoolean(document.RootElement, "IsAuditEnabled", tableLogicalName, attributeLogicalName),
+            ManagedBoolean(document.RootElement, "IsValidForAdvancedFind", tableLogicalName, attributeLogicalName));
+    }
+
+    private static bool ManagedBoolean(JsonElement attribute, string property, string table, string column)
+    {
+        if (attribute.TryGetProperty(property, out var managed) && managed.ValueKind == JsonValueKind.Object
+            && managed.TryGetProperty("Value", out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            return value.GetBoolean();
+        }
+        throw new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other,
+            $"The attribute metadata of {table}.{column} carries no readable {property} value.");
+    }
+
     internal async Task<SecureSetupTableIdentity> GetTableIdentityAsync(string tableLogicalName, CancellationToken ct)
     {
         using var response = await SendAsync(HttpMethod.Get,
@@ -537,6 +636,10 @@ internal sealed class SecureRecordSetupWebApi
 
     internal Task AssociateTeamRoleAsync(Guid teamId, Guid roleId, CancellationToken ct)
         => WriteAsync(HttpMethod.Post, $"teams({teamId})/teamroles_association/$ref", Reference("roles", roleId), "Giving the team the role", ct);
+
+    internal Task AssociateUserRoleAsync(Guid systemUserId, Guid roleId, CancellationToken ct)
+        => WriteAsync(HttpMethod.Post, $"systemusers({systemUserId})/systemuserroles_association/$ref", Reference("roles", roleId),
+            "Giving the user the role", ct);
 
     internal Task DisassociateTeamRoleAsync(Guid teamId, Guid roleId, CancellationToken ct)
         => WriteAsync(HttpMethod.Delete, $"teams({teamId})/teamroles_association({roleId})/$ref", null, "Taking the role from the team", ct);

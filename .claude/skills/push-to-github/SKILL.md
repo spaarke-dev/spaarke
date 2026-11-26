@@ -462,7 +462,7 @@ After pushing, CI runs automatically. The CI Router runs Tier 1 and Tier 2; `Cli
 
 | Workflow | Role | Blocking? |
 |---|---|---|
-| **`CI` (Router)** → `ci-tier1-blocking.yml` | Compile, Arch Tests (MUST-NOT subset), auth/tenant/eval/fidelity gates. Target p95 ≤3 min. | **Yes** — this is the verdict that matters |
+| **`CI` (Router)** → `ci-tier1-blocking.yml` | Compile, Arch Tests (MUST-NOT subset), auth/tenant/eval/fidelity gates, format of changed C# files. Target p95 ≤3 min. | **Yes** — this is the verdict that matters |
 | **`CI` (Router)** → `ci-tier2-advisory.yml` | Full unit tests, format, lint, ADR NetArchTest, markdown links, plugin size | **No — advisory by design.** A red Tier 2 does **not** block a merge |
 | **`Client lint (type-aware ratchet)`** (`client-lint.yml`) | Typed ESLint ratchet on client packages | **Yes — required** |
 | **`CI Standalone Checks`** (`ci-standalone-checks.yml`) | Dependency audit, Release build + BFF publish, Compose client gate, client typecheck, PCF ESLint | **No — advisory** (red jobs on master raise quality alerts). `sdap-ci.yml` was retired 2026-10-14 (CICD-077) |

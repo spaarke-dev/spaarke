@@ -4,7 +4,7 @@
     <title>Migrate Create Work Assignment wizard to the server write path (FR-16)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>025 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -71,7 +71,7 @@
     <step order="1">Inventory keys on the work-assignment `entity` and the follow-on event entity (priority at ~:390 and ~:622); classify user-entered vs client default; move defaults to the Work Assignment/Event rows of the task-012 registry or drop; list in task notes.</step>
     <step order="2">Delete the applyFieldMappings call (~:472) and import (~:38) and the comment at ~:470.</step>
     <step order="3">Keep createRecordViaBffWithWarnings (~:507); add mappingSource only when the filed-under parent differs from the intended mapping source.</step>
-    <step order="4">Move the follow-on sprk_event create (~:669) onto the BFF route (it resolves through withBffChildWrites because sprk_event is in BFF_CHILD_CREATE_TABLES; verify) so it carries owner, stamp and mapping.</step>
+    <step order="4">Move the follow-on sprk_event create (~:669) onto the BFF route (it resolves through withBffChildWrites because sprk_event is in BFF_CHILD_CREATE_TABLES; verify) so it carries owner, stamp and mapping. Mapping needs a source: either add "sprk_event" to ChildRecordEndpoints.InferMappingSourceTables (with the MappingSourceOf seam test; the Event wizard already names its source since task 023, so it is unaffected) or send an explicit mappingSource. Without one of the two the follow-on event maps nothing and no warning says so (task 023 review, finding 1).</step>
     <step order="5">Add workAssignmentService.payload.test.ts (both payloads = user-entered keys only); run all CreateWorkAssignmentWizard jest tests.</step>
     <step order="6">Build library and src/solutions/CreateWorkAssignmentWizard; deploy via code-page-deploy (sprk_createworkassignmentwizard); live check per ui-tests, including filing under a secure Matter (created into isolation).</step>
     <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>

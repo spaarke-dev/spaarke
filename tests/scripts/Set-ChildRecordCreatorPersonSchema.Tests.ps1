@@ -82,12 +82,12 @@ Describe 'the script''s table and solution wiring' {
         $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
         $homes | Should -Match '(?m)^\s+sprk_signal\s+= @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
         # exactly the three ontology tables, the four eBilling tables (ebilling-r1 task 013), the two Procedure tables and the two
-        # policy tables (task 081), and the rule set and Procedure assignment (task 090) have solution homes; every other child's
+        # policy tables (task 081), the rule set and Procedure assignment (task 090) and the Stored File (task 086) have solution homes; every other child's
         # column stays in SpaarkeCore
         @([regex]::Matches($homes, '(?m)^\s+(sprk_\w+)\s+=') | ForEach-Object { $_.Groups[1].Value } | Sort-Object) |
             Should -Be @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_externalidentifier', 'sprk_invoiceapproval',
                 'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_policy', 'sprk_policyversion', 'sprk_procedure',
-                'sprk_procedureassignment', 'sprk_procedureversion', 'sprk_ruleset', 'sprk_signal')
+                'sprk_procedureassignment', 'sprk_procedureversion', 'sprk_ruleset', 'sprk_signal', 'sprk_storedfile')
     }
 
     It 'ebilling-r1 081: lists the Procedure and policy tables in $Tables with SpaarkeMaster as their only home; the empty-before-securing gate covers every table (UAC #2276)' {
@@ -112,6 +112,15 @@ Describe 'the script''s table and solution wiring' {
             $text | Should -Match "(?m)^\`$Tables = @\([^)]*'$t'[^)]*\)"
             $homes | Should -Match "(?m)^\s+$t\s+= @\('SpaarkeMaster'\)"
         }
+    }
+
+    It 'ebilling-r1 086: lists sprk_storedfile in $Tables with SpaarkeMaster as its only home, outside the narrow profile' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
+        $text | Should -Match "(?m)^\`$Tables = @\([^)]*'sprk_storedfile'[^)]*\)"
+        $homes | Should -Match "(?m)^\s+sprk_storedfile\s+= @\('SpaarkeMaster'\)"
+        # 088 created the column (canonical relationship name); a home means no mode of this script creates it (F3).
+        $text | Should -Not -Match "(?m)^\`$OntologyWriterTables = @\([^)]*'sprk_storedfile'"
     }
 
     It 'D-136: the narrow profile covers exactly sprk_budgetrevision, sprk_decisionrecord and sprk_signal' {
@@ -148,13 +157,19 @@ Describe 'a simulated run' {
             $global:SimCpNarrowUsers = @((SimCp-Guid 'mi'))
             $global:SimCpNarrowTeams = @()
             $global:SimCpNarrowExtra = @()
+            # Task 267 (#2618): the business units named 'Spaarke Ontology Writer', every default team, and the teams on the reader
+            # profile. 'ok' has none of them (as before task 267); a scenario sets them.
+            $global:SimCpWriterUnits = @()
+            $global:SimCpDefaultTeams = @()
+            $global:SimCpReaderTeams = @()
         }
         # The tables whose column travels in SpaarkeMaster / OntologyPlatformSolution, as the script's $SolutionHomes says.
         $global:SimCpHomeTables = @('sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal')
         # ebilling-r1 task 013: tables whose column travels in SpaarkeMaster only (the eBilling schema scripts create it with
         # the canonical relationship name).
         $global:SimCpMasterOnlyTables = @('sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection',
-            'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment')
+            'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment',
+            'sprk_storedfile')
         # Task 081: the tables a field-permission POST was sent for (the write list records only "POST fieldpermissions"), and no
         # real waiting: Ensure-FieldPermission's retry sleeps are shadowed so a refused grant fails fast instead of after two minutes.
         $global:SimCpPermissionPosts = [System.Collections.Generic.List[string]]::new()
@@ -224,7 +239,11 @@ Describe 'a simulated run' {
             if ($path -like "systemusers?*applicationid eq $(SimCp-Guid 'mi-app')*") { return @{ value = @(@{ systemuserid = $mi; fullname = 'MI' }) } }
             if ($path -like 'systemusers?*applicationid eq *') { return @{ value = @(@{ systemuserid = $bff; fullname = 'BFF' }) } }
             if ($path -like 'systemusers?*applicationid ne null*') { return @{ value = @() } }
-            if ($path -like 'teams?*') { return @{ value = @() } }
+            if ($path -like "businessunits?*name eq 'Spaarke Ontology Writer'*") { return @{ value = @($global:SimCpWriterUnits | ForEach-Object { @{ businessunitid = $_; name = 'Spaarke Ontology Writer' } }) } }
+            if ($path -like 'teams?*') {
+                if ($path -notlike '*_businessunitid_value*') { throw "simulation: the default-team read must select _businessunitid_value ($path)" }
+                return @{ value = @($global:SimCpDefaultTeams) }
+            }
             if ($path -like "fieldsecurityprofiles($writer)/systemuserprofiles_association*") {
                 $members = @(@{ systemuserid = $bff; fullname = 'BFF'; applicationid = 'x' })
                 if ($global:SimCpScenario -eq 'mi-in-bff-writers') { $members += @{ systemuserid = $mi; fullname = 'MI'; applicationid = 'mi-app-id' } }
@@ -238,6 +257,9 @@ Describe 'a simulated run' {
             }
             if ($path -like "fieldsecurityprofiles($narrow)/teamprofiles_association*") {
                 return @{ value = @($global:SimCpNarrowTeams | ForEach-Object { @{ teamid = $_; name = 'Some team' } }) }
+            }
+            if ($path -like "fieldsecurityprofiles($reader)/teamprofiles_association*") {
+                return @{ value = @($global:SimCpReaderTeams | ForEach-Object { @{ teamid = $_; name = 'Some team' } }) }
             }
             if ($path -like 'fieldsecurityprofiles(*)/teamprofiles_association*') { return @{ value = @() } }
             if ($path -like "fieldpermissions?*_fieldsecurityprofileid_value eq $narrow and entityname eq *") {
@@ -330,7 +352,7 @@ Describe 'a simulated run' {
     }
     AfterAll {
         foreach ($f in 'az', 'Invoke-RestMethod', 'SimCp-Guid', 'SimCp-Rel', 'SimCp-Reset', 'Start-Sleep') { Remove-Item "function:global:$f" -ErrorAction SilentlyContinue }
-        Remove-Variable SimCpTables, SimCpHomeTables, SimCpMasterOnlyTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra, SimCpPermissionPosts -Scope Global -ErrorAction SilentlyContinue
+        Remove-Variable SimCpTables, SimCpHomeTables, SimCpMasterOnlyTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra, SimCpPermissionPosts, SimCpWriterUnits, SimCpDefaultTeams, SimCpReaderTeams -Scope Global -ErrorAction SilentlyContinue
     }
 
     It 'passes: the maker relationship name is accepted, and the column is found in SpaarkeMaster and OntologyPlatformSolution, not reported missing from SpaarkeCore' {
@@ -405,6 +427,68 @@ Describe 'a simulated run' {
         $run.Text | Should -Match 'MISSING\s+sprk_budgetrevision\.sprk_createdbyperson in OntologyPlatformSolution'
         $run.Text | Should -Match 'VERIFY FAIL'
         $run.ExitCode | Should -Be 1
+    }
+
+    # ── Task 267 (#2618): the ontology writer's business unit keeps its default team out of the reader profile ─────────
+    # H7b (procedure version 8) skips that team at S11/S16 and refuses it in any profile at S24; the script follows the same rule
+    # through scripts/common/OntologyWriterUnit.ps1.
+    It '267: -Apply adds every default team but the ontology writer unit''s to the reader profile' {
+        SimCp-Reset
+        $global:SimCpWriterUnits = @((SimCp-Guid 'bu-writer'))
+        $global:SimCpDefaultTeams = @(
+            @{ teamid = (SimCp-Guid 'team-root'); name = 'Root team'; _businessunitid_value = (SimCp-Guid 'bu-root') },
+            @{ teamid = (SimCp-Guid 'team-writer'); name = 'Writer team'; _businessunitid_value = (SimCp-Guid 'bu-writer') })
+        $run = Invoke-SimulatedRun @{ Apply = $true }
+        @($run.Writes | Where-Object { $_ -like 'POST fieldsecurityprofiles(*)/teamprofiles_association/$ref' }).Count | Should -Be 1
+        $run.Text | Should -Match "DONE\s+added default team 'Root team' to Spaarke BFF-Managed Field Readers"
+        $run.Text | Should -Not -Match "default team 'Writer team'"
+    }
+
+    It '267: -Verify passes when every default team but the ontology writer unit''s is on the reader profile' {
+        SimCp-Reset
+        $global:SimCpWriterUnits = @((SimCp-Guid 'bu-writer'))
+        $global:SimCpDefaultTeams = @(
+            @{ teamid = (SimCp-Guid 'team-root'); name = 'Root team'; _businessunitid_value = (SimCp-Guid 'bu-root') },
+            @{ teamid = (SimCp-Guid 'team-writer'); name = 'Writer team'; _businessunitid_value = (SimCp-Guid 'bu-writer') })
+        $global:SimCpReaderTeams = @((SimCp-Guid 'team-root'))
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match "OK\s+Spaarke BFF-Managed Field Readers member: default team 'Root team'"
+        $run.Text | Should -Not -Match 'Writer team'
+        $run.Text | Should -Match 'VERIFY PASS'
+        $run.ExitCode | Should -Be 0
+    }
+
+    It '267: -Verify FAILs when the ontology writer unit''s default team IS on the reader profile, and removes nothing' {
+        SimCp-Reset
+        $global:SimCpWriterUnits = @((SimCp-Guid 'bu-writer'))
+        $global:SimCpDefaultTeams = @(
+            @{ teamid = (SimCp-Guid 'team-root'); name = 'Root team'; _businessunitid_value = (SimCp-Guid 'bu-root') },
+            @{ teamid = (SimCp-Guid 'team-writer'); name = 'Writer team'; _businessunitid_value = (SimCp-Guid 'bu-writer') })
+        $global:SimCpReaderTeams = @((SimCp-Guid 'team-root'), (SimCp-Guid 'team-writer'))
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match "FAIL\s+default team 'Writer team' of the 'Spaarke Ontology Writer' business unit is on Spaarke BFF-Managed Field Readers"
+        $run.Text | Should -Match 'VERIFY FAIL'
+        $run.ExitCode | Should -Be 1
+        $run.Writes.Count | Should -Be 0
+    }
+
+    It '267 must not fire: with no ontology writer unit, every default team is still demanded on the reader profile' {
+        SimCp-Reset
+        $global:SimCpDefaultTeams = @(
+            @{ teamid = (SimCp-Guid 'team-root'); name = 'Root team'; _businessunitid_value = (SimCp-Guid 'bu-root') },
+            @{ teamid = (SimCp-Guid 'team-other'); name = 'Other team'; _businessunitid_value = (SimCp-Guid 'bu-other') })
+        $global:SimCpReaderTeams = @((SimCp-Guid 'team-root'))
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match "MISSING\s+Spaarke BFF-Managed Field Readers member: default team 'Other team'"
+        $run.ExitCode | Should -Be 1
+    }
+
+    It '267: two business units named ''Spaarke Ontology Writer'' stop the run with a clear message before any profile write' {
+        SimCp-Reset
+        $global:SimCpWriterUnits = @((SimCp-Guid 'bu-writer'), (SimCp-Guid 'bu-writer-2'))
+        $global:SimCpDefaultTeams = @(@{ teamid = (SimCp-Guid 'team-root'); name = 'Root team'; _businessunitid_value = (SimCp-Guid 'bu-root') })
+        { Invoke-SimulatedRun @{ Apply = $true } } | Should -Throw -ExpectedMessage "*Found 2 business units named 'Spaarke Ontology Writer'*"
+        @($global:SimCpWrites | Where-Object { $_ -like '*teamprofiles_association*' }).Count | Should -Be 0
     }
 
     # ── D-136: the narrow profile ────────────────────────────────────────────────────────────────────────────

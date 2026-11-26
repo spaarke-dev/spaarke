@@ -560,6 +560,35 @@ secrets:
 #
 # Ordering: sorted alphabetically by key at generator-emit time (determinism
 # contract mirrors secrets: sort).
+# ---------------------------------------------------------------------------
+# Stamp-absent BFF keys (ISS-022, plan D36, owner decision 2026-10-14)
+# ---------------------------------------------------------------------------
+# Customer stamps are keyless (D13). Three BFF settings that look like missing
+# catalog entries are deliberately NOT secrets here, and no secret is added for
+# any of them:
+#   - PowerBi__ClientSecret  -- NOT supplied. Reporting is gated OFF on stamps:
+#       ReportingModule registers ReportingEmbedService and maps /api/reporting/*
+#       only when PowerBi:TenantId is set, so without it the module is absent
+#       (404) and nothing fails at boot. Setting TenantId without the secret
+#       would fail PowerBiOptions validation, so never set one alone. A stamp
+#       reporting design (a UAMI-federated Power BI service-principal app, never
+#       a secret, plus an embed capacity and workspace per stamp) is a later
+#       project.
+#   - Rag__ApiKey            -- NOT needed on stamps; left absent. The RagApiKey
+#       scheme guards only POST /api/ai/rag/enqueue-indexing for non-JWT callers
+#       (scripts, bulk jobs, tests). The product indexing path is the Service Bus
+#       RagIndexingJobHandler plus the JWT send-to-index endpoint. Without the
+#       key the scheme fails closed (401), so the endpoint stays closed.
+#   - Notifications__SignalR__ConnectionString -- keyless, per_env_settings
+#       below, only when the stamp's SignalR is deployed (customer.bicep
+#       signalrEnabled; default false). The resource has disableLocalAuth, so
+#       there is no access key and a key-bearing string can never work: H4b
+#       writes the managed-identity string (AuthType=azure.msi) built from the
+#       H2a signalrHostName output and the stamp UAMI client id. Not deployed =
+#       neither setting is written and the BFF keeps its Null-Object delivery
+#       service (negotiate answers 503; clients use the poll endpoint, ADR-032).
+#       No Key Vault secret, ever.
+
 per_env_settings:
   - key: 'SpeAdmin__KeyVaultUri'
     per_env_source: 'from-h2a-output:kv_vault_uri'
@@ -950,6 +979,19 @@ per_env_settings:
       uploads are refused (StoreDisabled) and the blob probe reports
       NotConfigured.
 
+  - key: 'Ontology__Writer__ManagedIdentityClientId'
+    per_env_source: 'from-h2a-output:ontology_writer_client_id'
+    iOptionsModule: 'SignalsModule (OntologyWriterCredentialFactory)'
+    required: true
+    notes: >-
+      Task 266 / #2605. Client id of the stamp's ontology writer UAMI
+      (customer.bicep output `ontologyWriterIdentityClientId`), attached to
+      both slots next to the stamp UAMI. The BFF's Signal and Decision Record
+      writers authenticate ONLY as this identity and fail closed without it;
+      it must never be the stamp UAMI (System Administrator). Not a secret.
+      H10 creates its Dataverse application user; H7b S24 grants it the
+      writer role and field-security profiles; H13 T7 reads the setting back.
+
   - key: 'DocumentIntelligence__Enabled'
     per_env_source: 'literal'
     literal_value: 'true'
@@ -1023,6 +1065,30 @@ per_env_settings:
       absent = no limit. The BFF refuses model calls with 429 once its
       estimate reaches it (Services/Ai/Metering/AiSpendLimit). Change or
       remove it later with scripts/Set-AiSpendLimit.ps1 (both slots).
+
+  - key: 'Notifications__SignalR__ConnectionString'
+    per_env_source: 'from-h2a-output:signalr_msi_connection_string'
+    iOptionsModule: 'NotificationsModule (SignalRDeliveryOptions)'
+    required: false
+    notes: >-
+      ISS-022 (plan D36, owner 2026-10-14). The KEYLESS managed-identity string
+      Endpoint=https://{name}.service.signalr.net;AuthType=azure.msi;ClientId={stamp
+      UAMI client id};Version=1.0; built from H2a's signalrHostName output and
+      MiClientId (StampSignalRConnection). Written ONLY when SignalR was
+      deployed; absent = Null-Object delivery, clients poll (ADR-032). Never an
+      AccessKey= value: the resource has local auth disabled. The stamp UAMI
+      holds "SignalR App Server" on it (signalr.bicep, via customer.bicep).
+      Plain setting, not a Key Vault secret (nothing in the string is secret).
+
+  - key: 'Notifications__SignalR__Enabled'
+    per_env_source: 'from-h2a-output:signalr_enabled'
+    iOptionsModule: 'NotificationsModule (SignalRDeliveryOptions)'
+    required: false
+    notes: >-
+      ISS-022. The BFF kill-switch Notifications:SignalR:Enabled, written as
+      "true" only together with the connection string above (when SignalR was
+      deployed). The BFF defaults it to true, so it is not load-bearing today;
+      writing it makes the intent explicit and survives a changed default.
 
   - key: 'EmailProcessing__DefaultContainerId'
     per_env_source: 'from-h8-output:spe_container_id'

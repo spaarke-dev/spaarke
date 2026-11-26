@@ -17,11 +17,11 @@
 // `@spaarke/ai-widgets` is below. Measured 2026-08-20: mapping it to `src` moves resolution of its
 // OWN dependency graph into this package's node_modules, and 10 of its runtime deps are ones this
 // package does not (and should not) declare — d3-force, lexical, pdfjs-dist, react-window,
-// dompurify, diff, marked, @hello-pangea/dnd, @microsoft/applicationinsights-web, @spaarke/sdap-client.
+// dompurify, diff, marked, @hello-pangea/dnd, @microsoft/applicationinsights-web (and @spaarke/sdap-client until it was folded into ui-components, 2026-11-24).
 // The experiment failed with 72 `Cannot find module '@fluentui/react-icons'` errors. The dist route
 // keeps the package boundary honest; the cost is that CI must build the SharedLibs first
 // (`compose-client-gate` in .github/workflows/ci-standalone-checks.yml does exactly that, in dependency order:
-// Spaarke.Auth → Spaarke.SdapClient → Spaarke.UI.Components → Spaarke.DocumentOperations).
+// Spaarke.Auth → Spaarke.UI.Components).
 //
 // NEVER pass `{ virtual: true }` to a `jest.mock()` of an `@spaarke/*` specifier in this package.
 // `virtual: true` registers the specifier in jest's RESOLVER, which is shared by every suite a

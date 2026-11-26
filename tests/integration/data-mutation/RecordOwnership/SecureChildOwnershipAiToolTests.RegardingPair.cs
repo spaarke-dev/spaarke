@@ -546,7 +546,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 body = "Draft.",
                 to = new[] { "a@b.example" },
                 regarding = new { table = "sprk_invoice", recordId = invoice },
-            })) with { UserId = Guid.NewGuid().ToString() },
+            })) with
+            { UserId = Guid.NewGuid().ToString() },
             BuildAnalysisTool(nameof(EmailDraftToolHandler)), CancellationToken.None);
 
         var missing = await Draft(absent);
@@ -587,7 +588,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 body = "Draft.",
                 to = new[] { "a@b.example" },
                 regarding = new { table = "sprk_invoice", recordId = invoice },
-            })) with { UserId = Guid.NewGuid().ToString() },
+            })) with
+            { UserId = Guid.NewGuid().ToString() },
             BuildAnalysisTool(nameof(EmailDraftToolHandler)), CancellationToken.None);
 
         result.Success.Should().BeTrue(result.ErrorMessage);

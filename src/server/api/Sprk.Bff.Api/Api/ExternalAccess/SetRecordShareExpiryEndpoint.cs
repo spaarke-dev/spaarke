@@ -189,6 +189,19 @@ public static class SetRecordShareExpiryEndpoint
                 "One of the shares on this record could not be identified, so no expiry was changed.");
         }
 
+        // Fix round 3g: a share that did not carry a root, contact, organization or issuer column cannot be judged: whether it is
+        // also linked to another record, whom it belongs to and whether a contact issued it are all unknown. Skipping it would
+        // leave it at its old date while reporting success, so it is refused as the share without an id is (nothing is changed).
+        if (shares.Any(s => !s.KeyLookupsRead || !s.IssuerRead))
+        {
+            logger.LogError(
+                "[SHARE-EXPIRY] An active share of {RootType} {RootId} came back without every root, contact, organization " +
+                "and issuer column. Nothing was changed.", root.Type, root.Id);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotAppliedTitle,
+                ShareUnidentifiableReasonCode,
+                "One of the shares on this record could not be identified, so no expiry was changed.");
+        }
+
         // A share row carrying a SECOND root lookup confers access on that other record too — the read path
         // grants every populated root. Re-dating it, or reviving it under "Renew them too", would change access
         // to a record the caller's Write was never checked on. The BFF never writes such a row, but an import or

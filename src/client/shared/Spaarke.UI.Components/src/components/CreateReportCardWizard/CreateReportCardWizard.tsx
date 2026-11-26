@@ -66,7 +66,6 @@ import { ReportCardService } from './reportCardService';
 import { buildEmptyReportCardForm } from './formTypes';
 import type { ICreateReportCardFormState } from './formTypes';
 
-import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -77,6 +76,7 @@ import {
   AddTodoFollowOnStep,
   SendEmailFollowOnStep,
 } from '../WizardFollowOns';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import { createTodoRegardingChild } from '../WizardFollowOns';
 import { EMPTY_TODO_FORM } from '../CreateTodoWizard/formTypes';
 import type { ICreateTodoFormState } from '../CreateTodoWizard/formTypes';
@@ -90,6 +90,14 @@ import {
   searchMatterTypes,
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import {
+  EMAIL_NOT_SENT_NO_SERVER,
+  EMPTY_COMPOSED_EMAIL,
+  isComposedEmailReady,
+  sendComposedEmail,
+} from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
+import { createWebApiFromDataService } from '../../utils/adapters/dataServiceWebApiAdapter';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing)
@@ -135,6 +143,11 @@ export interface ICreateReportCardWizardProps {
   dataService: IDataService;
   /** Optional INavigationService for opening records after creation. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
   /** MSAL-backed authenticated fetch function for BFF API calls (follow-on email/todo/assign-work only — no file pipeline). */
@@ -157,25 +170,6 @@ export interface ICreateReportCardWizardProps {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter: build a webApi-shaped object from IDataService for CreateRecordWizard
-// ---------------------------------------------------------------------------
-
-function buildWebApiAdapter(dataService: IDataService) {
-  return {
-    retrieveMultipleRecords: async (entityLogicalName: string, options?: string, _maxPageSize?: number) => {
-      const result = await dataService.retrieveMultipleRecords(entityLogicalName, options);
-      return { entities: result.entities };
-    },
-    retrieveRecord: (entityLogicalName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityLogicalName, id, options),
-    createRecord: async (entityLogicalName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityLogicalName, data);
-      return { id };
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // CreateReportCardWizard
 // ---------------------------------------------------------------------------
 
@@ -184,6 +178,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   onClose,
   dataService,
   navigationService,
+  emailComposeHandlers,
   embedded,
   authenticatedFetch: authFetch,
   bffBaseUrl,
@@ -218,9 +213,8 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   const [todoForm, setTodoForm] = React.useState<ICreateTodoFormState>(EMPTY_TODO_FORM);
 
   // -- Follow-on state: Send Email --------------------------------------------
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
+  // Task 182 (D-219): the whole composed email — From, To/Cc/Bcc, subject, body, attachments.
+  const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
 
   // Reset all state on open
   React.useEffect(() => {
@@ -242,9 +236,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       setAssignedOutsideCounselId('');
       setAssignedOutsideCounselName('');
       setTodoForm(EMPTY_TODO_FORM);
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
+      setEmail(EMPTY_COMPOSED_EMAIL);
     }
   }, [open]);
 
@@ -279,12 +271,11 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   assignedOutsideCounselNameRef.current = assignedOutsideCounselName;
   const todoFormRef = React.useRef(todoForm);
   todoFormRef.current = todoForm;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
+  const emailRef = React.useRef(email);
+  emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
 
   // -- Search callbacks --------------------------------------------------
   const handleSearchContacts = React.useCallback(
@@ -331,7 +322,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
   }, []);
 
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
-  const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // -- Custom Next Steps card set: Send Email / Add To Do / Assign Work ------
   // (design.md §5.9, task 040 — mirrors CreateInvoiceWizard's task 030 set.)
@@ -343,20 +334,13 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         stepLabel: 'Send Email',
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email about this report card.',
-        canAdvance: () =>
-          emailToRef.current.trim() !== '' &&
-          emailSubjectRef.current.trim() !== '' &&
-          emailBodyRef.current.trim() !== '',
+        canAdvance: () => isComposedEmailReady(emailRef.current),
         renderStep: () => (
           <SendEmailFollowOnStep
-            emailTo={emailToRef.current}
-            onEmailToChange={setEmailTo}
-            emailSubject={emailSubjectRef.current}
-            onEmailSubjectChange={setEmailSubject}
-            emailBody={emailBodyRef.current}
-            onEmailBodyChange={setEmailBody}
-            onSearchUsers={handleSearchUsers}
-            infoNote="This email will be saved as a draft activity on the record. You can review and send it from there."
+            value={emailRef.current}
+            onChange={setEmail}
+            composeHandlers={emailComposeHandlers}
+            onSearchRecipients={handleSearchUsers}
           />
         ),
       },
@@ -369,6 +353,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         renderStep: () => (
           <AddTodoFollowOnStep
             dataService={dataService}
+            navigationService={navigationService}
             formValues={todoFormRef.current}
             onFormValuesChange={setTodoForm}
             onSearchAssignees={handleSearchContacts}
@@ -423,6 +408,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
               outsideCounselValue={ocVal}
               onOutsideCounselChange={handleOutsideCounselChange}
               onSearchOutsideCounsel={handleSearchOrganizations}
+              navigationService={navigationService}
             />
           );
         },
@@ -430,6 +416,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
     ],
     [
       dataService,
+      emailComposeHandlers,
       handleSearchContacts,
       handleSearchOrganizations,
       handleSearchUsers,
@@ -440,6 +427,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       handleAttorneyChange,
       handleParalegalChange,
       handleOutsideCounselChange,
+      navigationService,
     ]
   );
 
@@ -462,6 +450,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         renderContent: () => (
           <CreateReportCardStep
             dataService={dataService}
+            navigationService={navigationService}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}
@@ -474,144 +463,166 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
 
       finishingLabel: 'Creating report card…',
 
-      onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
-        const association = context.association;
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish: (context: IFinishContext): Promise<IWizardSuccessConfig> =>
+        holdComposedEmailUploadsDuring(emailRef.current, async (): Promise<IWizardSuccessConfig> => {
+          const association = context.association;
 
-        const reportCardService = new ReportCardService(dataService, authFetch ?? fetch.bind(window), bffBaseUrl ?? '');
+          const reportCardService = new ReportCardService(
+            dataService,
+            authFetch ?? fetch.bind(window),
+            bffBaseUrl ?? ''
+          );
 
-        const result = await reportCardService.createReportCard(formValuesRef.current, association);
+          const result = await reportCardService.createReportCard(formValuesRef.current, association);
 
-        if (result.status === 'error') {
-          throw new Error(result.errorMessage ?? 'Failed to create report card');
-        }
-
-        const reportCardId = result.reportCardId!;
-        const reportCardName = result.reportCardName!;
-        const warnings: string[] = [...result.warnings];
-
-        // -- Follow-on: Assign Work (sprk_workassignment — NOT regarding the
-        // report card; see the file-level NOTE above for why) --
-        if (context.selectedActions.includes('assign-work') && assignWorkNameRef.current.trim()) {
-          try {
-            const waForm: ICreateWorkAssignmentFormState = {
-              recordType: '',
-              recordId: '',
-              recordName: '',
-              assignWithoutRecord: true,
-              name: assignWorkNameRef.current.trim(),
-              description: assignWorkDescriptionRef.current.trim(),
-              matterTypeId: assignWorkMatterTypeIdRef.current,
-              matterTypeName: assignWorkMatterTypeNameRef.current,
-              practiceAreaId: assignWorkPracticeAreaIdRef.current,
-              practiceAreaName: assignWorkPracticeAreaNameRef.current,
-              priority: assignWorkPriorityRef.current,
-              responseDueDate: assignWorkResponseDueDateRef.current,
-            };
-            const waAssignWork: IAssignWorkState = {
-              assignedAttorneyId: assignedAttorneyIdRef.current,
-              assignedAttorneyName: assignedAttorneyNameRef.current,
-              assignedParalegalId: assignedParalegalIdRef.current,
-              assignedParalegalName: assignedParalegalNameRef.current,
-              assignedLawFirmId: assignedOutsideCounselIdRef.current,
-              assignedLawFirmName: assignedOutsideCounselNameRef.current,
-              assignedLawFirmAttorneyId: '',
-              assignedLawFirmAttorneyName: '',
-              notifyResources: false,
-            };
-            const waService = new WorkAssignmentService(dataService, authFetch ?? fetch.bind(window), bffBaseUrl ?? '');
-            const waResult = await waService.createWorkAssignment(waForm, [], [], waAssignWork);
-            if (waResult.status === 'error') {
-              warnings.push(
-                `Work assignment could not be created (${waResult.errorMessage ?? 'Unknown error'}). ` +
-                  'You can create it manually from the report card record.'
-              );
-            } else if (waResult.warnings.length > 0) {
-              warnings.push(...waResult.warnings);
-            }
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            warnings.push(
-              `Work assignment could not be created (${message}). You can create it manually from the report card record.`
-            );
+          if (result.status === 'error') {
+            throw new Error(result.errorMessage ?? 'Failed to create report card');
           }
-        }
 
-        // -- Follow-on: Add To Do (sprk_todo regarding the new Report Card, NOT the host) --
-        if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
-          try {
-            const todoResult = await createTodoRegardingChild(
-              dataService,
-              todoFormRef.current,
-              {
-                entityType: 'sprk_reportcard',
-                recordId: reportCardId,
-                recordName: reportCardName,
-              },
-              authFetch,
-              bffBaseUrl
-            );
-            if (!todoResult.success) {
+          const reportCardId = result.reportCardId!;
+          const reportCardName = result.reportCardName!;
+          const warnings: string[] = [...result.warnings];
+
+          // -- Follow-on: Assign Work (sprk_workassignment — NOT regarding the
+          // report card; see the file-level NOTE above for why) --
+          if (context.selectedActions.includes('assign-work') && assignWorkNameRef.current.trim()) {
+            try {
+              const waForm: ICreateWorkAssignmentFormState = {
+                recordType: '',
+                recordId: '',
+                recordName: '',
+                assignWithoutRecord: true,
+                name: assignWorkNameRef.current.trim(),
+                description: assignWorkDescriptionRef.current.trim(),
+                matterTypeId: assignWorkMatterTypeIdRef.current,
+                matterTypeName: assignWorkMatterTypeNameRef.current,
+                practiceAreaId: assignWorkPracticeAreaIdRef.current,
+                practiceAreaName: assignWorkPracticeAreaNameRef.current,
+                priority: assignWorkPriorityRef.current,
+                responseDueDate: assignWorkResponseDueDateRef.current,
+              };
+              const waAssignWork: IAssignWorkState = {
+                assignedAttorneyId: assignedAttorneyIdRef.current,
+                assignedAttorneyName: assignedAttorneyNameRef.current,
+                assignedParalegalId: assignedParalegalIdRef.current,
+                assignedParalegalName: assignedParalegalNameRef.current,
+                assignedLawFirmId: assignedOutsideCounselIdRef.current,
+                assignedLawFirmName: assignedOutsideCounselNameRef.current,
+                assignedLawFirmAttorneyId: '',
+                assignedLawFirmAttorneyName: '',
+                notifyResources: false,
+              };
+              const waService = new WorkAssignmentService(
+                dataService,
+                authFetch ?? fetch.bind(window),
+                bffBaseUrl ?? ''
+              );
+              const waResult = await waService.createWorkAssignment(waForm, [], [], waAssignWork);
+              if (waResult.status === 'error') {
+                warnings.push(
+                  `Work assignment could not be created (${waResult.errorMessage ?? 'Unknown error'}). ` +
+                    'You can create it manually from the report card record.'
+                );
+              } else if (waResult.warnings.length > 0) {
+                warnings.push(...waResult.warnings);
+              }
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'Unknown error';
               warnings.push(
-                `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +
-                  'You can create it manually from the report card record.'
+                `Work assignment could not be created (${message}). You can create it manually from the report card record.`
               );
             }
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            warnings.push(
-              `To do could not be created (${message}). You can create it manually from the report card record.`
-            );
           }
-        }
 
-        // -- Follow-on: Send Email --
-        if (context.selectedActions.includes('send-email') && emailToRef.current.trim() && authFetch && bffBaseUrl) {
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: emailToRef.current,
-            subject: emailSubjectRef.current,
-            body: emailBodyRef.current,
-            associations: [{ entityType: 'sprk_reportcard', entityId: reportCardId, entityName: reportCardName }],
-          });
-          if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
-        }
-
-        const hasWarnings = warnings.length > 0;
-
-        const viewReportCard = () => {
-          if (navigationService) {
-            navigationService.openRecord('sprk_reportcard', reportCardId);
+          // -- Follow-on: Add To Do (sprk_todo regarding the new Report Card, NOT the host) --
+          if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
+            try {
+              const todoResult = await createTodoRegardingChild(
+                dataService,
+                todoFormRef.current,
+                {
+                  entityType: 'sprk_reportcard',
+                  recordId: reportCardId,
+                  recordName: reportCardName,
+                },
+                authFetch,
+                bffBaseUrl
+              );
+              if (!todoResult.success) {
+                warnings.push(
+                  `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +
+                    'You can create it manually from the report card record.'
+                );
+              }
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'Unknown error';
+              warnings.push(
+                `To do could not be created (${message}). You can create it manually from the report card record.`
+              );
+            }
           }
-          onClose();
-        };
 
-        return {
-          icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
-          title: hasWarnings ? 'Report card created with warnings' : 'Report card created!',
-          body: (
-            <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
-                &ldquo;{reportCardName}&rdquo;
-              </span>{' '}
-              has been created
-              {hasWarnings
-                ? ', though some operations could not complete. See details below.'
-                : ' and is ready to use.'}
-            </Text>
-          ),
-          actions: (
-            <>
-              <Button appearance="primary" onClick={viewReportCard} aria-label={`View report card: ${reportCardName}`}>
-                View Report Card
-              </Button>
-              <Button appearance="secondary" onClick={onClose}>
-                Close
-              </Button>
-            </>
-          ),
-          warnings,
-        };
-      },
+          // -- Follow-on: Send Email --
+          if (
+            context.selectedActions.includes('send-email') &&
+            emailRef.current.to.length > 0 &&
+            authFetch &&
+            bffBaseUrl
+          ) {
+            // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the report card.
+            const emailResult = await sendComposedEmail(emailRef.current, {
+              associations: [{ entityType: 'sprk_reportcard', entityId: reportCardId, entityName: reportCardName }],
+              authenticatedFetch: authFetch,
+              bffBaseUrl,
+              onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+            });
+            if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+          } else if (context.selectedActions.includes('send-email') && emailRef.current.to.length > 0) {
+            warnings.push(EMAIL_NOT_SENT_NO_SERVER);
+          }
+
+          const hasWarnings = warnings.length > 0;
+
+          const viewReportCard = () => {
+            if (navigationService) {
+              navigationService.openRecord('sprk_reportcard', reportCardId);
+            }
+            onClose();
+          };
+
+          return {
+            icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
+            title: hasWarnings ? 'Report card created with warnings' : 'Report card created!',
+            body: (
+              <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
+                  &ldquo;{reportCardName}&rdquo;
+                </span>{' '}
+                has been created
+                {hasWarnings
+                  ? ', though some operations could not complete. See details below.'
+                  : ' and is ready to use.'}
+              </Text>
+            ),
+            actions: (
+              <>
+                <Button
+                  appearance="primary"
+                  onClick={viewReportCard}
+                  aria-label={`View report card: ${reportCardName}`}
+                >
+                  View Report Card
+                </Button>
+                <Button appearance="secondary" onClick={onClose}>
+                  Close
+                </Button>
+              </>
+            ),
+            warnings,
+          };
+        }),
     }),
     [
       formValid,
@@ -621,7 +632,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       authFetch,
       bffBaseUrl,
       navigationService,
-      webApiAdapter,
+      emailComposeHandlers,
       initialAssociation,
       lockAssociation,
       followOnCards,

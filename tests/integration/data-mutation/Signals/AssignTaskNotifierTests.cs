@@ -125,7 +125,7 @@ public sealed class AssignTaskNotifierTests
             var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl }).Build();
             var customer = new CustomerIdentity(Options.Create(new CustomerOptions { Id = CustomerKey }), config, NullLogger<CustomerIdentity>.Instance);
 
-            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, null!, null!, null!, null!, null!, GateLog) { CallBase = true };
+            Gate = new Mock<AssignTaskRecipientGate>(Identities.Object, Links, new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None) /* task 193: ContactUserRepresentation needs it */, null!, null!, null!, null!, GateLog) { CallBase = true };
             Gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .Returns((string entity, Guid id, Guid user, CancellationToken _) =>
                 {
@@ -237,9 +237,9 @@ public sealed class AssignTaskNotifierTests
             LinkUser(LinkedUser);
         }
 
-        public void LinkUser(Guid user, bool disabled = false, bool external = false) =>
+        public void LinkUser(Guid user, bool disabled = false, bool external = false, int accessMode = 0) =>
             Links.UsersByLink.GetOrAdd(Contact, _ => new List<AssignedLinkCandidate>())
-                .Add(new AssignedLinkCandidate(user, Contact, Guid.NewGuid(), disabled, 0, null, external));
+                .Add(new AssignedLinkCandidate(user, Contact, Guid.NewGuid(), disabled, accessMode, null, external));
 
         /// <summary>The contact as an onboarded external party: no internal user represents it, a CIAM binding, an email.</summary>
         public void MakeExternal(AccessRights? portalRights = AccessRights.Read)
@@ -402,6 +402,28 @@ public sealed class AssignTaskNotifierTests
 
     // ── Must fire: an onboarded external assignee with a grant (D-199) ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// uac-r2 task 193 (master merge): the gate reads who the contact represents through ContactUserRepresentation. A user with
+    /// NO link who carries the contact's bound oid, where the binder does not resolve that oid to this contact alone (two
+    /// contacts carry it), is not confirmed as the contact's user — and the contact is not external either: nobody is emailed.
+    /// </summary>
+    [Fact]
+    public async Task AContactWhoseOidAnUnlinkedUserCarries_Unconfirmed_IsNeitherInternalNorExternal_MustNotFire()
+    {
+        var h = new Harness();
+        h.MakeExternal();
+        h.Links.UsersByOid.GetOrAdd(PortalOid, _ => new List<AssignedLinkCandidate>())
+            .Add(new AssignedLinkCandidate(LinkedUser, null, PortalOid, false, 0, null, false));
+        h.Identities.Setup(i => i.FindContactsByOidAsync(PortalOid, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Of(
+            new ContactBindingRow(Contact, 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address),
+            new ContactBindingRow(Guid.NewGuid(), 0, PortalOid.ToString("D"), (int)IdentityPlaneMarker.External, Email: Address)));
+
+        (await h.Gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, AssignerOid, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.NoAccess));
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.NoAccessWarning);
+        h.NothingWasSent();
+    }
+
     [Fact]
     public async Task OnboardedExternal_WithAGrant_GetsThePortalLink_NoModelDrivenLink_NoRecordName_NoBell_AndTheAssignerByDisplayNameOnly()
     {
@@ -501,6 +523,87 @@ public sealed class AssignTaskNotifierTests
         var h = new Harness { Wall = SecureShareWallOutcome.NotWalled, TaskRights = AccessRights.None };
 
         (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.NoAccessWarning);
+
+        h.NothingWasSent();
+    }
+
+    // ── Task 207 (#3063, DI-171): an Administrative-mode user the rights answer refuses gets its own warning ────────────────
+
+    private const int AdministrativeAccessMode = 1;
+
+    private Harness AdministrativeAssignee(AccessRights? taskRights)
+    {
+        var h = new Harness { TaskRights = taskRights };
+        h.Links.UsersByLink.Clear();
+        h.LinkUser(LinkedUser, accessMode: AdministrativeAccessMode);
+        return h;
+    }
+
+    [Fact]
+    public async Task AnAdministrativeUser_WhomDataverseAnswersWithoutRead_GetsTheAdminAccountWarning_AndNothingIsSent()
+    {
+        var h = AdministrativeAssignee(AccessRights.None);
+
+        (await h.Gate.Object.DecideAsync(Contact, new DecisionCoreRecord("sprk_matter", Matter), TaskId, AssignerOid, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.AdministrativeAccount));
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.AdministrativeAccountWarning);
+        AssignTaskRecipient.AdministrativeAccountWarning.Should().Be("assignee_email_not_sent_admin_account");
+
+        h.NothingWasSent();
+    }
+
+    [Fact]
+    public async Task TheJob_AnAdministrativeUser_WhomDataverseAnswersWithoutRead_IsNotAllowed_AndSendsNothing()
+    {
+        var h = AdministrativeAssignee(AccessRights.None);
+
+        (await h.Handler().ProcessAsync(Job(Payload()), CancellationToken.None)).Status.Should().Be(JobStatus.Completed, "a refusal is final");
+
+        h.SystemSends.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnAdministrativeUser_WhomDataverseAnswersWithRead_IsEmailedAsBefore_MustNotFire()
+    {
+        var h = AdministrativeAssignee(AccessRights.Read);
+
+        (await h.NotifyAsync()).Should().BeEmpty();
+        h.UserSends.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task AReadWriteUser_WhomDataverseAnswersWithoutRead_KeepsTheNoAccessWarning_MustNotFire()
+    {
+        var h = new Harness { TaskRights = AccessRights.None };
+
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.NoAccessWarning);
+
+        h.NothingWasSent();
+    }
+
+    /// <summary>
+    /// Task 207 review (K2 guard): the request path refuses on <c>Warning is not null</c>, so every refusal value must map to a
+    /// warning; a value someone adds without one would be emailed and belled. Must fire for every refusal; must not for None.
+    /// </summary>
+    [Fact]
+    public void EveryRefusalExceptNone_HasAWarning_AndNoneHasNone()
+    {
+        foreach (var why in Enum.GetValues<AssignTaskRefusal>())
+        {
+            var warning = AssignTaskRecipient.Refused(why).Warning;
+            if (why == AssignTaskRefusal.None)
+                warning.Should().BeNull();
+            else
+                warning.Should().NotBeNullOrEmpty($"refusal {why} must carry a commit warning");
+        }
+    }
+
+    [Fact]
+    public async Task AnAdministrativeUser_WithNoAnswerFromDataverse_KeepsTheUnverifiedWarning_MustNotFire()
+    {
+        var h = AdministrativeAssignee(null);
+
+        (await h.NotifyAsync()).Should().Equal(AssignTaskRecipient.UnverifiedWarning);
 
         h.NothingWasSent();
     }

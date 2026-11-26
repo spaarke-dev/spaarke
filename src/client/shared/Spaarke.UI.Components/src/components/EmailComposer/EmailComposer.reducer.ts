@@ -169,7 +169,7 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     communicationId: props.communicationId ?? props.sourceRecord?.communicationId,
     to: toRecipients(props.initialTo),
     cc: toRecipients(props.initialCc),
-    bcc: [],
+    bcc: toRecipients(props.initialBcc),
     subject: props.initialSubject ?? '',
     body: props.initialBody ?? '',
     bodyFormat: props.initialBodyFormat ?? 'HTML',
@@ -631,6 +631,8 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
                 // linkUrl lights up the per-row Link toggle (item 9b). Only set when the
                 // host resolved one; never clobber an existing value with undefined.
                 linkUrl: action.linkUrl ?? a.linkUrl,
+                // Task 220: the upload's own delete travels with the item (uploadDiscard.ts).
+                discard: action.discard ?? a.discard,
               }
             : a
         ),

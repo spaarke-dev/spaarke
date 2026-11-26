@@ -79,8 +79,21 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 3 = T259: §6 T1/T3 — the customer's business unit is a direct child of the root and holds both BFF application users.
     /// 4 = ISS-020 / #1565: S19–S21, the standing-grant profile (BFF application users as members) and the task-154 role split.
     /// 5 = ISS-025 / #1803: S22, the lock on contact.sprk_externalinvitedon and (once present) sprk_externalinvitecodehash.
+    /// 6 = S23: the BFF's runtime application user holds "Spaarke Ontology Service"; no team or interactive user does.
+    /// 7 = S24 (#2605): the ontology writer application user holds exactly "Spaarke Ontology Service" and is the only member
+    ///     of the two ontology-writer profiles.
+    /// 8 = task 267 (#2618): S24 — the writer is alone in its own unit "Spaarke Ontology Writer" and holds that unit's copy of
+    ///     the role; S11/S16 skip that unit's default team; S25 — "Spaarke Basic User" on the customer unit's default team.
+    /// 9 = task 268: S26 — the lock on the invoice amounts and firm (ebilling-r1 task 166, EB-D-200), verified only.
+    /// 10 = task 270: S27 — the lock on the invoice family's core-record lookups and invoice links (unified-access-control-r2
+    ///      #2799); S28 — the lock on the message-access columns (field-mapping task 054b); both verified only.
+    /// 11 = S28 also verifies the three optional private-context columns where they exist (field-mapping 056b).
+    /// 12 = S22 also verifies that auditing and Advanced Find are off on contact.sprk_externalinvitecodehash where it exists
+    ///      (ISS-025 / #1803), verified only.
+    /// 13 = S29 — the BFF's two application users hold "Spaarke Decision Record Reader" (DEF-059); the role's one privilege and
+    ///      its holders are verified only, and only the user-to-role association is written.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=5";
+    internal const string ProcedureVersion = "secure-setup-procedure=13";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;
@@ -220,12 +233,19 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (4) The procedure.
+        // (4) The procedure. S24's writer (#2605): absent or unparseable is Guid.Empty, which the procedure refuses Resumable
+        // ("start a new run"): a run whose H10 completed before task 266 has no writer. Its unit (task 267) likewise: a run
+        // whose H10 completed before task 267 has none.
+        var writerAppUser = Guid.TryParse(state.OntologyWriterSystemUserId, out var parsedWriter) ? parsedWriter : Guid.Empty;
+        var writerUnit = Guid.TryParse(state.OntologyWriterBusinessUnitId, out var parsedWriterUnit) ? parsedWriterUnit : Guid.Empty;
         var request = new SecureRecordSetupRequest(
             new SecureRecordSetupTarget(state.DataverseEnvUrl!, tenantId, state.BffAppRegId!),
             roleSet,
             [bffAppUser, miAppUser],
+            miAppUser,
+            writerAppUser,
             customerUnitId,
+            writerUnit,
             dryRun);
         SecureRecordSetupOutcome outcome;
         try
@@ -338,12 +358,22 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[gateId ?? $"h7b-{rejectionCode}"] = new GateEntry
+        JsonElement? gateEvidence = evidence is null ? null : JsonDocument.Parse(JsonSerializer.Serialize(evidence)).RootElement.Clone();
+        if (gateId is null)
         {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = evidence is null ? null : JsonDocument.Parse(JsonSerializer.Serialize(evidence)).RootElement.Clone(),
-        };
+            // ISS-035: no named gate -> this is a failure marker, cleared when H7b later succeeds.
+            run.RecordFailureGate($"h7b-{rejectionCode}", HandlerIdentifier, gateEvidence);
+        }
+        else
+        {
+            // A named gate (the plan-approval gate) is a real operator gate, never auto-cleared.
+            run.GateStates[gateId] = new GateEntry
+            {
+                Status = GateState.Pending,
+                VerifierHandler = HandlerIdentifier,
+                Evidence = gateEvidence,
+            };
+        }
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

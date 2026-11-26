@@ -22,12 +22,12 @@ internal static class CorrectionSeed
 
     public static Entity Invoice(Guid? firm = null, string coreColumn = "sprk_matter", string coreEntity = "sprk_matter", Guid? coreId = null,
         int state = InvoiceStatusCodes.StateActive, int status = InvoiceStatusCodes.InReview) => new("sprk_invoice", OldInvoiceId)
-    {
-        [InvoiceSubmissionPersister.InvoiceVendorOrg] = new EntityReference("sprk_organization", firm ?? InvoiceSubmissionServiceTests.FirmId),
-        [coreColumn] = new EntityReference(coreEntity, coreId ?? InvoiceSubmissionServiceTests.MatterId),
-        ["statecode"] = new OptionSetValue(state),
-        ["statuscode"] = new OptionSetValue(status),
-    };
+        {
+            [InvoiceSubmissionPersister.InvoiceVendorOrg] = new EntityReference("sprk_organization", firm ?? InvoiceSubmissionServiceTests.FirmId),
+            [coreColumn] = new EntityReference(coreEntity, coreId ?? InvoiceSubmissionServiceTests.MatterId),
+            ["statecode"] = new OptionSetValue(state),
+            ["statuscode"] = new OptionSetValue(status),
+        };
 
     /// <summary>The invoice's own submission; finished (Accepted) unless <paramref name="status"/> says otherwise (task 097 second review F1).</summary>
     public static Entity Submission(string number = Number, Guid? firm = null, Guid? matter = null, Guid? id = null,
@@ -50,6 +50,13 @@ internal static class CorrectionSeed
             row["sprk_outcomereasoncode"] = reasonCode;
         }
 
+        return row;
+    }
+
+    /// <summary>Task 095c-2: <paramref name="row"/> (an invoice or a submission) with no firm, as a from-email submission taken without one.</summary>
+    public static Entity WithoutFirm(Entity row)
+    {
+        row.Attributes.Remove(InvoiceSubmissionPersister.InvoiceVendorOrg); // the same column name on both tables (sprk_vendororg)
         return row;
     }
 
@@ -123,6 +130,112 @@ public sealed class InvoiceCorrectionIntakeTests
         var invoice = CorrectionSeed.Seed(h, submission: CorrectionSeed.Submission(firm: Guid.NewGuid()));
 
         RefusedWith((await Check(h, invoice)).Refusal, "different_firm");
+    }
+
+    // ── task 095c-2: a correction keeps the replaced invoice's firm, including no firm ──────────────────────────────────
+
+    [Fact(DisplayName = "095c-2: a no-firm invoice (and its no-firm submission) corrected without a firm is allowed; the target is its own submission")]
+    public async Task NoFirmInvoice_CorrectedWithoutAFirm_IsAllowed()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
+
+        var (refusal, target) = await h.Build().CheckCorrectionAsync(Matter, null, CorrectionSeed.Number, invoice, CancellationToken.None);
+
+        refusal.Should().BeNull("the correction keeps the original's firm, and the original has none");
+        target.Should().Be(CorrectionSeed.OldSubmissionId);
+        h.Writes.Should().Be(0);
+    }
+
+    public static TheoryData<bool, bool, bool> FirmOnOneSideOnly => new()
+    {
+        // (the invoice has a firm, its submission has a firm, the request sends a firm): exactly one side differs from the request
+        { false, false, true },  // a no-firm original corrected WITH a firm (the from-document route, or a from-email request that sends one)
+        { true, true, false },   // a firm original corrected without a firm
+        { false, true, false },  // the invoice has no firm, but its submission has one: the submission check refuses
+    };
+
+    [Theory(DisplayName = "095c-2 (must fire): a firm on one side only is 409 different_firm; a null firm never matches a firm")]
+    [MemberData(nameof(FirmOnOneSideOnly))]
+    public async Task AFirmOnOneSideOnly_Is409DifferentFirm(bool invoiceHasFirm, bool submissionHasFirm, bool requestSendsFirm)
+    {
+        var h = new Harness();
+        var invoiceRow = CorrectionSeed.Invoice();
+        var submissionRow = CorrectionSeed.Submission();
+        var invoice = CorrectionSeed.Seed(h,
+            invoiceHasFirm ? invoiceRow : CorrectionSeed.WithoutFirm(invoiceRow),
+            submissionHasFirm ? submissionRow : CorrectionSeed.WithoutFirm(submissionRow));
+
+        var (refusal, target) = await h.Build().CheckCorrectionAsync(
+            Matter, requestSendsFirm ? FirmId : null, CorrectionSeed.Number, invoice, CancellationToken.None);
+
+        RefusedWith(refusal, "different_firm");
+        target.Should().BeNull();
+    }
+
+    // ── task 095c-5 review K1: a held invoice is corrected like a no-firm one, whatever its firm column says ───────────────
+
+    [Theory(DisplayName = "095c-5 K1 (must fire): an invoice held for a firm (its own sprk_firmhold, or its submission's marker), firm columns set, corrected naming that firm is 409 different_firm")]
+    [InlineData("invoice")]
+    [InlineData("submission")]
+    public async Task HeldInvoice_WithItsFirmSet_CorrectionNamingThatFirm_Is409DifferentFirm(string hold)
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+        if (hold == "invoice")
+        {
+            invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+        }
+        else
+        {
+            h.PriorSubmissions.Single()["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing;
+        }
+
+        invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column is set");
+
+        var (refusal, target) = await Check(h, invoice);
+
+        RefusedWith(refusal, "different_firm");
+        target.Should().BeNull();
+        h.Writes.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "095c-5 K1 must not fire: an ordinary firm invoice (hold column present and empty) corrected keeping its firm is allowed")]
+    public async Task OrdinaryFirmInvoice_HoldColumnEmpty_CorrectionKeepingTheFirm_IsAllowed()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+        invoice[InvoiceFirmHold.InvoiceHoldColumn] = null;
+
+        var (refusal, target) = await Check(h, invoice);
+
+        refusal.Should().BeNull();
+        target.Should().Be(CorrectionSeed.OldSubmissionId);
+    }
+
+    [Fact(DisplayName = "095c-5 K1: the hold cannot be read - 503 record_unavailable, never allowed as 'not held'")]
+    public async Task HeldInvoice_HoldReadFault_Is503()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+        h.HoldReadFailure = new TimeoutException();
+
+        var (refusal, target) = await Check(h, invoice);
+
+        (refusal!.StatusCode, refusal.ErrorCode).Should().Be((503, "ebilling.submission.record_unavailable"));
+        target.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "095c-5 K1 must not fire: a held no-firm invoice corrected without a firm is still allowed (it stays held)")]
+    public async Task HeldNoFirmInvoice_CorrectedWithoutAFirm_IsAllowed()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
+        invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+
+        var (refusal, _) = await h.Build().CheckCorrectionAsync(Matter, null, CorrectionSeed.Number, invoice, CancellationToken.None);
+
+        refusal.Should().BeNull("the request names no firm, as the original");
     }
 
     public static TheoryData<string, string, bool> OtherCores => new()
@@ -410,6 +523,92 @@ public sealed class InvoiceCorrectionIntakeTests
             outcome.ErrorCode.Should().Be("ebilling.submission.document_already_submitted", $"earlier target {earlierTarget}, corrected {corrected}");
             h.Allocations.Should().BeEmpty();
         }
+    }
+
+    // ── the upload entry (SubmitAsync), task 095f-2e2a (EB-D-245, design 16 option B') ──────────────────────────────
+
+    private const string UploadNote = "The firm re-issued the invoice with the corrected rate.";
+
+    private static InvoiceSubmissionRequest Upload(Entity? corrected, string number = CorrectionSeed.Number, string? note = UploadNote) =>
+        InvoiceSubmissionServiceTests.Spa(number: number) with
+        {
+            Channel = InvoiceSubmissionChannel.Internal,
+            ExternalCaller = null,
+            CallerObjectId = Guid.NewGuid(),
+            CorrectedInvoice = corrected,
+            CorrectionNote = note,
+        };
+
+    [Fact(DisplayName = "095f-2e2a: an allowed upload Correction stages the PDF and creates the submission with sprk_resubmissionof = the replaced invoice's submission; the note rides the job")]
+    public async Task Upload_AllowedCorrection_RecordsTheTarget_AndTheJobCarriesTheNote()
+    {
+        var h = new Harness { Allocation = TrackingNumberResult.Created("INV-7.2", 2) };
+        var invoice = CorrectionSeed.Seed(h);
+
+        var outcome = await h.Build().SubmitAsync(Upload(invoice), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        outcome.Receipt!.TrackingNumber.Should().Be("INV-7.2");
+        var allocation = h.Allocations.Should().ContainSingle().Subject;
+        (allocation.FirmId, allocation.Number).Should().Be((FirmId, CorrectionSeed.Number));
+        allocation.Fields!["sprk_resubmissionof"].Should().Be(new EntityReference("sprk_invoicesubmission", CorrectionSeed.OldSubmissionId));
+        h.Stages.Should().ContainSingle();
+        h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be(UploadNote);
+    }
+
+    [Fact(DisplayName = "095f-2e2a: a refused upload Correction stages nothing, creates nothing and queues nothing (the check runs before the first write)")]
+    public async Task Upload_RefusedCorrection_WritesNothing()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, CorrectionSeed.Invoice(state: InvoiceStatusCodes.StateActive, status: InvoiceStatusCodes.Approved));
+
+        var outcome = await h.Build().SubmitAsync(Upload(invoice), CancellationToken.None);
+
+        RefusedWith(outcome, "invoice_status");
+        h.Stages.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+        h.JobsSent.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095f-2e2a: an upload Correction under another firm invoice number is 409 different_invoice_number; nothing written")]
+    public async Task Upload_CorrectionWithAnotherNumber_Is409()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+
+        var outcome = await h.Build().SubmitAsync(Upload(invoice, number: "INV-8"), CancellationToken.None);
+
+        RefusedWith(outcome, "different_invoice_number");
+        h.Stages.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095f-2e2a (must not fire): an upload with no correction is unchanged: no sprk_resubmissionof, no note on the job (even if one were set), no submission read for it")]
+    public async Task Upload_New_IsUnchanged()
+    {
+        var h = new Harness();
+        CorrectionSeed.Seed(h);
+
+        var outcome = await h.Build().SubmitAsync(Upload(null), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        h.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+        h.JobsSent.Should().ContainSingle().Which.Payload!.RootElement.TryGetProperty("correctionNote", out _).Should().BeFalse();
+        h.Entities.Verify(e => e.RetrieveMultipleAsync(
+            It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "095f-2e2a (must not fire): a Correction on the SPA channel is a caller defect, refused by a throw before anything is read or written")]
+    public async Task Upload_SpaCorrection_Throws()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+
+        var act = () => h.Build().SubmitAsync(InvoiceSubmissionServiceTests.Spa(number: CorrectionSeed.Number) with { CorrectedInvoice = invoice }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        h.Stages.Should().BeEmpty();
+        h.Allocations.Should().BeEmpty();
     }
 
     // ── the job's snapshot ─────────────────────────────────────────────────────────────────────────────────────────

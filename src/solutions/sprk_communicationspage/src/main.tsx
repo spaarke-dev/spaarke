@@ -21,10 +21,11 @@
  * Resource" control. The companion form `onLoad` script
  * (`src/dataverse/forms/sprk_matter/communicationsGridOnLoad.ts`, Matter
  * pilot; entity-agnostic, generalizes across all 11 ADR-024 regarding-family
- * entities) pushes a `data=` envelope onto that control via the documented
- * `WebResourceControl.setData()` Client API — `regardingAttribute` (the host
+ * entities; deployed as `sprk_/scripts/communications_grid_onload.js`) pushes a
+ * `data=` envelope onto that control (`setData()` where the control has it,
+ * else `setSrc`) — `regardingAttribute` (the host
  * record's `sprk_regarding{type}` lookup field name) + `regardingValue` (the
- * host record's id). `parseRegardingHostFilter` below reads that envelope and
+ * host record's id). `parseRegardingEnvelope` (`hostCommands.ts`) reads that envelope and
  * forwards it as `additionalHostFilters` to `<DataGridPageShell>`, which the
  * shared DataGrid framework overlays into the grid's FetchXML via
  * `overlayHostFilters` (`fetchXmlOverlay.ts`) — the SANCTIONED `hostFilters`
@@ -42,76 +43,22 @@
  */
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import { DataGridPageShell, type HostFilterCondition } from "@spaarke/ui-components";
+import { Add20Regular } from "@fluentui/react-icons";
+import {
+  DataGridPageShell,
+  getXrm,
+  openConversationPanel,
+  openEmailCompose,
+  type CommandBarAction,
+  type DataGridHostCommand,
+} from "@spaarke/ui-components";
+import { buildHostCommands, hostFiltersFor, parseRegardingEnvelope, type FormEntityLike } from "./hostCommands";
 
 const CONFIG_ID = "e1826c4c-9575-f111-ab0e-7ced8ddc4a05";
 
-/** Outcome of parsing the `regardingAttribute`/`regardingValue` envelope. */
-type RegardingEnvelope =
-  | { kind: "none" }
-  | { kind: "valid"; hostFilters: HostFilterCondition[] }
-  | { kind: "malformed" };
-
-/**
- * Parse the record-scoping hostFilter pushed by the form `onLoad` script's
- * `data=` envelope (see `communicationsGridOnLoad.ts`). Checks the top-level
- * query string first; only falls back to unwrapping a `data=` param (the
- * `WebResourceControl.setData()` convention — mirrors
- * `DataGridPageShell.tsx`'s `parseUrlParentContext` fallback shape) when
- * NEITHER key is present at the top level — never mixes one key from the
- * outer query string with the other from the `data` envelope.
- *
- * Three outcomes:
- *   - `none` — neither key present anywhere (the pre-existing global/launcher
- *     entry point). Correct, intentional no-op.
- *   - `valid` — both keys present. Scoped `hostFilters` condition.
- *   - `malformed` — exactly ONE key present. This can only happen from a
- *     wiring bug (the onLoad script always sets both together or neither —
- *     see `communicationsGridOnLoad.ts`). Deliberately distinguished from
- *     `none` so the caller can fail CLOSED instead of silently falling back
- *     to an unfiltered/global render (over-disclosure risk).
- */
-function parseRegardingEnvelope(): RegardingEnvelope {
-  if (typeof window === "undefined") return { kind: "none" };
-  try {
-    const outer = new URLSearchParams(window.location.search);
-    const readBoth = (params: URLSearchParams): { attribute: string | null; value: string | null } => ({
-      attribute: params.get("regardingAttribute"),
-      value: params.get("regardingValue"),
-    });
-
-    let { attribute, value } = readBoth(outer);
-    if (!attribute && !value) {
-      const data = outer.get("data");
-      if (data) {
-        ({ attribute, value } = readBoth(new URLSearchParams(data)));
-      }
-    }
-
-    if (!attribute && !value) return { kind: "none" };
-    if (!attribute || !value) return { kind: "malformed" };
-
-    return { kind: "valid", hostFilters: [{ attribute, operator: "eq", value }] };
-  } catch {
-    // Graceful degradation — malformed/unexpected query string never breaks
-    // the page; treated as "no envelope" (global mode), NOT as a scoping
-    // failure — an exception here means the URL couldn't be parsed at all
-    // (no attacker-controlled partial envelope to fail closed against).
-    return { kind: "none" };
-  }
-}
-
-const regardingEnvelope = parseRegardingEnvelope();
-
-// Fail CLOSED on a malformed envelope: an impossible condition (never
-// matches any `sprk_communication` row) renders an EMPTY grid rather than
-// risk falling back to the unfiltered/global view (over-disclosure). A
-// malformed envelope only indicates a host wiring bug — see
-// `communicationsGridOnLoad.ts`'s `buildDataEnvelope`, which always sets
-// both keys together.
-const IMPOSSIBLE_HOST_FILTER: HostFilterCondition[] = [
-  { attribute: "sprk_communicationid", operator: "eq", value: "00000000-0000-0000-0000-000000000000" },
-];
+// Record scoping, the fail-closed filter and the "+ New Email" / "+ New Message" logic live in `hostCommands.ts`
+// (tested in `__tests__/hostCommands.test.ts`); this file only supplies the browser and host functions.
+const regardingEnvelope = parseRegardingEnvelope(typeof window === "undefined" ? "" : window.location.search);
 
 if (regardingEnvelope.kind === "malformed") {
   // eslint-disable-next-line no-console
@@ -121,12 +68,7 @@ if (regardingEnvelope.kind === "malformed") {
   );
 }
 
-const hostFilters: HostFilterCondition[] | undefined =
-  regardingEnvelope.kind === "valid"
-    ? regardingEnvelope.hostFilters
-    : regardingEnvelope.kind === "malformed"
-      ? IMPOSSIBLE_HOST_FILTER
-      : undefined;
+const hostFilters = hostFiltersFor(regardingEnvelope);
 
 // Record-scoped mode (embedded on a form tab) has no "back" affordance to
 // offer — there is no dialog/window to close. Suppress it whenever ANY
@@ -134,10 +76,41 @@ const hostFilters: HostFilterCondition[] | undefined =
 // global/launcher entry point (no envelope at all) shows the back arrow.
 const isRecordScoped = regardingEnvelope.kind !== "none";
 
+/** The built-in commands this page does not offer (the OOB "+ New" form). Module scope, so the array is stable. */
+const HIDDEN_BUILT_IN_COMMANDS: ReadonlyArray<CommandBarAction> = ["create-form"];
+
+function alertNewMessage(text: string): void {
+  // The nearest frame that can open an alert (the typed XrmContext does not declare openAlertDialog).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm((x: any) => typeof x.Navigation?.openAlertDialog === "function");
+  if (typeof xrm?.Navigation?.openAlertDialog === "function") {
+    void xrm.Navigation.openAlertDialog({ title: "New Message", text });
+  } else {
+    window.alert(text);
+  }
+}
+
+const HOST_COMMANDS: ReadonlyArray<DataGridHostCommand> = buildHostCommands(
+  regardingEnvelope,
+  {
+    // `any` view: the typed XrmPageLike does not declare `data.entity`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    readFormEntity: () => (getXrm("page") as any)?.Page?.data?.entity as FormEntityLike | undefined,
+    openEmailCompose,
+    openConversationPanel,
+    alert: alertNewMessage,
+    // eslint-disable-next-line no-console
+    warn: message => console.warn(message),
+  },
+  <Add20Regular />
+);
+
 const App: React.FC = () => (
   <DataGridPageShell
     configId={CONFIG_ID}
     additionalHostFilters={hostFilters}
+    hostCommands={HOST_COMMANDS}
+    hiddenBuiltInCommands={HIDDEN_BUILT_IN_COMMANDS}
     onBack={isRecordScoped ? undefined : () => window.close()}
   />
 );

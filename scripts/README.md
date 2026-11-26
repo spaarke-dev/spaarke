@@ -208,47 +208,28 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Demo & Sample Data Scripts
 
 ### `Load-DemoSampleData.ps1`
-**Purpose:** Load non-confidential sample data into a Spaarke demo environment — contacts, matters, projects, events, documents, chart definitions, and AI seed data. Orchestrates all data loading steps including optional SPE document upload and AI Search indexing.
-**Usage:** 🟡 Occasional - Demo environment setup or refresh
+**Purpose:** Load (or reset) the demo dataset v2 on a **demo customer stamp**: typed organizations, contacts, matters, projects, events, to-dos, communications and document records for one coherent legal-department story. Operator script; never part of provisioning. Full usage, the tag, ownership and the dataset shape: `scripts/demo-data/README.md`.
+**Usage:** 🟡 Occasional - Demo stamp setup or refresh
 **Lifecycle:** ✅ Maintained
-**Dependencies:** Azure CLI (`az login`), Dataverse access, Spaarke managed solutions imported
+**Dependencies:** Azure CLI signed in as yourself (`az login`; no service principal), Dataverse access, the stamp's taxonomy and event types seeded (data plan D2/D4)
 **Owner:** DevOps Team
-**Last Used:** March 2026
-
-**When to Use:**
-- After provisioning a new demo environment (task 024)
-- After importing managed solutions into Dataverse
-- Refreshing demo data after a reset
-- Setting up demo environments for sales presentations
 
 **Command:**
 ```powershell
-# -EnvironmentUrl is required: the old demo environment was retired 2026-10-14 and the demo is now the
-# ACME stamp built by the provisioning control plane (no static default URL).
+# Preview (nothing is written; lists every reference missing on the target)
+.\Load-DemoSampleData.ps1 -CustomerId acme -WhatIf
 
-# Preview what would be created (recommended first)
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -DryRun
-
-# Load all sample data
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
-
-# Skip optional steps
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
-
-# Force recreate existing records
-.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -Force
+# Load (idempotent: tag + natural key), then remove only the tagged rows
+.\Load-DemoSampleData.ps1 -CustomerId acme
+.\Load-DemoSampleData.ps1 -CustomerId acme -Reset
 ```
 
-**Data Sources:**
-- `scripts/demo-data/demo-records.json` — Record definitions (contacts, matters, projects, events, documents, charts)
-- `scripts/demo-data/sample-documents/` — 8 sample text documents for SPE upload
-- `scripts/seed-data/` — AI seed data (actions, tools, skills, knowledge, playbooks)
+Refuses unless the registry row for the target is Demo and active (`-AllowNonDemo` overrides, with a warning; Production
+is always refused). AI seed data, chart definitions, SPE upload, AI Search indexing and `-Force` were removed in v2.
 
-**Features:**
-- Idempotent: Existing records skipped (matched by name)
-- Graceful degradation: If solutions not imported, creates only contacts (standard entity)
-- Modular: Each data type can be skipped independently
-- DryRun mode for safe preview
+**Data Sources:**
+- `scripts/demo-data/demo-records.json` — the dataset (`datasetVersion` 2.0.0)
+- `scripts/demo-data/sample-documents/` — 8 sample files (not uploaded yet; document rows are metadata only)
 
 ---
 
@@ -1855,7 +1836,7 @@ pwsh scripts/ebilling/Seed-EbillingBillingCodes.ps1 -EnvironmentUrl https://spaa
 
 ### `ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1`
 
-Additive Dataverse metadata script (FR-08, `ebilling-r1` task 017) that extends the existing `sprk_timekeeper` stub into the firm roster (`sprk_firm`, date-only `sprk_effectivefrom` / `sprk_effectiveto`, `sprk_contact` shown as "Linked contact", `statuscode` 1 Approved + Pending + 2 Inactive) and creates the user-owned `sprk_ratecard` (firm, optional matter / project / work assignment scope, source document, effective dates, Draft / Published / Inactive) and `sprk_ratecardrate` (parental card lookup, optional timekeeper, approved and rack rate money, effective dates). It counts timekeeper rows at statuscode 1 first and stops with exit 2, before any write, if any exist. It revises and extends the shared global choice `sprk_timekeeperrole` to the 20 LEDES timekeeper classifications (label = LEDES name, ExternalValue = LEDES code; existing values kept; the non-LEDES options it first left in place were deleted by `Deploy-EbillingUserProfileRoleChoice.ps1`, D-84) and creates `sprk_classification` on `sprk_timekeeper` and `sprk_ratecardrate` bound to it. `-RemoveStubInvoiceLookup` deletes the obsolete `sprk_timekeeper.sprk_invoice` lookup (owner-approved; refuses if any row or component uses it). Supports `-WhatIf`; deletes nothing else and renames nothing by logical name; retries on customization / publish locks, MetadataCache lag after a table create, and eventually consistent metadata reads. Columns: `docs/data-model/sprk_ratecard.md`.
+Additive Dataverse metadata script (FR-08, `ebilling-r1` task 017) that extends the existing `sprk_timekeeper` stub into the firm roster (`sprk_firm`, date-only `sprk_effectivefrom` / `sprk_effectiveto`, `sprk_contact` shown as "Linked contact", `statuscode` 1 Approved + Pending + 2 Inactive) and creates the user-owned `sprk_ratecard` (firm, source document, effective dates, Draft / Published / Inactive; no core-record scope lookups, retired by task 193) and `sprk_ratecardrate` (parental card lookup, optional timekeeper, approved and rack rate money, effective dates). It counts timekeeper rows at statuscode 1 first and stops with exit 2, before any write, if any exist. It revises and extends the shared global choice `sprk_timekeeperrole` to the 20 LEDES timekeeper classifications (label = LEDES name, ExternalValue = LEDES code; existing values kept; the non-LEDES options it first left in place were deleted by `Deploy-EbillingUserProfileRoleChoice.ps1`, D-84) and creates `sprk_classification` on `sprk_timekeeper` and `sprk_ratecardrate` bound to it. `-RemoveStubInvoiceLookup` deletes the obsolete `sprk_timekeeper.sprk_invoice` lookup (owner-approved; refuses if any row or component uses it). Supports `-WhatIf`; deletes nothing else and renames nothing by logical name; retries on customization / publish locks, MetadataCache lag after a table create, and eventually consistent metadata reads. Columns: `docs/data-model/sprk_ratecard.md`.
 
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingTimekeeperRateCardSchema.ps1 -WhatIf
@@ -1961,6 +1942,28 @@ pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1
 pwsh scripts/ebilling/Remove-EbillingInvoiceLineItem.ps1 -Delete -OwnerApproval '<date and who>' -WhatIf
 ```
 
+### `ebilling/Remove-EbillingRateCardCoreLookups.ps1`
+
+Retires the three core-record lookups of `sprk_ratecard` (matter, project, work assignment) and their three relationships (`ebilling-r1` task 193; since task 085 a rate card belongs to a Procedure Version and nothing reads them; DEF-027). **Read-only without `-Apply`** (the `-WhatIf` default): per column it reports whether it exists, how many rate cards hold a value (a count, no ids), what depends on it, and which `sprk_ratecard` forms, views, personal views and grid configurations name it, then a READY / BLOCKED / ALREADY RETIRED verdict. **`-Apply` is destructive**: it needs `-OwnerApproval '<date and who>'` (project `CLAUDE.md` section 5), `-BffDeployAttestation <sha>` and `-SpaDeployAttestation <sha>` (the commits the dev BFF and SPA were built from; the script checks that source by content, git only, before any Dataverse call, and refuses a build whose files name the rate card table together with one of the columns), and dev only. It refuses (exit 2, nothing changed) if any rate card of any state holds a value in a column, the caller cannot be shown to read every `sprk_ratecard` row (organization-wide Read, which a System Administrator holds; no role-name shortcut), anything but the form and view it cleans depends on a column or relationship, a personal view or grid configuration names a column, a relationship is not exactly the expected one, or another pending form or view of `sprk_ratecard` would go live with the publish (unless `-AllowPendingCollateral`, D-83). Then it takes the controls off the `sprk_ratecard` forms and the cells and attributes off its views, publishes `sprk_ratecard` (entity-scoped, through `scripts/lib/Publish-SolutionComponents.ps1`), waits until nothing depends on a column, deletes the three relationships by schema name (the lookup columns go with them; the core tables are never published), publishes `sprk_ratecard` again, and verifies. Exit 1 after the first write means partly applied: re-run to resume. `-Verify` is read-only (exit 1 while anything remains). Idempotent: a second `-Apply` finds everything gone and passes. The census, the form and view edits and the relationship deletes go through `EbillingSchema.psm1` (`Consistency: Strong`); the pending-collateral reads and `PublishXml` go through the shared `scripts/lib/Publish-SolutionComponents.ps1`, whose context the script sets `Consistency: Strong` on (`Get-PublishContext`), and `PublishXml` is wrapped in a bounded transient retry (`Invoke-WithTransientRetry`, 4 attempts, 5 s / 10 s / 20 s). The edit is built from the published text, so the pending check reads every unpublished item of `sprk_ratecard` WITHOUT excluding the script's own forms and views: for those it reads the unpublished text and refuses (exit 2, report and `-Apply -WhatIf` show it as `OVERWRITE RISK`) unless it equals the edit this run would write (a resume after a stop before the publish); `-AllowPendingCollateral` does not override that. The comparisons (form text; view fetchxml and layoutxml, each on its own) are case-strict. After each PATCH the script reads the unpublished text back and the pre-publish re-check expects that text, so a Dataverse that normalises the XML on save does not stop the first `-Apply`; a re-run that finds a normalised pending text refuses (exit 2): publish the pending edit in the designer, which clears it, then re-run. A read that fails before the first write exits 1 and says "Nothing was written". Tests: `tests/scripts/Remove-EbillingRateCardCoreLookups.Tests.ps1` (Pester 5.7.1).
+
+```powershell
+pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1
+pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1 -Apply -WhatIf -BffDeployAttestation <bff-sha> -SpaDeployAttestation <spa-sha>
+pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1 -Apply -OwnerApproval '<date and who>' -BffDeployAttestation <bff-sha> -SpaDeployAttestation <spa-sha> -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+pwsh scripts/ebilling/Remove-EbillingRateCardCoreLookups.ps1 -Verify
+```
+
+### `ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1`
+
+Takes the retired `sprk_extractionstatus` and `sprk_extractedjson` controls off the live `sprk_invoice` main form ("Invoice main form") and quick-create form ("Invoice quick create form") (`ebilling-r1` task 194, ISS-045; nothing writes either column since task 050b). **Read-only without `-Apply`**: per form it reports which control it shows, what would be removed (the cell and the row, section and column it leaves empty; the remaining quick-create columns share 50 / 50) and a READY / BLOCKED / ALREADY CLEAN verdict. **`-Apply`** (dev only, `-WhatIf` for a dry run) refuses before the first write (exit 2) when an expected form is missing, another invoice form names a control, a control sits where the script does not edit (a header) or a mention would remain (an event handler), or another pending form or view of `sprk_invoice` would go live with the publish (D-83, unless `-AllowPendingCollateral`); otherwise it edits each form and publishes `sprk_invoice` entity-scoped through `scripts/lib/Publish-SolutionComponents.ps1` (`PublishXml` in a bounded transient retry), then verifies. `-Verify` is read-only: exit 0 only when neither control is on either form. Idempotent. The columns and the `sprk_extractionstatus` option set are not touched. Only the two form ids (main `93aa1c69-...`, quick create `c5e5807d-...`) are ever edited; any other invoice form naming a control is a blocker. The edit is built from the published text, so the pending check reads every unpublished item of `sprk_invoice` WITHOUT excluding the two forms: a target form with unpublished changes that are not exactly this run's edit (a resume) refuses (exit 2; shown as `OVERWRITE RISK` in the report; `-AllowPendingCollateral` does not override it; the comparison is case-strict). After each PATCH the script reads the unpublished text back and the pre-publish re-check expects that text, so a Dataverse that normalises the form XML on save does not stop the first `-Apply`; a re-run that finds a normalised pending text refuses (exit 2): publish the pending edit in the designer, which clears it, then re-run. A read that fails before the first write exits 1 and says "Nothing was written". The dev-only check runs first inside the run, before anything is initialised. Reads and form edits go through `EbillingSchema.psm1` (`Consistency: Strong`); the pending reads and `PublishXml` go through the shared lib, whose context the script sets `Consistency: Strong` on. Do not use `Deploy-EbillingFormsViews.ps1` for this change (in Section mode it now merges `section_ebilling` and keeps the cells it does not own, the `qv_billingexport` quick view included, but it never removes a control). Tests: `tests/scripts/Remove-EbillingInvoiceExtractionFormControls.Tests.ps1` (Pester 5.7.1).
+
+```powershell
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1 -Apply -WhatIf
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1 -Apply -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+pwsh scripts/ebilling/Remove-EbillingInvoiceExtractionFormControls.ps1 -Verify
+```
+
 ### `ebilling/Deploy-EbillingFormsViews.ps1`
 
 Builds the WP1 forms, views and navigation in dev (`ebilling-r1` task 029; also the procedure later serial tasks reuse: add the new column names to the `$Spec` table and re-run). Rewrites the stub main form and the Active view of the 11 new WP1 tables (read-only controls, rates / codes / eligible-approver subgrids), adds a `section_ebilling` to the existing `sprk_timekeeper`, `sprk_invoice` and `sprk_billingevent` main forms (the five invoice totals and `sprk_billingevent.sprk_amount` are disabled), creates the "Invoices to review" view on `sprk_invoice`, adds the eBilling sitemap entries, then publishes only the touched entities, the two sitemaps and the two app modules (never a tenant-wide publish). Idempotent: a second run changes nothing and publishes nothing. `-WhatIf` reads everything and writes nothing. Refuses to publish when another pending form / view of a touched entity would go out too, unless `-AllowPendingCollateral`. Dev only in R1. It cannot add tables to an app (the API silently ignores it); it prints that manual app-designer step.
@@ -1972,7 +1975,7 @@ pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
 
 ### `ebilling/Deploy-EbillingRolePrivileges.ps1`
 
-Grants table privileges on the eBilling tables for `ebilling-r1` decision D-90 (follow-up to task 029 finding B: non-admins got 0x80040220 on `sprk_invoiceapproval`). For `Spaarke Core User`, and for `Spaarke Basic User` while it holds `sprk_invoice` privileges, it reads the role's own privileges on `sprk_invoice` and mirrors them: on the working tables (`sprk_invoiceapproval`, `sprk_invoicesubmission`, `sprk_invoicecorrection`, `sprk_externalidentifier`, `sprk_billingexport`) the same privileges at the same depth; on the configuration tables (`sprk_ebillingsetting`, `sprk_ratecard`, `sprk_ratecardrate`, `sprk_billingcodeset`, `sprk_billingcode`, `sprk_ruleset`, `sprk_timekeeper`) Read at the invoice Read depth (Global on the organization-owned tables, which offer nothing else) plus AppendTo only where a working table's lookup targets the table (none today). It only ever adds (`AddPrivilegesRole` on the root-business-unit role): a privilege already held at or above the target is skipped, nothing is removed or lowered, and the script stops with exit 2 if a read-back shows a lowered privilege. It reads the added privileges back and checks the per-business-unit role copies picked them up. Supports `-WhatIf` (prints each privilege it would add); a second run reports no change. No publish is involved; the role source under `src/dataverse/solutions/SpaarkeMaster/Roles` is updated from an export (`projects/ebilling-r1/notes/029-wp1-apply-and-export.md`, "Role privileges (D-90)").
+Grants table privileges on the eBilling tables for `ebilling-r1` decision D-90 (follow-up to task 029 finding B: non-admins got 0x80040220 on `sprk_invoiceapproval`). For `Spaarke Core User`, and for `Spaarke Basic User` while it holds `sprk_invoice` privileges, it reads the role's own privileges on `sprk_invoice` and mirrors them: on the working tables (`sprk_invoiceapproval`, `sprk_invoicesubmission`, `sprk_externalidentifier`, `sprk_billingexport`; not `sprk_invoicecorrection`, correction rows: native write hardening, EB-D-249) the same privileges at the same depth; on the configuration tables (`sprk_ebillingsetting`, `sprk_ratecard`, `sprk_ratecardrate`, `sprk_billingcodeset`, `sprk_billingcode`, `sprk_ruleset`, `sprk_timekeeper`) Read at the invoice Read depth (Global on the organization-owned tables, which offer nothing else) plus AppendTo only where a working table's lookup targets the table (none today). It only ever adds (`AddPrivilegesRole` on the root-business-unit role): a privilege already held at or above the target is skipped, nothing is removed or lowered, and the script stops with exit 2 if a read-back shows a lowered privilege. It reads the added privileges back and checks the per-business-unit role copies picked them up. Supports `-WhatIf` (prints each privilege it would add); a second run reports no change. No publish is involved; the role source under `src/dataverse/solutions/SpaarkeMaster/Roles` is updated from an export (`projects/ebilling-r1/notes/029-wp1-apply-and-export.md`, "Role privileges (D-90)").
 
 ```powershell
 pwsh scripts/ebilling/Deploy-EbillingRolePrivileges.ps1 -WhatIf

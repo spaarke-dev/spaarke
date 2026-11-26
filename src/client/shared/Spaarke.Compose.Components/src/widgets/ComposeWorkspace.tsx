@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ComposeWorkspace.tsx — workspace-level orchestrator for the Spaarke Compose surface.
  *
  * Project:   spaarkeai-compose-r1
@@ -100,9 +100,9 @@ import { getComposeAiToolbarActions } from './ComposeAiToolbar';
 import { useComposeChangeSummary } from './hooks/useComposeChangeSummary';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
-// widget registration (`register-workspace-widgets.ts` transitively pulls in
+// widget registration (`register-workspace-widgets.ts`; it once pulled in
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
-// cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
+// could not resolve; folded into ai-widgets 2026-11-24). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
 import { useDispatchPaneEvent, usePaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
@@ -133,9 +133,13 @@ import {
   createXrmDataService,
   RichFilePreviewDialog,
   SendEmailDialog,
+  createXrmEmailComposeHandlers,
   // FR-C05 (r8 task 052) — the stale-target "apply anyway?" question. ADR-050 canonical shell +
   // ADR-021 semantic tokens; no bespoke chrome (assessment §4.4 O-6).
   ConfirmModal,
+  // Open in Word (web / desktop) through the BFF; moved here from the retired document-operations package
+  // (reuse-governance-tightening-r1 task 033).
+  useDocumentActions,
   type LookupResult,
 } from '@spaarke/ui-components';
 // FR-14 (task 051) — Review Summary toolbar control: shared types + pure email-body formatting for the
@@ -162,7 +166,6 @@ import {
 // toolbar's "Word" dropdown + right-aligned Save button. `ComposeToolbar.tsx` is
 // retained for its own standalone tests + potential reuse, but is no longer
 // rendered here (one toolbar row, not two).
-import { useDocumentActions } from '@spaarke/document-operations';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // FR-05 (task 032, spaarkeai-compose-r6): "Apply firm template" dialog — 030 part-merge wiring.
@@ -222,6 +225,7 @@ import type {
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
 // against, so both ends agree on the contract shape.
 import { COMPOSE_OPERATION_SCHEMA_VERSION } from '../types/compose-operations';
+import { COMPOSE_DOCUMENT_SCHEMA } from '../types/composeDocumentSchema';
 
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
 // follow-up task; this workspace only receives + stores what LoadAsync's response carries).
@@ -585,13 +589,12 @@ const COMPOSE_BLANK_TEMPLATE_HTML =
 // ---------------------------------------------------------------------------
 // FR-02 (task 011) — `sprk_document` field constants for the Search lookup
 // ---------------------------------------------------------------------------
-// Mirrors the field constants in `src/solutions/SpaarkeAi/src/ribbon/DocumentComposeLaunch.ts`
-// (the 1c ribbon launcher) — same schema, same resolution shape. Update both if the
-// schema is ever renamed.
-const SEARCH_FIELD_DOCUMENT_ID = 'sprk_documentid';
-const SEARCH_FIELD_GRAPH_ITEM_ID = 'sprk_graphitemid';
-const SEARCH_FIELD_DRIVE_ID = 'sprk_graphdriveid';
-const SEARCH_FIELD_DISPLAY_NAME = 'sprk_filename';
+// The names live in `../types/composeDocumentSchema` (ADR-012 Compose amendment, P-8), which also
+// names the ribbon launcher that mirrors them.
+const SEARCH_FIELD_DOCUMENT_ID = COMPOSE_DOCUMENT_SCHEMA.fields.documentId;
+const SEARCH_FIELD_GRAPH_ITEM_ID = COMPOSE_DOCUMENT_SCHEMA.fields.graphItemId;
+const SEARCH_FIELD_DRIVE_ID = COMPOSE_DOCUMENT_SCHEMA.fields.graphDriveId;
+const SEARCH_FIELD_DISPLAY_NAME = COMPOSE_DOCUMENT_SCHEMA.fields.fileName;
 const SEARCH_DOCUMENT_SELECT = `?$select=${SEARCH_FIELD_DOCUMENT_ID},${SEARCH_FIELD_GRAPH_ITEM_ID},${SEARCH_FIELD_DRIVE_ID},${SEARCH_FIELD_DISPLAY_NAME}`;
 
 // ---------------------------------------------------------------------------
@@ -1696,7 +1699,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // FIX #5 (UAT): Open-in-Word (Web + Desktop) handlers for the consolidated
   // toolbar's "Word" dropdown. Bound HERE (the host) and threaded to ComposeEditor
-  // so the shared-lib editor stays decoupled from `@spaarke/document-operations`.
+  // so the shared-lib editor stays decoupled from `useDocumentActions`.
   // Safe to call at mount — the hook only allocates `useState`/`useCallback`; the
   // authenticated fetch fires lazily on click.
   // `wordActionError` ("Couldn't open the document: <reason>") goes to the banner stack; the hook clears it
@@ -3363,6 +3366,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     }
   }, [bffBaseUrl, state.sessionId, memoActionInFlight, memoNegativeFromError]);
 
+  // Task 188 (D-219 Q3): the memo email shows the SAME composer features as the Console's Send Email dialog —
+  // template picker (`onListEmailTemplates` + `onRenderEmailTemplate`), AI draft (`onDraftWithAi`) and local-file
+  // attachments (`onUploadLocalAttachment`). ONE factory instance, never a second in this component; a host that
+  // omits these handlers silently hides the feature (pattern: wizard-side-pane-lookup-and-email-compose).
+  const memoEmailHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [bffBaseUrl]
+  );
   /**
    * "Email memo" — reads the persisted memo (JSON) and opens the canonical `<EmailComposer />`
    * (ADR-045) prefilled with a deterministic HTML body + the "Review Summary Memo — {analysis name}"
@@ -4000,7 +4011,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     let lookupResults: LookupResult[];
     try {
       const navigationService = createXrmNavigationService();
-      lookupResults = await navigationService.openLookup({ entityType: 'sprk_document' });
+      lookupResults = await navigationService.openLookup({ entityType: COMPOSE_DOCUMENT_SCHEMA.entityName });
     } catch (err) {
       // No Dataverse-hosted context (e.g. a standalone non-MDA host) — the standard
       // lookup dialog is unavailable. Fail soft: leave the empty state as-is.
@@ -4022,7 +4033,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     let record: Record<string, unknown>;
     try {
       const dataService = createXrmDataService();
-      record = await dataService.retrieveRecord('sprk_document', picked.id, SEARCH_DOCUMENT_SELECT);
+      record = await dataService.retrieveRecord(COMPOSE_DOCUMENT_SCHEMA.entityName, picked.id, SEARCH_DOCUMENT_SELECT);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'loadFailed', errorMessage: `Failed to resolve the selected document: ${message}` });
@@ -5396,6 +5407,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         initialBodyFormat="HTML"
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        onListEmailTemplates={memoEmailHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={memoEmailHandlers.onRenderEmailTemplate}
+        onDraftWithAi={memoEmailHandlers.onDraftWithAi}
+        onUploadLocalAttachment={memoEmailHandlers.onUploadLocalAttachment}
         onSent={() => setMemoEmailOpen(false)}
       />
 
@@ -5412,11 +5427,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           documentName={state.documentRef?.fileName ?? 'Document'}
           onClose={() => setDocumentPreviewOpen(false)}
           fetchPreviewUrl={fetchDocumentPreviewUrl}
-          onOpenFile={() => undefined}
+          // Same behaviour as the toolbar's "Word > Desktop" (ISS-004): the Office app, else a download
+          // through the BFF. Failures reach the banner stack via `wordActionError`.
+          onOpenFile={() => void openInDesktop(previewDocumentId)}
           onEmailDocument={() => undefined}
           onCopyLink={() => undefined}
           onOpenRecord={() => {
-            void previewNavigationService.openRecord('sprk_document', previewDocumentId);
+            void previewNavigationService.openRecord(COMPOSE_DOCUMENT_SCHEMA.entityName, previewDocumentId);
           }}
         />
       ) : null}

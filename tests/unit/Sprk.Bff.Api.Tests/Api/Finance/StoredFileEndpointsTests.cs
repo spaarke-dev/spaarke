@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Spaarke.Core.Auth;
+using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
@@ -442,7 +444,8 @@ public sealed class StoredFileEndpointsTests
         var gate = new System.Text.RegularExpressions.Regex(@"\.GetCallerRightsForAuthorizationGateAsync\s*\(");
 
         direct.IsMatch(source).Should().BeFalse("a direct GetCallerRightsAsync call would answer no-access faster than not-found");
-        gate.Matches(source).Count.Should().Be(2, "the parent Read and the copy rule");
+        gate.Matches(source).Count.Should().Be(1, "the ONE memoizing helper (CallerRightsMemo) the parent Read and the copy rule both ask through");
+        System.Text.RegularExpressions.Regex.Matches(source, @"rights\.GetAsync\s*\(").Count.Should().Be(2, "the parent Read and the copy rule");
 
         // Controls: the patterns see what they must, and not each other.
         direct.IsMatch("await probe.GetCallerRightsAsync(token, set, id, ct)").Should().BeTrue();
@@ -470,11 +473,18 @@ public sealed class StoredFileEndpointsTests
         public ConcurrentQueue<string> Timeline { get; } = new();
         public CapturingProvider Logs { get; private set; } = null!;
 
+        /// <summary>ISS-043 fix round 1 (F1): what the host logged, with level and exception.</summary>
+        public MalformedMultipartBodies.LogCapture Warnings { get; } = new();
+
+        /// <summary>ISS-043 fix round 1 (K2): replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
+        public Action<Microsoft.AspNetCore.Http.HttpContext>? OnRequest { get; set; }
+
         public IReadOnlyList<(EventId EventId, string Message)> AuditEvents =>
             Logs.Entries.Where(e => e.EventId.Id == StoredFileAudit.Downloaded.Id).ToList();
 
         public static async Task<Host> StartAsync(
-            bool ebillingEnabled = true, bool? malwareScanningEnabled = true, bool configured = true, StoredFileRig? rig = null)
+            bool ebillingEnabled = true, bool? malwareScanningEnabled = true, bool configured = true, StoredFileRig? rig = null,
+            int maxSubmissionFileSizeMb = 25)
         {
             // ebilling-r1 task 094: a caller may pass its own rig (the copy-rule end-to-end test serves the copy Submit Invoice committed).
             var host = new Host { Rig = rig ?? new StoredFileRig(malwareScanningEnabled, configured) };
@@ -484,6 +494,7 @@ public sealed class StoredFileEndpointsTests
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(host.Logs);
+            builder.Logging.AddProvider(host.Warnings);
             builder.Services
                 .AddAuthentication(o =>
                 {
@@ -497,8 +508,23 @@ public sealed class StoredFileEndpointsTests
             builder.Services.AddSingleton(host.Rig.Service);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Rig.Probe);
 
+            // 123: the upload reads the invoice's state app-only through the same in-memory Dataverse the store writes to.
+            builder.Services.AddSingleton(host.Rig.Dataverse.Service);
+            builder.Services.AddOptions<EbillingOptions>().Configure(o => o.MaxSubmissionFileSizeMb = maxSubmissionFileSizeMb);
+
+            // 151e: the invoice file list is authorized on the invoice by the REAL Finance authorization stack, asked what the rig's probe
+            // grants (one statement of the caller's rights: GrantParentRead grants the filter's check and the per-file decision alike).
+            builder.Services.AddSingleton<IAccessDataSource>(new RigAccessDataSource(host.Rig));
+            builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
+            builder.Services.AddScoped<AuthorizationService>();
+
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
+            host._app.Use(async (context, next) =>
+            {
+                host.OnRequest?.Invoke(context);
+                await next(context);
+            });
             host._app.UseRouting();
             host._app.UseAuthentication();
             host._app.UseAuthorization();
@@ -543,6 +569,19 @@ public sealed class StoredFileEndpointsTests
             return _client.SendAsync(request);
         }
 
+        /// <summary>123: POST <paramref name="content"/> (a multipart body, or anything else) to the invoice's upload route.</summary>
+        public Task<HttpResponseMessage> PostAsync(Guid invoiceId, HttpContent? content, bool authenticated = true)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"/api/finance/invoices/{invoiceId}/files") { Content = content };
+            if (authenticated)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token");
+                request.Headers.Add(FinanceAuthzTestAuthHandler.CallerHeader, "present");
+            }
+
+            return _client.SendAsync(request);
+        }
+
         public async ValueTask DisposeAsync()
         {
             _client?.Dispose();
@@ -552,6 +591,29 @@ public sealed class StoredFileEndpointsTests
                 await _app.DisposeAsync();
             }
         }
+    }
+
+    /// <summary>
+    /// The Finance authorization stack's access-data seam, answering from the rig's rights (the same grants the probe answers). A record in
+    /// the probe's <c>Unknown</c> set answers as the production source does when Dataverse gave no complete answer: its rights (if any)
+    /// marked <see cref="AccessSnapshot.Faulted"/> (123: the upload's 403 system_failure).
+    /// </summary>
+    internal sealed class RigAccessDataSource(StoredFileRig rig) : IAccessDataSource
+    {
+        public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            Answer(userId, StoredFileSchema.DocumentEntitySet, Guid.Parse(resourceId), userAccessToken);
+
+        public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+            Answer(userId, entitySetName, recordId, userAccessToken);
+
+        private Task<AccessSnapshot> Answer(string userId, string set, Guid id, string? token) =>
+            Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = id.ToString(),
+                AccessRights = token is not null && rig.Probe.Rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
+                Faulted = rig.Probe.Unknown.Contains((set, id)),
+            });
     }
 
     internal sealed class CapturingProvider(ConcurrentQueue<string> timeline) : ILoggerProvider

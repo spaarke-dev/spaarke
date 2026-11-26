@@ -116,6 +116,24 @@
       "depth": "Global",
       "from": "None",
       "feature": "Document type on a practice area matrix row (model-driven form); Core User holds it before Basic User loses it (owner 2026-11-06, task 046c)"
+    },
+    {
+      "gap": "ISS-043",
+      "role": "Spaarke Core User",
+      "table": "sprk_contacttype_ref",
+      "privilege": "prvAppendTosprk_ContactType_Ref",
+      "depth": "Global",
+      "from": "None",
+      "feature": "Contact type on a contact or contact-organization row (model-driven form; demo dataset typed contacts); same as G17 (owner 2026-11-25, ISS-043 #3109)"
+    },
+    {
+      "gap": "ISS-042",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_eventtype_ref",
+      "privilege": "prvReadsprk_EventType_Ref",
+      "depth": "Global",
+      "from": "Deep",
+      "feature": "Event types readable on stamps (provisioning seeds them in the root unit; ISS-039). Office Add In User only: Core and Basic User get the same Read from config/product-configuration-read-role.json"
     }
   ],
   "removals": [
@@ -766,6 +784,46 @@
       "privilege": "prvAppendTosprk_WorkAssignment",
       "expectedDepth": "Deep",
       "feature": "Basic User is read-only on Spaarke tables (owner 2026-11-06)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvAssignsprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvCreatesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvDeletesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvSharesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
+    },
+    {
+      "gap": "ISS028",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicecorrection",
+      "privilege": "prvWritesprk_invoicecorrection",
+      "expectedDepth": "Deep",
+      "feature": "Correction rows: native write hardening (ebilling-r1 iss028, EB-D-249)"
     }
   ]
 }

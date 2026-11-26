@@ -98,7 +98,8 @@ public class AnalysisResultPersistence
                         TargetRecordId = analysisId,
                     }
                     : AppOnlyAnalysisService.OwnershipOfNewAnalysis(documentId))
-                    with { RequestedBy = requestedBy },
+                    with
+                { RequestedBy = requestedBy },
                 cancellationToken);
 
             if (!owner.IsOwned)

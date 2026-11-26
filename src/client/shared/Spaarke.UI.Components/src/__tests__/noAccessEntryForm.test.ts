@@ -13,6 +13,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { declaredScriptVersion } from './helpers/scriptVersion';
 
 const SCRIPT = path.resolve(__dirname, '../../../../../solutions/webresources/sprk_noaccessentry_postsave.js');
 
@@ -148,7 +149,7 @@ function load(
   };
   inject(SCRIPT);
   const api = win.Spaarke.NoAccessEntry;
-  expect(api.Config.version).toBe('1.1.2'); // the real script ran
+  expect(api.Config.version).toBe(declaredScriptVersion(SCRIPT)); // the real script ran
   return { api, retrieveRecord, lookupObjects };
 }
 

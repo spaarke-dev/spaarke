@@ -80,16 +80,26 @@ jest.mock('../SummarizeCreateProjectStep', () => {
 
 jest.mock('../../CreateRecordWizard/useHandoffFileLeg', () => ({ useHandoffFileLeg: () => [] }));
 
-jest.mock('../../CreateProjectWizard/projectService', () => ({
-  ProjectService: jest.fn().mockImplementation(() => ({
-    createProject: jest.fn().mockResolvedValue({
-      success: true,
-      projectId: '11111111-1111-1111-1111-111111111111',
-      projectName: 'Acme',
-      warnings: [],
-    }),
-  })),
-}));
+// With a BFF the create is substituted (it succeeds); without one the REAL service runs, which refuses to create
+// (task 022: no Xrm.WebApi fallback), so the dialog's "no service" case is the real one.
+jest.mock('../../CreateProjectWizard/projectService', () => {
+  const actual = jest.requireActual('../../CreateProjectWizard/projectService');
+  return {
+    ...actual,
+    ProjectService: jest.fn().mockImplementation((dataService: unknown, authFetch: unknown, bffBaseUrl?: string) =>
+      bffBaseUrl
+        ? {
+            createProject: jest.fn().mockResolvedValue({
+              success: true,
+              projectId: '11111111-1111-1111-1111-111111111111',
+              projectName: 'Acme',
+              warnings: [],
+            }),
+          }
+        : new actual.ProjectService(dataService, authFetch, bffBaseUrl)
+    ),
+  };
+});
 
 const BFF = 'https://bff.example.test';
 const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
@@ -184,16 +194,21 @@ describe('SummarizeFilesDialog — routes a provisioning failure to the right de
     expect(screen.queryByText(/try securing it again/i)).not.toBeInTheDocument();
   });
 
-  // Task 150, owner round 10 item 9 (F6): the copy the owner picked for this host's two own messages, verbatim.
-  it('with no BFF to ask, says the project was created but not secured (F6 row 4, option A)', async () => {
+  // Task 022: with no BFF the project is NOT created (the service fails closed), so the old "created but not secured"
+  // state (F6 row 4) cannot arise. The refusal already says the project was not created, so it is shown once, unprefixed.
+  it('with no BFF to ask, creates nothing and shows the refusal once, with no "Project creation failed:" prefix', async () => {
     const authFetch = jest.fn();
     const success = await finishWithProvisioningFailure(authFetch, true);
 
     expect(authFetch).not.toHaveBeenCalled();
     expect(success.warnings).toContain(
-      'The project was created but not secured, because securing it needs a connection to the Spaarke service that this dialog does not have. An administrator can secure it.'
+      'The project was not created: this screen is not connected to the Spaarke service, which must save it.'
     );
+    expect((success.warnings ?? []).some(w => w.startsWith('Project creation failed:'))).toBe(false);
+    expect((success.warnings ?? []).some(w => w.includes('created but not secured'))).toBe(false);
   });
+
+  // Task 150, owner round 10 item 9 (F6): the copy the owner picked for this host's other own message, verbatim.
 
   it('when securing throws unexpectedly, says it did not finish and names the error (F6 row 5, option A)', async () => {
     (provisionSecureProject as jest.Mock).mockRejectedValueOnce(new Error('boom'));

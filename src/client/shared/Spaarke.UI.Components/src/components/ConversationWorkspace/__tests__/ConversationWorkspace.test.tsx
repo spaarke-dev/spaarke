@@ -49,7 +49,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 interface IMockFetchOptions {
   allThreads?: typeof ALL_THREADS;
-  regardingResult?: typeof REGARDING_RESULT;
+  regardingResult?: typeof REGARDING_RESULT & { truncated?: boolean };
   unreadByThread?: Record<string, number>;
   /** task 041: when true, every PATCH .../pin request resolves 500 (rollback test). */
   pinShouldFail?: boolean;
@@ -124,7 +124,11 @@ describe('ConversationWorkspace — mount-agnostic (FR-01)', () => {
     expect(screen.queryByText('Direct: Alice')).not.toBeInTheDocument();
 
     expect(authenticatedFetch.mock.calls.some(([u]) => u.includes('/by-regarding/sprk_matter/rec1'))).toBe(true);
-    const listCalls = authenticatedFetch.mock.calls.filter(([u]) => /\/api\/communications\/threads(\?|$)/.test(u));
+    // fm task 056: a matter/project/work-assignment record also asks for its private entries (`about=`); the all-mode list
+    // (no `about`) is still never read in record mode.
+    const listCalls = authenticatedFetch.mock.calls.filter(
+      ([u]) => /\/api\/communications\/threads(\?|$)/.test(u) && !u.includes('about=')
+    );
     expect(listCalls).toHaveLength(0);
   });
 });
@@ -407,5 +411,43 @@ describe('ConversationWorkspace — pin/unpin (task 041, FR-24)', () => {
       /archive|mute|tag/i.test(b.getAttribute('aria-label') ?? b.textContent ?? '')
     );
     expect(forbidden).toHaveLength(0);
+  });
+});
+
+describe('ConversationWorkspace — incomplete record list (ontology task 221, #2671)', () => {
+  const LINE = 'Some messages may not be shown.';
+
+  it('record mode: shows the line when the by-regarding read says it was truncated', async () => {
+    renderWorkspace({
+      regarding: { entityType: 'sprk_matter', id: 'rec1' },
+      authenticatedFetch: makeAuthenticatedFetch({ regardingResult: { ...REGARDING_RESULT, truncated: true } }),
+    });
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    expect(screen.getByRole('note')).toHaveTextContent(LINE);
+  });
+
+  it('record mode: no line when the flag is false', async () => {
+    renderWorkspace({
+      regarding: { entityType: 'sprk_matter', id: 'rec1' },
+      authenticatedFetch: makeAuthenticatedFetch({ regardingResult: { ...REGARDING_RESULT, truncated: false } }),
+    });
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    expect(screen.queryByText(LINE)).not.toBeInTheDocument();
+  });
+
+  it('record mode: no line when the flag is absent (an older BFF)', async () => {
+    renderWorkspace({ regarding: { entityType: 'sprk_matter', id: 'rec1' } });
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    expect(screen.queryByText(LINE)).not.toBeInTheDocument();
+  });
+
+  it('all mode: never shows the line', async () => {
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    expect(screen.queryByText(LINE)).not.toBeInTheDocument();
   });
 });

@@ -226,6 +226,36 @@ public sealed class CallerPrincipal
     public IEnumerable<CallerProjectAccess> ReadableProjects =>
         ProjectAccess.Where(p => p.Rights.HasFlag(AccessRights.Read));
 
+    /// <summary>
+    /// The matters and work assignments the caller may READ, each with its DISPLAY level — what /me lists as
+    /// <c>records</c> beside <see cref="ReadableProjects"/> (spaarke-SPA-external-access-platform-r4 task 008; uac-r2 review
+    /// 2026-11-13, condition A).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Source.</b> The principal's own <see cref="MatterAccess"/> / <see cref="WorkAssignmentAccess"/>, filtered to
+    /// Read — the same derived view as <see cref="AccessibleMatterIds"/> / <see cref="AccessibleWorkAssignmentIds"/>, and the
+    /// same dictionaries <see cref="GetMatterRights"/> / <see cref="GetWorkAssignmentRights"/> (and so the read routes'
+    /// <c>RightsForRoot</c>) read. A level is therefore emitted only for a record the read routes admit, and it is exactly
+    /// <see cref="ExternalAccessLevels.ToDisplayLevel"/> of the rights they decide on. A None key (or any entry without Read)
+    /// is not listed; a vetoed record is not in the map at all. No new read.</para>
+    /// <para>⚠️ <b>Display only.</b> For a <see cref="DataverseConfirmsWrites"/> caller the level is the composed READ view
+    /// (as for projects); every action stays server-checked.</para>
+    /// </remarks>
+    public IEnumerable<(ExternalGrantRootType RootType, Guid RecordId, ExternalAccessLevel Level)> ReadableRecordLevels =>
+        DisplayLevelsOf(ExternalGrantRootType.Matter, MatterAccess)
+            .Concat(DisplayLevelsOf(ExternalGrantRootType.WorkAssignment, WorkAssignmentAccess));
+
+    private static IEnumerable<(ExternalGrantRootType RootType, Guid RecordId, ExternalAccessLevel Level)> DisplayLevelsOf(
+        ExternalGrantRootType rootType, IReadOnlyDictionary<Guid, AccessRights> rights)
+    {
+        foreach (var (recordId, recordRights) in rights)
+        {
+            // Read first (task 136's view rule); ToDisplayLevel then cannot be null (Read alone is ViewOnly).
+            if (recordRights.HasFlag(AccessRights.Read) && ExternalAccessLevels.ToDisplayLevel(recordRights) is { } level)
+                yield return (rootType, recordId, level);
+        }
+    }
+
     /// <summary>All project ids the caller can READ (for list construction).</summary>
     public IEnumerable<Guid> GetAccessibleProjectIds() => ReadableProjects.Select(p => p.ProjectId);
 
@@ -534,6 +564,10 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
         // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
         // survive (deny list, then Restricted).
+        //
+        // #2851: the request's access memo is created HERE, single-threaded, before the three concurrent compositions
+        // start, so none of them is the first to touch HttpContext.Items (RequestAccessMemo.For).
+        RequestAccessMemo.For(httpContext);
         var principal = (await ComposeAsync(_accessibleSet, contactId, email, oid, httpContext.RequestAborted)
             .ConfigureAwait(false)).Principal;
 
@@ -558,14 +592,13 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
     {
         ArgumentNullException.ThrowIfNull(accessibleSet);
 
-        var accessibleProjects = await accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, ct)
-            .ConfigureAwait(false);
-        var accessibleMatters = await accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, ct)
-            .ConfigureAwait(false);
-        var accessibleWorkAssignments = await accessibleSet
-            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, ct)
+        // #2845: the three compositions run CONCURRENTLY (started in this order), sharing the request's memo of the
+        // subject-level reads. Their results, and the first fault in project → matter → work-assignment order, are exactly
+        // what the sequential awaits gave (AwaitInOrderAsync).
+        var (accessibleProjects, accessibleMatters, accessibleWorkAssignments) = await AwaitInOrderAsync(
+                accessibleSet.ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, ct),
+                accessibleSet.ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, ct),
+                accessibleSet.ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, ct))
             .ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does. Only entries
@@ -590,6 +623,30 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 WorkAssignmentAccess = workAssignmentAccess,
             },
             accessibleProjects, accessibleMatters, accessibleWorkAssignments);
+    }
+
+    /// <summary>
+    /// #2845: the three per-type compositions, awaited as if one after another. All three are already running; this waits for
+    /// every one to finish (so none is left running past the request's authorization), then takes the results in
+    /// project → matter → work-assignment order — and so rethrows the FIRST of them to fault or be cancelled, in that order,
+    /// exactly as the sequential awaits did. A later composition's fault is observed (never an unobserved task exception).
+    /// </summary>
+    internal static async Task<(AccessibleRecordSet Projects, AccessibleRecordSet Matters, AccessibleRecordSet WorkAssignments)>
+        AwaitInOrderAsync(Task<AccessibleRecordSet> projects, Task<AccessibleRecordSet> matters, Task<AccessibleRecordSet> workAssignments)
+    {
+        try
+        {
+            await Task.WhenAll(projects, matters, workAssignments).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Rethrown below, in order: the first faulted or cancelled task of project → matter → work assignment.
+        }
+
+        return (
+            await projects.ConfigureAwait(false),
+            await matters.ConfigureAwait(false),
+            await workAssignments.ConfigureAwait(false));
     }
 
     /// <summary>
@@ -697,15 +754,58 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<WorkforcePrincipalStrategy> _logger;
+    private readonly IContactIdentityStore? _identityStore;
 
+    /// <param name="identityStore">
+    /// The A9 licensed-user email read for the <c>registration_required</c> answer's <c>licensedUser</c> routing hint (R4
+    /// task 041, FR-25, #2192). Optional only so the strategy's existing unit constructions keep compiling: the host
+    /// always resolves it (the store is a registered singleton, <c>ExternalAccessModule</c>). Without it the hint is
+    /// <c>false</c>, which is the behaviour before FR-25 (the form shows and the registration POST decides).
+    /// </param>
     public WorkforcePrincipalStrategy(
         IWorkforcePrincipalResolver resolver,
         IAccessibleRecordSetService accessibleSet,
-        ILogger<WorkforcePrincipalStrategy> logger)
+        ILogger<WorkforcePrincipalStrategy> logger,
+        IContactIdentityStore? identityStore = null)
     {
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _accessibleSet = accessibleSet ?? throw new ArgumentNullException(nameof(accessibleSet));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _identityStore = identityStore;
+    }
+
+    /// <summary>
+    /// R4 FR-25 (#2192): whether the caller's OWN home-token email belongs to an enabled licensed user, decided exactly as the
+    /// registration route decides its <c>licensed_user_link_required</c> refusal: the same email rule
+    /// (<see cref="Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail"/>, the email claim only), the same read
+    /// (<see cref="IContactIdentityStore.FindEnabledSystemUsersByEmailAsync"/>) and the same decision
+    /// (<see cref="ContactBindingDecision.DecideLicensedUserEmail"/>). A ROUTING hint only: it tells the SPA to show the
+    /// "Link my account" step instead of the profile form. It grants nothing, chooses no link target and authorizes nothing;
+    /// the link route still proves the Spaarke-tenant guest server-side. No email, Unknown, NotLicensed or a failed read →
+    /// <c>false</c> (the form shows, and the registration POST answers as before). The log carries only the outcome.
+    /// Unlike the POST, the hint does not run the binder's column-readability probes first: in a mis-provisioned
+    /// environment a licensed user reaches the link step (whose route makes its own checks) rather than the POST's
+    /// "registration environment" refusal. Deliberate; the hint never grants.
+    /// </summary>
+    /// <param name="email">The caller's registration email (<see cref="Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail"/>), or null.</param>
+    private async Task<bool> IsLicensedUserEmailAsync(string? email, CancellationToken ct)
+    {
+        if (_identityStore is null || email is null) return false;
+        try
+        {
+            var lookup = await _identityStore.FindEnabledSystemUsersByEmailAsync(email, ct).ConfigureAwait(false);
+            return ContactBindingDecision.DecideLicensedUserEmail(lookup, email) == LicensedUserEmailOutcome.LicensedUser;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] Licensed-user hint unavailable ({ExceptionType}); the registration form is shown", ex.GetType().Name);
+            return false;
+        }
     }
 
     /// <inheritdoc />
@@ -741,6 +841,15 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         ? new ClaimsPrincipal(homeIdentity)
                         : httpContext.User;
                     var prefill = WorkforceCallerClaims.From(home);
+                    // R4 FR-27 (#2449): the prefill email is the one the registration route would use
+                    // (ExternalRegistrationEndpoints.TokenEmail: the email claim only, exactly one value), NOT
+                    // WorkforceCallerClaims.TokenEmail, whose preferred_username / upn fallback showed an address the
+                    // registration then refused. No usable email → null, and the SPA shows its email-missing screen
+                    // instead of a form that cannot succeed. The names stay as WorkforceCallerClaims reads them.
+                    var registrationEmail = Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail(home);
+                    // R4 FR-25: the routing hint (see IsLicensedUserEmailAsync). Only the caller's own token email is read.
+                    var licensedUser = await IsLicensedUserEmailAsync(registrationEmail, httpContext.RequestAborted)
+                        .ConfigureAwait(false);
                     return CallerPrincipalResolution.Denied(Results.Problem(
                         statusCode: StatusCodes.Status403Forbidden,
                         title: "Forbidden",
@@ -750,7 +859,8 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                             ["reasonCode"] = resolution.DenyCode,
                             ["givenName"] = prefill.GivenName,
                             ["familyName"] = prefill.FamilyName,
-                            ["email"] = prefill.Email,
+                            ["email"] = registrationEmail,
+                            ["licensedUser"] = licensedUser,
                         }));
 
                 case WorkforceDenyReason.PrincipalNotResolved
@@ -796,6 +906,10 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         }
 
         var principal = resolution.Principal!;
+
+        // #2851: the request's access memo is created HERE, single-threaded, before the three concurrent compositions
+        // start, so none of them is the first to touch HttpContext.Items (RequestAccessMemo.For).
+        RequestAccessMemo.For(httpContext);
         var composed = await ComposeAsync(
                 _accessibleSet, principal, WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User), httpContext.RequestAborted)
             .ConfigureAwait(false);
@@ -827,12 +941,14 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         // type (project / matter / work assignment). This is what prevents a workforce caller from seeing
         // all records merely by authenticating (R2 NFR-08). Each set = membership/assignment ∪ own-contact
         // grants for that type.
-        var accessibleProjects = await accessibleSet
-            .ComposeAsync(principal, ProjectEntity, ct).ConfigureAwait(false);
-        var accessibleMatters = await accessibleSet
-            .ComposeAsync(principal, MatterEntity, ct).ConfigureAwait(false);
-        var accessibleWorkAssignments = await accessibleSet
-            .ComposeAsync(principal, WorkAssignmentEntity, ct).ConfigureAwait(false);
+        //
+        // #2845: concurrently, as the CIAM strategy does (CiamContactPrincipalStrategy.AwaitInOrderAsync): started in this
+        // order, results and the first fault taken in this order.
+        var (accessibleProjects, accessibleMatters, accessibleWorkAssignments) = await CiamContactPrincipalStrategy.AwaitInOrderAsync(
+                accessibleSet.ComposeAsync(principal, ProjectEntity, ct),
+                accessibleSet.ComposeAsync(principal, MatterEntity, ct),
+                accessibleSet.ComposeAsync(principal, WorkAssignmentEntity, ct))
+            .ConfigureAwait(false);
 
         // Per-record rights, straight from the evaluator — no stamp, no per-plane default. Only entries
         // carrying Read reach the principal (task 136 · C2); until then this copied every key, a None-rights

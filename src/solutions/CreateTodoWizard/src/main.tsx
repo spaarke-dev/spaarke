@@ -1,57 +1,20 @@
 import * as React from "react";
-import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
-import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
-import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
-import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
+import { useWizardPageBootstrap } from "@spaarke/ui-components/utils/useWizardPageBootstrap";
+import { mountWizardPage, WizardPageInitializing } from "@spaarke/ui-components/utils/mountWizardPage";
 import { withBffChildWrites } from "@spaarke/ui-components/utils/adapters/bffChildWriteAdapter";
-import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import {
   CreateTodoWizard,
   withTodoCreatedBroadcast,
   resolveCurrentUserContact,
 } from "@spaarke/ui-components/components/CreateTodoWizard";
-import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 // R4 task 100 (W-2) post-create refetch broadcast and the smart-todo-r5 default assignee now live in
 // `@spaarke/ui-components` CreateTodoWizard/todoWizardHostSupport.ts, shared with the in-app
 // InAppWizardHost (spaarke-ontology-platform-r1 task 112) so the two hosts cannot drift.
 
 function App() {
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  const params = React.useMemo(() => parseDataParams(), []);
-  const [isAuthReady, setIsAuthReady] = React.useState(false);
-  const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
-
-  React.useEffect(() => {
-    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
-  }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    async function initialize(): Promise<void> {
-      try {
-        const config = await resolveRuntimeConfig();
-        await initAuth({
-          clientId: config.msalClientId,
-          bffBaseUrl: config.bffBaseUrl,
-          bffApiScope: config.bffOAuthScope,
-          tenantId: config.tenantId || undefined,
-          proactiveRefresh: true,
-        });
-        if (!cancelled) {
-          setResolvedBffBaseUrl(config.bffBaseUrl);
-          setIsAuthReady(true);
-        }
-      } catch (err) {
-        console.error("[CreateTodoWizard] Failed to initialize auth:", err);
-        if (!cancelled) setIsAuthReady(true);
-      }
-    }
-    void initialize();
-    return () => { cancelled = true; };
-  }, []);
+  const b = useWizardPageBootstrap("CreateTodoWizard");
 
   // R4 task 100 (W-2) — wrap the dataService so successful sprk_todo creates
   // broadcast on the shared BroadcastChannel for cross-iframe refetch wiring.
@@ -60,34 +23,33 @@ function App() {
   // through the BFF (POST /api/v1/child-records/{table}, G5), which decides its owner. The broadcast wraps the BFF-routed
   // service, so it fires after the BFF create. With no base URL (auth init failed) the service is "not connected": a
   // child create is refused with a message, never sent to Xrm.WebApi.
+  const { dataService: baseDataService, bffBaseUrl } = b;
   const dataService = React.useMemo(
     () =>
       withTodoCreatedBroadcast(
-        withBffChildWrites(createXrmDataService(), authenticatedFetch, resolvedBffBaseUrl || undefined),
+        withBffChildWrites(baseDataService, b.authenticatedFetch, bffBaseUrl || undefined),
       ),
-    [resolvedBffBaseUrl],
+    [baseDataService, b.authenticatedFetch, bffBaseUrl],
   );
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
   // UAC-r2 task 147 r1c: a launch from a record (the parent-form "Create To Do" ribbon, and the secure-record subgrid's
   // "New To Do" that replaces the platform "+ New" under a secure record — owner round 28 item 2) passes the record as
   // entityType / entityId / recordName. The To Do opens filed under it (the launch contract's "launch record triple",
   // TodoWizardDialog `initialRegarding`); the user may still change it. Absent → no pre-fill, as before.
   const initialRegarding = React.useMemo(() => {
-    const entityType = (params.entityType ?? "").trim();
-    const entityId = (params.entityId ?? "").replace(/[{}]/g, "").toLowerCase();
+    const entityType = (b.params.entityType ?? "").trim();
+    const entityId = (b.params.entityId ?? "").replace(/[{}]/g, "").toLowerCase();
     return entityType && entityId
-      ? { entityType, recordId: entityId, recordName: params.recordName ?? "" }
+      ? { entityType, recordId: entityId, recordName: b.params.recordName ?? "" }
       : undefined;
-  }, [params]);
+  }, [b.params]);
 
   // smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
   // current user's CONTACT. `sprk_todo.sprk_assignedto` targets the OOB
   // `contact` table, resolved from systemuser via the custom `contact
   // .sprk_systemuser` lookup (same query as `useCurrentContactId`, inlined here
   // because this Code Page intentionally does NOT depend on
-  // `@spaarke/smart-todo-components` — see the BroadcastChannel note above).
-  // Defensive: any failure leaves the assignee blank (today's behavior).
+  // `@spaarke/smart-todo-components`). Defensive: any failure leaves the assignee blank.
   const [defaultAssignedTo, setDefaultAssignedTo] = React.useState<
     { contactId: string; contactName?: string } | undefined
   >(undefined);
@@ -101,58 +63,25 @@ function App() {
     };
   }, [dataService]);
 
-  const handleClose = React.useCallback(() => {
-    navigationService.closeDialog({ confirmed: true });
-  }, [navigationService]);
-
-  const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
-    // Shared cross-frame walker (task 081 / C-8).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(['webApi', 'utility']);
-    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
-    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
-    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
-    const buId = user["_businessunitid_value"] as string;
-    if (!buId) throw new Error("Could not resolve business unit");
-    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
-    return (bu["sprk_containerid"] as string) || "";
-  }, []);
-
-  if (!isAuthReady) {
-    return (
-      <FluentProvider theme={theme} style={{ height: "100%" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-          <span>Initializing...</span>
-        </div>
-      </FluentProvider>
-    );
-  }
+  if (!b.isAuthReady) return <WizardPageInitializing theme={b.theme} />;
 
   return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
+    <FluentProvider theme={b.theme} style={{ height: "100%" }}>
       <CreateTodoWizard
         open={true}
         dataService={dataService}
-        navigationService={navigationService}
+        navigationService={b.navigationService}
+        emailComposeHandlers={b.emailComposeHandlers}
         initialRegarding={initialRegarding}
         embedded={true}
-        onClose={handleClose}
-        authenticatedFetch={authenticatedFetch}
-        bffBaseUrl={resolvedBffBaseUrl}
-        resolveSpeContainerId={resolveSpeContainerId}
+        onClose={b.closeDialog}
+        authenticatedFetch={b.authenticatedFetch}
+        bffBaseUrl={b.bffBaseUrl}
+        resolveSpeContainerId={b.resolveSpeContainerId}
         defaultAssignedTo={defaultAssignedTo}
       />
     </FluentProvider>
   );
 }
 
-const rootElement = document.getElementById("root");
-if (rootElement) {
-  createRoot(rootElement).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  console.error("[CreateTodoWizard] Root element not found");
-}
+mountWizardPage("CreateTodoWizard", App);

@@ -24,9 +24,8 @@ namespace Sprk.Bff.Api.Tests.Seam.Finance;
 /// <para>
 /// <b>Anti-stub.</b> The request is read back out of the rendered prompt's frozen <c>## Input</c> section, so the
 /// tests fail if the operand never reaches the model; the parsed DTO is compared with the JSON the fake model
-/// returned, so they fail if the output is not parsed. The facade's own <see cref="IPlaybookService"/> and
-/// <see cref="IOpenAiClient"/> are STRICT mocks with no setups: a capability method that used either directly
-/// (a by-name playbook or a C#-supplied schema) fails the test.
+/// returned, so they fail if the output is not parsed. The facade's own <see cref="IOpenAiClient"/> is a STRICT mock
+/// with no setups: a capability method that used it directly (a C#-supplied schema) fails the test.
 /// </para>
 /// <para>
 /// <b>Fail closed (FR-46).</b> No Binding (the routing table returns no Action), a failed completion and an
@@ -312,7 +311,6 @@ public sealed class InvoiceAiActionSeamTests
     public async Task ClassifyAsync_WhenTheActionResolverIsKillSwitched_PropagatesFeatureDisabledUnchanged()
     {
         var sut = new InvoiceAi(
-            new Mock<IPlaybookService>(MockBehavior.Strict).Object,
             new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
             new NullActionResolver(NullLogger<NullActionResolver>.Instance),
             new NullActionRunner(NullLogger<NullActionRunner>.Instance),
@@ -439,7 +437,6 @@ public sealed class InvoiceAiActionSeamTests
                 Model.Object, new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance), NullLogger<ActionRunner>.Instance);
 
             Sut = new InvoiceAi(
-                new Mock<IPlaybookService>(MockBehavior.Strict).Object,
                 new Mock<IOpenAiClient>(MockBehavior.Strict).Object,
                 resolver,
                 runner,

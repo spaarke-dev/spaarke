@@ -12,7 +12,7 @@ namespace Spaarke.ArchTests;
 /// ONE step after a re-file (the re-filed row's secure-child mirror, the pass over everything filed under it, a
 /// communication's thread). A writer that skips it leaves a row moved under a Secure record readable by its business unit
 /// until the two-minute net, and releases nothing when it moves out (the defect #2091 fixed in the playbook update node
-/// and the output orchestrator's generic update).
+/// and the update handler's generic update).
 /// </summary>
 /// <remarks>
 /// <para><b>The signal.</b> A re-file goes through a re-file seam: <see cref="IRecordOwnershipResolver.ReparentAsync"/> (the
@@ -33,7 +33,7 @@ namespace Spaarke.ArchTests;
 /// <c>{nav}@odata.bind</c> key built from metadata or playbook configuration, or a payload a caller hands in — so "writes a
 /// lineage lookup" is not a property of the compiled code. The heuristic (a generic update call plus the literal
 /// <c>@odata.bind</c>) flags every create and every non-filing bind, and misses the pass-through writers: the playbook
-/// update node, the output orchestrator's update and the field-mapping push, which #2091 round 3 found writing filing binds
+/// update node, the update handler's update and the field-mapping push, which #2091 round 3 found writing filing binds
 /// with no seam. That class is closed instead by the ONE payload reader every generic writer uses,
 /// <see cref="RecordReparent.ParentChangesWithClearsIn{TValue}"/>: it turns a filing bind into a parent change (or refuses
 /// it), so those writers re-file through <see cref="IRecordOwnershipResolver.ReparentAsync"/> and are held here. A new

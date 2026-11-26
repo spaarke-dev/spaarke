@@ -17,7 +17,7 @@
  * (`setValue`) and, where the caller needs it, reading the current value or
  * dirty state. `getValue`/`getIsDirty` are optional because not every
  * consumer of {@link getXrmPage} needs them (declared narrower where they
- * do — see `FieldMappingHandler.ts`'s local `IXrmPageAttributeLike`).
+ * do; the former field-mapping handler, deleted in task 035, declared its own narrower type).
  */
 export interface XrmPageAttributeLike {
   setValue(value: unknown): void;
@@ -91,6 +91,8 @@ export interface EntityReference {
 export interface XrmNavigation {
   openForm(options: OpenFormOptions): Promise<OpenFormResult>;
   openUrl(url: string, options?: WindowOptions): void;
+  /** Shows the platform error dialog (the `'openErrorDialog'` capability guarantees it is a function). */
+  openErrorDialog?(options: { message?: string; details?: string; errorCode?: number }): Promise<unknown>;
   /**
    * `navigationOptions` widened by task 081 (C-8) when `openEmailCompose.ts`
    * / `openEmailRecord.ts` converged onto this interface from the untyped
@@ -309,6 +311,7 @@ export interface SidePane {
  * - `'navigation'`: `Xrm.Navigation.navigateTo` is a function
  * - `'openForm'`: `Xrm.Navigation.openForm` is a function
  * - `'openUrl'`: `Xrm.Navigation.openUrl` is a function
+ * - `'openErrorDialog'`: `Xrm.Navigation.openErrorDialog` is a function
  * - `'utility'`: `Xrm.Utility.getGlobalContext` is a function
  * - `'clientUrl'`: `Xrm.Utility.getGlobalContext().getClientUrl()` returns a non-empty string
  * - `'lookupObjects'`: `Xrm.Utility.lookupObjects` is a function
@@ -328,6 +331,7 @@ export type XrmCapability =
   | 'navigation'
   | 'openForm'
   | 'openUrl'
+  | 'openErrorDialog'
   | 'utility'
   | 'clientUrl'
   | 'lookupObjects'
@@ -361,6 +365,8 @@ function hasCapability(xrm: any, capability: XrmCapability): boolean {
       return typeof xrm.Navigation?.openForm === 'function';
     case 'openUrl':
       return typeof xrm.Navigation?.openUrl === 'function';
+    case 'openErrorDialog':
+      return typeof xrm.Navigation?.openErrorDialog === 'function';
     case 'utility':
       return typeof xrm.Utility?.getGlobalContext === 'function';
     case 'clientUrl': {
@@ -488,7 +494,7 @@ export function getXrm(
  *
  * THE single shared accessor (FR-20) — consolidates the two near-identical
  * private `getXrmPage()` duplicates that previously lived in
- * `FieldMappingHandler.ts` and `MatterHeaderView.tsx`. Resolves through
+ * the former `FieldMappingHandler.ts` (deleted in task 035) and `MatterHeaderView.tsx`. Resolves through
  * {@link getXrm} with the `'page'` capability (task 081 / C-8), so it uses the
  * one frame walk: the nearest frame whose Xrm has `Page`. Before task 081 it
  * had its own window -> parent walk; the result is unchanged wherever that

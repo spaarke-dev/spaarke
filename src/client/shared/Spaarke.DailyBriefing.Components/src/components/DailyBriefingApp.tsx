@@ -64,6 +64,8 @@ import {
   cleanGuid,
   EmptyState,
   getXrm,
+  openInDesktopApp,
+  OPEN_IN_DESKTOP_FAILED_MESSAGE,
 } from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
@@ -157,6 +159,26 @@ export interface DailyBriefingAppProps {
 type EmailDialogState =
   | { mode: 'briefing'; defaultSubject: string; defaultBody: string }
   | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
+// Both modes carry an HTML `defaultBody`: the composer opens in rich text (task 197).
+
+/**
+ * A modal's content, whether it is open, and a key per opening (#2658). A Fluent Dialog unmounted while open leaves
+ * tabster's aria-hidden on the rest of the page for good, and so does changing the key of an open one. So the modal is
+ * closed with `open={false}` and keeps its content, and `seq` changes only when it opens from closed.
+ */
+interface ModalSlot<T> {
+  value: T;
+  open: boolean;
+  seq: number;
+}
+
+function openModalSlot<T>(prev: ModalSlot<T> | null, value: T): ModalSlot<T> {
+  return prev?.open ? { ...prev, value } : { value, open: true, seq: (prev?.seq ?? 0) + 1 };
+}
+
+function closeModalSlot<T>(prev: ModalSlot<T> | null): ModalSlot<T> | null {
+  return prev ? { ...prev, open: false } : prev;
+}
 
 /**
  * Build a Dataverse record deep link from the record's STRUCTURED identity
@@ -181,7 +203,7 @@ export function buildRecordDeepLink(clientUrl: string, entityType: string, entit
 export function buildItemEmailDraft(
   item: HighPriorityItemResult,
   clientUrl: string
-): { subject: string; body: string } {
+): { subject: string; body: string; html: string } {
   const kind = item.kindLabel ? `${item.kindLabel}: ` : '';
   const subject = `${kind}${item.name || 'Record'}`.slice(0, 200);
   const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
@@ -189,7 +211,17 @@ export function buildItemEmailDraft(
   if (item.description) lines.push('', item.description);
   if (link) lines.push('', `Open the record: ${link}`);
   lines.push('', '— Shared from the Daily Briefing');
-  return { subject, body: lines.join('\n') };
+  // The same draft as HTML for the rich-text composer (task 197 fix round 1): the record URL is a real anchor, as in the
+  // briefing email below, not text a rich editor leaves unlinked. Every field is escaped.
+  const html = [
+    `<p>${esc(item.name || 'Record')}</p>`,
+    item.description ? `<p>${esc(item.description).replace(/\r?\n/g, '<br>')}</p>` : '',
+    link ? `<p><a href="${esc(link)}">Open the record</a></p>` : '',
+    '<p>— Shared from the Daily Briefing</p>',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return { subject, body: lines.join('\n'), html };
 }
 
 /** Minimal HTML escaper for the briefing-email builder below. */
@@ -604,16 +636,23 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // (client-composed draft email activity). Reuses the shared SendEmailDialog.
   // ---------------------------------------------------------------------------
 
-  const [emailDialog, setEmailDialog] = React.useState<EmailDialogState | null>(null);
+  // Both modals below keep their content after they close (a ModalSlot): they are closed with `open={false}`, never
+  // unmounted while open, which would leave the briefing aria-hidden (#2658).
+  const [emailSlot, setEmailSlot] = React.useState<ModalSlot<EmailDialogState> | null>(null);
+  const emailDialog = emailSlot?.value ?? null;
 
   // Operator UAT (2026-07-09, item D) — file-preview modal state. Set by a
   // Documents-channel row's open-document icon / menu; drives the shared
   // RichFilePreviewDialog below.
-  const [previewDoc, setPreviewDoc] = React.useState<{ documentId: string; documentName: string } | null>(null);
+  const [previewSlot, setPreviewSlot] = React.useState<ModalSlot<{ documentId: string; documentName: string }> | null>(
+    null
+  );
+  const previewDoc = previewSlot?.value ?? null;
   const handlePreviewDocument = React.useCallback((documentId: string, documentName: string) => {
     if (!documentId) return;
-    setPreviewDoc({ documentId, documentName });
+    setPreviewSlot(prev => openModalSlot(prev, { documentId, documentName }));
   }, []);
+  const closePreview = React.useCallback(() => setPreviewSlot(closeModalSlot), []);
 
   // Dataverse client URL for deep links (e.g. https://org.crm.dynamics.com).
   const clientUrl = React.useMemo<string>(() => {
@@ -654,20 +693,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const handleEmailBriefing = React.useCallback(() => {
     const subject = `Daily Briefing — ${new Date().toLocaleDateString()}`;
     const body = buildBriefingEmailHtml(clientUrl, renderData?.tldr ?? null, renderData?.channelNarratives ?? []);
-    setEmailDialog({ mode: 'briefing', defaultSubject: subject, defaultBody: body });
+    setEmailSlot(prev => openModalSlot(prev, { mode: 'briefing', defaultSubject: subject, defaultBody: body }));
   }, [clientUrl, renderData]);
 
   const handleEmailItem = React.useCallback(
     (item: HighPriorityItemResult) => {
-      const { subject, body } = buildItemEmailDraft(item, clientUrl);
-      setEmailDialog({ mode: 'item', item, defaultSubject: subject, defaultBody: body });
+      const { subject, html } = buildItemEmailDraft(item, clientUrl);
+      setEmailSlot(prev => openModalSlot(prev, { mode: 'item', item, defaultSubject: subject, defaultBody: html }));
     },
     [clientUrl]
   );
 
   // Owner UAT 2026-08-04: both share modes open the canonical composer prefilled
   // (see EmailDialogState docblock) — no host-owned send remains.
-  const closeEmailDialog = React.useCallback(() => setEmailDialog(null), []);
+  const closeEmailDialog = React.useCallback(() => setEmailSlot(closeModalSlot), []);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -843,14 +882,15 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         </div>
         <CaughtUpFooter channelLabels={[]} />
       </div>
-      {emailDialog && (
+      {emailSlot && emailDialog && (
         <SendEmailDialog
-          open={true}
+          key={emailSlot.seq}
+          open={emailSlot.open}
           onClose={closeEmailDialog}
           titleOverride={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
           initialSubject={emailDialog.defaultSubject}
           initialBody={emailDialog.defaultBody}
-          initialBodyFormat={emailDialog.mode === 'briefing' ? 'HTML' : 'PlainText'}
+          initialBodyFormat="HTML"
           onSearchRecipients={handleSearchUsers}
           authenticatedFetch={authenticatedFetch}
           bffBaseUrl=""
@@ -882,16 +922,44 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           }}
         />
       )}
-      {previewDoc && (
+      {previewSlot && previewDoc && (
         <RichFilePreviewDialog
-          open={true}
+          key={previewSlot.seq}
+          open={previewSlot.open}
           documentId={previewDoc.documentId}
           documentName={previewDoc.documentName}
-          onClose={() => setPreviewDoc(null)}
+          onClose={closePreview}
           // Same BFF endpoint the Semantic Search PCF uses — SPE preview embed URL.
           fetchPreviewUrl={() => getDocumentPreviewUrl(previewDoc.documentId)}
-          // "Open file": open the SPE preview URL in a new tab (both modes).
-          onOpenFile={async () => {
+          // "Open file" / "Download": desktop mode goes through the shared open-in-desktop behaviour (ISS-004):
+          // the Office app for Word / Excel / PowerPoint, otherwise a download through the BFF. Web mode keeps
+          // opening the SPE preview URL in a new tab.
+          onOpenFile={async mode => {
+            if (mode === 'desktop') {
+              try {
+                const response = await authenticatedFetch(
+                  `/api/documents/${encodeURIComponent(previewDoc.documentId)}/open-links`
+                );
+                const links = await response.json();
+                // Relative base: `authenticatedFetch` resolves `/api/...` against the BFF host set in `initAuth`.
+                await openInDesktopApp({
+                  bffBaseUrl: '',
+                  documentId: previewDoc.documentId,
+                  links,
+                  fetch: authenticatedFetch,
+                  fallbackFileName: previewDoc.documentName,
+                });
+              } catch (err) {
+                console.error('[DailyBriefing] Open in desktop failed:', err);
+                dispatchToast(
+                  <Toast>
+                    <ToastTitle>{OPEN_IN_DESKTOP_FAILED_MESSAGE}</ToastTitle>
+                  </Toast>,
+                  { intent: 'error', timeout: 8000 }
+                );
+              }
+              return;
+            }
             const url = await getDocumentPreviewUrl(previewDoc.documentId);
             if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
           }}

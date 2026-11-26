@@ -6,8 +6,8 @@
  * mirror the shapes the LegalWorkspace-local SmartToDo subtree consumed
  * (`src/solutions/LegalWorkspace/src/types/entities.ts` `ITodo`,
  * `src/solutions/LegalWorkspace/src/types/enums.ts` `PriorityLevel`/`EffortLevel`,
- * `src/solutions/LegalWorkspace/src/hooks/useUserPreferences.ts`
- * `ITodoKanbanPreferences`) so the hoisted components stay strongly typed WITHOUT
+ * and the former per-host `useUserPreferences.ts` `ITodoKanbanPreferences`, now
+ * `../hooks/useTodoKanbanPreferences.ts` — #2972) so the hoisted components stay strongly typed WITHOUT
  * reaching into `src/solutions/...` (ADR-012 / NFR-05).
  *
  * `ITodo` is a structural SUPERSET of the package's `IKanbanTodoLike`
@@ -48,6 +48,8 @@ export interface ITodo {
   /** 0-100 native effort score on sprk_todo. */
   sprk_effortscore?: number;
   sprk_duedate?: string;
+  /** Formatted sprk_duedate (locale short date) — the search box matches it. */
+  dueDateFormatted?: string;
   sprk_completedon?: string;
   /** Choice: 100000000=Today, 100000001=Tomorrow, 100000002=Future. */
   sprk_todocolumn?: number;
@@ -65,18 +67,51 @@ export interface ITodo {
   _ownerid_value?: string;
   createdon?: string;
   modifiedon?: string;
+  /** Regarding-record display name (ADR-024 resolver field) — the search box matches it. */
+  sprk_regardingrecordname?: string;
+  /** Regarding-record number (ADR-024 resolver field) — the search box matches it. */
+  sprk_regardingrecordnumber?: string;
 }
 
 /**
  * Kanban threshold preferences shape (stored as JSON in sprk_preferencevalue).
  *
- * Host-agnostic mirror of the LegalWorkspace `ITodoKanbanPreferences`. The host
- * shim persists/loads it via its own preferences service; the hoisted
- * `SmartToDo` + `ThresholdSettings` consume it purely as data.
+ * One envelope for every Smart To Do surface (preference type 100000000),
+ * loaded and saved by `useTodoKanbanPreferences`. A save keeps the fields the
+ * saving surface does not use (#2972 — the workspace used to drop the code
+ * page's orientation and column order).
  */
 export interface ITodoKanbanPreferences {
   todayThreshold: number;
   tomorrowThreshold: number;
+  /**
+   * Legacy list/card view selection (R4 FR-09). The list view is gone; the field is kept so a save does not drop
+   * what an older client stored.
+   */
+  viewMode?: SmartTodoViewMode;
+  /** Kanban board orientation (R4 FR-28..FR-30). Absent means horizontal. */
+  orientation?: SmartTodoOrientation;
+  /** Manual card order per column id ("Today" / "Tomorrow" / "Future") — arrays of sprk_todoid. */
+  columnOrders?: Record<string, string[]>;
+}
+
+/** Persisted list/card view value (R4 FR-09). card renders the Kanban. */
+export type SmartTodoViewMode = 'card' | 'list';
+
+/** Persisted Kanban orientation (R4 FR-28). */
+export type SmartTodoOrientation = 'horizontal' | 'vertical';
+
+/** A sprk_userpreference record: one JSON value per user and preference type. */
+export interface IUserPreferenceRecord {
+  sprk_userpreferenceid: string;
+  /** Choice discriminator (100000000 = Smart To Do Kanban). */
+  sprk_preferencetype: number;
+  /** JSON text. */
+  sprk_preferencevalue: string;
+  /** Lookup → systemuser. */
+  _sprk_user_value?: string;
+  createdon: string;
+  modifiedon: string;
 }
 
 /**

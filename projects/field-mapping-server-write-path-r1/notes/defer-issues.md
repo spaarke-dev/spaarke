@@ -83,6 +83,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Deferred: RepairAsync has no production caller yet |
 | **Owner task** | 052 |
 | **Failure** | Registering the three chat tables (owner, 2026-10-30) makes RepairAsync accept them, so the scheduled pass would re-own user-created rows to a team. Exclude them in 052, or ask the owner |
+| **Resolution (owner, 2026-11-08)** | task and account are excluded from the repair pass. A contact must be owned by the customer's main business-unit team. The rule finds that team per environment, and refuses and logs if it can't, never falling back to the creator. 052b proposes a contact owner-only rule; UAC-r2 reviews it once the owner names the team. No field mapping on contacts |
 
 ## DI-009 — The owner decision does not see a secure root reached only through the derived stamp
 
@@ -195,3 +196,239 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Owner task** | Task 042c (POML written 2026-11-04), straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
 | **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
 | **Status** | **Closed 2026-11-05** by task 042c, PR #2569: by owner decision D-204 the general create (the service and chat) refuses Signal, Decision Record and Budget Revision, so no general create asks this owner question; #2561 closed |
+
+## DI-020 — Inbound mail dedupe can create a duplicate communication
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-07, review of tasks 030b and 034, in passing (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2625 |
+| **Class** | K, known limit: pre-existing, not changed by 030b or 034 |
+| **Failure** | In `IncomingCommunicationProcessor` (~:143), the Graph-id check is check-then-act and fails open. A blank `InternetMessageId` takes the plain create with no guard, so a concurrent redelivery can create two rows. If the host stops after the create, the redelivery stops at the duplicate check, and the attachment and archive steps never run |
+| **Status** | Open |
+
+## DI-021 — Rate card and rule set imports write the SPE pointer by a follow-up update
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-07, review of task 030b, in passing (pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2626 |
+| **Class** | K, known limit: pre-existing |
+| **Failure** | `RateCardImportService.cs` (~:250) and `RuleSetService.cs` (~:481) create the document, then write its pointer in an update. A failed update leaves a document with no file. The fix is to use 030b's `CreateDocumentRequest.FilePointer` |
+| **Status** | Open |
+
+## DI-022 — Inbound-created communications and documents are not field-mapped
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-07, task 034 scope review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2633 |
+| **Class** | Known gap, accepted by the owner 2026-11-08 |
+| **Failure** | Rows the mail ingestor and the attachment workers create get no field mapping from their parent. No profile targets those tables today, and most inbound mail arrives unfiled. Building it needs the app-only mapping gates of 032 (W3 keeps them out of R1). Build it when a profile targets an inbound-created table, reusing 032's step and 052a's metadata reader |
+| **Status** | Open |
+
+## DI-023 — Write-path doc row I-18 still says the writer identity owns a Signal
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-08, task 060 (ownership matrix), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2636 |
+| **Class** | F2, a doc that contradicts the code; doc only |
+| **Failure** | Row I-18 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` says `sprk_signal` is owned by the writer identity with `owningbusinessunit` set from the matter's unit. Since ontology task 143, `SignalWriter` writes the resolver's team and never sends `owningbusinessunit` (class remarks; census entry `SignalWriter.cs`). I-6 and §5.2 describe the current behaviour. Task 060's edit was confined to §5.2 and an I-6 pointer, so it did not fix I-18. Rewrite or retire the row (task 062 or the ontology project) |
+| **Status** | Open |
+
+## DI-024 — A default displaced by a mapped value is not re-applied when the mapping-source rule removes that value
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-09, task 022 fix round 6 (K4 from the security review), verified by a seam test |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2648 |
+| **Class** | K, known limit; accepted by UAC-r2 2026-11-09 |
+| **Failure** | Step 3½ fills an adapter default only where the column is still empty (`RecordCreationService.cs` ~:587). When the mapping-source strip later removes the mapped value, the rebuild keeps only the surviving mapped values (`RecordCreationService.Mapping.cs` ~:513-517), so the displaced default is lost. Concrete case: the Office To Do's Assigned To (the caller's own contact, `OfficeService.cs` ~:2969-2987) ends up empty. Fix: re-run the defaults fill over the stripped columns AND re-run the caller's write checks (AppendTo on a lookup) on what it fills. The seam test `..._IsNotReapplied_KnownLimitK4` pins today's behaviour; flip it when fixed |
+| **Status** | Open |
+
+## DI-025 — Converge the Direct recipient stamp's participant read onto the shared Direct-thread reader
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-10, task 054a piece 2 fix round 1; UAC-r2 review condition (follow-up) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2652 |
+| **Class** | Follow-up; blocked on unified-access-control-r2 task 198 reaching master |
+| **Failure** | `DirectMessageRecipient.ReadParticipantsAsync` deliberately duplicates the participant rule of `IDirectThreadAccessService.GetParticipantSystemUserIdsAsync`: the thread typed Direct; the user owner plus systemuser shares carrying the Read bit; a strict read. Two readers can drift, and then the stamp and the grant path would disagree on who a message's participants are. Fix: once 198 is on master, call the shared reader and delete the duplicate, keeping the stamp's tests passing |
+| **Status** | Open |
+## DI-026 — Check that no strict Direct pair thread is Record-Anchored before the Direct settings go live
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-11, task 054b (A1, known limit K3); UAC-r2 review follow-up |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2701 |
+| **Class** | K, follow-up |
+| **Failure** | Rule: a strict Direct pair thread, or a thread holding a message with `sprk_directrecipient` set, stays typed Direct and is never anchored to a record. Since 054b, filing enforces this going forward (`ThreadResolver` rule 2, EventId 5413); it does not look back. Follow-up: a one-time per-environment check, before the `DirectMessage:*` settings are set, that no such thread is Record-Anchored, with an owner-approved dry-run / `-Apply` / `-Verify` correction if any is found (a script, or a phase of `Migrate-DirectMessagesToOwnerTeam.ps1`). Nothing with outbound Direct pair routing is deployed yet, so the expected count is zero |
+| **Status** | Open for other environments. **dev (spaarkedev1), 2026-11-13: PASS**: a read-only check found no message with `sprk_directrecipient` set in a Record-Anchored thread (0 such messages in all), and no Record-Anchored thread shaped as a strict pair (0 of 66 user-owned; owner a systemuser and the only share row another systemuser with Read). The check is a one-time query; making it a reusable script (or a `-Verify` phase) for other environments is still to do. |
+## DI-027 — Apply the Restricted source rule to Repair and the field-mapping push (task 022c)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-12, task 022b (scope: create only) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2738 |
+| **Class** | F1, follow-up task 022c (unified-access-control-r2, round 90: fixed promptly, right after 022b merges) |
+| **Failure** | Rule: values mapped from a source whose `sprk_accesspermission` is Restricted, or cannot be read, are written only into a row that is Restricted. 022b applies it to the create. Repair mode (`RecordCreationService.Repair.cs`) and the field-mapping push (`FieldMappingPushSourceGate`) apply the secure copy gate; 022c applies the same Restricted predicate there. |
+| **Status** | Fixed on the work branch by task 022c (merge 74556c46df, 2026-11-12; UAC-r2 PASS). On master via #2768 (d8b53ec0c3); #2738 closed. |
+## DI-028 — `ExternalAccess:CustomerBusinessUnitId` is required, and names the customer's business unit
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-12, task 052b; unified-access-control-r2 condition 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2771 |
+| **Class** | K, deployment dependency (customer-provisioning-orchestration-r1 and the deployment guide) |
+| **Failure** | Rule: a chat-created contact, and a contact the repair pass re-owns, is owned by the default team of the unit in `ExternalAccess:CustomerBusinessUnitId`. The setting is required where those run (unset: the chat create is refused with `record_owner_customer_contact_team_unresolved`, and the pass skips the contact table) and names the customer's business unit, never the Secure Record unit. Add it to the deployment guide and the provisioning flow. |
+| **Status** | Open |
+## DI-029 — Invoice family: the regarding pair agrees with the row's core lookup on every update path
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-13, task 045d adversarial review (outside the task's scope) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2772 |
+| **Class** | Follow-up; owner decision (touches FR-23); ebilling-r1 and this project |
+| **Failure** | Rule: on every invoice-family table, a row's regarding pair and its five resolver fields agree with its core lookup, and a write's pair agrees with the stored or written core lookup. Options: (a) refuse a disagreeing pair (ebilling-r1's view), (b) always derive the pair from the core lookup. Scope once decided: six tables × child-record update, chat tool, `UpdateRecordActionCore`, `DataverseUpdateHandler`, push. |
+| **Status** | Owner decided 2026-11-13: (a) refuse (decisions.md). Work: task 045e, after 045d merges. |
+
+## DI-030 — Three Office save tests time out under a broad parallel test run
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-13, task 045g gates (filtered suites on the work branch, master 4f9e77e9c0 merged) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2817 |
+| **Class** | Test reliability; outside this project's code (the Office save path is unchanged) |
+| **Failure** | `OfficeVersionSaveContractTests.Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_…(Email)`, `Issue1084_OfficeJobRecordDurabilityTests.RetryOfASaveWhoseRequestDied_…`, `OfficeEmailSaveNamingTests.EmailSave_WithATypedDocumentName_…` each failed after ~3 minutes in a 9362-test run (9352 passed); all pass alone (4 cases, 7 s). Same class as #2543. |
+| **Status** | Filed; not blocking 045g. |
+
+## DI-031 — Comments and the framework doc still describe client mapping in EventService
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-16, task 023 adversarial review (finding 2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2874 |
+| **Class** | F2, documentation; outside task 023's scope (other wizards' files; docs task 062) |
+| **Failure** | `CreateMatterWizard.tsx` (~:639) and `CreateProjectWizard.tsx` (~:729) comments say the follow-on `EventService` "drives the Field Mapping Framework engine"; `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md` (~:51, ~:197) lists `eventService.ts` as calling `applyFieldMappings` and as a graceful no-op without a fetch. Since 023 the server maps and the create fails closed. No runtime effect. |
+| **Status** | Filed; fix the comments when those wizards are next touched, the doc in task 062. |
+
+## DI-033 — The Direct owner step read the row version only from the `versionnumber` attribute
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-20, UAC-r2's U-11 live check on dev (one outbound Direct message; BFF build 5ae2804884) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2919 |
+| **Class** | F1, this project's code (054 piece 3) |
+| **Failure** | `DirectMessageOwnerStep` read the message with `ColumnSet(true)` and took its version from the `versionnumber` attribute only; the ServiceClient returns it on `Entity.RowVersion`. Every Direct message kept its creator as owner (error 5415), failing closed. The content-row move read versions the same way. |
+| **Status** | Fixed on `task/fm-054-fix`: `DirectMessageOwnerStep.VersionOf` (attribute, else `RowVersion`) at both sites; regression `tests/integration/regression/Issue2919_DirectOwnerStepRowVersionTests.cs` (fails before the fix). Live re-check: UAC-r2 re-runs U-11 after the dev deploy; `-Phase Move` (054c) is the recovery for messages sent before it. |
+
+## DI-034 — The communication-arrived fan-out's thread read always faults (not this project's code)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-20, while root-causing DI-033 (same dev operation) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2920 |
+| **Class** | Outside this project (messaging-r3's `CommunicationArrivedProducer`) |
+| **Failure** | The thread read names `RegardingFieldMap.AllRegardingFields`, which includes `sprk_regardingreportcard`, a column the thread table lacks. The read faults, and the fan-out treats every thread as private (narrower, never wider). |
+| **Status** | Filed and reported; fix is `ThreadResolver.ThreadRegardingColumns`, owned by the fan-out's owner. |
+
+## DI-035 — The conversation workspace thread list shows only the first page (no lazy-scroll)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-22, task 055 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2936 |
+| **Class** | Pre-existing (messaging-r3's `ConversationWorkspace`), not caused by 055 |
+| **Failure** | The all-mode list loads one `listThreads` page (default 50) and ignores `nextPageToken`, in All and now in Messages. ADR-051 requires infinite lazy-scroll. The server already pages, and `kind=direct` fills each page server-side. |
+| **Status** | Filed and reported. |
+
+## DI-036 — Invite-only conversations for private messages about a record (follow-up, not built here)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-22, owner discussion of task 056 filing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2977 |
+| **Class** | Feature follow-up for `messages-enhancements-r1` |
+| **Need** | Participants invite named people into a private conversation about a record; each invitee passes the recipient's record-access check; the conversation widens only by invitation, never by filing. |
+| **Status** | Filed. 056 ships strictly 1:1, never filed (decisions.md 2026-11-22). The Direct access model is pair-only and belongs to UAC-r2, so this needs a design reviewed with UAC-r2 first. |
+
+## DI-037 — Flaky client test: EmailComposer.lookupFocus under full ui-components jest load (found, not ours)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-23, verifying master PR #2984 (full `@spaarke/ui-components` jest at ef2bb76a73) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2990 |
+| **Class** | Pre-existing test flake from master (task 199); this project does not touch EmailComposer |
+| **Need** | Make the focus-return assertion robust to slow jsdom ticks under full-suite load. It passes alone. |
+| **Status** | Filed. The same run's OntologyAdmin Rules failure is already #2597. |
+
+## DI-038 — A private-message refusal carries the title "Record owner unresolved" (found in the 056 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-23, 056 live check on dev (`PATCH /api/communications/{id}/filing` on a private message) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3023 |
+| **Class** | Cosmetic (ProblemDetails title). The status, `reasonCode` and detail are correct, and clients branch on `reasonCode`. |
+| **Need** | `ProblemDetailsHelper.RecordOwnerRefused` picks its title from the code: `not_fileable` and `check_unavailable` get their own titles. Add a contract test for each. |
+| **Status** | Filed. Fix with the next BFF change in this area. |
+
+## DI-039 — The Create Event wizard binds Assigned To by a column-name fragment (found in the 024 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-24, 024 live check on dev. The To Do wizard had the same pattern and stored the Assignee in `sprk_assignedtointernal`; fixed in task 024. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3039 |
+| **Class** | Latent defect. Events are correct today only because Dataverse lists `sprk_assignedto` first among `sprk_event`'s contact lookups. |
+| **Need** | `eventService.ts` (~:191): pass `'sprk_assignedto'` to `findNavProp`, not `'assignedto'`; add a test with another `assignedto` column listed first. |
+| **Status** | Filed. Not fixed here: task 024 must not edit another wizard's files. |
+
+## DI-040 — A typed email subject over the column length is sent with no communication record (found in the 028 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 028 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3126 |
+| **Class** | Pre-existing. The composer's subject has no length limit and `ValidateRequest` checks only for an empty subject. The `sprk_communication` create after the send is best-effort, so an over-long subject is delivered with no row. |
+| **Need** | Refuse a subject longer than `sprk_subject` (2000) before sending, and limit the composer field; tests at and over the limit. |
+| **Status** | Filed. Task 028 covers only the mapped subject (an over-long mapped value is not used); the typed case is the communication path's owner's. |
+
+## DI-041 — One email's attachments must each keep their own bytes (pointer; found in word-add-in-r1 task 138's review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, word-add-in-r1 task 138 adversarial review; registered there as ISS-040. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3135 |
+| **Class** | Pre-existing, in the Office save / upload-finalization path. This project touched that worker only for the record-first owner (015) and the save stamp (030). |
+| **Need** | Two attachments with the same name in one email keep their own files; redelivery stays idempotent. |
+| **Status** | Filed; owner is the Office save / upload-finalization path, not this project. Pointer only. |
+
+## DI-042 — Summarize Files "Work on Analysis" analyses documents that have no file (found in the 029 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 029 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3156 |
+| **Class** | Pre-existing. The step creates `sprk_document` rows with a name only (no upload, no attach) and hands their ids to the Playbook Library; the analysis reads the "No file content available" placeholder. The old `/api/v1/documents` create stored no file either. |
+| **Need** | Upload and attach each file before the analysis starts, or refuse to start an analysis on documents without a file; test that a file-less document never reaches an analysis. |
+| **Status** | Filed. Task 029 moved only the create onto the child-records route (FR-16); the upload pipeline is outside its scope. |
+
+## DI-043 — The Document Upload wizard silently drops TXT, PPTX, MSG and EML files (found in the 029 live check)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 029 live check on dev. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3176 |
+| **Class** | Pre-existing. The shared `FileUploadZone` resolves a type only for PDF/DOCX/XLSX, and `AddFilesStep` ignores the validation errors, so the user sees nothing. |
+| **Need** | Every advertised extension resolves to a type; validation errors are shown; tests for each extension and for a shown rejection. |
+| **Status** | Filed. Outside FR-16 (the create payload). |
+
+## DI-044 — The Create Matter wizard reads the business unit on every submit and discards it (found in the 035 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 035 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3190 |
+| **Class** | Pre-existing. `CreateMatterWizard.tsx` awaits `resolveUserBuDefaults()` (systemuser, then businessunit) and passes the result as `_cascadeDefaults`, which `matterService.createMatter` never reads. |
+| **Need** | Remove the prop, its hosts' wiring and the unused parameter; keep `EntityCreationService.resolveUserBuDefaults` for its container callers; test that a matter create makes no systemuser or businessunit read. |
+| **Status** | Filed. Out of 035 scope (no wizard-logic changes). |

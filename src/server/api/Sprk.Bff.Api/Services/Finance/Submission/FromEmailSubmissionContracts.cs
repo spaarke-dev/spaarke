@@ -41,6 +41,18 @@ public static class FromEmailSubmissionErrors
     /// save was refused after the build and before the upload; nothing was saved and nothing was submitted.
     /// </summary>
     public const string AttachmentNotPreserved = "ebilling.submission.attachment_not_preserved";
+
+    /// <summary>
+    /// 400 (task 095f, EB-D-225): a Correction names no note, or a blank one. Decided after the replay of K (a retry of a Correction that was
+    /// accepted is answered as a replay) and before the communication is read or anything is saved, so a refusal writes nothing.
+    /// </summary>
+    public const string CorrectionNoteRequired = "ebilling.submission.correction_note_required";
+
+    /// <summary>
+    /// The detail of <see cref="CorrectionNoteRequired"/>, shared by every route that refuses a Correction with no note (from-email and,
+    /// task 095f-2e1, from-document), so the text has one source.
+    /// </summary>
+    public const string CorrectionNoteRequiredDetail = "A correction needs a note saying why the invoice is corrected.";
 }
 
 /// <summary>The <c>reason</c> values of 400 <see cref="FromEmailSubmissionErrors.MarksInvalid"/> (contract section 6).</summary>
@@ -133,11 +145,21 @@ internal sealed record FromEmailSubmissionInput
 
     public required EmailMetadata Email { get; init; }
     public required IReadOnlyList<FromEmailMark> Marks { get; init; }
-    public required Guid FirmId { get; init; }
+
+    /// <summary>
+    /// The firm, or null for none (task 095c-2, owner 2026-11-03): mode New may be sent without a firm, and a Correction of a no-firm invoice
+    /// is sent without one. Null is accepted only once the tracking-scope key is Active (P2); before that it is 400 firm_invalid "A firm is
+    /// required.". A firm that is sent is checked as before (active, linked). The empty id is never "no firm" (400 firm_invalid).
+    /// </summary>
+    public required Guid? FirmId { get; init; }
     public string? FirmInvoiceNumber { get; init; }
     public string? PoNumber { get; init; }
     public required string Mode { get; init; }
     public Guid? InvoiceId { get; init; }
+
+    /// <summary>Task 095f (EB-D-225): the correction note, trimmed and checked (<see cref="InvoiceCorrectionNote.Check"/>); null for a New
+    /// request and for a Correction that sent none or a blank one (the service refuses that: <see cref="FromEmailSubmissionErrors.CorrectionNoteRequired"/>).</summary>
+    public string? CorrectionNote { get; init; }
 
     /// <summary>The RFC Message-ID (OP-2: required and RFC-shaped by the body check).</summary>
     public string MessageId => Sprk.Bff.Api.Services.Office.OfficeEmailEnricher.ResolveRfcMessageId(Email)!;
@@ -162,7 +184,7 @@ internal static class FromEmailMarkRules
     /// matches no entry is accepted.
     /// </summary>
     public static (FromEmailMarksRefusal? Refusal, IReadOnlyList<FromEmailResolvedMark> Saved) Check(
-        IReadOnlyList<AttachmentReference> attachments, IReadOnlyList<FromEmailMark> marks)
+        IReadOnlyList<AttachmentReference> attachments, IReadOnlyList<FromEmailMark> marks, long? maxFileBytes = null)
     {
         var none = Array.Empty<FromEmailResolvedMark>();
 
@@ -242,12 +264,27 @@ internal static class FromEmailMarkRules
                     "A file marked to be saved was not sent with its content, so nothing was saved."), none);
             }
 
+            // DEF-052 (#2553): a marked file over the per-file limit is refused here, in step 1, before the save, the replay or any write, so
+            // the .eml (which carries every marked part) is never stored. A file of exactly the limit passes.
+            if (maxFileBytes is { } limit && bytes.LongLength > limit)
+            {
+                return (new FromEmailMarksRefusal(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+                    Reason: string.Empty, mark.FileName, mark.Mark, TooLargeDetail(limit)), none);
+            }
+
             saved.Add(new FromEmailResolvedMark(mark, found.Entry, found.Index, EmlMimeParts.Sha256Hex(bytes)));
         }
 
         // The Invoice first, then the Supporting files in attachment order.
         return (null, saved.OrderBy(s => s.Mark.Mark == FromEmailMarks.Invoice ? 0 : 1).ThenBy(s => s.EntryIndex).ToList());
     }
+
+    /// <summary>
+    /// The 413 sentence of a from-email marked file over the per-file limit (<paramref name="maxFileBytes"/>): worded for any marked file, an
+    /// Invoice or a Supporting one (the upload route's own text, "The invoice file may be at most N MB.", is unchanged).
+    /// </summary>
+    internal static string TooLargeDetail(long maxFileBytes) =>
+        $"Each marked file may be at most {maxFileBytes / (1024 * 1024)} MB. Nothing was submitted or saved.";
 
     /// <summary>Contract section 6 <c>invoice_not_pdf</c>: a PDF unless the content type lacks "pdf" AND the name does not end in ".pdf".</summary>
     internal static bool IsPdf(FromEmailMark invoice) =>
@@ -330,12 +367,15 @@ internal static class FromEmailSubmissionKey
     /// <summary>
     /// The value the <c>X-Idempotency-Key</c> response cache is bound to (the filter hashes it): K plus the firm and the trimmed firm invoice
     /// number, so a header reused on a request with another firm or number is never answered with the first request's cached 202; it
-    /// reaches the handler, which answers it from K (contract section 5).
+    /// reaches the handler, which answers it from K (contract section 5). Task 095c-2: no firm (null or absent) binds as an empty value, so
+    /// a replay with <c>firmId</c> null or absent is the same request; K is unchanged.
     /// </summary>
     public static string CacheBinding(FromEmailSubmissionInput input) =>
-        Of(input) + "|" + input.FirmId.ToString("D") + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty);
+        Of(input) + "|" + (input.FirmId is { } firm ? firm.ToString("D") : string.Empty) + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty)
+        + "|" + (input.CorrectionNote ?? string.Empty);
 
-    /// <summary>Whether an attempt row recorded exactly this firm and trimmed firm invoice number (the details K does not carry).</summary>
+    /// <summary>Whether an attempt row recorded exactly this firm and trimmed firm invoice number (the details K does not carry). Task 095c-2:
+    /// a row with no firm and a request with no firm have the same firm detail; a firm on one side only is another detail.</summary>
     public static bool SameFirmDetails(Guid? rowFirm, string? rowNumber, FromEmailSubmissionInput input) =>
         rowFirm == input.FirmId
         && string.Equals(rowNumber?.Trim(), input.FirmInvoiceNumber?.Trim(), StringComparison.Ordinal);
@@ -366,11 +406,20 @@ internal static class FromEmailSubmissionKey
 public sealed record InvoiceSubmissionFromEmailAccepted(Guid SubmissionId, Guid JobId, string TrackingNumber, string StatusUrl, Guid EmlDocumentId);
 
 /// <summary>One firm of a core record (contract section 8).</summary>
-public sealed record CoreRecordFirm(Guid FirmId, string Name);
+public sealed record CoreRecordFirm(Guid FirmId, string Name)
+{
+    /// <summary>The section 8 order: name (ordinal, ignore case), then id. The ONE definition: the section 8 GET and the firm-assign route's
+    /// <c>firms</c> (ebilling-r1 task 095g) both use it.</summary>
+    internal static IReadOnlyList<CoreRecordFirm> Ordered(IEnumerable<(Guid FirmId, string Name)> firms) => firms
+        .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(f => f.FirmId)
+        .Select(f => new CoreRecordFirm(f.FirmId, f.Name))
+        .ToList();
+}
 
 /// <summary>The 200 body of <c>GET /api/finance/invoices/{invoiceId}/correction-prefill</c> (ebilling-r1 task 097e; contract section 10).</summary>
 /// <param name="InvoiceId">The invoice asked about.</param>
-/// <param name="Firm">The invoice's firm.</param>
+/// <param name="Firm">The invoice's firm; null when it has none (task 095c-2, contract section 10: the property is sent as <c>null</c>).</param>
 /// <param name="CoreRecord">The invoice's one core record.</param>
 /// <param name="InvoiceStatus">The <c>InvoiceLifecycleStatus</c> name; null for a status this lifecycle does not know.</param>
 /// <param name="TrackingNumber">The invoice's own submission's tracking number; null when it has none.</param>
@@ -380,7 +429,7 @@ public sealed record CoreRecordFirm(Guid FirmId, string Name);
 /// <param name="ReplacedBy">When the invoice is Superseded: its direct replacement, if the caller can read it; else null.</param>
 public sealed record CorrectionPrefillResponse(
     Guid InvoiceId,
-    CorrectionPrefillFirm Firm,
+    CorrectionPrefillFirm? Firm,
     CorrectionPrefillCoreRecord CoreRecord,
     string? InvoiceStatus,
     string? TrackingNumber,

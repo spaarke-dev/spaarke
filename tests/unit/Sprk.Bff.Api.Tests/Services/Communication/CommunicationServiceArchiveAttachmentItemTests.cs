@@ -684,7 +684,11 @@ public class CommunicationServiceArchiveAttachmentItemTests
 
         return new Harness
         {
-            Sut = sut, CommunicationId = communicationId, Created = created, Updates = updates, Jobs = jobs,
+            Sut = sut,
+            CommunicationId = communicationId,
+            Created = created,
+            Updates = updates,
+            Jobs = jobs,
             CommunicationReads = () => communicationReads,
             BoundLookups = () => boundLookups,
         };

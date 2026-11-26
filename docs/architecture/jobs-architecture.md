@@ -1,6 +1,6 @@
 # Jobs Architecture
 
-> **Last Updated**: April 5, 2026
+> **Last Updated**: 2026-11-24 (ebilling-r1 ISS-025: retry with back-off)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: New
@@ -40,7 +40,7 @@ The system was designed to replace in-process background queues with a durable, 
 | BulkRagIndexingJobHandler | `BulkRagIndexing` | AI/Search | Batch RAG indexing with bounded concurrency (SemaphoreSlim), Dataverse document query, BatchJobStatusStore progress tracking |
 | ProfileSummaryJobHandler | `ProfileSummary` | AI/Office | Office add-in post-save profile extraction; chains to RagIndexing job |
 | AttachmentClassificationJobHandler | `AttachmentClassification` | Finance | AI classification of email attachments as invoice candidates; multi-signal entity matching (reference, vendor, parent, keyword) |
-| InvoiceExtractionJobHandler | `InvoiceExtraction` | Finance | AI fact extraction via OutputOrchestrator; chains to InvoiceIndexing job |
+| InvoiceSubmissionProcessingJobHandler | `InvoiceSubmissionProcessing` | Finance | Reads the invoice (Content Understanding), evaluates it and persists the `sprk_invoice`; its after-steps enqueue InvoiceIndexing (ebilling-r1 049). The legacy `InvoiceExtraction` job and its handler were deleted by ebilling-r1 050b |
 | InvoiceIndexingJobHandler | `InvoiceIndexing` | Finance/Search | Indexes invoice into Azure AI Search with embeddings (text-embedding-3-large, 3072 dims) |
 | SpendSnapshotGenerationJobHandler | `SpendSnapshotGeneration` | Finance | Aggregates BillingEvents into snapshots, evaluates threshold signals, runs finance rollup |
 | IncomingCommunicationJobHandler | `IncomingCommunication` | Communication | Processes webhook notifications; delegates to IncomingCommunicationProcessor for message fetch, record creation, .eml archival |
@@ -56,15 +56,15 @@ The system was designed to replace in-process background queues with a durable, 
 3. **Receive**: ServiceBusJobProcessor (or CommunicationJobProcessor) receives the message with PeekLock, creates a DI scope, deserializes `JobContract`
 4. **Route**: Processor resolves all `IJobHandler` registrations and finds the handler where `handler.JobType == job.JobType`
 5. **Process**: Handler calls `IdempotencyService.IsEventProcessedAsync()` and `TryAcquireProcessingLockAsync()` before executing business logic
-6. **Outcome**: Handler returns `JobOutcome` — Completed (complete message), Failed (abandon for redelivery), or Poisoned (dead-letter)
-7. **Dead-letter**: Messages are dead-lettered when: poisoned by handler, `job.IsAtMaxAttempts`, `DeliveryCount >= 5`, or 3 unhandled exceptions
+6. **Outcome**: Handler returns `JobOutcome` — Completed (complete message), Failed (retry later: the processor schedules a copy on its own queue `JobContract.RetryDelay` later — 1, 2, 4, 8 minutes after logical deliveries 1-4, 15 minutes in all — carrying the `PriorDeliveryCount` application property, then completes the original; if the complete fails it peeks its queue at the original's sequence number and cancels the copy only if the original is still there, keeping it otherwise; if the schedule fails it abandons for immediate redelivery), or Poisoned (dead-letter). A failed settlement of a Completed or dead-letter outcome, and a lost lock, are logged and never retried. Both processors share these rules (`Services/Jobs/JobMessageRetry.cs`)
+7. **Dead-letter**: Messages are dead-lettered when: poisoned by handler, `job.IsAtMaxAttempts`, logical `DeliveryCount >= 5` (`JobContract.IsFinalDelivery`), or 3 unhandled exceptions. The logical count is `PriorDeliveryCount` + the broker's own delivery count, so it survives the retry copies; `JobContract.DeliveryCount` is that logical count for every handler, on both queues (`sdap-jobs` and `sdap-communication`). The copy reuses the `MessageId`, which depends on duplicate detection staying off on these queues (it is off; receive-side idempotency is the guarantee)
 
 ### Job Chaining Pattern
 
 Several handlers chain to downstream jobs upon completion:
 
 - `ProfileSummaryJobHandler` → queues `RagIndexing` job
-- `InvoiceExtractionJobHandler` → queues `InvoiceIndexing` job
+- `InvoiceSubmissionProcessingJobHandler` → queues `InvoiceIndexing` job (after the invoice is accepted; the retired `InvoiceExtractionJobHandler` used to)
 - `UploadFinalizationWorker` → queues profile or indexing stage
 
 ### Queue Isolation

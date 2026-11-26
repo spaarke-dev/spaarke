@@ -75,7 +75,7 @@ Status lives in `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (**
   - The preview `2026-06-01` is allowed only as spike arm (c′) in task 005.
 - **Firm-visible output (D-66):**
   - It carries the rule set name and version, the section reference and the quoted clause text.
-  - It never carries a Procedure Library document link.
+  - It never carries a Procedure document link.
   - Rule sets with "visible to firms" off are never shown to CIAM users.
 - **Corrections are data (D-64).** Every line value or code change made in review writes a correction record with:
   - the AI value and the final value;
@@ -105,10 +105,9 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-14 — D-33 / D-40 / D-54: approvers are resolved from `sprk_billingapproverrole` on the core record. Any one eligible approver approves. An empty role means the settings default, seeded as Assigned Attorney 1 + Assigned To Internal.
 - 2026-10-14 — D-37 / D-43: resubmission keeps the firm invoice number and gets a new `.n`. Return to Firm closes the invoice; the accepted resubmission is a new invoice linked as superseding it.
 - 2026-10-14 — D-42: approved total = billed − line adjustments − invoice adjustments. A percent adjustment applies to fees *after* line adjustments.
-- 2026-10-14 — D-44 / D-55: invoice PDFs go in the core record's general (or secure) container and the files index.
-  - Guidelines, rate cards and procedures go in **Procedure Library** (internal only, indexed).
-  - Export files go in **E-Billing Output Files** (not indexed).
-  - Both use SPE, never Blob.
+- 2026-10-14 — D-44 / D-55 (**superseded by EB-D-148**): invoice PDFs go in the core record's general (or secure) container and the files index.
+  - **Current rule (EB-D-148):** every e-billing file (Procedure source, invoice PDF, supporting file, export file) is a Stored File in the Finance file store, bytes in Azure Blob; see `docs/architecture/EBILLING-FILE-STORE.md`. Do not add a SharePoint Embedded container for these files.
+  - Superseded text: guidelines, rate cards and procedures went in **Procedure Library** (internal only, indexed); export files went in **E-Billing Output Files** (not indexed); both used SPE, never Blob.
   - **Superseded for files by EB-D-148 (2026-10-21, `notes/procedure-and-file-model.md` 3.4, 4):** invoice PDFs, supporting files, Procedure sources and export files are Stored Files in the Finance file store (090, provisioned with the stamp by 091). 092 retired `Finance:EbillingOutputContainerId`; task 124 retires `Finance:ProcedureLibraryContainerId` after 116 (EB-D-163). No new reader of either container.
 - 2026-10-14 — D-46 / D-49 / D-51 / D-53: extraction (Content Understanding custom analyzer `sprk_invoice_vN`, gpt-5.2) is separate from coding (`INVOICE-LINE-CODE@v1`, gpt-5.4-mini; gpt-5.6-luna is compared in 005).
 - 2026-10-14 — D-47: field confidence is combined from four signals: analyzer confidence, arithmetic consistency, reference-data match and model self-report.
@@ -126,10 +125,11 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-66 (confirmed): firms see guideline *content* — clause quotes on findings plus the SPA Billing Guidelines view — never the documents.
 - 2026-10-15 — Pipeline: WP1 schema tasks (010–028) each write their own idempotent Web API script under `scripts/ebilling/` and apply it to dev. **Only task 029** syncs SpaarkeMaster solution source, forms and views. After 029, `src/dataverse/solutions/SpaarkeMaster/**` is edited only by serial tasks: 015 and 026 (their entities), 070 (billing values on the `sprk_policyversion.sprk_ruletype` option set) and the deploy tasks 053, 079, 112, 136 and 153 (sitemap / navigation entries for the pages they deploy, plus any columns or tables their phase added after 029, using 029's export-to-temp procedure). No parallel task edits it.
 
-- 2026-10-15 — D-67: Procedure Library and Output Files container keys join `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed). Being retired with the keys (092, 124; EB-D-163).
+- 2026-10-15 — D-67 (**superseded by EB-D-148**): Procedure Library and Output Files container keys joined `GraphModule.StampContainerSettingKeys` (app-only SPE writes allowed). Retired with the keys (092, 124; EB-D-163); nothing is added to the stamp for e-billing files.
 - 2026-10-15 — D-68: external-identifier key = (firm, type, normalized value, core record).
 - 2026-10-15 — D-69: confidence weights seeded provisionally; validated in 161 / 162 and checked at UAT (163).
 - 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
+- 2026-11-08 — Owner ruling on D-70 (task 130-0, final): firm-match policy. An external contact sees only its own firms' invoices on records it can access; a contact with no firm sees no invoices; a firm read that fails hides everything. (An earlier relayed ruling to the contrary was withdrawn the same day.)
 - 2026-10-15 — D-71: legacy Finance extraction deleted; confirm route redirected into 044; ontology-r1 confirmed no dependency 2026-10-15; keep `sprk_totalamount` + matter/project lookup for `FinanceBaseValues`; send the 050 PR to ontology-r1 for review.
 
 - 2026-10-15 — D-72 (F-2): approve with undecided Clean lines allowed (Accepted in bulk, not labels).
@@ -140,6 +140,18 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-77: any user with Write on the invoice decides lines.
 - 2026-10-15 — D-78: approver re-resolution = live check at approve + recheck on GET + refresh job (or stale flag + manual refresh).
 - 2026-10-15 — D-79: rule set with "visible to firms" off → firm sees reason + rule set name, never clause text or section reference.
+  **Amended 2026-11-09 by EB-D-209 (owner):** with the flag off the firm sees the reason only: no clause text, no section reference, **no rule set name**.
+- 2026-11-09 — EB-D-210 (owner, option C): every rejection a firm sees carries its reason code plus a description from a closed firm-safe text table in code (every `RejectCapableReasons` code, guard-enforced, no interpolated data, generic fallback), shown whatever the flag; a non-blank `sprk_signal.sprk_firmreason` replaces it. The DEF-060 writer is in R1 scope (design reviewed by uac-r2 and ontology-r1 before build). Task 130d.
+- 2026-11-10 — EB-D-211 (owner, task 116 gate): `sprk_procedureversion.sprk_notconverted` stays Yes/No and means "drafted" (written Yes last); a new field-secured memo column on `sprk_procedureversion` holds the not-converted JSON list. Additive, added by 080's script; no dev column delete.
+- 2026-11-10 — EB-D-212 (owner, DEF-060 option A): the firm override text is a per-rule admin description `sprk_policyversion.sprk_firmdescription`, copied onto the Signal with its reason code at create. The design goes to uac-r2 and ontology-r1 before it is built.
+- 2026-11-10 — EB-D-213 (owner, DEF-060): `sprk_policyversion.sprk_firmdescription` is NOT field-secured (the ontology tables carry no field security profiles); firm safety rests on the shared validator run by the mapper, the replay and the projection, and the BFF refuses a change to a published version's text.
+- 2026-11-10 — EB-D-214 (owner, task 116): a successful replacement upload on a Draft Procedure Version makes it draftable again; the upload clears the drafted state before staging the file and is refused if the clear fails.
+- 2026-11-10 — EB-D-215 (owner, F3b): the invoice walk has its own bound of 5 hops (`InvoiceLinks`), the task 188 narrowing stays at 3, only child-to-child hops count, a service request counts as a hop, and a row past the bound fails closed.
+- 2026-11-12 — EB-D-218 (owner, option A): 084's record lists read rows app-only and check the caller's Read on every exposed row (one batched check); any refusal or fault is 503 `procedures.unavailable`, never a partial list. Step 0 on the stored external flag. No caller-identity entity service (no SDK impersonation). External callers would need the 191 predicate first.
+- 2026-11-12 — EB-D-219 (owner): the "displaced" mark moves to task 084e as "Outranked by X", built on one shared precedence function extracted from the evaluator (ontology-r1 reviews).
+- 2026-11-12 — EB-D-220 (owner, option a): 084's routes serve billing admins in R1. Billing Administrator and the Billing Rule Reader role get Read at Deep on Procedure Versions and Procedure Assignments (task 084f; dev apply at 112 with the owner's typed OK and uac-r2 notices). Others see "unavailable" until uac-r2 191. Never skip the caller probe for internal callers.
+- 2026-11-12 — EB-D-221 (owner, 084b escalation): 084's read routes also return the caller's write permissions on the record (one boolean per 089 write), computed from 089's own authorization declarations; the client only opens read-only from them, the write routes still decide; a fault gives false. Task 084g (uac-r2 reviews).
+- 2026-11-13 — EB-D-222 (owner, 084c item 8): only ApprovedRate (rate card) refuses "Change for this record" (ApprovedTimekeeper has no values); Discount and other rules in a rate-card Procedure keep Change. May be revisited at UAT.
 - 2026-10-15 — D-80: task 001 baseline accepted without a live legacy run; dev not repaired (legacy path replaced in 044, deleted in 050).
 - 2026-10-15 — D-81: extraction GO on Content Understanding with a preview exception (path A): preview analyzer primary, GA fallback analyzer kept in step and selectable by config, REST client for both versions (no beta SDK), 161 / 162 measure both.
 - 2026-10-17 — D-96: an invoice core-lookup change is refused if its lines name another core; the line check runs as the app identity.
@@ -161,13 +173,17 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
 
 ## 4. Coordination
 
+- **This project's own session is `ebilling-r1`** (a Claude Desktop session, from 2026-11-10, replacing the VS Code session `spaarke-wt-ebilling-r1-c7`). Peers address it by that name. Only one session writes to this worktree at a time.
+
 - **spaarke-ontology-platform-r1** owns the Signals, rules and Decision Record code: `Services/Signals/**`, `FinanceBaseValues.cs`, `PolicyVersionValidator`, `RuleBodyDescriber`, `DecisionActionCatalog`.
   - **#1111 merged to master 2026-10-15 (`f292ad119`)** and was merged into `work/ebilling-r1` the same day. It provides the Signal writer, rule grammar and evaluator, the Decision Record writer (`WriteAsync` for humans, `WriteGateDecisionAsync` for the gate) and `GET /api/v1/signals/worklist`. ontology-r1 reviews eBilling PRs into master.
   - ontology-r1 reviews FR-09, FR-15, FR-24 and FR-30, plus the `CountedInvoiceStatuses` change in 015.
   - Notify ontology-r1 when the `sprk_invoicestatus` retirement PR and the schema PRs open.
-- **unified-access-control-r2** reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
+- **unified-access-control-r2** (session **`uac-r2`**, a Claude Code desktop session, from 2026-11-08, replacing `spaarke-wt-unified-access-control-r2-20`; a held message means the owner approves it there) reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
+- **External Access R4** (successor to R3, which is closed; session **`spa-r4`** from 2026-11-08, replacing `spaarke-wt-spa-external-access-platform-ad`; worktree spaarke-wt-SPA-external-access-platform-r4; it receives the 082c-3/114 master PR review) wants a copy of anything that changes the SPA invoice or record-modal UI.
 - **spaarke-SPA-external-access-platform-r3** shares the external SPA (`src/client/external-spa/**`) and `deploy-external-spa.yml`. Coordinate on the Invoices widget and the SPA notification feed.
-- **customer-provisioning-orchestration-r1** received the hand-off for SPE container provisioning in customer environments (task 028, DEF-013 / #1967). EB-D-163 withdraws it: eBilling needs no SPE container on a stamp, only 091's file store; task 124 closes #1967 and tells them.
+- **spaarkeai-word-add-in-r1** (session **`word-add-in-r1`**, a desktop session, from 2026-11-08) is owed the master SHA of the dev deploy carrying 095c-2..4 (it releases pane PR #2552) and the 095a/095b/151e PR + SHA.
+- **customer-provisioning-orchestration-r1** (session **`provisioning-r1`**, a desktop session, from 2026-11-08; owed: the master SHA plus the profile grants on `sprk_totalamount`/`sprk_approvedtotal` after 166 merges, and the 089d option R SHA for H7c #2429) received the hand-off for SPE container provisioning in customer environments (task 028, DEF-013 / #1967). EB-D-163 withdraws it: eBilling needs no SPE container on a stamp, only 091's file store; task 124 closes #1967 and tells them.
 - **notification-spine-r1 / ADR-047** — notifications (132) go through the spine.
 - **spaarkeai-tuning-and-feedback-r1** consumes our correction records later. Do not build anything for it in R1 beyond the D-64 record.
 - **Prototype** (`spaarke-prototype/projects/ebilling.r1`) is the reference UI for 108–111. Its components are mocks: map them to real shared components (WizardShell, FormModal, ConsoleKit, StatusBadge, AiFieldTag, PanelSplitter / useTwoPanelLayout, DataGrid). Never import from the prototype repo.
@@ -178,7 +194,7 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
   - Dataverse dev;
   - `spaarke-bff-dev`;
   - Content Understanding resource `spaarke-docintel-invoices-dev` (AIServices, West US, `rg-spaarke-dev`);
-  - containers per D-55 (Procedure Library `b!tqSgSM13R06R6O5ymHDynNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y`, E-Billing Output Files `b!1m_ZuA0VWUKCsWg44OvUtNNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y`, container type `8a6ce34c-6055-4681-8f87-2f4f9f921c06`).
+  - the Finance file store's blob containers (`procedures`, `invoice-files`, `billing-exports`; `docs/architecture/EBILLING-FILE-STORE.md`). The two dev SharePoint Embedded containers D-55 created are no longer used (EB-D-148); the owner removes them (O-13).
 - **Additive dev schema** (new tables or columns via the task's idempotent script) is part of the schema task.
   - **Destructive changes need explicit owner OK before running:** deleting a table, column, option set or data. This covers 011 `sprk_invoicelineitem` and 015 `sprk_invoicestatus`.
 - **Azure model deployments, analyzer creation and BFF / code-page / SPA deploys:**
@@ -208,6 +224,8 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
 - 2026-10-17 — No upload or storage route may accept an invoice line (`sprk_billingevent`) as a regarding/parent until uac-r2 #2047 lands (`sprk_invoice` as carrier). Today a document or to-do under a line in a secure matter gets 409 `container_ancestor_unverifiable` (task 026, D-94 condition 4).
 
 - 2026-10-23 — **#2277 merge obligation (uac-r2, 090 round-2 K1).** Once master's `CreatorPersonColumnSecuredGuardTests` is in our branch, every stamped table must declare `sprk_createdbyperson` secured. It needs either `<IsSecured>1</IsSecured>` in Entity.xml, after an export, or a `SecuredOnlyByDeployScript` entry naming `scripts/Set-ChildRecordCreatorPersonSchema.ps1`; only tables in its `$Tables` may get one, and unstamped tables never do. Today that is 081's `sprk_procedure`, `sprk_procedureversion`, `sprk_policy` and `sprk_policyversion`, plus 090's `sprk_ruleset` (no column in Entity.xml) and `sprk_procedureassignment` (no Entity.xml). Any new stamped table adds its entry in the same change.
+- 2026-11-15 — **Every Dataverse Web API call in `scripts/ebilling` sends `Consistency: Strong`** (#2833). Enforced by uac-r2's ArchTest `ScriptMetadataStrongConsistencyGuardTests` (#2838; empty baseline for our scripts). A script passes in one of two ways: it routes through `EbillingSchema.psm1` (the guard follows `using module` / `Import-Module` to a module beside the script), or it sets the header itself. A new script that builds its own `$headers` without `Consistency = 'Strong'` fails the guard.
+- 2026-11-15 — **Ebilling Pester runs on each test file's declared version** (5.7.1 or 3.4.0). A plain `Invoke-Pester` loads 6.2, which fails (the Money suite went 0/18).
 
 ## 7. Key documents
 

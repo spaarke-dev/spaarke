@@ -65,6 +65,48 @@ export interface InvoiceSubmissionInput {
    * for everyone else. The server still checks it is one of the caller's own firms (403 otherwise).
    */
   firmId?: string;
+  /**
+   * Set only for a corrected invoice (ebilling-r1 095f-2e2b): the invoice this submission replaces and why. The host sends
+   * `mode=Correction`, `invoiceId` and `correctionNote`. Absent for a new invoice, which sends none of the three.
+   */
+  correction?: InvoiceSubmissionCorrectionInput;
+}
+
+/** The correction part of {@link InvoiceSubmissionInput}. */
+export interface InvoiceSubmissionCorrectionInput {
+  /** The invoice being replaced. */
+  invoiceId: string;
+  /** Why the invoice is corrected: required, already trimmed and non-empty. */
+  note: string;
+}
+
+/**
+ * The invoice a corrected submission replaces, as the host read it (the correction prefill of the BFF). The wizard prefills the firm
+ * invoice number from it, fixes the record and the firm to it, asks for the note, and hands `invoiceId` and the note to `submit`.
+ */
+export interface InvoiceCorrectionTarget {
+  /** The invoice being replaced. */
+  invoiceId: string;
+  /** Its firm invoice number: a correction keeps it (the server refuses another). */
+  firmInvoiceNumber: string;
+  /** Its one core record: the correction is for this record only. */
+  record: InvoiceCoreRecordOption;
+  /** Its firm: the correction keeps the firm (the server refuses another), so there is no firm step. */
+  firmId: string;
+  /** The firm's display name, for the summary. */
+  firmName?: string;
+  /** The tracking number of the invoice's own submission, when it has one. */
+  trackingNumber?: string | null;
+}
+
+/**
+ * A received invoice that is on hold for its billing terms (ebilling-r1 082c). `message` is the server's own fixed
+ * sentence, shown as written (one copy of the wording, the server's); `code` is the stable reason code, which this UI
+ * never branches on (tests only).
+ */
+export interface InvoiceSubmissionWarning {
+  code: string;
+  message: string;
 }
 
 /** The 202 body of the submit route. */
@@ -74,6 +116,13 @@ export interface InvoiceSubmissionAccepted {
   /** Never null from the BFF today (D-87 / D-91); tolerated as null so a host adapter cannot break the screen. */
   trackingNumber: string | null;
   statusUrl?: string | null;
+  /**
+   * ebilling-r1 082c-3: the PROVISIONAL warning of the server's advisory pre-check (today no billing terms are set up
+   * for the record). Absent on a 202 without one (an older server, an internal route, or terms in force). The result
+   * screen shows it as a quiet note under Processing and drops it when the terminal status arrives: the status view's
+   * own {@link InvoiceSubmissionStatusView.warning} (or none) is then authoritative.
+   */
+  warning?: InvoiceSubmissionWarning | null;
 }
 
 /** The server-side lifecycle of a submission. `Received` and `Processing` both read as "Processing" to the user. */
@@ -90,6 +139,65 @@ export interface InvoiceSubmissionStatusView {
   /** The stable reason code of a terminal outcome, when the job set one. */
   outcomeReasonCode?: string | null;
   receivedOn?: string | null;
+  /**
+   * ebilling-r1 082c-2 / 082c-3: an Accepted invoice that is held for review for its billing terms. Absent when the
+   * invoice is not held. When present, the Accepted screen shows ONE warning bar (the server's `message`) in place of
+   * the green Accepted bar.
+   */
+  warning?: InvoiceSubmissionWarning | null;
+  /**
+   * ebilling-r1 iss052: the invoice of an Accepted submission, sent only by the external single read and only when the caller may see
+   * that invoice. Absent for every other status, a hidden invoice, the internal route and the list. The result screen offers
+   * "Open invoice" only when this is a GUID, the status is Accepted and the host passed `onOpenInvoice`.
+   */
+  invoiceId?: string | null;
+  /** The core record the submission is filed against, as the BFF sends it; absent or null when the row names none. */
+  coreRecord?: InvoiceSubmissionStatusCoreRecord | null;
+}
+
+/**
+ * The status view's `coreRecord` on the wire. The BFF writes `kind` as its enum's number (0 matter, 1 project, 2 work assignment);
+ * a name (`'matter'`, `'Project'`, `'workassignment'`, ...) is read too. Read it through {@link invoiceSubmissionRecordOf}.
+ */
+export interface InvoiceSubmissionStatusCoreRecord {
+  kind: number | string;
+  recordId: string;
+}
+
+/** The core record a result screen offers to open (`onOpenRecord`): a known kind and a GUID. */
+export interface InvoiceSubmissionRecordRef {
+  kind: InvoiceCoreRecordKind;
+  recordId: string;
+}
+
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True for a GUID string (the wire is untrusted: anything else is not offered as a link). */
+export function isInvoiceSubmissionGuid(value: unknown): value is string {
+  return typeof value === 'string' && GUID_PATTERN.test(value);
+}
+
+const KIND_BY_NUMBER: readonly InvoiceCoreRecordKind[] = ['matter', 'project', 'workassignment'];
+
+/** The status view's core record as a known kind and a GUID; null when it is absent or not understood. */
+export function invoiceSubmissionRecordOf(
+  view: Pick<InvoiceSubmissionStatusView, 'coreRecord'> | null | undefined
+): InvoiceSubmissionRecordRef | null {
+  const core = view?.coreRecord;
+  if (!core || typeof core !== 'object' || !isInvoiceSubmissionGuid(core.recordId)) return null;
+  let kind: InvoiceCoreRecordKind | undefined;
+  if (typeof core.kind === 'number') {
+    kind = Number.isInteger(core.kind) ? KIND_BY_NUMBER[core.kind] : undefined;
+  } else if (typeof core.kind === 'string') {
+    const name = core.kind.toLowerCase();
+    kind = KIND_BY_NUMBER.find(k => k === name);
+  }
+  return kind ? { kind, recordId: core.recordId } : null;
+}
+
+/** The invoice the result screen may offer to open: an Accepted view's GUID `invoiceId`; null otherwise. */
+export function invoiceSubmissionInvoiceIdOf(view: InvoiceSubmissionStatusView | null | undefined): string | null {
+  return view?.status === 'Accepted' && isInvoiceSubmissionGuid(view.invoiceId) ? view.invoiceId : null;
 }
 
 /** The data callbacks a host provides (`loadFirms` is optional). */
@@ -124,13 +232,16 @@ export class InvoiceSubmissionError extends Error {
   readonly errorCode?: string;
   /** The ProblemDetails `detail`: the server's own user-facing sentence. */
   readonly detail?: string;
+  /** The ProblemDetails `reason` extension: a 409 `correction_not_allowed` says why (`invoice_status`, `different_firm`, ...). */
+  readonly reason?: string;
 
-  constructor(init: { message?: string; statusCode?: number; errorCode?: string; detail?: string }) {
+  constructor(init: { message?: string; statusCode?: number; errorCode?: string; detail?: string; reason?: string }) {
     super(init.message ?? init.detail ?? 'The invoice submission request failed.');
     this.name = 'InvoiceSubmissionError';
     this.statusCode = init.statusCode;
     this.errorCode = init.errorCode;
     this.detail = init.detail;
+    if (init.reason !== undefined) this.reason = init.reason;
   }
 }
 
@@ -139,6 +250,19 @@ export const EBILLING_DISABLED_ERROR_CODE = 'ebilling.disabled';
 
 /** The `errorCode` of "the caller has several firms and none was named" (400). The wizard answers it by asking for the firms again. */
 export const FIRM_REQUIRED_ERROR_CODE = 'ebilling.submission.firm_required';
+
+/** The `errorCode` of a Correction with no note (400). The wizard holds Submit off without a note; this is the server's backstop. */
+export const CORRECTION_NOTE_REQUIRED_ERROR_CODE = 'ebilling.submission.correction_note_required';
+
+/** The `errorCode` of a Correction the intake refuses (409); the `reason` extension says why. Nothing was saved. */
+export const CORRECTION_NOT_ALLOWED_ERROR_CODE = 'ebilling.submission.correction_not_allowed';
+
+/**
+ * Client-side wording only (as `NO_FIRM_LINKED_ERROR_CODE` of the internal host): the server answers a Correction of an invoice the caller
+ * cannot write, or that does not exist, with one uniform 404 that carries no `errorCode`. The internal host gives that answer this code so
+ * the screen says what happened to the correction, not "that submission was not found".
+ */
+export const CORRECTION_UNAVAILABLE_ERROR_CODE = 'ebilling.submission.correction_unavailable';
 
 /** True for the 503 `ebilling.disabled` answer, and for nothing else (an outage 503 carries another code). */
 export function isEbillingDisabledError(err: unknown): boolean {

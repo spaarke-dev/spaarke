@@ -62,7 +62,7 @@ export type WizardShellAction =
   | {
       type: 'GO_TO_STEP';
       stepIndex: number;
-      /** When `true`, forget every `'skipped'` mark (used when the wizard is re-opened). */
+      /** When `true`, forget every `'skipped'` mark. The shell no longer uses it on reopen (that is `RESET`, which also drops dynamic steps). */
       clearSkipped?: boolean;
     }
   | {
@@ -214,8 +214,11 @@ export interface IWizardShellHandle {
 export interface IWizardSuccessConfig {
   /** Icon or illustration displayed above the title (e.g., a checkmark). */
   icon: React.ReactNode;
-  /** Primary success message (e.g., "Matter created successfully"). */
-  title: string;
+  /**
+   * Primary success message (e.g., "Matter created successfully"). A string for a fixed message; a node when the heading
+   * follows something that is still changing on the success screen (the invoice result screen follows its polled status).
+   */
+  title: React.ReactNode;
   /** Body content below the title — can be a string or rich JSX. */
   body: React.ReactNode;
   /**
@@ -316,14 +319,34 @@ export interface IWizardShellProps {
    */
   dismiss?: SprkModalDismiss;
   /**
+   * Modal mode only, forwarded to `SprkModal`: the dialog opens maximized (the user can still restore it to {@link size}). Embedded
+   * mode ignores it. Default `false`.
+   */
+  defaultMaximized?: boolean;
+  /**
    * The `--sprk-ui-scale` factor (modal mode only), forwarded to `SprkModal`. Pass the same value the
    * host passes to `scaleTheme`. Default 1.
    * @since ontology task 056
    */
   uiScale?: number;
   /**
+   * Opt-in (modal mode only), forwarded to `SprkModal`: no backdrop and no focus trap, so a host lookup pane opened in
+   * the same document (`Xrm.Utility.lookupObjects` from a PCF) can take focus. Pair with {@link yieldToSidePane}, as
+   * `SendEmailDialog` does. Default `false`: every other host renders and layers as before.
+   * @since ontology task 194
+   */
+  nonBlocking?: boolean;
+  /**
+   * Opt-in (modal mode only), forwarded to `SprkModal`: while `true` the wizard stays mounted but dims, goes inert and
+   * drops just below the host's lookup side pane (`sidePaneLayering.ts`). Set it while a lookup is open; used together
+   * with {@link nonBlocking}. Default `false`.
+   * @since ontology task 194
+   */
+  yieldToSidePane?: boolean;
+  /**
    * Browse navigation ("‹ N of M ›") in the modal header, rendered by `SprkModal`'s own nav group
-   * (modal mode only). Put a discard check in `nav.onBeforeNavigate`.
+   * (modal mode only). Put a discard check in `nav.onBeforeNavigate`. While `onFinish` runs the shell disables ‹ › itself
+   * (and makes × / Escape / backdrop / Cancel no-ops), so a save's outcome cannot land under another record.
    * @since ontology task 056
    */
   nav?: SprkModalNav;
@@ -337,6 +360,11 @@ export interface IWizardShellProps {
    * Footer override. Called on every render while a step is shown (not on the success screen); return
    * slots to replace either side of the standard footer, or `null` / `undefined` to keep the standard
    * footer. Both modes.
+   *
+   * The shell holds the header ‹ › and every close path while `onFinish` runs, but only a save the SHELL started (its own
+   * Finish button). A save started from a button you render in a slot is invisible to the shell: guard that yourself (disable
+   * your buttons, and block close and nav, while it runs), as DecisionWizard does. `context.close` is held during a shell-started
+   * finish.
    * @since ontology task 056
    */
   footer?: (context: IWizardFooterContext) => IWizardFooterSlots | null | undefined;
@@ -383,7 +411,8 @@ export interface IWizardShellProps {
   finishLabel?: string;
   /**
    * Extra content rendered in the footer's left side, after the Cancel button.
-   * Use for additional actions like "Delete" that apply to the whole wizard.
+   * Use for additional actions like "Delete" that apply to the whole wizard. While `onFinish` runs the shell wraps it in a
+   * `<fieldset disabled>`, so its buttons and inputs are natively disabled.
    */
   footerLeftExtra?: React.ReactNode;
   /**

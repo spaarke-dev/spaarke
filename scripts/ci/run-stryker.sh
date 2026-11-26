@@ -16,6 +16,10 @@
 # Stryker 5.0.0 facts (2026-06-01 pilot): `coverage-analysis` and `test-case-filter` are
 # accepted only in a config file, `output-path` is rejected there (use --output), and
 # --skip-version-check avoids the newer-version probe.
+#
+# `ignore-methods: ConfigureAwait`: the boolean mutant `ConfigureAwait(false)` -> `(true)` is equivalent in tests (no
+# synchronization context), so it can only survive; the 2026-11-23 run (#1821) had three such survivors on changed
+# lines of SecureChildReconciliationJob.cs. Stryker's own configuration docs give this exact entry as the example.
 set -euo pipefail
 
 label="$1"; project="$2"; prefix="$3"; files="$4"; since="$5"
@@ -51,17 +55,37 @@ case "$label" in
     ;;
 esac
 
-# Types declared in the mutated files (plus the file stems, e.g. SecureRootInheritance.Cascade.cs).
+# Top-level types declared in the mutated files (plus the file stems, e.g.
+# SecureRootInheritance.Cascade.cs). Nested types are left out: a test reaches one through
+# its outer type's name (SecureChildLineage.Table), which is already in the list, and a
+# nested name is often a common word. #1821: the nested `Table` record matched 196 test
+# files, selected 9,341 tests and the night was cancelled at the job cap; the nested
+# `Outcome` record did the same the night before. A top-level declaration is the least
+# indented one in its file (column 0 under a file-scoped namespace, 4 under a block one).
+# `record struct X` / `record class X` name X: without the optional second keyword the
+# name read was the word `struct`, which matches ~2,250 test files (RecordShareLevels.cs,
+# SecureChildShareSynchronizer.cs and SecureDesignationRemoval.cs each declare one).
 types="$(
   while IFS= read -r f; do
     basename "$f" .cs | sed 's/\..*$//'
-    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" | awk '{print $NF}'
+    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record([[:space:]]+(class|struct))?|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" |
+      awk '{ match($0, /^[ \t]*/); indent[NR] = RLENGTH; name[NR] = $NF; if (NR == 1 || RLENGTH < min) min = RLENGTH }
+           END { for (i = 1; i <= NR; i++) if (indent[i] == min) print name[i] }'
   done < "$files" | sort -u
 )"
 type_re="($(echo "$types" | paste -sd'|'))"
 
+# Contract tests (tests/integration/contract/**) are left out of the referencing classes. Most
+# boot the whole API host per class, and an access filter is named by many of them: on
+# 2026-11-24 (#1821) EntityAccessFilter selected 42 classes, 28 of them contract classes from
+# 13 files, the initial test run took 42 min instead of ~12 and the night hit the 190-min cap
+# with 135 mutants untested; without them the same night selects 14 classes. The dedicated suites (SEEDS, tests/integration/auth/**) still
+# run. Cost: a mutant only a contract test would kill is reported as surviving, which raises
+# an alert rather than hiding one.
+contract_dir="tests/integration/contract/"
 classes="$(
   { grep -rlwE "$type_re" tests --include='*.cs' || true; } | sort -u | while IFS= read -r tf; do
+    case "$tf" in "$contract_dir"*) continue ;; esac
     tns="$(grep -m1 -oE '^namespace[[:space:]]+[A-Za-z0-9_.]+' "$tf" | awk '{print $2}')"
     case "$tns" in
       Sprk.Bff.Api.Tests|Sprk.Bff.Api.Tests.*) ;;
@@ -76,7 +100,13 @@ while IFS= read -r c; do
   [ -n "$c" ] || continue
   include+="${include:+|}FullyQualifiedName~${c}"
 done <<<"$classes"
-echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count}"
+contract_files="$({ grep -rlwE "$type_re" "$contract_dir" --include='*.cs' 2>/dev/null || true; } | grep -c . || true)"
+echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count} contract-files-left-out=${contract_files}"
+# A selection this large usually means a type name is a common word; the initial test run
+# alone then nears the job cap (#1821: 249 classes, cancelled). Say so where it is visible.
+if [ "$class_count" -gt 150 ]; then
+  echo "::warning::Stryker test selection for ${label} is ${class_count} classes; a type name above may be a common word matching unrelated tests (#1821)."
+fi
 if [ -z "$include" ]; then
   echo "::error::no test selected for ${label}: no seed namespace and no test names a mutated type"
   exit 1
@@ -115,6 +145,7 @@ jq -n \
       "thresholds": { "high": 80, "low": 60, "break": 0 },
       "concurrency": $concurrency,
       "coverage-analysis": "perTest",
+      "ignore-methods": ["ConfigureAwait"],
       "test-case-filter": $filter,
       "since": { "enabled": true, "target": $since },
       "verbosity": "info"

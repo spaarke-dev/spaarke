@@ -730,6 +730,215 @@ public sealed class E2EValidationRunnerTests
             .Which.Diagnostic.Should().Contain("KeylessProofTimeout");
     }
 
+    // -----------------------------------------------------------------------
+    // ISS-034: a BFF saturated after its slot swap answers nothing for tens of minutes; H13 waits it out.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task RunAsync_KeylessProofTimesOutThenProves_RetriesWithGrowingWaitsAndPasses()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (!IsKeylessProof(req))
+            {
+                return HappyResponder(req);
+            }
+            // A timeout ends an attempt at once (no inner retry), so attempts 1–3 time out and attempt 4 proves.
+            return ++calls <= 3 ? throw new TaskCanceledException("simulated HttpClient timeout") : Json(KeylessBody());
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Success>().Which.ChecksPassed.Should().BeEquivalentTo(AllCheckNames);
+        waits.Should().Equal(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(120));
+    }
+
+    [Fact]
+    public async Task RunAsync_AServiceUnreachableThenProved_RetriesAndPasses()
+    {
+        var calls = 0;
+        var handler = new FakeBffHttpMessageHandler(req => !IsKeylessProof(req)
+            ? HappyResponder(req)
+            : ++calls == 1
+                ? Json(KeylessBody((KeylessProofContract.Services.Redis, KeylessProofContract.Outcomes.Unreachable, "timeout")))
+                : Json(KeylessBody()));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Success>();
+        calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofNeverAnswers_StopsAtTheWindowWithTheWaitsCapped()
+    {
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? throw new TaskCanceledException("simulated HttpClient timeout")
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        var inconclusive = result.Should().BeOfType<E2EValidationOutcome.Inconclusive>().Subject;
+        inconclusive.ChecksInconclusive.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+        inconclusive.Diagnostic.Should().Contain("KeylessProofRetryWindow").And.Contain("KeylessProofTimeout");
+        // 30 s, 1, 2, 4 min, then 5 min (the cap) while the total stays inside 40 min: 37.5 min in all.
+        waits.Should().Equal(
+            TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(4),
+            TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+        waits.Aggregate(TimeSpan.Zero, (a, b) => a + b).Should().BeLessThanOrEqualTo(new H13AcceptanceOptions().KeylessProofRetryWindow);
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofRefused_IsNotRetried()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (!IsKeylessProof(req))
+            {
+                return HappyResponder(req);
+            }
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.Forbidden);
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>();
+        calls.Should().Be(1);
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_AFailureNextToAnUnreachable_IsNotRetried()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (!IsKeylessProof(req))
+            {
+                return HappyResponder(req);
+            }
+            calls++;
+            return Json(KeylessBody(
+                (KeylessProofContract.Services.Redis, KeylessProofContract.Outcomes.Unreachable, "timeout"),
+                (KeylessProofContract.Services.Cosmos, KeylessProofContract.Outcomes.KeyCredential, "key")));
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>();
+        calls.Should().Be(1);
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_AnEarlierCheckFailed_TheKeylessProofIsNotRetried()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (PathIs(req, E2EValidationRunner.HealthzPath) && req.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+            if (IsKeylessProof(req))
+            {
+                calls++;
+                throw new TaskCanceledException("simulated HttpClient timeout");
+            }
+            return HappyResponder(req);
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Contain(E2EValidationRunner.CheckBffHealthz);
+        calls.Should().Be(1, "the run fails on healthz whatever the proof answers, so waiting buys nothing");
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_KeylessProofRouteMissing_IsNotRetried()
+    {
+        var calls = 0;
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req =>
+        {
+            if (!IsKeylessProof(req))
+            {
+                return HappyResponder(req);
+            }
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var result = await BuildRunner(handler, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().Contain("404").And.NotContain("KeylessProofRetryWindow");
+        calls.Should().Be(1, "a build without the route needs a redeploy, not a wait");
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_CancelledDuringAWait_StopsWithCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? throw new TaskCanceledException("simulated HttpClient timeout")
+            : HappyResponder(req));
+        var runner = BuildRunner(handler);
+        runner.WaitAsync = (_, ct) =>
+        {
+            cts.Cancel(); // the Worker shuts down during the wait
+            ct.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        };
+
+        var act = () => runner.RunAsync(BuildRequest(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the wait receives the caller's token");
+    }
+
+    [Fact]
+    public async Task RunAsync_RetryWindowZero_MakesOneAttempt()
+    {
+        var waits = new List<TimeSpan>();
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? new HttpResponseMessage(HttpStatusCode.BadGateway)
+            : HappyResponder(req));
+        var options = new H13AcceptanceOptions { KeylessProofRetryWindow = TimeSpan.Zero };
+
+        var result = await BuildRunner(handler, options: options, waits: waits).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
+            .Which.Diagnostic.Should().NotContain("KeylessProofRetryWindow");
+        waits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Options_KeylessProofRetry_DefaultsAndValidation()
+    {
+        var defaults = new H13AcceptanceOptions();
+        defaults.KeylessProofRetryWindow.Should().Be(TimeSpan.FromMinutes(40));
+        defaults.Invoking(o => o.Validate()).Should().NotThrow();
+
+        new H13AcceptanceOptions { KeylessProofRetryWindow = TimeSpan.FromSeconds(-1) }
+            .Invoking(o => o.Validate()).Should().Throw<InvalidOperationException>().WithMessage("*KeylessProofRetryWindow*");
+        new H13AcceptanceOptions { KeylessProofRetryInitialDelay = TimeSpan.Zero }
+            .Invoking(o => o.Validate()).Should().Throw<InvalidOperationException>().WithMessage("*KeylessProofRetryInitialDelay*");
+        new H13AcceptanceOptions { KeylessProofRetryMaxDelay = TimeSpan.FromSeconds(10) }
+            .Invoking(o => o.Validate()).Should().Throw<InvalidOperationException>().WithMessage("*KeylessProofRetryMaxDelay*");
+    }
+
     [Fact]
     public async Task RunAsync_KeylessProofUnparseableAnswer_IsAFailure()
     {
@@ -954,19 +1163,31 @@ public sealed class E2EValidationRunnerTests
 
     private static E2EValidationRunner BuildRunner(
         FakeBffHttpMessageHandler? handler = null,
-        TokenCredential? credential = null)
+        TokenCredential? credential = null,
+        H13AcceptanceOptions? options = null,
+        List<TimeSpan>? waits = null)
     {
         handler ??= new FakeBffHttpMessageHandler(_ =>
             throw new InvalidOperationException("default handler must not be exercised"));
         var runner = new E2EValidationRunner(
             new FakeHttpClientFactory(handler),
             credential ?? new FakeTokenCredential(),
-            Options.Create(new H13AcceptanceOptions
+            Options.Create(options ?? new H13AcceptanceOptions
             {
                 KeylessProofTimeout = TimeSpan.FromSeconds(30),
             }),
             NullLogger<E2EValidationRunner>.Instance);
         runner.TransientRetryDelay = TimeSpan.Zero; // no real sleeping in unit tests
+
+        // A manual clock: each keyless-proof wait advances it instead of sleeping, so the retry window is exercised in full.
+        var now = new DateTimeOffset(2026, 11, 22, 19, 0, 0, TimeSpan.Zero);
+        runner.UtcNow = () => now;
+        runner.WaitAsync = (delay, _) =>
+        {
+            waits?.Add(delay);
+            now += delay;
+            return Task.CompletedTask;
+        };
         return runner;
     }
 

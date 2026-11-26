@@ -68,7 +68,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     // matter-type list, and the sprk_recordtype_ref lookup the To Do writer below stamps. Extracted so this
     // class issues no Dataverse read of its own; the IOfficeService search members delegate to it.
     private readonly OfficeSearchService _search;
-    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Invoice) and the To Do writer.
+    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (before ebilling-r1 task 096, the Invoice leg) and the To Do writer.
     // Required (task 059): registered unconditionally as a singleton (→ IDataverseService, GraphModule.cs).
     private readonly IGenericEntityService _genericEntityService;
     // Field mapping task 018b (FR-13 part 2, FR-12): the Matter and Project quick-create legs create through the ONE server
@@ -94,6 +94,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     // FR-08's Generate Profile request, on the job queue (task 068, #1086). It replaced OfficeProfileDispatcher, whose
     // Task.Run behind the 202 lost the profile on a restart, and the three optional parameters that built it.
     private readonly OfficeProfileQueue _profileQueue;
+
+    /// <summary>Task 138 (#2209): what a re-save of an already-saved email adds (read-only).</summary>
+    private readonly EmailAttachmentAddPlanner _attachmentAddPlanner;
+
+    /// <summary>Task 138: the caller's current rights on the existing .eml an email re-save adds attachments under.</summary>
+    private readonly Spaarke.Core.Auth.IAuthorizationService _authorizationService;
 
     // Task 083 (#1044 writer half): the caller's linked CONTACT (task 141's link,
     // systemuser.sprk_primarycontact / contact.sprk_externalobjectid), used to default CreateTodoAsync's
@@ -122,8 +128,14 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         ICallerSystemUserResolver callerSystemUserResolver,
         OfficeProfileQueue profileQueue,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        EmailAttachmentAddPlanner attachmentAddPlanner,
+        Spaarke.Core.Auth.IAuthorizationService authorizationService,
         ILogger<OfficeService> logger)
     {
+        _authorizationService = authorizationService
+            ?? throw new ArgumentNullException(nameof(authorizationService));
+        _attachmentAddPlanner = attachmentAddPlanner
+            ?? throw new ArgumentNullException(nameof(attachmentAddPlanner));
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
         // Required, not optional (ADR-032): an absent registration must fail at startup, not surface as a 403
@@ -501,6 +513,64 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 existingJob = null;
             }
 
+            // Task 138 (#2209): an email already saved to this record, re-saved naming attachments not yet saved under its
+            // .eml, adds exactly those. The key is unchanged (a selection in it would make a second .eml); what is missing is
+            // read from the stored .eml and its existing children, never taken from the client. Nothing missing → the
+            // duplicate answer below, exactly as before. The save then runs the ordinary email path (capture, filing,
+            // communication, owner) and, in place of the upload and the create, queues an attachments-only finalization.
+            EmailAttachmentAddPlanner.Plan? attachmentAdd = null;
+            IReadOnlyList<string>? attachmentsNotStored = null;
+            if (existingJob is not null)
+            {
+                // The request COULD add (an Email save naming attachments, found against a Completed job that made its own
+                // .eml): the duplicate answer leans on the earlier save, but an add WRITES now, so the caller's CURRENT rights
+                // decide, fail closed, BEFORE the app reads anything about that .eml (no download, no child listing, no filing
+                // read: a caller refused here learns nothing from what is stored). The target record was checked on THIS request
+                // by EntityAccessFilter (entity.associate_document), as for a fresh save. What a fresh save does not need, and
+                // an add does, is the existing .eml: "write" on it (the version save's operation on an existing document),
+                // through the one document-grant helper.
+                if (GetEmailAttachmentAddCandidate(request, existingJob, submission) is { } candidate)
+                {
+                    var denied = await AuthorizeEmailAttachmentAddAsync(candidate.Id, userId, httpContext, cancellationToken);
+                    if (denied is not null)
+                    {
+                        return denied;
+                    }
+
+                    var plan = await PlanEmailAttachmentAddAsync(request, candidate, existingJob, idempotencyKey, cancellationToken);
+
+                    // Names the selection asked for that the stored .eml does not hold are reported on either answer (an add or
+                    // the duplicate one); a plan with no name to add is only that report.
+                    attachmentsNotStored = plan is { NotStored.Count: > 0 } ? plan.NotStored : null;
+                    attachmentAdd = plan is { AttachmentNames.Count: > 0 } ? plan : null;
+                }
+
+                if (attachmentAdd is not null)
+                {
+                    // A fresh save derives its container from the record (or the caller's business unit) now, refusing
+                    // what it cannot place. The add runs the same derivation, with the same refusals; if the record's
+                    // documents now belong elsewhere than the .eml (e.g. the record became secure), nothing is added
+                    // there: the answer is the duplicate one, as before this task.
+                    var currentContainer = await ResolveContainerAsync(request, userId, cancellationToken);
+                    if (!string.Equals(currentContainer, attachmentAdd.DriveId, StringComparison.Ordinal))
+                    {
+                        _logger.LogWarning(
+                            "Email re-save: the record's documents are no longer kept where .eml document {DocumentId} is; "
+                            + "no attachment is added there",
+                            attachmentAdd.EmlDocumentId);
+                        attachmentAdd = null;
+                    }
+                }
+
+                if (attachmentAdd is not null)
+                {
+                    _logger.LogInformation(
+                        "Email re-save of job {JobId} adds {Count} attachment(s) under .eml document {DocumentId}",
+                        existingJob.JobId, attachmentAdd.AttachmentNames.Count, attachmentAdd.EmlDocumentId);
+                    existingJob = null;
+                }
+            }
+
             if (existingJob is not null)
             {
                 _logger.LogInformation(
@@ -513,7 +583,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     Duplicate = true,
                     JobId = existingJob.JobId,
                     StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
-                    StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream"
+                    StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream",
+                    AttachmentsNotStored = attachmentsNotStored
                 };
             }
 
@@ -757,9 +828,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             //
             // FR-11 (task 023): a VERSION save writes to the target document's OWN drive — the destination is
             // an item that already exists, so a container derived from TargetEntity could only disagree with it.
+            // Task 138: an attachments add writes into the existing .eml's own drive, where its first children are.
             var derivedContainerId = versionTarget is not null
                 ? versionTarget.DriveId!
-                : await ResolveContainerAsync(request, userId, cancellationToken);
+                : attachmentAdd is not null
+                    ? attachmentAdd.DriveId
+                    : await ResolveContainerAsync(request, userId, cancellationToken);
 
             // The request's METADATA for sprk_payload, never its content (task 060, #1084): the content's base64 made
             // Dataverse refuse the create for 27 of 40 saves in 60 days, and those saves ran with no job row.
@@ -812,7 +886,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 // identical "{ContentType} Save - …" name.
                 jobId = await _jobs.CreateAsync(
                     jobRecord,
-                    $"{(versionTarget is not null ? "Document Version" : request.ContentType.ToString())} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    $"{(versionTarget is not null ? "Document Version" : attachmentAdd is not null ? "Email Attachments" : request.ContentType.ToString())} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     idempotencyKey,
                     payload,
                     initiatedBySystemUserId,
@@ -862,6 +936,58 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
             try
             {
+                if (attachmentAdd is not null)
+                {
+                    // Task 138: no .eml is built, uploaded or created — it exists. The worker creates the missing children
+                    // under it through its own child create, with the owner team and the communication this save resolved
+                    // above (the same questions the first save asked). Its message key is this job's own, so the first
+                    // save's "already processed" mark does not skip it and a redelivery of this message is still skipped.
+                    await _jobQueue.QueueUploadFinalizationAsync(
+                        jobId,
+                        EmailAttachmentAddPlanner.AddJobMessageKey(idempotencyKey, jobId),
+                        correlationId,
+                        userId,
+                        request with
+                        {
+                            Email = request.Email! with { SelectedAttachmentFileNames = attachmentAdd.AttachmentNames.ToList() },
+                        },
+                        attachmentAdd.DriveId,
+                        attachmentAdd.ItemId,
+                        attachmentAdd.EmlFileName,
+                        attachmentAdd.EmlFileSize,
+                        attachmentAdd.EmlDocumentId,
+                        isVersionSave: false,
+                        owningTeamId,
+                        cancellationToken,
+                        createdByPersonId,
+                        relatedCommunicationId: emailCommunicationId,
+                        attachmentsOnly: true);
+
+                    // The job lands on the saved email: a later re-save finds this job under the same key, with the same
+                    // result as the first save's, and the pane completes on the .eml document.
+                    jobRecord = jobRecord with
+                    {
+                        Status = JobStatus.Completed,
+                        Progress = 100,
+                        CurrentPhase = EmailAttachmentAddPlanner.AttachmentsQueuedPhase,
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        Result = DocumentResult(attachmentAdd.EmlDocumentId, attachmentAdd.ItemId, attachmentAdd.DriveId, webUrl: null)
+                    };
+                    await _jobs.RecordAsync(jobRecord, null, cancellationToken);
+
+                    return new SaveResponse
+                    {
+                        Success = true,
+                        Duplicate = false,
+                        JobId = jobId,
+                        StatusUrl = $"/api/office/jobs/{jobId}",
+                        StreamUrl = $"/api/office/jobs/{jobId}/stream",
+                        EmailFiling = emailFiling,
+                        AttachmentsAdded = attachmentAdd.AttachmentNames,
+                        AttachmentsNotStored = attachmentsNotStored
+                    };
+                }
+
                 // Build file content based on content type
                 switch (request.ContentType)
                 {
@@ -1593,6 +1719,141 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     public static string ResolveIdempotencyKey(SaveRequest request) =>
         request.IdempotencyKey ?? GenerateIdempotencyKey(request);
 
+    /// <summary>The <c>.eml</c> a re-save could add attachments under: the document the earlier save created and the SPE item it uploaded.</summary>
+    private sealed record EmailAttachmentAddCandidate(Guid Id, string SpeFileId);
+
+    /// <summary>
+    /// Task 138 (#2209): the <c>.eml</c> a re-save of an email already saved by <paramref name="existingJob"/> COULD add
+    /// attachments under, or <see langword="null"/> for the duplicate answer as before. Cheap gates only: no read.
+    /// </summary>
+    /// <remarks>
+    /// Only an <c>/office/save</c> Email save (never the from-email submission) whose selection is not <c>[]</c> (none: there is
+    /// no add for it) and that names attachments at all (the worker's <c>HasAttachments</c> gate), found against a Completed job that created its own <c>.eml</c> (its result names the SPE item it
+    /// uploaded; a content-duplicate job names another save's canonical and has none). The caller's rights on that <c>.eml</c> are
+    /// checked next (<see cref="AuthorizeEmailAttachmentAddAsync"/>), then what is missing is the planner's answer
+    /// (<see cref="PlanEmailAttachmentAddAsync"/>).
+    /// </remarks>
+    private static EmailAttachmentAddCandidate? GetEmailAttachmentAddCandidate(
+        SaveRequest request,
+        JobStatusResponse existingJob,
+        SubmissionSaveState? submission)
+    {
+        if (submission is not null
+            || request.ContentType != SaveContentType.Email
+            || request.Email is null
+            || request.Email.SelectedAttachmentFileNames is { Count: 0 }
+            // The worker's own gate (OfficeJobQueue's HasAttachments): a save that names no attachments, in either
+            // signal, creates no children, so its re-save has nothing to add and reads no file, as before.
+            || !(request.Email.Attachments?.Count > 0 || request.Email.SelectedAttachmentFileNames?.Count > 0)
+            || existingJob.Status != JobStatus.Completed
+            || existingJob.Result?.Artifact is not { Type: ArtifactType.Document } artifact
+            || artifact.Id == Guid.Empty
+            || string.IsNullOrEmpty(artifact.SpeFileId))
+        {
+            return null;
+        }
+
+        return new EmailAttachmentAddCandidate(artifact.Id, artifact.SpeFileId);
+    }
+
+    /// <summary>
+    /// Task 138 (#2209): the attachments a re-save adds under <paramref name="candidate"/>, or <see langword="null"/> for the
+    /// duplicate answer as before: the planner's answer from the stored <c>.eml</c> (still filed to the request's record) and its
+    /// existing children. A read that fails keeps the duplicate answer: the save never adds on a guess.
+    /// </summary>
+    private async Task<EmailAttachmentAddPlanner.Plan?> PlanEmailAttachmentAddAsync(
+        SaveRequest request,
+        EmailAttachmentAddCandidate candidate,
+        JobStatusResponse existingJob,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // While the matched job has not finished creating its documents they are not all there to be counted: no add yet,
+            // the duplicate answer (the pane tells the user to save again if they do not appear). This runs after the
+            // caller's rights, so a refused caller learns nothing from what the app holds.
+            if (await _attachmentAddPlanner.IsFinalizationPendingAsync(existingJob, idempotencyKey, cancellationToken))
+            {
+                return null;
+            }
+
+            return await _attachmentAddPlanner.PlanAsync(
+                candidate.Id,
+                candidate.SpeFileId,
+                request.Email!.SelectedAttachmentFileNames,
+                DocumentAssociationMap.ToLogicalName(request.TargetEntity?.EntityType),
+                request.TargetEntity?.EntityId ?? Guid.Empty,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Email re-save: could not read what is already saved under .eml document {DocumentId}; answering as a duplicate",
+                candidate.Id);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Task 138 (#2209): may the caller add attachment documents under the existing <c>.eml</c> NOW? "write" on that document
+    /// (the operation the version save requires on an existing document, <c>OfficeVersionSaveAuthorizationFilter</c>), decided
+    /// by <see cref="Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync"/> — the one
+    /// document-grant decision outside <c>DocumentAuthorizationFilter</c>, with the same narrowing. Returns the refusal
+    /// (OFFICE_009, 403) or <see langword="null"/> when allowed. A decision that faults refuses: fail closed.
+    /// </summary>
+    private async Task<SaveResponse?> AuthorizeEmailAttachmentAddAsync(
+        Guid emlDocumentId,
+        string userId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        Spaarke.Core.Auth.AuthorizationResult decision;
+        try
+        {
+            decision = await Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                httpContext,
+                _authorizationService,
+                userId,
+                new[] { emlDocumentId },
+                Sprk.Bff.Api.Api.Filters.OfficeVersionSaveAuthorizationFilter.Operation,
+                TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                "office-save:email-attachment-add",
+                _logger,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Email re-save: the access decision on .eml document {DocumentId} failed; refusing", emlDocumentId);
+            decision = new Spaarke.Core.Auth.AuthorizationResult
+            {
+                IsAllowed = false,
+                ReasonCode = "sdap.access.deny.error",
+                RuleName = "OfficeEmailAttachmentAdd",
+            };
+        }
+
+        if (decision.IsAllowed)
+        {
+            return null;
+        }
+
+        _logger.LogWarning(
+            "Email re-save refused before any write: the caller may not add to .eml document {DocumentId} ({Reason})",
+            emlDocumentId, decision.ReasonCode);
+        return new SaveResponse
+        {
+            Success = false,
+            Error = new SaveError
+            {
+                Code = OfficeErrorCodes.AccessDenied,
+                Message = "You no longer have permission to add to this saved email, so nothing was saved.",
+                Retryable = false
+            }
+        };
+    }
+
     /// <summary>
     /// Task 047: may the job found under this save's key still answer it as a duplicate? For a VERSION save, a
     /// Completed job does so only while the target document still holds exactly this save's content.
@@ -2167,8 +2428,9 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <inheritdoc />
     /// <remarks>
     /// <para>Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
-    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
-    /// return null (endpoint 403s) until built out.</para>
+    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project</b>; other types
+    /// return null (endpoint 403s) until built out. An <b>Invoice</b> was in scope until ebilling-r1 task 096 (owner L: an invoice is
+    /// created only by submission); the route refuses it with 400 <c>OFFICE_023</c> and this returns null, writing nothing.</para>
     /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created by the ONE server create,
     /// <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>, as the caller (field mapping task 018b):
     /// this method is a thin adapter that maps the request to that service's payload and its refusal to the Office codes
@@ -2176,13 +2438,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim). A refusal surfaces as
     /// <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row written); see
     /// <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
-    /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
-    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name, the description and the Assigned To contact
-    /// (task 100). It is owned by the caller's business-unit
-    /// default owner team (task 080, invariant I-6), and REFUSED with <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/>
-    /// when no team resolves — no longer best-effort, which left an unresolved caller's invoice app-owned in ROOT.
-    /// There is no impersonated-create helper in the BFF, so ownership is set via the <c>ownerid</c> lookup rather
-    /// than MSCRMCallerID.</para>
     /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
@@ -2196,13 +2451,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             entityType,
             userId);
 
-        // Scope: Matter + Project + Invoice (UI feedback 2026-09-02). Others not yet supported.
-        if (entityType is not (QuickCreateEntityType.Matter
-            or QuickCreateEntityType.Project
-            or QuickCreateEntityType.Invoice))
+        // Scope: Matter + Project. Others are not supported — an Invoice in particular (ebilling-r1 task 096, owner L): an invoice is
+        // created only by submission, so the route refuses it (OFFICE_023) before this runs, and this returns null for it, writing nothing.
+        if (entityType is not (QuickCreateEntityType.Matter or QuickCreateEntityType.Project))
         {
             _logger.LogInformation(
-                "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
+                "Quick create for {EntityType} is not supported (Matter/Project only).",
                 entityType);
             return null;
         }
@@ -2215,92 +2469,10 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
         // FR-13: Matter (task 030) and Project (task 031) both go through the shared server-side creation service —
         // load-bearing owner, BU defaults, Field Mapping Framework, plus the matter-type lookup for Matter. Neither
-        // writes its entity's number; a separate on-create numbering component owns both. Invoice stays on the
-        // minimal path below.
-        if (entityType is QuickCreateEntityType.Matter or QuickCreateEntityType.Project)
-        {
-            return await QuickCreateViaCreationServiceAsync(
-                    entityType, name, request, userId, ownerSystemUserId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        // removed by ebilling-r1 task 096
-        // Invoice only: name, description and Assigned To (task 100, owner UAT round 5 item 3).
-        var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
-
-        var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
-        // sprk_name is sprk_invoice's primary name attribute (live metadata, 2026-10-01). This wrote
-        // "sprk_invoicename", which sprk_invoice does not have, so Dataverse refused every invoice quick-create
-        // (#1079, task 085). sprk_billingevent is the entity that has a sprk_invoicename column.
-        entity["sprk_name"] = name;
-
-        // Task 100 — both columns verified against live metadata (spaarkedev1, 2026-10-05): sprk_description (Memo,
-        // "Description") and sprk_assignedto1 (contact lookup, "Assigned To 1" — the invoice's first Assigned To slot;
-        // sprk_invoice has no sprk_assignedtointernal). The contact id was authorized (caller holds Read) by
-        // QuickCreateSourceAccessFilter before this runs. An invoice has NO server default assignee: absent means
-        // unassigned (unlike Matter/Project, which name the maker — unified-access-control-r2 task 152).
-        if (!string.IsNullOrWhiteSpace(request.Description))
-        {
-            entity[InvoiceDescriptionAttribute] = request.Description.Trim();
-        }
-
-        if (request.AssignedToContactId is { } invoiceAssignee && invoiceAssignee != Guid.Empty)
-        {
-            entity[InvoiceAssignedToAttribute] = new Microsoft.Xrm.Sdk.EntityReference("contact", invoiceAssignee);
-        }
-
-        // Ownership (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER
-        // pattern and says nothing about ownerid, a miscitation corrected 2026-09-22). Task 080 (invariant I-6): the
-        // caller's business-unit DEFAULT OWNER TEAM. A new invoice is filed against nothing here, so the acting user's
-        // business unit decides. This used to be best-effort — an unresolved caller left the invoice app-owned in the
-        // ROOT business unit, invisible to its own creator — and is now a refusal, like Matter and Project.
-        var invoiceOwner = await _ownershipResolver.ResolveOwnerAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-            {
-                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
-                    ? callerSystemUserId
-                    : null,
-                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
-                // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the invoice the app creates.
-                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
-                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
-                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
-            },
-            cancellationToken).ConfigureAwait(false);
-        var invoiceOwnerTeamId = invoiceOwner.IsOwned ? invoiceOwner.OwningTeamId : null;
-
-        if (invoiceOwnerTeamId is null)
-        {
-            // Rendered by the quick-create endpoint's SdapProblemException catch; no row was written.
-            throw new SdapProblemException(
-                OfficeErrorCodes.RecordOwnerUnresolved,
-                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
-                "The new invoice could not be assigned to your business unit's team, so it was not created. Ask an "
-                + "administrator to check that your user has a business unit and that the unit has its default team.",
-                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
-        }
-
-        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", invoiceOwnerTeamId.Value);
-        invoiceOwner.StampCreatorOn(entity); // task 146 c1-r1 — the Office user, on the app-created invoice
-
-        var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "Quick create completed: EntityType={EntityType}, Id={Id}, Name={Name}",
-            entityType,
-            createdId,
-            name);
-
-        return new QuickCreateResponse
-        {
-            Id = createdId,
-            EntityType = entityType,
-            LogicalName = logicalName,
-            Name = name,
-            // Org URL isn't known server-side (the add-in must not be org-pinned); the add-in uses
-            // Id + Name to select the new record as the regarding, not the Url.
-            Url = null
-        };
+        // writes its entity's number; a separate on-create numbering component owns both.
+        return await QuickCreateViaCreationServiceAsync(
+                entityType, name, request, userId, ownerSystemUserId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2521,15 +2693,15 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <summary>The request's optional references: (column, target table, chosen id). Their columns are the registry's.</summary>
     private static IEnumerable<(string Column, string Target, Guid? Id)> QuickCreateReferences(
         QuickCreateEntityType entityType, QuickCreateRequest request) => entityType switch
-    {
-        QuickCreateEntityType.Matter =>
-        [
-            (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
+        {
+            QuickCreateEntityType.Matter =>
+            [
+                (MatterTypeColumn, "sprk_mattertype_ref", request.MatterTypeId),
             ("sprk_practicearea", "sprk_practicearea_ref", request.PracticeAreaId),
         ],
-        QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
-        _ => [],
-    };
+            QuickCreateEntityType.Project => [("sprk_projecttype_ref", "sprk_projecttype_ref", request.ProjectTypeId)],
+            _ => [],
+        };
 
     /// <summary>A lookup in the service's Web API payload: the target table and the record (no entity set to guess).</summary>
     private static Dictionary<string, object?> LookupValue(string relatedTable, Guid recordId) => new(StringComparer.Ordinal)
@@ -2684,12 +2856,6 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     private static string InternalErrorDetail(string noun) =>
         $"The new {noun} could not be created because of an unexpected server condition. Nothing was created.";
 
-    /// <summary><c>sprk_invoice</c> description column (Memo, "Description"; live metadata 2026-10-05, task 100).</summary>
-    internal const string InvoiceDescriptionAttribute = "sprk_description";
-
-    /// <summary><c>sprk_invoice</c> "Assigned To 1" contact lookup — the invoice's Assigned To (live metadata 2026-10-05, task 100).</summary>
-    internal const string InvoiceAssignedToAttribute = "sprk_assignedto1";
-
     /// <summary>The <see cref="SdapProblemException.Extensions"/> key that carries the Assigned To refusal's <c>reasonCode</c>.</summary>
     internal const string AssigneeReasonCodeExtension = "reasonCode";
 
@@ -2759,6 +2925,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 or Sprk.Bff.Api.Services.Access.AccessFollowsParent.SecureFlagReasonCode
                 or Sprk.Bff.Api.Services.Access.AccessInheritance.ServerOnlyReasonCode)
                 => new(refusal.Code, Forbidden, refusal.Detail),
+
+            // ── Invalid: a value copied from a secure source files the row, which would not be secure (task 022 fix round 3).
+            // The same request is refused every time: passed through with the service's words, never the generic 500. ──
+            (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Invalid,
+                Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal.MappingSourceSecureFilingCode)
+                => new(refusal.Code, StatusCodes.Status400BadRequest, refusal.Detail),
 
             // ── OwnerUnresolved (stays 403) ──
             (Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved,
@@ -2929,6 +3101,11 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 payload["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
             }
 
+            // The relative record URL beside the id and name (045c, gap G5): the writer holds the table and the id, and
+            // RegardingRecordType owns the format every other writer of the pair uses. The reference number needs a read of
+            // the record, which this adapter does not make, so it is left unset (never guessed).
+            payload["sprk_regardingrecordurl"] = RegardingRecordType.BuildRecordUrl(reg.LogicalName, regardingId.ToString("D"));
+
             // Best-effort record-type ref (the denormalized ADR-024 resolver lookup): the typed lookup above is the
             // load-bearing relationship; a missing type only affects cross-entity display.
             var recordTypeId = await _search.ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
@@ -3068,34 +3245,34 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// <param name="targetTable">What the To Do is filed against (the record, else a carrier), or <see langword="null"/>.</param>
     internal static SdapProblemException? MapTodoRefusal(
         Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string? targetTable) => refusal.Kind switch
-    {
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Unavailable
-            or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided => TransientTodoRefusal(),
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
-            when Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf(refusal)
-                is StatusCodes.Status429TooManyRequests
-                or StatusCodes.Status503ServiceUnavailable
-                or StatusCodes.Status504GatewayTimeout => TransientTodoRefusal(),
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved => new SdapProblemException(
-            OfficeErrorCodes.RecordOwnerUnresolved,
-            OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
-            targetTable is not null
-                ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
-                  + "Check that the item still exists and that you can open it."
-                : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
-                  + "administrator to check your user record's business unit.",
-            OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved)),
-        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied => new SdapProblemException(
-            OfficeErrorCodes.AccessDenied,
-            "Forbidden",
-            Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedDetail,
-            StatusCodes.Status403Forbidden,
-            new Dictionary<string, object>
-            {
-                [AssigneeReasonCodeExtension] = Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode,
-            }),
-        _ => null,
-    };
+        {
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Unavailable
+                or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided => TransientTodoRefusal(),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
+                when Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf(refusal)
+                    is StatusCodes.Status429TooManyRequests
+                    or StatusCodes.Status503ServiceUnavailable
+                    or StatusCodes.Status504GatewayTimeout => TransientTodoRefusal(),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved => new SdapProblemException(
+                OfficeErrorCodes.RecordOwnerUnresolved,
+                OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
+                targetTable is not null
+                    ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
+                      + "Check that the item still exists and that you can open it."
+                    : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
+                      + "administrator to check your user record's business unit.",
+                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved)),
+            Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.NotFoundOrDenied => new SdapProblemException(
+                OfficeErrorCodes.AccessDenied,
+                "Forbidden",
+                Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedDetail,
+                StatusCodes.Status403Forbidden,
+                new Dictionary<string, object>
+                {
+                    [AssigneeReasonCodeExtension] = Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode,
+                }),
+            _ => null,
+        };
 
     /// <summary>
     /// What the add-in pane shows for a To Do create that failed for a reason a retry can clear (<see cref="MapTodoRefusal"/>).

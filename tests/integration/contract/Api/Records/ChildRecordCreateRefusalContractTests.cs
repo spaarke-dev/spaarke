@@ -79,7 +79,8 @@ public class ChildRecordCreateRefusalContractTests
     public async Task ARecordTheRowNamesThatIsMissingOrDenied_IsTheUniformNotFound_ByteIdenticalToTheInvoiceGuardsNotFound()
     {
         var notFound = Render(new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
-            "the service's own words") { RefusedColumn = "sprk_regardingmatter" });
+            "the service's own words")
+        { RefusedColumn = "sprk_regardingmatter" });
 
         ShouldBeTheRoutesShape(notFound, StatusCodes.Status404NotFound, ChildRecordEndpoints.NotFoundCode,
             "A record this to-do is filed under was not found. The to-do was not saved.");
@@ -136,7 +137,8 @@ public class ChildRecordCreateRefusalContractTests
         const string reason = "the row names two core records";
         var preWrite = undecided ? PreWriteRefusal.Undecided(code, reason) : PreWriteRefusal.Refused(code, reason);
         var refusal = new RecordCreationRefusal(
-            undecided ? RecordCreationRefusalKind.Undecided : RecordCreationRefusalKind.Invalid, code, reason) { PreWrite = preWrite };
+            undecided ? RecordCreationRefusalKind.Undecided : RecordCreationRefusalKind.Invalid, code, reason)
+        { PreWrite = preWrite };
 
         var now = Render(refusal, "sprk_invoice");
         var before = ChildRecordEndpoints.InvoiceFamilyRefused(InvoiceFamilyCoreRecord.Refused("sprk_invoice", code, reason), "sprk_invoice");

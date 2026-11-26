@@ -36,6 +36,13 @@ namespace Sprk.Bff.Api.Api;
 /// </remarks>
 public static class CommunicationEndpoints
 {
+    /// <summary>fm task 055: POST /threads/direct could not read the other participant; nothing was created (503).</summary>
+    internal const string DirectParticipantUnreadEventCode = "direct_thread.participant_unread";
+    /// <summary>fm task 055: POST /threads/direct named someone who cannot be a Direct participant; nothing was created (400).</summary>
+    internal const string DirectParticipantRefusedEventCode = "direct_thread.participant_refused";
+    private static readonly EventId DirectParticipantUnreadEvent = new(5421, DirectParticipantUnreadEventCode);
+    private static readonly EventId DirectParticipantRefusedEvent = new(5422, DirectParticipantRefusedEventCode);
+
     /// <summary>
     /// Job type for processing incoming email notifications from Graph webhooks.
     /// </summary>
@@ -81,7 +88,9 @@ public static class CommunicationEndpoints
 
         var result = await ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
-            filingOnly: true).ConfigureAwait(false);
+            filingOnly: true,
+            // fm task 056: the app-only reader the re-file core asks whether the message is a private message with.
+            appOnlyEntities: entities).ConfigureAwait(false);
 
         if (result is Microsoft.AspNetCore.Http.HttpResults.NoContent)
         {
@@ -103,11 +112,13 @@ public static class CommunicationEndpoints
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Send)
             .WithName("SendCommunication")
-            .WithDescription("Send an email communication via Microsoft Graph API. The caller must be able to read every attached document, see the target thread and the inherit-from communication, and hold AppendTo on every association and copied regarding record (403 otherwise).")
+            .WithDescription("Send an email communication via Microsoft Graph API. The caller must be able to read every attached document, see the target thread and the inherit-from communication, and hold AppendTo on every association and copied regarding record (403 otherwise). A private message (privateContext, task 056) is a Message into the caller's own 1:1 Direct thread: an invalid shape is a 400; a sender or recipient without the required record access is a 403 (sdap.communication.private.sender_access / recipient_access); missing reference columns are a 409 (sdap.communication.private.columns_missing); a check that cannot be answered is a 503 (sdap.communication.private.check_unavailable). Nothing is sent on any of them.")
             .Produces<SendCommunicationResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/send-bulk", SendBulkCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
@@ -154,7 +165,9 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
-            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            // fm task 054 piece 3b: the owner the re-file needs could not be read now (nothing written; try again).
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         // GET /{id}/status was DELETED by unified-access-control-r2 task 161 (owner round 10 item 1): it had no caller
         // anywhere in the repository and is in no published API description (src/solutions/CopilotAgent/
@@ -208,7 +221,7 @@ public static class CommunicationEndpoints
         group.MapGet("/threads/{threadId:guid}/messages", GetThreadMessagesAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("GetThreadMessages")
-            .WithDescription("Read a thread's messages for the polling timeline (access-filtered; impersonated). Optional ?since=<iso8601> and ?top=<n>.")
+            .WithDescription("Read a thread's messages for the polling timeline (access-filtered; impersonated). Optional ?since=<iso8601>, ?top=<n> and ?about=<table>:<id> (only the caller's private messages about that matter, project or work assignment; malformed is a 400). Each message carries privateContext, the record it is about as the caller may read it, or null.")
             .Produces<ThreadReadResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
@@ -235,7 +248,7 @@ public static class CommunicationEndpoints
         group.MapGet("/threads", ListThreadsAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ListThreads")
-            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=.")
+            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=, ?kind=all|direct (direct: the caller's own strict 1:1 Direct threads, each with counterpartName; any other kind is a 400), ?about=<table>:<id> with kind=direct only (the pair threads holding one of the caller's private messages about that record; malformed or with another kind is a 400).")
             .Produces<ThreadListResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
@@ -550,6 +563,8 @@ public static class CommunicationEndpoints
         StartDirectThreadRequest request,
         IDirectThreadAccessService directThreadAccess,
         ICallerSystemUserResolver callerResolver,
+        IGenericEntityService entities,
+        ILogger<CommunicationService> logger,
         HttpContext context,
         CancellationToken ct)
     {
@@ -578,6 +593,50 @@ public static class CommunicationEndpoints
                 code: "VALIDATION_ERROR",
                 title: "Validation Error",
                 detail: "Cannot start a direct thread with yourself.",
+                statusCode: 400);
+        }
+
+        // fm task 055: the other participant must be a person who can be a Direct message's participant — the Direct
+        // participant rule the outbound pair routing applies (enabled, not an application user). Checked before the thread is
+        // found or created, so a refused request creates and shares nothing. A read that does not complete refuses (503).
+        IReadOnlyDictionary<Guid, ParticipantEligibility> eligibility;
+        try
+        {
+            eligibility = await DirectMessageRecipient.ReadEligibilityAsync(
+                entities, new[] { request.OtherParticipantSystemUserId }, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                DirectParticipantUnreadEvent,
+                ex,
+                "{EventCode}: the other participant of a direct thread request could not be read; nothing was created",
+                DirectParticipantUnreadEventCode);
+            throw new SdapProblemException(
+                code: "DIRECT_PARTICIPANT_UNREAD",
+                title: "Service Unavailable",
+                detail: "The other participant could not be checked. Try again.",
+                statusCode: 503);
+        }
+
+        if (!eligibility.TryGetValue(request.OtherParticipantSystemUserId, out var answer)
+            || answer != ParticipantEligibility.Eligible)
+        {
+            // One neutral answer for a missing, disabled or application user (UAC-r2 condition b): the response never says
+            // which. An existing pair thread with a participant who is now disabled is refused the same way, so its id is not
+            // returned.
+            logger.LogInformation(
+                DirectParticipantRefusedEvent,
+                "{EventCode}: a direct thread request named a participant who cannot take part; nothing was created",
+                DirectParticipantRefusedEventCode);
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "The other participant must be an active internal user.",
                 statusCode: 400);
         }
 
@@ -843,10 +902,13 @@ public static class CommunicationEndpoints
         HttpContext context,
         [FromQuery] string? since,
         [FromQuery] int? top,
+        [FromQuery] string? about,
         CancellationToken ct)
     {
         var sinceValue = ParseSince(since);
-        var result = await readService.ReadThreadAsync(threadId, context.User, sinceValue, top, ct);
+        // fm task 056: ?about={table}:{id} narrows to the caller's private messages about that record (the service parses it;
+        // malformed is a 400).
+        var result = await readService.ReadThreadAsync(threadId, context.User, sinceValue, top, ct, about);
         return TypedResults.Ok(result);
     }
 
@@ -917,9 +979,13 @@ public static class CommunicationEndpoints
         [FromQuery] string? search,
         [FromQuery] int? top,
         [FromQuery] string? pageToken,
+        [FromQuery] string? kind,
+        [FromQuery] string? about,
         CancellationToken ct)
     {
-        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct);
+        // fm task 056: ?about={table}:{id} (with kind=direct only) lists the caller's pair threads holding a private message
+        // about that record (the service parses it; malformed or with another kind is a 400).
+        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct, kind, about);
         return TypedResults.Ok(result);
     }
 

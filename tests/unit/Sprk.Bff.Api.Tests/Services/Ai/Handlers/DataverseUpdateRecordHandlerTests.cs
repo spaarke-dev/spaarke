@@ -31,7 +31,9 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
 
     private DataverseUpdateRecordHandler CreateHandler() =>
         new(_dataverse.Object, _world.AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+            // fm task 056: the app-only reader the re-file core asks the private-message guard with (no private message here).
+            appOnlyEntities: Sprk.Bff.Api.Tests.DataMutation.Communication.PrivateMessageGuardFixtures.NoPrivateMessage());
 
     private static AnalysisTool BuildUpdateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseUpdateRecordHandler), name: "SYS-Dataverse Update Record");
@@ -78,6 +80,66 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
         var result = CreateHandler().ValidateChat(ctx, BuildUpdateTool());
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainMatch(expectedErrorPattern);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // fm task 054b: a BFF-owned communication column is refused before the confirm dialog
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Each of the five columns in the forms a model item key can take.</summary>
+    public static TheoryData<string, string> TheBffOwnedCommunicationColumnForms => new()
+    {
+        { "sprk_communication", "sprk_communicationthread" },
+        { "sprk_communication", "sprk_communicationthread@odata.bind" },
+        { "sprk_communication", "SPRK_CommunicationThread" },
+        { "sprk_communication", "sprk_sentby" },
+        { "sprk_communication", "sprk_sentby@odata.bind" },
+        { "sprk_communication", "Sprk_SentBy" },
+        { "sprk_communication", "_sprk_sentby_value" },
+        { "sprk_communication", "sprk_directrecipient" },
+        { "sprk_communication", "sprk_directrecipient@odata.bind" },
+        { "sprk_communication", "SPRK_DIRECTRECIPIENT" },
+        { "sprk_communicationthread", "sprk_threadtype" },
+        { "sprk_communicationthread", "SPRK_ThreadType" },
+        { "sprk_communicationthread", "sprk_isdefaultthread" },
+        { "sprk_communicationthread", "Sprk_IsDefaultThread" },
+    };
+
+    private static string UpdateArgs(string table, string column) =>
+        JsonSerializer.Serialize(new
+        {
+            tablename = table,
+            recordId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            item = new Dictionary<string, object> { [column] = "x" },
+        });
+
+    [Theory]
+    [MemberData(nameof(TheBffOwnedCommunicationColumnForms))]
+    public async Task ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_InThePostConfirmWords_054b(
+        string table, string column)
+    {
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: UpdateArgs(table, column));
+
+        var validation = CreateHandler().ValidateChat(ctx, BuildUpdateTool());
+        var afterConfirm = await CreateHandler().ExecuteChatAsync(ctx, BuildUpdateTool(), CancellationToken.None);
+
+        validation.IsValid.Should().BeFalse("a proposal the update can never write is refused before the confirm dialog");
+        afterConfirm.Success.Should().BeFalse();
+        string.Join(" ", validation.Errors).Should().Be(afterConfirm.ErrorMessage, "only the timing changed");
+        string.Join(" ", validation.Errors).Should().Contain("NOT written");
+        _dataverse.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("account", "name")]
+    [InlineData("sprk_communication", "sprk_subject")]
+    [InlineData("sprk_communicationthread", "sprk_name")]
+    [InlineData("sprk_matter", "sprk_communicationthread")] // the same name on another table is not a BFF-owned column
+    public void ValidateChat_AnOrdinaryUpdate_StillPassesToItsConfirmation_054b_MustNotFire(string table, string column)
+    {
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: UpdateArgs(table, column));
+
+        CreateHandler().ValidateChat(ctx, BuildUpdateTool()).IsValid.Should().BeTrue();
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
@@ -176,6 +238,25 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
                   "_sprk_regardingcommunication_value": "{{Communication:D}}",
                   "_sprk_regardinginvoice_value": "{{Invoice:D}}",
                   "_sprk_regardingmatter_value": "{{MatterA:D}}"
+                }
+                """)));
+
+        // Task 045b (owner ruling Q7): the update planner reads that same row (above), and a pair moved with no type it could
+        // re-derive from has its display columns cleared — written as null clears, so the caller's mapper reads the event's
+        // lookups (as the caller) to tell a lookup clear from a column clear.
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')") && p.Contains("ManyToOneRelationships")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""
+                {
+                  "LogicalName": "sprk_event",
+                  "ManyToOneRelationships": [
+                    { "ReferencingAttribute": "sprk_regardingcommunication", "ReferencingEntityNavigationPropertyName": "sprk_RegardingCommunication", "ReferencedEntity": "sprk_communication" },
+                    { "ReferencingAttribute": "sprk_regardinginvoice", "ReferencingEntityNavigationPropertyName": "sprk_RegardingInvoice", "ReferencedEntity": "sprk_invoice" },
+                    { "ReferencingAttribute": "sprk_regardingmatter", "ReferencingEntityNavigationPropertyName": "sprk_RegardingMatter", "ReferencedEntity": "sprk_matter" },
+                    { "ReferencingAttribute": "sprk_regardingrecordtype", "ReferencingEntityNavigationPropertyName": "sprk_RegardingRecordType", "ReferencedEntity": "sprk_recordtype_ref" }
+                  ]
                 }
                 """)));
 
@@ -278,6 +359,13 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_communications({Communication:D})?$select=")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "sprk_communicationid": "{{Communication:D}}" }""")));
+        // Task 045b: the update planner reads the row as the caller (the update moves an agreement lookup): no pair, so the
+        // pair has nothing to follow and the update is written as sent.
+        _dataverse
+            .Setup(d => d.GetAsync($"sprk_communications({Communication:D})", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                { "sprk_communicationid": "{{Communication:D}}", "_sprk_regardingmatter_value": "{{MatterA:D}}" }
+                """)));
         int? restampPatchesWhenTheUserWrote = null;
         _dataverse
             .Setup(d => d.PatchAsync($"sprk_communications({Communication:D})", It.IsAny<string>(), It.IsAny<CancellationToken>()))

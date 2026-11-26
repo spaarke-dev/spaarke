@@ -17,6 +17,16 @@ public interface IIdempotencyService
     Task MarkEventAsProcessedAsync(string eventId, TimeSpan? expiration = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Forgets a processed marker, so a later delivery of the same event is handled again. Answers <see langword="true"/> only when the marker was read
+    /// back as gone; <see langword="false"/> when it could not be removed or read.
+    /// </summary>
+    /// <remarks>
+    /// ebilling-r1 task 132: a job that wrote its at-most-once marker BEFORE a send forgets it when the send provably did not go out, so the retry sends.
+    /// A default method that answers <see langword="false"/>: an implementer that cannot remove a marker leaves it, and the caller treats that as "not forgotten".
+    /// </remarks>
+    Task<bool> ClearEventProcessedAsync(string eventId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+    /// <summary>
     /// Attempts to acquire processing lock for an event.
     /// Returns true if lock acquired successfully, false if event is already being processed.
     /// </summary>

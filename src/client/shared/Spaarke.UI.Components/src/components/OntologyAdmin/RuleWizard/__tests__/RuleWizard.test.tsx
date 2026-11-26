@@ -17,7 +17,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import {
   REASON_COLUMN_NOT_AUTHORABLE,
@@ -29,6 +29,7 @@ import {
 import type { OntologyAuthoringService } from '../authoringService';
 import { RuleWizard } from '../RuleWizard';
 import type { RuleWizardResult } from '../RuleWizard';
+import type { INavigationService } from '../../../../types/serviceInterfaces';
 import type { MatterPicker, NewVersionMode, RuleWizardMode } from '../ruleWizardTypes';
 import { catalog, dryRunResult, failure, makeAuthoringService, published, saved, validation } from './fixtures';
 
@@ -41,6 +42,7 @@ const maybe = (id: string) => screen.queryByTestId(id);
 const change = (id: string, value: string) => fireEvent.change(byId(id), { target: { value } });
 const click = (id: string) => fireEvent.click(byId(id));
 const optionValues = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.value);
+const optionTexts = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.text);
 const valueOf = (id: string) => (byId(id) as HTMLInputElement).value;
 /** How many times `text` is rendered anywhere on the page, hidden or not. */
 const occurrencesOf = (text: string) => (document.body.textContent ?? '').split(text).length - 1;
@@ -88,6 +90,13 @@ async function fillBasics() {
   change('rule-wizard-code', 'POL-ZZ');
   change('rule-wizard-name', 'Zed rule');
   change('rule-wizard-lane', 'Decide');
+}
+
+/** Task 193: an Existence rule needs one test; this adds a record test on the chosen table. */
+function addRecordTest(field: string, value: string) {
+  click('rule-wizard-when-row-add');
+  change('rule-wizard-when-row-0-field', field);
+  change('rule-wizard-when-row-0-value', value);
 }
 
 async function fillCondition() {
@@ -225,11 +234,71 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(screen.queryByLabelText(/json/i)).toBeNull();
   });
 
+  it('shows each table by its display name and keeps the logical name as the value (DI-157)', async () => {
+    // A catalog of the real tables: the wizard names them for a person, and sends the logical name.
+    const real = {
+      ...catalog,
+      subjects: [
+        {
+          ...catalog.subjects[0],
+          entity: 'sprk_matter',
+          joins: [{ ...catalog.subjects[0].joins[0], related: 'sprk_budgetrevision' }],
+        },
+        { ...catalog.subjects[1], entity: 'sprk_invoice' },
+        { ...catalog.subjects[1], entity: 'sprk_workassignment' },
+      ],
+    };
+    cleanup();
+    setup({ service: makeAuthoringService({ getCatalog: jest.fn(async () => ({ ok: true as const, data: real })) }) });
+    await fillBasics();
+    await next('rule-wizard-condition');
+
+    expect(optionTexts('rule-wizard-subject')).toEqual(['Choose a table', 'Matter', 'Invoice', 'Work Assignment']);
+    expect(optionValues('rule-wizard-subject')).toEqual(['', 'sprk_matter', 'sprk_invoice', 'sprk_workassignment']);
+
+    change('rule-wizard-subject', 'sprk_matter');
+    click('rule-wizard-add-clause');
+    expect(optionTexts('rule-wizard-clause-0-related')).toEqual(['Choose related records', 'Budget Revision']);
+    expect(optionValues('rule-wizard-clause-0-related')).toEqual(['', 'sprk_budgetrevision']);
+    expect(document.body.textContent).not.toMatch(/sprk_(matter|invoice|workassignment|budgetrevision)/);
+  });
+
+  it('shows each column by its display name and keeps the logical name as the value (DI-169)', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    click('rule-wizard-when-row-add');
+    expect(optionTexts('rule-wizard-when-row-0-field')).toEqual([
+      'Choose a column',
+      'Widget State',
+      'Due On',
+      'Colour',
+    ]);
+    expect(optionValues('rule-wizard-when-row-0-field')).toEqual(['', 'zz_state', 'zz_due', 'zz_colour']);
+
+    // The rule body written from the choice names the column by its logical name.
+    change('rule-wizard-when-row-0-field', 'zz_state');
+    change('rule-wizard-when-row-0-value', 'open');
+    const preview = byId('rule-wizard-body-preview').textContent as string;
+    expect(preview).toContain('"zz_state"');
+    expect(preview).not.toContain('Widget State');
+
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_note');
+    expect(optionTexts('rule-wizard-clause-0-row-0-field')).toEqual(['Choose a column', 'Note Kind', 'Noted On']);
+    expect(optionValues('rule-wizard-clause-0-row-0-field')).toEqual(['', 'zz_kind', 'zz_noted']);
+  });
+
+  it('shows a column by its logical name when the catalog names it no display name (an older BFF)', () => {
+    change('rule-wizard-subject', 'zz_gadget');
+    click('rule-wizard-when-row-add');
+    expect(optionTexts('rule-wizard-when-row-0-field')).toEqual(['Choose a column', 'zz_size']);
+  });
+
   it("offers a Threshold only the tables that have a measure, and only that table's measures", () => {
     change('rule-wizard-rule-type', 'Threshold');
     expect(optionValues('rule-wizard-subject')).toEqual(['', 'zz_widget']);
     change('rule-wizard-subject', 'zz_widget');
     expect(optionValues('rule-wizard-threshold-field')).toEqual(['', 'zz_load']);
+    expect(optionTexts('rule-wizard-threshold-field')).toEqual(['Choose a measure', 'Load (percent)']);
     expect(optionValues('rule-wizard-threshold-operator')).toEqual(['>=', '<=']);
     change('rule-wizard-threshold-field', 'zz_load');
     expect(byId('rule-wizard-threshold-range')).toHaveTextContent('0 to 250');
@@ -302,10 +371,33 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(byId('rule-wizard-next')).toBeDisabled();
     expect(byId('rule-wizard-condition-summary')).toHaveTextContent('Choose what the rule is about.');
     change('rule-wizard-subject', 'zz_widget');
-    expect(byId('rule-wizard-next')).toBeEnabled();
+    expect(byId('rule-wizard-next')).toBeDisabled();
     click('rule-wizard-when-row-add');
     expect(byId('rule-wizard-next')).toBeDisabled();
     expect(byId('rule-wizard-condition-summary')).toHaveTextContent('Choose a column.');
+  });
+
+  it('task 193 (A7): a table with no test keeps Next shut and says to add one; one test opens it', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    expect(byId('rule-wizard-next')).toBeDisabled();
+    expect(byId('rule-wizard-condition-summary')).toHaveTextContent(
+      'To continue: Add at least one test on the record or one related-record test.'
+    );
+    click('rule-wizard-when-row-add');
+    change('rule-wizard-when-row-0-field', 'zz_state');
+    change('rule-wizard-when-row-0-value', 'open');
+    expect(byId('rule-wizard-next')).toBeEnabled();
+    expect(maybe('rule-wizard-condition-summary')).toBeNull();
+  });
+
+  it('task 193 (A7): a related-record test alone also opens Next', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    expect(byId('rule-wizard-next')).toBeDisabled();
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_note');
+    change('rule-wizard-clause-0-row-0-field', 'zz_kind');
+    change('rule-wizard-clause-0-row-0-value', 'x');
+    expect(byId('rule-wizard-next')).toBeEnabled();
   });
 });
 
@@ -334,6 +426,37 @@ describe('RuleWizard - a refusal is shown at the field and the step it concerns'
 
     change('rule-wizard-when-row-0-value', 'closed');
     await waitFor(() => expect(maybe('field-error-ruleBody')).toBeNull());
+  });
+
+  it('task 193 (A7): a root schema refusal is shown without the leading ": "; a message without it is unchanged', async () => {
+    const refusals = [
+      ': Required properties ["when"] are not present',
+      'The rule reads zz_secret, which a rule may not use.',
+    ];
+    const validate = jest.fn(async () => ({
+      ok: true as const,
+      data: validation({
+        valid: false,
+        errors: [{ field: 'ruleBody', message: refusals.shift() as string }],
+        reasonCode: REASON_COLUMN_NOT_AUTHORABLE,
+        templateEligibleFields: [],
+      }),
+    }));
+    setup({ service: makeAuthoringService({ validate }) });
+    await fillBasics();
+    await next('rule-wizard-condition');
+    await fillCondition();
+
+    click('rule-wizard-next');
+    const shown = await find('field-error-ruleBody');
+    expect(shown.textContent).toBe('Required properties ["when"] are not present');
+
+    change('rule-wizard-when-row-0-value', 'closed');
+    await waitFor(() => expect(maybe('field-error-ruleBody')).toBeNull());
+    click('rule-wizard-next');
+    expect((await find('field-error-ruleBody')).textContent).toBe(
+      'The rule reads zz_secret, which a rule may not use.'
+    );
   });
 
   it('validate (200): a reason code with no listed message still puts its own message on its field', async () => {
@@ -416,6 +539,11 @@ describe('RuleWizard - wording', () => {
     expect(maybe('rule-wizard-eligible-zz_due')).not.toBeNull();
     // An authorable column of the table that the BFF did not return is not offered.
     expect(maybe('rule-wizard-eligible-zz_colour')).toBeNull();
+
+    // Task 210 (DI-169): offered by the column's display name; the token inserted is still the logical name.
+    expect(byId('rule-wizard-eligible-zz_state')).toHaveTextContent('Widget State');
+    expect(byId('rule-wizard-eligible-zz_due')).toHaveTextContent('Due On');
+    expect(byId('rule-wizard-eligible-zz_state')).not.toHaveTextContent('zz_state');
 
     click('rule-wizard-eligible-zz_state');
     expect(valueOf('rule-wizard-message')).toBe('{{zz_state}}');
@@ -587,7 +715,7 @@ describe('RuleWizard - a new rule', () => {
 
   it('refuses a save the BFF refuses (400): the message is on the field, the banner leads to its step, and nothing is closed', async () => {
     const message =
-      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.';
     const savePolicy = jest.fn(async () =>
       failure({
         status: 400,
@@ -647,7 +775,7 @@ describe('RuleWizard - a new rule', () => {
 
   it("shows a refused save (400) once: in the banner, not again as the shell's own error", async () => {
     const message =
-      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.';
     const savePolicy = jest.fn(async () =>
       failure({ status: 400, reasonCode: REASON_DUPLICATE_ACTION, fieldErrors: { decisionPlan: [message] }, message })
     );
@@ -1044,6 +1172,7 @@ describe('RuleWizard - matter scope', () => {
       await fillCondition();
     } else {
       change('rule-wizard-subject', subject);
+      addRecordTest('zz_size', 'big');
     }
     await next('rule-wizard-wording');
     fillWording();
@@ -1112,6 +1241,59 @@ describe('RuleWizard - matter scope', () => {
       expect(JSON.stringify(request)).not.toContain('Matter Two');
       expect(JSON.stringify(request)).not.toContain('tenant');
     }
+  });
+
+  // D-219 Q5 (task 187): with the host's navigation service the matter limit opens the Dataverse side pane for the subject table.
+  const withPane = (openLookup: jest.Mock) => ({
+    ...makePicker(),
+    navigationService: { openLookup } as unknown as INavigationService,
+  });
+
+  it('with a navigation service the matter limit opens the pane for the subject table, with no inline search input (D-219 Q5)', async () => {
+    const openLookup = jest.fn(async () => [{ id: 'M-2', name: 'Matter Two' }]);
+    const matterPicker = withPane(openLookup);
+    const { service } = setup({ matterPicker });
+    await toScopeAsNewRule();
+
+    expect(screen.queryByRole('textbox', { name: 'Limit to one matter', hidden: true })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: Matter Two'), WAIT);
+
+    expect(openLookup).toHaveBeenCalledTimes(1);
+    expect(openLookup).toHaveBeenCalledWith({ entityType: 'zz_widget' });
+    expect(matterPicker.search).not.toHaveBeenCalled();
+    await next('rule-wizard-test');
+    await runTest();
+    // Saved shape unchanged: only the normalised id reaches the request.
+    expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-2');
+    expect(JSON.stringify(service.dryRun.mock.calls[0][0])).not.toContain('Matter Two');
+  });
+
+  it('cancelling the pane leaves the scope as it was; a failed pane is a cancel', async () => {
+    const openLookup = jest.fn().mockResolvedValueOnce([{ id: 'm-1', name: 'Matter One' }]);
+    const matterPicker = withPane(openLookup);
+    setup({ matterPicker });
+    await toScopeAsNewRule();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: Matter One'), WAIT);
+
+    // Clear, reopen and cancel (empty result): still no matter, still all matters.
+    openLookup.mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(openLookup).toHaveBeenCalledTimes(2), WAIT);
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+
+    // A rejected pane is a cancel, not an unhandled rejection; the wizard stays usable.
+    openLookup.mockRejectedValueOnce(new Error('no pane'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(openLookup).toHaveBeenCalledTimes(3), WAIT);
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+    expect(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true })).toBeEnabled();
+    warn.mockRestore();
+    expect(byId('rule-wizard-scope')).toBeInTheDocument();
   });
 
   it('sends no matter for all matters, and says allMatters on validate and the test (fix rounds 1 and 2)', async () => {
@@ -1260,6 +1442,7 @@ describe('RuleWizard - matter scope', () => {
     await find('rule-wizard-basics');
     await next('rule-wizard-condition');
     change('rule-wizard-subject', 'zz_gadget');
+    addRecordTest('zz_size', 'big');
     // Condition, Wording and Actions ask validate with the limit still set: the refusal is not theirs, so they can be left.
     await next('rule-wizard-wording');
     await next('rule-wizard-actions');

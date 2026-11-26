@@ -10,28 +10,26 @@
  *   GET   /api/v1/external/projects/{id}                      → single project
  *   GET   /api/v1/external/projects/{id}/documents            → project documents
  *   GET   /api/v1/external/projects/{id}/events               → project events
- *   GET   /api/v1/external/projects/{id}/todos                → project to-dos (NEW; replaces /events?todoflag=true)
  *   GET   /api/v1/external/projects/{id}/contacts             → project contacts
  *   GET   /api/v1/external/projects/{id}/organizations        → project organizations
  *   POST  /api/v1/external/projects/{id}/events               → create event
- *   POST  /api/v1/external/projects/{id}/todos                → create to-do (NEW)
- *   PATCH /api/v1/external/todos/{id}                         → update to-do (NEW)
+ *   GET   /api/v1/external/events/{id}                        → one event (R4 task 015; the `?record=event:{id}` deep link)
+ *   PATCH /api/v1/external/events/{id}                        → edit / change status / reassign (R4 task 015; 204)
+ *   GET   /api/v1/external/{projects|matters|workassignments}/{id}/assignable-people → who an event may be assigned to
  *   GET   /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents
  *                                                              → a record's documents (task 031; service requests ONLY here)
+ *   GET   /api/v1/external/invoices/{id}/files[/{fileId}/content] → an invoice's files, list and download only (R4 task 021)
  *   DELETE /api/v1/external/documents/{id}                    → delete own document (task 032 / 054)
- *   DELETE /api/v1/external/todos/{id}                        → delete own to-do (task 032 / 054)
  *   DELETE /api/v1/external/events/{id}                       → delete own event (task 032 / 054)
  *   POST  /api/v1/external/{matters|projects|workassignments}/{id}/invoice-submissions → submit an invoice PDF (ebilling-r1 051)
  *   GET   /api/v1/external/invoice-submissions[/{id}]         → the caller's submissions / one submission (ebilling-r1 051)
  *
- * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
- * removed; to-dos are now first-class `sprk_todo` records with
- * regarding-project resolver fields (ADR-024).
- * See: projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md
+ * External users work only with `sprk_event` (owner 2026-11-12, R4 task 009): the SPA calls no other work-item
+ * route (a Task is an event type).
  * See: docs/architecture/external-access-architecture.md
  */
 
-import { bffApiCall, getExternalUserContext } from '../auth/bff-client';
+import { bffApiBlob, bffApiCall, getExternalUserContext } from '../auth/bff-client';
 import { ApiError } from '../types';
 import { gridDataverseClient } from '../services/gridDataverseClient';
 import { InvoiceSubmissionError, isEbillingDisabledError } from '@spaarke/ui-components/components/InvoiceSubmission';
@@ -111,9 +109,8 @@ export interface ODataDocument extends CreatorStamps {
 /**
  * An Event record (sprk_event EntitySet: sprk_events).
  *
- * Events are now strictly calendar / project-timeline items. The legacy
- * event-as-todo boolean toggle was removed in R3 task 007 — to-dos are
- * first-class `sprk_todo` records (see `ODataTodo` below).
+ * Events are calendar / project-timeline items. External users work only
+ * with events (owner 2026-11-12, R4 task 009).
  *
  * Fields must be listed in the `Webapi/sprk_event/fields` site setting.
  */
@@ -138,58 +135,60 @@ export interface ODataEvent extends CreatorStamps {
    * returns `_sprk_regardingproject_value`.
    */
   _sprk_regardingproject_value?: string | null;
+  /**
+   * `true` when the event is of the Task type (R4 task 008): the BFF reads the type server-side and sends only this
+   * boolean. The Events list marks these with a Task badge; every other event is a plain event. Absent (an older BFF) is "not a task".
+   */
+  isTask?: boolean;
+  // R4 task 014b/c, 015 (FR-35 / FR-36): the event's own fields and the rights the BFF decided for THIS caller. Names are the
+  // Dataverse FormattedValues of the lookups; the SPA never receives a contact id except from `assignable-people`.
+  /** The event type's row id (a type row, never a person); null when the event has no type. */
+  eventTypeId?: string | null;
+  /** The event type's name; null when the event has no type (shown as "—"). */
+  eventTypeName?: string | null;
+  /** Plain text, up to 2,000 characters. */
+  sprk_description?: string | null;
+  /** Low 100000000, Normal 100000001, High 100000002, Urgent 100000003 (`events/eventFields.ts`). */
+  sprk_priority?: number | null;
+  /** The assignee's name; never the assignee's id or email. */
+  assignedToName?: string | null;
+  /** The creator's name. */
+  createdByName?: string | null;
+  /** `PATCH /events/{id}` would admit an edit by this caller (the same check). Absent = not said = hidden. */
+  canEdit?: boolean;
+  /** `PATCH /events/{id}` would admit a status change by this caller. Absent = not said = hidden. */
+  canChangeStatus?: boolean;
+  /** The statuscodes a status change may set (every status but the current one), when `canChangeStatus`. */
+  allowedStatuses?: number[];
+  /** The PATCH would admit a reassign (`assignedToContactId`): `canEdit`, open work, and a role that reads contacts. */
+  canReassign?: boolean;
 }
 
-/**
- * A To-Do record (sprk_todo EntitySet: sprk_todos).
- *
- * NEW in R3 task 007 — replaces the legacy event-as-todo boolean-toggle
- * pattern. The BFF synthesises this DTO from `sprk_todo` records scoped to
- * the regarding project via `_sprk_regardingproject_value` plus ADR-024
- * polymorphic-resolver fields.
- *
- * Status values (FR-24):
- *   1         = Open
- *   659490001 = In Progress
- *   2         = Completed
- *   659490002 = Dismissed
- *
- * Column values (sprk_todocolumn):
- *   100000000 = Today
- *   100000001 = Tomorrow
- *   100000002 = Future
- */
-export interface ODataTodo extends CreatorStamps {
-  /** Primary key — Dataverse GUID */
-  sprk_todoid: string;
-  /** To-do display name (title) */
-  sprk_name: string;
-  /** Rich notes / description (memo up to 100000 chars) */
-  sprk_notes?: string | null;
-  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only, task 106) — parse with parseDueDate, never new Date(). */
-  sprk_duedate?: string | null;
-  /** Priority score 0-100 */
-  sprk_priorityscore?: number | null;
-  /** Effort score 0-100 */
-  sprk_effortscore?: number | null;
-  /** Kanban column: 100000000=Today / 100000001=Tomorrow / 100000002=Future */
-  sprk_todocolumn?: number | null;
-  /** Whether the column assignment is pinned (locks against auto-shifting) */
-  sprk_todopinned?: boolean | null;
-  /** Entity state: 0=Active / 1=Inactive */
-  statecode?: number | null;
-  /** Status reason: 1=Open / 659490001=In Progress / 2=Completed / 659490002=Dismissed */
-  statuscode?: number | null;
-  /** ISO date string — record created */
-  createdon?: string | null;
-  /** Regarding-project lookup value (GUID) */
-  _sprk_regardingproject_value?: string | null;
-  /** ADR-024 resolver: regarding record GUID */
-  sprk_regardingrecordid?: string | null;
-  /** ADR-024 resolver: regarding record display name */
-  sprk_regardingrecordname?: string | null;
-  /** ADR-024 resolver: regarding record deep-link URL (e.g. main.aspx?...) */
-  sprk_regardingrecordurl?: string | null;
+/** The record an event is regarding, as `GET /events/{id}` names it. */
+export interface ODataEventRegarding {
+  kind: 'project' | 'matter' | 'workassignment';
+  id: string;
+  name?: string | null;
+}
+
+/** `GET /events/{id}`: the list row's fields plus the regarding record. */
+export interface ODataEventDetail extends ODataEvent {
+  regarding?: ODataEventRegarding | null;
+}
+
+/** One event type the caller may pick on create (`creatableEventTypes` of the events list). */
+export interface CreatableEventType {
+  id: string;
+  name: string;
+  /** An event of this type needs a due date. */
+  requiresDueDate: boolean;
+}
+
+/** One person an event may be assigned to (`GET …/assignable-people`). The only place a contact id reaches the SPA. */
+export interface AssignablePerson {
+  contactId: string;
+  name: string;
+  isMe: boolean;
 }
 
 /**
@@ -254,11 +253,17 @@ interface ODataCollectionResponse<T> {
   truncated?: boolean;
   /**
    * Whether the caller may create under the record the list is scoped to: the answer that record's create route gives.
-   * Document lists always carry it (task 054 review: the upload route's Create). To-do lists and a project's event list
-   * carry it only for a caller whose write access is decided per record (`/me` `writeAccessPerRecord`,
-   * unified-access-control-r2 task 036 fix round 1); absent otherwise.
+   * Document lists always carry it (task 054 review: the upload route's Create). Since R4 task 002 (FR-06) the event
+   * lists of a project, matter or work assignment carry it for every caller too (it was only for a caller whose
+   * write access is decided per record before, unified-access-control-r2 task 036 fix round 1). A BFF that predates that
+   * may still omit it: absent is "not said", never "can".
    */
   canCreate?: boolean;
+  /**
+   * The event lists only (R4 task 014b): every event type the caller may pick on create. An empty array means "none": the
+   * SPA offers no Add event (014 K3). Omitted by a BFF that predates it: absent is "not said", never "any".
+   */
+  creatableEventTypes?: unknown;
 }
 
 /**
@@ -272,6 +277,23 @@ export interface ListResult<T> {
   truncated: boolean;
   /** The BFF's `canCreate` for the record the list is scoped to, when it wrote one (task 036 fix round 1); else absent. */
   canCreate?: boolean | null;
+  /**
+   * The event lists' `creatableEventTypes` (task 014b), only when the BFF sent an array (an empty one included: "no type may
+   * be picked"); else absent.
+   */
+  creatableEventTypes?: CreatableEventType[];
+}
+
+/** The well-formed entries of a `creatableEventTypes` array (an entry with no id or name is dropped, never guessed). */
+function creatableEventTypesOf(raw: unknown[]): CreatableEventType[] {
+  const types: CreatableEventType[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name, requiresDueDate } = entry as Record<string, unknown>;
+    if (typeof id !== 'string' || !id || typeof name !== 'string' || !name.trim()) continue;
+    types.push({ id, name, requiresDueDate: requiresDueDate === true });
+  }
+  return types;
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +378,9 @@ async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {
     truncated: response.truncated === true,
     // Only when the BFF said (task 036 fix round 1): a missing member stays absent, never read as "cannot".
     ...(typeof response.canCreate === 'boolean' ? { canCreate: response.canCreate } : {}),
+    ...(Array.isArray(response.creatableEventTypes)
+      ? { creatableEventTypes: creatableEventTypesOf(response.creatableEventTypes) }
+      : {}),
   };
 }
 
@@ -380,20 +405,6 @@ async function getById<T>(bffPath: string, id: string, _options: ODataQueryOptio
 async function createRecord<TBody, TResult = TBody>(bffPath: string, body: TBody): Promise<TResult> {
   return bffApiCall<TResult>(bffPath, {
     method: 'POST',
-    body: JSON.stringify(body),
-  });
-}
-
-/**
- * Make a PATCH (update) request to the BFF API.
- *
- * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/todos")
- * @param id       Record GUID to update
- * @param body     Partial record payload with fields to update
- */
-async function updateRecord<TBody>(bffPath: string, id: string, body: Partial<TBody>): Promise<void> {
-  await bffApiCall<void>(`${bffPath}/${id}`, {
-    method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
@@ -473,11 +484,10 @@ export async function getDocuments(
 /**
  * The record types whose documents the external plane serves (task 031): the `{root}` segment of
  * `/api/v1/external/{root}/{id}/documents`. A service request's documents are reachable ONLY through the
- * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice's
- * documents use the `invoices` route (owner decision 2026-10-11, option A: rights inherited from the invoice's matter and
- * project, the union of both; task 031 notes).
+ * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice has
+ * NO document root: its files are ebilling's read-only `/invoices/{id}/files` routes (`getInvoiceFiles` below; R4 task 021).
  */
-export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests' | 'invoices';
+export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests';
 
 /** `/api/v1/external/{root}/{id}/documents`: list (GET) and upload (POST). */
 export function documentsPath(root: DocumentRoot, recordId: string): string {
@@ -500,7 +510,7 @@ export interface DocumentListResult extends ListResult<ODataDocument> {
 }
 
 /**
- * The documents of a project, matter, work assignment, service request or invoice (task 031 routes), and the BFF's `canCreate`:
+ * The documents of a project, matter, work assignment or service request (task 031 routes), and the BFF's `canCreate`:
  * whether the caller holds Create on the record (so a ViewOnly reader is not offered an upload that can only fail).
  */
 export async function getRecordDocuments(root: DocumentRoot, recordId: string): Promise<DocumentListResult> {
@@ -513,38 +523,126 @@ export async function getRecordDocuments(root: DocumentRoot, recordId: string): 
 }
 
 // ---------------------------------------------------------------------------
+// Invoice files (R4 task 021, FR-13): ebilling-r1 task 093's read-only firm routes
+// ---------------------------------------------------------------------------
+//
+// Contract read at the ebilling PR #2839 head (ref pr/2839):
+//   ExternalInvoiceSubmissionEndpoints.cs:106 GET /api/v1/external/invoices/{id}/files          -> 200 { value: ExternalInvoiceFileItem[] }
+//   ExternalInvoiceSubmissionEndpoints.cs:122 GET /api/v1/external/invoices/{id}/files/{fileId}/content -> the bytes (no Content-Disposition name)
+//   StoredFileContracts.cs:628 `ExternalInvoiceFileItem` (Id, FileName, ContentType?, SizeBytes?, CreatedOn?, ScanStatus)
+// Content for a Checking file answers 409 `errorCode: file_scan_pending` (StoredFileEndpoints.cs:479). A file the caller may not
+// see (an invisible invoice, an unknown or out-of-set file, a Malicious one) is one uniform 404; a fault or the eBilling kill
+// switch is 503 (`file_store_unavailable`, `ebilling.disabled`); the workforce role ceiling is 403. There is no upload route
+// and no versions route: the SPA offers list and download only.
+
+/** `scanStatus`: Clean and NotScanned are served; Checking has no malware verdict yet (its content answers 409). */
+export type InvoiceFileScanStatus = 'Clean' | 'Checking' | 'NotScanned';
+
+/** One row of `GET /api/v1/external/invoices/{id}/files`. `contentType`, `sizeBytes` and `createdOn` (UTC ISO) may be null. */
+export interface InvoiceFileItem {
+  id: string;
+  fileName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  createdOn: string | null;
+  /** Typed as the contract's values; the reader treats any other string as not served (never offers Download for it). */
+  scanStatus: InvoiceFileScanStatus;
+}
+
+/** The `errorCode` of the content route's 409 while a file's malware scan has no verdict. */
+export const FILE_SCAN_PENDING_ERROR_CODE = 'file_scan_pending';
+
+/** `/api/v1/external/invoices/{id}/files`: the invoice's firm-visible files (list). */
+export function invoiceFilesPath(invoiceId: string): string {
+  return `/api/v1/external/invoices/${encodeURIComponent(invoiceId)}/files`;
+}
+
+/** The content (download) route of one invoice file. */
+export function invoiceFileContentPath(invoiceId: string, fileId: string): string {
+  return `${invoiceFilesPath(invoiceId)}/${encodeURIComponent(fileId)}/content`;
+}
+
+/** The invoice's files, as the BFF lists them (a Malicious file is omitted by the server). */
+export async function getInvoiceFiles(invoiceId: string): Promise<InvoiceFileItem[]> {
+  const response = await bffApiCall<{ value?: InvoiceFileItem[] }>(invoiceFilesPath(invoiceId));
+  return response.value ?? [];
+}
+
+/** The bytes of one invoice file, through the authenticated blob read (no signed URL, no Graph, no SPE pointer). */
+export async function getInvoiceFileContent(invoiceId: string, fileId: string): Promise<Blob> {
+  return bffApiBlob(invoiceFileContentPath(invoiceId, fileId));
+}
+
+/** Whether a failed content read is the 409 `file_scan_pending` (the file is still being checked). */
+export function isFileScanPendingError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.statusCode !== 409) return false;
+  try {
+    return (JSON.parse(err.message) as { errorCode?: unknown }).errorCode === FILE_SCAN_PENDING_ERROR_CODE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a failed files read is the eBilling kill switch (503 `ebilling.disabled`; both files routes sit behind it). It
+ * reuses the shared detector, which answers true for that code only: an outage 503 (`file_store_unavailable`) is not it.
+ */
+export function isInvoiceFilesDisabledError(err: unknown): boolean {
+  return isEbillingDisabledError(toInvoiceSubmissionError(err));
+}
+
+/** The name an invoice file is shown under when the BFF sends none (it sends `Name ?? ""`). */
+export const INVOICE_FILE_FALLBACK_NAME = 'Invoice file';
+
+/** The name shown for a file: its `fileName`, else {@link INVOICE_FILE_FALLBACK_NAME}. */
+export function invoiceFileDisplayName(file: Pick<InvoiceFileItem, 'fileName'>): string {
+  return file.fileName.trim() ? file.fileName : INVOICE_FILE_FALLBACK_NAME;
+}
+
+const FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/** The name a file is saved under: its `fileName`, else "invoice-file" plus an extension from its `contentType` (pdf for application/pdf). */
+export function invoiceFileSaveName(file: Pick<InvoiceFileItem, 'fileName' | 'contentType'>): string {
+  if (file.fileName.trim()) return file.fileName;
+  const type = (file.contentType ?? '').split(';')[0].trim().toLowerCase();
+  const extension = FILE_EXTENSIONS[type];
+  return extension ? `invoice-file.${extension}` : 'invoice-file';
+}
+
+// ---------------------------------------------------------------------------
 // Event queries
 // ---------------------------------------------------------------------------
 
 /**
- * The record kinds whose events and to-dos the external plane lists (task 039 / task 029): the `{root}` segment of
- * `/api/v1/external/{root}/{id}/events` and `.../todos`. Same row shape on all three; the server applies the record's own
- * rights (and the every-root rule) and the client does no filtering of its own.
+ * The record kinds whose events the external plane lists (task 039 / task 029): the `{root}` segment of
+ * `/api/v1/external/{root}/{id}/events`. Same row shape on all three; the server applies the record's own rights (and the
+ * every-root rule) and the client does no filtering of its own.
  */
-export type EventsTodosRoot = Extract<DocumentRoot, 'projects' | 'matters' | 'workassignments'>;
+export type EventsRoot = Extract<DocumentRoot, 'projects' | 'matters' | 'workassignments'>;
 
-/** What an events/to-dos section calls the record it belongs to, in its sentences. */
-export const EVENTS_TODOS_ROOT_NOUN: Readonly<Record<EventsTodosRoot, string>> = {
+/** What an events section calls the record it belongs to, in its sentences. */
+export const EVENTS_ROOT_NOUN: Readonly<Record<EventsRoot, string>> = {
   projects: 'project',
   matters: 'matter',
   workassignments: 'work assignment',
 };
 
 /** `/api/v1/external/{root}/{id}/events`: the events regarding one record. */
-export function rootEventsPath(root: EventsTodosRoot, recordId: string): string {
+export function rootEventsPath(root: EventsRoot, recordId: string): string {
   return `/api/v1/external/${root}/${encodeURIComponent(recordId)}/events`;
-}
-
-/** `/api/v1/external/{root}/{id}/todos`: the to-dos regarding one record. */
-export function rootTodosPath(root: EventsTodosRoot, recordId: string): string {
-  return `/api/v1/external/${root}/${encodeURIComponent(recordId)}/todos`;
 }
 
 /**
  * Retrieve the Events regarding a project, matter or work assignment (task 057; the project route is the original).
  *
  * `sprk_event`'s project lookup is `sprk_regardingproject` (it has no `sprk_projectid` attribute); a matter or work
- * assignment event carries `null` there. Events no longer carry a to-do flag - see `getRootTodos`.
+ * assignment event carries `null` there.
  *
  * NOTE: `getCollection` ignores its options entirely (:291) - select/filter/order/top are all applied server-side by
  * GET /api/v1/external/{root}/{id}/events - so the options are accepted only so existing call sites type-check.
@@ -554,7 +652,7 @@ export function rootTodosPath(root: EventsTodosRoot, recordId: string): string {
  * @param options   Optional OData query overrides (currently ignored downstream)
  */
 export async function getRootEvents(
-  root: EventsTodosRoot,
+  root: EventsRoot,
   recordId: string,
   options: ODataQueryOptions = {}
 ): Promise<ListResult<ODataEvent>> {
@@ -571,43 +669,24 @@ export async function getEvents(projectId: string, options: ODataQueryOptions = 
   return getRootEvents('projects', projectId, options);
 }
 
-// ---------------------------------------------------------------------------
-// To-Do queries (NEW in R3 task 007 — replaces the legacy event-as-todo toggle)
-// ---------------------------------------------------------------------------
-
 /**
- * Retrieve the To-Dos regarding a project, matter or work assignment (task 057; the project route is the original).
- *
- * Calls the BFF route `/api/v1/external/{root}/{id}/todos`. The BFF resolves the regarding lookup server-side and returns
- * DTOs with the ADR-024 resolver fields populated. Note: the BFF computes the `$select` server-side.
- *
- * @param root      Which kind of record `recordId` is
- * @param recordId  Dataverse GUID of the record
- * @param options   Optional OData query overrides (currently ignored downstream)
+ * `GET /api/v1/external/events/{id}` (R4 task 014b, owner Q-7): one event with the rights the BFF decided for this caller and
+ * the record it is regarding. Not readable and not found answer the same 404 (`ApiError`). The deep link `?record=event:{id}`
+ * reads through this; a row opened from a list does NOT (a multi-parent event can be in a readable list and 404 here).
  */
-export async function getRootTodos(
-  root: EventsTodosRoot,
-  recordId: string,
-  options: ODataQueryOptions = {}
-): Promise<ListResult<ODataTodo>> {
-  const defaults: ODataQueryOptions = {
-    $orderby: 'sprk_duedate asc',
-  };
-
-  return getCollection<ODataTodo>(rootTodosPath(root, recordId), { ...defaults, ...options });
+export async function getEvent(eventId: string): Promise<ODataEventDetail> {
+  return bffApiCall<ODataEventDetail>(`/api/v1/external/events/${encodeURIComponent(eventId)}`);
 }
 
 /**
- * Retrieve all To-Dos belonging to a Secure Project (`getRootTodos` for the project root).
- *
- * @param projectId  Dataverse GUID of the parent sprk_project record
- * @param options    Optional OData query overrides
+ * `GET /api/v1/external/{root}/{id}/assignable-people` (R4 task 014b): the people an event on this record may be assigned to,
+ * "Me" flagged. 403 when the caller may neither create nor edit an event there; 503 when unknown (`ApiError`).
  */
-export async function getProjectTodos(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ListResult<ODataTodo>> {
-  return getRootTodos('projects', projectId, options);
+export async function getAssignablePeople(root: EventsRoot, recordId: string): Promise<AssignablePerson[]> {
+  const response = await bffApiCall<{ value?: AssignablePerson[] }>(
+    `/api/v1/external/${root}/${encodeURIComponent(recordId)}/assignable-people`
+  );
+  return (response.value ?? []).filter(p => typeof p.contactId === 'string' && p.contactId && !!p.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -698,6 +777,17 @@ export interface CreateEventPayload {
   /** Optional status — Draft (1) or Open (659490001) only, written to `statuscode`; omit it to create the event Open (task 097 review F9). */
   sprk_status?: number;
   /**
+   * The event's type: REQUIRED, one of the list's `creatableEventTypes` ids (R4 task 014b / 015, owner Q-2). The legacy
+   * `eventType: "task"` is no longer sent.
+   */
+  eventTypeId: string;
+  /** Low 100000000, Normal 100000001, High 100000002, Urgent 100000003 (`events/eventFields.ts`). */
+  sprk_priority?: number;
+  /** Plain text, up to 2,000 characters. */
+  sprk_description?: string;
+  /** A contact id from `getAssignablePeople` for this record; anyone else is refused (400). */
+  assignedToContactId?: string;
+  /**
    * OData binding to associate the event with a project. The navigation property is the
    * PascalCase SchemaName sprk_RegardingProject (metadata-verified, R5 task 002 — sprk_event
    * has no "sprk_projectid" lookup; its project lookup is sprk_regardingproject).
@@ -707,106 +797,74 @@ export interface CreateEventPayload {
 }
 
 /**
- * Create a new Event record in Dataverse via the Power Pages Web API.
+ * Create an Event regarding a project, matter or work assignment: `POST /api/v1/external/{root}/{id}/events`
+ * (spaarke-SPA-external-access-platform-r4 task 006, FR-06; the matter and work-assignment routes are task 002's).
  *
- * Requires the authenticated user to have Create table permission on
- * sprk_event for their web role.
+ * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has no regarding member), so a matter or
+ * work-assignment event sends the payload as given. The project route keeps the body it has always been sent, the project
+ * bind included (the server skips that member), byte for byte.
  *
- * The Bearer token is automatically included by `bffApiCall`.
+ * The returned row has NO formatted names (type, assignee, creator) and no rights, so a list must re-read after a create
+ * rather than insert it.
+ *
+ * @param root      Which kind of record `recordId` is
+ * @param recordId  Dataverse GUID of the record
+ * @param payload   Event fields to set on creation
+ * @returns         The created ODataEvent record (system fields only)
+ */
+export async function createRootEvent(
+  root: EventsRoot,
+  recordId: string,
+  payload: CreateEventPayload
+): Promise<ODataEvent> {
+  const body: CreateEventPayload =
+    root === 'projects'
+      ? {
+          ...payload,
+          // Bind to the project using the OData navigation property (PascalCase SchemaName).
+          'sprk_RegardingProject@odata.bind': `/sprk_projects(${recordId})`,
+        }
+      : payload;
+  return createRecord<CreateEventPayload, ODataEvent>(rootEventsPath(root, recordId), body);
+}
+
+/**
+ * Create a new Event regarding a Secure Project (`createRootEvent` for the project root).
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param payload    Event fields to set on creation
  * @returns          The created ODataEvent record (with system fields populated)
  */
 export async function createEvent(projectId: string, payload: CreateEventPayload): Promise<ODataEvent> {
-  const body: CreateEventPayload = {
-    ...payload,
-    // Bind to the project using the OData navigation property (PascalCase SchemaName).
-    'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`,
-  };
-
-  return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
+  return createRootEvent('projects', projectId, payload);
 }
 
-// ---------------------------------------------------------------------------
-// To-Do write operations (NEW in R3 task 007)
-// ---------------------------------------------------------------------------
-
 /**
- * Payload for creating a new To-Do record via the BFF.
- *
- * NOTE: regarding context (project lookup + ADR-024 resolver fields) is NOT
- * in the request body. The BFF applies the regarding context server-side
- * using the project id from the route — prevents external callers from
- * regarding-ing a to-do to an arbitrary project they don't have access to.
+ * The partial body of `PATCH /api/v1/external/events/{id}` (R4 task 014b / 014c): a member that is not sent is not changed.
+ * `eventTypeId` is never sent (the type is immutable: 400 `type_immutable`).
  */
-export interface CreateTodoPayload {
-  /** To-do title (required) */
-  sprk_name: string;
-  /** Rich notes / description */
-  sprk_notes?: string | null;
-  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only refuses a timestamp — task 106). */
+export interface UpdateEventPatch {
+  sprk_name?: string;
+  /** "yyyy-MM-dd", or `null` to clear it (400 when the event's type requires one). */
   sprk_duedate?: string | null;
-  /** Priority score 0-100 */
-  sprk_priorityscore?: number;
-  /** Effort score 0-100 */
-  sprk_effortscore?: number;
-  /** Kanban column: 100000000=Today / 100000001=Tomorrow / 100000002=Future */
-  sprk_todocolumn?: number;
-  /** Whether the column assignment is pinned */
-  sprk_todopinned?: boolean;
+  sprk_priority?: number;
+  /** `null` or "" clears it. */
+  sprk_description?: string | null;
+  /** Any event statuscode (`EVENT_STATUS_LABELS`). */
+  sprk_status?: number;
+  /** A reassign to this contact (from `getAssignablePeople`): sets status Reassigned unless `sprk_status` is also sent. */
+  assignedToContactId?: string;
 }
 
 /**
- * Payload for updating an existing To-Do record via the BFF.
- *
- * PATCH semantics — only provided fields are written. Regarding context
- * cannot be changed via this surface (re-parent through the model-driven
- * app form to keep resolver-field invariants intact per ADR-024).
+ * Edits an event / changes its status: `PATCH /api/v1/external/events/{id}`, 204 with no body. A refusal is an `ApiError`
+ * whose message is the ProblemDetails body (`problemMessage`): 400 with a stable `errorCode` per field, 403, 404, 503.
  */
-export interface UpdateTodoPayload {
-  /** To-do title */
-  sprk_name?: string | null;
-  /** Rich notes / description */
-  sprk_notes?: string | null;
-  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only refuses a timestamp — task 106). */
-  sprk_duedate?: string | null;
-  /** Priority score 0-100 */
-  sprk_priorityscore?: number;
-  /** Effort score 0-100 */
-  sprk_effortscore?: number;
-  /** Kanban column: 100000000=Today / 100000001=Tomorrow / 100000002=Future */
-  sprk_todocolumn?: number;
-  /** Whether the column assignment is pinned */
-  sprk_todopinned?: boolean;
-  /** Status reason: 1=Open / 659490001=In Progress / 2=Completed / 659490002=Dismissed */
-  statuscode?: number;
-}
-
-/**
- * Create a new To-Do record via the BFF.
- *
- * The BFF applies the regarding-project lookup + 4 ADR-024 resolver fields
- * server-side using `{projectId}` from the route.
- *
- * @param projectId  Dataverse GUID of the parent sprk_project record
- * @param payload    To-Do fields to set on creation
- * @returns          The created ODataTodo record (with system + resolver fields populated)
- */
-export async function createTodo(projectId: string, payload: CreateTodoPayload): Promise<ODataTodo> {
-  return createRecord<CreateTodoPayload, ODataTodo>(`/api/v1/external/projects/${projectId}/todos`, payload);
-}
-
-/**
- * Update an existing To-Do record via the BFF.
- *
- * PATCH semantics — only the fields included in `payload` are modified.
- *
- * @param todoId   Dataverse GUID of the sprk_todo record to update
- * @param payload  Partial to-do fields to update
- */
-export async function updateTodo(todoId: string, payload: UpdateTodoPayload): Promise<void> {
-  return updateRecord<UpdateTodoPayload>('/api/v1/external/todos', todoId, payload);
+export async function updateEvent(eventId: string, patch: UpdateEventPatch): Promise<void> {
+  await bffApiCall<void>(`/api/v1/external/events/${encodeURIComponent(eventId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -824,11 +882,6 @@ export async function updateTodo(todoId: string, payload: UpdateTodoPayload): Pr
 /** Hard-deletes a document the caller created (and its stored file). */
 export async function deleteOwnDocument(documentId: string): Promise<void> {
   await bffApiCall<void>(`/api/v1/external/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
-}
-
-/** Hard-deletes a to-do the caller created. */
-export async function deleteOwnTodo(todoId: string): Promise<void> {
-  await bffApiCall<void>(`/api/v1/external/todos/${encodeURIComponent(todoId)}`, { method: 'DELETE' });
 }
 
 /**
@@ -976,7 +1029,7 @@ const INVOICE_RECORD_READS = [
 ] as const;
 
 /** The body of GET /api/v1/external/invoice-submissions/firm-records (task 051 / D-106): the caller's readable records the firm is linked to. */
-interface InvoiceFirmRecordsResponse {
+export interface InvoiceFirmRecordsResponse {
   firmId: string;
   matters?: string[];
   projects?: string[];
@@ -987,6 +1040,25 @@ interface InvoiceFirmRecordsResponse {
 }
 
 const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * One firm's firm-records answer: the caller's readable records the firm is linked to (a single read, not paged; the BFF
+ * flags a cut-short answer `truncated` and a partly failed one `partial`). Rejects with an {@link InvoiceSubmissionError}.
+ * Used by {@link listInvoiceCoreRecords} (the wizard's Record step) and by the record view's "Submit invoice" rule
+ * (R4 task 007, FR-10).
+ */
+export async function readInvoiceFirmRecords(firmId: string): Promise<InvoiceFirmRecordsResponse> {
+  if (!GUID_RE.test(firmId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
+  }
+  try {
+    return await bffApiCall<InvoiceFirmRecordsResponse>(
+      `/api/v1/external/invoice-submissions/firm-records?firmId=${encodeURIComponent(firmId)}`
+    );
+  } catch (err) {
+    throw toInvoiceSubmissionError(err);
+  }
+}
 
 /**
  * The core records the caller can pick for an invoice: their accessible projects (the external projects route) plus
@@ -1006,11 +1078,7 @@ export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Pr
     throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
   }
   const linkedRead: Promise<InvoiceFirmRecordsResponse | null> = firmId
-    ? bffApiCall<InvoiceFirmRecordsResponse>(
-        `/api/v1/external/invoice-submissions/firm-records?firmId=${encodeURIComponent(firmId)}`
-      ).catch(err => {
-        throw toInvoiceSubmissionError(err);
-      })
+    ? readInvoiceFirmRecords(firmId)
     : Promise.resolve(null);
 
   const [linked, reads] = await Promise.all([
@@ -1083,7 +1151,7 @@ export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Pr
  *
  * Or import individual functions directly for better tree-shaking:
  * ```typescript
- * import { getProjects, getEvents, getProjectTodos } from "../api/web-api-client";
+ * import { getProjects, getEvents } from "../api/web-api-client";
  * ```
  */
 export const webApiClient = {
@@ -1098,12 +1166,9 @@ export const webApiClient = {
   getEvents,
   getRootEvents,
   createEvent,
-  // To-Dos (NEW)
-  getProjectTodos,
-  getRootTodos,
-  createTodo,
-  updateTodo,
-  deleteOwnTodo,
+  getEvent,
+  updateEvent,
+  getAssignablePeople,
   deleteOwnEvent,
   deleteOwnServiceRequest,
   // Contacts

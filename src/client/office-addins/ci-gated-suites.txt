@@ -394,3 +394,49 @@ shared/taskpane/services/__tests__/invoiceSubmissionService.test.ts
 shared/taskpane/utils/__tests__/invoiceSubmissionMessages.test.ts
 shared/taskpane/components/views/__tests__/InvoiceView.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.invoiceTaskTypes.test.tsx
+
+# Task 134 review (2026-11-13): the Invoice tab's already-submitted banner (the previous-submission read, its polling
+# and its banner), green but never listed until now.
+shared/taskpane/services/__tests__/invoicePreviousSubmission.test.ts
+shared/taskpane/components/views/__tests__/InvoiceView.previousSubmission.test.tsx
+# Task 134 slice B2 (2026-11-13): the correction note (ebilling 095f) - required on a Correction, absent on New, resent on Retry.
+shared/taskpane/components/views/__tests__/InvoiceView.correctionNote.test.tsx
+shared/taskpane/services/__tests__/invoiceSubmissionSeam.correctionNote.test.ts
+shared/taskpane/services/__tests__/invoiceSubmissionService.correctionNote.test.ts
+shared/taskpane/utils/__tests__/invoiceSubmissionMessages.correctionNote.test.ts
+# Task 134 slice C (2026-11-14): add a law firm to the record from the Invoice tab (ebilling 095g) - add only, keyed on the code.
+shared/taskpane/services/__tests__/invoiceSubmissionService.addFirm.test.ts
+shared/taskpane/utils/__tests__/invoiceSubmissionMessages.firmAssign.test.ts
+shared/taskpane/components/__tests__/AddFirmPanel.test.tsx
+shared/taskpane/components/views/__tests__/InvoiceView.addFirm.test.tsx
+
+# Tasks 135-139 (2026-11-26): green in the full office-addins run (149 of 149 suites) but never listed. Sign-in signals and
+# refused tokens (135/136), attachments added / not stored and the email filing notice (131/138), the profile wait hint
+# (137), contact search errors, and the pane start-up failure, Retry and pinned item-change handling (139).
+outlook/commands/__tests__/commands.signIn.test.ts
+outlook/taskpane/__tests__/index.itemChanged.test.tsx
+shared/adapters/__tests__/OutlookAdapter.lateItem.test.ts
+shared/services/__tests__/AuthService.naaRefusedToken.test.ts
+shared/services/__tests__/AuthService.signInGesture.test.ts
+shared/services/__tests__/AuthService.signInRequired.test.ts
+shared/services/__tests__/authenticatedJsonFetch.refusedToken.test.ts
+shared/services/__tests__/authenticatedJsonFetch.signInSignal.test.ts
+shared/taskpane/__tests__/App.authRetry.test.tsx
+shared/taskpane/__tests__/App.startupFailure.test.tsx
+shared/taskpane/components/__tests__/CreateRecordForm.contactSearchError.test.tsx
+shared/taskpane/components/__tests__/DocumentProfileSection.waitHint.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.attachmentsAdded.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.attachmentsNotStored.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.emailFilingNotice.test.tsx
+shared/taskpane/components/views/__tests__/CreateTodoView.contactSearchError.test.tsx
+shared/taskpane/hooks/__tests__/useDocumentProfile.polling.test.tsx
+shared/taskpane/hooks/__tests__/useSaveFlow.attachmentsAdded.test.ts
+shared/taskpane/hooks/__tests__/useSaveFlow.attachmentsNotStored.test.ts
+shared/taskpane/hooks/__tests__/useSaveFlow.emailFiling.test.ts
+shared/taskpane/services/__tests__/SseClient.refusedToken.test.ts
+shared/taskpane/services/__tests__/SseClient.signInSignal.test.ts
+shared/taskpane/services/__tests__/attachmentsAddedNotice.test.ts
+shared/taskpane/services/__tests__/attachmentsNotStoredNotice.test.ts
+shared/taskpane/services/__tests__/quickSaveHelpers.signIn.test.ts
+shared/taskpane/utils/__tests__/errorMessages.startupFailure.test.ts
+word/commands/__tests__/commands.signIn.test.ts

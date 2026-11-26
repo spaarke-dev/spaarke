@@ -510,6 +510,16 @@ public static class RunsEndpoints
                     $"(exact case). Omit it for '{IntakeParameterCatalog.ManagedSolutionPackage}'.");
             }
 
+            // Data-setup plan D4: the starter taxonomy pack H12b seeds — the same allowed set H12b checks (owner decision B).
+            if (request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ReferenceDataPack, out var referenceDataPackValue)
+                && !IntakeParameterCatalog.AllowedReferenceDataPacks.Contains(referenceDataPackValue ?? string.Empty))
+            {
+                return BadRequest(httpContext, ControlPlaneErrorCodes.IntakeInvalidReferenceDataPack,
+                    $"nonSecretParameters['{IntakeParameterCatalog.ReferenceDataPack}'] is '{referenceDataPackValue}'; " +
+                    $"allowed values are {IntakeParameterCatalog.LegalStandardReferenceDataPack} | {IntakeParameterCatalog.NoReferenceDataPack} " +
+                    $"(exact case). Omit it for '{IntakeParameterCatalog.LegalStandardReferenceDataPack}'.");
+            }
+
             // T256: H7b's dry-run flag — the handler's own rule (SecureRecordSetupIntake) and its own rejection code.
             if (!SecureRecordSetupIntake.TryReadDryRun(request.NonSecretParameters, out _))
             {
@@ -650,8 +660,10 @@ public static class RunsEndpoints
         //     recovery path (H13 marks Resumable but Cosmos still carries the
         //     wrong environmentId).
         //   - CustomerId mismatch → same cross-customer bleed risk.
-        //   - SetupStatus != InProgress → row is already finalized (Ready)
-        //     or in a rollback state; a second run should never overwrite it.
+        //   - A finalized (Ready) or rollback-state row overwritten by accident.
+        //     ISS-031: a row with sprk_provisionedon set is admitted (Ready or
+        //     InProgress) only with intake upgradeOfProvisionedOn equal to it;
+        //     a never-provisioned row only when InProgress (RegistryRunAdmissionRule).
         //
         // Best-effort: a registry lookup infra fault (client throws) is treated
         // as inconclusive — CreateRun proceeds so the operator isn't blocked
@@ -683,18 +695,30 @@ public static class RunsEndpoints
                         $"'{snapshot.CustomerId}', not requested customer '{request.CustomerId}' " +
                         "(§4D I1 cross-customer bleed guard).");
                 }
-                if (!string.Equals(snapshot.SetupStatus, "InProgress", StringComparison.OrdinalIgnoreCase))
+                // ISS-031: status + existing-stamp acknowledgement in one rule (RegistryRunAdmissionRule). An admitted row is
+                // left as it is: H13 sets Ready whatever it says, and nothing would move a live stamp back from InProgress.
+                request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.UpgradeOfProvisionedOn, out var acknowledgedProvisionedOn);
+                var admission = Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmissionRule.Evaluate(
+                    snapshot.SetupStatus, snapshot.ProvisionedOn, acknowledgedProvisionedOn);
+                if (admission is not Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.Admit)
                 {
                     _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                    var (errorCode, detail) = admission switch
+                    {
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.UpgradeNotAcknowledged u =>
+                            (ControlPlaneErrorCodes.RegistryUpgradeNotAcknowledged, u.Detail),
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.UpgradeMismatch m =>
+                            (ControlPlaneErrorCodes.RegistryUpgradeProvisionedOnMismatch, m.Detail),
+                        Sprk.Provisioning.ControlPlane.Core.Models.RegistryRunAdmission.NotInProgress n =>
+                            (ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress, n.Detail),
+                        _ => (ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress, $"has setupStatus='{snapshot.SetupStatus}'."),
+                    };
                     logger.LogWarning(
-                        "CreateRun: 400 — REG-07 setupStatus mismatch. RequestedCustomerId={CustomerId} " +
-                        "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus}",
-                        request.CustomerId, request.EnvironmentId, snapshot.SetupStatus);
-                    return BadRequest(httpContext, ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress,
-                        $"REG-07: environmentId '{request.EnvironmentId}' has setupStatus='{snapshot.SetupStatus}' " +
-                        "(expected 'InProgress'). Row is already finalized or in a rollback state; " +
-                        "a new run cannot overwrite it. Use clear-quarantine or an operator-side " +
-                        "registry reset before retrying.");
+                        "CreateRun: 400 — REG-07 registry admission refused. RequestedCustomerId={CustomerId} " +
+                        "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus} ErrorCode={ErrorCode}",
+                        request.CustomerId, request.EnvironmentId, snapshot.SetupStatus, errorCode);
+                    return BadRequest(httpContext, errorCode,
+                        $"REG-07: environmentId '{request.EnvironmentId}' {detail}");
                 }
             }
             else
@@ -716,8 +740,17 @@ public static class RunsEndpoints
                     request.EnvironmentId);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // The caller went away after the guard was acquired: release it (not with the cancelled token) so the
+            // customer is not blocked by a guard naming a run that was never written (ISS-031 review).
+            _ = await runGuard.ReleaseAsync(request.CustomerId, runId, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // An HttpClient timeout surfaces as a TaskCanceledException with the caller's token NOT cancelled: it is an
+            // infra fault like any other, not a cancellation (ISS-031 review — it used to escape as a 500 holding the guard).
             // Registry-lookup infra fault — do NOT block CreateRun. Cosmos +
             // audit trail are the fallback source of truth; the concurrency
             // guard prevents dual-dispatch even if the strict check was
@@ -764,6 +797,12 @@ public static class RunsEndpoints
         if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.SolutionPackageType))
         {
             run.Parameters.NonSecret[IntakeParameterCatalog.SolutionPackageType] = IntakeParameterCatalog.ManagedSolutionPackage;
+        }
+
+        // Data-setup plan D4: store the starter taxonomy pack actually used, so H12b and the run record agree with the intake.
+        if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.ReferenceDataPack))
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.ReferenceDataPack] = IntakeParameterCatalog.LegalStandardReferenceDataPack;
         }
 
         // T228: canonical forms — the URL H5 compares against and hands on (https://{host}/), and the two GUIDs in the
@@ -1395,7 +1434,7 @@ public static class RunsEndpoints
         }
 
         // T259 (ISS-010): the customer's display name names its business unit (H10) — H10's own rule and codes.
-        if (CustomerBusinessUnitIntake.Validate(parameters, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName)
+        if (CustomerBusinessUnitIntake.Validate(parameters, CustomerBusinessUnitIntake.ReservedBusinessUnitNames)
             is CustomerBusinessUnitIntakeOutcome.Invalid customerName)
         {
             return (customerName.RejectionCode, $"nonSecretParameters: {customerName.Diagnostic}");

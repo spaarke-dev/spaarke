@@ -77,7 +77,7 @@ public class GrantRowOwnershipTests
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, ExternalAccessLevel.Collaborate, null, organizationId, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, _h.Ownership, _h.OwnerPrivileges, new EverythingProbe(),
-            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     private Task<IResult> InviteAndGrant() =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
@@ -90,7 +90,7 @@ public class GrantRowOwnershipTests
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build(),
             TestSpeOwnership.Customer("acme"),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None, _h.ContactShare);
 
     private Task<AssignedAccessOutcome> Sync() => _h.SyncAsync(Matter, _matter);
 

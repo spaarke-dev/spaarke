@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: API Authorization
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-11-25 (Amendment A1)
 
 ---
 
@@ -18,7 +18,7 @@ Use **endpoint filters** for resource-based authorization, not global middleware
 
 ### ✅ MUST
 
-- **MUST** use endpoint filters for resource authorization
+- **MUST** use endpoint filters for resource authorization of every resource the request names (Amendment A1: a resource only the service's own lookup identifies is checked in the service, under A1's seven conditions)
 - **MUST** call `.RequireAuthorization()` on protected route groups
 - **MUST** add explicit authorization filter for resource checks
 - **MUST** keep global middleware limited to cross-cutting concerns only
@@ -67,7 +67,7 @@ public class DocumentAuthorizationFilter : IEndpointFilter
 }
 ```
 
-**See**: [Authorization Service Pattern](../patterns/auth/authorization-service.md)
+**See**: [Endpoint Filter Pattern](../patterns/api/endpoint-filters.md)
 
 ### Anti-Pattern: Global Middleware
 
@@ -78,6 +78,17 @@ app.UseMiddleware<DocumentSecurityMiddleware>();
 
 // ✅ DO: Endpoint filter (see above)
 ```
+
+---
+
+### Amendment A1 (2026-11-25): a resource the service finds
+When the request does not name the resource and only a lookup inside the service identifies it (for example an
+idempotency match or a message-id match), check it in the service, where it is found. Do not repeat the lookup in
+a filter: two lookups can disagree. Conditions: run as the caller; run before any content read or write (a job
+row counts as a write); check the exact id the action then uses; fail closed; use the shared check
+(`AuthorizeDocumentsAsync` for documents, `CallerRecordAccessProbe` for other records with a system-user caller,
+the external evaluator for a contact); test the deny and fault paths; name it in the route's ledger entry.
+Full text: [ADR-008 A1](../../docs/adr/ADR-008-authorization-endpoint-filters.md#amendment-a1-2026-11-25-a-resource-the-service-finds-is-checked-where-it-is-found).
 
 ---
 

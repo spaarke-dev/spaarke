@@ -97,6 +97,14 @@ export interface PreviewModalProps {
   headerActions?: React.ReactNode;
   /** Stage content — e.g. a `RichFilePreview` renderer. Defaults to a placeholder. */
   children?: React.ReactNode;
+  /**
+   * Opt-in, forwarded to `SprkModal`: while `true` the modal stays mounted but dims, goes inert and drops just below
+   * the host's lookup side pane (`sidePaneLayering.ts`). A host sets it while ANOTHER modal stacked over this one has
+   * the pane open (e.g. the Email documents wizard over a preview), so this one does not cover the pane. Default
+   * `false`.
+   * @since ontology task 194
+   */
+  yieldToSidePane?: boolean;
 }
 
 export const PreviewModal: React.FC<PreviewModalProps> = ({
@@ -107,6 +115,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
   metadata = [],
   headerActions,
   children,
+  yieldToSidePane,
 }) => {
   return (
     <SprkModal
@@ -118,6 +127,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
       padded={false}
       uiScale={uiScale}
       headerActions={headerActions}
+      yieldToSidePane={yieldToSidePane}
       footer={
         <Button appearance="primary" onClick={onClose}>
           Close

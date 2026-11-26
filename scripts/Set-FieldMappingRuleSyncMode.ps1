@@ -13,23 +13,27 @@
       CLASS          RULE'S TARGET COLUMN                                            VALUE
       Assigned-To    an access-conferring Assigned-To column of its target table      0  One-time
                      (the BFF's MembershipOptionsDefaults.CanonicalAccessConferringRegistry)
+      Display copy   an Assigned-style column that confers no access, copied at       0  One-time (never pushed)
+                     create only (the BFF's MembershipOptionsDefaults.DisplayCopyColumns,
+                     task 032b-1: the invoice's attorney and paralegal columns)
       Filing         a filing column of its target table - a typed filing lookup,     0  One-time (not re-pushed)
                      the regarding pair or a regarding stamp (RecordFamilyEdges)
       Plain data     anything else                                                     1  Manual Refresh
 
     An Assigned-To rule is applied by a push only on a request that opts in (includeAssignedTo), whatever its value. A filing
     rule is applied by a push only while its value is 1 (the push then re-files the child through its re-file path); this
-    script keeps it at 0, so an ordinary refresh does not re-file a record. Both classes stay 0.
+    script keeps it at 0, so an ordinary refresh does not re-file a record. A display copy is never pushed whatever its value (the
+    push skips it, task 032b-1); this script keeps it at 0 so the data agrees with the code. All three classes stay 0.
 
-    The two class tables below are COPIES of the BFF's registries (a script cannot read them); the tests in
+    The three class tables below are COPIES of the BFF's registries (a script cannot read them); the tests in
     SyncModeMigrationClassDataTests hold each copy to its source, so a column added to the registry or to a family edge fails a
     build until it is added here. A rule whose class cannot be decided (no resolvable target table) is never guessed: it stops the
     run before any write (exit 2).
 
     WHICH ROWS (the only rows it ever writes):
       sprk_fieldmappingrule rows with sprk_mapping_type = 0 (Copy), ACTIVE (statecode 0), whose sprk_syncmode is not the value its
-      class calls for: Plain data at 0 or empty -> 1 (Migrate); Assigned-To / Filing at 1 -> 0 (Demote). An EMPTY sprk_syncmode
-      reads as One-time, so an Assigned-To or Filing rule that is empty is already as the class requires and is not written.
+      class calls for: Plain data at 0 or empty -> 1 (Migrate); Assigned-To / Display copy / Filing at 1 -> 0 (Demote). An EMPTY
+      sprk_syncmode reads as One-time, so an Assigned-To, Display copy or Filing rule that is empty is already as the class requires and is not written.
     NEVER written: Default (1), Concat (2) and Template (3) rules; any rule already at its class value; any other column; no row
     is deleted or created. The PATCH body is exactly { "sprk_syncmode": <0 or 1> }, with If-Match '*' so it can only update.
 
@@ -109,13 +113,17 @@ $SyncManualRefresh = 1
 $AssignedToColumns = @{
     'sprk_analysis' = @('sprk_assignedattorney1', 'sprk_assignedattorney2', 'sprk_assignedparalegal1', 'sprk_assignedparalegal2')
     'sprk_event' = @('sprk_assignedattorney1', 'sprk_assignedattorney2', 'sprk_assignedlawfirm1', 'sprk_assignedlawfirm2', 'sprk_assignedparalegal1', 'sprk_assignedparalegal2', 'sprk_assignedto', 'sprk_assignedto1', 'sprk_assignedto2', 'sprk_assignedtoexternal', 'sprk_assignedtointernal')
-    'sprk_invoice' = @('sprk_assignedto1', 'sprk_assignedto2', 'sprk_assignedtoattorney1', 'sprk_assignedtoattorney2', 'sprk_assignedtoparalegal1', 'sprk_assignedtoparalegal2')
     'sprk_matter' = @('sprk_assignedattorney1', 'sprk_assignedattorney2', 'sprk_assignedlawfirm1', 'sprk_assignedlawfirm2', 'sprk_assignedparalegal1', 'sprk_assignedparalegal2', 'sprk_assignedtoexternal', 'sprk_assignedtointernal')
     'sprk_project' = @('sprk_assignedattorney1', 'sprk_assignedattorney2', 'sprk_assignedlawfirm1', 'sprk_assignedlawfirm2', 'sprk_assignedparalegal1', 'sprk_assignedparalegal2', 'sprk_assignedtoexternal', 'sprk_assignedtointernal')
     'sprk_todo' = @('sprk_assignedto')
     'sprk_workassignment' = @('sprk_assignedattorney1', 'sprk_assignedattorney2', 'sprk_assignedlawfirm1', 'sprk_assignedlawfirm2', 'sprk_assignedlawfirmattorney1', 'sprk_assignedparalegal1', 'sprk_assignedparalegal2', 'sprk_assignedto', 'sprk_assignedtoexternal', 'sprk_assignedtointernal')
 }
 # END-CLASS-DATA assigned-to
+# BEGIN-CLASS-DATA display-copy  (source: MembershipOptionsDefaults.DisplayCopyColumns)
+$DisplayCopyColumns = @{
+    'sprk_invoice' = @('sprk_assignedtoattorney1', 'sprk_assignedtoattorney2', 'sprk_assignedtoparalegal1', 'sprk_assignedtoparalegal2')
+}
+# END-CLASS-DATA display-copy
 # BEGIN-CLASS-DATA filing  (source: RecordFamilyEdges.All - every edge's lookup column, plus the regarding pair's type column)
 $FilingColumns = @{
     'sprk_agreement' = @('sprk_regardingdocument', 'sprk_regardingmatter', 'sprk_regardingproject')
@@ -156,12 +164,13 @@ $FilingColumns = @{
 }
 # END-CLASS-DATA filing
 
-# PURE: the class of a rule's target column: 'AssignedTo', 'Filing' or 'Plain'. Names compare case-insensitively.
+# PURE: the class of a rule's target column: 'AssignedTo', 'DisplayCopy', 'Filing' or 'Plain'. Names compare case-insensitively.
 function Get-RuleClass {
     param([string]$Entity, [string]$Field)
     $e = "$Entity".Trim().ToLowerInvariant()
     $f = "$Field".Trim().ToLowerInvariant()
     if ($AssignedToColumns.ContainsKey($e) -and $AssignedToColumns[$e] -contains $f) { return 'AssignedTo' }
+    if ($DisplayCopyColumns.ContainsKey($e) -and $DisplayCopyColumns[$e] -contains $f) { return 'DisplayCopy' }
     if ($FilingColumns.ContainsKey($e) -and $FilingColumns[$e] -contains $f) { return 'Filing' }
     return 'Plain'
 }
@@ -176,14 +185,14 @@ function Get-ClassValue {
 # PURE: what to do with one rule row. $TargetEntity is the logical name of the rule's profile's target table ('' when unknown).
 # Outcome is one of:
 #   Migrate               a Plain-data Copy rule, active, sprk_syncmode empty or 0   -> PATCH to 1
-#   Demote                an Assigned-To / Filing Copy rule, active, at 1            -> PATCH to 0
+#   Demote                an Assigned-To / Display copy / Filing Copy rule, active, at 1 -> PATCH to 0
 #   Aligned               a Copy rule already at its class value (an empty value reads as One-time)
 #   InactiveNotMigrated   a Copy rule, inactive, short of its class value -> reported, never written (Dataverse refuses the update)
 #   NotCopy               Default / Concat / Template -> never touched
 #   Unknown               mapping type outside 0-3, sync mode outside {empty, 0, 1}, or a Copy rule whose target table is unknown
 #                         -> the run stops, nothing is written
 # Current is the sync mode as a display string: 'empty', 'One-time' or 'Manual Refresh' (or the raw value when unknown).
-# Class is 'AssignedTo' | 'Filing' | 'Plain' for a Copy rule, else ''. Target is the value the rule should take (or $null).
+# Class is 'AssignedTo' | 'DisplayCopy' | 'Filing' | 'Plain' for a Copy rule, else ''. Target is the value the rule should take (or $null).
 function Get-RuleDecision {
     param($Row, [string]$TargetEntity)
     $type = $Row.sprk_mapping_type
@@ -214,7 +223,7 @@ function Get-RuleDecision {
 function Get-MigrationPlan {
     param([object[]]$Rows, [hashtable]$EntityOf = @{})
     $counts = [ordered]@{ Migrate = 0; Demote = 0; Aligned = 0; InactiveNotMigrated = 0; NotCopy = 0; Unknown = 0 }
-    $byClass = [ordered]@{ AssignedTo = 0; Filing = 0; Plain = 0 }
+    $byClass = [ordered]@{ AssignedTo = 0; DisplayCopy = 0; Filing = 0; Plain = 0 }
     $items = [System.Collections.Generic.List[object]]::new()
     foreach ($row in @($Rows)) {
         $profileKey = "$($row._sprk_fieldmappingprofile_value)"
@@ -241,6 +250,7 @@ if ($SelfTest) {
     # A class table that is not empty: the data block was lost if this fails.
     Assert-Case 'the Assigned-To table is not empty' ($AssignedToColumns.Count -gt 0) $true
     Assert-Case 'the filing table is not empty' ($FilingColumns.Count -gt 0) $true
+    Assert-Case 'the display-copy table is not empty' ($DisplayCopyColumns.Count -gt 0) $true
 
     # The class of a target column.
     Assert-Case 'an Assigned-To column of a matter' (Get-RuleClass 'sprk_matter' 'sprk_assignedattorney1') 'AssignedTo'
@@ -252,6 +262,9 @@ if ($SelfTest) {
     Assert-Case 'a plain column takes Manual Refresh' (Get-ClassValue 'Plain') 1
     Assert-Case 'an Assigned-To column stays One-time' (Get-ClassValue 'AssignedTo') 0
     Assert-Case 'a filing column stays One-time' (Get-ClassValue 'Filing') 0
+    Assert-Case 'an invoice attorney column is a display copy' (Get-RuleClass 'sprk_invoice' 'sprk_assignedtoattorney1') 'DisplayCopy'
+    Assert-Case 'a display copy stays One-time' (Get-ClassValue 'DisplayCopy') 0
+    Assert-Case 'an invoice Assigned To column is plain (no registry entry)' (Get-RuleClass 'sprk_invoice' 'sprk_assignedto1') 'Plain'
 
     $cases = @(
         @{ N = 'plain Copy, active, empty -> Migrate'; E = 'sprk_event'; R = @{ sprk_mapping_type = 0; sprk_syncmode = $null; statecode = 0; sprk_targetfield = 'sprk_description' }; O = 'Migrate' }
@@ -263,6 +276,8 @@ if ($SelfTest) {
         @{ N = 'Assigned-To Copy, One-time -> Aligned'; E = 'sprk_matter'; R = @{ sprk_mapping_type = 0; sprk_syncmode = 0; statecode = 0; sprk_targetfield = 'sprk_assignedattorney1' }; O = 'Aligned' }
         @{ N = 'Assigned-To Copy, Manual Refresh -> Demote'; E = 'sprk_matter'; R = @{ sprk_mapping_type = 0; sprk_syncmode = 1; statecode = 0; sprk_targetfield = 'sprk_assignedattorney1' }; O = 'Demote' }
         @{ N = 'Assigned-To Copy, Manual Refresh, inactive -> InactiveNotMigrated'; E = 'sprk_matter'; R = @{ sprk_mapping_type = 0; sprk_syncmode = 1; statecode = 1; sprk_targetfield = 'sprk_assignedattorney1' }; O = 'InactiveNotMigrated' }
+        @{ N = 'display-copy Copy, One-time -> Aligned (never migrated to Manual Refresh)'; E = 'sprk_invoice'; R = @{ sprk_mapping_type = 0; sprk_syncmode = 0; statecode = 0; sprk_targetfield = 'sprk_assignedtoparalegal1' }; O = 'Aligned' }
+        @{ N = 'display-copy Copy, Manual Refresh -> Demote'; E = 'sprk_invoice'; R = @{ sprk_mapping_type = 0; sprk_syncmode = 1; statecode = 0; sprk_targetfield = 'sprk_assignedtoattorney1' }; O = 'Demote' }
         @{ N = 'filing Copy, empty -> Aligned'; E = 'sprk_event'; R = @{ sprk_mapping_type = 0; sprk_syncmode = $null; statecode = 0; sprk_targetfield = 'sprk_regardingmatter' }; O = 'Aligned' }
         @{ N = 'filing Copy, Manual Refresh -> Demote'; E = 'sprk_event'; R = @{ sprk_mapping_type = 0; sprk_syncmode = 1; statecode = 0; sprk_targetfield = 'sprk_regardingmatter' }; O = 'Demote' }
         @{ N = 'Default, empty -> NotCopy (never written)'; E = 'sprk_event'; R = @{ sprk_mapping_type = 1; sprk_syncmode = $null; statecode = 0; sprk_targetfield = 'sprk_description' }; O = 'NotCopy' }
@@ -375,7 +390,7 @@ function Write-Plan {
     }
     Write-Host ("Totals: {0} rule(s) read. ToMigrate (to Manual Refresh): {1}; ToDemote (to One-time): {2}; Aligned: {3}; InactiveNotMigrated: {4}; NotCopy (never touched): {5}; Unknown: {6}" -f `
             $Plan.Items.Count, $Plan.Counts.Migrate, $Plan.Counts.Demote, $Plan.Counts.Aligned, $Plan.Counts.InactiveNotMigrated, $Plan.Counts.NotCopy, $Plan.Counts.Unknown)
-    Write-Host ("Copy rules by class: Assigned-To {0}, Filing {1}, Plain data {2}" -f $Plan.ByClass.AssignedTo, $Plan.ByClass.Filing, $Plan.ByClass.Plain)
+    Write-Host ("Copy rules by class: Assigned-To {0}, Display copy {1}, Filing {2}, Plain data {3}" -f $Plan.ByClass.AssignedTo, $Plan.ByClass.DisplayCopy, $Plan.ByClass.Filing, $Plan.ByClass.Plain)
 }
 
 function Read-Plan {

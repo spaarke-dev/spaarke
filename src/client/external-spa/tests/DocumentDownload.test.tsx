@@ -2,7 +2,8 @@
  * R3 task 066 (owner check 3, items 2-3) - an external user downloads a document from the document detail window, and a
  * failed download is always visible (document detail AND DocumentLibrary).
  *
- * What runs for real: the Documents widget body, `RecordDetailModal`, `RecordDetailFields`, `DocumentLibrary`, the shared
+ * What runs for real: the Documents widget body, `RecordTemplateModal` (R4 task 005: Download is its toolbar action),
+ * `RecordDetailFields`, `DocumentLibrary`, the shared
  * `SprkModal` and Fluent v9. What is substituted: the network seam (`bffApiCall` / `bffApiBlob`, throwing `ApiError` the way
  * bff-client builds it), the shared grid (reports its rows, opens one on click) and the browser-only helpers jsdom lacks
  * (object URLs, the anchor click that starts a download).
@@ -31,45 +32,48 @@ vi.mock('@spaarke/ui-components/utils/themeStorage', () => ({
   resolveCodePageTheme: () => null,
   setupCodePageThemeListener: () => () => undefined,
 }));
-vi.mock('../src/services/gridDataverseClient', () => ({ gridDataverseClient: {} }));
+vi.mock('../src/services/gridDataverseClient', async () => (await import('./documentsGridHarness')).gridClientModule());
 
-// The shared grid, as in RecordDetailModal.test.tsx: reports its rows and opens one through `onRecordOpen`.
+// The shared grid, as in RecordTemplateSections.test.tsx: reports its rows and opens one through `onRecordOpen`.
 vi.mock('../src/widgets/ExternalDataGrid', async () => {
   const R = await import('react');
+  const { documentsGridOr } = await import('./documentsGridHarness');
   return {
-    ExternalDataGrid: (props: {
-      configId: string;
-      onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
-      onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
-    }) => {
-      const spec = gridSpecs[props.configId];
-      const { onRecordsLoaded } = props;
-      R.useEffect(() => {
-        onRecordsLoaded?.(spec.rows);
-      }, [onRecordsLoaded, spec.rows]);
-      return R.createElement(
-        'ul',
-        { 'data-testid': 'fake-grid' },
-        spec.rows.map(row =>
-          R.createElement(
-            'li',
-            { key: String(row.sprk_documentid) },
+    ExternalDataGrid: await documentsGridOr(
+      (props: {
+        configId: string;
+        onRecordsLoaded?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+        onRecordOpen?: (id: string, row: Record<string, unknown>, ctx: Record<string, unknown>) => void;
+      }) => {
+        const spec = gridSpecs[props.configId];
+        const { onRecordsLoaded } = props;
+        R.useEffect(() => {
+          onRecordsLoaded?.(spec.rows);
+        }, [onRecordsLoaded, spec.rows]);
+        return R.createElement(
+          'ul',
+          { 'data-testid': 'fake-grid' },
+          spec.rows.map(row =>
             R.createElement(
-              'button',
-              {
-                onClick: () =>
-                  props.onRecordOpen?.(String(row.sprk_documentid), row, {
-                    configId: props.configId,
-                    entityName: 'sprk_document',
-                    selectedIds: [],
-                  }),
-              },
-              String(row.sprk_documentname)
+              'li',
+              { key: String(row.sprk_documentid) },
+              R.createElement(
+                'button',
+                {
+                  onClick: () =>
+                    props.onRecordOpen?.(String(row.sprk_documentid), row, {
+                      configId: props.configId,
+                      entityName: 'sprk_document',
+                      selectedIds: [],
+                    }),
+                },
+                String(row.sprk_documentname)
+              )
             )
           )
-        )
-      );
-    },
+        );
+      }
+    ),
   };
 });
 
@@ -77,6 +81,7 @@ import { ApiError, AccessLevel } from '../src/types';
 import DocumentsWidgetBody from '../src/widgets/DocumentsWidget';
 import { DocumentLibrary } from '../src/components/DocumentLibrary';
 import { documentParentCandidates } from '../src/components/detail/RecordDetailFields';
+import { documentRow as libraryRow, rowAction } from './documentsGridHarness';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -123,7 +128,14 @@ async function openDocumentDetail(): Promise<HTMLElement> {
 }
 
 beforeEach(() => {
-  documentRow = { sprk_documentid: DOC_ID, sprk_documentname: 'Contract.pdf', sprk_documenttype: 'Contract' };
+  // `sprk_filetype: 'DOCX'` keeps this file about Download: a file type that is present decides over the name's ".pdf", so the
+  // Preview section (R4 task 022) reads nothing and the content route is called only by Download.
+  documentRow = {
+    sprk_documentid: DOC_ID,
+    sprk_documentname: 'Contract.pdf',
+    sprk_documenttype: 'Contract',
+    sprk_filetype: 'DOCX',
+  };
   gridSpecs[DOCUMENTS_GRID] = { rows: [{ sprk_documentid: DOC_ID, sprk_documentname: 'grid-row' }] };
   bffApiCall.mockReset();
   bffApiBlob.mockReset();
@@ -314,7 +326,7 @@ describe('DocumentLibrary download failure', () => {
       bffApiBlob.mockRejectedValue(new ApiError(status, problem(status)));
       renderLibrary();
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Download Contract.pdf' }, SLOW));
+      fireEvent.click(rowAction(await libraryRow('Contract.pdf'), 'Download')!);
 
       const error = await screen.findByTestId('document-download-error', undefined, SLOW);
       expect(error.textContent).toMatch(text);
@@ -333,10 +345,10 @@ describe('DocumentLibrary download failure', () => {
       bffApiBlob.mockResolvedValue(new Blob(['bytes']));
       renderLibrary();
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Download Contract.pdf' }, SLOW));
+      fireEvent.click(rowAction(await libraryRow('Contract.pdf'), 'Download')!);
       await screen.findByTestId('document-download-error', undefined, SLOW);
 
-      fireEvent.click(screen.getByRole('button', { name: 'Download Contract.pdf' }));
+      fireEvent.click(rowAction(await libraryRow('Contract.pdf'), 'Download')!);
       await waitFor(() => expect(downloadedAs).toEqual(['Contract.pdf']));
       expect(screen.queryByTestId('document-download-error')).toBeNull();
     },

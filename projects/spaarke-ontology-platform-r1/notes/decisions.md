@@ -480,7 +480,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **Q2, "the same Signal stays open with its title recomputed" is withdrawn.** It assumed the writer could rewrite an open row's title; it refreshes only `sprk_lastevaluated` (`SignalWriter.cs` ~:340-352). A changed reason set closes the Signal Superseded (record-free, R16) and opens episode n+1, as ontology's own version change and ebilling 101's corrections re-evaluation do. Conditions:
     - supersede only when the reason set actually changed, never on every run;
     - the new episode starts its own first-detected date (the Worklist age restarts; accepted);
-    - a stored Override or Return set that names the superseded Signal closes it as `LeftAsIs` (resolved otherwise), not a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503;
+    - a stored Override or Return set that names the superseded Signal is never a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503. Which outcome follows the commit route's rule (`SignalWriter.CloseActedByDecisionAsync`): a Superseded close made BEFORE the stored set was read is `LeftAsIs`; a record-free Superseded close made at or after that read is re-closed Acted with the decision's record, so the Signal and the record agree (text aligned to the writer 2026-11-06, ebilling 095d-2b-2; both cases pinned by ebilling's tests);
     - the 114b filter matches on policy + subject and so carries over to the new episode.
   - **ebilling EB-D-185, EB-D-186, EB-D-187 (owner 2026-11-05, relayed by ebilling; first relayed as D-148/149/150, renumbered by ebilling for an ID clash; ontology notes, no change to the rulings above).**
     - **EB-D-185, no substantive invoice decision without a firm.** While an invoice has no firm, is held for its firm, or its post-Set-firm re-run is pending, line decisions (single and batch), every Override and approve refuse 409 and write nothing (`ebilling.line_decision.firm_missing`, `ebilling.override.firm_missing`, `ebilling.approve.firm_missing`). Return stays open. Slice 095d-0. **Amended by EB-D-190 (owner 2026-11-05, relayed; ebilling `92d0421725`):** a whole-invoice Reject is refused the same way (409, nothing written); only Return and Set firm stay available.
@@ -710,3 +710,131 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Formats:** JPS playbook (`sprk_analysisplaybook`, JSON, executed) · legal playbook (Markdown master, read by Copilot/Cowork Agent Skills) · contract-review playbook (Microsoft's four-column subtype).
 - **Writing rule:** qualify by format where the format matters. **Changed text:** the §3 Internal Standard row no longer says a reviewer's handbook is "not a JPS AI playbook". **Unchanged:** §4.11 (a Policy is a predicate, never a playbook's control flow); a one-line note says that section means the JPS format.
 - **Recorded in** `ontology-component-model.md` §3. Told legal-ai-accelerator and spaarkeai-mcp-bff-api-r1.
+
+## D-210 — The Signal core-record pair is not field-secured (owner, 2026-11-06; relayed from field-mapping-server-write-path-r1)
+
+- **Ruling (relayed):** `sprk_signal.sprk_corerecordtype` and `sprk_corerecordid` get no field security. Readability of a Signal stays decided by the core record's own row security.
+- **Write integrity** of the pair (the 042c rule: a half pair is never written on any path) rests on role privileges, the writers' server-side refusal, column auditing (D-206) and field-mapping 052's report, which also flags a pair changed after create.
+- **Readers:** Signal access fails closed whenever the server cannot confirm the pair (field-mapping 044 fix round, reviewed by ontology and uac-r2).
+- **Recorded in** this file. Told field-mapping and uac-r2. Detail of the review is kept out of this public file.
+
+## D-211 — Reviewer-added invoice lines count toward budget spend (owner, 2026-11-07; ebilling EB-D-205, relayed)
+
+- **Ruling (relayed):** the derived spend and budget Thresholds read the invoice approved total (ebilling-r1 D-130), and that total now includes reviewer-added lines (EB-D-199/EB-D-205). An added line counts its amount while undecided or Accepted, its approved amount when Reduced, and nothing when Disallowed. Pending spend moves when a line is added; counted spend moves once the invoice is in a counted status.
+- **Code:** no evaluator change. `FinanceBaseValues` doc comments updated by ebilling (164a, with ontology's OK). Reviewed by ontology (164a: no F findings).
+
+## D-212 — Work Item privilege flag is derived from communication classification (owner, 2026-11-08; relayed from spaarkeai-mcp-bff-api-r1)
+
+- **Ruling (relayed), FR-04 "option A widened":** a Work Item is privilege-flagged when its subject (when the subject is a communication) or any witness or evidence communication has `sprk_privilegeclassification` Privileged or Potentially Privileged. The read is made as the caller and fails closed: unreadable, faulted or uninterpretable sources flag the item. None or null does not flag. `sprk_signal.sprk_privilegeflagged` is not a source (DI-64). Privilege still never gates a read (2026-07-16).
+- **Code:** mcp-bff task 018, `Services/Signals/WorkItemPrivilege.cs` (`SourcesOf`, `FlaggedAsync`). Reviewed by ontology: no F findings.
+- **Ontology follow-up:** DI-143 (#2630) reuses that helper for the Decision Record snapshot once 018 is on master.
+- **Known limits accepted with the ruling:** the AI's own flag (stored in association provenance) is not a source; field security on the classification column would read as not flagged; an untyped non-communication subject is over-flagged.
+
+## D-213 — A published rate card is not evidence that its Procedure Version opened a window (ontology ruling, 2026-11-08; ebilling 085)
+
+- **Ruling (ontology, on D-203 (5a)/(9)):** a Retired Procedure Version opened a window only when it has a Published policy version (as before). Rate cards are not evidence: import accepts only a Draft version and card publish does not check version status, so a card can be Published under a version that was never published. ebilling's 085 fix-1 rule (F1-b, "Retired + Published card = opened") is withdrawn, in both the resolver and the scope lock.
+- **Known limit (extended):** a rate-card-only version that was in force and then Retired without a successor reads as never opened (work in its window is not applicable). Proper fix, offered to ebilling as a follow-up on its own table (schema, owner approval): stamp the version at publish and test that stamp.
+- **Rejected:** making card publish wait for version publish (an in-force window with no approved rate; existing data stays ambiguous); publishing cards inside version publish (a half-done follow-on step).
+
+## D-214 — A decision on a worklist row may close the row's other items through add-on options (owner, 2026-11-08)
+
+- **Owner confirmation:** while testing Create budget on a matter, the owner also closed that row's other open items (including 17 billing "Submission integrity" items) through the decision panel's add-on option, and called it "a good feature; no changes necessary". No change to the commit route's row-level resolution.
+- **Note:** D-207 (held PRs #2580/#2579) still moves billing items out of the Console decision route into Invoice Review once ebilling 112 is on dev; until then a row decision can close billing items with the row.
+
+## D-215 — Gate Decision Records of Direct messages follow the message's participants (owner, 2026-11-09, asked directly; uac-r2 task 198 Part E)
+
+- **Context:** the owner approved Direct 1:1 messages being owned by a dedicated Direct-message owner team (fm 054a) and ruled that participants keep their message shares after filing (except secure targets, and Restricted targets for external users). Under D-169 as built, a team-owned message's gate Decision Records got no participant share, and filing revoked every share.
+- **Ruling (1):** a gate Decision Record of a message owned by the Direct-message owner team is shared Read with the message's internal participants who can read the message now. It is never more visible than its message; an unknown or unreadable case grants nothing. Every other team-owned communication keeps D-169's behaviour.
+- **Ruling (2), amends D-169 for Direct messages only:** on filing to an ordinary record the record is re-owned to the record's team as before and keeps Read for those participants (recomputed, not carried over). A secure target stays with the Secure mirror. External users never get a Decision Record share (D-169 internal only).
+- **Added with uac-r2 (ontology agreed):** unfiling a message back to Direct re-owns its gate Decision Records to the Direct-message owner team, recomputes the participant shares and revokes every other share, so the record team keeps no access the message no longer gives.
+- **Revoke side:** no path removes an internal participant's Read on a Direct message (uac-r2, 198 design), so no revoke-side mirror is built. If uac-r2's rework adds one, it adds the mirror.
+- **Implementation:** uac-r2 (198 Part E) edits `Services/Signals/GateDecisionRecordSharing.cs` after fm 054a's recipient column lands; ontology reviews the diff, plus one independent review, before merge. D-123's secure wall is unchanged.
+
+## D-216 — The budget inquiry email is filed under both the inquiry and the matter, and archived as a Document (owner, 2026-11-09, asked directly; UAT of 161 on REAL-2026-123456.02)
+
+- **Finding (owner UAT):** Revise budget worked; the inquiry email was sent and the `sprk_servicerequest` was created under the matter. But the `sprk_communication` has only `sprk_regardingservicerequest` set (`sprk_regardingmatter` empty), so it does not show on the matter, and no .eml Document was archived. Cause: `BudgetInquiryExecutor.Build` puts the service request first, `CommunicationService.MapAssociationFieldsAsync` maps only `associations[0]`, and the executor never sets `ArchiveToSpe` (default false; the email composer defaults it to true).
+- **Ruling:** the inquiry email is filed under BOTH the inquiry (service request) and the matter, and the sent email is archived as an .eml Document like a composer send. Chosen over "matter only" (which would move reply linking to the matter).
+- **Implementation (to come, ours):** the matter association also sets its own lookup at create, before the core-ancestor stamp so the inherited Access Permission takes both parents in; opt-in for this sender only; `ArchiveToSpe = true`. Access questions (two core lookups on one communication; external visibility through the matter; a secure matter) go to uac-r2 before the build. Regression test plus an independent review; dev deploy needs the owner's go.
+- **Internal-only (owner, 2026-11-10, relayed by uac-r2, then confirmed directly in this session: "Budget inquiry are internal only"):** "Budget inquiry can be internal only" (option a). The inquiry email and the replies resolved to an inquiry service request are created with `sprk_isinternalonly = true` in the same create, so filing them under the matter does not make them visible to the matter's external grantees. Scope stays inquiry service requests only (anything wider goes back to uac-r2 and the owner). The matter is read from the service request presence-aware and fails closed (absent, unread or faulted read: fail or retry, never service-request-only); an explicit null stays as today. The email joins the matter's thread at send (the thread sweep skips rows with two typed lookups).
+
+## D-217 — Every outgoing email filed to a record is saved as an .eml Document and shows in that record's Messages (owner, 2026-11-10, asked directly; UAT of 176)
+
+- **Owner ruling:** "emails (which are communication records) should be saved as Documents (as .eml) AND show in the Messages". Scope is the `sprk_communication` table, never the out-of-the-box Dataverse `email` activity.
+- **Finding (dev, 2026-11-10):** archival is opt-in per request (`SendCommunicationRequest.ArchiveToSpe`, default false). Only the email composer (default on) and the budget inquiry (176) ask, so no outgoing email has been archived since 2026-11-03: Assign Task notices, decision messages, Messages replies, AI disposition, AP export, the Outlook add-in and registration emails never are. No archival error was logged. Separately, a record's Messages list (`GET /api/communications/by-regarding`, `CommunicationThreadReadService.ReadByRegardingAsync`) finds messages only through threads ANCHORED to the record; a thread carries one anchor, so an email filed under two records (the budget inquiry: inquiry + matter) shows only under its anchor. 176 met "filed under both" on the email row but not in the matter's Messages.
+- **Ruling (implementation, task 177):** (1) The BFF owns the archive rule (ADR-002: one server-side owner): every outgoing send that creates a `sprk_communication` filed to at least one regarding record is archived as an .eml, whatever the request flag says. The sender account's `ArchiveOutgoingOptIn` admin switch is kept. Record-less sends (registration, mailbox verification) keep the opt-in flag. (2) A record's Messages list also shows messages whose OWN typed regarding lookup is that record, grouped under their thread, even when the thread is anchored elsewhere; only those messages, not the rest of that thread. Same impersonation, Open-only rule for external callers and access filter as today.
+- **Accepted consequence:** each archived .eml queues document analysis, so Assign Task notices also add a Document and an analysis run on their matter (the owner was told; ask again if this proves noisy).
+
+## D-218 — The outgoing .eml is linked to its record, so it shows in that record's Documents (owner, 2026-11-10, asked directly; follows D-217)
+
+- **Owner ruling:** "Yes, link it". The question was whether the .eml saved for an outgoing email should be linked to its record so it appears in that record's Documents, not only through its email.
+- **Finding:** task 177's archive (`ArchiveToSpeAsync`) sets only `sprk_relatedcommunication`, so the .eml never shows in a record's Documents. The implementer stopped there (uac-r2 condition C3: link only through an existing shared path). That shared path is `Spaarke.Dataverse.DocumentAssociationMap.TryApply(CreateDocumentRequest, …)`, used by the Outlook add-in save (`OfficeDocumentPersistence`) and the upload finalizer. It stages ONE association per create, on the same direct columns the add-in writes (matter, project, invoice, work assignment, event, To Do, contact).
+- **Ruling (task 177, part A3):** the outgoing .eml is created with one record link through `DocumentAssociationMap.TryApply`, chosen from the communication as written: its primary regarding when that type has a document column, otherwise the first typed regarding lookup that has one (so the budget inquiry's .eml, filed to a service request and a matter, links to the matter). The link is written in the same create as `sprk_relatedcommunication` (uac-r2 C1). The container, owner and the one-document-per-email rule are unchanged. A communication filed only to a type with no document column (for example a service request alone) keeps today's behaviour: no record link, still reachable through its email. The inbound archive is unchanged.
+- **Implementation path (uac-r2, 2026-11-10, Option A):** the archive writes a raw `sprk_document` (generic create), which `TryApply(CreateDocumentRequest…)` cannot reach, and no shared path gives a document an inherited Access Permission at create (task 189 fence). So: a narrow raw-row companion of `DocumentAssociationMap` stages the link (the map alone chooses field and target); the inherited Access Permission follows immediately after the create through `CoreAncestorRestamper.RefreshInheritedAccessPermissionAsync` (as `RecordCreationService` does); a failed restamp is logged and repaired by `ChildAccessPermissionReconciler`, never failing the archive. The link lives inside `ArchiveToSpeAsync`, so on-demand re-archive of an outgoing email links too (outbound only). Owner unchanged (task 146 content owner).
+
+## D-219 — Wizard lookups and email: side pane everywhere, full composer (owner, 2026-11-12, asked directly; review `notes/create-wizard-lookup-composer-review.md` §6)
+
+- **Q1 reference tables:** side pane. Any lookup uses the side pane (an option set stays a dropdown).
+- **Q2 sent-as:** a From selection (My mailbox / Spaarke shared mailbox), as in the Send Email dialog.
+- **Q3 attachments, templates, AI drafting:** on in the wizard email steps, AND turned on in the Send Email dialog, which today shows no template picker or AI draft (task 186).
+- **Q4 Cc/Bcc:** Cc and Bcc, as in the Send Email dialog.
+- **Q5 other pickers:** the same rule applies; update Rule Review, the ontology rule wizard and SPE Admin (task 187).
+- **Q6 contacts:** person lookups show active contacts only.
+- **Effect:** tasks 179–182 lose their owner-question gates; 183 turns templates/AI on; new tasks 186 (Send Email dialog templates + AI) and 187 (other pickers); 185 deploys them all.
+
+## D-220 — Templates and AI drafting: not Daily Briefing; yes the Office add-in, after coordination (owner, 2026-11-12, asked directly; task 186 inventory)
+
+- **Daily Briefing:** no (its composer stays without templates, AI draft or upload).
+- **Office add-in email** (`office-addins/shared/taskpane/components/views/EmailView.tsx`, `SendEmailPane`): yes, "but this needs to be coordinated with word-add-in-r1 and uac-r2 because there may be technical limits". AI draft and template render are BFF calls the add-in can make; template listing reads `template` rows through `Xrm.WebApi`, which the add-in lacks. Questions sent to both sessions 2026-11-12; task 189 waits on their answers.
+- **uac-r2 conditions (2026-11-12):** same routes with the add-in's own OBO token, no branching on the client; each route checks the record it touches as the caller (route ledger shows a record check); any grounding in /draft for a flagged caller (stored `sprk_isexternal`) goes through the 191h seam; template listing via a BFF route is fine as an IMPERSONATED caller read (`DataverseImpersonation` + `RetrieveMultipleImpersonatedAsync`), declared as such in the route ledger, not app-only + filter; do not bind its contract to OOB `template` columns (compose-templates-r8 plans `sprk_template`); send the route design and add-in wiring to uac-r2 before merge.
+
+## D-221 — SPE Admin pickers stay as they are (owner, 2026-11-12, asked directly; task 187)
+
+- The four SPE Admin pickers (Business Unit in `BuContextPicker` and `ContainerTypeConfig`, Container Type Config, Environment) keep their BFF-backed lists. An exception to D-219 Q5 ("any lookup uses side pane").
+- Why: each BFF route limits the list to the caller's business units (`BusinessUnitEndpoints`, `ListConfigsAsync`, `ListEnvironmentsAsync`); the Dataverse side pane lists every row the user can read and its `filters` cannot express that reach, so it would show rows the routes hide, and a pick outside the list clears `BuContextPicker`'s selection.
+- Rejected: a BFF-backed side pane (new surface with no owner need).
+
+## D-222 — Budget inquiry: Cc/Bcc sent end to end; a failed send is recoverable; dev evidence kept (owner, 2026-11-13, after the 176/160 dev run on MAT-34929-0040)
+
+- **Cc/Bcc:** the Send budget inquiry step sends Cc and Bcc end to end, like the Send Email dialog (D-219 Q4). The warning "Cc and Bcc are not sent with this step. Add every recipient to To." goes away. Rejected: hiding Cc behind a toggle as the only fix. Task 190.
+- **Failed send:** when the inquiry email fails after earlier actions succeeded, the user can retry from the item; the retry re-sends (reusing the service request already created) instead of replaying the stored error, and the Signal is not auto-closed while a decision on it is unfinished. Task 191 (Opus review; ontology-owned).
+- **Why:** on dev the budget revision and service request were written, the email was not sent, no Decision Record was written, the budget-revision trigger closed the Signal 33 s later, and "Record decision" then returned HTTP 500 by replaying the failure. The user had no way to finish.
+- **Dev data:** the revision, service request and closed Signal stay as evidence; re-test on a fresh zz- fee/scope communication after the next nightly run.
+
+## D-223 — A "maybe sent" inquiry email: the user chooses; sends are no longer silently re-sent (owner, 2026-11-13, asked directly after task 191 escalated)
+
+- **Finding:** every email send goes through the standard Graph policy, which re-sends `sendMail` up to 3 times on 5xx/408 (`GraphHttpMessageHandler.cs:116-119`), so after a 502/503/timeout nobody can tell whether the email went out (DI-153, #2779).
+- **Decision ("Ask the user"):** (1) fix #2779 in task 191: sends use `NoTransientRetryOption` (429 only) and the send error says NotSent or Unknown; (2) a NotSent failure retries automatically, reusing the service request; (3) for Unknown the item says the email may have been sent and to check Sent Items, and offers "Send again" or "Record without sending". No duplicate is ever sent without a person choosing it.
+- **Rejected:** checking Sent Items automatically (lag; lookup broken, #2774); treating 5xx as not sent (duplicate risk to the outside firm); shipping only the safe part.
+
+## D-224 — Budget inquiry email: standard default text; no template picker or AI of its own (owner, 2026-11-14, asked directly after task 188's review)
+
+- **Finding:** the decision wizard's email step (`DecisionWizard/steps/EmailMessageFields.tsx`) passes no template or AI handlers and refuses network fetches by design. Only To is pre-filled (task 160, `DecisionPlanEndpoints.cs:226`). Subject and Message start empty (`DecisionActionCatalog.cs` `MessageParameters`, no default).
+- **Decision:**
+  - The Budget inquiry email opens with a **standard default subject and message**, which the user can edit.
+  - It gets **no template picker** unless the shared EmailComposer shows one anyway, and **no AI draft**.
+  - The step stays compose-only, as built in tasks 160 and 190.
+- **Follow-up:** task 192 adds the default through the plan route's `DefaultSource` mechanism (task 167, D-193). The owner confirms the wording before execution.
+- **Rejected:** wiring templates and AI into the decision step. The owner said they are not needed here, and the step blocks fetches on purpose.
+
+## D-225 — Decision Record duplicate check: deterministic primary id on keyed writes (main session, 2026-11-17, ebilling-r1 EB-D-247 (d); owner asked for "a check")
+
+- **Finding:** keyed writes (gate, condition-cleared, billing, Procedure) look up `sprk_steps` for their key, then create. Two concurrent attempts can both miss and both create: the processing lock fails open (#984), and the invoice decision lock expires after 2 minutes. `sprk_decisionrecord` has no key column, so Dataverse never refuses the second create. `StoredSetOf` then refuses that key permanently.
+- **Decision:** every keyed entry point sets the record's primary id to a value derived from its key alone (not the code, own prefix), in the one `CreateAsync`. A DuplicateRecord fault re-reads the stored row and applies the existing already-recorded rules (same code and hash → AlreadyRecorded; otherwise the existing refusals). The `sprk_steps` lookup stays first, for older rows. The commit route's client-keyed review path keeps random ids.
+- **Builder:** ebilling-r1, with a full ontology review (as for 095f-2b). It closes ontology 149 K2 and the invoice-lock overlap.
+- **Open:** one known limit of a derivable id was sent to uac-r2 and the owner by message (access detail kept out of the repo). The merge waits on both accepting it.
+- **Owner choice (2026-11-17, typed in this session): option 1.** Every keyed entry point, the gate included, derives its id with a keyed hash. The key is a per-environment value the BFF reads from Key Vault with its managed identity; if the value is missing, the BFF refuses to start. The value is not a credential: it falls in ADR-028 A6's Spaarke-generated category. An earlier relay of "option 2" (EB-D-251, ebilling-r1) contradicts this; ebilling asked for the owner's confirmation in their session. Creating the dev value is an Azure change that needs the owner's go.
+- **Superseded the same day: "Option 2 narrowed"** (owner, typed in uac-r2's session, relayed verbatim by uac-r2, 2026-11-17; it replaces both earlier answers).
+  - Gate and billing Decision Records keep random ids.
+  - Only condition-cleared and Procedure keep the derived id.
+  - No Key Vault value is created, so there is no keyed hash, startup check or provisioning step.
+  - ebilling-r1 makes the change on `task/ebilling-084h-5-r1`; we review that diff.
+  - Consequence: ontology **149 K2 stays open**. A gate retry is still guarded only by the lookup-first step, not by the id. Billing likewise.
+  - The derivable-id known limit applies to the two derived entries (detail by message only).
+  - Owner to say here if this is not what they meant (they typed "Option 1" in this session earlier).
+- **Rejected:** an alternate key on a new key column (schema change and backfill, same derivable handle); a check after the write (detects, doesn't prevent; deletes from an append-only table).
+
+## D-226 — Reschedule keeps allowing a new due date in the past (owner, 2026-11-22, asked directly after the main session's Do-lane check)
+
+- **Finding:** the Do lane's Reschedule (`DecisionActionCatalog.cs` `reschedule`; `RescheduleExecutor.PreflightAsync`) checks only that the new due date is a valid date. A date in the past is accepted with no message; the item stays overdue and the rule may raise it again.
+- **Decision (owner, typed in this session: "No, allow them"):** keep allowing past dates. No validation added in the wizard or the BFF. Use case: correcting a due date that was entered wrong.
+- **Effect:** none in code. Testers and reviewers should not re-raise it as a defect.

@@ -25,6 +25,9 @@ import { _resetNavPropCacheForTests } from '../../../services/PolymorphicResolve
 const WA_ID = '33333333-3333-3333-3333-333333333333';
 const CONTACT_ID = '51a5ddb0-40bf-f111-aaaf-0022482913fc';
 
+/** The event create route; the follow-on names its mapping source in a query string (task 026). */
+const EVENT_ROUTE = /\/api\/v1\/child-records\/sprk_event(\?|$)/;
+
 /**
  * ManyToOneRelationships shaped like the live sprk_event response. Order is deliberately
  * adversarial: a systemuser lookup and a look-alike contact column come before sprk_assignedto.
@@ -118,7 +121,7 @@ describe('WorkAssignmentService.createFollowOnEvent — Assigned To (task 097)',
     });
 
     expect(result.success).toBe(true);
-    const create = bff.childCreates.find(c => c.url.endsWith('/api/v1/child-records/sprk_event'))!;
+    const create = bff.childCreates.find(c => EVENT_ROUTE.test(c.url))!;
     expect(create).toBeDefined();
     const payload = create.body;
     expect(payload['sprk_AssignedTo@odata.bind']).toBe(`/contacts(${CONTACT_ID})`);
@@ -135,7 +138,7 @@ describe('WorkAssignmentService.createFollowOnEvent — Assigned To (task 097)',
 
     await service.createFollowOnEvent(WA_ID, { ...EMPTY_FOLLOW_ON_EVENT_STATE });
 
-    const payload = bff.childCreates.find(c => c.url.endsWith('/api/v1/child-records/sprk_event'))!.body;
+    const payload = bff.childCreates.find(c => EVENT_ROUTE.test(c.url))!.body;
     expect(Object.keys(payload).some(k => /assignedto/i.test(k))).toBe(false);
   });
 

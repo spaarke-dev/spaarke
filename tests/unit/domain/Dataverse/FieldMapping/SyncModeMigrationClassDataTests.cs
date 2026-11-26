@@ -8,8 +8,8 @@ namespace Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 040 (FR-34, scope: sync mode) — the sync-mode migration script
-/// (<c>scripts/Set-FieldMappingRuleSyncMode.ps1</c>) decides a rule's class from two tables it carries: the Assigned-To columns and
-/// the filing columns. A script cannot read the BFF's registries, so the tables are copied into it and THESE tests hold the copies to
+/// (<c>scripts/Set-FieldMappingRuleSyncMode.ps1</c>) decides a rule's class from the tables it carries: the Assigned-To columns,
+/// the display copies (task 032b-1) and the filing columns. A script cannot read the BFF's registries, so the tables are copied into it and THESE tests hold the copies to
 /// the sources: a column added to the registry or to a family edge that is not added to the script fails here, naming the line to add.
 /// </summary>
 public class SyncModeMigrationClassDataTests
@@ -81,7 +81,41 @@ public class SyncModeMigrationClassDataTests
 
         notAssignedTo.Should().BeEmpty("every column of the script's Assigned-To table must be one the push treats as Assigned-To");
         missing.Should().BeEmpty("every Assigned-To column the push classifies must be in the script's table");
-        script.Keys.Should().Contain(["sprk_event", "sprk_invoice"], "the classifier covers every table of the registry, not only the roots");
+        script.Keys.Should().Contain(["sprk_event", "sprk_todo"], "the classifier covers every table of the registry, not only the roots");
+    }
+
+    /// <summary>
+    /// Task 032b-1: the script's display-copy table is <see cref="MembershipOptionsDefaults.DisplayCopyColumns"/> — the columns the
+    /// push never writes (<c>PushRuleSelection.Select</c>) — so the script keeps them One-time and never migrates them to Manual
+    /// Refresh.
+    /// </summary>
+    [Fact]
+    public void TheDisplayCopyTable_IsTheDisplayCopySet()
+    {
+        var expected = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var (table, columns) in MembershipOptionsDefaults.DisplayCopyColumns)
+            expected[table.ToLowerInvariant()] = columns.Select(c => c.ToLowerInvariant()).OrderBy(c => c, StringComparer.Ordinal).ToArray();
+
+        var actual = Block(ScriptText(), "display-copy");
+
+        actual.Should().BeEquivalentTo(expected, o => o.WithStrictOrdering(),
+            "the script's display-copy table must equal MembershipOptionsDefaults.DisplayCopyColumns. The block should read:\n"
+            + Render(expected));
+    }
+
+    [Fact]
+    public void NoDisplayCopyIsAssignedToOrFiling_SoItsClassIsNeverAmbiguous()
+    {
+        var assigned = ExpectedAssignedTo();
+        var filing = ExpectedFiling();
+
+        var both = MembershipOptionsDefaults.DisplayCopyColumns
+            .SelectMany(kv => kv.Value.Select(c => (Table: kv.Key.ToLowerInvariant(), Column: c.ToLowerInvariant())))
+            .Where(x => (assigned.TryGetValue(x.Table, out var a) && a.Contains(x.Column))
+                        || (filing.TryGetValue(x.Table, out var f) && f.Contains(x.Column)))
+            .ToArray();
+
+        both.Should().BeEmpty();
     }
 
     private static SortedDictionary<string, string[]> ExpectedFiling()

@@ -11,6 +11,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
+import { openAccessNotes } from '../../../__tests__/helpers/accessNotes';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -19,7 +20,7 @@ import type {
   IAccessGrantRecord,
   IContactSearchResult,
   IOrganizationPick,
-  IUserPick,
+  IPersonPick,
   IRecordNoAccessEntry,
 } from '../types';
 import {
@@ -31,6 +32,7 @@ import {
   vetoFor,
   buildVetoIndex,
 } from '../noAccess';
+import { personFromContact, personFromUser } from './personPickDouble';
 
 const RECORD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5';
 const CONTACT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
@@ -142,7 +144,6 @@ function makeProps(setup: ISetup = {}): IAccessGrantModalProps {
     fetchExistingGrants: jest.fn(async () => setup.grants ?? [CONTACT_GRANT]),
     fetchStandingContacts: jest.fn(async () => setup.standing ?? []),
     searchContacts: jest.fn(async (): Promise<IContactSearchResult[]> => []),
-    isInternalContact: jest.fn(async () => false),
     ...setup.overrides,
   };
 }
@@ -591,7 +592,10 @@ describe('AccessGrantModal — cancellation follows the parent (task 174, owner 
         'No effect: this record is secure, so standing grants give no access.'
       )
     ).toBeInTheDocument();
-    expect(screen.getByText(/It follows the matter it is filed under: Parent Matter\./)).toBeInTheDocument();
+    // Task 196: the Access Permission explanation is a note behind the header bell.
+    expect(
+      within(await openAccessNotes()).getByText(/It follows the matter it is filed under: Parent Matter\./)
+    ).toBeInTheDocument();
   });
 
   it('under a Restricted matter: every contact-based row has no effect', async () => {
@@ -642,23 +646,21 @@ describe('AccessGrantModal — "No Access" is a veto, never a level (spec FR-23)
     const props = makeProps({
       noAccess: async () => jsonResponse(noAccessBody([entry({})])),
       overrides: {
-        pickContact: jest.fn(
-          async (): Promise<IContactSearchResult | null> => ({
-            contactId: 'contact-new',
-            fullName: 'Nina New',
-          })
-        ),
+        // Task 193: the one "Add person" lookup answers a contact first, then a user.
+        pickPerson: jest
+          .fn<Promise<IPersonPick | null>, []>()
+          .mockResolvedValueOnce(personFromContact({ contactId: 'contact-new', fullName: 'Nina New' }))
+          .mockResolvedValueOnce(personFromUser({ id: 'user-new', name: 'Ulf New' })),
         pickOrganization: jest.fn(async (): Promise<IOrganizationPick | null> => ({ id: 'org-new', name: 'NewOrg' })),
-        pickUser: jest.fn(async (): Promise<IUserPick | null> => ({ id: 'user-new', name: 'Ulf New' })),
       },
     });
     renderModal(props);
     await noAccessSection();
-    fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByText('Nina New');
     fireEvent.click(screen.getByRole('button', { name: 'Add organization' }));
     await screen.findByText('NewOrg');
-    fireEvent.click(screen.getByRole('button', { name: 'Add user' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
     await screen.findByText('Ulf New');
 
     const combos = screen.getAllByRole('combobox');

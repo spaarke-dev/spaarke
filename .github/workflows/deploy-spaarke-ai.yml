@@ -34,14 +34,19 @@ on:
       - 'src/solutions/SpaarkeAi/**'
       - 'src/client/shared/Spaarke.UI.Components/**'
       - 'src/client/shared/Spaarke.AI.Widgets/**'
-      - 'src/client/shared/Spaarke.AI.Outputs/**'
-      - 'src/client/shared/Spaarke.AI.Context/**'
       - 'src/client/shared/Spaarke.Events.Components/**'
       - 'src/client/shared/Spaarke.SmartTodo.Components/**'
       - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
       - 'src/client/shared/Spaarke.Auth/**'
-      - 'src/client/shared/Spaarke.SdapClient/**'
+      # Keep in step with the source roots in src/solutions/SpaarkeAi/vite.config.ts:
+      # a folder missing here means a merged fix to it never reaches the Console (ISS-006).
+      - 'src/client/shared/Spaarke.Communication.Components/**'
+      - 'src/client/shared/Spaarke.Compose.Components/**'
+      - 'src/client/shared/Spaarke.Notifications/**'
       - 'src/solutions/LegalWorkspace/**'
+      - 'src/solutions/DocumentUploadWizard/**'
+      - 'src/solutions/FindSimilarCodePage/**'
+      - 'src/solutions/WorkspaceLayoutWizard/**'
       - '.github/workflows/deploy-spaarke-ai.yml'
   workflow_dispatch:
     inputs:

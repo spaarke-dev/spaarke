@@ -4,7 +4,7 @@
     <title>Approval: eligible approvers, worklist, approve</title>
     <phase>4 Review and approval (WP4) — wave W4-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Decides who may approve payment of an invoice (authorization) and freezes the approved total; a wrong resolution lets a non-eligible user approve or hides an invoice from its approvers.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023a" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Shared DataGrid: host row source, row-actions column, truncate-with-tooltip (FR-16 enabler; design notes/task-023-design.md §3.1)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>owner approved the design 2026-11-22 ("Yes, Dataverse record") and the new props on behalf of the grid owners ("yes I approve")</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Additive change to a shared component with 34 consumers (.tsx); a regression reaches every grid host</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: shared-lib API design inside a 1,636-line component</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only the shared DataGrid folder and its type file; 023b touches BFF/config only</parallel-reason>
+    <deps>none (design approved)</deps>
+    <tags>frontend, fluent-ui, react, shared-lib</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add three optional, generic seams to the shared Spaarke DataGrid: a host-supplied row source, a host row-actions column (wiring the unused onRecordAction), and an opt-in ellipsis-with-tooltip for truncated text cells. With none of them passed, every existing grid renders and behaves exactly as today.</prompt>
+  <role>SPAARKE platform developer. Fluent UI v9. Owner of the change to the shared DataGrid on behalf of the dataset-grid framework owners (owner approval 2026-11-22).</role>
+  <goal>A host can give the grid its rows (paged, with lazy scroll), its per-row actions (hidden per row when not allowed) and opt cells into ellipsis + tooltip, while columns, labels and renderers still come from the grid configuration; every other consumer is unchanged.</goal>
+
+  <context>
+    <background>Design: `projects/spaarke-SPA-external-access-platform-r4/notes/task-023-design.md` §2–§3.1 (binding). Today rows come only from FetchXML through `IDataverseClient` → `useLazyLoad` (`DataGrid/useLazyLoad.ts`); `onRecordAction` is destructured as `_onRecordAction` and never used (`DataGrid.tsx` ~:1209); `overrides.columnRenderers` replaces only cells of configured columns (~:1236). Config load + `resolveConfig` (`configResolution.ts:252`) stay the source of columns. Resize is native, widths fitted to the container (~:1260-1310). `DisplayConfig` lives in `src/types/DataGridConfiguration.ts:83`. Inside the external SPA the grid is mounted only via `widgets/ExternalDataGrid.tsx`, which forwards all props (do not edit it). Task 032 later adds persisted widths/sort on top: keep sort inside the grid.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file role="create">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/useHostRowSource.ts (or extend useLazyLoad; choose the smaller diff)</file>
+      <file role="create">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.rowSource.test.tsx</file>
+      <file role="create">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.rowActions.test.tsx</file>
+      <file role="create">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.truncateTooltip.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.hostCommands.test.tsx (how the last additive host option was added and tested)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx (DataGridHostCommand shape)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Every new prop is optional; no Xrm, no fetching, no entity-name literals in the shared lib; types exported from the DataGrid index (and the package barrel if DataGridHostCommand is exported there).</constraint>
+    <constraint source="design §3.1">`rowSource(req: { page, pageSize, signal }) → Promise&lt;{ rows, hasMore, truncated? }&gt;`. When given, the grid runs no FetchXML query (no retrieveMultipleRecords call), no chips and no host-filter overlay; it still loads the configuration and entity metadata. `rowSourceKey` change reloads page 1. A rejected page shows the grid's existing error banner. Paging uses the existing sentinel / lazy scroll (ADR-051); `truncated: true` shows a notice.</constraint>
+    <constraint source="design §3.1, FR-07">`rowActions: { id, label, icon, isVisible?(record) }[]`; rendered as a final fixed-width, non-resizable column of icon buttons (tooltip = aria-label = label) that call `onRecordAction(id, recordId, record, ctx)`. An action whose `isVisible` returns false is NOT rendered (hide, don't disable). Above an inline limit, the rest fold into a "More actions" menu. No column when `rowActions` is absent or empty.</constraint>
+    <constraint source="design §3.1, ADR-021">Truncate-with-tooltip is opt-in (`display.truncateWithTooltip` on the configuration, or a `truncateWithTooltip` prop): text cells ellipsise, and a cell whose content overflows shows a Fluent `Tooltip` with the full text. Off by default.</constraint>
+    <constraint source="ADR-012, 34 consumers">With none of the new props/config passed, rendering, data loading, sort and resize are unchanged — a test proves it for each seam (must-not-fire pair).</constraint>
+    <constraint source="ADR-022">React-16-safe hooks only in anything `pcf-safe` exports (no useId / useSyncExternalStore / useTransition).</constraint>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; no hard-coded colours.</constraint>
+    <constraint source="project">No SPA, BFF or Dataverse change in this task; `ExternalDataGrid.tsx` not edited.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/notes/task-023-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>.claude/patterns/ui/infinite-scroll-list.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load knowledge; declare rigor and model tier (task-execute Step 0.5).</step>
+    <step order="1">Add the types (`DataGridRowSource`, `DataGridRowSourceRequest/Result`, `DataGridRowAction`, `DisplayConfig.truncateWithTooltip`) and export them.</step>
+    <step order="2">Row source: route the grid's records/isLoading/hasMore/error/fetchNextPage through the host loader when `rowSource` is given; keep the FetchXML path byte-for-byte otherwise. Abort in-flight requests on unmount and on `rowSourceKey` change.</step>
+    <step order="3">Row actions: wire `onRecordAction`; append the actions column; per-row visibility; overflow menu.</step>
+    <step order="4">Truncate-with-tooltip in text cells (default renderer and primary-name link) when enabled.</step>
+    <step order="5">Tests: must-fire and must-not-fire for each seam (rowSource: no retrieveMultipleRecords call, pages appended, key reload, error banner, truncated notice; without it: FetchXML path unchanged. rowActions: hidden per row, click calls onRecordAction with id/record, no column when absent. Tooltip: shown on overflow when on; absent when off).</step>
+    <step order="6">Run the whole shared-lib test suite and its build (`npm run build` in Spaarke.UI.Components); run the external SPA's tests and build (it consumes the lib by path).</step>
+    <step order="7">Update docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md with the three host options (short section). Task status: POML + TASK-INDEX, `pwsh scripts/check-task-status-drift.ps1`; notes in `notes/task-023-notes.md`.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.rowSource.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.rowActions.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.truncateTooltip.test.tsx</output>
+    <output type="docs">docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With `rowSource`, the grid shows the host's rows with the configuration's columns, loads further pages on scroll, reloads on `rowSourceKey` change, shows the error banner on a rejected page and a notice on `truncated`, and never calls `retrieveMultipleRecords`.</criterion>
+    <criterion testable="true">With `rowActions`, each row shows only the actions whose `isVisible` is not false; clicking one calls `onRecordAction(id, recordId, record, ctx)`; each button's tooltip equals its aria-label.</criterion>
+    <criterion testable="true">With truncate-with-tooltip on, an overflowing cell ellipsises and shows its full text in a tooltip; with it off, cells render as today.</criterion>
+    <criterion testable="true">With none of the new options, existing DataGrid tests pass unchanged and a must-not-fire test shows the FetchXML path, columns and absence of an actions column are as before.</criterion>
+    <criterion testable="true">Shared-lib build and full test suite pass; external SPA build and tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Split from task 023 by owner decision 2026-11-22 (design B+C+D). 023b and 023c follow. Approval for the dataset-grid owners: owner, 2026-11-22.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

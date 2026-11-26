@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095d-2b-3" project="ebilling-r1">
+  <metadata>
+    <title>Set the firm, part 2b-3: the post-Set-firm re-run writes the automatic supersedes link (EB-D-206)</title>
+    <phase>3 Rules (095d split; follows 095d-2b-2)</phase>
+    <gate>095d-2b-2 merged into work (it edits InvoiceSubmissionRerun*.cs).</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the re-run's conditional commit (.cs); a wrong link would close the firm's correction chain on the wrong invoice.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Concurrency inside an existing IfRowVersionMatches transaction; reuse of the persister rule across two callers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceSubmissionRerun.cs and InvoiceSubmissionPersister.cs (the persister is shared with 165b and field-mapping 032; persister hunks stay an extraction only).</parallel-reason>
+    <deps>095d-2b-2</deps>
+    <tags>bff-api, ebilling, background-job</tags>
+  </metadata>
+
+  <prompt>Read first, not restated here:
+    - EB-D-206 in projects/ebilling-r1/notes/decisions-log.md (the decision);
+    - notes/095d-2b-2.md section 6 ("The supersedes link"), the open question this answers;
+    - notes/095d2-brief.md R1 and section 3;
+    - InvoiceSubmissionPersister.FindSupersededInvoiceAsync (~:1131-1185) and its caller (~:580-603), the rule to reuse;
+    - InvoiceSubmissionRerun.cs: the class remarks (~:136-165, the "Not here (095d-2b seams)" list), PrepareAsync, the plan's invoice UpdateRequest (~:530, ~:550) and CommitAsync (~:698).
+    Wording in commits and notes stays neutral.</prompt>
+
+  <goal>When Set firm gives a firm-less New submission its firm, the re-run links its invoice to the Returned-to-Firm predecessor the persister would have linked had the firm been known at create time. The link is written in the re-run's existing conditional transaction, and it is never written when the persister rule plus the two re-run narrowings find nothing.</goal>
+
+  <scope>
+    <in>
+      1. Extract the predecessor lookup from FindSupersededInvoiceAsync into one shared internal helper (static, taking IGenericEntityService and ILogger) that both the persister and the re-run call. The persister's behaviour is byte-for-byte unchanged, and its tests pass unmodified.
+      2. Two narrowings, applied in the re-run call only (a parameter of the helper):
+         (a) candidates are invoices created BEFORE this invoice (createdon, then id). At create time nothing later exists; on a re-run a later resubmission may.
+         (b) a predecessor already named by another invoice's sprk_supersedesinvoice is not linked. Reuse SubmissionCommitGate.SupersededByAnotherAsync's query; do not copy it.
+      3. In PrepareAsync, only when ALL hold:
+         - the submission is New (ResubmissionOfSubmissionId is null);
+         - the re-run outcome is not an automatic rejection (073 maps to held, R5);
+         - the invoice has no sprk_supersedesinvoice;
+         - the submission now has a firm.
+         Then call the helper and set the lookup on the plan's existing invoice UpdateRequest (IfRowVersionMatches). No new request, no new transaction.
+      4. A read fault in the lookup is a Retry of the re-run, with a reason code and a neutral log, as in the persister. Nothing is written.
+      5. Update the class remarks: drop "the supersedes link" from the seams list and add a remark that cites EB-D-206.
+    </in>
+    <out>
+      - Any change to the predecessor's own row: a Returned-to-Firm invoice stays closed; the link is a peer reference, D-43.
+      - A Correction (097c, explicit target).
+      - Any sprk_signal link (R16).
+      - Any new column, endpoint, job type or DI registration.
+      - Re-linking an invoice that already has a link.
+      - Any client change.
+    </out>
+  </scope>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">One predecessor rule. The persister and the re-run call the same helper. A second copy of the query fails review.</constraint>
+    <constraint source="InvoiceFamilyCoreRecordGuard; D-43">The helper keeps the single-core check. A predecessor filed under another core record is never linked, and that case logs ids only.</constraint>
+    <constraint source="FindSupersededInvoiceAsync remarks">The read is app-only, and nothing about a candidate the firm cannot read reaches any response or log text beyond ids.</constraint>
+    <constraint source="095d-2b-2; EB-D-204">The link is part of the commit. It is never written by an after-commit step, so the re-run stays pending (the firm gate) until the commit holds it.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Must-fire, each with its must-not-fire control:
+      - L1: a firm-less New submission whose firm + number has an earlier Returned-to-Firm invoice under the same core record. After Set firm the re-run's commit carries the link. Control: no earlier invoice gives no link.
+      - L2: an earlier invoice that was automatically rejected is skipped and the Returned one behind it is linked. Control: a human-Rejected most-recent invoice ends the chain, no link.
+      - L3: a LATER Returned-to-Firm invoice (created after this one) is never linked (narrowing a). Control: the same invoice created earlier is linked.
+      - L4: a predecessor already superseded by another invoice is not linked (narrowing b). Control: one with no other successor is linked.
+      - L5: a predecessor under another core record gives no link and a log with ids only.
+      - L6: a Correction submission, an automatic-reject outcome, or an invoice that already has a link gets nothing written to the lookup.
+      - L7: a lookup read fault gives a Retry with nothing committed. A replay then links.
+      - L8: a row-version conflict on the invoice update commits nothing, and the replay re-reads and re-decides.
+    </criterion>
+    <criterion>The persister's existing supersede tests (task 104, EB-D-174, 095c-3) pass unmodified. One seed per new guard (the core check and narrowing a): drop the guard and the named test fails; record this in the notes.</criterion>
+    <criterion>Filtered unit tests (Finance, Submission, InvoiceSubmissionRerun, InvoiceAssignFirm, InvoiceFirmGate) and the full ArchTests pass. The BFF builds. Publish delta is measured against a fresh master build (expected ~0).</criterion>
+    <criterion>Notes in projects/ebilling-r1/notes/095d-2b-3.md: what landed, the seeds, known limits, the publish delta.</criterion>
+    <criterion>Test scope: exactly L1-L8 and the seeds. Anything beyond needs a one-line reason in the notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the re-run's commit is not a single IfRowVersionMatches transaction that holds the invoice update, STOP and report: the link must not be written outside it.</trigger>
+    <trigger>If a legitimate flow shows two live invoices that should both supersede one predecessor, STOP before narrowing (b) refuses it.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>

@@ -44,15 +44,7 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import {
-  XrmDataverseClient,
-  createXrmDataService,
-  createXrmNavigationService,
-  createXrmEmailComposeHandlers,
-  resolveCurrentUserEmail,
-  searchUsersAndContacts,
-  getXrm,
-} from "@spaarke/ui-components";
+import { getXrm, useXrmEmailHostProps } from "@spaarke/ui-components";
 import { EmailWorkspace } from "@spaarke/communication-components";
 import { authenticatedFetch } from "../services/authInit";
 
@@ -71,44 +63,14 @@ interface EmailSectionMountProps {
 }
 
 const EmailSectionMount: React.FC<EmailSectionMountProps> = ({ bffBaseUrl }) => {
-  // Stable across the section's lifetime — one Xrm-backed adapter set per
-  // mount, matching `XrmDataverseClient`'s own "instantiate once" guidance
-  // (see DataGrid.tsx's defaultClientRef pattern).
-  const dataverseClient = React.useMemo(() => new XrmDataverseClient(), []);
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // The Xrm-backed adapters and the composer parity wiring (recipient lookup, the "Related to" Link-another-record
+  // tile, templates, the AI sparkle, share links, "From:", org URL): the same hook the SpaarkeAi widget and the
+  // standalone EmailPage use, so all three surfaces behave identically (owner UAT 2026-07-31; #2973).
+  const hostProps = useXrmEmailHostProps({ authenticatedFetch, bffBaseUrl });
   // Xrm.WebApi-compatible bridge for the associations additive-write path
   // (035) + the embedded PolymorphicPicker (035) — the same object shape a
   // PCF host passes as `context.webAPI`.
   const webApi = React.useMemo(() => getXrm()?.WebApi, []);
-
-  // Composer parity wiring — WITHOUT these the compose modal (reply/forward/new)
-  // loses recipient lookup, the "Related to" Link-another-record tile, templates,
-  // the AI sparkle, and send-time share links. The standalone EmailPage code page
-  // wires the SAME handlers; this section mount must match so BOTH surfaces behave
-  // identically (owner UAT 2026-07-31 — widget-vs-code-page parity).
-  const composeHandlers = React.useMemo(
-    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl || undefined }),
-    [bffBaseUrl],
-  );
-  const handleSearchRecipients = React.useCallback(
-    (query: string) => searchUsersAndContacts(dataService, query),
-    [dataService],
-  );
-  const dataverseUrl = React.useMemo(
-    () => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "",
-    [],
-  );
-  const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
-  React.useEffect(() => {
-    let cancelled = false;
-    void resolveCurrentUserEmail().then((email) => {
-      if (!cancelled) setFromMailbox(email);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (!webApi) {
     // No Dataverse host available. EmailWorkspace's required host props
@@ -140,24 +102,10 @@ const EmailSectionMount: React.FC<EmailSectionMountProps> = ({ bffBaseUrl }) => 
       },
     },
     React.createElement(EmailWorkspace, {
-      dataverseClient,
-      dataService,
-      navigationService,
+      ...hostProps,
       webApi,
       authenticatedFetch,
       bffBaseUrl,
-      onSearchRecipients: handleSearchRecipients,
-      onLookupRecipients: composeHandlers.onLookupRecipients,
-      recordLookupCatalog: composeHandlers.recordLookupCatalog,
-      onLookupRecord: composeHandlers.onLookupRecord,
-      onAddRelationship: composeHandlers.onAddRelationship,
-      onUploadLocalAttachment: composeHandlers.onUploadLocalAttachment,
-      onResolveShareLink: composeHandlers.onResolveShareLink,
-      onListEmailTemplates: composeHandlers.onListEmailTemplates,
-      onRenderEmailTemplate: composeHandlers.onRenderEmailTemplate,
-      onDraftWithAi: composeHandlers.onDraftWithAi,
-      fromMailbox,
-      dataverseUrl,
     })
   );
 };

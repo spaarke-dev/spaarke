@@ -265,4 +265,104 @@ public sealed class BillingDecisionRecorderTests
         system.Role.Should().Be("automated: x");
         system.SystemUserId.Should().BeNull();
     }
+
+    // ── Task 084h-2: a per-record Procedure change's record (RecordProcedureAsync, PreflightProcedure) ──
+
+    private static readonly Guid Override = Guid.Parse("0740c000-0000-4000-8000-0000000000f0");
+    private static readonly Guid Procedure = Guid.Parse("0740c000-0000-4000-8000-0000000000f1");
+    private static readonly Guid Rule = Guid.Parse("0740c000-0000-4000-8000-0000000000f2");
+    private static readonly DateTimeOffset DecidedOn = new(2026, 11, 16, 9, 30, 0, TimeSpan.Zero);
+
+    private static RecordProcedureDecision ProcedureDecision(string code = "assign-procedure", string? reason = "client asked", Guid? id = null) =>
+        new(id ?? Guid.NewGuid(), code, "sprk_matter", Matter, Reviewer, "procedure-editor",
+            code == "exclude-rule"
+                ? new Dictionary<string, object?> { ["rule"] = Rule, ["override"] = Override }
+                : new Dictionary<string, object?> { ["procedure"] = Procedure, ["override"] = Override },
+            code == "exclude-rule" ? "Excluded" : "Assigned", reason, DecidedOn,
+            new[] { new DecisionRecordRef("sprk_procedureassignment", Override) });
+
+    [Fact]
+    public async Task RecordProcedure_WritesOneRecordOnTheCoreRecord_WithTheLookedUpContact_AndARetryWritesNone()
+    {
+        var identity = Identity();
+        var (h, recorder) = Build(identity);
+        var decision = ProcedureDecision();
+
+        var first = await recorder.RecordProcedureAsync(decision);
+        var retry = await recorder.RecordProcedureAsync(decision);
+
+        first.AlreadyRecorded.Should().BeFalse();
+        retry.AlreadyRecorded.Should().BeTrue();
+        retry.RecordId.Should().Be(first.RecordId);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(Matter, "the core record is the subject");
+        h.Row.GetAttributeValue<string>("sprk_actioncode").Should().Be("assign-procedure");
+        h.Row.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Reviewer);
+        h.Row.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(ReviewerContact, "the lookup's answer for the decider");
+        identity.Verify(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory(DisplayName = "084h-2 H-1: a decider's contact that cannot be read refuses a Procedure record as RecordProcedureLookupFailed, never the billing reason")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RecordProcedure_AContactThatCannotBeRead_IsRefusedAsTheProcedureLookup(bool serviceThrows)
+    {
+        var identity = new Mock<IIdentityNormalizationService>();
+        if (serviceThrows)
+        {
+            identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("dataverse slow"));
+        }
+        else
+        {
+            identity.Setup(i => i.ResolveAsync(Reviewer, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(Reviewer) { Faults = IdentityReadFaults.ContactBinding });
+        }
+
+        var (h, recorder) = Build(identity);
+
+        (await recorder.Invoking(r => r.RecordProcedureAsync(ProcedureDecision())).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.RecordProcedureLookupFailed);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "084h-2: a Procedure decision the writer refuses is refused by PreflightProcedure without I/O, and by RecordProcedureAsync before the contact lookup")]
+    public async Task RecordProcedure_ARefusedDecision_IsRefusedByPreflight_AndBeforeTheContactLookup()
+    {
+        var identity = Identity();
+        var (h, recorder) = Build(identity);
+        var decision = ProcedureDecision("exclude-rule", reason: null); // exclude-rule requires a reason
+
+        recorder.Invoking(r => r.PreflightProcedure(decision)).Should().Throw<DecisionRecordRefusedException>();
+        await recorder.Invoking(r => r.RecordProcedureAsync(decision)).Should().ThrowAsync<DecisionRecordRefusedException>();
+        h.Entities.Invocations.Should().BeEmpty();
+        identity.Invocations.Should().BeEmpty("the contact lookup is lazy: a refused decision never asks it");
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PreflightProcedure_PassesAValidDecision_AndReadsNothing()
+    {
+        var (h, recorder) = Build();
+
+        recorder.Invoking(r => r.PreflightProcedure(ProcedureDecision())).Should().NotThrow();
+        h.Entities.Invocations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "084h-2 S5: the writer request is pure: the core record as subject, the facts only the core table and record id, the decider as confirmer")]
+    public void ToRequest_IsPure_AndCarriesNoCloseState()
+    {
+        var decision = ProcedureDecision();
+
+        var request = BillingDecisionRecorder.ToRequest(decision);
+
+        request.Should().Be(BillingDecisionRecorder.ToRequest(decision) with { Facts = request.Facts }, "the same decision builds the same request");
+        request.DecisionId.Should().Be(decision.DecisionId);
+        request.Subject.Should().Be(new DecisionRecordRef("sprk_matter", Matter));
+        request.ConfirmedByUserId.Should().Be(Reviewer);
+        request.Facts.Keys.Should().BeEquivalentTo(new[] { "coreTable", "recordId" });
+        request.Values.Should().BeSameAs(decision.Values);
+        request.Reason.Should().Be("client asked");
+        request.DecidedOn.Should().Be(DecidedOn);
+        request.DeciderContactId.Should().BeNull("the contact is looked up, never passed (K3)");
+    }
 }

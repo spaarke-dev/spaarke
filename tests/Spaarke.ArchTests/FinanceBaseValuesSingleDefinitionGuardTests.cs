@@ -10,8 +10,8 @@ namespace Spaarke.ArchTests;
 /// would state a number the matter form does not show.
 /// </summary>
 /// <remarks>
-/// Enforced by: this source scan (CI and the Stop hook). The rollup's compute needs a live ServiceClient, so no unit test can observe
-/// which formula it calls; a scan of its source is the strongest mechanism that works. Controls: <see cref="TheDetector_FiresOnAPrivateCopy"/>
+/// Enforced by: this source scan (CI and the Stop hook); since task 165b-4 the three spend readers are also compared on one fixture
+/// (<c>SpendServerWrittenSourcesTests</c>, O6 parity), which observes the figures but not a private copy of the status set or formula. Controls: <see cref="TheDetector_FiresOnAPrivateCopy"/>
 /// and <see cref="TheDetector_StaysQuietOnTheSharedCall"/> prove the rule can fail and can pass.
 /// </remarks>
 public class FinanceBaseValuesSingleDefinitionGuardTests
@@ -59,14 +59,17 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         Assert.True(Violations(CodeOf(relativePath)).Count == 0,
             relativePath + ": " + string.Join("; ", Violations(CodeOf(relativePath))));
 
-    // The AI tool handler totals spend from the rollup's own query, so it follows the same amount rule (D-130). It keeps its own
-    // utilization arithmetic (not in scope here), so only the amount rule is guarded for it.
+    // The AI tool handler totals spend with the same amount rule (D-130). It keeps its own utilization arithmetic (not in scope here), so
+    // only the amount rule is guarded for it. Task 165b-4: it reads the invoices through the shared counted reader (the approve-record
+    // filter) and sums them with SumSpend (SpendAmount per row).
     [Fact(DisplayName = "ebilling-r1 D-130: the financial calculation tool handler takes the spend amount from FinanceBaseValues, with no copy of the rule")]
     public void TheToolHandler_UsesTheSharedAmountRule()
     {
         var code = CodeOf("Services/Finance/Tools/FinancialCalculationToolHandler.cs");
         Assert.DoesNotMatch(AmountRuleSpelling, code);
-        Assert.Contains("FinanceBaseValues.SpendAmount(", code, StringComparison.Ordinal);
+        Assert.True(code.Contains("FinanceBaseValues.SpendAmount(", StringComparison.Ordinal) || code.Contains("FinanceBaseValues.SumSpend(", StringComparison.Ordinal),
+            "the tool sums with FinanceBaseValues.SpendAmount / SumSpend");
+        Assert.Contains("FinanceBaseValues.ReadCountedInvoicesAsync(", code, StringComparison.Ordinal);
     }
 
     // ebilling-r1 D-130 (ontology-r1 review): widened from the three named consumers to ALL of src/server/**. A new reader that names an
@@ -82,6 +85,14 @@ public class FinanceBaseValuesSingleDefinitionGuardTests
         ["Services/Finance/InvoiceReviewService.cs"] = "holds the sprk_invoice column-name constants the submission persister writes (050a: it no longer writes an invoice); no sum",
         ["Services/Finance/InvoiceTotalsService.cs"] = "writes sprk_totalamount / sprk_approvedtotal (the source of the amount)",
         ["Services/Insights/LiveFacts/InvoiceLiveFactResolver.cs"] = "per-invoice fact documented as the billed total; not an aggregate",
+        // customer-provisioning-orchestration-r1 task 268 (L2 control plane, outside the BFF): H7b S26 names the seven EB-D-200 columns
+        // to verify their field-security lock (ebilling task 166). It reads metadata and profile grants, never an amount.
+        ["../../services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordSetupProcedure.cs"] =
+            "H7b S26 (task 268): the column names whose field-security lock it verifies; reads no amount, no sum",
+        ["../../services/Sprk.Provisioning.ControlPlane.Tests/Handlers/SecureRecordSetup/SecureRecordSetupProcedureTests.cs"] =
+            "tests of H7b S26 (task 268): seed and break the lock on named columns; no amount, no sum",
+        ["../../services/Sprk.Provisioning.ControlPlane.Tests/Handlers/SecureRecordSetup/H7bSecureRecordSetupHandlerTests.cs"] =
+            "test of H7b S26 (task 268): unsecures a named column; no amount, no sum",
     };
 
     private static string RelativeToBff(string file) =>

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191d" project="unified-access-control-r2">
+  <metadata>
+    <title>T191d: the External Collaborators business unit and the Spaarke External Collaborator role, codified with -Apply/-Verify (#2179)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Defines the only Dataverse privileges a flagged-external systemuser will hold; role and BU writes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security role design with "never" tables and matrix-BU behaviour; a wrong privilege re-opens every internal row.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group A with 191b and 191f: config, script and ArchTest files only.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, security, access-control, tenant-isolation, scripts, testing</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Codify the External Collaborators business unit and the Basic-only Spaarke External Collaborator role as config plus an -Apply/-Verify script, guarded by an ArchTest, so later tasks and the migration can place flagged users there.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Dataverse security roles, matrix business units and the repo's role-codification scripts.</role>
+  <goal>`config/external-collaborator-role.json`, `scripts/Set-ExternalCollaboratorRole.ps1` (dry run default, -Apply, -Verify) and an ArchTest exist. The script creates the BU under the root, creates or updates the role in it, and verifies privileges, depth, the "never" tables and that the BU owns no rows. Nothing is applied live in this task.</goal>
+
+  <context>
+    <background>Design §3.2 (placement), §3.11 (invoice family), §3.15 (enforced by), §4.1 Q3/Q6. Spike S1 (Appendix A.4) used 30 Basic privileges on matter, project, document, communication, event and to-do, plus prvReadUser at Local and prvRead/WriteUserSettings at Basic. Constraints from ebilling 088, D-185 and round 131: no privilege on sprk_storedfile, sprk_ruleset, sprk_policy, sprk_policyversion, sprk_procedureassignment.</background>
+    <relevant-files>
+      <file role="new">config/external-collaborator-role.json</file>
+      <file role="new">scripts/Set-ExternalCollaboratorRole.ps1</file>
+      <file role="new">tests/Spaarke.ArchTests/ExternalCollaboratorRoleGuardTests.cs</file>
+      <file role="new">tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1</file>
+      <file role="canonical-reference">config/direct-message-owner-role.json and scripts/Set-CustomerOwnerTeams.ps1 (config-driven role and team, -Apply/-Verify: copy this shape)</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/DirectMessageOwnerRoleGuardTests.cs and tests/Spaarke.ArchTests/ProcedureRolePrivilegeGuardTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs (the registry the role must match)</file>
+      <file role="modify">scripts/Set-RecordCreatorPersonSchema.ps1 (only if the reader-profile step needs a BU include list; otherwise document the re-run)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191" status="complete">Design checkpoint and owner answers (§4.1).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Basic depth only on every lineage table; no Global or Deep; no Share, no Assign; Delete at Basic at most.</constraint>
+    <constraint source="project">No privilege at all on: sprk_procedure, sprk_procedureversion, sprk_procedureassignment, sprk_storedfile, sprk_ruleset, sprk_policy, sprk_policyversion, sprk_emailartifact, sprk_attachmentartifact, sprk_emailreviewlog, sprk_affinity, and the invoice family (Q6 = a: sprk_invoice, sprk_invoicesubmission, sprk_invoiceapproval, sprk_invoicecorrection, sprk_externalidentifier, sprk_billingevent).</constraint>
+    <constraint source="project">prvReadUser at Local; no prvWriteUser.</constraint>
+    <constraint source="project">The BU's default team must never receive a writer column profile or ebilling's Stored File reader profile (`scripts/ebilling/Deploy-EbillingStoredFileSchema.ps1:540`); it receives the document-link and secure-flag reader profiles only.</constraint>
+    <constraint source="project">No live write in this task: -Apply is an owner-go step run later (191i).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="codified role with verify" location="scripts/Set-CustomerOwnerTeams.ps1">Config JSON is the source; dry run default; -Apply and -Verify are separate modes; VERIFY FAIL names each gap.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the config: BU name, parent = root, role privileges per table and depth, the "never" list, the Console and Office add-in entry privileges those surfaces need (take them from the existing Console and Office roles; Basic only).</step>
+    <step order="2">Write the script: dry run lists the BU and every privilege it would set; -Apply creates the BU and role idempotently; -Verify checks privileges, depth, the never list, the BU owning 0 lineage rows and its default team's column profiles.</step>
+    <step order="3">ArchTest: the config matches the lineage registry (every visible lineage table has Basic Read; no never-table appears; no Share/Assign; no Deep/Global). Must-fire and must-not-fire controls.</step>
+    <step order="4">Pester tests for the script's dry run and -Verify gap reporting.</step>
+    <step order="5">Run the ArchTests and the Pester tests; run the script in dry-run mode against dev (read-only) and save the output to the task notes.</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: `Set-ExternalCollaboratorRole.ps1 -Apply` on any environment creates a business unit and a role. Do not run it in this task; it is step 2 of the design's §3.19, run in 191i only after the owner's go in the uac-r2 session.</trigger>
+    <trigger>LIVE / OWNER GO: re-running a column-profile -Apply to add the new BU's default team is step 3 of §3.19 and needs its own owner go.</trigger>
+    <trigger>If Console or Office add-in use needs a privilege above Basic, or any privilege on a never-table, STOP and escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spaarke Basic User, Core User and Office Add In User (Deep); the Secure Record BU (no users).</existing>
+    <extension>Lowering those roles' depth breaks every internal user; no existing role is Basic-only with never-tables, and no existing BU holds users while owning no rows.</extension>
+    <cost-of-doing-nothing>Depth and default-team ownership keep giving flagged users every non-secure Restricted and internal-only row in their subtree.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">config/external-collaborator-role.json</output>
+    <output type="code">scripts/Set-ExternalCollaboratorRole.ps1</output>
+    <output type="test">tests/Spaarke.ArchTests/ExternalCollaboratorRoleGuardTests.cs</output>
+    <output type="test">tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The config grants Basic depth only, no Share or Assign, prvReadUser Local, no prvWriteUser.</criterion>
+    <criterion testable="true">Negative: the ArchTest fails when a never-table (each one in the constraint list) gets any privilege, or a lineage table gets Deep or Global (perturbation-checked).</criterion>
+    <criterion testable="true">The script's dry run against dev writes nothing and lists the BU and the role it would create.</criterion>
+    <criterion testable="true">-Verify reports a named gap for: a missing BU, a missing privilege, an extra privilege, a never-table privilege, a row owned by the BU, a writer profile or the Stored File profile on the BU's default team.</criterion>
+    <criterion testable="true">-Apply and -Verify are separate modes; passing both throws.</criterion>
+    <criterion testable="true">ArchTests and Pester tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>The placement job (191e) assigns this role. The migration (191i) runs -Apply after the owner's go.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

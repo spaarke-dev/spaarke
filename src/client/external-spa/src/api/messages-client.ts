@@ -56,6 +56,11 @@ export interface ExternalMessage {
   createdon?: string | null;
   /** The CALLER authored this message (server-decided; never inferred client-side from names or direction). */
   isMine: boolean;
+  /**
+   * The id of the thread the message sits in (task 035, FR-22): the one key messages are grouped by, opaque to the client.
+   * Null or absent (a BFF that predates it, or a message with no thread) means the message stands alone.
+   */
+  threadId?: string | null;
 }
 
 /** `ExternalCollectionResponse<ExternalMessageDto>`. */
@@ -63,15 +68,66 @@ export interface ExternalMessagesResponse {
   value: ExternalMessage[];
   /** The read stopped at its cap, or a later page failed: the list is incomplete. Absent = complete. */
   truncated?: boolean;
+  /**
+   * Whether the caller may post to this thread: the POST's own decision (R4 task 002, FR-06; `CanPostAsync`). Absent
+   * (a BFF that predates it) is "not said", never "can".
+   */
+  canCreate?: boolean;
 }
 
 function messagesPath(root: string, id: string): string {
   return `/api/v1/external/${encodeURIComponent(root)}/${encodeURIComponent(id)}/messages`;
 }
 
+/** How a read acquires its token (`bffApiCall`'s `auth` argument). */
+export interface ListMessagesOptions {
+  /**
+   * A TIMER-driven background read (R4 task 034, FR-21: the new-message check): if the token cannot be had silently the call
+   * rejects with `SignInRequiredError` instead of starting a sign-in redirect or popup. Never set for a read the user asked for.
+   */
+  noInteraction?: boolean;
+}
+
 /** GET the record's thread, oldest first. */
-export function listMessages(root: string, id: string): Promise<ExternalMessagesResponse> {
-  return bffApiCall<ExternalMessagesResponse>(messagesPath(root, id));
+export function listMessages(
+  root: string,
+  id: string,
+  options: ListMessagesOptions = {}
+): Promise<ExternalMessagesResponse> {
+  // The third argument is passed only when set, so every existing call keeps its shape (`bffApiCall(path)`).
+  return options.noInteraction
+    ? bffApiCall<ExternalMessagesResponse>(messagesPath(root, id), {}, { noInteraction: true })
+    : bffApiCall<ExternalMessagesResponse>(messagesPath(root, id));
+}
+
+function sentAtMs(message: ExternalMessage): number | null {
+  if (!message.createdon) return null;
+  const ms = Date.parse(message.createdon);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Whether a later read of the thread (`fetched`) holds a message that is newer than the thread on screen (`shown`) (R4 task 034,
+ * FR-21). A message counts when its id is not on screen AND it was created after the newest message on screen; with nothing
+ * dated on screen (an empty thread) any message not on screen counts. A message with no usable `createdon` can only count
+ * against a thread with nothing dated, so a missing date never raises the indicator over a thread that has dates. Only
+ * ADDITIONS count: a message that disappeared, or an older one that was already shown, does not.
+ */
+export function hasNewerMessages(shown: readonly ExternalMessage[], fetched: readonly ExternalMessage[]): boolean {
+  const shownIds = new Set(shown.map(m => m.sprk_communicationid).filter(id => !!id));
+  let newest: number | null = null;
+  for (const m of shown) {
+    const t = sentAtMs(m);
+    if (t !== null && (newest === null || t > newest)) newest = t;
+  }
+  return fetched.some(m => {
+    if (m.sprk_communicationid && shownIds.has(m.sprk_communicationid)) return false;
+    if (newest === null) return true;
+    const t = sentAtMs(m);
+    // `>=`: `createdon` has second precision, so a message created in the same second as the newest one on screen is not
+    // older than it. The id check above already excludes every message that is on screen.
+    return t !== null && t >= newest;
+  });
 }
 
 /**

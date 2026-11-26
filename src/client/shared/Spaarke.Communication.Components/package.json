@@ -13,9 +13,13 @@
     "./logic/connections": "./src/logic/connections/index.ts",
     "./logic/connections/provenance": "./src/logic/connections/provenance.ts",
     "./logic/attachments": "./src/logic/attachments/index.ts",
+    "./logic/invoice": "./src/logic/invoice/index.ts",
     "./logic/actions": "./src/logic/actions/index.ts",
+    "./logic/pcf-host": "./src/logic/pcf-host/index.ts",
     "./components": "./src/components/index.ts",
     "./components/AttachmentList": "./src/components/AttachmentList/index.ts",
+    "./components/AttachmentPreview": "./src/components/AttachmentPreview/index.ts",
+    "./components/SubmitInvoice": "./src/components/SubmitInvoice/index.ts",
     "./invoice-attachment-marking": "./src/components/InvoiceAttachmentMarking/index.ts"
   },
   "scripts": {
@@ -33,7 +37,6 @@
   "peerDependencies": {
     "@fluentui/react-components": ">=9.46.0 <10",
     "@fluentui/react-icons": "^2.0.0",
-    "@microsoft/signalr": "^8.0.0",
     "react": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0",
     "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
   },

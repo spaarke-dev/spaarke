@@ -26,7 +26,6 @@ This command executes the `dataverse-deploy` skill to handle Dataverse deploymen
 Before running this command:
 1. PAC CLI installed and authenticated (`pac auth list`)
 2. Clean build of the control/solution
-3. For PCF: Temporarily disable Central Package Management
 
 ## Execution Instructions
 
@@ -35,7 +34,6 @@ Before running this command:
 1. **Load the skill**: Read `.claude/skills/dataverse-deploy/SKILL.md`
 2. **Check PAC authentication** before any deployment
 3. **Follow the decision tree** for correct deployment path
-4. **Handle Central Package Management** (disable before, restore after)
 
 ## Skill Location
 
@@ -68,7 +66,7 @@ Is this a production release?
 
 ## Common Issues
 
-- **Central Package Management error**: Rename `Directory.Packages.props` before push
+- **NU1008 (central package management)**: only in a worktree branched before 2026-11-10 that still has `Directory.Packages.props`; rename it aside for the command
 - **Authentication expired**: Run `pac auth create --environment`
 - **Bundle too large**: Use platform-library declarations (ADR-021)
 

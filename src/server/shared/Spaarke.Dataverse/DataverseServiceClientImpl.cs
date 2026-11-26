@@ -298,7 +298,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
         //
         // unified-access-control-r2 task 146 (#1034): every caller now resolves the team through the BFF's
-        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents, EmailAttachmentProcessor), so a
+        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents), so a
         // missing owner is a programming error and REFUSES here, before any write — never the old "null keeps the
         // calling identity", which made the BFF application user own the document in the root business unit.
         if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
@@ -315,6 +315,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         // spaarkeai-word-add-in-r1 task 130 (#2126): the email link and the Restricted fallback, in this one write.
         StageDocumentCommunicationFields(document, request);
+
+        // field-mapping-server-write-path-r1 task 030b (FR-18): the association, in this one write, never a follow-up update.
+        StageDocumentAssociation(document, request);
+
+        // field-mapping-server-write-path-r1 task 034: an attachment's parent link, in this same write.
+        StageDocumentParent(document, request);
+
+        // Task 030b: the SPE file pointer, in this same write.
+        StageDocumentFilePointer(document, request);
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -361,6 +370,82 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             document[DocumentSubmissionMarkerColumn] = true;
         }
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.Association"/> onto the document <see cref="CreateDocumentAsync"/> creates, as
+    /// <c>[column] = EntityReference(target table, id)</c>, so the document is filed in its ONE create write
+    /// (field-mapping-server-write-path-r1 task 030b). No association writes nothing. Pure (no I/O), as
+    /// <see cref="StageDocumentCommunicationFields"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">An association with an empty record id, or on a column that is not one of
+    /// <see cref="DocumentAssociationMap"/>'s association columns with its verified target (refused before any write).</exception>
+    internal static void StageDocumentAssociation(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Association is not { } association)
+            return;
+
+        if (association.RecordId == Guid.Empty)
+            throw new InvalidOperationException("A document's association is created with the id of the record it is filed to (task 030b).");
+
+        if (!DocumentAssociationMap.IsAssociationField(association.Field))
+        {
+            throw new InvalidOperationException(
+                $"'{association.Field.LogicalName}' -> '{association.Field.TargetEntityLogicalName}' is not a document association column; "
+                + "a create's association is set through DocumentAssociationMap.TryApply (task 030b).");
+        }
+
+        document[association.Field.LogicalName] =
+            new EntityReference(association.Field.TargetEntityLogicalName, association.RecordId);
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.ParentDocumentLookup"/> onto the document <see cref="CreateDocumentAsync"/> creates,
+    /// as <c>sprk_parentdocument = EntityReference(sprk_document, id)</c> (field-mapping-server-write-path-r1 task 034). No parent
+    /// writes nothing. Pure (no I/O), as <see cref="StageDocumentAssociation"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A parent link with an empty id (refused before any write).</exception>
+    internal static void StageDocumentParent(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.ParentDocumentLookup is not { } parentId)
+            return;
+
+        if (parentId == Guid.Empty)
+            throw new InvalidOperationException("A document's parent link is created with the id of its parent document (task 034).");
+
+        document["sprk_parentdocument"] = new EntityReference("sprk_document", parentId);
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.FilePointer"/> onto the document <see cref="CreateDocumentAsync"/> creates:
+    /// <c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c> with its bound copy, and <c>sprk_filepath</c> when a URL is known, so the
+    /// pointer is part of the ONE create write (task 030b). No pointer writes nothing. Pure (no I/O), as
+    /// <see cref="StageDocumentAssociation"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A pointer without its drive or item id (refused before any write).</exception>
+    internal static void StageDocumentFilePointer(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.FilePointer is not { } pointer)
+            return;
+
+        if (string.IsNullOrWhiteSpace(pointer.DriveId) || string.IsNullOrWhiteSpace(pointer.ItemId))
+            throw new InvalidOperationException("A document's file pointer is created with both its drive id and its item id (task 030b).");
+
+        document["sprk_graphdriveid"] = pointer.DriveId;
+        document["sprk_graphitemid"] = pointer.ItemId;
+        // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+        document[DocumentPointerBinding.BoundItemIdColumn] = pointer.ItemId;
+        if (!string.IsNullOrEmpty(pointer.WebUrl))
+            document["sprk_filepath"] = pointer.WebUrl;
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
@@ -1728,6 +1813,135 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             throw new InvalidOperationException(
                 $"Failed to query collection navigation property for '{parentEntityLogicalName}.{relationshipSchemaName}': {ex.Message}", ex);
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (attributes, published metadata), projected by <see cref="ColumnMetadataOf"/>.
+    /// A fault propagates: the caller fails closed.</remarks>
+    public async Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Attributes,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return ColumnMetadataOf(response.EntityMetadata);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (the entity's own properties, published metadata), projected by
+    /// <see cref="TableAuditMetadataOf"/>. A fault propagates: the caller fails closed.</remarks>
+    public async Task<TableAuditMetadata> GetTableAuditMetadataAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Entity,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return TableAuditMetadataOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The audit facts of <paramref name="entity"/>: its object type code and whether auditing is on for the table; a fact the
+    /// metadata does not state is <c>null</c>. Pure, and <c>public static</c> for direct testability (the
+    /// <see cref="ColumnMetadataOf"/> precedent).
+    /// </summary>
+    public static TableAuditMetadata TableAuditMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity) =>
+        new(entity?.ObjectTypeCode, entity?.IsAuditEnabled?.Value);
+
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (relationships, published metadata), projected by <see cref="AssignCascadesOf"/>.
+    /// A fault propagates, and so does a response without the entity's relationships: the caller fails closed.</remarks>
+    public async Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Relationships,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return AssignCascadesOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The one-to-many relationships of <paramref name="entity"/> whose Assign cascade is not <c>NoCascade</c> — one whose
+    /// cascade configuration or Assign value the metadata does not state is included (fail closed) — each with its child table's
+    /// referencing column (task 052f; <c>null</c> when the metadata does not state it). Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="ColumnMetadataOf"/> precedent).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The metadata, or its one-to-many relationships, did not come back: that is a
+    /// fault, never "nothing cascades" (an empty list is the answer "nothing cascades").</exception>
+    public static IReadOnlyList<AssignCascadeRelationship> AssignCascadesOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity) =>
+        (entity?.OneToManyRelationships
+         ?? throw new InvalidOperationException(
+             $"The one-to-many relationships of '{entity?.LogicalName ?? "(no entity)"}' did not come back, so whether an Assign "
+             + "cascades cannot be told."))
+            .Where(r => r is not null
+                        && r.CascadeConfiguration?.Assign != Microsoft.Xrm.Sdk.Metadata.CascadeType.NoCascade)
+            .Select(r => new AssignCascadeRelationship(
+                r.SchemaName ?? string.Empty, r.ReferencingEntity ?? string.Empty, r.CascadeConfiguration?.Assign?.ToString(),
+                string.IsNullOrWhiteSpace(r.ReferencingAttribute) ? null : r.ReferencingAttribute))
+            .ToArray();
+
+    /// <summary>
+    /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
+    /// type's name, the update and field-security flags as stated, a text or memo column's maximum length, a number or Money
+    /// column's range, a lookup's target tables and a choice column's option values. Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="MapToDocumentEntity"/> precedent).
+    /// </summary>
+    public static IReadOnlyDictionary<string, ColumnMetadata> ColumnMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity)
+    {
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in entity?.Attributes ?? [])
+        {
+            if (attribute is null || string.IsNullOrWhiteSpace(attribute.LogicalName))
+                continue;
+
+            var maxLength = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.StringAttributeMetadata text => text.MaxLength,
+                Microsoft.Xrm.Sdk.Metadata.MemoAttributeMetadata memo => memo.MaxLength,
+                _ => null,
+            };
+            (decimal? Min, decimal? Max) range = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.IntegerAttributeMetadata whole => (whole.MinValue, whole.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.BigIntAttributeMetadata big => (big.MinValue, big.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DecimalAttributeMetadata number => (number.MinValue, number.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DoubleAttributeMetadata real => (DecimalOf(real.MinValue), DecimalOf(real.MaxValue)),
+                Microsoft.Xrm.Sdk.Metadata.MoneyAttributeMetadata money => (DecimalOf(money.MinValue), DecimalOf(money.MaxValue)),
+                _ => (null, null),
+            };
+            var targets = (attribute as Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata)?.Targets?
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToArray();
+            var options = (attribute as Microsoft.Xrm.Sdk.Metadata.EnumAttributeMetadata)?.OptionSet?.Options?
+                .Where(o => o?.Value is not null)
+                .Select(o => o.Value!.Value)
+                .ToArray();
+            columns[attribute.LogicalName] = new ColumnMetadata(
+                attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength,
+                range.Min, range.Max, targets, options, attribute.ColumnNumber, attribute.IsAuditEnabled?.Value);
+        }
+
+        return columns;
+
+        // A double bound as a decimal; null when no decimal holds it (the reader then treats the bound as not stated).
+        static decimal? DecimalOf(double? value) =>
+            value is { } real && double.IsFinite(real) && Math.Abs(real) < 7.9e28 ? (decimal)real : null;
     }
 
     /// <summary>

@@ -30,6 +30,12 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// (task 150, round 46 item 4), tells the named team apart from any other owner through <see cref="IdentifyAsync"/> —
 /// <see cref="ResolveAsync"/>'s own first two steps.</para>
 ///
+/// <para><b>One parameterised lookup</b> (field-mapping-server-write-path-r1 task 054a). The steps are
+/// <see cref="IdentifyNamedAsync"/> (which unit, which team) and <see cref="ProveUnoccupiedAsync"/> (no member, no user),
+/// composed by <see cref="ResolveNamedAsync"/> and parameterised by the names they look for
+/// (<see cref="NamedOwnerTeamLookup"/>). <see cref="ResolveAsync"/> and <see cref="IdentifyAsync"/> are that lookup with the
+/// Secure Record names; <see cref="DirectMessageOwnerTeam"/> is the same lookup with the Direct message names.</para>
+///
 /// <para><b>Placement</b> (CLAUDE.md §10/§11): a static helper beside <see cref="SecureContainerDecision"/>, not a
 /// DI-registered service — it is three reads on the <see cref="DataverseWebApiClient"/> the provisioning endpoint
 /// already injects, and the config keys it owns were previously duplicated in four places. No new interface (the
@@ -138,21 +144,57 @@ public static class SecureRecordOwnerTeam
     /// </summary>
     internal static string BusinessUnitUsersFilter(Guid businessUnitId) => $"_businessunitid_value eq {businessUnitId}";
 
+    /// <summary>The Secure Record owner team's names, as configured (with the compiled defaults).</summary>
+    internal static NamedOwnerTeamLookup SecureRecordLookup(IConfiguration configuration) =>
+        new(BusinessUnitName(configuration), OwnerTeamName(configuration));
+
     /// <summary>
     /// Resolves the Secure Record business unit and its named owner team, and proves the team has no members and
     /// the business unit no users. Any unreadable or ambiguous answer is a refusal (ADR-003). Never throws for a
     /// Dataverse fault — the fault is carried on the result so the caller can name it in its own error contract.
     /// </summary>
-    public static async Task<SecureOwnerTeamResolution> ResolveAsync(
+    public static Task<SecureOwnerTeamResolution> ResolveAsync(
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataverseClient);
+        return ResolveNamedAsync(dataverseClient, SecureRecordLookup(configuration), ct);
+    }
 
-        // 1 + 2. WHICH team: the business unit by name, then its named owner team (IdentifyAsync — one rule for every
+    /// <summary>
+    /// The ONE named-owner-team lookup, parameterised by the business-unit and team names it looks for: the business unit
+    /// by name, its NAMED, non-default Owner team (<see cref="IdentifyNamedAsync"/>), then the two invariants (the team has
+    /// no members, the business unit no users — <see cref="ProveUnoccupiedAsync"/>). The Secure Record owner team
+    /// (<see cref="ResolveAsync"/>) and the Direct message owner team (<see cref="DirectMessageOwnerTeam"/>) are each this
+    /// lookup with their own names. Never throws for a Dataverse fault.
+    /// </summary>
+    internal static async Task<SecureOwnerTeamResolution> ResolveNamedAsync(
+        DataverseWebApiClient dataverseClient,
+        NamedOwnerTeamLookup lookup,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverseClient);
+
+        // 1 + 2. WHICH team: the business unit by name, then its named owner team (IdentifyNamedAsync — one rule for every
         //        caller that needs to know which team that is).
-        var identity = await IdentifyAsync(dataverseClient, configuration, ct).ConfigureAwait(false);
+        var identity = await IdentifyNamedAsync(dataverseClient, lookup, ct).ConfigureAwait(false);
+        return await ProveUnoccupiedAsync(dataverseClient, identity, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Steps 3 and 4 of <see cref="ResolveNamedAsync"/> for a team <see cref="IdentifyNamedAsync"/> already answered: the
+    /// identified team has no members and its business unit no users. A refused identity is carried through unchanged
+    /// (nothing is read). An unreadable count is a refusal, never zero. Never throws for a Dataverse fault.
+    /// </summary>
+    internal static async Task<SecureOwnerTeamResolution> ProveUnoccupiedAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureOwnerTeamIdentity identity,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverseClient);
+        ArgumentNullException.ThrowIfNull(identity);
+
         var result = new SecureOwnerTeamResolution(
             identity.Refusal ?? SecureOwnerTeamStatus.BusinessUnitUnreadable, identity.BusinessUnitName,
             identity.BusinessUnitId, identity.OwnerTeamName, identity.OwnerTeamId,
@@ -219,15 +261,28 @@ public static class SecureRecordOwnerTeam
     /// </summary>
     /// <remarks>Never throws for a Dataverse fault: an unreadable, absent or ambiguous answer is a refusal carried on the
     /// result (<see cref="SecureOwnerTeamIdentity.Refusal"/>), with the fault. Ambiguity is never resolved by picking one.</remarks>
-    internal static async Task<SecureOwnerTeamIdentity> IdentifyAsync(
+    internal static Task<SecureOwnerTeamIdentity> IdentifyAsync(
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dataverseClient);
+        return IdentifyNamedAsync(dataverseClient, SecureRecordLookup(configuration), ct);
+    }
 
-        var buName = BusinessUnitName(configuration);
-        var teamName = OwnerTeamName(configuration);
+    /// <summary>
+    /// Steps 1 and 2 of <see cref="ResolveNamedAsync"/>, for the names in <paramref name="lookup"/>: the business unit by name
+    /// (TOP 2), then its NAMED, non-default Owner team (TOP 2). Never throws for a Dataverse fault; ambiguity is a refusal.
+    /// </summary>
+    internal static async Task<SecureOwnerTeamIdentity> IdentifyNamedAsync(
+        DataverseWebApiClient dataverseClient,
+        NamedOwnerTeamLookup lookup,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverseClient);
+
+        var buName = lookup.BusinessUnitName;
+        var teamName = lookup.OwnerTeamName;
         var identity = new SecureOwnerTeamIdentity(
             SecureOwnerTeamStatus.BusinessUnitUnreadable, buName, null, teamName, null, null);
 
@@ -352,6 +407,12 @@ public static class SecureRecordOwnerTeam
         public string? name { get; set; }
     }
 }
+
+/// <summary>
+/// The names one named-owner-team lookup (<see cref="SecureRecordOwnerTeam.ResolveNamedAsync"/>) looks for: a business unit
+/// by name and, inside it, a NAMED, non-default Owner team. Both are matched as Dataverse matches <c>name</c>.
+/// </summary>
+internal readonly record struct NamedOwnerTeamLookup(string BusinessUnitName, string OwnerTeamName);
 
 /// <summary>Why <see cref="SecureRecordOwnerTeam.ResolveAsync"/> did or did not resolve an owner team.</summary>
 public enum SecureOwnerTeamStatus

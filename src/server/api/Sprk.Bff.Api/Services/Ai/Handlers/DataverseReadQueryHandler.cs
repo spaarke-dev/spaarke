@@ -45,6 +45,10 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <see cref="AppOnlyInvoiceFamilyHiding"/>, hides an external caller's invoice-family row (an invoice, or a row derived from
 /// one) whose invoice the (a') predicate hides, decided after the read by row id. It can only HIDE a row the user's own read
 /// returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
+/// uac-r2 task 191h (#2189, #2179 design §3.3): a THIRD hide-only app-only seam, <see cref="AppOnlyExternalVisibility"/> (THE
+/// external visibility predicate), decides an external caller's rows of every root and lineage-child table after the read by
+/// row id (<see cref="ExternalCallerCommunicationGuard.NotVisibleIdsAsync"/>); only a Visible row is kept. It can only HIDE a
+/// row the user's own read returned.
 /// </para>
 /// <para>
 /// <b>Grounding (ADR-039)</b>: every returned row carries the table's primary id (added to
@@ -77,6 +81,8 @@ public sealed class DataverseReadQueryHandler : IToolHandler
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
     /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
     private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
+    /// <summary>uac-r2 task 191h: THE external visibility predicate, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyExternalVisibility _externalVisibility;
 
     public DataverseReadQueryHandler(
         IDataverseUserClient dataverse,
@@ -85,8 +91,10 @@ public sealed class DataverseReadQueryHandler : IToolHandler
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
         AppOnlyDocumentNarrowing narrowDocuments,
-        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily,
+        AppOnlyExternalVisibility externalVisibility)
     {
+        _externalVisibility = externalVisibility ?? throw new ArgumentNullException(nameof(externalVisibility));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
@@ -98,6 +106,51 @@ public sealed class DataverseReadQueryHandler : IToolHandler
 
     /// <inheritdoc />
     public string HandlerId => HandlerIdValue;
+
+    /// <summary>
+    /// Task 130-0b fix round 1 (F1-2): the one refusal for a WHERE or ORDER BY on a root's invoice link or regarding columns
+    /// (<see cref="RootInvoiceLinkRedaction"/>). Neutral and fixed: the same text whether or not any row would be blanked.
+    /// </summary>
+    internal const string RootInvoiceLinkPredicateRefusal =
+        "Filtering or sorting this table on its regarding or invoice link columns is not supported. " +
+        "Remove those columns from WHERE and ORDER BY; they can still be selected.";
+
+    /// <summary>
+    /// Task 130-0b R1 (owning project ruling): the one fixed note on a call whose hiding seam is active, byte-identical whether or
+    /// not a row was left out.
+    /// </summary>
+    internal const string RowsLeftOutNote =
+        "Rows you cannot access are left out of this result, so a page shorter than TOP does not prove there are no further matches.";
+
+    /// <summary>
+    /// Task 130-0b fix round 1 (F1-2): true when an OData clause (<paramref name="clauses"/>: the translated filter and order-by)
+    /// names any of <paramref name="columns"/> as an identifier outside a quoted literal. Every identifier is compared whole, so
+    /// each form in the set (<c>col</c>, <c>_col_value</c>, <c>colname</c>) is matched exactly; a literal never matches.
+    /// </summary>
+    internal static bool NamesAnyColumn(IReadOnlySet<string> columns, params string?[] clauses)
+    {
+        if (columns.Count == 0)
+            return false;
+        foreach (var clause in clauses)
+        {
+            if (string.IsNullOrEmpty(clause))
+                continue;
+            var segments = clause.Split('\'');
+            for (var i = 0; i < segments.Length; i += 2)
+            {
+                foreach (System.Text.RegularExpressions.Match token in IdentifierPattern.Matches(segments[i]))
+                {
+                    if (columns.Contains(token.Value))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex IdentifierPattern =
+        new(@"[A-Za-z_][A-Za-z0-9_]*", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.Compiled);
 
     /// <summary>Task 188: a row's primary id (<see cref="Guid.Empty"/> when it is absent or not a GUID: never visible).</summary>
     private static Guid RecordIdOf(JsonElement record, string primaryIdAttribute) =>
@@ -189,13 +242,42 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var guardDocuments = false;
             var guardDerived = false;
             var guardInvoices = false;
+            var guardInvoiceLinks = false;
+            var guardRootInvoiceLink = false;
+            var guardVisibility = false;
+            // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
+            InvoiceFamilyCaller? familyCaller = null;
             if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName) ||
-                 ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName)) &&
-                await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
-                    _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
+                 ExternalCallerCommunicationGuard.IsVisibilityGuarded(translation.EntityLogicalName) ||
+                 ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName) ||
+                 ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(translation.EntityLogicalName) ||
+                 InvoiceLinks.IsRootWithInvoiceLink(translation.EntityLogicalName)) &&
+                await CallerExternality.ClassifyCallerAsync(
+                    _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false)
+                    is { IsExternal: true } verdict)
             {
+                // uac-r2 task 191h (#2189): a row of a root or lineage-child table is ALSO decided after the read by row id through
+                // THE external visibility predicate, on top of any guard below; nothing is injected into the query.
+                guardVisibility = ExternalCallerCommunicationGuard.IsVisibilityGuarded(translation.EntityLogicalName);
+
+                // Task 130-0b step 2: a CHILD table with an invoice link (to-do, event, document, communication, analysis, memo...)
+                // is ALSO decided after the read by row id, through the same seam, on top of any guard below; nothing is injected.
+                if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(translation.EntityLogicalName))
+                {
+                    guardInvoiceLinks = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
+                }
+
+                // Task 130-0b step 3: a ROOT with an invoice link (today the work assignment) is decided by its grant and never
+                // hidden by that link; after the read, the link is blanked on each row whose invoice is not visible (same seam).
+                if (InvoiceLinks.IsRootWithInvoiceLink(translation.EntityLogicalName))
+                {
+                    guardRootInvoiceLink = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
+                }
+
                 if (ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName))
                 {
                     guardDocuments = true;
@@ -209,8 +291,13 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 {
                     // ebilling-r1 task 098 ((a')): decided after the read by row id; nothing is injected into the query.
                     guardInvoices = true;
+                    familyCaller = new InvoiceFamilyCaller(verdict.SystemUserId);
                 }
-                else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
+                else if (ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
+                {
+                    guardCommunications = true;
+                }
+                else if (ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName))
                 {
                     _logger.LogInformation(
                         "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
@@ -218,11 +305,26 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     return Error(tool, ExternalCallerCommunicationGuard.RefusalMessage,
                         DataverseUserClientErrorCodes.AccessDenied, startedAt);
                 }
-                else
-                {
-                    guardCommunications = true;
-                }
             }
+
+            // Task 130-0b fix round 1 (F1-2): a root row is never hidden, so a predicate or sort on its invoice link would answer
+            // what the blanking below withholds. For an external caller on a root with an invoice link, a WHERE or ORDER BY that
+            // names any column of the root redaction set (RootInvoiceLinkRedaction: the link in every form, the regarding pair and
+            // its resolver columns) is refused BEFORE any read. Decided from the query's column names alone, never from data, so
+            // the answer is the same whether or not any row would be blanked.
+            if (guardRootInvoiceLink &&
+                NamesAnyColumn(RootInvoiceLinkRedaction.ColumnsOf(translation.EntityLogicalName), translation.RawFilter, translation.RawOrderBy))
+            {
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, "root_invoice_link_predicate_refused", context.DecisionId);
+                return Error(tool, RootInvoiceLinkPredicateRefusal, ToolErrorCodes.ValidationFailed, startedAt);
+            }
+
+            // Task 130-0b R1 (owning project ruling): a seam that can leave rows out of the page is ACTIVE for this call. Decided
+            // from the caller and the table before the read, never from whether any row was left out.
+            var hidingSeamActive = guardCommunications || guardDocuments || guardDerived || guardInvoices || guardInvoiceLinks
+                || guardVisibility;
 
             // Resolve entity-set + primary id from metadata (under the user's token — a table
             // invisible to this user 404s here, which is the correct fail-closed behavior).
@@ -363,8 +465,9 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             }
 
             // ebilling-r1 task 098 ((a')): an invoice-family row whose invoice the predicate hides (or cannot decide) is
-            // hidden. One hide-only app-only call for the page (its own batched reads); a fault throws into the error result
-            // below (no rows). A row without a readable id is hidden.
+            // hidden. One hide-only app-only call for the page (its own batched reads). A fault in the decision hides the asked rows
+            // (F3b: the family path never throws for a fault); only firms that cannot be read throw, into the error result below (no
+            // rows). A row without a readable id is hidden.
             IReadOnlySet<Guid>? hiddenInvoiceRows = null;
             if (guardInvoices &&
                 response.Body is { } invoiceBody && invoiceBody.TryGetProperty("value", out var invoiceValue) &&
@@ -375,7 +478,57 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     .Where(id => id != Guid.Empty)
                     .Distinct()
                     .ToList();
-                hiddenInvoiceRows = await _hideInvoiceFamily(translation.EntityLogicalName!, rowIds, cancellationToken)
+                hiddenInvoiceRows = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Task 130-0b step 2: a row of a CHILD table with an invoice link is hidden when any invoice it links to is hidden or
+            // cannot be decided. One hide-only app-only call for the page (the links read by id, then one invoice decision); with the
+            // caller's firms known, a fault there hides every invoice-linked row of the page rather than throwing; firms that cannot be
+            // read fail the tool call (F3b). A row without a readable id is hidden.
+            IReadOnlySet<Guid>? hiddenInvoiceLinkedRows = null;
+            if (guardInvoiceLinks &&
+                response.Body is { } linkedBody && linkedBody.TryGetProperty("value", out var linkedValue) &&
+                linkedValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = linkedValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                hiddenInvoiceLinkedRows = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // uac-r2 task 191h (#2189, #2179 design §3.3): a row of a root or lineage-child table that THE external visibility
+            // predicate does not show (Hidden or Undecided: a Restricted root, an internal-only communication or a hidden document it
+            // is filed under or about, through ANY registry lookup) is hidden. One app-only call for the page, by row id; a decision
+            // that could not be made throws into the error result below (no rows). A row without a readable id is hidden.
+            IReadOnlySet<Guid>? notVisibleRows = null;
+            if (guardVisibility &&
+                response.Body is { } visibilityBody && visibilityBody.TryGetProperty("value", out var visibilityValue) &&
+                visibilityValue.ValueKind == JsonValueKind.Array)
+            {
+                notVisibleRows = await ExternalCallerCommunicationGuard.NotVisibleIdsAsync(
+                    _externalVisibility, translation.EntityLogicalName!,
+                    visibilityValue.EnumerateArray().Select(record => RecordIdOf(record, primaryIdAttribute)), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Task 130-0b step 3: on a ROOT with an invoice link, the rows whose linked invoice is not visible or cannot be decided
+            // (a fault there counts as not visible, never throws). One app-only call for the page; the rows are KEPT and only their
+            // invoice link is blanked below. A row without a readable id has its link blanked.
+            IReadOnlySet<Guid>? blankedRootLinks = null;
+            if (guardRootInvoiceLink &&
+                response.Body is { } rootBody && rootBody.TryGetProperty("value", out var rootValue) &&
+                rootValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = rootValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                blankedRootLinks = await _hideInvoiceFamily(familyCaller ?? new InvoiceFamilyCaller(null), translation.EntityLogicalName!, rowIds, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -383,10 +536,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var citations = new List<ToolResultCitation>();
             var hiddenRows = 0;
             var hiddenInvoiceFamily = 0;
+            var hiddenInvoiceLinked = 0;
+            var blankedRootLinkRows = 0;
             var hiddenDocuments = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
-            // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
-            // hidden — a page that hit TOP stays reported as capped even when the narrowing removed rows from it.
+            var hiddenByVisibility = 0;
+            // Task 188 round 4a (F1-5) measured the row cap on the RAW page. Superseded by 130-0b R1 (owning project ruling): when a
+            // hiding seam is active for the call (hidingSeamActive, decided before the read), the cap is measured on the VISIBLE
+            // rows and the result carries one fixed note; a call with no active seam keeps the raw rule. No page refill.
             var rawPageLength = 0;
             if (response.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
             {
@@ -417,11 +574,27 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         continue;
                     }
 
+                    if (guardInvoiceLinks &&
+                        RecordIdOf(record, primaryIdAttribute) is var linkedId &&
+                        (linkedId == Guid.Empty || hiddenInvoiceLinkedRows is null || hiddenInvoiceLinkedRows.Contains(linkedId)))
+                    {
+                        hiddenInvoiceLinked++;
+                        continue;
+                    }
+
                     if (guardDerived &&
                         RecordIdOf(record, primaryIdAttribute) is var derivedId &&
                         ExternalCallerCommunicationGuard.IsDerivedRowHidden(derivedId, derivedSources, hiddenSources, out var source))
                     {
                         hiddenDerivedSources.Add(source);
+                        continue;
+                    }
+
+                    if (guardVisibility &&
+                        RecordIdOf(record, primaryIdAttribute) is var guardedId &&
+                        (guardedId == Guid.Empty || notVisibleRows is null || notVisibleRows.Contains(guardedId)))
+                    {
+                        hiddenByVisibility++;
                         continue;
                     }
 
@@ -460,6 +633,15 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         row.Remove(CommunicationInternalOnlyFloor.InternalOnlyField);
                     }
 
+                    // Task 130-0b step 3: a root row is kept; its invoice link is blanked when that invoice is not visible.
+                    if (guardRootInvoiceLink &&
+                        RecordIdOf(record, primaryIdAttribute) is var rootId &&
+                        (rootId == Guid.Empty || blankedRootLinks is null || blankedRootLinks.Contains(rootId)))
+                    {
+                        ExternalInvoiceVisibility.BlankRootInvoiceLink(translation.EntityLogicalName, row);
+                        blankedRootLinkRows++;
+                    }
+
                     if (recordId != Guid.Empty)
                     {
                         row["@citation.path"] = DataverseRecordCitations.RecordPath(translation.EntityLogicalName!, recordId);
@@ -492,6 +674,20 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     translation.EntityLogicalName, $"invoice_hidden={hiddenInvoiceFamily}", context.DecisionId);
             }
+            if (hiddenInvoiceLinked > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"invoice_linked_hidden={hiddenInvoiceLinked}", context.DecisionId);
+            }
+            if (blankedRootLinkRows > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"root_invoice_link_blanked={blankedRootLinkRows}", context.DecisionId);
+            }
             if (hiddenDerivedSources.Count > 0)
             {
                 // ADR-015: entity + reason codes with counts only — never query text, ids or row content.
@@ -500,6 +696,13 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     translation.EntityLogicalName,
                     ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources),
                     context.DecisionId);
+            }
+            if (hiddenByVisibility > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"external_visibility_hidden={hiddenByVisibility}", context.DecisionId);
             }
 
             stopwatch.Stop();
@@ -523,9 +726,15 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     "record's GUID. To map GUIDs to display names, query the referenced table " +
                     "(dataverse.describe shows the related table per lookup column).");
             }
-            if (rawPageLength >= translation.Top)
+            // 130-0b R1 (supersedes task 188 round 4a F1-5): with a hiding seam active, warn if and only if the VISIBLE rows reach
+            // TOP, and always add the one fixed note (byte-identical whether or not a row was left out). Otherwise the raw rule.
+            if ((hidingSeamActive ? rows.Count : rawPageLength) >= translation.Top)
             {
                 warnings.Add($"Result set reached the row cap ({translation.Top}). Narrow the WHERE clause or raise TOP (max {DataverseSqlQueryTranslator.MaxTop}).");
+            }
+            if (hidingSeamActive)
+            {
+                warnings.Add(RowsLeftOutNote);
             }
 
             return ToolResult.Ok(

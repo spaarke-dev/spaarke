@@ -1,0 +1,198 @@
+/**
+ * SDAP Client configuration options.
+ */
+export interface SdapClientConfig {
+  /** Base URL of SDAP BFF API (e.g., 'https://spe-bff-api.azurewebsites.net') */
+  baseUrl: string;
+
+  /** Request timeout in milliseconds (default: 300000 = 5 minutes) */
+  timeout?: number;
+}
+
+/**
+ * SharePoint Drive Item metadata.
+ */
+export interface DriveItem {
+  /** Unique item ID */
+  id: string;
+
+  /** File/folder name */
+  name: string;
+
+  /** File size in bytes (null for folders) */
+  size: number | null;
+
+  /** Drive ID containing this item */
+  driveId: string;
+
+  /**
+   * Parent folder ID.
+   *
+   * Renamed from `parentReferenceId` 2026-09-03: the BFF's `FileHandleDto` has always serialized
+   * this as `parentId`, so `parentReferenceId` was `undefined` at runtime for every response — a
+   * field name invented by this type rather than read off the wire. It had zero consumers here,
+   * but DocumentUploadWizard reads `parentId` off the same payload, so the mismatch would have
+   * silently dropped the field the moment that path started going through this client.
+   */
+  parentId?: string;
+
+  /** Created date/time */
+  createdDateTime: string;
+
+  /** Last modified date/time */
+  lastModifiedDateTime: string;
+
+  /** ETag for versioning */
+  eTag?: string;
+
+  /** Whether this is a folder */
+  isFolder: boolean;
+
+  /** MIME type (files only) */
+  mimeType?: string;
+
+  /**
+   * SharePoint web URL for the item.
+   *
+   * Added 2026-09-02: the BFF's `FileHandleDto` has always returned this, and consumers persist it
+   * as `sprk_document.sprk_filepath` — this type was simply an incomplete view of the response.
+   * Optional because Graph omits it for some item states, not because the server might not send it.
+   */
+  webUrl?: string;
+}
+
+/**
+ * Upload session for chunked uploads.
+ */
+export interface UploadSession {
+  /** Upload URL for PUT requests */
+  uploadUrl: string;
+
+  /** Session expiration date/time */
+  expirationDateTime: string;
+
+  /** Next expected byte ranges (for resumption) */
+  nextExpectedRanges?: string[];
+}
+
+/**
+ * Upload progress callback.
+ */
+export type UploadProgressCallback = (percent: number) => void;
+
+/**
+ * SDAP API error response.
+ */
+export interface SdapApiError {
+  /** Error status code */
+  status: number;
+
+  /** Error title */
+  title: string;
+
+  /** Detailed error message */
+  detail: string;
+
+  /** Trace ID for correlation */
+  traceId?: string;
+}
+
+/**
+ * Container information.
+ */
+export interface Container {
+  /** Container ID */
+  id: string;
+
+  /** Container display name */
+  displayName: string;
+
+  /** Drive ID */
+  driveId: string;
+}
+
+/**
+ * Authenticated fetch function signature — the EITHER-shape fetch (`@spaarke/auth`'s
+ * `ResponseFetchFn`, structurally). `@spaarke/auth.authenticatedFetch` (which throws on failure and
+ * resolves only with a success) is assignable to it, and so is a fetch that RETURNS failures; the
+ * operations handle both shapes (`operations/httpFailure.ts` `requestOrThrow`).
+ * Consumers inject this so the SDAP client operations can call BFF endpoints with
+ * the canonical Spaarke Auth v2 contract (ADR-028) without taking a direct
+ * dependency on `@spaarke/auth`. The function MUST attach a valid Bearer token
+ * for the BFF API audience (`api://{bff-client-id}/SDAP.Access`).
+ */
+export type AuthenticatedFetchFn = (url: string, options?: RequestInit) => Promise<Response>;
+
+/**
+ * Parent entity context attached to indexed file chunks for entity-scoped search.
+ * Mirrors the BFF's `ParentEntityContext` record so chunks are filterable by
+ * parent record in `spaarke-files-index`.
+ */
+export interface ParentEntityContext {
+  /** Logical entity name — e.g., 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_event'. */
+  entityType: string;
+
+  /** GUID of the parent record. */
+  entityId: string;
+
+  /** Display name of the parent record (e.g., matter name) — informational, no routing impact. */
+  entityName: string;
+}
+
+/**
+ * Request payload for `SdapApiClient.indexFile()` / `IndexFileOperation`.
+ * Triggers sync OBO indexing of a SPE-resident file into Azure AI Search.
+ *
+ * Pattern: writer-identity matching (Pattern 4) — the same user who wrote the
+ * file via OBO MUST be the caller indexing it via OBO. Used by wizards after
+ * a successful PUT to `/api/obo/records/{entityLogicalName}/{recordId}/files/{path}` (or
+ * `/api/obo/me/files/{path}`). The container-keyed route this used to name was deleted by task 076.
+ */
+export interface IndexFileRequest {
+  /** SPE drive ID (NOT the container ID — these are different). */
+  driveId: string;
+
+  /** SPE drive item ID (returned from a prior upload). */
+  itemId: string;
+
+  /** File name with extension — used for format detection. */
+  fileName: string;
+
+  /** Tenant ID for multi-tenant index routing. */
+  tenantId: string;
+
+  /** Optional Dataverse `sprk_document` record GUID linked to this file. */
+  documentId?: string;
+
+  /** Optional parent entity context for entity-scoped search. */
+  parentEntity?: ParentEntityContext;
+
+  // No search index is named here: the server's index-file request has no such member and the index follows the
+  // document's content type (field-mapping-server-write-path-r1 FR-40). A client that names one is a regression.
+}
+
+/**
+ * Result returned by `SdapApiClient.indexFile()`.
+ */
+export interface IndexFileResult {
+  /** True when indexing succeeded end-to-end (chunks written to AI Search). */
+  success: boolean;
+
+  /** Number of chunks indexed (when `success` is true). */
+  chunksIndexed?: number;
+
+  /** Error message when `success` is false. */
+  errorMessage?: string;
+}
+
+/**
+ * Result returned by `SdapApiClient.attachDocumentFile()` — the pointer the BFF stamped on the
+ * document (unified-access-control-r2 task 166 f1).
+ */
+export interface AttachDocumentFileResult {
+  documentId: string;
+  driveId: string;
+  itemId: string;
+  /** True when this same file was already attached (the call was idempotent). */
+  alreadyAttached: boolean;
+}

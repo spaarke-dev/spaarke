@@ -140,6 +140,57 @@ public interface IGenericEntityService
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);
     Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default);
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Every column of <paramref name="entityLogicalName"/> as the table declares it (published metadata, read under this
+    /// connection's identity — app-only in the BFF): its type, whether an update may set it, whether it is field-secured and,
+    /// for a text column, its maximum length. Keyed by logical name, case-insensitively. Uncached: each call is one metadata read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for field-mapping-server-write-path-r1 task 052 (Repair mode, the system principal): Repair has no caller
+    /// whose Web API metadata reads it could reuse, and needs field security on the mapping SOURCE (owner decision 2026-10-21,
+    /// option 1) and update-validity, length and Money on the TARGET (#2124).</para>
+    /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
+    /// <see cref="ExecuteTransactionAsync"/>'s does: only the ServiceClient implementation (<c>DataverseServiceClientImpl</c>)
+    /// answers, so a substitute that does not model metadata fails loudly instead of reading as "no column is secured".</para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(string entityLogicalName, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "GetColumnMetadataAsync is implemented by DataverseServiceClientImpl only; a substitute must model column metadata.");
+
+    /// <summary>
+    /// The audit facts of the table <paramref name="entityLogicalName"/>: its numeric object type code and whether auditing is on
+    /// for the table (published metadata, read under this connection's identity — app-only in the BFF). Uncached: each call is one
+    /// metadata read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for field-mapping-server-write-path-r1 task 052d (review fix round 1): an <c>audit</c> row is read by the
+    /// table's NUMERIC object type code (Dataverse refuses the logical name), and a table whose auditing is off has no history to
+    /// read, which the core-pair report must not take as "no change". The same <c>RetrieveEntityRequest</c> as
+    /// <see cref="GetColumnMetadataAsync"/>, asked for the entity's own properties.</para>
+    /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
+    /// <see cref="GetColumnMetadataAsync"/>'s does.</para>
+    /// </remarks>
+    Task<TableAuditMetadata> GetTableAuditMetadataAsync(string entityLogicalName, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "GetTableAuditMetadataAsync is implemented by DataverseServiceClientImpl only; a substitute must model table metadata.");
+
+    /// <summary>
+    /// The one-to-many relationships of <paramref name="entityLogicalName"/> along which an Assign cascades to the child rows:
+    /// every relationship whose Assign cascade is not <c>NoCascade</c>, one whose metadata states none included (published
+    /// metadata, read under this connection's identity — app-only in the BFF). Uncached: each call is one metadata read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for field-mapping-server-write-path-r1 task 052b (review F1-a): Repair's owner write is an Assign, and Dataverse
+    /// re-owns the child rows of every relationship that cascades on Assign. Task 052f: Repair re-owns a row only when it has no
+    /// child along a relationship its allow-list does not accept, read per row along each relationship's referencing column.</para>
+    /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
+    /// <see cref="GetColumnMetadataAsync"/>'s does: a substitute that does not model relationships fails loudly instead of reading
+    /// as "nothing cascades".</para>
+    /// </remarks>
+    Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(string entityLogicalName, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "GetAssignCascadesAsync is implemented by DataverseServiceClientImpl only; a substitute must model relationship metadata.");
     Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
 

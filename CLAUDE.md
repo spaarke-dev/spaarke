@@ -42,6 +42,7 @@ An enterprise AI-directed legal operations platform on Power Apps/Dataverse, Sha
 | Spaarke Matter Management | The model-driven app | — |
 | Spaarke External Access | The external SPA | — |
 | Spaarke Connect (SKU) / Connection Engine | Third-party data binding | `Sprk.Connect.*` |
+| Spaarke for Microsoft 365 Copilot (Copilot connector "Spaarke MCP") | Decide lane and Decision wizard in Copilot Chat and Cowork; terms: `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §1.1 | `/mcp/legal-operations`, `Api/Mcp/`, `spaarke_*` tools, `ui://spaarke/decisions.html`, `src/client/widgets/spaarke-decisions/`, `src/solutions/CopilotPlugins/spaarke/` |
 | Decision Record | The append-only record of decisions | "ledger" stays correct in engineering docs |
 
 Product names and engineering identifiers deliberately differ. Read "SpaarkeAi" in code and older docs as the Console, and do not sweep-rename it (tracked as #1095). Terminology changes originate only in `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.
@@ -117,7 +118,7 @@ The BFF is the single backend for every client surface. Any task that adds endpo
 
 Every new service, abstraction, interface, endpoint, DI registration, package, Dataverse column or file surface answers three questions, one sentence each:
 
-1. **Existing** — what does it overlap with? (Check with Grep/Glob before saying "none".)
+1. **Existing** — what does it overlap with? (`<existing>` starts at `.claude/patterns/CAPABILITY-INDEX.md`; then Grep/Glob before saying "none".)
 2. **Extension** — can an existing component be extended instead? If not, why (≤ 2 sentences)?
 3. **Cost of doing nothing** — what concrete behaviour or contract fails without it? ("Scalability" or "flexibility" is not an answer.)
 
@@ -175,7 +176,7 @@ For Microsoft and AI platform topics where training data may be stale (Azure AI 
 ## 16. Hooks and permissions
 
 Configured in `.claude/settings.json`:
-- `PostToolUse` on Edit/Write runs `scripts/quality/post-edit-lint.sh`, which returns lint findings to the agent as `additionalContext` (advisory, best-effort within its 4-second linter timeout); `Stop` runs `scripts/quality/task-quality-gate.sh`.
+- `PostToolUse` on Edit/Write runs `scripts/quality/post-edit-lint.sh`, which returns lint findings to the agent as `additionalContext` (advisory, best-effort within its 4-second linter timeout); `Stop` runs `scripts/quality/task-quality-gate.sh`, which sends Claude back once (exit 2) when the build, a changed file's typecheck or the ArchTests fail.
 - `SessionStart` with the `compact` matcher runs `.claude/hooks/reinject-project-state.ps1`, which re-injects the current project's `current-task.md` and its standing-directive and gotcha sections after compaction. It finds the project from the `work/<project>` branch or the `spaarke-wt-<project>` worktree folder. `scripts/quality/context-checkpoint.py` (PostToolUse, UserPromptSubmit, PreCompact, SessionStart `compact`) gives the §5 prompt and re-injects a git-state snapshot; it never blocks compaction.
 - `SessionStart` with the `startup|resume` matcher runs `scripts/quality/quality-alert-banner.py`, which shows the open `quality-alert` issues (failing nightly checks, opened and auto-closed by `.github/actions/quality-alert`). It reads a cache and refreshes it in the background, so it never waits on the network.
 - `PreToolUse` on Agent/Task/Workflow runs `scripts/quality/require-agent-model.py`, which denies an agent launch that names no model (the session then chooses one). On Bash/PowerShell, `scripts/quality/guard-worktree-links.py` denies a junction or symlink into another worktree and a recursive delete or `git worktree remove` of a worktree root: remove worktrees only with `scripts/worktree/Remove-WorktreeSafe.ps1`, because `git worktree remove` follows junctions into the worktree they point at, and the hook sees literal paths only, not loops (FAILURE-MODES G-20). `env` and top-level keys set concurrency caps, the workflow size guideline and the auto-compact window (`.claude/constraints/agent-cost.md`).
@@ -195,7 +196,7 @@ When about to do the thing on the left, read the document on the right first. �
 | Add background work | `.claude/adr/ADR-052-workload-placement.md`. In the BFF: queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`; no new hand-rolled timer `BackgroundService` |
 | Add a create/update path or a rule a record must satisfy on save | `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, `.claude/adr/ADR-002-thin-plugins.md`. 🔒 No Dataverse plugins; one server-side owner per invariant; wizards preview only; security fails closed |
 | Change the document create → profile → index pipeline | `docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md` |
-| Wire a new AI capability or narrative-output consumer, or author an AI executor or playbook | `docs/guides/ai-guide-consumer-wiring.md`, `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`, `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` |
+| Wire a new AI capability or narrative-output consumer, or author an AI executor or playbook; expose one to Copilot (tool, skill, agent) | `docs/guides/ai-guide-consumer-wiring.md`, `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`, `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`; Copilot: `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` |
 | Add a capability that opens an Assistant surface; choose bubble/chip/card/tab | `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`, `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` |
 | Build a workspace widget; embed `LegalWorkspaceApp` | `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`, `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`; embedding: `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` |
 | Change Compose save or read/reference | `.claude/adr/ADR-049-compose-shadow-document.md`, `docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`, `docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`. 🔒 "Every save ends in a defined outcome" and "untouched blocks are preserved" are a pair — never trade one for the other; no text search in the write path. A new citation shape needs a case in `tests/fixtures/compose-citation-parity/cases.json` |

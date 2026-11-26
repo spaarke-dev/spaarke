@@ -1,14 +1,9 @@
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Email;
 using Xunit;
-using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Services.Email;
 
@@ -77,30 +72,10 @@ public class EmailAttachmentProcessorTests
 
     /// <summary>
     /// Constructs a REAL <see cref="EmailAttachmentProcessor"/> for unit testing its pure filtering
-    /// logic. <see cref="ShouldFilterAttachment"/> never touches <c>speFileStore</c> or
-    /// <c>documentService</c>, so both are satisfied with the minimum needed to construct: a real
-    /// <see cref="SpeFileStore"/> built from mocked Graph primitives (the codebase idiom — see
-    /// <c>OfficeStorageUploaderDeleteTests.BuildSpeMock</c> — no transport-shaped mocking per
-    /// ADR-038 B1) and a trivially mocked <see cref="IDocumentDataverseService"/>.
+    /// logic. The processor is a filter only: options and a logger are all it takes.
     /// </summary>
-    private static EmailAttachmentProcessor CreateProcessor(EmailProcessingOptions options)
-    {
-        var graphClientFactory = Mock.Of<IGraphClientFactory>();
-        var speFileStore = new SpeFileStore(
-            new ContainerOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), NullLogger<ContainerOperations>.Instance),
-            new DriveItemOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), NullLogger<DriveItemOperations>.Instance),
-            new UploadSessionManager(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance),
-            new UserOperations(graphClientFactory, NullLogger<UserOperations>.Instance));
-
-        return new EmailAttachmentProcessor(
-            speFileStore,
-            Mock.Of<IDocumentDataverseService>(),
-            // Task 146 (integ): the processor owns its document rows through the ONE resolver; the filter under test
-            // runs before any create, so a module-boundary double is enough (batch-4 integration of master #1287).
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            Options.Create(options),
-            NullLogger<EmailAttachmentProcessor>.Instance);
-    }
+    private static EmailAttachmentProcessor CreateProcessor(EmailProcessingOptions options) =>
+        new(Options.Create(options), NullLogger<EmailAttachmentProcessor>.Instance);
 
     #region Blocked Extension Tests
 

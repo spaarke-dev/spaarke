@@ -224,9 +224,11 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
 
-        // One source read spanning every Copy field and every placeholder.
+        // One source read spanning every Copy field and every placeholder, plus the source's owner and secure flag (the
+        // mapping-source rule's own columns, read in the same request).
         requestedColumns.Single().Should().BeEquivalentTo(
-            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber");
+            "sprk_clientreference", "sprk_client", "sprk_projectname", "sprk_notonsource", "sprk_projectnumber",
+            "ownerid", "sprk_issecure", "sprk_accesspermission"); // task 022b: the Restricted-source check reads the source's access permission in the same request
 
         var matter = created.Entity!;
         matter.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
@@ -503,7 +505,6 @@ public class OfficeQuickCreateContractTests
     [Theory]
     [InlineData("matter", "prvCreatesprk_Matter")]
     [InlineData("project", "prvCreatesprk_Project")]
-    [InlineData("invoice", "prvCreatesprk_Invoice")]
     public void CreatePrivilegeFor_IsTheLiveDataversePrivilegeName(string entityType, string privilege)
     {
         QuickCreateFieldRequirements.TryParse(entityType, out var parsed).Should().BeTrue();
@@ -522,7 +523,6 @@ public class OfficeQuickCreateContractTests
     [Theory]
     [InlineData("matter", "prvCreatesprk_Matter")]
     [InlineData("project", "prvCreatesprk_Project")]
-    [InlineData("invoice", "prvCreatesprk_Invoice")]
     public async Task Post_QuickCreate_WhenTheCallerLacksTheTablesCreatePrivilege_Returns403_AndCreatesNothing(
         string entityType, string privilege)
     {
@@ -583,7 +583,6 @@ public class OfficeQuickCreateContractTests
     [Theory]
     [InlineData("matter")]
     [InlineData("project")]
-    [InlineData("invoice")]
     public async Task Post_QuickCreate_WithNoBearerToken_Returns403_AndCreatesNothing(string entityType)
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
@@ -885,7 +884,7 @@ public class OfficeQuickCreateContractTests
         factory.Entities
             .Setup(e => e.RetrieveAsync("sprk_project", SourceProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Callback<string, Guid, string[], CancellationToken>((_, _, columns, _) => requests.Add(columns))
-            .ReturnsAsync(source);
+            .ReturnsAsync(source.WithGate());
         return requests;
     }
 

@@ -92,6 +92,15 @@ public sealed class DataverseEnvironmentRegistryClientTests
             .WithMessage("*EntitySetName*non-empty*");
     }
 
+    [Fact]
+    public void SnapshotSelectColumns_IncludeTheColumnsH3GatesTheDemoClientOn()
+    {
+        // H3 (demo plan decision 1) pre-authorizes the Demo-only client from sprk_environmenttype + sprk_isactive.
+        // Without them in $select every row parses as type unset, and no Demo stamp ever gets the client.
+        DataverseEnvironmentRegistryClient.SnapshotSelectColumns.Split(',').Should().Contain(
+            ["sprk_dataverseenvironmentid", "sprk_customerid", "sprk_tenantid", "sprk_environmenttype", "sprk_isactive"]);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -243,6 +252,63 @@ public sealed class DataverseEnvironmentRegistryClientTests
         snapshot.TenantId.Should().Be("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         snapshot.SetupStatus.Should().Be("InProgress");
         snapshot.CurrentRunId.Should().Be("65109e91-5968-4300-933e-9e79dea4109c");
+        snapshot.ProvisionedOn.Should().BeNull("sprk_provisionedon is absent — never provisioned");
+        snapshot.EnvironmentType.Should().BeNull("sprk_environmenttype is absent");
+        snapshot.IsActive.Should().BeNull("sprk_isactive is absent");
+        snapshot.IsActiveDemo.Should().BeFalse("an unmarked row is never read as Demo");
+    }
+
+    // Demo environment plan decision 1: H3 pre-authorizes the Demo-only operator client only when the row is
+    // Environment Type = Demo (1) AND active. Only a JSON number / boolean counts; anything else reads as unset.
+    [Theory]
+    [InlineData("1", "true", 1, true, true)]
+    [InlineData("6", "true", 6, true, false)]
+    [InlineData("1", "false", 1, false, false)]
+    [InlineData("1", "null", 1, null, false)]
+    [InlineData("null", "true", null, true, false)]
+    [InlineData("\"1\"", "\"true\"", null, null, false)]
+    public void ParseSnapshot_Reads_EnvironmentType_And_IsActive(
+        string typeJson, string activeJson, int? expectedType, bool? expectedActive, bool expectedActiveDemo)
+    {
+        var payload = $$"""
+        {
+          "sprk_dataverseenvironmentid": "721bce03-13c8-f111-a05c-0022482913fc",
+          "sprk_customerid": "acme",
+          "sprk_tenantid": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+          "sprk_setupstatus": 2,
+          "sprk_environmenttype": {{typeJson}},
+          "sprk_isactive": {{activeJson}}
+        }
+        """;
+        using var doc = JsonDocument.Parse(payload);
+        var snapshot = DataverseEnvironmentRegistryClient.ParseSnapshot(doc.RootElement);
+
+        snapshot.EnvironmentType.Should().Be(expectedType);
+        snapshot.IsActive.Should().Be(expectedActive);
+        snapshot.IsActiveDemo.Should().Be(expectedActiveDemo);
+    }
+
+    [Theory]
+    [InlineData("\"2026-11-23T14:01:48Z\"", "2026-11-23T14:01:48Z")]
+    [InlineData("null", null)]
+    [InlineData("\"not-a-date\"", null)]
+    public void ParseSnapshot_Reads_ProvisionedOn_As_Utc(string json, string? expected)
+    {
+        // ISS-031: POST /api/runs recognises an existing stamp by this column.
+        var payload = $$"""
+        {
+          "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
+          "sprk_customerid": "acme",
+          "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "sprk_setupstatus": 2,
+          "sprk_provisionedon": {{json}}
+        }
+        """;
+        using var doc = JsonDocument.Parse(payload);
+
+        var snapshot = DataverseEnvironmentRegistryClient.ParseSnapshot(doc.RootElement);
+
+        snapshot.ProvisionedOn.Should().Be(expected is null ? null : DateTimeOffset.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Theory]

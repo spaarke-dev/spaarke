@@ -281,6 +281,61 @@ public sealed record BillingDecisionRecordRequest(
     bool PrivilegeFlagged = false,
     DateTimeOffset? DecidedOn = null);
 
+/// <summary>
+/// ebilling-r1 task 084h-1 (EB-D-238; design notes/084h section 6.2): the ONE idempotency key of a per-record Procedure change's Decision
+/// Record, deterministic from the core record and the server-minted decision id (one per change). Stored as the record's review id in
+/// <c>sprk_steps</c>, as <see cref="BillingDecisionKey"/> is; its prefix (<c>procedure-dr-</c>) differs from every other key's, so no key can
+/// hash to another's value. The override row id is deliberately NOT in the key: row ids recur when an override is removed and added again
+/// (design section 6.2), so it stays in the record's <c>Values</c> under <c>override</c>.
+/// </summary>
+public static class RecordProcedureDecisionKey
+{
+    /// <summary>The key as the log carries it: <c>procedure-dr-{subjectEntity}-{subjectId}-{decisionId}</c>.</summary>
+    public static string Of(string subjectEntity, Guid subjectId, Guid decisionId) =>
+        $"procedure-dr-{subjectEntity}-{subjectId.ToString("D", CultureInfo.InvariantCulture)}-{decisionId.ToString("D", CultureInfo.InvariantCulture)}";
+
+    /// <summary>The key as a <see cref="Guid"/> (the first 16 bytes of its SHA-256), the form <c>sprk_steps</c> keeps a review id in.</summary>
+    public static Guid IdOf(string subjectEntity, Guid subjectId, Guid decisionId) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(Of(subjectEntity, subjectId, decisionId))).AsSpan(0, 16));
+}
+
+/// <summary>
+/// ebilling-r1 task 084h-1 (EB-D-238; design notes/084h sections 3.2, 4): ONE per-record Procedure change (assign, pin, unpin, exclude a
+/// Procedure, exclude a rule, change a rule, remove an override) made by a person on a matter, project or work assignment, for
+/// <see cref="DecisionRecordWriter.WriteRecordProcedureDecisionAsync(RecordProcedureDecisionRecordRequest, CancellationToken)"/>. It
+/// deliberately has NO resolved Signals, NO policy version and NO privilege flag (design section 5, ontology-r1 Q2): the record's parents are
+/// exactly the core record, so two secure families can never meet on it (C9 by construction).
+/// </summary>
+/// <param name="DecisionId">The server-minted decision id (one per change, minted before the preflight); with the subject, the record's
+/// idempotency key (<see cref="RecordProcedureDecisionKey"/>).</param>
+/// <param name="ActionCode">A per-record Procedure code (<see cref="DecisionActionCatalog.TryGetRecordProcedure"/>); a Signals or billing code
+/// is refused.</param>
+/// <param name="Subject">The core record the change was made on: <c>sprk_matter</c>, <c>sprk_project</c> or <c>sprk_workassignment</c>.</param>
+/// <param name="ConfirmedByUserId">The deciding user (<c>systemuserid</c>). Never empty: there is no automated decider on this path.</param>
+/// <param name="DeciderRole">The decider's role (for example <c>procedure-editor</c>), recorded in the fact snapshot.</param>
+/// <param name="Values">The decided content, keyed by the catalog parameter codes (<c>procedure</c>, <c>version</c>, <c>rule</c>, <c>firm</c>,
+/// <c>note</c>) plus the undeclared ids of design section 4.1 (<c>override</c>, and so on). A <c>note</c> that is null or only white space is
+/// the same as no note: it is neither written nor hashed.</param>
+/// <param name="Outcome">What the change did (<c>Assigned</c>, <c>Pinned</c>, <c>Excluded</c>, <c>Changed</c>, <c>Unpinned</c>, <c>Removed</c>).</param>
+/// <param name="Facts">Context at decision time (<c>coreTable</c>, <c>recordId</c>). MANDATORY and non-empty; not hashed.</param>
+/// <param name="Reason">The change's reason as stored on the override row (the POST codes); null for an unpin or a removal.</param>
+/// <param name="Written">Rows the change wrote (the override row).</param>
+/// <param name="DeciderContactId">The decider's linked internal contact (D-129), written to <c>sprk_assignedtointernal</c>.</param>
+/// <param name="DecidedOn">When decided; the writer's clock when null.</param>
+public sealed record RecordProcedureDecisionRecordRequest(
+    Guid DecisionId,
+    string ActionCode,
+    DecisionRecordRef Subject,
+    Guid ConfirmedByUserId,
+    string DeciderRole,
+    IReadOnlyDictionary<string, object?> Values,
+    string Outcome,
+    IReadOnlyDictionary<string, object?> Facts,
+    string? Reason,
+    IReadOnlyList<DecisionRecordRef>? Written = null,
+    Guid? DeciderContactId = null,
+    DateTimeOffset? DecidedOn = null);
+
 /// <summary>Bounded-cardinality refusal reasons for the Decision Record writer (log and metric dimension).</summary>
 public static class DecisionRecordRefusalReason
 {
@@ -344,6 +399,11 @@ public static class DecisionRecordRefusalReason
     /// record), the policy version it names, or (in the Finance recorder, before it calls this entry) the deciding user's linked contact. A
     /// retry may succeed.</summary>
     public const string BillingRecordLookupFailed = "decision_billing_lookup_failed";
+
+    /// <summary>ebilling-r1 task 084h-1 (design 084h, ontology-r1 Q1): whether a per-record Procedure change's Decision Record already exists
+    /// could not be checked (the lookup, or the writer identity it is narrowed by, faulted), so nothing was written: guessing "none" would
+    /// risk a second record. A retry may succeed.</summary>
+    public const string RecordProcedureLookupFailed = "decision_record_procedure_lookup_failed";
 
     /// <summary>Task 042b (D-169): a read or a grant of an unfiled communication's gate record participant share failed. Not a refusal: the
     /// record is written and owner-visible; nothing is shared beyond the communication's sharees (<see cref="GateDecisionRecordSharing"/>).</summary>
@@ -452,12 +512,18 @@ public sealed class DecisionRecordRefusedException : Exception
     /// <summary>The ownership resolver's refusal code when <see cref="Reason"/> is owner_refused.</summary>
     public string? OwnerRefusalCode { get; }
 
+    /// <summary>True only for the keyed "same decision id, same action code, other readable content" refusal (billing and Procedure entries,
+    /// <c>AlreadyRecordedOrRefuse</c>). Typed so a caller never reads <see cref="Exception.Message"/> to tell it from the other
+    /// <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> refusals.</summary>
+    public bool IsOtherContent { get; }
+
     public DecisionRecordRefusedException(
-        string reason, string message, string? ownerRefusalCode = null, Exception? innerException = null)
+        string reason, string message, string? ownerRefusalCode = null, Exception? innerException = null, bool isOtherContent = false)
         : base(message, innerException)
     {
         Reason = reason;
         OwnerRefusalCode = ownerRefusalCode;
+        IsOtherContent = isOtherContent;
     }
 }
 
@@ -598,6 +664,82 @@ public sealed class DecisionRecordWriter
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    // ── ebilling-r1 task 084h-5 (EB-D-247; ontology-r1 option 1): a derived primary id for every keyed Decision Record ──────────────
+
+    /// <summary>The keyed entry points: each has ONE idempotency key per decision (<see cref="GateDecisionKey"/>,
+    /// <see cref="ConditionClearedRecordKey"/>, <see cref="BillingDecisionKey"/>, <see cref="RecordProcedureDecisionKey"/>). The review path
+    /// (<see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>) is not one: its review id is chosen by the client.</summary>
+    internal enum KeyedEntry
+    {
+        Gate,
+        ConditionCleared,
+        Billing,
+        RecordProcedure,
+    }
+
+    /// <summary>
+    /// Task 084h-5: the keyed entry points that create their record with <see cref="DecisionRecordIdOf"/> as its primary id, so a second
+    /// concurrent create of the same decision is refused by Dataverse (<see cref="IsDuplicateRecord"/>) and answered as the existing
+    /// already-recorded case. One line per entry point: removing a line returns that entry to a random id (today's behaviour) with no other
+    /// edit. Condition-cleared and Procedure are on; the gate and billing are off (owner option B, EB-D-251), so their records keep random ids and their duplicates stay guarded by the lock and lookup.
+    /// </summary>
+    internal static readonly FrozenSet<KeyedEntry> DerivedRecordIdEntriesByDefault = new[]
+    {
+        KeyedEntry.ConditionCleared,
+        KeyedEntry.RecordProcedure,
+    }.ToFrozenSet();
+
+    /// <summary>Task 084h-5: the entry points this writer creates with a derived record id; <see cref="DerivedRecordIdEntriesByDefault"/> in
+    /// production. A test seam only (set at construction, never changed after).</summary>
+    internal IReadOnlySet<KeyedEntry> DerivedRecordIdEntries { get; init; } = DerivedRecordIdEntriesByDefault;
+
+    /// <summary>
+    /// Task 084h-5: THE derivation of a keyed Decision Record's primary id from its idempotency key, and from nothing else (never the action
+    /// code, so one key is one record whatever the code). The first 16 bytes of the SHA-256 of the key under its own prefix, the scheme every
+    /// key in this file uses (<see cref="GateDecisionKey.IdOf"/>); never the raw key. Every keyed entry point gets its id here and nowhere
+    /// else, so a change of derivation is a change to this one function. Nothing finds a record by this id (the <c>sprk_steps</c> lookup
+    /// stays first and a refused create re-runs it), so a changed derivation leaves existing rows found as before. Known limit: derivable
+    /// record id, see uac-r2 thread.
+    /// </summary>
+    internal static Guid DecisionRecordIdOf(Guid key) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes("decision-record-id:" + key.ToString("D", CultureInfo.InvariantCulture))).AsSpan(0, 16));
+
+    /// <summary>Task 084h-5: the primary id <paramref name="entry"/> creates its record with for <paramref name="key"/>, or null (a random id,
+    /// chosen by Dataverse) when the entry is not in <see cref="DerivedRecordIdEntries"/>.</summary>
+    private Guid? RecordIdFor(KeyedEntry entry, Guid key) => DerivedRecordIdEntries.Contains(entry) ? DecisionRecordIdOf(key) : null;
+
+    /// <summary>
+    /// Task 084h-5: <see cref="CreateAsync"/> was refused because a record with the derived primary id already exists (a concurrent attempt
+    /// of the same decision created it first). Private, and thrown only for a plan with <see cref="Plan.RecordId"/> set: every keyed entry
+    /// point catches it around its one create call, re-runs its own "already recorded" lookup and applies that lookup's rules, so it never
+    /// leaves the writer. Nothing was written by this attempt.
+    /// </summary>
+    private sealed class DerivedRecordIdTakenException(Exception inner, Guid derivedId, Func<Guid, Task> shareParticipants)
+        : Exception("A Decision Record with this decision's derived id already exists.", inner)
+    {
+        /// <summary>The primary id this call tried to create the record with.</summary>
+        internal Guid DerivedId { get; } = derivedId;
+
+        /// <summary>The participant share the create path would have run for this call (owner and principal as <see cref="CreateAsync"/>
+        /// computed them), given the record id to share.</summary>
+        internal Func<Guid, Task> ShareParticipants { get; } = shareParticipants;
+    }
+
+    /// <summary>Task 084h-5 review F1: a duplicate-path answer of AlreadyRecorded for the record with this call's own derived id means the
+    /// create committed and the SDK's internal retry was refused, so the share the create path would have run never ran. Run it now (never
+    /// throws; a re-grant is harmless). A stored record with any other id is another attempt's or an older row, shared by whoever created
+    /// it: nothing runs. The secure-owner read-back stays skipped on this path.</summary>
+    private static Task ShareIfThisCallsRecordAsync(DerivedRecordIdTakenException taken, Guid storedId) =>
+        storedId == taken.DerivedId ? taken.ShareParticipants(storedId) : Task.CompletedTask;
+
+    /// <summary>Task 084h-5: the refusal when the derived id is taken but the entry's own lookup does not find this decision's record (so the
+    /// lookup's rules cannot answer it). The entry's lookup-failed reason: nothing was written, and a retry runs the lookup again. Never
+    /// <see cref="DecisionRecordRefusalReason.CreateFailed"/>.</summary>
+    private static DecisionRecordRefusedException DerivedRecordIdNotAnswered(string lookupFailedReason, DerivedRecordIdTakenException taken) =>
+        new(lookupFailedReason,
+            "This decision's Decision Record id is already taken, but its record is not found by the lookup, so nothing was written.",
+            innerException: taken.InnerException);
+
     /// <summary>Writes the review's one Decision Record.</summary>
     /// <exception cref="DecisionRecordRefusedException">The ONLY exception this writer throws (other than cancellation): the
     /// review is invalid or too large for its columns, has no fact snapshot, cannot be typed from the catalog, has no subject the
@@ -666,13 +808,7 @@ public sealed class DecisionRecordWriter
             var decisionKey = GateDecisionKey.IdOf(request.CommunicationId, request.Authorize);
             if (await FindGateRecordAsync(request.CommunicationId, decisionKey, ct).ConfigureAwait(false) is { } existing)
             {
-                _logger.LogInformation(
-                    "Gate decision {EvaluationId} already recorded as Decision Record {RecordId} (outcome {Outcome}); nothing written.",
-                    request.EvaluationId, existing, request.Authorize ? "Authorized" : "Denied");
-                return new DecisionRecordWriteResult(existing, RecordedDecisionClass.Judgement, [])
-                {
-                    AlreadyRecorded = true,
-                };
+                return AlreadyRecorded(existing);
             }
 
             var (core, derived) = await ResolveGateCoreAsync(request, ct).ConfigureAwait(false);
@@ -694,12 +830,42 @@ public sealed class DecisionRecordWriter
                 Reason: request.Reason,
                 Denied: !request.Authorize,
                 PrivilegeFlagged: request.PrivilegeFlagged);
-            return await CreateAsync(review, plan with { AlreadyDerived = derived }, resolvedOwner: null, ct).ConfigureAwait(false);
+            try
+            {
+                return await CreateAsync(
+                        review,
+                        plan with { AlreadyDerived = derived, RecordId = RecordIdFor(KeyedEntry.Gate, decisionKey) },
+                        resolvedOwner: null,
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (DerivedRecordIdTakenException taken)
+            {
+                // Task 084h-5: a concurrent attempt of this decision created the record first. The same lookup and the same answer as above.
+                if (await FindGateRecordAsync(request.CommunicationId, decisionKey, ct).ConfigureAwait(false) is { } stored)
+                {
+                    await ShareIfThisCallsRecordAsync(taken, stored).ConfigureAwait(false);
+                    return AlreadyRecorded(stored);
+                }
+
+                throw DerivedRecordIdNotAnswered(DecisionRecordRefusalReason.GateRecordLookupFailed, taken);
+            }
         }
         catch (DecisionRecordRefusedException ex)
         {
             LogRefusal(request.EvaluationId, ex);
             throw;
+        }
+
+        DecisionRecordWriteResult AlreadyRecorded(Guid existing)
+        {
+            _logger.LogInformation(
+                "Gate decision {EvaluationId} already recorded as Decision Record {RecordId} (outcome {Outcome}); nothing written.",
+                request.EvaluationId, existing, request.Authorize ? "Authorized" : "Denied");
+            return new DecisionRecordWriteResult(existing, RecordedDecisionClass.Judgement, [])
+            {
+                AlreadyRecorded = true,
+            };
         }
     }
 
@@ -730,11 +896,12 @@ public sealed class DecisionRecordWriter
             query.Criteria.AddCondition("sprk_confirmedby", ConditionOperator.Null);
             // Task 153 (adversarial pass 2 F1): and only a record the writer itself created. A Console user may create a Decision Record
             // (Deep create) carrying this key and no confirmer; without this condition it would stop the gate's record being written.
-            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+            // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
+            WriterCreatedRecord.AddConditions(query.Criteria, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty ? row.Id : null;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.GateRecordLookupFailed,
@@ -798,14 +965,7 @@ public sealed class DecisionRecordWriter
             var plan = ValidateConditionCleared(request);
             if (await FindConditionClearedRecordAsync(request.Subject, key, ct).ConfigureAwait(false) is { } existing)
             {
-                _logger.LogInformation(
-                    "Signal {SignalId} (episode {Episode}): its condition-cleared closure is already recorded as Decision Record {RecordId}; nothing written.",
-                    request.SignalId, request.Episode, existing.Id);
-                return new DecisionRecordWriteResult(existing.Id, RecordedDecisionClass.Routine, [request.SignalId])
-                {
-                    AlreadyRecorded = true,
-                    ConfirmedByUserId = existing.ConfirmedBy,
-                };
+                return AlreadyRecorded(existing);
             }
 
             var (person, unknownWhy, changedOn) = await ReadChangedByAsync(request, ct).ConfigureAwait(false);
@@ -845,7 +1005,24 @@ public sealed class DecisionRecordWriter
                 PrivilegeFlagged: request.PrivilegeFlagged,
                 SignalSubjects: [request.Subject],
                 AssigneeSystemUserId: request.AssigneeSystemUserId);
-            var written = await CreateAsync(review, plan, resolvedOwner: null, ct).ConfigureAwait(false);
+            DecisionRecordWriteResult written;
+            try
+            {
+                written = await CreateAsync(review, plan with { RecordId = RecordIdFor(KeyedEntry.ConditionCleared, key) }, resolvedOwner: null, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (DerivedRecordIdTakenException taken)
+            {
+                // Task 084h-5: a concurrent attempt of this closure created the record first. The same lookup and the same answer as above.
+                if (await FindConditionClearedRecordAsync(request.Subject, key, ct).ConfigureAwait(false) is { } stored)
+                {
+                    await ShareIfThisCallsRecordAsync(taken, stored.Id).ConfigureAwait(false);
+                    return AlreadyRecorded(stored);
+                }
+
+                throw DerivedRecordIdNotAnswered(DecisionRecordRefusalReason.ConditionClearedLookupFailed, taken);
+            }
+
             return written with { ConfirmedByUserId = person };
         }
         catch (DecisionRecordRefusedException ex) when (ConditionClearedSkipTag(ex.Reason) is { } skip)
@@ -862,6 +1039,18 @@ public sealed class DecisionRecordWriter
         {
             LogRefusal(key, ex);
             throw;
+        }
+
+        DecisionRecordWriteResult AlreadyRecorded((Guid Id, Guid? ConfirmedBy) existing)
+        {
+            _logger.LogInformation(
+                "Signal {SignalId} (episode {Episode}): its condition-cleared closure is already recorded as Decision Record {RecordId}; nothing written.",
+                request.SignalId, request.Episode, existing.Id);
+            return new DecisionRecordWriteResult(existing.Id, RecordedDecisionClass.Routine, [request.SignalId])
+            {
+                AlreadyRecorded = true,
+                ConfirmedByUserId = existing.ConfirmedBy,
+            };
         }
     }
 
@@ -1014,13 +1203,14 @@ public sealed class DecisionRecordWriter
             // Adversarial pass 2 F1: and only a record the writer itself created. The key is computable from the Signal id and episode, and a
             // Console user may create a Decision Record (Deep create): a user's row with this key, this code and a confirmer of their choosing
             // would otherwise be taken as the closure's record, and its confirmer copied to the Signal's sprk_resolvedby.
-            query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+            // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
+            WriterCreatedRecord.AddConditions(query.Criteria, await WriterUserIdAsync(ct).ConfigureAwait(false));
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             return rows?.Entities?.FirstOrDefault() is { } row && row.Id != Guid.Empty
                 ? (row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id)
                 : null;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.ConditionClearedLookupFailed,
@@ -1054,7 +1244,7 @@ public sealed class DecisionRecordWriter
             link.Columns = new ColumnSet("isdisabled", "accessmode", "applicationid", "sprk_isexternal");
             row = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities?.FirstOrDefault();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(
                 "Signal {SignalId}: the {SubjectEntity} it was about could not be read for its last change ({ExceptionType}); the closure is recorded with the person unknown.",
@@ -1241,8 +1431,24 @@ public sealed class DecisionRecordWriter
     /// <summary>The most rows the billing "already recorded" lookup reads (see <see cref="FindBillingRecordsAsync"/>).</summary>
     private const int BillingLookupTop = 10;
 
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when the decision id is recorded with the same billing action and
+    /// other, readable content (the request is not a repeat of the recorded decision).</summary>
+    internal const string BillingOtherContentRefusal =
+        "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.";
+
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when a record under the decision id has the same billing action
+    /// but its content hash cannot be read (nothing is proven either way).</summary>
+    internal const string BillingContentUnreadableRefusal =
+        "This decision id is already recorded on its subject with the same billing action, but the recorded content cannot be read; nothing was written.";
+
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when the decision id is recorded on its subject with ANOTHER billing
+    /// action (the key carries no code). Moved unchanged from <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, Func{CancellationToken, Task{Guid?}}?, CancellationToken)"/>
+    /// (ebilling-r1 iss029) so <see cref="PreflightBillingRepeat"/> refuses with the same words.</summary>
+    internal const string BillingOtherCodeRefusal =
+        "This decision id is already recorded on its subject with another billing action; nothing was written.";
+
     /// <summary>
-    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the three line codes, the invoice for every other
+    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the line codes (accept, reduce, disallow and add-line), the invoice for every other
     /// (D-75; D-101: an override and an automatic rejection file under the invoice the submission created). This list is consulted by
     /// <see cref="WriteBillingDecisionAsync"/> only; <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> neither reads nor
     /// changes it. Built from the catalog's billing set, so every billing code has a subject; but a NEW line-level code that is not named in
@@ -1253,7 +1459,7 @@ public sealed class DecisionRecordWriter
     private static readonly FrozenDictionary<string, string> BillingSubjectByCode = DecisionActionCatalog.BillingActions
         .ToFrozenDictionary(
             d => d.Code,
-            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" ? BillingLineEntity : BillingInvoiceEntity,
+            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" or "add-line" ? BillingLineEntity : BillingInvoiceEntity,
             StringComparer.Ordinal);
 
     /// <summary>K4 (ontology-r1): the billing codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order, so
@@ -1321,41 +1527,25 @@ public sealed class DecisionRecordWriter
             var plan = ValidateBilling(request);
             var key = BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId);
             var recorded = await FindBillingRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
-            if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)))
-            {
-                // The key carries no code, so one decision id can only ever be one billing decision on its subject: another code under
-                // it (a retry that changed its mind after a create timeout) would be a second, contradictory record. Refused; a retry
-                // does not change it.
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.ReviewInvalid,
-                    "This decision id is already recorded on its subject with another billing action; nothing was written.");
-            }
-
-            var hash = BillingDecisionHash(request);
-            // Of the rows with this code (two can exist after a concurrent pair, see above), the one with THIS decision's hash answers, whichever
-            // row the lookup returned first.
-            var sameCode = recorded.Where(r => string.Equals(r.Code, request.ActionCode, StringComparison.Ordinal)).ToList();
-            var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
-            if (existing.Id == Guid.Empty && sameCode.Count > 0)
-            {
-                // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded
-                // decision; answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot
-                // be read proves nothing either, so it is refused the same way, never written over with a second record.
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.ReviewInvalid,
-                    "This decision id is already recorded on its subject with the same billing action but other content; nothing was written.");
-            }
+            // The key carries no code, so one decision id can only ever be one billing decision on its subject: another code under it (a retry
+            // that changed its mind after a create timeout) would be a second, contradictory record. Refused; a retry does not change it.
+            // K2 (ontology-r1): the same id and code with other content (reduce-line 800, then 700) is not a repeat of the recorded decision;
+            // answering AlreadyRecorded would tell the caller its 700 was recorded when 800 was. A record whose hash cannot be read proves
+            // nothing either, so it is refused the same way (same reason), never written over with a second record; its message says so, so a
+            // caller can tell it from proven other content (ebilling-r1 164a fix round K2). The rules are shared with the Procedure entry
+            // (AlreadyRecordedOrRefuse, task 084h-1 fix round 1); the messages are billing's own. PreflightBillingRepeat applies the same rules,
+            // with the same messages, to a stored record a caller read before its own writes (ebilling-r1 iss029).
+            var (existing, hash) = AlreadyRecordedOrRefuse(
+                recorded,
+                request.ActionCode,
+                () => BillingDecisionHash(request),
+                BillingOtherCodeRefusal,
+                BillingOtherContentRefusal,
+                BillingContentUnreadableRefusal);
 
             if (existing.Id != Guid.Empty)
             {
-                _logger.LogInformation(
-                    "Billing decision {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
-                    request.DecisionId, request.ActionCode, existing.Id);
-                return new DecisionRecordWriteResult(existing.Id, plan.Class, request.ResolvedSignalIds ?? [])
-                {
-                    AlreadyRecorded = true,
-                    ConfirmedByUserId = existing.ConfirmedBy,
-                };
+                return AlreadyRecorded(existing, plan);
             }
 
             if (deciderContact is not null && NoneIfEmpty(request.ConfirmedByUserId) is not null && NoneIfEmpty(request.DeciderContactId) is null)
@@ -1366,18 +1556,50 @@ public sealed class DecisionRecordWriter
             await RequireBillingPolicyVersionAsync(request.PolicyVersionId, ct).ConfigureAwait(false);
             var signalSubjects = await BillingSignalSubjectsAsync(request.ResolvedSignalIds, ct).ConfigureAwait(false);
             var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
-            var written = await CreateAsync(
-                    BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects, ReviewHash = hash },
-                    plan with { AlreadyDerived = derived },
-                    resolvedOwner: null,
-                    ct)
-                .ConfigureAwait(false);
+            DecisionRecordWriteResult written;
+            try
+            {
+                written = await CreateAsync(
+                        BillingReview(request, plan, key, core) with { SignalSubjects = signalSubjects, ReviewHash = hash },
+                        plan with { AlreadyDerived = derived, RecordId = RecordIdFor(KeyedEntry.Billing, key) },
+                        resolvedOwner: null,
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (DerivedRecordIdTakenException taken)
+            {
+                // Task 084h-5: a concurrent attempt of this decision id created the record first. The same lookup and EXACTLY the same rules as
+                // above (another code, other content or an unreadable hash refused; the same code and hash answered), on this decision's hash.
+                var stored = await FindBillingRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
+                var (found, _) = AlreadyRecordedOrRefuse(
+                    stored, request.ActionCode, () => hash, BillingOtherCodeRefusal, BillingOtherContentRefusal, BillingContentUnreadableRefusal);
+                if (found.Id != Guid.Empty)
+                {
+                    await ShareIfThisCallsRecordAsync(taken, found.Id).ConfigureAwait(false);
+                    return AlreadyRecorded(found, plan);
+                }
+
+                throw DerivedRecordIdNotAnswered(DecisionRecordRefusalReason.BillingRecordLookupFailed, taken);
+            }
+
             return written with { ConfirmedByUserId = NoneIfEmpty(request.ConfirmedByUserId) };
         }
         catch (DecisionRecordRefusedException ex)
         {
             LogRefusal(request.DecisionId, ex);
             throw;
+        }
+
+        DecisionRecordWriteResult AlreadyRecorded((Guid Id, Guid? ConfirmedBy, string Code, string? Hash) existing, Plan plan)
+        {
+            _logger.LogInformation(
+                "Billing decision {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
+                request.DecisionId, request.ActionCode, existing.Id);
+            return new DecisionRecordWriteResult(existing.Id, plan.Class, request.ResolvedSignalIds ?? [])
+            {
+                AlreadyRecorded = true,
+                ConfirmedByUserId = existing.ConfirmedBy,
+            };
         }
     }
 
@@ -1392,6 +1614,28 @@ public sealed class DecisionRecordWriter
         ArgumentNullException.ThrowIfNull(request);
         var plan = ValidateBilling(request);
         _ = Content(BillingReview(request, plan, BillingDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId), core: null), plan);
+    }
+
+    /// <summary>
+    /// ebilling-r1 iss029 (ISS-029): the "already recorded" decision <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, Func{CancellationToken, Task{Guid?}}?, CancellationToken)"/>
+    /// will make, made BEFORE a caller's own first write, against the record <paramref name="stored"/> that the caller already read under this
+    /// request's subject and decision id (<see cref="FindBillingDecisionResolvedSetsAsync"/>). The SAME rules and messages
+    /// (<see cref="AlreadyRecordedOrRefuse"/>, <see cref="BillingDecisionHash"/>): another billing code, or the same code with other readable
+    /// content (<see cref="DecisionRecordRefusedException.IsOtherContent"/>), or a stored content that cannot be read, is refused; the same code
+    /// and content returns (the write will answer AlreadyRecorded). No I/O; writes and logs nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.ReviewInvalid"/>, as the write would throw it.</exception>
+    internal static void PreflightBillingRepeat(BillingDecisionRecordRequest request, BillingStoredResolvedSet stored)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(stored);
+        _ = AlreadyRecordedOrRefuse(
+            [(stored.RecordId, stored.ConfirmedByUserId, stored.ActionCode ?? string.Empty, stored.ContentHash)],
+            request.ActionCode,
+            () => BillingDecisionHash(request),
+            BillingOtherCodeRefusal,
+            BillingOtherContentRefusal,
+            BillingContentUnreadableRefusal);
     }
 
     private static Guid? NoneIfEmpty(Guid? id) => id is { } value && value != Guid.Empty ? value : null;
@@ -1605,12 +1849,37 @@ public sealed class DecisionRecordWriter
     /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.BillingRecordLookupFailed"/>: the lookup (or
     /// the writer identity it is narrowed by) faulted, a timeout surfacing as a cancellation the caller did not ask for included. Nothing is
     /// written: guessing "none" would risk a second record; a retry may succeed.</exception>
-    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindBillingRecordsAsync(
-        DecisionRecordRef subject, Guid key, CancellationToken ct)
+    private Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindBillingRecordsAsync(
+        DecisionRecordRef subject, Guid key, CancellationToken ct) =>
+        FindKeyedRecordsAsync(
+            subject,
+            key,
+            BillingLookupCodes,
+            BillingSubjectByCode.ContainsKey,
+            DecisionRecordRefusalReason.BillingRecordLookupFailed,
+            "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
+            ct);
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 fix round 1: the body of the billing "already recorded" lookup (<see cref="FindBillingRecordsAsync"/>), moved
+    /// here unchanged so the per-record Procedure lookup (<see cref="FindRecordProcedureRecordsAsync"/>) reuses it instead of copying it. Runs
+    /// <see cref="KeyedRecordsQueryAsync"/> on <paramref name="codes"/> and reads each row's code, <c>sprk_confirmedby</c> and stored hash
+    /// (<see cref="StoredBillingHashOf"/>), keeping only rows whose code <paramref name="isCode"/> accepts (the code check repeated on each row).
+    /// Any fault, a timeout surfacing as a cancellation the caller did not ask for included, is refused as <paramref name="refusalReason"/>
+    /// with <paramref name="refusalMessage"/>; the caller's own cancellation propagates.
+    /// </summary>
+    private async Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindKeyedRecordsAsync(
+        DecisionRecordRef subject,
+        Guid key,
+        object[] codes,
+        Func<string, bool> isCode,
+        string refusalReason,
+        string refusalMessage,
+        CancellationToken ct)
     {
         try
         {
-            var query = await BillingRecordsQueryAsync(subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], ct).ConfigureAwait(false);
+            var query = await KeyedRecordsQueryAsync(subject, key, ["sprk_confirmedby", "sprk_actioncode", "sprk_steps"], codes, ct).ConfigureAwait(false);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
             var found = new List<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>();
@@ -1618,7 +1887,7 @@ public sealed class DecisionRecordWriter
             {
                 if (row.Id != Guid.Empty
                     && row.GetAttributeValue<string>("sprk_actioncode") is { } code
-                    && BillingSubjectByCode.ContainsKey(code))
+                    && isCode(code))
                 {
                     found.Add((row.Id, row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id, code, StoredBillingHashOf(row)));
                 }
@@ -1628,42 +1897,414 @@ public sealed class DecisionRecordWriter
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            throw new DecisionRecordRefusedException(
-                DecisionRecordRefusalReason.BillingRecordLookupFailed,
-                "Whether the billing decision's Decision Record already exists could not be checked, so nothing was written.",
-                innerException: ex);
+            throw new DecisionRecordRefusedException(refusalReason, refusalMessage, innerException: ex);
         }
     }
 
-    /// <summary>The "already recorded" lookup's query (<see cref="FindBillingRecordsAsync"/>), shared UNCHANGED with
+    /// <summary>
+    /// ebilling-r1 task 084h-1 fix round 1: the "already recorded" decision of the billing entry, moved here unchanged so the per-record
+    /// Procedure entry reuses it. In order: (1) rows found but none with <paramref name="code"/> → <see cref="DecisionRecordRefusalReason.ReviewInvalid"/>
+    /// with <paramref name="otherCodeRefusal"/> (the key carries no code); (2) the request's hash is computed (<paramref name="hashOf"/>, only
+    /// now, as before the move); (3) of the rows with the code, the one with this hash answers, whichever came first; (4) rows with the code
+    /// but none with this hash → <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> with <paramref name="contentUnreadableRefusal"/> when
+    /// any of them has no readable hash, otherwise <paramref name="otherContentRefusal"/>.
+    /// </summary>
+    /// <returns>The matching row (its <c>Id</c> is <see cref="Guid.Empty"/> when nothing is recorded yet) and the request's hash.</returns>
+    private static ((Guid Id, Guid? ConfirmedBy, string Code, string? Hash) Existing, string Hash) AlreadyRecordedOrRefuse(
+        IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)> recorded,
+        string code,
+        Func<string> hashOf,
+        string otherCodeRefusal,
+        string otherContentRefusal,
+        string contentUnreadableRefusal)
+    {
+        if (recorded.Count > 0 && !recorded.Any(r => string.Equals(r.Code, code, StringComparison.Ordinal)))
+        {
+            throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, otherCodeRefusal);
+        }
+
+        var hash = hashOf();
+        // Of the rows with this code (two can exist after a concurrent pair), the one with THIS decision's hash answers, whichever row the
+        // lookup returned first.
+        var sameCode = recorded.Where(r => string.Equals(r.Code, code, StringComparison.Ordinal)).ToList();
+        var existing = sameCode.FirstOrDefault(r => string.Equals(r.Hash, hash, StringComparison.Ordinal));
+        if (existing.Id == Guid.Empty && sameCode.Count > 0)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                sameCode.Any(r => r.Hash is null) ? contentUnreadableRefusal : otherContentRefusal,
+                isOtherContent: sameCode.All(r => r.Hash is not null));
+        }
+
+        return (existing, hash);
+    }
+
+    /// <summary>The billing "already recorded" query (<see cref="FindBillingRecordsAsync"/> runs the same query through <see cref="FindKeyedRecordsAsync"/>
+    /// with <see cref="BillingLookupCodes"/>), shared UNCHANGED with
     /// <see cref="FindBillingDecisionResolvedSetAsync"/>: the subject's regarding lookup, the key in <c>sprk_steps</c>, created by the writer
     /// identity, billing codes only, at most <see cref="BillingLookupTop"/> rows. Only the columns differ.</summary>
-    private async Task<QueryExpression> BillingRecordsQueryAsync(DecisionRecordRef subject, Guid key, string[] columns, CancellationToken ct)
+    private Task<QueryExpression> BillingRecordsQueryAsync(DecisionRecordRef subject, Guid key, string[] columns, CancellationToken ct) =>
+        KeyedRecordsQueryAsync(subject, key, columns, BillingLookupCodes, ct);
+
+    /// <summary>The part of the "already recorded" filter that says WHO wrote the row and WHAT it is, shared unchanged by
+    /// <see cref="BillingRecordsQueryAsync"/> and <see cref="FindBillingDecisionResolvedSetsAsync"/>: created by the writer identity (a row a
+    /// person created is never trusted), billing codes only.</summary>
+    private Task AddBillingWriterFilterAsync(QueryExpression query, CancellationToken ct) =>
+        AddWriterFilterAsync(query, BillingLookupCodes, ct);
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 (design 084h section 3.2 step 2, ontology-r1 review round 1 item 6): the body of the billing "already recorded"
+    /// query, moved here UNCHANGED so the per-record Procedure lookup reuses it instead of copying it. The billing callers pass
+    /// <see cref="BillingLookupCodes"/>, so their query (conditions, their order, the row cap) is exactly what it was; the Procedure lookup
+    /// passes <see cref="RecordProcedureLookupCodes"/>. The subject's regarding lookup, the key in <c>sprk_steps</c>, created by the writer
+    /// identity, <c>sprk_actioncode</c> in <paramref name="codes"/>, at most <see cref="BillingLookupTop"/> rows.
+    /// </summary>
+    private async Task<QueryExpression> KeyedRecordsQueryAsync(
+        DecisionRecordRef subject, Guid key, string[] columns, object[] codes, CancellationToken ct)
     {
         var query = new QueryExpression(Table)
         {
             ColumnSet = new ColumnSet(columns),
-            // Sequential use leaves at most one billing row per key; only a concurrent pair (see WriteBillingDecisionAsync) adds another.
-            // Bounded, never a scan.
+            // Sequential use leaves at most one row per key, billing or Procedure (each key is per entry: BillingDecisionKey,
+            // RecordProcedureDecisionKey); only a concurrent pair (see WriteBillingDecisionAsync, and K-b in the 084h-1 notes) adds another.
+            // Since task 084h-5 a concurrent pair also leaves one row (the derived record id), except on an entry switched off in
+            // DerivedRecordIdEntries; rows written before it may still be two. Bounded, never a scan.
             TopCount = BillingLookupTop,
             NoLock = true,
         };
         query.Criteria.AddCondition(SubjectLookupByEntity[subject.Entity], ConditionOperator.Equal, subject.Id);
         query.Criteria.AddCondition("sprk_steps", ConditionOperator.Like, $"%\"reviewId\":\"{key:D}\"%");
-        await AddBillingWriterFilterAsync(query, ct).ConfigureAwait(false);
+        await AddWriterFilterAsync(query, codes, ct).ConfigureAwait(false);
         return query;
     }
 
-    /// <summary>The part of the "already recorded" filter that says WHO wrote the row and WHAT it is, shared unchanged by
-    /// <see cref="BillingRecordsQueryAsync"/> and <see cref="FindBillingDecisionResolvedSetsAsync"/>: created by the writer identity (a row a
-    /// person created is never trusted), billing codes only.</summary>
-    private async Task AddBillingWriterFilterAsync(QueryExpression query, CancellationToken ct)
+    /// <summary>The body of <see cref="AddBillingWriterFilterAsync"/>, moved here unchanged (task 084h-1): created by the writer identity
+    /// (task 223, DI-144: <see cref="WriterCreatedRecord"/>, so <c>createdonbehalfby</c> empty as well), <c>sprk_actioncode</c> in
+    /// <paramref name="codes"/>.</summary>
+    private async Task AddWriterFilterAsync(QueryExpression query, object[] codes, CancellationToken ct)
     {
-        query.Criteria.AddCondition(CreatedByColumn, ConditionOperator.Equal, await WriterUserIdAsync(ct).ConfigureAwait(false));
+        WriterCreatedRecord.AddConditions(query.Criteria, await WriterUserIdAsync(ct).ConfigureAwait(false));
         // K4 (ontology-r1): only billing records count against the cap. Signals reviews that reused the id would otherwise fill the 10
-        // rows and hide this decision's record, and a second record would be written.
-        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, BillingLookupCodes);
+        // rows and hide this decision's record, and a second record would be written. (084h-1: the same holds for the Procedure codes.)
+        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.In, codes);
     }
+
+    // ── ebilling-r1 task 084h-1 (EB-D-238; design notes/084h sections 3.2, 3.4; root CLAUDE.md 6.5 path B, as D-100): the per-record Procedure entry
+
+    /// <summary>The per-record Procedure codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order).</summary>
+    private static readonly object[] RecordProcedureLookupCodes =
+        [.. DecisionActionCatalog.RecordProcedureActions.Select(d => d.Code).Order(StringComparer.Ordinal)];
+
+    /// <summary>The <c>Values</c> key of the optional note (design section 4.1); a null or blank value is the same as none.</summary>
+    internal const string RecordProcedureNoteKey = "note";
+
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when the decision id is recorded with the same Procedure code and
+    /// other, readable content (another note, say): the request is not a repeat of the recorded change.</summary>
+    internal const string RecordProcedureOtherContentRefusal =
+        "This decision id is already recorded on its core record with the same Procedure change but other content; nothing was written.";
+
+    /// <summary>The <see cref="DecisionRecordRefusalReason.ReviewInvalid"/> message when a record under the decision id has the same Procedure code
+    /// but its content hash cannot be read (nothing is proven either way).</summary>
+    internal const string RecordProcedureContentUnreadableRefusal =
+        "This decision id is already recorded on its core record with the same Procedure change, but the recorded content cannot be read; nothing was written.";
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 (EB-D-238; design notes/084h sections 3.2, 3.4, 6.2): writes the ONE Decision Record of a per-record Procedure
+    /// change (assign, pin, unpin, exclude a Procedure, exclude a rule, change a rule, remove an override), filed under the core record the change
+    /// was made on, exactly once per (core record, decision id) for retries made one after another: a second call with the same decision id and
+    /// the same content (<see cref="RecordProcedureDecisionHash"/>) returns the first record; with the same decision id but another code, or the
+    /// same code with other content (another note), it is refused (<see cref="DecisionRecordRefusalReason.ReviewInvalid"/>). An additive entry
+    /// point beside <see cref="WriteBillingDecisionAsync(BillingDecisionRecordRequest, CancellationToken)"/> (section 6.5 path B, the D-100 shape):
+    /// no existing entry, request or validation changes, and below the request it is the SAME code: <see cref="Content"/> (D-34 context),
+    /// <see cref="FiledAndOwnedAsync"/> (the core record filed through the shared regarding builder, the core-ancestor stamp, uac-r2's owner
+    /// answer) and the one <see cref="CreateAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Order.</b> (1) <see cref="ValidateRecordProcedure"/>, no I/O: a per-record Procedure code, a core-record subject, a deciding
+    /// user (never an <c>automated:</c> decider), the required parameters under their declared codes. (2) The "already recorded" lookup
+    /// (<see cref="FindRecordProcedureRecordsAsync"/>): a record is returned, nothing written; a fault writes nothing. (3) The lazy decider
+    /// contact. (4) The core pair (<see cref="ResolveBillingCoreAsync"/>, unchanged: for a core subject the derivation is the CORE branch, no
+    /// read, plus the one cached record-type read). (5) The shared create.</para>
+    /// <para><b>Closed field semantics.</b> Class: the catalog's <see cref="DecisionActionDefinition.RecordClass"/>. Outcome: Authorized (the
+    /// change was made). One taken step: the code with its catalog label, values, outcome and written rows. <c>sprk_gatetier</c>: the code's
+    /// declared gate through <see cref="Ai.PublicContracts.DecisionGateTier"/>. <c>sprk_policyversion</c> is never set (ontology-r1 Q4); no Signal
+    /// is resolved or linked (Q2: the owner's parents are exactly the core record).</para>
+    /// </remarks>
+    /// <exception cref="DecisionRecordRefusedException">The only exception type (besides cancellation): the request is invalid, the lookup
+    /// faulted (<see cref="DecisionRecordRefusalReason.RecordProcedureLookupFailed"/>), the subject cannot be filed, the owner was refused, or the
+    /// create failed. Nothing was written (after a create timeout the row may exist).</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
+    public Task<DecisionRecordWriteResult> WriteRecordProcedureDecisionAsync(RecordProcedureDecisionRecordRequest request, CancellationToken ct = default) =>
+        WriteRecordProcedureDecisionAsync(request, deciderContact: null, ct);
+
+    /// <summary>
+    /// <see cref="WriteRecordProcedureDecisionAsync(RecordProcedureDecisionRecordRequest, CancellationToken)"/> with the deciding contact supplied
+    /// LAZILY, as the billing entry takes it: <paramref name="deciderContact"/> runs only when a record is going to be written, after the
+    /// "already recorded" check; when the request already names a contact it is not called.
+    /// </summary>
+    internal async Task<DecisionRecordWriteResult> WriteRecordProcedureDecisionAsync(
+        RecordProcedureDecisionRecordRequest request, Func<CancellationToken, Task<Guid?>>? deciderContact, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        try
+        {
+            var plan = ValidateRecordProcedure(request);
+            var key = RecordProcedureDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId);
+            var recorded = await FindRecordProcedureRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
+            // The billing entry's rules (AlreadyRecordedOrRefuse): one decision id is one change on its core record, so another code under it
+            // is a contradiction; the same code with other content is not a repeat (K2); an unreadable hash proves nothing.
+            const string otherCodeRefusal = "This decision id is already recorded on its core record with another Procedure change; nothing was written.";
+            var (existing, hash) = AlreadyRecordedOrRefuse(
+                recorded,
+                request.ActionCode,
+                () => RecordProcedureDecisionHash(request),
+                otherCodeRefusal,
+                RecordProcedureOtherContentRefusal,
+                RecordProcedureContentUnreadableRefusal);
+
+            if (existing.Id != Guid.Empty)
+            {
+                return AlreadyRecorded(existing, plan);
+            }
+
+            if (deciderContact is not null && NoneIfEmpty(request.DeciderContactId) is null)
+            {
+                request = request with { DeciderContactId = await deciderContact(ct).ConfigureAwait(false) };
+            }
+
+            var (core, derived) = await ResolveBillingCoreAsync(request.Subject, ct).ConfigureAwait(false);
+            DecisionRecordWriteResult written;
+            try
+            {
+                written = await CreateAsync(
+                        RecordProcedureReview(request, plan, key, core) with { ReviewHash = hash },
+                        plan with { AlreadyDerived = derived, RecordId = RecordIdFor(KeyedEntry.RecordProcedure, key) },
+                        resolvedOwner: null,
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (DerivedRecordIdTakenException taken)
+            {
+                // Task 084h-5: a concurrent attempt of this change created the record first. The same lookup and EXACTLY the same rules as above.
+                var stored = await FindRecordProcedureRecordsAsync(request.Subject, key, ct).ConfigureAwait(false);
+                var (found, _) = AlreadyRecordedOrRefuse(
+                    stored, request.ActionCode, () => hash, otherCodeRefusal, RecordProcedureOtherContentRefusal, RecordProcedureContentUnreadableRefusal);
+                if (found.Id != Guid.Empty)
+                {
+                    await ShareIfThisCallsRecordAsync(taken, found.Id).ConfigureAwait(false);
+                    return AlreadyRecorded(found, plan);
+                }
+
+                throw DerivedRecordIdNotAnswered(DecisionRecordRefusalReason.RecordProcedureLookupFailed, taken);
+            }
+
+            return written with { ConfirmedByUserId = request.ConfirmedByUserId };
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            LogRefusal(request.DecisionId, ex);
+            throw;
+        }
+
+        DecisionRecordWriteResult AlreadyRecorded((Guid Id, Guid? ConfirmedBy, string Code, string? Hash) existing, Plan plan)
+        {
+            _logger.LogInformation(
+                "Procedure change {DecisionId} ({ActionCode}) already recorded as Decision Record {RecordId}; nothing written.",
+                request.DecisionId, request.ActionCode, existing.Id);
+            return new DecisionRecordWriteResult(existing.Id, plan.Class, [])
+            {
+                AlreadyRecorded = true,
+                ConfirmedByUserId = existing.ConfirmedBy,
+            };
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 (design 084h section 6.1 step 2): every refusal <see cref="WriteRecordProcedureDecisionAsync(RecordProcedureDecisionRecordRequest, CancellationToken)"/>
+    /// can give WITHOUT I/O (validation, column sizes), so the Procedure service can refuse a request the writer would refuse before its own
+    /// transaction. Writes and reads nothing; logs nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">The change as given would be refused.</exception>
+    internal void PreflightRecordProcedureDecision(RecordProcedureDecisionRecordRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var plan = ValidateRecordProcedure(request);
+        _ = Content(RecordProcedureReview(
+            request, plan, RecordProcedureDecisionKey.IdOf(request.Subject.Entity, request.Subject.Id, request.DecisionId), core: null), plan);
+    }
+
+    /// <summary>
+    /// The decided content as it is recorded and hashed: <see cref="RecordProcedureDecisionRecordRequest.Values"/> without a <c>note</c> whose
+    /// value is null or only white space (design section 4.1: the hash covers every key, a null one included, so a blank note would make two
+    /// otherwise identical changes hash differently; it is never written either). Every other key is kept as given. A note that came through
+    /// JSON (a <see cref="JsonElement"/> or <see cref="System.Text.Json.Nodes.JsonNode"/> holding a JSON null or a blank string, as Values
+    /// read back from a payload are) is blank in the same way (task 084h-1 fix round 1).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> RecordProcedureValuesOf(RecordProcedureDecisionRecordRequest r) =>
+        (r.Values ?? new Dictionary<string, object?>())
+            .Where(v => !(string.Equals(v.Key, RecordProcedureNoteKey, StringComparison.Ordinal) && IsBlankNote(v.Value)))
+            .ToDictionary(v => v.Key, v => v.Value, StringComparer.Ordinal);
+
+    /// <summary>True for a note value that is no note: null, a blank string, or JSON holding null or a blank string.</summary>
+    private static bool IsBlankNote(object? value) => value switch
+    {
+        null => true,
+        string text => string.IsNullOrWhiteSpace(text),
+        JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } => true,
+        JsonElement { ValueKind: JsonValueKind.String } element => string.IsNullOrWhiteSpace(element.GetString()),
+        System.Text.Json.Nodes.JsonNode node => node.GetValueKind() switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => true,
+            // TryGetValue, not GetValue: a JsonValue over a Guid or a date reports the String kind but holds no string (GetValue<string> throws).
+            JsonValueKind.String => node is System.Text.Json.Nodes.JsonValue text && text.TryGetValue<string>(out var noteText) && string.IsNullOrWhiteSpace(noteText),
+            _ => false,
+        },
+        _ => false,
+    };
+
+    /// <summary>True for a note that is text: a string, a JSON string, or a JsonValue holding a string. Anything else (a number, an object, an
+    /// array, a Guid) is not a note and is refused (task 084h-1 fix round 2).</summary>
+    private static bool IsTextNote(object? value) => value switch
+    {
+        string => true,
+        JsonElement { ValueKind: JsonValueKind.String } => true,
+        System.Text.Json.Nodes.JsonValue node => node.TryGetValue<string>(out _),
+        _ => false,
+    };
+
+    /// <summary>
+    /// A stable hash of what the per-record Procedure change IS (design section 6.2), stored in <c>sprk_steps</c> beside the key, with the
+    /// billing hash's shape: every value through the shared <see cref="CanonicalHashValue"/>. Covered: the code, the core record, who decided
+    /// (confirmer and role), the values (ordered by key; a blank note is not a value), the outcome and the reason. Not covered, because an
+    /// honest retry (the 084h-3 repair job) may differ in them: the fact snapshot, the decision time, the written rows and the deciding contact.
+    /// </summary>
+    internal static string RecordProcedureDecisionHash(RecordProcedureDecisionRecordRequest r)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        var canonical = new
+        {
+            code = r.ActionCode,
+            subject = r.Subject.Entity,
+            subjectId = r.Subject.Id,
+            confirmedBy = NoneIfEmpty(r.ConfirmedByUserId),
+            role = r.DeciderRole,
+            values = RecordProcedureValuesOf(r).OrderBy(v => v.Key, StringComparer.Ordinal)
+                .Select(v => new object?[] { v.Key, CanonicalHashValue(v.Value) }).ToArray(),
+            outcome = r.Outcome,
+            reason = r.Reason,
+        };
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(canonical))));
+    }
+
+    /// <summary>The review shape the shared builders read (<see cref="Content"/>, <see cref="FiledAndOwnedAsync"/>): no policy version
+    /// (<see cref="Guid.Empty"/>), no Signal, filed under the core record, which is also the decision context.</summary>
+    private static DecisionRecordRequest RecordProcedureReview(
+        RecordProcedureDecisionRecordRequest r, Plan plan, Guid key, DecisionRecordCore? core) => new(
+        ReviewId: key,
+        PolicyVersionId: Guid.Empty,
+        Core: core,
+        ItemSubject: r.Subject,
+        ConfirmedByUserId: r.ConfirmedByUserId,
+        DecidedOn: r.DecidedOn,
+        Steps: plan.Steps.Select(s => s.Step).ToList(),
+        FollowOns: [],
+        GateTier: Ai.PublicContracts.DecisionGateTier.ToText(Ai.PublicContracts.DecisionGateTier.Resolve(plan.Steps[0].Def.Gate!)),
+        ResolvedSignalIds: [],
+        FactValues: r.Facts,
+        DeciderRole: r.DeciderRole,
+        Because: null,
+        Reason: r.Reason,
+        DeciderContactId: r.DeciderContactId);
+
+    /// <summary>ebilling-r1 task 084h-1 (design section 3.2 step 1): the per-record Procedure request's checks, with no I/O, and the plan its
+    /// record is built from. Modelled on <see cref="ValidateBilling"/>.</summary>
+    private static Plan ValidateRecordProcedure(RecordProcedureDecisionRecordRequest r)
+    {
+        static DecisionRecordRefusedException Invalid(string message) => new(DecisionRecordRefusalReason.ReviewInvalid, message);
+
+        if (r.Facts is null || r.Facts.Count == 0)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.FactSnapshotMissing,
+                "sprk_factsnapshot is mandatory: the Procedure change carries no fact values, so no Decision Record was written.");
+        }
+
+        if (r.DecisionId == Guid.Empty) throw Invalid("DecisionId is required.");
+
+        // P1: a Signals or billing code is not a per-record Procedure change, and a Procedure code is neither (WriteAsync and the billing entry
+        // refuse it): the three entries take disjoint code sets.
+        if (!DecisionActionCatalog.TryGetRecordProcedure(r.ActionCode, out var definition) || definition.Gate is null)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.RecordClassUnderivable,
+                "The action is not a per-record Procedure action in the catalog, so the record class cannot be derived.");
+        }
+
+        if (r.Subject is null || string.IsNullOrWhiteSpace(r.Subject.Entity) || r.Subject.Id == Guid.Empty) throw Invalid("Subject is required.");
+
+        // P2: only the three filing core tables (matter, project, work assignment), before any I/O.
+        if (!InvoiceFamilyCoreRecordGuard.FilingCoreTables.Contains(r.Subject.Entity, StringComparer.Ordinal))
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.SubjectUnsupported,
+                "A per-record Procedure change is filed under its matter, project or work assignment; this subject is not one, so nothing was written.");
+        }
+
+        // P5: human-only. No null confirmer and no system decider.
+        if (r.ConfirmedByUserId == Guid.Empty) throw Invalid("ConfirmedByUserId is required: a Procedure change is always a person's.");
+        if (string.IsNullOrWhiteSpace(r.DeciderRole)) throw Invalid("DeciderRole is required.");
+        if (r.DeciderRole.StartsWith(AutomatedDeciderPrefix, StringComparison.Ordinal))
+        {
+            throw Invalid("A Procedure change a user confirmed cannot carry an 'automated:' decider.");
+        }
+
+        if (string.IsNullOrWhiteSpace(r.Outcome)) throw Invalid("Outcome is required.");
+        if (r.Reason is { Length: > ReasonMaxLength }) throw Invalid("Reason is too long for sprk_reason.");
+
+        var values = RecordProcedureValuesOf(r);
+
+        // A blank note is already dropped above; a note that is left must be text (a non-string JSON value is not one).
+        if (values.TryGetValue(RecordProcedureNoteKey, out var note) && !IsTextNote(note)) throw Invalid("A note must be text.");
+
+        foreach (var parameter in definition.Parameters.Where(p => p.Required))
+        {
+            if (parameter.Code == "reason")
+            {
+                if (string.IsNullOrWhiteSpace(r.Reason)) throw Invalid($"'{definition.Code}' requires a reason.");
+                continue;
+            }
+
+            if (!values.TryGetValue(parameter.Code, out var value) || value is null || value is string text && string.IsNullOrWhiteSpace(text))
+            {
+                throw Invalid($"'{definition.Code}' requires '{parameter.Code}'.");
+            }
+        }
+
+        var step = new DecisionRecordStep(definition.Code, Taken: true, values, r.Outcome, r.Written);
+        var steps = new List<(DecisionRecordStep Step, DecisionActionDefinition Def)> { (step, definition) };
+        var recordClass = definition.RecordClass == DecisionRecordClass.Judgement ? RecordedDecisionClass.Judgement : RecordedDecisionClass.Routine;
+        return new Plan(recordClass, AuthorizedOutcome, steps, steps);
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 084h-1 (design section 3.2 step 2, P3): the per-record Procedure records already written under this key, each with its
+    /// code, <c>sprk_confirmedby</c> and stored content hash (read as the billing lookup reads it). The query is the billing lookup's own
+    /// (<see cref="KeyedRecordsQueryAsync"/>: the core record's regarding lookup, the key in <c>sprk_steps</c>, created by the writer identity),
+    /// narrowed to the Procedure codes; the code check is repeated on each row read.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException"><see cref="DecisionRecordRefusalReason.RecordProcedureLookupFailed"/>: the lookup (or
+    /// the writer identity it is narrowed by) faulted. Nothing is written.</exception>
+    private Task<IReadOnlyList<(Guid Id, Guid? ConfirmedBy, string Code, string? Hash)>> FindRecordProcedureRecordsAsync(
+        DecisionRecordRef subject, Guid key, CancellationToken ct) =>
+        FindKeyedRecordsAsync(
+            subject,
+            key,
+            RecordProcedureLookupCodes,
+            static code => DecisionActionCatalog.TryGetRecordProcedure(code, out _),
+            DecisionRecordRefusalReason.RecordProcedureLookupFailed,
+            "Whether the Procedure change's Decision Record already exists could not be checked, so nothing was written.",
+            ct);
 
     /// <summary>
     /// The fact (in <c>sprk_factsnapshot</c>'s <c>facts</c>) under which a human billing decision stores the D-122 set it read before its
@@ -1677,8 +2318,17 @@ public sealed class DecisionRecordWriter
     /// <param name="SetReadAtUtc">Null when the record lists no Signal and stored no set (a record written before the set was stored).</param>
     /// <param name="ConfirmedByUserId">The record's <c>sprk_confirmedby</c> (the deciding person's <c>systemuserid</c>, as the writer wrote
     /// it); null for a system decision. A repeat names this decider, never one read from a column a person can edit.</param>
+    /// <param name="Reason">The record's <c>sprk_reason</c> as stored (095f-2c review round 1); null when the column is empty.</param>
+    /// <param name="Note">The record's stored <c>values.note</c> (095f-2c review round 1); null when the decision took no note.</param>
+    /// <param name="StoredContentReadable">True only when <see cref="StoredSetOf"/> could read the record's step and its <c>values</c> (a
+    /// note that is absent or null is readable and means none). False (the default) means <see cref="Reason"/> and <see cref="Note"/> must not
+    /// be trusted: a caller that finishes a decision from the stored content refuses (fail closed).</param>
+    /// <param name="ActionCode">ebilling-r1 iss029: the record's <c>sprk_actioncode</c> (a billing code), for <see cref="PreflightBillingRepeat"/>.</param>
+    /// <param name="ContentHash">ebilling-r1 iss029: the record's stored content hash (<see cref="BillingDecisionHash"/>, <c>sprk_steps.reviewHash</c>);
+    /// null when it cannot be read, which <see cref="PreflightBillingRepeat"/> refuses as the write does.</param>
     internal sealed record BillingStoredResolvedSet(
-        Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals, Guid? ConfirmedByUserId = null);
+        Guid RecordId, DateTime? SetReadAtUtc, IReadOnlyList<(Guid SignalId, string PolicyCode)> Signals, Guid? ConfirmedByUserId = null,
+        string? Reason = null, string? Note = null, bool StoredContentReadable = false, string? ActionCode = null, string? ContentHash = null);
 
     /// <summary>
     /// ebilling-r1 tasks 100 and 105 (D-122, additive; ontology-r1 approved): the set the billing decision <paramref name="decisionId"/> on
@@ -1725,7 +2375,7 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>The columns <see cref="StoredSetOf"/> reads.</summary>
-    private static readonly string[] BillingStoredSetColumns = ["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby"];
+    private static readonly string[] BillingStoredSetColumns = ["sprk_actioncode", "sprk_steps", "sprk_factsnapshot", "sprk_confirmedby", "sprk_reason"];
 
     private static bool IsBillingRow(Entity r) =>
         r.Id != Guid.Empty && r.GetAttributeValue<string>("sprk_actioncode") is { } code && BillingSubjectByCode.ContainsKey(code);
@@ -1838,11 +2488,68 @@ public sealed class DecisionRecordWriter
                 "The recorded billing decision lists Signals whose stored set cannot be read; nothing was written.");
         }
 
+        var (note, contentReadable) = StoredNoteOf(row);
         return new BillingStoredResolvedSet(
             row.Id,
             stored?.ReadAt,
             ids.Select(id => (id, stored!.Value.Codes[id])).ToList(),
-            row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id is { } by && by != Guid.Empty ? by : null);
+            row.GetAttributeValue<EntityReference>("sprk_confirmedby")?.Id is { } by && by != Guid.Empty ? by : null,
+            row.GetAttributeValue<string>("sprk_reason") is { Length: > 0 } reason ? reason : null,
+            note,
+            contentReadable,
+            row.GetAttributeValue<string>("sprk_actioncode"),
+            StoredBillingHashOf(row));
+    }
+
+    private const string NoteValueKey = "note";
+
+    /// <summary>
+    /// 095f-2c review round 1: the optional note a billing record stored (<c>sprk_steps</c>: the record's own taken step, <c>values.note</c>,
+    /// which <see cref="BillingDecisionHash"/> covers), read the way approve reads its stored amount. <c>Readable</c> is false when the step
+    /// or its <c>values</c> cannot be read, or the note is not a non-blank string (a note that is absent or JSON null is readable and means none).
+    /// </summary>
+    private static (string? Note, bool Readable) StoredNoteOf(Entity row)
+    {
+        try
+        {
+            using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps") ?? "{}");
+            var code = row.GetAttributeValue<string>("sprk_actioncode");
+            if (steps.RootElement.ValueKind != JsonValueKind.Object
+                || !steps.RootElement.TryGetProperty("steps", out var list) || list.ValueKind != JsonValueKind.Array)
+            {
+                return (null, false);
+            }
+
+            foreach (var step in list.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object
+                    || !step.TryGetProperty("code", out var stepCode) || stepCode.ValueKind != JsonValueKind.String || stepCode.GetString() != code
+                    || !step.TryGetProperty("taken", out var taken) || taken.ValueKind != JsonValueKind.True)
+                {
+                    continue;
+                }
+
+                if (!step.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Object)
+                {
+                    return (null, false);
+                }
+
+                if (!values.TryGetProperty(NoteValueKey, out var note) || note.ValueKind == JsonValueKind.Null)
+                {
+                    return (null, true);
+                }
+
+                return note.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(note.GetString())
+                    ? (note.GetString(), true)
+                    : (null, false);
+            }
+
+            return (null, false);
+        }
+        catch (JsonException)
+        {
+            return (null, false);
+        }
     }
 
     /// <summary>The record's <c>resolvedSignalIds</c> from <c>sprk_steps</c>; null when unreadable.</summary>
@@ -2058,8 +2765,9 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// D-34 / D-75: the core record of a billing subject, derived from the subject's OWN core lookups by <see cref="CoreAncestorResolver"/> (a
-    /// line's core is never its invoice's). Only a single derived core is a core here; none or several is returned as no core, and the shared
+    /// D-34 / D-75: the core record of a billing subject, and also of the per-record Procedure entry's core subject (task 084h-1: a matter,
+    /// project or work assignment takes the resolver's CORE branch and is its own core, with no ancestor read), derived from the subject's OWN
+    /// core lookups by <see cref="CoreAncestorResolver"/> (a line's core is never its invoice's). Only a single derived core is a core here; none or several is returned as no core, and the shared
     /// filing step (<see cref="FileUnderSubjectAsync"/>, ebilling-r1 026) refuses it (SubjectUnfileable). The derivation is handed to that
     /// step, so it is not paid for twice. A FAILED derivation is refused here with its own class: a fault is FilingFailed (a retry may
     /// succeed), a data condition SubjectUnfileable.
@@ -2157,12 +2865,35 @@ public sealed class DecisionRecordWriter
 
         Guid? secureTeamId = owner.IsSecureOwner ? owner.OwningTeamId : null;
 
+        // Task 084h-5: a keyed entry point's derived primary id (DecisionRecordIdOf), so Dataverse refuses a second create of the same
+        // decision. Null for the review path and for an entry that is switched off: Dataverse picks the id, as before.
+        if (plan.RecordId is { } derivedId)
+        {
+            entity.Id = derivedId;
+        }
+
         Guid recordId;
         try
         {
             recordId = await _writerClient.CreateAsync(entity, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && plan.RecordId is not null && IsDuplicateRecord(ex))
+        {
+            // Task 084h-5: the derived id is taken, so this decision's record already exists (a concurrent attempt created it, or the SDK's
+            // internal retry of this very call's committed create). Not a refusal here: the entry point re-runs its lookup and answers with
+            // that lookup's rules. No secure-owner read-back runs, as on the lookup-found path. Review F1: the participant share does not run
+            // here either; the entry point runs it (carried on the exception) only when the record it finds is this call's own derived id.
+            var duplicateOwnerPrincipal = recordOwner.Principal;
+            var duplicateSubjectId = SubjectOf(request).Id;
+            var duplicateIsGate = plan.IsGate;
+            var duplicateSecureTeamId = secureTeamId;
+            var duplicateOwningTeamId = owner.OwningTeamId;
+            throw new DerivedRecordIdTakenException(
+                ex,
+                plan.RecordId.Value,
+                id => ShareParticipantsAsync(id, duplicateSubjectId, duplicateOwnerPrincipal, duplicateIsGate, duplicateSecureTeamId, duplicateOwningTeamId));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // Wrapped, not leaked: the commit route handles ONE exception type from this writer. The inner exception is kept.
             // A timeout can leave the row created; the route must not assume "failed" means "absent" without a check.
@@ -2180,13 +2911,8 @@ public sealed class DecisionRecordWriter
             await VerifySecureOwnerAsync(recordId, expectedTeam, ct).ConfigureAwait(false);
         }
 
-        // Task 042b (D-169): a gate record owned by an unfiled communication's own user (the only record with a Principal owner, D-144) is
-        // also readable by the communication's internal sharees. After the create, never before; never throws (the record has landed). A
-        // team-owned record never reaches this (D-123).
-        if (recordOwner.Principal is { LogicalName: "systemuser", Id: var ownerUserId })
-        {
-            await _participantShares.ShareAtWriteAsync(recordId, SubjectOf(request).Id, ownerUserId).ConfigureAwait(false);
-        }
+        await ShareParticipantsAsync(recordId, SubjectOf(request).Id, recordOwner.Principal, plan.IsGate, secureTeamId, owner.OwningTeamId)
+            .ConfigureAwait(false);
 
         _logger.LogInformation(
             "Decision Record {RecordId} written for review {ReviewId}: class {RecordClass}, {SignalCount} Signal(s).",
@@ -2196,6 +2922,28 @@ public sealed class DecisionRecordWriter
         {
             SecureOwnerTeamId = secureTeamId,
         };
+    }
+
+    /// <summary>
+    /// The participant share after a record has landed, for the create path and (task 084h-5 review F1) for the duplicate path that answers
+    /// with this call's own record. Never throws (the share classes swallow their faults; the record has landed).
+    /// </summary>
+    private async Task ShareParticipantsAsync(
+        Guid recordId, Guid subjectId, EntityReference? principal, bool isGate, Guid? secureTeamId, Guid? owningTeamId)
+    {
+        // Task 042b (D-169): a gate record owned by an unfiled communication's own user (the only record with a Principal owner, D-144) is
+        // also readable by the communication's internal sharees. After the create, never before. A team-owned record is shared only for a
+        // Direct message (D-215, below).
+        if (principal is { LogicalName: "systemuser", Id: var ownerUserId })
+        {
+            await _participantShares.ShareAtWriteAsync(recordId, subjectId, ownerUserId).ConfigureAwait(false);
+        }
+        else if (isGate && secureTeamId is null && owningTeamId is { } ownerTeamId)
+        {
+            // D-215 (uac-r2 task 198 Part E): a team-owned gate record is shared only when its communication is an unfiled Direct message
+            // (Direct-message owner team); for every other communication the call writes nothing (D-123). Never throws.
+            await _participantShares.ShareTeamOwnedAtWriteAsync(recordId, subjectId, ownerTeamId).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -2649,7 +3397,7 @@ public sealed class DecisionRecordWriter
             // `disabled` is consulted only for a systemuser owner below.)
             disabled = row?.GetAttributeValue<AliasedValue>($"{OwnerAlias}.isdisabled")?.Value is not false;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             throw new DecisionRecordRefusedException(
                 DecisionRecordRefusalReason.OwnerResolutionFailed,
@@ -2684,7 +3432,7 @@ public sealed class DecisionRecordWriter
         {
             return await _ownership.ResolveOwnerAsync(context, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // A Dataverse fault in the resolver is not an answer (it propagates there); here it becomes the writer's one
             // exception type. Nothing was written.
@@ -2730,7 +3478,7 @@ public sealed class DecisionRecordWriter
                 "Decision Record {RecordId} was created but owningteam is {ActualTeam}, not the Secure Record Owners team {ExpectedTeam}.",
                 recordId, actual, expectedTeam);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(DecisionRecordEvents.SecureOwnerMismatch, ex,
                 "Decision Record {RecordId} was created but its owner could not be read back to verify.", recordId);
@@ -2768,6 +3516,33 @@ public sealed class DecisionRecordWriter
         return false;
     }
 
+    /// <summary>Dataverse's DuplicateRecord fault ("Cannot insert duplicate key"), <c>0x80040237</c>: a create whose primary id is taken. The
+    /// code <c>TrackingNumberAllocator</c> already matches (measured in dev 2026-10-16) and <c>ProcedureAssignmentService</c> names.</summary>
+    private const int DuplicateRecordFault = unchecked((int)0x80040237);
+
+    /// <summary>
+    /// Task 084h-5: true for Dataverse's DuplicateRecord fault (<see cref="DuplicateRecordFault"/>), by typed fault code first and the code in
+    /// the message second, as <see cref="IsDataverseAccessDenied"/> classifies. The code only, never words: any other fault stays
+    /// <see cref="DecisionRecordRefusalReason.CreateFailed"/> or <see cref="DecisionRecordRefusalReason.DataverseAccessDenied"/>.
+    /// </summary>
+    private static bool IsDuplicateRecord(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> fault && fault.Detail?.ErrorCode == DuplicateRecordFault)
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("0x80040237", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // ── Validation and typing ───────────────────────────────────────────────────────────────────────────────────
 
     /// <param name="Name">Task 042: the record's name when the gate path sets it; null derives it from the class and the taken labels.</param>
@@ -2780,6 +3555,8 @@ public sealed class DecisionRecordWriter
     /// <param name="NoRequester">Task 153 (adversarial pass 1 F3): true only for a condition-cleared closure
     /// (<see cref="ValidateConditionCleared"/>): the nightly job writes it for nobody, so the owner question names no requester and
     /// <c>sprk_createdbyperson</c> stays empty (<see cref="OwnershipContextOf"/>).</param>
+    /// <param name="RecordId">Task 084h-5: the primary id a keyed entry point creates its record with (<see cref="RecordIdFor"/>); null for
+    /// the review path, whose id Dataverse picks.</param>
     private sealed record Plan(
         RecordedDecisionClass Class,
         int Outcome,
@@ -2789,7 +3566,8 @@ public sealed class DecisionRecordWriter
         string SkippedOutcome = "Skipped",
         CoreAncestorResult? AlreadyDerived = null,
         bool IsGate = false,
-        bool NoRequester = false);
+        bool NoRequester = false,
+        Guid? RecordId = null);
 
     private static Plan Validate(DecisionRecordRequest r)
     {

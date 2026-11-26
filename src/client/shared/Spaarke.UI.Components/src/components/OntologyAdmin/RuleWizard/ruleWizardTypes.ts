@@ -7,6 +7,7 @@
  */
 
 import type { ILookupItem } from '../../../types/LookupTypes';
+import type { INavigationService } from '../../../types/serviceInterfaces';
 import type { RuleDetail } from '../Rules/rulesService';
 import type { AuthoringCatalog } from './authoringService';
 import { emptyDraft, QUIET_WINDOW_LANE } from './ruleDraft';
@@ -50,10 +51,18 @@ export type RuleWizardMode = NewRuleMode | NewVersionMode;
  * matter list. The BFF stays the judge: it refuses a limit on any other subject (`ontology.admin.scope_subject_mismatch`).
  */
 export interface MatterPicker {
-  /** The rule subject a matter limit applies to; the picker is offered only for a rule about it. */
+  /**
+   * The rule subject a matter limit applies to; the picker is offered only for a rule about it. It is the Dataverse table the host
+   * searches (the host sets both to the matter table), so it is also the table the side pane opens.
+   */
   subject: string;
-  /** At most a page of matters whose name contains the text, as the caller can read them. */
+  /** At most a page of matters whose name contains the text, as the caller can read them. Used only when there is no `navigationService`. */
   search: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * The host's navigation service (D-219 Q5). With it the matter limit is chosen in the Dataverse side pane, as in the create wizards;
+   * without it (a host with no Xrm) the picker falls back to the inline `search`.
+   */
+  navigationService?: INavigationService;
 }
 
 /** The mode that opens the wizard on a new version of the rule a page shows. */

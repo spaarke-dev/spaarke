@@ -7,6 +7,94 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-25 — ADR-004 A2: queue consumers outside the BFF
+
+The `spaarke-intake-pipeline-r1` design review found that ADR-004's "MUST implement handlers as `IJobHandler`" could not be met by any Service Bus consumer outside the BFF. A1 made every queue consumer ADR-004 work, but `IJobHandler`/`JobContract`/`JobOutcome` live only in `Sprk.Bff.Api`, which ADR-052 forbids non-BFF hosts to reference.
+
+Amendment **A2** (path B, owner decision 2026-11-25):
+- scopes `IJobHandler` to the BFF;
+- states the equivalent guarantees for a Function or Container Apps Job: the Job Contract JSON envelope, a deterministic key plus an atomic marker, `correlationId`, a `Completed`/`Failed`/`Poisoned` outcome, `MaxDeliveryCount` → monitored DLQ;
+- leaves the payload rule unchanged, adding only that staged content is stamp-private and lifecycle-deleted.
+
+Files: `docs/adr/ADR-004-async-job-contract.md` (A2 section), `.claude/adr/ADR-004-job-contract.md`, `.claude/constraints/jobs.md`, and the ADR-004 row of `.claude/adr/ADR-052-workload-placement.md`.
+
+###### 2026-11-25 — Root CLAUDE.md §17: Copilot surfaces pointer
+
+The §17 row "Wire a new AI capability …" now also covers exposing a capability to Copilot (tool, skill, agent) and points at the new `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (what Spaarke builds for each AI surface, why MCP, when to create an agent). The row was extended rather than added, so the line count is unchanged. **Budget:** 219 lines (unchanged), 22,340 → 22,451 bytes (**+111 bytes**), under the 30 KB ceiling. Owner request (2026-11-25: "yes we need to do this now").
+
+###### 2026-11-25 — ADR-026: ribbon/command scripts live in `src/client/webresources/js/`
+
+#3074 (2026-11-24) removed the last files under `src/dataverse/webresources/`, so ADR-026's surface matrix named a folder that no longer exists (`Test-InstructionPaths` new miss). Both copies (`.claude/adr/` and `docs/adr/`) now name `src/client/webresources/js/`, where the ribbon and command scripts are. Wording fix only; no rule changed. Found and fixed by spaarkeai-mcp-bff-api-r1 (owner: "Fix it here").
+
+###### 2026-11-25 — Root CLAUDE.md §1.1: "Spaarke for Microsoft 365 Copilot" row
+
+`spaarkeai-mcp-bff-api-r1` task 050 (spec FR-18).
+
+- **Root `CLAUDE.md` §1.1**: one row added for **Spaarke for Microsoft 365 Copilot** (Copilot connector **"Spaarke MCP"**), citing `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §1.1 (on master; its connector row reads "Spaarke MCP", commit `324cf6e5e2`). Identifiers: `/mcp/legal-operations`, `Api/Mcp/`, `spaarke_*` tools, `ui://spaarke/decisions.html`, `src/client/widgets/spaarke-decisions/`, `src/solutions/CopilotPlugins/spaarke/`. Nothing else in the file changed; the Spaarke Connect row is unchanged.
+- **Budget:** 218 → 219 lines, 21,730 → 22,121 bytes (**+391 bytes**, LF), under the 30 KB ceiling. Over the 200-line budget by one more line with the **owner's explicit OK** ("Yes, OK the +1", 2026-11-25).
+- `/widget-design`: the bundle-size script path made repo-rooted (`Test-InstructionPaths` caught the short form). `.claude/skills/INDEX.md`: the `mcp-tool-handler` rows now describe the MCP server, not `IAiToolHandler` (Checklist F item 1).
+
+###### 2026-11-25 — MCP skills describe the server, widget and packages that were built
+
+`spaarkeai-mcp-bff-api-r1` task 051 (spec FR-18), from the live MCP server in the BFF.
+
+- **`mcp-tool-handler`** rewritten. It used to describe the chat-tool `IAiToolHandler` pattern with kebab-case ids. It now states the MCP host's rules: one server, `/mcp/{area}`; tools named `spaarke_{verb}_{object}`, one `McpToolDefinition` subclass tagged `[McpArea]` under `Api/Mcp/{Area}/{Group}/`; caller-only (OBO, stateless); the A10 token plane and allowed policies; explicit title and `ReadOnly` hint; app-only visibility for widget-only and every writing tool; `isError` through `DecisionResultMapper` → `McpToolResults`; minimal model-visible output; size, time, rate and kill-switch limits; the `McpTools` ledger; and the tests a new tool needs (auth, contract, size, data-mutation, conformance).
+- **`widget-design`**: new "Spaarke conventions (implemented)" section: `ui://spaarke/{widget}.html`, `src/client/widgets/{skill-name}/`, embedded in the BFF, aim < 1 MB / fail > 3 MB with Phase 0's measured init and paint times, empty CSP, `callServerTool`-only shims returning `Response`, host theme only. Two checklist items and the conventions list updated.
+- **`declarative-agent`**: new "Spaarke's Copilot packages today" section with the schema versions actually used (Spaarke AI: manifest 1.30, DA v1.8, plugin v2.4; plugin package `spaarke`: manifest 1.30 `agentSkills`, skills only), the register-once rule, OAuth not SSO (ADR-028 A10) and the Cowork switch-on step. Package location and the MCP OAuth wiring corrected.
+
+###### 2026-11-12 — `adversarial-reviewer` checks capability duplication and traces acceptance criteria
+
+`reuse-governance-tightening-r1` task 021 (FR-07).
+
+- **`.claude/agents/adversarial-reviewer.md`**: two checks. **Capability duplication** against `.claude/patterns/CAPABILITY-INDEX.md` is F2 for a second implementation of an indexed capability, K-class for a judgment call. **Requirements trace**: given a task POML or `spec.md`, each acceptance criterion is reported met (file:line + test), not met (F4 in scope) or not verifiable from the diff (K-class). A new Input section tells callers to pass those paths. The Output class list now matches the task-execute Step 9.5 table; it had described F1–F4 differently (silent failure, a test that proves nothing, a contract break). Frontmatter unchanged.
+- **`task-execute`** Step 9.5, review-scope rule 3: launch the reviewer with the task POML path, and `spec.md` when one exists. No step renumbered.
+
+###### 2026-11-12 — `design-to-spec` runs one reuse scan in Step 3
+
+`reuse-governance-tightening-r1` task 011 (FR-04), after the task 010 dry-run caught both known duplicates at `low` (about 36k tokens per scan) and the owner said go.
+
+- **`design-to-spec`** Step 3: the "quick Grep/Glob" exception becomes one `code-mapper` agent (sonnet; `low` from its definition) that searches by concept, synonym and interface shape, starting from the capability index, and returns a fixed JSON schema. The orchestrator judges each capability: none found, one extend target, or 2+ (an owner question). Step 4 writes `notes/reuse-scan.md`; Step 5 asks the reuse questions and records them under Owner Clarifications. The Constraints line and the Step 3 scope limitation now name this scan as the single discovery pass; everything else stays in project-pipeline Step 2. No step renumbered.
+- **`references/spec-template.md`**: the §11 overlap column and Owner Clarifications point at `notes/reuse-scan.md`. No new heading.
+- **`project-pipeline`** Step 2: the sentence describing design-to-spec Step 3 is corrected.
+- Task 012 (FR-05), same day: **`project-pipeline`** Step 2 item 5 cites `notes/reuse-scan.md` when it exists and runs the design-to-spec Step 3 scan only when it is missing (Part 2 writes the file). No partial re-scan. A capability with 2+ candidates is a safety gate: autonomous mode stops, interactive mode asks (`references/interactive-mode.md` Step 2 row). **`task-create`** Step 3.5.6: `<existing>` also cites the file's row for the capability. No lint or `Validate-TaskPoml.ps1` change.
+
+###### 2026-11-12 — `power-page-deploy` skill archived (Power Pages deploy retired)
+
+The owner confirmed the Power Pages Code Site deploy for the external SPA is retired; the SPA deploys to Azure Static Web Apps through `.github/workflows/deploy-external-spa.yml` (ISS-003, #2713, found by `reuse-governance-tightening-r1`).
+
+- **`power-page-deploy`** moved to `.claude/archive/2026-11-12/skills/power-page-deploy/` (restore with `git mv`; see `.claude/archive/README.md`). Its two instruction-path baseline lines are removed.
+- **`.claude/skills/INDEX.md`**: row removed. **`azure-deploy`**, **`deploy-new-release`**, **`office-addins-deploy`** now point at the Static Web Apps workflow.
+- Docs: `docs/architecture/client-resources-inventory.md` §9, `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md`, `knowledge/sharepoint-embedded/NOTES.md`.
+
+###### 2026-11-11 — The reuse gate starts at the capability index
+
+`reuse-governance-tightening-r1` task 002 (FR-02). The `<existing>` answer in the component-justification gate now starts at `.claude/patterns/CAPABILITY-INDEX.md` (concept → canonical component, task 001), then Grep.
+
+- **Root `CLAUDE.md` §11** item 1: the pointer is folded into the existing line (+57 bytes, line count unchanged at 218), so it adds no line to a file already over its 200-line budget (owner decision).
+- **`task-create`** Step 3.5.6: `<existing>` cites "CAPABILITY-INDEX row N" + file:line or "CAPABILITY-INDEX: no row" + the Grep run; a task that adds or changes a canonical component updates its row in the same PR.
+- **`code-review`** Step 6.6: the `<existing>` check uses the same index.
+- **`.claude/patterns/INDEX.md`**: describes the index and how it differs from pointer files.
+- **`doc-drift-audit`**: the index is a pointer file to keep accurate, and a deleted or moved canonical component means checking its row.
+
+###### 2026-11-10 — C# formatting is blocking for changed files; the commit hook formats in seconds
+
+Master had 2,569 whitespace violations in 230 files because commits skipped the pre-commit hook (`--no-verify`, approved in several projects because the hook's full `dotnet format` took 16–45 s and was SIGKILLed under load), and the only CI check was the advisory Tier 2 `format` job, red for weeks. PR #2663.
+
+- **`.lintstagedrc.mjs`**: the C# step is `dotnet format whitespace <repo> --folder --include <staged>` (~2 s, no MSBuild workspace, same changes as the workspace mode).
+- **`scripts/quality/check-changed-cs-format.sh`** (new) and Tier 1 job **`format-changed-cs`** (blocking, owner-approved §6.5 path-A exception): checks only the `*.cs` under `src/` and `tests/` that a PR changes; under a minute, in parallel with `arch-tests`.
+- **`.claude/skills/ci-cd`**, **`push-to-github`**: tier tables and the failure row updated.
+
+###### 2026-11-09 — The Stop quality gate now blocks
+
+`scripts/quality/task-quality-gate.sh` never stopped Claude: it exited `1` (Claude Code only blocks a Stop on exit `2`, reading stderr), its error trap exited `0` mid-run, and its report went to stdout. Found while evaluating an external quality-recommendations document.
+
+- **`scripts/quality/task-quality-gate.sh`** (rewritten): exit `2` with the report on stderr on definite code failures only — compiler errors in any project owning a changed `.cs` file (was: BFF only), TypeScript errors located in a changed file (new `tsc --noEmit` gate), failing `Spaarke.ArchTests`, a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. Loop guard: with `stop_hook_active` it never blocks again and shows the user a `systemMessage` instead. Includes untracked files. Drops the CLI `-warnaserror`: `Directory.Build.props` owns the warning policy, including the sanctioned `WarningsNotAsErrors` CS0618 sites, and CI tier1 `compile` omits the flag for the same reason. No bare `python3` (WindowsApps stub hazard). The error trap logs and continues instead of exiting `0`.
+- **`.claude/settings.json`**: Stop hook `timeout: 420` (the gate's own budget stops starting new checks at 240 s).
+- **Root `CLAUDE.md` §16**: states the blocking behaviour (+104 bytes, line count unchanged at 218 — owner OK requested in the PR).
+- **`docs/procedures/testing-and-code-quality.md`**: the hooks table said `TaskCompleted` (not a real event, FAILURE-MODES G-1); now `Stop`, with the blocking contract.
+- **Lint steps never worked (same day, both hooks)**: every `--format compact` ESLint call exited 2 because the compact formatter left ESLint core in v9, and `timeout N dotnet format` never finished (it loads the MSBuild workspace) and left its BuildHost child running — 97 orphaned BuildHosts (~650 MB) were found and killed. ESLint now runs once per config folder with that package's own eslint and the default `stylish` output; C# uses `dotnet format whitespace --folder` (seconds, no workspace; ENDOFLINE ignored because `.gitattributes` normalises line endings) in the Stop gate only — `post-edit-lint.sh` no longer lints `.cs`, since nothing fits its 4 s budget. On timeout both hooks kill the whole Windows process tree (`taskkill /T`), not just the direct child.
+
+---
 ###### 2026-11-05 — Finished sub-agent worktrees are cleaned up (FAILURE-MODES G-25); Stop/PostToolUse hooks run from the repo root
 
 On 2026-11-04, 123 sub-agent copies under the main checkout's `.claude\worktrees` hung VS Code and Claude sessions opened there.

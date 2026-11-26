@@ -3,8 +3,8 @@
  *
  * Pins:
  *  - exactly the listed fields per type, in the listed order (Matter: Name*, Description, Matter Type*, Practice
- *    Area*, Assigned To Internal; Project: Name*, Project Type, Description, Assigned To Internal; Invoice: Name*,
- *    Description, Assigned To);
+ *    Area*, Assigned To Internal; Project: Name*, Project Type, Description, Assigned To Internal). Invoice left
+ *    "+ New" in task 133 slice C; SaveFlow.invoiceTaskTypes.test.tsx pins that the picker never offers it;
  *  - the Assigned To picker is the REAL shared `LookupField`, by exact alias (never a copy, never the barrel);
  *  - Assigned To is prefilled with the server's default and optional: clearing it sends nothing (= the server's
  *    default, which on a Matter/Project is the user — the form says so), choosing someone sends their id, and a late
@@ -106,11 +106,6 @@ describe('CreateRecordForm — the listed fields per type (task 100)', () => {
     expect(screen.getByRole('combobox', { name: 'Project Type' })).toHaveAttribute('aria-required', 'false');
   });
 
-  it('Invoice: Name*, Description, Assigned To', () => {
-    renderForm({ type: 'Invoice' });
-    expect(fieldOrder()).toEqual(['Name', 'Description', 'Assigned To']);
-  });
-
   it('Matter: every value entered is submitted — name and description trimmed, both ids, the prefilled assignee', async () => {
     const { onSubmit } = renderForm({ type: 'Matter' });
 
@@ -144,26 +139,18 @@ describe('CreateRecordForm — Assigned To: prefilled, optional (owner decision 
     expect(onSubmit).toHaveBeenCalledWith({ name: 'Due Diligence' });
   });
 
-  it('an Invoice cleared is simply unassigned — no "assigned to you" note (an invoice has no server default)', async () => {
-    renderForm({ type: 'Invoice' });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Clear Assigned To' }));
-
-    expect(screen.queryByText(/assigned to you/)).toBeNull();
-  });
-
   it('choosing someone else from the contact search submits their id', async () => {
     const onSearchContacts = jest.fn().mockResolvedValue([COLLEAGUE]);
-    const { onSubmit } = renderForm({ type: 'Invoice', onSearchContacts });
+    const { onSubmit } = renderForm({ type: 'Project', onSearchContacts });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear Assigned To' }));
-    await userEvent.type(screen.getByRole('textbox', { name: 'Assigned To' }), 'Ja');
+    await userEvent.click(screen.getByRole('button', { name: 'Clear Assigned To Internal' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Assigned To Internal' }), 'Ja');
     await userEvent.click(await screen.findByText('Jane Cooper (jane@acme.test)'));
-    await userEvent.type(screen.getByLabelText('New Invoice name'), 'INV-1');
+    await userEvent.type(screen.getByLabelText('New Project name'), 'PRJ-1');
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(onSearchContacts).toHaveBeenCalledWith('Ja');
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'INV-1', assignedToContactId: COLLEAGUE.id });
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'PRJ-1', assignedToContactId: COLLEAGUE.id });
   });
 
   it('no linked contact → the field starts empty, and a prefill that arrives later fills it', async () => {
@@ -191,9 +178,9 @@ describe('CreateRecordForm — submit and failure', () => {
     const onSubmit = jest
       .fn()
       .mockRejectedValue(new Error('The person chosen in Assigned To is not available to you.'));
-    renderForm({ type: 'Invoice', onSubmit });
+    renderForm({ type: 'Project', onSubmit });
 
-    await userEvent.type(screen.getByLabelText('New Invoice name'), 'INV-2');
+    await userEvent.type(screen.getByLabelText('New Project name'), 'PRJ-2');
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('The person chosen in Assigned To is not available to you.')).toHaveAttribute(
@@ -204,7 +191,7 @@ describe('CreateRecordForm — submit and failure', () => {
   });
 
   it('Cancel is left of Create (the Save tab footer pattern)', () => {
-    renderForm({ type: 'Invoice' });
+    renderForm({ type: 'Project' });
 
     const cancel = screen.getByRole('button', { name: 'Cancel' });
     const create = screen.getByRole('button', { name: 'Create' });
@@ -230,7 +217,7 @@ describe('CreateRecordForm — submit and failure', () => {
 
   it('Cancel calls onCancel and submits nothing', async () => {
     const onCancel = jest.fn();
-    const { onSubmit } = renderForm({ type: 'Invoice', onCancel });
+    const { onSubmit } = renderForm({ type: 'Project', onCancel });
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 

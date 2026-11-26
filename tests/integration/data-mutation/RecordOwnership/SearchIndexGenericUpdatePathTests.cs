@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 039 (FR-38, #2399; part E) — the generic server update paths that do not go through
-/// <c>OwnedChildWrite</c>: the output orchestrator (<see cref="DataverseUpdateHandler"/>), the playbook update
+/// <c>OwnedChildWrite</c>: the update handler (<see cref="DataverseUpdateHandler"/>), the playbook update
 /// (<see cref="UpdateRecordActionCore"/>, also the action seam's) and the field-mapping push
 /// (<c>ApplyMappingsToChildRecordsAsync</c>). On a search-indexed table both index columns are the server's: a write that names
 /// either has it dropped (logged as <c>client_search_index_dropped</c>, applied "unchanged"), the rest of the write is made, and
@@ -50,7 +50,7 @@ public sealed class SearchIndexGenericUpdatePathTests
 
     private static IEnumerable<string> Drops(IEnumerable<string> messages) => messages.Where(m => m.Contains("client_search_index_dropped"));
 
-    // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
+    // ── DataverseUpdateHandler (its orchestrator caller was deleted in ebilling-r1 050b) ────────────────────────────────────────────────────────────
 
     private DataverseUpdateHandler Handler(CapturingLog<DataverseUpdateHandler> log) =>
         new(_writes.Object, new Mock<IGenericEntityService>().Object, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
@@ -186,12 +186,20 @@ public sealed class SearchIndexGenericUpdatePathTests
 
     private static FieldMappingRuleDto TextRule(string source, string target) => new()
     {
-        SourceField = source, TargetField = target, SourceFieldType = "Text", TargetFieldType = "Text", Priority = 1,
+        SourceField = source,
+        TargetField = target,
+        SourceFieldType = "Text",
+        TargetFieldType = "Text",
+        Priority = 1,
     };
 
     private static readonly FieldMappingRuleDto IndexLookupRule = new()
     {
-        SourceField = "sprk_sourceindex", TargetField = LookupColumn, SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+        SourceField = "sprk_sourceindex",
+        TargetField = LookupColumn,
+        SourceFieldType = "Lookup",
+        TargetFieldType = "Lookup",
+        Priority = 2,
     };
 
     [Theory]
@@ -205,6 +213,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         var nameRule = TextRule("sprk_indexname", NameColumn);
 
         var (updated, failed, _, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [descriptionRule, nameRule, IndexLookupRule],
             new Dictionary<string, object?>
             {
@@ -244,10 +253,15 @@ public sealed class SearchIndexGenericUpdatePathTests
         var log = new CapturingLog<object>();
         var aliasRule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_sourceindex", TargetField = "sprk_alias", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+            SourceField = "sprk_sourceindex",
+            TargetField = "sprk_alias",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 2,
         };
 
         await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [TextRule("sprk_note", "sprk_description"), aliasRule],
             new Dictionary<string, object?> { ["sprk_note"] = "From the source", ["sprk_sourceindex"] = Index },
             "sprk_matter", [Row], Caller, log, CancellationToken.None,
@@ -270,6 +284,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         var world = new StampWorld().Row("sprk_event", Row, [("sprk_regardingmatter", "sprk_matter", Matter)]);
 
         var (_, failed, _, errors, results) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [TextRule("sprk_indexname", NameColumn), IndexLookupRule],
             new Dictionary<string, object?> { ["sprk_indexname"] = "source-index", ["sprk_sourceindex"] = Index },
             "sprk_event", [Row], Caller, new CapturingLog<object>(), CancellationToken.None,
@@ -292,6 +307,7 @@ public sealed class SearchIndexGenericUpdatePathTests
         var log = new CapturingLog<object>();
 
         var (updated, _, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [TextRule("sprk_indexname", NameColumn)],
             new Dictionary<string, object?> { ["sprk_indexname"] = "kept" },
             "sprk_todo", [Row], Caller, log, CancellationToken.None,

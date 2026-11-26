@@ -4,7 +4,7 @@
     <title>Read-time Procedure-change banner on /review: app-only comparison with the snapshot, internal callers only</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-F</phase>
     <gate>082 (resolver and 7.4 snapshot) and 100 (Invoice Review read model) merged; 099 merged (step-0 verdict on the request)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a computed member to an internal BFF read model that must never reach external callers and must never read as "no change" on a fault.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// filing changed — through the BFF or outside it (a model-driven form, an import) — has its file moved into its new
 /// derived container by the <c>SecureChildReconciliationJob</c>'s recent-changes cadence (every 2 minutes, writes on
 /// unless its emergency stop is set). A re-file moves only the row's BFF-bound item, and an unfiled document whose file
-/// is in no business unit's container and no declared home (#2151) is left where it is
+/// is in no business unit's container (the declared home of #2151 was removed by ebilling-r1 task 124) is left where it is
 /// (<see cref="RelocationState.UnfiledHomeUnknown"/>). Until the pass reaches it, a re-filed document is refused under
 /// the strict rule (up to about two minutes plus the run). <b>The widening guard holds for every purpose</b> (#2159): a
 /// row owned by the Secure Record owner team whose derivation is not a secure record's own container never has its file
@@ -721,8 +721,8 @@ public sealed class DocumentContainerRelocator
     /// <see cref="RelocationPurpose.Refile"/> (#2159) — the document's filing changed — moves the file into its NEW
     /// derived container. Its source is verified ONLY as the row's BFF-bound item (<c>sprk_graphitemidbound</c>) that the
     /// BFF identity uploaded (B9; never the legacy check — a legacy misplaced row is the operator-gated migration's); and an
-    /// unfiled document whose file is in no business unit's container (a record's own, or another owner's that is not a
-    /// declared home, #2151) is reported <see cref="RelocationState.UnfiledHomeUnknown"/> and never pulled into a business
+    /// unfiled document whose file is in no business unit's container (a record's own, or another owner's;
+    /// #2151) is reported <see cref="RelocationState.UnfiledHomeUnknown"/> and never pulled into a business
     /// unit's container. For EVERY purpose (#2159): a checked-out row is left alone (<see cref="RelocationState.CheckedOut"/>,
     /// B4); and the widening guard holds an isolated row (owned in the Secure Record business unit) whose move would leave
     /// its secure record — its derivation is not a secure record's own container, or its file is in ANOTHER secure record's
@@ -1135,7 +1135,7 @@ public sealed class DocumentContainerRelocator
     /// <list type="number">
     /// <item><b>The widening guard</b> — every purpose (<see cref="IsolationHoldAsync"/>).</item>
     /// <item><b>An unfiled document's unknown home</b> (#2151) — <see cref="RelocationPurpose.Refile"/>. Unfiled, and its
-    /// file is in no business unit's container (a declared home would have derived in place) →
+    /// file is in no business unit's container (#2151's declared home was removed by ebilling-r1 task 124) →
     /// <see cref="RelocationState.UnfiledHomeUnknown"/>: where it belongs (a record's own container after a re-scope,
     /// another owner's) cannot be told, and pulling it into a business unit's container could widen a narrower audience.
     /// (The legacy migration exists to pull such files into their business unit's container; it keeps doing so.)</item>
@@ -1171,10 +1171,10 @@ public sealed class DocumentContainerRelocator
             {
                 _logger.LogWarning(
                     "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT re-filed: it is unfiled and its file is in {SourceDrive}, "
-                    + "which is no business unit's container and no declared home; it is not pulled into {Target}.",
+                    + "which is no business unit's container; it is not pulled into {Target}.",
                     documentId, sourceDrive, target);
                 return DocumentRelocationOutcome.Of(documentId, RelocationState.UnfiledHomeUnknown, sourceDrive, sourceItem, target,
-                    null, "unfiled, and its file is in no business unit's container and no declared home: where it belongs cannot "
+                    null, "unfiled, and its file is in no business unit's container: where it belongs cannot "
                           + "be told, so it is left where it is");
             }
         }
@@ -3711,7 +3711,7 @@ public enum RelocationState
 
     /// <summary>
     /// #2159 / #2151 (<see cref="RelocationPurpose.Refile"/>): the document is UNFILED and its file is in no business
-    /// unit's container and in no declared home — where it belongs cannot be told (a record's narrower audience must not
+    /// unit's container — where it belongs cannot be told (a record's narrower audience must not
     /// be widened to a whole business unit). Reported and left; nothing was written.
     /// </summary>
     UnfiledHomeUnknown,

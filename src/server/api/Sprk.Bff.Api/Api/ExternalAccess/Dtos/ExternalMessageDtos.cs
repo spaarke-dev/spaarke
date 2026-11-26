@@ -48,6 +48,15 @@ public sealed class ExternalMessageDto
     /// </summary>
     [JsonPropertyName("isMine")]
     public bool IsMine { get; init; }
+
+    /// <summary>
+    /// The id of the thread this message sits in (<c>_sprk_communicationthread_value</c>), as the record view's grouping
+    /// key (task 035, FR-22): messages that share it form one thread. Opaque to the client; null when the message has no
+    /// thread (and on a post's 201 body). Only the id crosses this surface, never the thread's name or any other column,
+    /// and the internal-only, privilege and open-thread filters have already run on the row it comes from.
+    /// </summary>
+    [JsonPropertyName("threadId")]
+    public string? ThreadId { get; init; }
 }
 
 /// <summary>

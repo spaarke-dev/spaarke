@@ -61,8 +61,11 @@
 // transform). ADR-012 PCF Import Pattern.
 import {
   buildRegardingSelectionPayload,
+  discoverNavProps,
   findHostNavPropForLookup,
+  nullRecordNumberWhenTargetHasNone,
   CORE_ANCESTOR_LOOKUPS,
+  _resetNavPropCacheForTests as _resetSharedNavPropCacheForTests,
   type CoreAncestorDerivationStatus,
   type ICoreAncestorStamp,
   type INavPropEntry,
@@ -71,6 +74,9 @@ import {
 } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import {
   TODO_REGARDING_CATALOG,
+  findRegardingCatalogEntry,
+  resolveAllowedCatalog,
+  type IRegardingSelection,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
 import {
@@ -82,14 +88,10 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-export interface IRegardingSelection {
-  /** Dataverse logical name of the selected parent entity (e.g., 'sprk_matter'). */
-  entityType: string;
-  /** GUID of the selected parent record (with or without braces / case). */
-  recordId: string;
-  /** Display name of the selected parent record (used for sprk_regardingrecordname). */
-  recordName: string;
-}
+// The selection shape and the allow-list parser are shared with the CommunicationConnections handler
+// (one definition each, in ui-components); re-exported so this module's importers are unchanged.
+export type { IRegardingSelection };
+export { resolveAllowedCatalog };
 
 export interface IResolverWriteContext {
   /** WebApi instance (Xrm.WebApi-compatible — context.webAPI from PCF). */
@@ -275,114 +277,31 @@ export interface IResolverWriteResult {
 }
 
 // ---------------------------------------------------------------------------
-// Nav-prop discovery (per-host-entity, cached)
+// Nav-prop discovery — the shared `discoverNavProps` (ui-components): one metadata query + cache for every writer.
 // ---------------------------------------------------------------------------
 
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
 /**
- * Discover ManyToOne navigation properties for an arbitrary host entity.
- *
- * Mirrors the `discoverTodoNavProps` pattern from
- * `@spaarke/ui-components/services/TodoRegardingUpdateBuilder` but parameterized
- * on host entity so the PCF works for `sprk_todo`, `sprk_communication`, or any
- * future resolver-pattern entity per FR-22.
+ * Discover ManyToOne navigation properties for an arbitrary host entity — a one-line delegation to the shared
+ * `discoverNavProps` (lowercases the logical name, caches per entity, warns on a zero-entry result; SRFR-050). Kept as a
+ * named export because the App-level tests and callers import it from this module.
  *
  * @param hostEntity  - Logical name of the host entity (e.g., 'sprk_todo').
  * @param fetchImpl   - Fetch implementation (overridable for tests).
  */
-export async function discoverHostNavProps(
+export function discoverHostNavProps(
   hostEntity: string,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<INavPropEntry[]> {
-  if (_navPropCache[hostEntity]) {
-    return _navPropCache[hostEntity];
-  }
-
-  try {
-    // v1.4.2 (SRFR-050): Dataverse entity logical names are lowercase-normalized;
-    // if the maker set `entity` input with wrong case (e.g., `sprk_Communication`),
-    // the metadata endpoint returns 200 with EMPTY results (not 404), which
-    // silently breaks nav-prop discovery + all downstream writes. Lowercase
-    // defensively.
-    const hostEntityLower = hostEntity.toLowerCase();
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${hostEntityLower}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetchImpl(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[RegardingResolver] Nav-prop discovery failed for ${hostEntity}: HTTP ${resp.status}`);
-      return [];
-    }
-
-    const json = (await resp.json()) as {
-      value?: {
-        ReferencingAttribute: string;
-        ReferencingEntityNavigationPropertyName: string;
-        ReferencedEntity: string;
-      }[];
-    };
-
-    const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    // v1.4.2 (SRFR-050): diagnostic warning if discovery returned no entries.
-    // Common cause: `entity` input on the manifest was set to a non-existent /
-    // misspelled logical name. Silent empty was the v1.4.0/1.4.1 failure mode
-    // on sprk_communication placement.
-    if (entries.length === 0) {
-      console.warn(
-        `[RegardingResolver] Nav-prop discovery returned zero entries for hostEntity="${hostEntity}" (normalized "${hostEntityLower}"). ` +
-          `Verify the Host Entity input on the form matches an actual entity logical name. All resolver writes will silently fail.`
-      );
-    }
-
-    _navPropCache[hostEntity] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[RegardingResolver] Nav-prop discovery error for ${hostEntity}:`, err);
-    return [];
-  }
+  return discoverNavProps(hostEntity, fetchImpl);
 }
 
 /**
- * Reset the nav-prop cache. Test-only.
+ * Reset the shared nav-prop cache (the cache is the shared one, not a private copy). Test-only.
  *
  * @internal
  */
 export function _resetNavPropCacheForTests(): void {
-  for (const k of Object.keys(_navPropCache)) {
-    delete _navPropCache[k];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Catalog lookup
-// ---------------------------------------------------------------------------
-
-/**
- * Parse the manifest `regardingTargets` input — a comma-separated list of
- * allowed parent entity logical names. Returns the subset of
- * `TODO_REGARDING_CATALOG` matching that list. When the input is empty or
- * undefined, returns the full canonical catalog.
- */
-export function resolveAllowedCatalog(
-  regardingTargetsRaw: string | null | undefined
-): readonly ITodoRegardingTargetCatalogEntry[] {
-  if (!regardingTargetsRaw || !regardingTargetsRaw.trim()) {
-    return TODO_REGARDING_CATALOG;
-  }
-  const allowed = new Set(
-    regardingTargetsRaw
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .filter(Boolean)
-  );
-  return TODO_REGARDING_CATALOG.filter(c => allowed.has(c.entityType.toLowerCase()));
+  _resetSharedNavPropCacheForTests();
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +371,7 @@ export async function applyRegardingSelection(
   catalog: readonly ITodoRegardingTargetCatalogEntry[] = TODO_REGARDING_CATALOG,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
-  const catalogEntry = catalog.find(c => c.entityType === selection.entityType);
+  const catalogEntry = findRegardingCatalogEntry(catalog, selection.entityType);
   if (!catalogEntry) {
     return {
       success: false,
@@ -506,6 +425,9 @@ export async function applyRegardingSelection(
 
   // Persist immediately if we have a host record; otherwise return for pre-save staging.
   const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
+  // A re-regard of a SAVED host: when the new target has no number, the old target's number must not stay beside the new
+  // pair (045c). A new host has nothing to overwrite; its number rides the presave bridge (`recordNumber`), not the payload.
+  if (hasHostGuid) nullRecordNumberWhenTargetHasNone(payload, navProps);
   if (!hasHostGuid) {
     // v1.6.0 (task 147 r1): a NEW host's selection rides the form's own save, as the user. Never under a secure record.
     // Every DERIVED ancestor counts here, including one the host has no stamp column for (`unstampable`): the record

@@ -22,7 +22,9 @@ name: CI Standalone Checks
 #                                                                 suite on a push (client-tests.yml is nightly).
 #   client-typecheck        Client Quality > shared-lib builds    The only `tsc` check of the shared client
 #                           + Spaarke.AI.Widgets tsc --noEmit     libraries (client-lint is an ESLint
-#                                                                 ratchet, Tier 2 lint is Prettier + ESLint).
+#                                                                 ratchet, Tier 2 lint is Prettier + ESLint),
+#                                                                 and of LegalWorkspace + SemanticSearch,
+#                                                                 whose bundlers do not type-check (#2808).
 #   pcf-eslint              Client Quality > PCF ESLint           Tier 2 `lint` runs PCF ESLint only when
 #                                                                 SpaarkeAi/BFF paths change and client-lint.yml
 #                                                                 does not cover src/client/pcf, so a PCF-only PR
@@ -30,7 +32,8 @@ name: CI Standalone Checks
 #                                                                 (sdap-ci's Prettier check is NOT carried over:
 #                                                                 it ran after `prettier --write`, so it could
 #                                                                 never fail. Tier 2 `lint` runs the real check.)
-#   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1.
+#   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1 and
+#                                                                 summarize-mutation-report.py (unittest).
 #   ontology-script-tests   (new)                                  Pester controls for Apply-DoLanePolicies.ps1 (the
 #                                                                 policy lint and apply order),
 #                                                                 Invoke-OntologyStampBackfill.ps1 and the
@@ -278,28 +281,12 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.SdapClient deps
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.SdapClient
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npx tsc
-
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Spaarke.UI.Components
         working-directory: src/client/shared/Spaarke.UI.Components
-        run: npx tsc
-
-      - name: Install Spaarke.DocumentOperations deps
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.DocumentOperations
-        working-directory: src/client/shared/Spaarke.DocumentOperations
         run: npx tsc
 
       - name: Install Spaarke.Compose.Components deps
@@ -351,6 +338,31 @@ jobs:
         with:
           node-version: '20'
 
+      # ISS-005 / #2808: LegalWorkspace (Vite) and SemanticSearch (webpack) bundle without a
+      # type check, so a type error reached review only if it also broke bundling. Neither
+      # depends on the shared-lib steps below: each tsconfig maps @spaarke/* to SOURCE and resolves bare
+      # imports from that source through its own node_modules, as its bundler does.
+      # They run FIRST, before any shared-lib install, so CI sees what a clean checkout sees:
+      # a shared lib's own node_modules must not change how these two resolve.
+      # LegalWorkspace: src/** must be clean; errors in the shared source it compiles are
+      # pinned in tsc-baseline.json (a new one fails; --fail-on-stale makes a fixed one that
+      # is still listed fail too, so the baseline is pruned in the PR that fixes it).
+      - name: Install LegalWorkspace deps
+        working-directory: src/solutions/LegalWorkspace
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: LegalWorkspace — tsc ratchet
+        working-directory: src/solutions/LegalWorkspace
+        run: node ../../../scripts/tsc-surface-gate.mjs --baseline tsc-baseline.json --fail-on-stale
+
+      - name: Install SemanticSearch deps
+        working-directory: src/client/code-pages/SemanticSearch
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: SemanticSearch — tsc --noEmit
+        working-directory: src/client/code-pages/SemanticSearch
+        run: npm run typecheck
+
       - name: Install Spaarke.Auth deps
         working-directory: src/client/shared/Spaarke.Auth
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -359,36 +371,12 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.AI.Context deps
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Context
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npx tsc
-
-      - name: Install Spaarke.SdapClient deps
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.SdapClient
-        working-directory: src/client/shared/Spaarke.SdapClient
-        run: npx tsc
-
       - name: Install Spaarke.UI.Components deps
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Spaarke.UI.Components
         working-directory: src/client/shared/Spaarke.UI.Components
-        run: npx tsc
-
-      - name: Install Spaarke.AI.Outputs deps
-        working-directory: src/client/shared/Spaarke.AI.Outputs
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Outputs
-        working-directory: src/client/shared/Spaarke.AI.Outputs
         run: npx tsc
 
       # MUST come after Spaarke.UI.Components: it type-checks against that package's dist.
@@ -447,10 +435,11 @@ jobs:
 
   # --------------------------------------------------------------------------
   # verdict-script-tests: the Pester must-fire controls for scripts/ci/master-ci-verdict.ps1
-  # (the decision logic behind the router-master and tier2 alerts). Fake gh, no network.
+  # (the decision logic behind the router-master and tier2 alerts), and the unittest controls for
+  # scripts/ci/summarize-mutation-report.py (the mutation-nightly verdict). Fake gh, no network.
   # --------------------------------------------------------------------------
   verdict-script-tests:
-    name: Master verdict script tests (Pester)
+    name: CI verdict script tests (Pester + unittest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -469,6 +458,11 @@ jobs:
           $r = Invoke-Pester -Path tests/scripts/Master-Ci-Verdict.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
+      # The mutation-nightly verdict (scripts/ci/summarize-mutation-report.py): only mutants on changed lines count,
+      # an unreadable diff fails closed (#1821). Temp git repos, no network.
+      - name: Mutation summary controls (unittest)
+        run: python3 -m unittest discover -s scripts/ci/tests -v
+
   # --------------------------------------------------------------------------
   # ontology-script-tests: the Pester controls for scripts/Apply-DoLanePolicies.ps1 (policy lint, the
   # order of the apply, what -Verify calls drift), scripts/Invoke-OntologyStampBackfill.ps1 and the
@@ -480,6 +474,7 @@ jobs:
   # with "Export-ModuleMember ... can only be called from inside a module" (seen in uac-r2's 194b review).
   # Set-FeatureRolePrivileges.Tests.ps1 (field-mapping-server-write-path-r1 task 046b) runs scripts/Set-FeatureRolePrivileges.ps1 whole in a child
   # pwsh against a test double of az and Invoke-RestMethod (tests/scripts/Set-FeatureRolePrivileges.Harness.ps1): no network, no token.
+  # Check-TaskStatusDrift.Tests.ps1 (ebilling-r1 ISS-047 / iss015): the task-completion drift gate scripts/check-task-status-drift.ps1 and its id grammar, run in a child pwsh over a temp repo; no network.
   # --------------------------------------------------------------------------
   ontology-script-tests:
     name: Ontology script tests (Pester)
@@ -488,28 +483,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        # The last path: Set-BffDecisionRecordReaderRole.Tests.ps1 reads the platform-added privilege list from the S29
+        # source (SecureRecordSetupProcedure.cs) and checks it equals the two scripts' copies; without it that check fails.
         with:
           sparse-checkout: |
             scripts
             config
             tests/scripts
             src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse
+            src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup
 
       - name: Pester
         shell: pwsh
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Deploy-EbillingInvoiceReviewDetailColumn.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1, tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1, tests/scripts/Deploy-EbillingRolePrivileges.Tests.ps1, tests/scripts/Check-TaskStatusDrift.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
-  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 (unified-access-control-r2
-  # task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
+  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 and (task 191d)
+  # scripts/Set-ExternalCollaboratorRole.ps1 and (task 191f) scripts/Set-AccessMarkerFieldSecurity.ps1 over the
+  # field-security engine (unified-access-control-r2 task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
   # customer unit), Secure Record is refused by its name, and a dry run whose drift is an owner decision exits 1.
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
   # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
   # with "Export-ModuleMember ... can only be called from inside a module", which would turn this job red on a release.
+  # Also tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1 (field-mapping-server-write-path-r1 task 054b): the script
+  # refuses, in every mode and before any write, unless each of its eight target columns exists (same mocked shape).
+  # Also tests/scripts/Set-PrivateContextSchema.Tests.ps1 (task 056b): the private-context schema script's -Verify fails on any non-NoCascade
+  # Assign/Share/Unshare/Reparent or a Delete that is not RemoveLink, over the same kind of mock.
+  # Also scripts/Migrate-DirectMessagesToOwnerTeam.ps1 (field-mapping-server-write-path-r1 task 054c): the field-security
+  # precondition, the Stamp pair rule, the Move assign invariant and the Direct team checks, over the same kind of mock.
   # --------------------------------------------------------------------------
   owner-teams-script-tests:
     name: Owner teams script tests (Pester)
@@ -529,7 +534,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1, tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1, tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1, tests/scripts/Set-PrivateContextSchema.Tests.ps1, tests/scripts/Migrate-DirectMessagesToOwnerTeam.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

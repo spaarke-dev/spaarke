@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Platform;
 using Sprk.Bff.Api.Api.Records;
@@ -240,6 +241,9 @@ public static class EndpointMappingExtensions
         app.MapDecisionCommitEndpoints();
         // Ontology platform R1 task 038: the worklist's Signal read route (core-record check and Do-lane scope as the caller).
         app.MapSignalReadEndpoints();
+        // spaarkeai-mcp-bff-api-r1 task 020 (FR-01, ADR-010): POST /mcp/legal-operations, the stateless MCP endpoint (v1 maps this one area).
+        // UNCONDITIONAL (bff-extensions.md §F.1): AddMcpModule registers the SDK services in both states; Mcp:Enabled false answers 503.
+        app.MapMcpEndpoints();
         // Ontology platform R1 task 104 (D-22): the Ontology admin capability probe (shows the tab; never authorizes a write).
         app.MapOntologyAdminEndpoints();
         // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,
@@ -386,6 +390,7 @@ public static class EndpointMappingExtensions
         app.MapRateCardImportEndpoints(); // ebilling-r1 task 078 (FR-29)
         app.MapRuleSetEndpoints(); // ebilling-r1 task 076 (FR-28)
         app.MapProcedureEndpoints(); // ebilling-r1 task 081 (EB-D-148)
+        app.MapProcedureAssignmentEndpoints(); // ebilling-r1 task 089b (assignments and record overrides)
         app.MapInvoiceContextEndpoints(); // ebilling-r1 task 106 (FR-33)
         app.MapInvoiceRelatedWorkEndpoints(); // ebilling-r1 task 107 (FR-34)
         app.MapInvoiceLineReviewEndpoints(); // ebilling-r1 task 100 (FR-31)
@@ -395,8 +400,11 @@ public static class EndpointMappingExtensions
         app.MapCodeSetMappingEndpoints(); // ebilling-r1 task 048 (FR-22)
         app.MapSubmissionOverrideEndpoints(); // ebilling-r1 task 105 (FR-19, FR-37)
         app.MapInvoiceApprovalEndpoints(); // ebilling-r1 task 103 (FR-35, FR-11)
+        app.MapCoreRecordFirmEndpoints(); // ebilling-r1 task 095g (EB-D-224: assign a firm from the Outlook pane)
         app.MapInvoiceRejectReturnEndpoints(); // ebilling-r1 task 104 (FR-36)
+        app.MapFirmNoticeEndpoints(); // ebilling-r1 task 131 (FR-50: the reviewer's firm-notice draft)
         app.MapApExportEndpoints(); // ebilling-r1 task 150 (FR-41, EB-D-178)
+        app.MapRecordProcedureEndpoints(); // ebilling-r1 task 084 (EB-D-218)
         app.MapStoredFileEndpoints(); // ebilling-r1 task 090 (Stored File download, EB-D-148)
         app.MapCommunicationEndpoints();
 

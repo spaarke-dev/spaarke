@@ -636,6 +636,14 @@ export function getActiveBackend(): ActiveBackend {
 }
 
 /**
+ * The active backend's plane, or `null` when none is active. Never throws: for display rules only (SPA-r4 task 040, the
+ * "Submit invoice" plane rule in `components/record/recordAccess.ts`). Requests still go through {@link getActiveBackend}.
+ */
+export function activePlaneOrNull(): BackendPlane | null {
+  return activeBackend?.plane ?? null;
+}
+
+/**
  * The BFF scope a plane's token acquirer requests. The active backend's scope when it belongs to this plane (a backend
  * resolved for the other plane throws). Before any selection — direct calls outside the bootstrap — the dev
  * configuration's single backend for the plane; otherwise throws (fail closed).

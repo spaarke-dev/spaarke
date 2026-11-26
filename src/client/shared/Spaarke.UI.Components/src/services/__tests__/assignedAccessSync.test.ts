@@ -5,6 +5,10 @@
  * after its write succeeds, so wizard-created assignees get access at creation (owner R3 "immediate"), and a failed sync
  * call is logged and never fails the wizard (the reconciliation job is the safety net). The body carries ONLY the record
  * — the server reads the subjects from the record itself.
+ *
+ * Since the work assignment (ontology task 046), the matter (field-mapping-server-write-path-r1 task 021) and the project
+ * (task 022) are created through the BFF child-records route, none of the three wizard services calls the sync route:
+ * the server's root create runs the pass. The cases below pin that no call is made.
  */
 
 import { syncAssignedAccess, ASSIGNED_ACCESS_SYNC_PATH } from '../assignedAccessSync';
@@ -72,9 +76,7 @@ describe('syncAssignedAccess', () => {
     // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
     const fetchMock = jest
       .fn()
-      .mockRejectedValue(
-        apiErrorFor(403, { title: 'Forbidden', reasonCode: 'sdap.access.delegation.write_required' })
-      );
+      .mockRejectedValue(apiErrorFor(403, { title: 'Forbidden', reasonCode: 'sdap.access.delegation.write_required' }));
 
     const result = await syncAssignedAccess(fetchMock, BFF, 'project', CREATED);
 
@@ -115,24 +117,30 @@ describe('the client writers call the sync route after their create (criterion 1
     summary: '',
   };
 
-  it('Create Matter: syncs the created matter', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(ok());
+  // Task 021: the matter is created through the BFF child-records route, which answers with the new id.
+  const MATTER_ROUTE = `${BFF}/api/v1/child-records/sprk_matter`;
+  const matterFetch = (): jest.Mock =>
+    jest.fn(async (url: string) => (url === MATTER_ROUTE ? ok({ id: CREATED }) : ok()));
+
+  // Fix round 1 (task 021): on a root create the server owns the Assigned * grant (the maker's share inline, the full pass
+  // queued, tasks 049/049b), so the Create Matter wizard no longer calls the sync route (a second pass would only repeat it).
+  it('Create Matter: does NOT call the sync route -- the server grants the Assigned * access from the create', async () => {
+    const fetchMock = matterFetch();
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});
 
     expect(result.status).not.toBe('error');
-    expect(syncCalls(fetchMock)).toEqual([{ url: SYNC_URL, body: { recordType: 'matter', recordId: CREATED } }]);
+    expect(fetchMock.mock.calls.some(([url]) => url === MATTER_ROUTE)).toBe(true);
+    expect(syncCalls(fetchMock)).toEqual([]);
   });
 
-  it('Create Matter: a failed sync is logged and does NOT fail the wizard', async () => {
-    const fetchMock = jest.fn(async (url: string) =>
-      url === SYNC_URL ? Promise.reject(new TypeError('Failed to fetch')) : ok()
-    );
+  it('Create Matter: with an Assigned attorney, the create still succeeds and no access-sync warning is logged', async () => {
+    const fetchMock = matterFetch();
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});
 
-    expect(result.status).not.toBe('error');
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('[AssignedAccessSync]'), expect.anything());
+    expect(result.status).toBe('success');
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('[AssignedAccessSync]'), expect.anything());
   });
 
   const projectForm: ICreateProjectFormState = {
@@ -151,22 +159,29 @@ describe('the client writers call the sync route after their create (criterion 1
     isSecure: false,
   };
 
-  it('Create Project: syncs a standard project at create', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(ok());
+  // Task 022: the project is created through the BFF child-records route, a ROOT create, so the server owns the
+  // Assigned * grant exactly as for the matter (the maker's share inline, the full pass queued, tasks 049/049b; a
+  // secure-from-creation project's pass waits for the securing). The Create Project wizard no longer calls the sync route.
+  const PROJECT_ROUTE = `${BFF}/api/v1/child-records/sprk_project`;
+  const projectFetch = (): jest.Mock =>
+    jest.fn(async (url: string) => (url.startsWith(PROJECT_ROUTE) ? ok({ id: CREATED }) : ok()));
 
-    const result = await new ProjectService(dataService(), fetchMock, BFF).createProject(projectForm);
+  it.each([false, true])(
+    'Create Project: does NOT call the sync route -- the server grants the Assigned * access from the create (secure: %s)',
+    async isSecure => {
+      const fetchMock = projectFetch();
 
-    expect(result.success).toBe(true);
-    expect(syncCalls(fetchMock)).toEqual([{ url: SYNC_URL, body: { recordType: 'project', recordId: CREATED } }]);
-  });
+      const result = await new ProjectService(dataService(), fetchMock, BFF).createProject({
+        ...projectForm,
+        assignedAttorneyId: 'att-guid-1',
+        isSecure,
+      });
 
-  it('Create Project: a project about to be SECURED is not synced at create (the wizard syncs after provisioning)', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(ok());
-
-    await new ProjectService(dataService(), fetchMock, BFF).createProject({ ...projectForm, isSecure: true });
-
-    expect(syncCalls(fetchMock)).toEqual([]);
-  });
+      expect(result.success).toBe(true);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith(PROJECT_ROUTE))).toBe(true);
+      expect(syncCalls(fetchMock)).toEqual([]);
+    }
+  );
 
   // Ontology task 046 (D-21; uac-r2 D-113): the work assignment is created through POST /api/v1/child-records/
   // sprk_workassignment, which materializes the Assigned-To access INLINE on the server (ChildRecordEndpoints

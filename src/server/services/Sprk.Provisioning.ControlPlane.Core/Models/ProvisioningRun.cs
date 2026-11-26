@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 // NOTE (2026-08-18 Phase F acceptance): Cosmos SDK defaults to Newtonsoft.Json;
 // STJ [JsonPropertyName] alone is ignored on write path. Below uses fully-
@@ -266,6 +267,48 @@ public sealed class ProvisioningRun
         ErrorDetail = errorDetail;
     }
 
+    /// <summary>Verifier recorded on a failure marker that a handler's later success cleared (ISS-035).</summary>
+    public const string HandlerSucceededVerifier = "system:handler-succeeded";
+
+    /// <summary>
+    /// Records a handler-failure marker gate (<c>{handler}-{rejectionCode}</c>) as <see cref="GateState.Pending"/>, tagged
+    /// with the failing handler so <see cref="MarkPhaseSucceeded"/> can clear it when that handler later succeeds
+    /// (ISS-035). Every handler failure path writes its marker here; a real operator gate is written with a plain
+    /// <see cref="GateEntry"/> (no <see cref="GateEntry.FailureOfHandler"/>) and is never auto-cleared.
+    /// </summary>
+    public void RecordFailureGate(string gateKey, string handlerId, JsonElement? evidence = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(gateKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+
+        GateStates[gateKey] = new GateEntry
+        {
+            Status = GateState.Pending,
+            VerifierHandler = handlerId,
+            Evidence = evidence,
+            FailureOfHandler = handlerId,
+        };
+    }
+
+    /// <summary>
+    /// ISS-035: the handler succeeded, so each of ITS failure markers still Pending becomes <see cref="GateState.Cleared"/>
+    /// (kept as history, verified by <see cref="HandlerSucceededVerifier"/> at <paramref name="at"/>). Only entries tagged
+    /// with this handler's id move; another handler's marker and every real (untagged) gate are left alone.
+    /// </summary>
+    private void ClearFailureGates(string handlerId, DateTimeOffset at)
+    {
+        foreach (var gate in GateStates.Values)
+        {
+            if (gate.Status == GateState.Pending
+                && string.Equals(gate.FailureOfHandler, handlerId, StringComparison.OrdinalIgnoreCase))
+            {
+                gate.Status = GateState.Cleared;
+                gate.VerifiedAt = at;
+                gate.VerifierHandler = HandlerSucceededVerifier;
+            }
+        }
+    }
+
     private void RemoveFailedHandler(string handlerId)
     {
         for (var i = FailedHandlers.Count - 1; i >= 0; i--)
@@ -289,12 +332,13 @@ public sealed class ProvisioningRun
     /// (its own gate re-verified) moves the run on. A Cancelled run is never revived.
     /// </para>
     /// </summary>
-    public void MarkPhaseSucceeded(string handlerId)
+    public void MarkPhaseSucceeded(string handlerId, DateTimeOffset? at = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
 
         RemoveFailedHandler(handlerId);
         ResetAutoRetries(handlerId);
+        ClearFailureGates(handlerId, at ?? DateTimeOffset.UtcNow);
 
         if (Status == RunStatus.Cancelled)
         {

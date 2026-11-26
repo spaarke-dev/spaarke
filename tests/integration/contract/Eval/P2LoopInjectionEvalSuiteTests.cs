@@ -1202,7 +1202,8 @@ public class P2LoopInjectionEvalSuiteTests
                 PlaybookId: null,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+                Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())
+            { OwnerOid = TestSessionOwner.Oid };
             await sessionManager.UpdateSessionCacheAsync(session);
 
             var services = new ServiceCollection();

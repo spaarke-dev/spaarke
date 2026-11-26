@@ -12,7 +12,7 @@
  * instead of duplicating the wiring:
  *
  *   - `useTodoItems`         → `items` / `isLoading` / `error` / `onRefetch`
- *   - `useUserPreferences`   → `preferences` / `onUpdatePreferences` / `prefsLoading`
+ *   - `useTodoKanbanPreferences` (package) → `preferences` / `onUpdatePreferences` / `prefsLoading`
  *   - `DataverseService.createTodo/dismissTodo/updateTodoStatus`
  *                            → `onCreateTodo` / `onDismissTodo` / `onRestoreTodo`
  *                              (adapted from `IResult<T>` to `ITodoMutationResult`)
@@ -46,9 +46,11 @@
  */
 
 import * as React from 'react';
+import { useTodoKanbanPreferences } from '@spaarke/smart-todo-components';
 import type {
   IFeedSyncBridge,
   ISmartToDoProps as IPackageSmartToDoProps,
+  ITodoKanbanPreferences,
   ITodoMutationResult,
 } from '@spaarke/smart-todo-components';
 import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
@@ -56,7 +58,7 @@ import { DataverseService } from '../services/DataverseService';
 import type { ITodo } from '../types/entities';
 import type { IWebApi } from '../types/xrm';
 import { useTodoItems } from './useTodoItems';
-import { useUserPreferences } from './useUserPreferences';
+
 import { useFeedTodoSync } from './useFeedTodoSync';
 
 // ---------------------------------------------------------------------------
@@ -101,10 +103,9 @@ export function useSmartToDoBridge(
   const { webApi, userId, mockItems, scope, businessUnitId } = options;
 
   // Stable DataverseService reference (mirrors the pre-hoist SmartToDo.tsx pattern).
-  const serviceRef = React.useRef<DataverseService>(new DataverseService(webApi));
-  React.useEffect(() => {
-    serviceRef.current = new DataverseService(webApi);
-  }, [webApi]);
+  const service = React.useMemo(() => new DataverseService(webApi), [webApi]);
+  const serviceRef = React.useRef<DataverseService>(service);
+  serviceRef.current = service;
 
   // -------------------------------------------------------------------------
   // Data hooks
@@ -119,10 +120,11 @@ export function useSmartToDoBridge(
   });
 
   const { preferences, updatePreferences, isLoading: prefsLoading } =
-    useUserPreferences({ webApi, userId });
+    // #2972 — the shared hook keeps the fields the workspace does not use (orientation, column order) on save.
+    useTodoKanbanPreferences({ service, userId });
 
   const onUpdatePreferences = React.useCallback(
-    (prefs: Partial<{ todayThreshold: number; tomorrowThreshold: number }>) => {
+    (prefs: Partial<ITodoKanbanPreferences>) => {
       void updatePreferences(prefs);
     },
     [updatePreferences]
@@ -135,12 +137,12 @@ export function useSmartToDoBridge(
 
   const onCreateTodo = React.useCallback(
     async (title: string): Promise<ITodoMutationResult> => {
-      const result = await serviceRef.current.createTodo(title, userId);
+      const result = await serviceRef.current.createTodo(title);
       return result.success
         ? { success: true, id: result.data }
         : { success: false, error: { message: result.error?.message } };
     },
-    [userId]
+    []
   );
 
   const onDismissTodo = React.useCallback(

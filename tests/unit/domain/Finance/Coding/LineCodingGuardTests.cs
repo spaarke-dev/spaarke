@@ -47,14 +47,14 @@ public class LineCodingGuardTests
         string? expense = null,
         decimal confidence = 0.8m,
         IReadOnlyList<InvoiceLineObservation>? observations = null) => new()
-    {
-        LineKey = key,
-        TaskCode = task,
-        ActivityCode = activity,
-        ExpenseCode = expense,
-        Confidence = confidence,
-        Observations = observations ?? [],
-    };
+        {
+            LineKey = key,
+            TaskCode = task,
+            ActivityCode = activity,
+            ExpenseCode = expense,
+            Confidence = confidence,
+            Observations = observations ?? [],
+        };
 
     private static InvoiceLineObservation Observation(InvoiceLineObservationType type, string quote, decimal confidence = 0.7m) =>
         new() { Type = type, Confidence = confidence, QuotedText = quote };
@@ -223,6 +223,53 @@ public class LineCodingGuardTests
         var result = LineCodingGuard.Apply(Fee(), Returned(task: "L110"), Set());
 
         result.Task.Should().Be(new LineCodeValue("L110", null, Mismatch: false));
+    }
+
+    // ── ISS-051: the stored code carries its sprk_billingcode row (the line's code lookup) ──
+
+    private static readonly Guid L110Row = Guid.Parse("05100000-0000-4000-8000-0000000000a1");
+    private static readonly Guid A103Row = Guid.Parse("05100000-0000-4000-8000-0000000000a3");
+    private static readonly Guid E101Row = Guid.Parse("05100000-0000-4000-8000-0000000000e1");
+    private static readonly Guid L999Row = Guid.Parse("05100000-0000-4000-8000-0000000000f9");
+
+    private static ResolvedCodeSet SetWithRows() => new(
+        SetId,
+        "UTBMS Litigation",
+        CodeSetSource.MatterType,
+        taskCodes: [new("L110", "Fact Investigation", null), new("L120", "Analysis/Strategy", null)],
+        activityCodes: [new("A101", "Plan and prepare for", null), new("A103", "Draft/revise", null)],
+        expenseCodes: [new("E101", "Copying", null)],
+        codeIds: new Dictionary<(BillingCodeKind Kind, string Code), Guid>
+        {
+            [(BillingCodeKind.Task, "L110")] = L110Row,
+            [(BillingCodeKind.Activity, "A103")] = A103Row,
+            [(BillingCodeKind.Expense, "E101")] = E101Row,
+            [(BillingCodeKind.Task, "L999")] = L999Row, // not an allowed code: an id never makes a code allowed (FR-22)
+        });
+
+    [Fact(DisplayName = "ISS-051: a code kept from the set carries its sprk_billingcode row (case and padding ignored); a slot with no code has none")]
+    public void AKeptCode_CarriesItsRow()
+    {
+        var result = LineCodingGuard.Apply(Fee(task: "L120"), Returned(task: " l110 ", activity: "A103"), SetWithRows());
+
+        result.Task.Should().Be(new LineCodeValue("L110", "L120", Mismatch: true, CodeId: L110Row));
+        result.Activity.CodeId.Should().Be(A103Row);
+        result.Expense.CodeId.Should().BeNull("no expense code on a fee line");
+
+        LineCodingGuard.Apply(Expense(), Returned("X1", expense: "e101"), SetWithRows()).Expense.CodeId.Should().Be(E101Row);
+    }
+
+    [Fact(DisplayName = "ISS-051 / FR-22: an out-of-set code is refused and gets no row, even when an id is offered for it; the firm's code alone gets no row")]
+    public void ARefusedCode_AndAFirmOnlyCode_CarryNoRow()
+    {
+        var result = LineCodingGuard.Apply(Fee(task: "L110"), Returned(task: "L999"), SetWithRows());
+
+        result.Task.Should().Be(new LineCodeValue(null, "L110", Mismatch: false), "the refused code is not stored, so it names no row");
+        result.RefusedCodes.Should().ContainSingle(r => r.Code == "L999");
+        SetWithRows().CodeIdOf(BillingCodeKind.Task, "L999").Should().BeNull("an id for a code outside the allowed list is dropped");
+        SetWithRows().CodeIdOf(BillingCodeKind.Activity, "L110").Should().BeNull("a row is looked up within its kind");
+
+        LineCodingGuard.Uncoded(Fee(task: "L110"), LineCodingStatus.NoNarrative, SetWithRows()).Task.CodeId.Should().BeNull();
     }
 
     [Fact]

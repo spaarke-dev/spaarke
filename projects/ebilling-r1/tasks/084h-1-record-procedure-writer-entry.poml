@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084h-1" project="ebilling-r1">
+  <metadata>
+    <title>Decision Record writer entry for per-record Procedure changes (WriteRecordProcedureDecisionAsync), its catalog set and writer tests W1-W8</title>
+    <phase>3 Rules (WP3) — Procedures on the record (EB-D-238), wave W3-E2</phase>
+    <gate>Design notes/084h-procedure-change-decision-records-design.md revised after ontology-r1 review round 1 (section 16) and PASS on re-check; ontology-r1 reviews the writer and catalog diff (section 6.5 path B) before merge</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a public entry to the ontology-owned Decision Record writer and a catalog set (C# code, root section 6.5 path B, D-100 shape); moves the billing lookup query body into a shared helper.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Additive change to a shared, ontology-owned writer whose existing billing contract (task 142 C1-C3, C9) must stay byte-for-byte in behaviour; idempotency key and hash correctness.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits DecisionRecordWriter.cs and DecisionActionCatalog.cs (ontology-owned, shared with every billing task); 084h-2 and 084h-3 build on it.</parallel-reason>
+    <deps>084, 089, 084g</deps>
+    <tags>bff-api, signals, decision-record, ontology, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build the additive Decision Record writer entry of notes/084h-procedure-change-decision-records-design.md sections 3, 4.1 and 8: the request type RecordProcedureDecisionRecordRequest, the key class RecordProcedureDecisionKey (procedure-dr-), the public and internal WriteRecordProcedureDecisionAsync, the I/O-free preflight, ValidateRecordProcedure, the already-recorded lookup through one shared query helper (billing passes BillingLookupCodes, unchanged), the hash through CanonicalHashValue, the review mapper, and the additive refusal reason RecordProcedureLookupFailed; plus the catalog set RecordProcedureActions with its seven codes and TryGetRecordProcedure; plus writer tests W1-W8 (section 11). Nothing in the 089 service or endpoints (084h-2), the repair job (084h-3) or the UI (084h-4).</prompt>
+
+  <role>SPAARKE platform developer. Expert in the ontology Decision Record writer (task 142 contract, the billing entry of task 074 / D-100), DecisionActionCatalog and the CoreAncestorResolver CORE branch.</role>
+
+  <goal>A per-record Procedure change can be filed as one Decision Record under its core record (matter, project or work assignment) through WriteRecordProcedureDecisionAsync, exactly once per (subject, decision id), with the seven catalog codes; every existing writer and catalog member keeps its signature and behaviour and every existing test stays green.</goal>
+
+  <context>
+    <background>Design sections 3.2 (entry steps 1-5), 3.4 (P1-P7), 4.1 (Values keys are the declared parameter codes: procedure, version, rule, firm, note), 6.2 (key and hash), 8 (catalog table), 11 (W1-W8), 14 (Writer and Catalog rows), 16 (review round 1). Writer: src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs (billing entry :1313-1393, ValidateBilling :1540, lookup :1619-1677, CanonicalHashValue :1446, ResolveBillingCoreAsync :2081). Catalog: Services/Signals/Actions/DecisionActionCatalog.cs (DeclaredBilling :388, Separate :476, TryGetBilling :493).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/DecisionRecordContextImmutabilityTests.cs (CreateEntryPoints gains the new entry, as #2212 added the billing entry)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.RecordProcedure.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md 6.5 path B, D-100, design 3.4 P7">Additive only: no existing writer or catalog signature or behaviour changes; existing writer test files (DecisionRecordWriterTests*.cs) are not edited; BillingActions and its exact-set tests are unchanged.</constraint>
+    <constraint source="design 3.2 step 2, review round 1 item 6">The billing lookup's query body (BillingRecordsQueryAsync, AddBillingWriterFilterAsync) moves into one private helper taking the sprk_actioncode code set; it is a PURE extract: the billing callers pass BillingLookupCodes and their conditions, order and top count are identical.</constraint>
+    <constraint source="design 3.2 step 5, review round 1 item 6">The hash calls the existing CanonicalHashValue for every value; never a copy. The already-recorded rows' stored hash is read with the existing reader.</constraint>
+    <constraint source="design 3.2 step 4, review round 1 item 2">The core pair comes from the existing ResolveBillingCoreAsync, unchanged; its derivation is handed on as AlreadyDerived.</constraint>
+    <constraint source="design 4.1, review round 1 item 1">Required parameters are checked as Values[parameter.Code] (or Reason for a reason parameter), exactly as ValidateBilling does.</constraint>
+    <constraint source="design 4.1">A note key is never written or hashed with a null value; a null or whitespace-only note is the same as no note.</constraint>
+    <constraint source="design 6.2">The key is procedure-dr-{subjectEntity}-{subjectId}-{decisionId}; the override row id stays in Values, never in the key.</constraint>
+    <constraint source="design 8, 13 Q7 (owner proposal, open)">Classes: Routine for assign-procedure, pin-procedure, unpin-procedure; Judgement for exclude-procedure, exclude-rule, change-rule, remove-override. Gate Tier2b, reversible, RecordOfTruthImpact, ExternallyVisible false on every code. Declared in one place.</constraint>
+    <constraint source="design 5, 13 Q2">The request type has no ResolvedSignalIds, PolicyVersionId or PrivilegeFlagged member.</constraint>
+    <constraint source="brief">No edit to Api/ExternalAccess/**, WorkforceRoleCeilingGate.cs, route census or ledger ArchTests, src/client/**, .claude/**, or the 089 Procedure service and endpoints. No live Dataverse, no deploy.</constraint>
+    <constraint source="root 10">Publish-size delta against a fresh master build recorded; no package; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/084h-procedure-change-decision-records-design.md</file>
+      <file>projects/ebilling-r1/notes/074-billing-actions.md (section 8.2, D-100 conditions)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Additive writer entry" location="DecisionRecordWriter.WriteBillingDecisionAsync (:1313-1393)">Validate, key, lookup, hash, lazy contact, core, shared CreateAsync.</pattern>
+      <pattern name="Separate catalog set" location="DecisionActionCatalog DeclaredBilling / Separate / TryGetBilling (:388-503)">A closed set outside All.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL; base 73ce24172c; read the design in full and the billing entry it mirrors.</step>
+    <step order="1">Catalog: DeclaredRecordProcedure (seven codes, one gate and the class mapping in one place), RecordProcedureActions, TryGetRecordProcedure, the three-way separation.</step>
+    <step order="2">Writer: request, key, refusal reason, public and internal entry, preflight, ValidateRecordProcedure, the lookup through the extracted shared query helper, the hash, the review mapper.</step>
+    <step order="3">Tests W1-W8 in the new partial; prove each fails on the old writer; add the entry to the ArchTest's CreateEntryPoints list.</step>
+    <step order="4">Run the Signals writer and catalog test classes, the Finance suites using the billing writer, full ArchTests, BFF build --warnaserror; publish-size delta; CVE check; notes in projects/ebilling-r1/notes/084h-1-writer-entry.md.</step>
+    <step order="5">Hand to the orchestrator for code-review, adr-check, one adversarial pass and ontology-r1 review; TASK-INDEX row 🔄 [wip] built, awaiting review.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the entry cannot be built without changing an existing writer signature, an existing billing behaviour or an existing writer test, STOP and report.</trigger>
+    <trigger>If ResolveBillingCoreAsync or the shared CreateAsync path refuses a core-record subject for a reason the design did not foresee, STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WriteAsync (Signals review), WriteGateDecisionAsync, WriteConditionClearedAsync and WriteBillingDecisionAsync; DecisionActionCatalog.All and BillingActions.</existing>
+    <extension>None fits (design 3.1): WriteAsync needs a policy version and Signals; the billing entry refuses any subject other than the code's invoice or line table and extending BillingActions changes its exact-set contract. The new entry reuses every shared builder (Content, FiledAndOwnedAsync, CreateAsync, ResolveBillingCoreAsync, CanonicalHashValue, the lookup query) instead of copying it.</extension>
+    <cost-of-doing-nothing>EB-D-238 is unmet: a per-record change of how a matter's invoices are checked leaves no Decision Record, and 084h-2 has no writer to call.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">DecisionRecordWriter.cs, DecisionActionCatalog.cs</output>
+    <output type="test">DecisionRecordWriterTests.RecordProcedure.cs; DecisionRecordContextImmutabilityTests.cs (one list entry)</output>
+    <output type="docs">projects/ebilling-r1/notes/084h-1-writer-entry.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">W1 (P1): a procedure code through WriteAsync is refused (RecordClassUnderivable) and through WriteBillingDecisionAsync is refused (RecordClassUnderivable); a Signals code, a billing code or an unknown code through the new entry is refused as RecordClassUnderivable with zero reader calls and zero creates.</criterion>
+    <criterion testable="true">W2 (P2): sprk_invoice, sprk_billingevent, sprk_todo and sprk_servicerequest subjects are refused as SubjectUnsupported with zero reader calls, zero WhoAmI, zero owner questions and zero creates; sprk_matter, sprk_project and sprk_workassignment are written.</criterion>
+    <criterion testable="true">W3 (P3): a repeated (subject, decision id) with the same content answers AlreadyRecorded with exactly one create; a row with the key created by another identity is not "already recorded"; the same key with another code, or with another note, is refused (ReviewInvalid) with no second create; a request with no note key, a null note and a whitespace-only note hash identically and none writes a note key; the override row id is in Values, not in the key.</criterion>
+    <criterion testable="true">W4 (P4): a lookup fault and a writer-identity (WhoAmI) fault each refuse as RecordProcedureLookupFailed with zero creates; the new lookup filters sprk_actioncode In the procedure codes only, and the billing lookup still filters on the billing codes only (existing billing tests green, untouched).</criterion>
+    <criterion testable="true">W5 (P5): an empty confirmer and an "automated:" decider role are refused (ReviewInvalid) before any I/O; a written record carries sprk_confirmedby = the deciding user, sprk_gatetier from the catalog gate, the class of section 8 and outcome Authorized; a missing required parameter (under its declared code) or reason is refused; a missing fact snapshot is FactSnapshotMissing.</criterion>
+    <criterion testable="true">W6 (filing): the record is filed under sprk_regarding{matter,project,workassignment} = the subject, sprk_corerecordtype is the subject's record-type row and sprk_corerecordid the subject; the core derivation makes no reader call; one sprk_recordtype_ref read per core type across repeated writes; a record-type read fault, and a type with no catalog row, are FilingFailed with zero creates.</criterion>
+    <criterion testable="true">W7 (two walls): the request type has no Signal, policy-version or privilege member (reflection); the written sprk_steps.resolvedSignalIds is empty; sprk_policyversion is not set; the owner question's parents are exactly {core}.</criterion>
+    <criterion testable="true">W8 (catalog): RecordProcedureActions is exactly the seven codes in order, disjoint from All and BillingActions; each has a Gate, ExternallyVisible false, no PlanLane, no WorkType, the section 8 class, tier and required parameters; for every code, Values keyed as design 4.1 pass the preflight; TryGetRecordProcedure knows only these codes; BillingActions is unchanged.</criterion>
+    <criterion testable="true">Every new test fails against the base writer and catalog (proved by restoring the base files); all existing Signals writer and catalog tests, the Finance suites using the billing writer and the full ArchTests pass; dotnet build src/server/api/Sprk.Bff.Api/ --warnaserror exits 0 with no warnings; publish-size delta and the CVE check are recorded in the notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner questions Q6-Q10 of the design stay open; the classes and gates (Q7) are implemented as drafted. 084h-2 (service and endpoints) and 084h-3 (repair job) follow and ship in the same deploy.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

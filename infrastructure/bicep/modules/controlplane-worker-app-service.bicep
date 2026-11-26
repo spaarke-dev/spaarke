@@ -207,6 +207,9 @@ param preAuthorizedClientAppIds array = [
 @description('Client id of the shared Spaarke Copilot Agent app (T257; secret-free public client, PKCE). When set it is appended to preAuthorizedClientAppIds, so H3 pre-authorizes it on every customer BFF app for user_impersonation. Empty (default): not added -- the app does not exist until the operator creates it. Must be a GUID: H3 rejects every run on a malformed entry (appreg-preauthorized-client-invalid).')
 param copilotAgentClientAppId string = ''
 
+@description('Client apps H3 pre-authorizes for user_impersonation ONLY on customer BFF apps whose registry row (sprk_dataverseenvironment) is Environment Type = Demo and active (demo environment plan decision 1, owner 2026-11-26) -- today the Spaarke Operator Tools (Demo) public client from scripts/provisioning/Register-OperatorToolsClient.ps1. Emitted as EntraAppRegOptions__DemoPreAuthorizedClientAppIds__N. Empty (default): H3 never reads the registry for this. Each entry must be a GUID: H3 rejects every run on a malformed entry (appreg-demo-preauthorized-client-invalid).')
+param demoPreAuthorizedClientAppIds array = []
+
 @description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts. Emitted with the deployment tenant as ReservedTenants__CiamTenantIds__N / ReservedTenants__SpaarkeTenantId (task 255): H4b and H13 refuse either as a customer workforce tenant (CustomerWorkforceTenantsRule). REQUIRED, at least one: ReservedTenantsOptions.Validate() fails Worker startup without it. Same value the Api module receives.')
 @minLength(1)
 param ciamTenantIds array
@@ -241,6 +244,9 @@ var entraAppRegSettings = concat([
 ], map(range(0, length(effectivePreAuthorizedClientAppIds)), i => {
   name: 'EntraAppRegOptions__PreAuthorizedClientAppIds__${i}'
   value: effectivePreAuthorizedClientAppIds[i]
+}), map(range(0, length(demoPreAuthorizedClientAppIds)), i => {
+  name: 'EntraAppRegOptions__DemoPreAuthorizedClientAppIds__${i}'
+  value: demoPreAuthorizedClientAppIds[i]
 }))
 
 // ============================================================================

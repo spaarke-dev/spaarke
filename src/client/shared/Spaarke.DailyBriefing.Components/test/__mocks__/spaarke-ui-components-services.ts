@@ -27,6 +27,16 @@ export function applyResolverFields(..._args: any[]): any {
   return {};
 }
 
+// Pattern D (#2803 / #2804): useInlineTodoCreate calls the shared nav-prop discovery instead of a private copy. The
+// stub catalog is empty, so the hook never reaches it here; `useInlineTodoCreate.sharedNavProps.test.ts` overrides this
+// module with the real discovery to prove the hook uses the shared cache.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function discoverNavProps(..._args: any[]): Promise<any[]> {
+  return [];
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function _resetNavPropCacheForTests(..._args: any[]): void {}
+
 // ---------------------------------------------------------------------------
 // r5 email-share (2026-07-09): DailyBriefingApp imports extractEmailKey from
 // `@spaarke/ui-components/services`. Mirror the real implementation so tests

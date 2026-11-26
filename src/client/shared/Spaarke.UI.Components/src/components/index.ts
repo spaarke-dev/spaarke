@@ -45,6 +45,13 @@ export * from './FindSimilarViewer';
 // RelationshipCountCard - Document relationship count with drill-through
 export * from './RelationshipCountCard';
 
+// DocumentRelationshipGraph - graph data, API hook and node card shared by the
+// DocumentRelationshipViewer code page and PCF (#3093)
+export * from './DocumentRelationshipGraph';
+
+// SearchFilters - FilterDropdown + DateRangeFilter shared by the SemanticSearch code page and PCF (#3093)
+export * from './SearchFilters';
+
 // Playbook - Shared playbook card grid, scope configuration, and analysis services
 export * from './Playbook';
 
@@ -197,6 +204,11 @@ export * from './PolymorphicPicker';
 // (record-header-and-notepad-r1 FR-01, task 002)
 export * from './HeaderToolbar';
 
+// RecordCommandBar - Record-level action bar (hide-don't-disable descriptors,
+// overflow menu) composing HeaderToolbar, plus the RECORD_ACTION_ICONS map
+// (spaarke-SPA-external-access-platform-r4 FR-04/FR-05, task 001)
+export * from './RecordCommandBar';
+
 // RecordHeader - Card chrome (RecordHeaderShell), grid primitive (FieldGrid),
 // and four field renderers (TextField, LookupField, OptionSetField, TextareaField)
 // (record-header-and-notepad-r1 FR-02/03/04, tasks 003–008)
@@ -266,12 +278,13 @@ export * from './ConversationWorkspace';
 // (forwardRef) to scroll + transiently highlight the bubble (task 023, FR-05).
 export * from './MessageQuickView';
 
-// NewThreadModal - Fluent v9 modal to start (find-or-create) a 1:1 direct thread
-// via POST /threads/direct; reuses RecipientField/BodyEditor/AssociationChips
-// (no dup impl). Optional regarding (read-only AssociationChips) + optional body
-// (posted as the first Message via the existing send engine). name/description
-// omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
+// NewThreadModal - Fluent v9 modal to create a named, record-anchored thread
+// (POST /threads) with an optional first message via the existing send engine.
 export * from './NewThreadModal';
+
+// NewDirectMessageModal - start (find-or-create) a 1:1 Direct conversation with one
+// internal user (POST /threads/direct) and an optional first message (fm task 055).
+export * from './NewDirectMessageModal';
 
 // ModalWindowControls - the standard Spaarke modal window-controls cluster
 // (maximize/restore + close ×), right-aligned in a dialog header. Shared so all
@@ -316,7 +329,7 @@ export * from './StatusBadge';
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
 // directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);
 // writes sprk_externalrecordaccess exclusively through the built BFF endpoints
-// (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
+// (/grant, /invite, /revoke) — context-agnostic (ADR-012), no Xrm
 // dependency in the shared core.
 export * from './AccessGrantModal';
 

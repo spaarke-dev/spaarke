@@ -89,6 +89,28 @@ public sealed class BicepDeployOutputs
     /// </summary>
     public required string StorageBlobEndpoint { get; init; }
 
+    /// <summary>
+    /// Client id of the stamp's ontology writer UAMI (ARM output <c>ontologyWriterIdentityClientId</c>, task 266 / #2605) —
+    /// written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.OntologyWriterClientId"/>. H4b sets it as
+    /// the BFF's <c>Ontology__Writer__ManagedIdentityClientId</c>; H10 creates its Dataverse application user.
+    /// </summary>
+    public required string OntologyWriterClientId { get; init; }
+
+    /// <summary>
+    /// Principal (object) id of the ontology writer UAMI (ARM output <c>ontologyWriterIdentityObjectId</c>, task 266) —
+    /// written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.OntologyWriterObjectId"/>. H10 writes it
+    /// as the writer application user's <c>azureactivedirectoryobjectid</c> (auth-v4 §10.4: never the client id).
+    /// </summary>
+    public required string OntologyWriterObjectId { get; init; }
+
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
+
+    /// <summary>
+    /// SignalR Service host name (ARM output <c>signalrHostName</c>, <c>{name}.service.signalr.net</c>) — blank unless
+    /// <see cref="SignalRDeployed"/>. Optional by design (a default stamp deploys no SignalR); H2a requires it only when
+    /// SignalR was deployed, and persists it to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.SignalRHostName"/>
+    /// for H4b's keyless connection string (ISS-022).
+    /// </summary>
+    public string SignalRHostName { get; init; } = string.Empty;
 }

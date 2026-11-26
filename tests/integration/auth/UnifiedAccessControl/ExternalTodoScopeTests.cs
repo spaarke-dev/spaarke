@@ -119,6 +119,31 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             "the write must target the to-do named in the route, not a substitute");
     }
 
+    // uac-r2 task 191h fix round 1 (F1): a to-do the external lists hide (THE external visibility predicate) is not written. Hidden
+    // and Undecided are the SAME 403 as a to-do that does not exist (NFR-01); a decision that could not be made is the 503.
+    [Theory]
+    [InlineData(ExternalDataService.LiveParentDecision.Withheld, HttpStatusCode.Forbidden)]
+    [InlineData(ExternalDataService.LiveParentDecision.Unavailable, HttpStatusCode.ServiceUnavailable)]
+    public async Task Task191h_PatchExternalTodo_TheListsHide_IsRefused_AndNothingIsWritten(
+        ExternalDataService.LiveParentDecision decision, HttpStatusCode expected)
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.Collaborate));
+        using var client = _fixture.CreateAuthenticatedClient();
+        var missing = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch()); // no to-do: the deny
+        var missingBody = await missing.Content.ReadAsStringAsync();
+
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Data.ExternalVisibility = decision;
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(expected);
+        if (expected == HttpStatusCode.Forbidden)
+            (await response.Content.ReadAsStringAsync()).Should().Be(missingBody, "hidden reads exactly as absent (NFR-01)");
+        _fixture.Data.ExternalVisibilityChecks.Should().Be(1);
+        _fixture.Data.UpdateCallCount.Should().Be(0, "nothing is written");
+    }
+
     [Fact]
     public async Task PatchExternalTodo_WhenCallerHasFullAccess_AppliesTheUpdate()
     {
@@ -217,8 +242,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "a nonexistent to-do denies cleanly rather than erroring unhandled");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a nonexistent to-do is refused exactly as a to-do outside the caller's set (one uniform refusal)");
         _fixture.Data.UpdateCallCount.Should().Be(0);
     }
 
@@ -1465,9 +1490,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             _fixture.Probe.HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
         }
 
+        // R4 task 014b: the create names its type (required now), and the systemuser holds AppendTo on it, so the answer is the
+        // project's.
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, Spaarke.Dataverse.EventTypeRef.EntitySet, Spaarke.Dataverse.EventTypeRef.Task,
+            AccessRights.Read | AccessRights.AppendTo);
+
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
-            $"/api/v1/external/projects/{InScopeProject}/events", new { sprk_name = "Kickoff" });
+            $"/api/v1/external/projects/{InScopeProject}/events", new { sprk_name = "Kickoff", eventType = "task" });
 
         response.StatusCode.Should().Be(expected);
         _fixture.Data.CreateEventCallCount.Should().Be(creates);
@@ -1493,7 +1523,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     // =====================================================================
     // Task 036 fix round 1 (F4, open question g): a Dataverse-decided caller's /me level says only what they may see, so
     // the record's own lists say whether its create route would admit them (`canCreate`) — one probe for the record in
-    // hand. Every other caller's list is byte-for-byte unchanged (no `canCreate` member).
+    // hand. Since R4 task 002 (FR-06) every other caller's list says `canCreate` too, from the composed rights the create
+    // route checks, and Dataverse is still asked nothing for them.
     // =====================================================================
 
     private static async Task<System.Text.Json.JsonElement> ListJsonAsync(HttpClient client, string path)
@@ -1553,10 +1584,12 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         json.GetProperty("canCreate").GetBoolean().Should().BeFalse();
     }
 
-    [Theory(DisplayName = "Task 036 F4 twin: flag OFF (any level), the to-do list carries no canCreate and asks Dataverse nothing")]
+    // R4 task 002 (FR-06) changed this twin: a caller whose access Dataverse does NOT decide is now told canCreate too —
+    // from the composed rights the create route itself checks — and is still asked nothing (no extra Dataverse read).
+    [Theory(DisplayName = "R4 task 002 (FR-06): flag OFF, the to-do list's canCreate is the composed Create, and Dataverse is asked nothing")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Fr20_TodoList_FlagOff_IsUnchanged_AndAsksNothing(bool collaborate)
+    public async Task Fr20_TodoList_FlagOff_ReportsTheComposedCreate_AndAsksNothing(bool collaborate)
     {
         _fixture.Reset();
         var rights = collaborate ? ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate) : AccessRights.Read;
@@ -1566,9 +1599,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/todos");
 
-        json.TryGetProperty("canCreate", out _).Should().BeFalse("flag off, the wire is byte-for-byte what it was");
+        json.GetProperty("canCreate").GetBoolean().Should().Be(collaborate,
+            "flag off, the composed rights decide the create route, so they decide canCreate");
         _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
         _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
+
+        // The list's canCreate equals the create route's own answer for the same caller and record.
+        var create = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+        create.StatusCode.Should().Be(collaborate ? HttpStatusCode.Created : HttpStatusCode.Forbidden);
     }
 
     [Theory(DisplayName = "Task 036 F4: flag ON, the PROJECT event list's canCreate is the event create route's Dataverse answer")]
@@ -1593,23 +1631,61 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         json.GetProperty("canCreate").GetBoolean().Should().Be(expected);
     }
 
-    [Theory(DisplayName = "Task 036 F4 twin: no event create route on a matter, and flag OFF on a project — no canCreate, no probe")]
-    [InlineData("matters", true)]
-    [InlineData("projects", false)]
-    public async Task Fr20_EventList_WithoutACreateRoute_OrFlagOff_IsUnchanged(string segment, bool dataverseDecides)
+    // R4 task 002 (FR-06, FR-08) replaced "no event create route on a matter — no canCreate": every root has one now, so the
+    // matter and work-assignment event lists say canCreate as the project's does, and a flag-off caller is told too.
+    [Theory(DisplayName = "R4 task 002: flag ON, a matter/WA event list's canCreate is that root's event create route's Dataverse answer")]
+    [InlineData("matters", AccessRights.Read | AccessRights.AppendTo, true, true)]
+    [InlineData("matters", AccessRights.Read | AccessRights.AppendTo, false, false)]
+    [InlineData("workassignments", AccessRights.Read | AccessRights.AppendTo, true, true)]
+    [InlineData("workassignments", AccessRights.Read | AccessRights.Write, true, false)]
+    public async Task Fr20_RootEventList_CanCreate_IsTheCreateRoutesDataverseAnswer(
+        string segment, AccessRights dataverse, bool holdsCreate, bool expected)
     {
         _fixture.Reset();
         var (kind, rootId) = segment == "matters"
             ? (ExternalDataService.TodoRootKind.Matter, InScopeMatter)
-            : (ExternalDataService.TodoRootKind.Project, InScopeProject);
-        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides);
-        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
+            : (ExternalDataService.TodoRootKind.WorkAssignment, InScopeWorkAssignment);
+        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, dataverse);
+        if (holdsCreate)
+        {
+            _fixture.Probe.HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
+        }
 
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/{segment}/{rootId}/events");
 
-        json.TryGetProperty("canCreate", out _).Should().BeFalse();
+        json.GetProperty("canCreate").GetBoolean().Should().Be(expected);
+        // R4 task 008 review round 1: when canCreate is true the list also asks the Task event-type row (canCreateTask) — one
+        // more probe, not about the root; the root is still asked once.
+        _fixture.Probe.AppOnlyCalls.Where(c => c.RecordId != Spaarke.Dataverse.EventTypeRef.Task)
+            .Should().ContainSingle("one probe, for the record in hand");
+        _fixture.Probe.AppOnlyCalls.Count(c => c.RecordId == Spaarke.Dataverse.EventTypeRef.Task).Should().Be(expected ? 1 : 0);
+
+        // R4 task 014b: the create names its type (required now); the systemuser holds AppendTo on the Task row, so the type
+        // adds no refusal and the create's answer is still the root's.
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, Spaarke.Dataverse.EventTypeRef.EntitySet, Spaarke.Dataverse.EventTypeRef.Task,
+            AccessRights.Read | AccessRights.AppendTo);
+        var create = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/events",
+            new { sprk_name = "Kickoff", eventType = "task" });
+        create.StatusCode.Should().Be(expected ? HttpStatusCode.Created : HttpStatusCode.Forbidden,
+            "the list's canCreate is the create route's own decision");
+    }
+
+    [Fact(DisplayName = "R4 task 002 twin: flag OFF on a project, the event list reports the composed Create and asks Dataverse nothing")]
+    public async Task Fr20_EventList_FlagOff_ReportsTheComposedCreate_AndAsksNothing()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: false);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/events");
+
+        json.GetProperty("canCreate").GetBoolean().Should().BeFalse("Read alone does not admit the create route");
         _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 
     // =====================================================================
@@ -1917,15 +1993,24 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         set => _resolver.Principal = value;
     }
 
+    /// <summary>
+    /// R4 task 014b: the record's assignable people at <see cref="RecordContactAccessService"/>'s module boundary (its rules are
+    /// pinned by <c>RecordContactAccessServiceTests</c>; the routes here are tested for what they do with Known and Unknown).
+    /// </summary>
+    public StubRecordContactAccessService ContactAccess { get; } = new();
+
     /// <summary>Clears per-test state. The fixture is class-scoped, so tests must not leak into each other.</summary>
     public void Reset()
     {
         Data.Reset();
+        ContactAccess.Reset();
         Probe.Reset();
         Principal = null;
         Ownership.TeamId = Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId;
         Ownership.Fault = null;
         Ownership.Requests.Clear();
+        // R4 task 014b review pass 2 (F1): a test that sets the invoice predicate leaves the next one hiding nothing.
+        InvoiceHiding = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub.NoneHidden();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -1942,7 +2027,55 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             services.AddScoped(_ => (ExternalDataService)Data);
             // Task 036: the same for the typed-client CallerRecordAccessProbe.
             services.AddScoped<CallerRecordAccessProbe>(_ => Probe);
+            // R4 task 014b: the assignable set (RecordContactAccessService's virtual seam).
+            services.AddScoped<RecordContactAccessService>(_ => ContactAccess);
         });
+    }
+
+    /// <summary>R4 task 014b: <see cref="RecordContactAccessService"/> answering at its module boundary.</summary>
+    public sealed class StubRecordContactAccessService : RecordContactAccessService
+    {
+        public StubRecordContactAccessService()
+            : base(
+                new DataverseWebApiClient(
+                    new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
+                    }).Build(),
+                    NullLogger<DataverseWebApiClient>.Instance, new StubExternalDataService.Credential()),
+                new ExternalParticipationService(new HttpClient(), cache: null!, configuration: null!, credential: null!,
+                    httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance, filing: null),
+                Moq.Mock.Of<IAccessibleRecordSetService>(),
+                Moq.Mock.Of<IContactIdentityStore>(),
+                TimeProvider.System,
+                httpContextAccessor: null,
+                NullLogger<RecordContactAccessService>.Instance)
+        {
+        }
+
+        /// <summary>The answer for every record (Known with nobody unless a test says otherwise).</summary>
+        public RecordContactAccess Answer { get; set; } = new RecordContactAccess.Known(Array.Empty<RecordAccessContact>());
+
+        /// <summary>R4 task 014c: a per-record answer, which wins over <see cref="Answer"/> for that record id (an event filed
+        /// under several parents asks each).</summary>
+        public Dictionary<Guid, RecordContactAccess> AnswersByRecord { get; } = new();
+
+        /// <summary>The records asked about (the load-bearing assertion that a refused request asked nothing).</summary>
+        public List<(ExternalGrantRootType Type, Guid Id)> Calls { get; } = new();
+
+        public void Reset()
+        {
+            Answer = new RecordContactAccess.Known(Array.Empty<RecordAccessContact>());
+            AnswersByRecord.Clear();
+            Calls.Clear();
+        }
+
+        public override Task<RecordContactAccess> GetContactsWithAccessAsync(
+            ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
+        {
+            Calls.Add((rootType, rootId));
+            return Task.FromResult(AnswersByRecord.TryGetValue(rootId, out var answer) ? answer : Answer);
+        }
     }
 
     public sealed class StubCallerPrincipalResolver : ICallerPrincipalResolver
@@ -1982,6 +2115,105 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             return Task.FromResult(LiveParents);
         }
 
+        /// <summary>uac-r2 task 191h fix round 1: what the external visibility write gate answers (Readable unless a test says so;
+        /// the gate itself is pinned by <c>ExternalListVisibilityTests</c> over the real predicate).</summary>
+        public ExternalDataService.LiveParentDecision ExternalVisibility { get; set; } = ExternalDataService.LiveParentDecision.Readable;
+
+        public int ExternalVisibilityChecks { get; private set; }
+
+        public override Task<ExternalDataService.LiveParentDecision> CheckExternalVisibilityAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+        {
+            ExternalVisibilityChecks++;
+            return Task.FromResult(ExternalVisibility);
+        }
+
+        /// <summary>ebilling-r1 task 130-0 fix round 2 (F1): the PATCH reads the to-do's invoice links through the delete-own row read;
+        /// here the to-do links to no invoice (the invoice rule's own tests are <c>ExternalInvoiceLinkedWriteTests</c>).</summary>
+        public override Task<ExternalDataService.DeleteTarget?> GetDeleteTargetAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CancellationToken ct = default)
+        {
+            // R4 task 014b: the event record check reads an event's parents here; a test names them per event id.
+            if (kind == ExternalDataService.DeletableKind.Event && EventTargets.Count > 0)
+            {
+                EventTargetReads.Add(id);
+                if (EventTargetFault)
+                    throw new ExternalDataService.DataverseUnavailableException("test: the event row could not be read");
+                return Task.FromResult(EventTargets.TryGetValue(id, out var target) ? target : null);
+            }
+
+            return Task.FromResult<ExternalDataService.DeleteTarget?>(new ExternalDataService.DeleteTarget(
+                null, null, Array.Empty<ExternalDataService.DeleteTargetParent>(), InvoiceLinks: Array.Empty<Guid>()));
+        }
+
+        // ── R4 task 014b: the event record check, the single read, the edit write and the type rows ─────────────────────
+
+        /// <summary>An event's parents (its delete-own row read), by event id; an id not here does not exist.</summary>
+        public Dictionary<Guid, ExternalDataService.DeleteTarget?> EventTargets { get; } = new();
+        public bool EventTargetFault { get; set; }
+        public List<Guid> EventTargetReads { get; } = new();
+
+        /// <summary>What the event lists answer (empty unless a test says otherwise).</summary>
+        public List<ExternalEventDto> Events { get; } = new();
+
+        /// <summary>What the single event read answers, by id (absent: empty, i.e. withheld or gone).</summary>
+        public Dictionary<Guid, ExternalEventDto> EventsById { get; } = new();
+        public bool EventByIdTruncated { get; set; }
+
+        /// <summary>The type rows (the Task row, active, no due date required, unless a test says otherwise).</summary>
+        public List<ExternalDataService.EventTypeOption> EventTypes { get; } = new() { TaskType };
+        public bool EventTypesFault { get; set; }
+        public int EventTypeReads { get; private set; }
+
+        /// <summary>The PATCH writes that reached Dataverse (the load-bearing assertion on every refusal).</summary>
+        public List<(Guid Id, IReadOnlyDictionary<string, object?> Payload)> EventUpdates { get; } = new();
+        public bool UpdateEventFound { get; set; } = true;
+
+        private static readonly ExternalDataService.EventTypeOption TaskType = new(EventTypeRef.Task, "Task", false, true);
+
+        /// <summary>R4 task 014c: single event reads (the app-only read of the event's own fields; G5 asserts none before the right).</summary>
+        public int EventByIdReads { get; private set; }
+
+        public override Task<ExternalCollectionResponse<ExternalEventDto>> GetEventByIdAsync(
+            Guid eventId, CallerPrincipal caller, CancellationToken ct = default)
+        {
+            EventByIdReads++;
+            return Task.FromResult(new ExternalCollectionResponse<ExternalEventDto>
+            {
+                Value = EventsById.TryGetValue(eventId, out var dto) ? new[] { dto } : Array.Empty<ExternalEventDto>(),
+                Truncated = EventByIdTruncated,
+            });
+        }
+
+        public override Task<IReadOnlyList<ExternalDataService.EventTypeOption>> GetEventTypesAsync(CancellationToken ct = default)
+        {
+            EventTypeReads++;
+            if (EventTypesFault)
+                throw new ExternalDataService.DataverseUnavailableException("test: the event types could not be read");
+            return Task.FromResult<IReadOnlyList<ExternalDataService.EventTypeOption>>(EventTypes.ToList());
+        }
+
+        /// <summary>R4 task 014b (uac-r2, the Dataverse read gate): when set, the event PATCH runs the REAL
+        /// <see cref="ExternalDataService.UpdateEventAsync"/> over this transport, so a test pins how a throttled or failed
+        /// Dataverse answer reaches the route.</summary>
+        public HttpMessageHandler? UpdateEventTransport { get; set; }
+
+        public override Task<bool> UpdateEventAsync(
+            Guid eventId, IReadOnlyDictionary<string, object?> payload, CancellationToken ct = default)
+        {
+            EventUpdates.Add((eventId, payload));
+            if (UpdateEventTransport is { } transport)
+                return new ExternalDataService(
+                        new HttpClient(transport, disposeHandler: false),
+                        new ConfigurationBuilder()
+                            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                            .Build(),
+                        new Credential(),
+                        NullLogger<ExternalDataService>.Instance)
+                    .UpdateEventAsync(eventId, payload, ct);
+            return Task.FromResult(UpdateEventFound);
+        }
+
         public int UpdateCallCount { get; private set; }
         public Guid? LastUpdatedTodoId { get; private set; }
         public UpdateExternalTodoRequest? LastRequest { get; private set; }
@@ -2008,6 +2240,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             ThrowOnLookup = false;
             LiveParents = ExternalDataService.LiveParentDecision.Readable;
             LiveParentChecks = 0;
+            ExternalVisibility = ExternalDataService.LiveParentDecision.Readable;
+            ExternalVisibilityChecks = 0;
             UpdateCallCount = 0;
             LastUpdatedTodoId = null;
             LastRequest = null;
@@ -2020,13 +2254,34 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateCallerContactId = null;
             LastCreateCreator = null;
             CreateEventCallCount = 0;
+            LastCreateEventArgs = null;
+            EventTargets.Clear();
+            EventTargetFault = false;
+            EventTargetReads.Clear();
+            Events.Clear();
+            EventsById.Clear();
+            EventByIdTruncated = false;
+            EventByIdReads = 0;
+            EventTypes.Clear();
+            EventTypes.Add(TaskType);
+            EventTypesFault = false;
+            EventTypeReads = 0;
+            EventUpdates.Clear();
+            UpdateEventFound = true;
+            UpdateEventTransport = null;
         }
 
+        /// <summary>R4 task 002: what the route handed the event create (root kind and id from the ROUTE, the owner team).</summary>
+        public (ExternalDataService.TodoRootKind Kind, Guid RootId, Guid OwningTeamId, CreateExternalEventRequest Request, CallerPrincipal Creator)?
+            LastCreateEventArgs
+        { get; private set; }
+
         public override Task<ExternalEventDto> CreateEventAsync(
-            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
-            CancellationToken ct = default)
+            ExternalDataService.TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId,
+            CallerPrincipal creator, CancellationToken ct = default)
         {
             CreateEventCallCount++;
+            LastCreateEventArgs = (rootKind, rootId, owningTeamId, request, creator);
             return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 
@@ -2047,7 +2302,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         /// <summary>Task 036 fix round 1 (F4): the event list, offline (its canCreate is what the tests read).</summary>
         public override Task<ExternalCollectionResponse<ExternalEventDto>> GetEventsAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default) =>
-            Task.FromResult(new ExternalCollectionResponse<ExternalEventDto>());
+            Task.FromResult(new ExternalCollectionResponse<ExternalEventDto> { Value = Events.ToList() });
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId,
@@ -2082,6 +2337,16 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastUpdatedTodoId = todoId;
             LastRequest = request;
             return Task.CompletedTask;
+        }
+
+        /// <summary>A credential that never reaches the network (shared with <see cref="StubRecordContactAccessService"/>).</summary>
+        internal sealed class Credential : TokenCredential
+        {
+            public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken ct) =>
+                new("stub-token", DateTimeOffset.UtcNow.AddHours(1));
+
+            public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken ct) =>
+                new(new AccessToken("stub-token", DateTimeOffset.UtcNow.AddHours(1)));
         }
 
         private sealed class StubCredential : TokenCredential

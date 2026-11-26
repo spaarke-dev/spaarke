@@ -511,6 +511,11 @@ public class ExternalParticipationService
         CancellationToken ct = default,
         string? explicitTenantId = null)
     {
+        // #2845: every grant writer calls this after its write, so it is also where the request forgets the access reads it
+        // remembered (grant sets, contact state, organization memberships, deny-list rows): a composition later in the
+        // same request reads again. First, so nothing below can skip it.
+        ForgetRequestAccessReads();
+
         try
         {
             return await InvalidateGrantSetsCoreAsync(contactIds, organizationIds, ct, explicitTenantId)
@@ -711,11 +716,18 @@ public class ExternalParticipationService
         response.EnsureSuccessStatusCode();
 
         var page = await response.Content.ReadFromJsonAsync<MemberPageResult>(ct).ConfigureAwait(false);
-        var ids = (page?.Value ?? new List<ExternalOrganizationMembership.ContactOrganizationRow>())
+        if (page?.Value is null)
+        {
+            // #2845 review: a 2xx without a value array is not a Dataverse answer — a fault, never an empty page.
+            throw new InvalidOperationException(
+                $"The active members of Organization {organizationId} were read without a value array.");
+        }
+
+        var ids = page.Value
             .Where(r => r.ContactId is { } id && id != Guid.Empty)
             .Select(r => r.ContactId!.Value)
             .ToList();
-        return new OrganizationMemberPage(ids, page?.NextLink);
+        return new OrganizationMemberPage(ids, page.NextLink);
     }
 
     private sealed class MemberPageResult
@@ -740,25 +752,38 @@ public class ExternalParticipationService
     /// row is <see cref="ContactRecordState.Inactive"/>, a fault is <see cref="ContactRecordState.Unreadable"/>,
     /// and the evaluator treats both as "confers nothing" (ADR-003, NFR-01).</para>
     /// <para><b>Once per request.</b> A request that composes several entity types (the CIAM principal composes
-    /// three) reads the row once: an Active or Inactive answer is remembered in <c>HttpContext.Items</c> for the
-    /// rest of that request only — the next request reads again. A fault is not remembered.</para>
+    /// three) reads the row once: an Active or Inactive answer is remembered in the request's
+    /// <see cref="RequestAccessMemo"/> for the rest of that request only — the next request reads again. A fault is not
+    /// remembered. (#2845: the memo replaced the plain <c>HttpContext.Items</c> entry, because the three compositions
+    /// now run concurrently and <c>Items</c> is not thread-safe.)</para>
     /// <para><b>Why its own read.</b> No existing live read covers every plane: the standing-grant reader reads
     /// the contact row only on the workforce contact plane (and task 142 escalation (d) may retire that term), the
     /// junction read returns nothing for a contact with no membership, and the grant read is cached.</para>
     /// </remarks>
-    internal async Task<ContactRecordState> ReadContactStateAsync(Guid contactId, CancellationToken ct)
+    internal Task<ContactRecordState> ReadContactStateAsync(Guid contactId, CancellationToken ct)
     {
-        var items = _httpContextAccessor?.HttpContext?.Items;
-        var key = ContactStateItemKey + contactId.ToString("N");
-        if (items is not null && items.TryGetValue(key, out var remembered) && remembered is ContactRecordState known)
-        {
-            return known;
-        }
+        var memo = RequestAccessMemo.For(_httpContextAccessor?.HttpContext);
+        return memo is null
+            ? ReadContactStateLiveAsync(contactId, ct)
+            : memo.GetOrReadAsync(
+                RequestAccessMemo.ContactStateKey(contactId),
+                token => ReadContactStateLiveAsync(contactId, token),
+                state => state != ContactRecordState.Unreadable,
+                ct);
+    }
 
-        ContactRecordState state;
+    /// <summary>
+    /// #2845: the request-scoped memo of the access reads (<see cref="RequestAccessMemo"/>), forgotten. Every in-request
+    /// writer of an answer the memo can hold calls this (or <see cref="InvalidateGrantSetsAsync"/>, which does), so a read
+    /// after the write goes back to Dataverse. No request, no memo: a no-op.
+    /// </summary>
+    internal void ForgetRequestAccessReads() => RequestAccessMemo.For(_httpContextAccessor?.HttpContext)?.Clear();
+
+    private async Task<ContactRecordState> ReadContactStateLiveAsync(Guid contactId, CancellationToken ct)
+    {
         try
         {
-            state = await QueryContactStateAsync(contactId, ct).ConfigureAwait(false);
+            return await QueryContactStateAsync(contactId, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -771,16 +796,7 @@ public class ExternalParticipationService
                 "nothing on this request (ADR-003).", contactId);
             return ContactRecordState.Unreadable;
         }
-
-        if (items is not null && state != ContactRecordState.Unreadable)
-        {
-            items[key] = state;
-        }
-
-        return state;
     }
-
-    private const string ContactStateItemKey = "uac:contact-state:";
 
     /// <summary>
     /// The live read behind <see cref="ReadContactStateAsync"/>: <c>contacts({id})?$select=statecode</c>, app-only.
@@ -898,6 +914,54 @@ public class ExternalParticipationService
     private const int FlagQueryChunkSize = 50;
 
     /// <summary>
+    /// #2845 round 2: most chunk queries one batched read keeps in flight. The reads share the BFF's app identity with every
+    /// other request (Dataverse's service protection counts concurrent requests per identity), so the fan-out is bounded;
+    /// a typical composition (≤ 300 ids) needs one round trip instead of one per chunk.
+    /// </summary>
+    internal const int MaxConcurrentChunkQueries = 6;
+
+    /// <summary>
+    /// #2845 round 2: <paramref name="read"/> over each <see cref="FlagQueryChunkSize"/> chunk of <paramref name="ids"/>,
+    /// at most <see cref="MaxConcurrentChunkQueries"/> in flight; the answers in chunk order. A chunk that throws propagates
+    /// once every started chunk has finished (Task.WhenAll), so the caller's fail-closed catch sees it and nothing is left
+    /// unobserved.
+    /// </summary>
+    /// <remarks>#2845 F-R3: the first chunk that THROWS cancels its siblings (a token linked to <paramref name="ct"/>, passed
+    /// to the fan-out wait and to every read), because a throw already fails every id of the batch closed in the caller's
+    /// catch: the siblings' answers would be discarded, so they stop instead of loading Dataverse. The outcome is unchanged.
+    /// A chunk that ANSWERS with its own fail-closed values (a non-success status) does not cancel anything: the other
+    /// chunks' answers still stand.</remarks>
+    internal static async Task<T[]> ForEachChunkAsync<T>(
+        IReadOnlyList<Guid> ids, Func<List<Guid>, CancellationToken, Task<T>> read, CancellationToken ct)
+    {
+        var chunks = ids.Chunk(FlagQueryChunkSize).Select(c => c.ToList()).ToList();
+        if (chunks.Count == 1)
+        {
+            return new[] { await read(chunks[0], ct).ConfigureAwait(false) };
+        }
+
+        using var siblings = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var gate = new SemaphoreSlim(MaxConcurrentChunkQueries, MaxConcurrentChunkQueries);
+        return await Task.WhenAll(chunks.Select(async chunk =>
+        {
+            await gate.WaitAsync(siblings.Token).ConfigureAwait(false);
+            try
+            {
+                return await read(chunk, siblings.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                siblings.Cancel(); // the batch is failed closed already: stop the rest
+                throw;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Reads the veto flags for a batch of root records (NFR-02: batched — never a per-record round trip).
     /// </summary>
     /// <remarks>
@@ -940,9 +1004,19 @@ public class ExternalParticipationService
             var token = await GetAppOnlyTokenAsync(ct);
             var apiUrl = GetDataverseApiUrl();
 
-            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            // #2845 round 2: the chunks are independent queries — sent concurrently (bounded, ForEachChunkAsync), each decided
+            // exactly as before; a chunk that throws still fails every id closed (the catch below), once every chunk has finished.
+            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync, ct).ConfigureAwait(false))
             {
-                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                foreach (var (id, value) in chunkAnswer)
+                {
+                    flags[id] = value;
+                }
+            }
+
+            async Task<Dictionary<Guid, RootRecordFlags>> ReadChunkAsync(List<Guid> chunk, CancellationToken chunkCt)
+            {
+                var part = new Dictionary<Guid, RootRecordFlags>();
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
                 var query = $"{apiUrl}/{source.Collection}" +
                             $"?$filter=({idFilter})" +
@@ -954,7 +1028,7 @@ public class ExternalParticipationService
                 request.Headers.Add("OData-Version", "4.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var response = await _httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, chunkCt);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
@@ -963,19 +1037,19 @@ public class ExternalParticipationService
                         entityType, chunk.Count, response.StatusCode);
                     foreach (var id in chunk)
                     {
-                        flags[id] = RootRecordFlags.Unreadable;
+                        part[id] = RootRecordFlags.Unreadable;
                     }
-                    continue;
+                    return part;
                 }
 
-                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(ct);
+                var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<RootFlagRow>>(chunkCt);
                 var byId = (result?.Value ?? new List<RootFlagRow>())
                     .GroupBy(r => r.GetId(source.IdAttribute))
                     .ToDictionary(g => g.Key, g => g.First());
 
                 foreach (var id in chunk)
                 {
-                    flags[id] = byId.TryGetValue(id, out var row)
+                    part[id] = byId.TryGetValue(id, out var row)
                         ? FlagsFrom(row.sprk_issecure, row.sprk_accesspermission, row.statecode)
                         // Asked about, not returned. Cannot be distinguished from an unreadable row.
                         : RootRecordFlags.Unreadable;
@@ -990,6 +1064,7 @@ public class ExternalParticipationService
                             entityType, id);
                     }
                 }
+                return part;
             }
         }
         catch (Exception ex)
@@ -1246,9 +1321,19 @@ public class ExternalParticipationService
             var token = await GetAppOnlyTokenAsync(ct);
             var apiUrl = GetDataverseApiUrl();
 
-            for (var offset = 0; offset < distinct.Count; offset += FlagQueryChunkSize)
+            // #2845 round 2: the chunks are independent queries — sent concurrently (bounded, ForEachChunkAsync), each decided
+            // exactly as before; a chunk that throws still fails every id closed (the catch below), once every chunk has finished.
+            foreach (var chunkAnswer in await ForEachChunkAsync(distinct, ReadChunkAsync, ct).ConfigureAwait(false))
             {
-                var chunk = distinct.Skip(offset).Take(FlagQueryChunkSize).ToList();
+                foreach (var (id, value) in chunkAnswer)
+                {
+                    result[id] = value;
+                }
+            }
+
+            async Task<Dictionary<Guid, ReferencedOrganizations>> ReadChunkAsync(List<Guid> chunk, CancellationToken chunkCt)
+            {
+                var part = new Dictionary<Guid, ReferencedOrganizations>();
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
                 var query = $"{apiUrl}/{source.Collection}" +
                             $"?$filter=({idFilter})" +
@@ -1260,7 +1345,7 @@ public class ExternalParticipationService
                 request.Headers.Add("OData-Version", "4.0");
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var response = await _httpClient.SendAsync(request, ct);
+                var response = await _httpClient.SendAsync(request, chunkCt);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError(
@@ -1269,25 +1354,26 @@ public class ExternalParticipationService
                         entityType, chunk.Count, response.StatusCode);
                     foreach (var id in chunk)
                     {
-                        result[id] = ReferencedOrganizations.Unresolved;
+                        part[id] = ReferencedOrganizations.Unresolved;
                     }
-                    continue;
+                    return part;
                 }
 
-                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(ct);
+                var payload = await response.Content.ReadFromJsonAsync<DataverseQueryResult<OrganizationReferenceRow>>(chunkCt);
                 var byId = (payload?.Value ?? new List<OrganizationReferenceRow>())
                     .GroupBy(r => r.GetId(source.IdAttribute))
                     .ToDictionary(g => g.Key, g => g.First());
 
                 foreach (var id in chunk)
                 {
-                    result[id] = byId.TryGetValue(id, out var row) && row.EveryLookupReturned
+                    part[id] = byId.TryGetValue(id, out var row) && row.EveryLookupReturned
                         ? new ReferencedOrganizations(row.ReferencedOrganizationIds(), Unreadable: false)
                         // Asked about, not returned - or returned WITHOUT one of its org-lookup properties (a property absent from the response; an
                         // empty lookup is an explicit null). Neither can be told from an unreadable row, and an org slot that was not read must
                         // not read as an empty one: that would be "references no organization" (D-110).
                         : ReferencedOrganizations.Unresolved;
                 }
+                return part;
             }
         }
         catch (Exception ex)
@@ -1400,16 +1486,20 @@ public class ExternalParticipationService
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-        var ids = new List<Guid>();
-        if (doc.RootElement.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+        if (!doc.RootElement.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
         {
-            foreach (var row in value.EnumerateArray())
+            // #2845 review: a 2xx without a value array is not a Dataverse answer — a fault, never "no rows" (which the
+            // No Access share enforcer would read as nothing to enforce).
+            throw new InvalidOperationException("The Dataverse read succeeded without a value array.");
+        }
+
+        var ids = new List<Guid>();
+        foreach (var row in value.EnumerateArray())
+        {
+            if (row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(cell.GetString(), out var id) && id != Guid.Empty)
             {
-                if (row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String &&
-                    Guid.TryParse(cell.GetString(), out var id) && id != Guid.Empty)
-                {
-                    ids.Add(id);
-                }
+                ids.Add(id);
             }
         }
 
@@ -1996,8 +2086,15 @@ public class ExternalParticipationService
             response.EnsureSuccessStatusCode();
 
             var page = await response.Content.ReadFromJsonAsync<ColleagueMembershipPage>(ct).ConfigureAwait(false);
-            rows.AddRange(page?.Value ?? new List<ColleagueMembershipRow>());
-            next = page?.NextLink;
+            if (page?.Value is null)
+            {
+                // #2845 review: a 2xx without a value array is not a Dataverse answer — a fault, never "no colleagues".
+                throw new InvalidOperationException(
+                    $"The colleague-by-email memberships of {organizationIds.Count} organization(s) were read without a value array.");
+            }
+
+            rows.AddRange(page.Value);
+            next = page.NextLink;
         }
 
         return rows;
@@ -2063,7 +2160,19 @@ public class ExternalParticipationService
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ContactOrgRow>>(ct);
-            var memberships = ProjectOrganizationMemberships(result?.Value ?? new List<ContactOrgRow>(), TodayUtc);
+            if (result?.Value is null)
+            {
+                // #2845 review: a 2xx without a value array is not a Dataverse answer — never "no organizations", which
+                // would leave every organization wall out of the deny veto.
+                _logger.LogError(
+                    "[EXT-ACCESS] Contact-organization membership query for Contact {ContactId} returned no value array. " +
+                    "Reporting the read as UNREADABLE — the org terms contribute nothing and the deny veto denies every " +
+                    "queried candidate (ISS-019).",
+                    contactId);
+                return ActiveOrgMemberships.Failed;
+            }
+
+            var memberships = ProjectOrganizationMemberships(result.Value, TodayUtc);
 
             if (memberships.ConferringOrganizationIds.Count != memberships.WallSubjectOrganizationIds.Count)
             {

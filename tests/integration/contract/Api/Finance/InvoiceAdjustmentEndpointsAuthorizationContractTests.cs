@@ -358,7 +358,12 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
         // The body names a reviewer and an amount: neither is read.
         var response = await host.SendAsync(Request("POST", Adjustments, new
         {
-            adjustmentId = id, method = "percent", value = 10, reason = "Volume discount", reviewer = Guid.NewGuid(), amount = 999999,
+            adjustmentId = id,
+            method = "percent",
+            value = 10,
+            reason = "Volume discount",
+            reviewer = Guid.NewGuid(),
+            amount = 999999,
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -392,6 +397,119 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["removedLineId"]!.GetValue<Guid>().Should().Be(LineId);
         host.Writes.Should().Be(1);
     }
+
+    // =========================================================================================
+    // 095f-2b: the note on both routes, and the remove route's optional body
+    // =========================================================================================
+
+    public static TheoryData<string, string> BadNotes() => new()
+    {
+        { new string('n', InvoiceCorrectionNote.MaxLength + 1), InvoiceCorrectionNote.NoteTooLongCode },
+        { "bell \u0007 here", InvoiceCorrectionNote.NoteInvalidCharactersCode },
+        { "escape \u001b[31m", InvoiceCorrectionNote.NoteInvalidCharactersCode },
+    };
+
+    [Theory(DisplayName = "095f-2b: an add whose note is too long or carries a control character is 400 with the shared note code, before any read")]
+    [MemberData(nameof(BadNotes))]
+    public async Task Add_ABadNote_Returns400_WithTheSharedCode_BeforeAnyRead(string note, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(Request("POST", Adjustments, new { adjustmentId = Guid.NewGuid(), method = "percent", value = 10, reason = "r", note }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        host.Entities.VerifyNoOtherCalls();
+        host.Records.Created.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "095f-2b: a remove whose note is too long or carries a control character is 400 with the shared note code, before any read")]
+    [MemberData(nameof(BadNotes))]
+    public async Task Remove_ABadNote_Returns400_WithTheSharedCode_BeforeAnyRead(string note, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(Request("DELETE", One(), new { note }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        host.Entities.VerifyNoOtherCalls();
+        host.Records.Created.Should().BeEmpty();
+    }
+
+    public static TheoryData<string?> RemoveBodiesWithoutANote() => new() { (string?)null, "{}", """{"note":null}""" };
+
+    [Theory(DisplayName = "095f-2b must-not-fire: a remove with no body, an empty body or a null note still succeeds, and writes no note")]
+    [MemberData(nameof(RemoveBodiesWithoutANote))]
+    public async Task Remove_WithoutANote_Succeeds_AndWritesNoNote(string? json)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Invoice = InvoiceRow(InvoiceStatusCodes.InReview);
+        host.Lines.Add(AdjustmentRow());
+        var request = Request("DELETE", One(), null);
+        if (json is not null)
+        {
+            request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        }
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.TotalsNotes.Should().Equal([null]);
+        var record = host.Records.Created.Should().ContainSingle().Subject;
+        record.GetAttributeValue<string>("sprk_actioncode").Should().Be("remove-adjustment");
+        record.GetAttributeValue<string>("sprk_steps").Should().NotContain("\"note\"");
+    }
+
+    [Fact(DisplayName = "095f-2b: a remove with a note writes it to the invoice's decision note and into the record")]
+    public async Task Remove_WithANote_Succeeds_AndTheNoteReachesTheColumnAndTheRecord()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Invoice = InvoiceRow(InvoiceStatusCodes.InReview);
+        host.Lines.Add(AdjustmentRow());
+
+        var response = await host.SendAsync(Request("DELETE", One(), new { note = "Firm agreed to drop the discount" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.TotalsNotes.Should().Equal(["Firm agreed to drop the discount"]);
+        host.Records.Created.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_steps").Should().Contain("Firm agreed to drop the discount");
+    }
+
+    [Fact(DisplayName = "095f-2b: an add with a note writes it to the invoice's decision note and into the record")]
+    public async Task Add_WithANote_Succeeds_AndTheNoteReachesTheColumnAndTheRecord()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Invoice = InvoiceRow(InvoiceStatusCodes.InReview);
+        host.Lines.Add(FeeRow(1000m));
+
+        var response = await host.SendAsync(Request("POST", Adjustments, new
+        {
+            adjustmentId = Guid.NewGuid(),
+            method = "percent",
+            value = 10,
+            reason = "Volume discount",
+            note = "Agreed on the call",
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.TotalsNotes.Should().Equal(["Agreed on the call"]);
+        var record = host.Records.Created.Should().ContainSingle().Subject;
+        record.GetAttributeValue<string>("sprk_actioncode").Should().Be("add-adjustment");
+        record.GetAttributeValue<string>("sprk_steps").Should().Contain("Agreed on the call");
+    }
+
+    private static Entity AdjustmentRow() => new("sprk_billingevent", LineId)
+    {
+        ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+        ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Adjustment),
+        ["statecode"] = new OptionSetValue(0),
+        ["versionnumber"] = 3L,
+    };
 
     // =========================================================================================
     // The rule list
@@ -492,6 +610,13 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
         public List<Entity> Lines { get; } = [];
         public List<Entity> Created { get; } = [];
 
+        /// <summary>095f-2b: the Decision Record writer's harness (the records it created).</summary>
+        public Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness Records { get; } =
+            Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.WithBillingLookups(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness());
+
+        /// <summary>095f-2b: the note each totals step was asked to write (null: the column is left as it is).</summary>
+        public List<string?> TotalsNotes { get; } = [];
+
         /// <summary>How many writes (conditional updates, transactions) reached Dataverse.</summary>
         public int Writes => _writes;
 
@@ -546,6 +671,19 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
             var totals = new Mock<IInvoiceTotalsService>();
             totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new InvoiceTotalsCalculation(1000m, 0m, 0m, 100m, 900m, new Dictionary<Guid, decimal>(), null));
+            // 095f-2b: the adjustment routes recompute through the overload that carries the decision note.
+            totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .Callback((Guid _, string? note, CancellationToken _) => host.TotalsNotes.Add(note))
+                .ReturnsAsync(new InvoiceTotalsCalculation(1000m, 0m, 0m, 100m, 900m, new Dictionary<Guid, decimal>(), null));
+            // 095f-2b: the REAL recorder over the writer's harness; the writer reads the invoice's core record from it.
+            host.Records.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId)
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", Guid.Parse("21000000-0000-4000-8000-0000000000e1")),
+            };
+            var identity = new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>();
+            identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid u, CancellationToken _) => new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(u));
+            var recorder = new BillingDecisionRecorder(host.Records.Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             var locks = new Mock<IIdempotencyService>();
             locks.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
             var ownership = new Mock<IRecordOwnershipResolver>();
@@ -554,13 +692,14 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
             builder.Services.AddScoped(_ => new InvoiceAdjustmentService(
                 host.Entities.Object, totals.Object, locks.Object, ownership.Object,
                 // One published billing rule in force on the invoice date; the real selection and gate run over it.
-                (_, _) => Task.FromResult<IReadOnlyList<BillingRuleCandidate>>([new BillingRuleCandidate
+                (_, _, date, work, _) => Task.FromResult(BillingFactLoader.RulesInForceOn([new BillingRuleCandidate
                 {
                     PolicyId = Guid.NewGuid(), PolicyCode = "BILL-DISCOUNT", PolicyVersionId = Guid.NewGuid(), RuleSetId = RuleSetId,
                     Scope = RuleSetScope.ClientDefault, RuleType = ((int)Sprk.Bff.Api.Services.Signals.RuleType.Discount).ToString(),
                     ClauseReference = "Volume discounts: 5% above 10,000 dollars a month.", IsCurrent = true, VersionNumber = 3,
                     InForceFrom = new DateOnly(2026, 1, 1),
-                }]),
+                }], Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.NoProcedures(), date, work)),
+                recorder,
                 NullLogger<InvoiceAdjustmentService>.Instance));
 
             builder.WebHost.UseTestServer();

@@ -75,6 +75,11 @@ export interface CatalogJoin {
   path: string;
   dateOnlyFields: string[];
   authorableFields: string[];
+  /**
+   * Task 210 (DI-169): each offered column's Dataverse display name, by logical name. Shown to the admin; the value written into the rule
+   * stays the logical name. Absent from a BFF older than the field, when the column shows its logical name.
+   */
+  fieldLabels?: Record<string, string>;
 }
 
 export interface CatalogSubject {
@@ -83,6 +88,8 @@ export interface CatalogSubject {
   thresholdFields: CatalogThresholdField[];
   joins: CatalogJoin[];
   authorableFields: string[];
+  /** Task 210 (DI-169): each offered column's display name, by logical name (see `CatalogJoin.fieldLabels`). */
+  fieldLabels?: Record<string, string>;
 }
 
 export interface CatalogOperators {
@@ -327,7 +334,7 @@ const REASON_FIELD: Readonly<Record<string, { field: string; message: string }>>
   },
   [REASON_DUPLICATE_ACTION]: {
     field: 'decisionPlan',
-    message: 'Each code may appear once, in actions or in next steps, never twice in one list and never in both.',
+    message: 'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.',
   },
   [REASON_POLICY_CODE_TAKEN]: { field: 'policyCode', message: 'Another rule already uses this code.' },
   [REASON_SCOPE_SUBJECT_MISMATCH]: {

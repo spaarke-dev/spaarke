@@ -380,7 +380,8 @@ public class TypedHandlerResumeExecutorTests
             PlaybookId: null,
             CreatedAt: now,
             LastActivity: now,
-            Messages: new List<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid }).GetAwaiter().GetResult();
+            Messages: new List<ChatMessage>())
+        { OwnerOid = TestSessionOwner.Oid }).GetAwaiter().GetResult();
 
         var registry = new ToolHandlerRegistry(
             new[] { handler },

@@ -12,9 +12,6 @@
         <row name="result" id="sprk_ratecardid">
           <cell name="sprk_name" width="220" />
           <cell name="sprk_firm" width="150" />
-          <cell name="sprk_matter" width="150" />
-          <cell name="sprk_project" width="150" />
-          <cell name="sprk_workassignment" width="150" />
           <cell name="sprk_effectivefrom" width="150" />
           <cell name="sprk_effectiveto" width="150" />
         </row>
@@ -27,9 +24,6 @@
           <attribute name="sprk_ratecardid" />
           <attribute name="sprk_name" />
           <attribute name="sprk_firm" />
-          <attribute name="sprk_matter" />
-          <attribute name="sprk_project" />
-          <attribute name="sprk_workassignment" />
           <attribute name="sprk_effectivefrom" />
           <attribute name="sprk_effectiveto" />
           <order attribute="sprk_name" descending="false" />

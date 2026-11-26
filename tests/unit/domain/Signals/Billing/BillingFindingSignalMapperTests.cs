@@ -126,7 +126,8 @@ public class BillingFindingSignalMapperTests
     public void AFlagOnlyReason_TakesTheFlagLevelLaneAndSeverity_NotTheHostRules_OntologyF2()
     {
         var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["taskCode"]}""", lane: SignalWriter.LaneDo)
-            with { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = Reject };
+            with
+        { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = Reject };
         var request = Request(Fee(0)) with { Currency = "EUR" };
         var result = Evaluator().Evaluate(request, Loaded(rule));
 
@@ -142,7 +143,8 @@ public class BillingFindingSignalMapperTests
     {
         // currency_not_usd sorts before missing_field; both are Flag here, and the author's Do / Critical ranking belongs to the breach.
         var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["billingPeriodStart"]}""", lane: SignalWriter.LaneDo)
-            with { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = (int)BillingConsequence.Flag };
+            with
+        { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = (int)BillingConsequence.Flag };
         var request = Request(Fee(0)) with { BillingPeriodStart = null, Currency = "EUR" };
         var result = Evaluator().Evaluate(request, Loaded(rule));
 
@@ -163,7 +165,8 @@ public class BillingFindingSignalMapperTests
     {
         // Control for the test above: only a flag-only reason is moved to the Flag level.
         var rule = Version("CD-REQUIRED", RuleType.RequiredData, """{"type":"RequiredData","fields":["taskCode"]}""", lane: SignalWriter.LaneDo)
-            with { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = Reject };
+            with
+        { Severity = SignalWriter.SeverityCritical, ShortHeadline = "Firm authored headline", Consequence = Reject };
         var request = Request(Fee(0) with { BilledTaskCode = null });
         var result = Evaluator().Evaluate(request, Loaded(rule));
 
@@ -187,13 +190,16 @@ public class BillingFindingSignalMapperTests
             "blank" => " ",
             "default wording" => BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template,
             _ => "The line dated {{line.date}} is outside {{coreRecord.openDate}} to {{coreRecord.closeDate}}.",
-        }) with { Consequence = Reject };
+        }) with
+        { Consequence = Reject };
         var request = Request(Fee(0) with { Date = new DateOnly(2026, 3, 1) });
         var loaded = Loaded(rule) with
         {
             CoreRecord = new BillingCoreRecordFacts
             {
-                OpenDate = new DateOnly(2026, 1, 1), CloseDate = new DateOnly(2026, 12, 31), BillingStatus = CoreRecordBillingStatus.Closed,
+                OpenDate = new DateOnly(2026, 1, 1),
+                CloseDate = new DateOnly(2026, 12, 31),
+                BillingStatus = CoreRecordBillingStatus.Closed,
             },
         };
         var result = Evaluator().Evaluate(request, loaded);
@@ -213,7 +219,8 @@ public class BillingFindingSignalMapperTests
     public void AFinalCoreRecordWithNoCloseDate_SaysThereIsNoCloseDate_NotThatTheLineIsOutsideOne_F1a()
     {
         var rule = Version("CD-WINDOW", RuleType.CoreRecordWindow,
-            template: BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template) with { Consequence = Reject };
+            template: BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template) with
+        { Consequence = Reject };
         var request = Request(Fee(0));
         var loaded = Loaded(rule) with
         {
@@ -236,13 +243,16 @@ public class BillingFindingSignalMapperTests
     {
         // Control: before_open / after_close really are about the dates, so they keep the version's template.
         var rule = Version("CD-WINDOW", RuleType.CoreRecordWindow,
-            template: BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template) with { Consequence = Reject };
+            template: BillingRuleDraftTranslator.Wording(RuleType.CoreRecordWindow).Template) with
+        { Consequence = Reject };
         var request = Request(Fee(0) with { Date = new DateOnly(2026, 3, 2) });
         var loaded = Loaded(rule) with
         {
             CoreRecord = new BillingCoreRecordFacts
             {
-                OpenDate = new DateOnly(2026, 3, 10), CloseDate = new DateOnly(2026, 12, 31), BillingStatus = CoreRecordBillingStatus.Open,
+                OpenDate = new DateOnly(2026, 3, 10),
+                CloseDate = new DateOnly(2026, 12, 31),
+                BillingStatus = CoreRecordBillingStatus.Open,
             },
         };
         var result = Evaluator().Evaluate(request, loaded);
@@ -511,7 +521,9 @@ public class BillingFindingSignalMapperTests
              new BillingValueRead { Name = "duplicateOf.submissionId", Value = hiddenPriorId.ToString() }],
             new Dictionary<string, string>
             {
-                ["invoice.firmInvoiceNumber"] = "INV-100", ["line.date"] = "2026-03-02", ["line.timekeeperName"] = "Jane Partner",
+                ["invoice.firmInvoiceNumber"] = "INV-100",
+                ["line.date"] = "2026-03-02",
+                ["line.timekeeperName"] = "Jane Partner",
                 ["duplicateOf.trackingNumber"] = hiddenTrackingNumber,
             });
         var alone = BillingFindingSignalMapper.Map(visible, rule, SubjectsFor(Request(Fee(0))));
@@ -602,7 +614,8 @@ public class BillingFindingSignalMapperTests
     public async Task RatesNotChecked_IsWrittenWithItsOwnMessage_AsAFlag_D115(string? currency, double? confidence, string said)
     {
         var rule = Version("CD-RATE", RuleType.ApprovedRate, template: "{{line.timekeeperName}} billed {{line.rate}}.", lane: SignalWriter.LaneDo)
-            with { Consequence = Reject, Severity = SignalWriter.SeverityCritical, ShortHeadline = "Billed rate above the approved rate" };
+            with
+        { Consequence = Reject, Severity = SignalWriter.SeverityCritical, ShortHeadline = "Billed rate above the approved rate" };
         var request = Request(Fee(0) with { BilledRate = 700m, Amount = 700m }) with
         {
             Currency = currency,

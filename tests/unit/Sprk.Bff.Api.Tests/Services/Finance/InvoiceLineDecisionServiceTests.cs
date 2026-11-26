@@ -27,10 +27,11 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// boundary modelled in memory (row versions, conditional all-or-nothing line writes, upserts), so each test proves the stored state and the
 /// ledger, not the calls the service makes.
 /// </summary>
-public sealed class InvoiceLineDecisionServiceTests
+public sealed partial class InvoiceLineDecisionServiceTests
 {
     private static readonly Guid Decider = Guid.Parse("01000000-0000-4000-8000-000000000001");
     private static readonly Guid Core = Guid.Parse("01000000-0000-4000-8000-0000000000c0");
+    private static readonly Guid Firm = Guid.Parse("01000000-0000-4000-8000-0000000000f1");
     private static readonly Guid Reviewer = Decider;
     private const string Reason = "Rate above the agreed card";
     private const string CallerToken = "caller-bearer-token";
@@ -91,6 +92,7 @@ public sealed class InvoiceLineDecisionServiceTests
         public readonly Guid InvoiceId = Guid.NewGuid();
         public Entity Invoice;
         public readonly List<Entity> Lines = [];
+        public readonly List<Entity> Submissions = [];
         public readonly Dictionary<Guid, Entity> Corrections = new();
         public readonly List<(string Entity, int Updates)> LineWrites = [];
         public readonly List<Dictionary<string, object?>> TotalsWrites = [];
@@ -105,6 +107,13 @@ public sealed class InvoiceLineDecisionServiceTests
         public Exception? CorrectionFault;
         public Exception? TotalsFault;
         public Action<string>? BeforeLineWrite;
+
+        /// <summary>ISS-050: called after each write, by kind ("lines", "totals", "corrections", "close"), so a test can move <see cref="Clock"/>.</summary>
+        public Action<string>? OnWrite;
+
+        /// <summary>ISS-050: the service's lock and clock when a test sets them (default: <see cref="Locks"/> and the system clock).</summary>
+        public IIdempotencyService? LockService;
+        public TimeProvider? Clock;
         public RecordOwnerResolution Owner = RecordOwnerResolution.Owned(Guid.Parse("01000000-0000-4000-8000-0000000000d0"));
         private long _nextVersion = 10;
 
@@ -115,7 +124,8 @@ public sealed class InvoiceLineDecisionServiceTests
         public readonly List<(string? Token, string Set, Guid Id)> RightsAsked = [];
         public readonly ListLogger<InvoiceLineDecisionService> Log = new();
         public readonly Mock<CallerRecordAccessProbe> Probe = new(
-            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!) { CallBase = false };
+            new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
+        { CallBase = false };
         /// <summary>The caller's rights, by default the REAL roles' (F1-2): Core User and Basic User hold only Read on <c>sprk_billingevent</c>
         /// (D-90), Write on the invoice and AppendTo on the core.</summary>
         public Func<string, Guid, AccessRights> Rights = RealReviewerRights;
@@ -134,6 +144,8 @@ public sealed class InvoiceLineDecisionServiceTests
                 ["statuscode"] = new OptionSetValue(status),
                 ["sprk_totalamount"] = new Money(billedTotal),
                 ["sprk_project"] = new EntityReference("sprk_project", Core),
+                // Task 095d-0 (EB-D-185): a firm comes first, so every line decision here is made on an invoice that has one (InvoiceFirmGateLineDecisionTests drops it).
+                ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm),
                 ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
                 ["sprk_regardingrecordid"] = Core.ToString("D"),
                 ["sprk_regardingrecordname"] = "Project",
@@ -163,6 +175,8 @@ public sealed class InvoiceLineDecisionServiceTests
                         {
                             "sprk_invoice" => new EntityCollection([Copy(Invoice)]),
                             "sprk_billingevent" => new EntityCollection(Lines.Select(Copy).ToList()),
+                            // Task 095d-0: the submissions linked to the invoice (the firm gate reads their reason code and stored findings, app-only).
+                            "sprk_invoicesubmission" => new EntityCollection(Submissions.Select(Copy).ToList()),
                             // The Signals whose subject lookup is any value the query names (the OR of invoice Equal / lines In).
                             "sprk_signal" => new EntityCollection(Signals
                                 .Where(s => query.Criteria.Conditions.Any(c => s.GetAttributeValue<EntityReference>(c.AttributeName) is { } subject
@@ -206,6 +220,7 @@ public sealed class InvoiceLineDecisionServiceTests
                         }
                     }
 
+                    OnWrite?.Invoke("lines");
                     return Task.CompletedTask;
                 });
 
@@ -222,6 +237,7 @@ public sealed class InvoiceLineDecisionServiceTests
                         Corrections[upsert.Target.Id] = Copy(upsert.Target);
                     }
 
+                    OnWrite?.Invoke("corrections");
                     return Task.CompletedTask;
                 });
 
@@ -238,6 +254,7 @@ public sealed class InvoiceLineDecisionServiceTests
                 {
                     TotalsWrites.Add(fields);
                     Invoice["sprk_approvedtotal"] = new Money((decimal)fields["sprk_approvedtotal"]!);
+                    OnWrite?.Invoke("totals");
                 })
                 .Returns(Task.CompletedTask);
             Records.Setup(r => r.UpdateExistingRecordFieldsAsync("sprk_billingevent", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
@@ -264,7 +281,8 @@ public sealed class InvoiceLineDecisionServiceTests
         {
             var recorder = new BillingDecisionRecorder(H.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
-            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log, jobs: Queue.Submitter);
+            return new InvoiceLineDecisionService(
+                Entities.Object, totals, recorder, LockService ?? Locks, Ownership.Object, Probe.Object, CloseAsync, Log, time: Clock, jobs: Queue.Submitter);
         }
 
         /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the
@@ -293,6 +311,7 @@ public sealed class InvoiceLineDecisionServiceTests
 
                 ClosedBy[signalId] = recordId;
                 row["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+                OnWrite?.Invoke("close");
                 return Task.FromResult(SignalAutomatedCloseOutcome.Closed);
             }
         }
@@ -320,9 +339,9 @@ public sealed class InvoiceLineDecisionServiceTests
 
         public Entity AddLine(
             decimal amount, InvoiceLineStatus status, InvoiceLineCostType type = InvoiceLineCostType.Fee, string? extraction = null, decimal? approved = null,
-            InvoiceAdjustmentMethod? method = null, decimal? adjustmentValue = null)
+            InvoiceAdjustmentMethod? method = null, decimal? adjustmentValue = null, Guid? rowId = null)
         {
-            var id = Guid.NewGuid();
+            var id = rowId ?? Guid.NewGuid();
             var line = new Entity("sprk_billingevent", id)
             {
                 ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
@@ -849,7 +868,8 @@ public sealed class InvoiceLineDecisionServiceTests
         w.AddLine(100m, InvoiceLineStatus.Accepted, extraction: Extraction);
         w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
 
-        var result = await w.Service().WriteUnreviewedAsync(w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, CancellationToken.None);
+        var result = await w.Service().WriteUnreviewedAsync(
+            w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, "approval-owner", TimeSpan.FromMinutes(5), CancellationToken.None);
 
         result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
         w.Corrections.Should().BeEmpty();
@@ -985,7 +1005,7 @@ public sealed class InvoiceLineDecisionServiceTests
                 return new EntityCollection(snapshot);
             });
         w.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new EntityCollection([new Entity("sprk_invoice", w.InvoiceId) { ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview), ["sprk_totalamount"] = new Money(100m), ["sprk_project"] = new EntityReference("sprk_project", Core) }]));
+            .ReturnsAsync(() => new EntityCollection([new Entity("sprk_invoice", w.InvoiceId) { ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview), ["sprk_totalamount"] = new Money(100m), ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm), ["sprk_project"] = new EntityReference("sprk_project", Core) }]));
 
         var results = await Task.WhenAll(
             Task.Run(() => service.DecideAsync(command, CancellationToken.None)),

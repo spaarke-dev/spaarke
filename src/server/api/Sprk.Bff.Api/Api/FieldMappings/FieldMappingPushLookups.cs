@@ -40,9 +40,9 @@ internal sealed record LookupBindPlan(string? BindKey, string? BindValue, string
 /// whether it can be selected at all, is read from the SOURCE's attribute metadata and the TARGET's many-to-one
 /// relationships. A rule field that is not a readable Web API attribute of the source never enters <c>$select</c> —
 /// its rule is skipped, and the other rules still run.</para>
-/// <para><b>Mirrors the client engine</b> (<c>Spaarke.UI.Components/src/services/FieldMappingService.ts</c>,
+/// <para><b>Mirrors the former client engine</b> (deleted in field-mapping-server-write-path-r1 task 035; its
 /// <c>applyCopyLookup</c>): select <c>_x_value</c>, bind through the target's navigation property, skip a null lookup
-/// silently, and skip (never throw) a lookup whose referent cannot be resolved. The client reads the referent from the
+/// silently, and skip (never throw) a lookup whose referent cannot be resolved. The former client engine read the referent from the
 /// <c>lookuplogicalname</c> annotation; the impersonated seam here does not request that annotation, so the referent
 /// comes from the source lookup's relationship metadata instead — exactly one relationship names it. A lookup that can
 /// reference several tables (Customer, Owner, multi-table) is therefore skipped with a stated reason.</para>
@@ -220,6 +220,39 @@ internal static class FieldMappingPushLookups
         }
 
         return plans;
+    }
+
+    /// <summary>
+    /// #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by the
+    /// referenced table's navigation property, which can be another lookup to the same table — a filing move the rule never
+    /// asked for. Such a plan is refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
+    /// (round 5): two rules can be equal by value, and the record's value equality would throw on the second.
+    /// </summary>
+    /// <remarks>Task 022 fix round 5 (review F1): the ONE place this is decided. The push's preview
+    /// (<see cref="FieldMappingPushFamily.PreviewAsync"/>) and its apply
+    /// (<see cref="FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync"/>) both call it before a rule is applied, so the
+    /// payload the mapping-source gate is asked with is the same on both, and a preview never hides a child the apply would
+    /// write. Idempotent: a refused plan has no bind key, so a second call keeps it as it is. Any other table's plans are
+    /// returned unchanged (the same instance).</remarks>
+    internal static IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> ConfineToNamedColumn(
+        string targetEntity, IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> lookupBinds)
+    {
+        if (!Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(targetEntity))
+            return lookupBinds;
+
+        var checkedBinds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance);
+        foreach (var (rule, plan) in lookupBinds)
+        {
+            checkedBinds[rule] = plan.BindKey is { } bindKey
+                                 && !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(bindKey),
+                                     rule.TargetField?.Trim(), StringComparison.OrdinalIgnoreCase)
+                ? LookupBindPlan.Refused(
+                    $"'{rule.TargetField}' on '{targetEntity}' would be written through '{bindKey}', a different lookup; "
+                    + "the lookup was not copied.")
+                : plan;
+        }
+
+        return checkedBinds;
     }
 
     private static async Task<LookupBindPlan> PlanAsync(

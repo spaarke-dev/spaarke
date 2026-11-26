@@ -240,7 +240,7 @@ Based on grep search, these files may contain incorrect field names:
 
 1. ✅ `src/server/api/Sprk.Bff.Api/Services/Finance/SpendSnapshotService.cs`
 2. ⚠️ `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs`
-3. ⚠️ `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs`
+3. `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs` (deleted by ebilling-r1 050b)
 4. ⚠️ `src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs`
 5. ⚠️ `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BulkRagIndexingJobHandler.cs`
 6. ⚠️ `src/server/api/Sprk.Bff.Api/Services/Email/EmailAssociationService.cs`

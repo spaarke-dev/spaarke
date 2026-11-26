@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Documents;
@@ -74,12 +75,27 @@ public static class OfficeModule
         // registered unconditionally — no §10 F.1 asymmetry. §11 answers: notes/task-013-notes.md.
         services.AddScoped<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>();
 
+        // field-mapping-server-write-path-r1 task 052b (FR-25): the scheduled repair pass, Repair mode's first production caller.
+        // ADR-036 A1 / ADR-052: registered only here, on the in-process Spaarke.Scheduling host; it resolves the scoped service above
+        // per run. Registered enabled but OFF until RecordRepair:Pass:GoLive is set (it then reads and writes nothing). §11 answers and
+        // placement: the job's remarks and notes/task-052b-notes.md.
+        services.AddScheduledJob<Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob>(
+            Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob.DefaultCronSchedule);
+
         // spaarkeai-word-add-in-r1 task 121 (owner 2026-10-09, "file it if unfiled"): an email save that reconciles to an
         // existing, unfiled communication files it to the save's record through the association engine's existing-row
         // write. Concrete (ADR-010), SCOPED because SecureChildReconciler is; every dependency (IncomingAssociationResolver,
         // IGenericEntityService, CallerRecordAccessProbe, SecureChildReconciler) is registered unconditionally — no §10 F.1
         // asymmetry for the unconditional save route.
         services.AddScoped<ReconciledEmailFiling>();
+
+        // spaarkeai-word-add-in-r1 task 138 (#2209): what a re-save of an email already saved to the same record adds — the
+        // attachments of its stored .eml (the worker's converter, noise filter and selection rule) not yet saved as its
+        // children. Read-only. Concrete (ADR-010), SCOPED because SpeFileStore, IEmailToEmlConverter and
+        // AttachmentFilterService are; every dependency is registered unconditionally (DocumentsModule, EmailServicesModule,
+        // the composite IDataverseService) — no §10 F.1 asymmetry for the unconditional save route. §11 answers:
+        // projects/spaarkeai-word-add-in-r1/notes/138-email-resave-add-attachments.md §5.
+        services.AddScoped<EmailAttachmentAddPlanner>();
 
         // ============================================================================
         // Office Add-in Orchestrator Service

@@ -94,6 +94,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     private const string EnvironmentName = "prod";
     private const string SecretsVer = "manifest-hash-h4b-xyz";
     private const string StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/";   // T186 follow-up: H2a StorageBlobEndpoint
+    private const string OntologyWriterClientId = "11111111-2222-3333-4444-555555555555";   // T266: H2a OntologyWriterClientId
     private const string CustomerBusinessUnitId = "7c1b2a40-5d6e-4f80-9a1b-2c3d4e5f6a7b";   // R3 073: H10's InterStepState.CustomerBusinessUnitId ("D" GUID)
 
     // T186 follow-up (AiSearch allow-list): the indexes H2b built and verified (InterStepState.AiSearchIndexNames), in catalog order.
@@ -191,8 +192,11 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["dataverse_env_url"] = "https://acme.crm.dynamics.com/",   // T245b: H5's DataverseEnvUrl
             ["spe_container_id"] = "b!h8-created-customer-container",   // T227c: H8's SpeContainerId
             ["storage_blob_endpoint"] = StorageBlobEndpoint,   // T186 follow-up: H2a StorageBlobEndpoint
+            ["ontology_writer_client_id"] = OntologyWriterClientId,   // T266: H2a OntologyWriterClientId
             ["customer_business_unit_id"] = CustomerBusinessUnitId,   // R3 073: H10's CustomerBusinessUnitId
             ["openai_monthly_limit_usd"] = "500",   // T254: the optional OpenAI spend limit (intake)
+            ["signalr_msi_connection_string"] = ExpectedSignalRConnectionString,   // ISS-022: H2a SignalRHostName + MiClientId
+            ["signalr_enabled"] = "true",   // ISS-022: SignalR deployed (a host name is present)
         };
         // T255: list sources write {key}__0..__{n-1}.
         var expectedLists = new Dictionary<string, string[]>(StringComparer.Ordinal)
@@ -210,7 +214,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 Indexed: s.IsList))
             .ToList();
         var writer = FakeSettingsWriter.Succeeds();
-        var handler = Build(new FakeRepository(BuildRun(), "etag-1b"), FakePerEnvManifest.Success(oneEntryPerSource),
+        var run1b = BuildRun();
+        run1b.InterStepState.SignalRHostName = SignalRHostName;   // ISS-022: SignalR deployed, so its sources resolve
+        var handler = Build(new FakeRepository(run1b, "etag-1b"), FakePerEnvManifest.Success(oneEntryPerSource),
             writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -318,6 +324,46 @@ public sealed class H4bBulkAppSettingsHandlerTests
         probe.CallCount.Should().Be(0);
     }
 
+    // ---------- T266 (#2605): Ontology__Writer__ManagedIdentityClientId (H2a's ontology writer UAMI) ----------
+
+    [Fact]
+    public async Task RealManifest_WritesOntologyWriterClientId_FromH2a_NeverTheStampUami()
+    {
+        // The BFF's Signal / Decision Record writers authenticate ONLY as this identity and fail closed without it.
+        var entries = await RealManifestEntryAsync("Ontology__Writer__ManagedIdentityClientId");
+        var writer = FakeSettingsWriter.Succeeds();
+        var run = BuildRun();
+        var handler = Build(new FakeRepository(run, "etag-ow"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings["Ontology__Writer__ManagedIdentityClientId"].Should().Be(OntologyWriterClientId)
+            .And.NotBe(run.InterStepState.MiClientId);
+    }
+
+    [Fact]
+    public async Task RunWithoutOntologyWriterClientId_ResumableFailure_BeforeAnyWrite()
+    {
+        var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = null;
+        var writer = FakeSettingsWriter.Succeeds();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(new FakeRepository(run, "etag-ow-b"),
+            FakePerEnvManifest.Success(await RealManifestEntryAsync("Ontology__Writer__ManagedIdentityClientId")), writer, probe, new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("ontology_writer_client_id");
+        failure.Diagnostic.Should().Contain("InterStepState.OntologyWriterClientId");
+        writer.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
     // ---------- T186 follow-up: SessionFileStore__BlobEndpoint (H2a's storage blob endpoint) ----------
 
     [Fact]
@@ -373,6 +419,101 @@ public sealed class H4bBulkAppSettingsHandlerTests
         var entry = ((PerEnvSettingsManifestReadResult.Success)read).Entries
             .Single(e => e.Key == "ExternalAccess__CustomerBusinessUnitId");
         return [entry];
+    }
+
+    // ---------- ISS-022 (plan D36): keyless SignalR on a stamp ----------
+
+    private const string SignalRHostName = "sprk-acme-prod-signalr.service.signalr.net";   // H2a SignalRHostName (only when deployed)
+    private const string ExpectedSignalRConnectionString =
+        "Endpoint=https://sprk-acme-prod-signalr.service.signalr.net;AuthType=azure.msi;ClientId=00000000-1111-2222-3333-555555555555;Version=1.0;";
+
+    private static async Task<IReadOnlyList<PerEnvSettingEntry>> RealSignalREntriesAsync()
+    {
+        var read = await new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance)
+            .ReadAsync(CancellationToken.None);
+        return ((PerEnvSettingsManifestReadResult.Success)read).Entries
+            .Where(e => e.Key.StartsWith("Notifications__SignalR__", StringComparison.Ordinal))
+            .ToList();
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRDeployed_WritesKeylessManagedIdentityString_AndEnabledFlag()
+    {
+        var entries = await RealSignalREntriesAsync();
+        entries.Select(e => e.Key).Should().BeEquivalentTo(
+            ["Notifications__SignalR__ConnectionString", "Notifications__SignalR__Enabled"],
+            "the shipped manifest carries exactly the two SignalR per_env entries");
+        var run = BuildRun();
+        run.InterStepState.SignalRHostName = SignalRHostName;
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-iss022a"), FakePerEnvManifest.Success(entries),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var settings = writer.LastRequest!.Settings;
+        settings["Notifications__SignalR__ConnectionString"].Should().Be(ExpectedSignalRConnectionString);
+        settings["Notifications__SignalR__Enabled"].Should().Be("true");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRDeployed_ConnectionStringNeverContainsAnAccessKey()
+    {
+        // Negative control: the stamp's SignalR has local auth disabled, so a key-bearing string can never work.
+        var run = BuildRun();
+        run.InterStepState.SignalRHostName = SignalRHostName;
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-iss022b"), new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var value = writer.LastRequest!.Settings["Notifications__SignalR__ConnectionString"];
+        value.Should().NotContainEquivalentOf("AccessKey");
+        value.Should().Contain("AuthType=azure.msi");
+        value.Should().NotStartWith("@Microsoft.KeyVault", "a plain setting: nothing in the string is a secret, so no Key Vault reference");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRNotDeployed_WritesNeitherSetting_AndStillSucceeds()
+    {
+        // Default stamp (signalrEnabled=false): no host name on the run. The BFF keeps its Null-Object delivery service.
+        var run = BuildRun();
+        run.InterStepState.SignalRHostName.Should().BeNull();
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-iss022c"), new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.Settings.Keys.Should().NotContain(k => k.StartsWith("Notifications__SignalR__", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Iss022_Parity_SignalRDeployed_WritesExactlyTheSettingsTheGeneratedScriptWrote()
+    {
+        var run = BuildRun();
+        run.InterStepState.SignalRHostName = SignalRHostName;
+        var arguments = new Dictionary<string, string>(ScriptArguments, StringComparer.Ordinal)
+        {
+            ["SignalrMsiConnectionString"] = ExpectedSignalRConnectionString,
+            ["SignalrEnabled"] = "true",
+        };
+        var writer = FakeSettingsWriter.Succeeds();
+        var handler = Build(new FakeRepository(run, "etag-iss022d"),
+            new FilePerEnvSettingsManifest(NullLogger<FilePerEnvSettingsManifest>.Instance),
+            writer, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var (scriptSettings, _) = EvaluateGeneratedConfigureScript(KeyVaultName, arguments);
+        writer.LastRequest!.Settings.Should().BeEquivalentTo(scriptSettings,
+            "H4b and the generated Configure script must agree when SignalR is deployed (re-run Invoke-CatalogGenerator.ps1)");
+        scriptSettings["Notifications__SignalR__ConnectionString"].Should().Be(ExpectedSignalRConnectionString);
     }
 
     // ---------- AC-2 per-env-input missing ----------
@@ -1143,7 +1284,10 @@ public sealed class H4bBulkAppSettingsHandlerTests
         ["SpeContainerId"] = "b!h8-created-customer-container",
         ["CustomerBusinessUnitId"] = CustomerBusinessUnitId,
         ["StorageBlobEndpoint"] = StorageBlobEndpoint,
+        ["OntologyWriterClientId"] = OntologyWriterClientId,
         ["OpenaiMonthlyLimitUsd"] = "500",
+        ["SignalrMsiConnectionString"] = string.Empty,   // ISS-022: optional parameters of the generated script,
+        ["SignalrEnabled"] = string.Empty,               // defaulted '' (SignalR not deployed)
     };
 
     /// <summary>T255: the generated script's [string[]] parameters → BuildRun()'s lists.</summary>
@@ -1436,6 +1580,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
         s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
         s.StorageBlobEndpoint = StorageBlobEndpoint;   // H2a output (T186 follow-up - SessionFileStore__BlobEndpoint)
+        s.OntologyWriterClientId = OntologyWriterClientId;   // H2a output (T266 - Ontology__Writer__ManagedIdentityClientId)
         s.CustomerBusinessUnitId = CustomerBusinessUnitId;   // H10 output (R3 073 — ExternalAccess__CustomerBusinessUnitId)
         s.AiSearchIndexNames = [.. AiSearchIndexNames];   // H2b output (T186 follow-up — AiSearch__AllowedIndexes)
         return run;

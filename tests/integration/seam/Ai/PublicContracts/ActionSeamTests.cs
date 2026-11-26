@@ -422,6 +422,51 @@ public class ActionSeamTests
             Times.Never);
     }
 
+    /// <summary>
+    /// Task 045b: the invoice-family guard runs before the regarding-pair planner (so the test above keeps the guard's code
+    /// when both reads fail). The other half: the guard's read answers and the planner's row read faults — still fail closed,
+    /// the planner's own refusal, and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task UpdateRecordAsync_AnInvoiceWhosePairPlannerReadFails_AfterTheFamilyGuardPassed_WritesNothing()
+    {
+        var invoice = Guid.NewGuid();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_invoice", invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+                columns.Contains("sprk_regardingrecordid", StringComparer.OrdinalIgnoreCase)
+                    ? Task.FromException<Entity>(new TimeoutException("socket")) // the planner's row read
+                    : Task.FromResult(new Entity(table, id)));                  // the guard's stored-lookup read
+        var provider = new ServiceCollection().AddSingleton(entities.Object).BuildServiceProvider();
+        _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(() => provider.CreateScope());
+
+        var result = await CreateSeam().UpdateRecordAsync(new UpdateRecordRequest
+        {
+            EntityLogicalName = "sprk_invoice",
+            RecordId = invoice,
+            LegacyFields = new Dictionary<string, string?> { ["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D") },
+        }, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain(RecordOwnerRefusal.ParentUndetermined);
+        entities.Verify(e => e.RetrieveAsync("sprk_invoice", invoice,
+            It.Is<string[]>(c => !c.Contains("sprk_regardingrecordid")), It.IsAny<CancellationToken>()), Times.Once,
+            "the family guard read first, and passed (the payload moves no lookup it decides on)");
+        _fieldMappingMock.Verify(
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _fieldMappingMock.Verify(
+            s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+        _fieldMappingMock.Verify(
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // ── UpdateRecord: a proposal a real person confirmed (#2257 with #2253) ───────────────────
 
     private static readonly Guid ConfirmingUser = Guid.Parse("22570000-0000-4000-8000-00000000a0c1");

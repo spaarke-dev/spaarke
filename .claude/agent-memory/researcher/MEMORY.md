@@ -1,146 +1,155 @@
 ## SharePoint Embedded + Graph
-- [SPE container permission user identity (2026-10-19)](spe-container-permission-user-identity-2026-10-19.md) — grantedToV2.user id/email/UPN in AdditionalData (SDK v5); guest email-vs-UPN undocumented
-- [SPE inactive container auto-delete (2026-10-16)](spe-container-inactive-autodelete-2026-10-16.md) — 24h auto-delete documented; customProperties PATCH/permission/upload activates; only H8 calls /activate
-- [atk oauth/register minimal project (2026-10-28)](atk-oauth-register-minimal-project-2026-10-28.md) — yaml-only project works; appId any non-empty GUID; scopes comma-split; idempotent only via env-file configurationId; verified to token step
-- [Entra publisher verification (2026-10-14)](publisher-verification-2026-10-14.md) — setVerifiedPublisher delegated-only; PGA ID + MFA + App Admin
-- [B2B guest vs multi-tenant (2026-10-13)](b2b-guest-vs-multitenant-home-authority-2026-10-13.md) — auto-redeem needs BOTH tenants; MFA trust off by default
-- [B2B guest home-tenant (2026-10-12)](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim; tid=resource tenant; bind at invite
-- [SPE app-only isolation (2026-10-06)](spe-apponly-per-container-isolation-2026-10-06.md) — app-only = ALL containers of CT; CT-per-customer is the hard boundary
-- [SPE container customProperties (2026-10-06)](spe-container-custom-properties.md) — PATCH after create; $select reads in one GET; containerId == driveId
-- [SPE JIT membership vs item sharing (2026-10-06)](spe-jit-membership-item-sharing-office-edit-2026-10-06.md) — item invite to non-member documented
-- [SPE owner app via MI-as-FIC (2026-10-02)](spe-owning-app-mi-as-fic-2026-10-02.md) — GA 2025-05; same-tenant MI; registration Graph v1.0 PUT
-- [SPE version comment (2026-09-12)](spe-version-comment-2026-09-12.md) — WRITE-ONLY via checkin{comment}; no read-back
-- [SPE WOPI co-auth lock / 423 (2026-07-30)](spe-wopi-coauthoring-lock-423-2026-07-30.md) — no Graph API releases lock; ~30-min timeout
-- [SPE dedup / content identity (2026-07-14)](spe-dedup-content-identity-2026-07.md) — quickXorHash only; no per-version hash
-- [SPE + CIAM cross-tenant app-only (2026-07-18)](spe-ciam-crosstenant-apponly-brokering-2026-07-18.md) — app-only read brokering GREEN
-- [Graph + SPE standards (2026-08-16)](graph-spe-standards-2026-08-16.md) — Graph 6.5.0/Kiota 2.0; Exchange RBAC-for-Apps; MI-as-FIC GA
-- [Graph shared vs group mailbox subs (2026-07-29)](graph-shared-vs-group-mailbox-subscriptions-2026-07-29.md) — shared = User; M365-group forks
-- [CIAM user provisioning (2026-07-19)](ciam-user-provisioning-graph-2026-07-19.md) — POST /users; `oid` link key
-- [Power Pages vs Entra External ID (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice
+- [agentConnectors plugin package](agentconnectors-plugin-package-2026-11-20.md) — 1.30 newest GA; max 10 connectors; admin=Agents>Tools>Registry>Upload
+- [SPE container permission user identity](spe-container-permission-user-identity-2026-10-19.md) — grantedToV2.user id/email/UPN in
+- [SPE inactive container auto-delete](spe-container-inactive-autodelete-2026-10-16.md) — 24h auto-delete documented; customProperties
+- [atk oauth/register minimal project](atk-oauth-register-minimal-project-2026-10-28.md) — yaml-only project works; appId any non-empty
+- [Connector "requested resource does not exist"](federated-connector-reference-id-not-exist-2026-11-09.md) — admin-center MCP form error undocumented
+- [Entra publisher verification](publisher-verification-2026-10-14.md) — setVerifiedPublisher delegated-only
+- [B2B guest vs multi-tenant](b2b-guest-vs-multitenant-home-authority-2026-10-13.md) — auto-redeem needs BOTH tenants; MFA trust
+- [B2B guest home-tenant](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim; tid=resource
+- [SPE app-only isolation](spe-apponly-per-container-isolation-2026-10-06.md) — app-only = ALL containers of CT
+- [SPE container customProperties](spe-container-custom-properties.md) — PATCH after create; $select reads in one GET
+- [SPE JIT membership vs item sharing](spe-jit-membership-item-sharing-office-edit-2026-10-06.md) — item invite to non-member documented
+- [SPE owner app via MI-as-FIC](spe-owning-app-mi-as-fic-2026-10-02.md) — GA 2025-05; same-tenant MI; registration
+- [SPE version comment](spe-version-comment-2026-09-12.md) — WRITE-ONLY via checkin{comment}
+- [SPE WOPI co-auth lock / 423](spe-wopi-coauthoring-lock-423-2026-07-30.md) — no Graph API releases lock; ~30-min timeout
+- [SPE dedup / content identity](spe-dedup-content-identity-2026-07.md) — quickXorHash only; no per-version hash
+- [SPE + CIAM cross-tenant app-only](spe-ciam-crosstenant-apponly-brokering-2026-07-18.md) — app-only read brokering GREEN
+- [Graph + SPE standards](graph-spe-standards-2026-08-16.md) — Graph 6.5.0/Kiota 2.0; Exchange
+- [Graph shared vs group mailbox subs](graph-shared-vs-group-mailbox-subscriptions-2026-07-29.md) — shared = User; M365-group forks
+- [CIAM user provisioning](ciam-user-provisioning-graph-2026-07-19.md) — POST /users; `oid` link key
+- [Power Pages vs Entra External ID](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice
 
 ## Word add-in / Office / Teams
-- [NAA web/new Outlook fallback + redirect (2026-11-03)](naa-web-newoutlook-fallback-redirect-2026-11-03.md) — createNestable falls back to std PCA w/ SAME config; brk-multihub redirectUri = AADSTS7000471; use https redirect; isSetSupported gate; WebView2 cookies
-- [TAC INVALID_PRIVILEGE (2026-10-29)](teams-admin-center-invalid-privilege-2026-10-29.md) — undocumented code = "no admin role" page; licence/propagation community-only; New-TeamsApp/Graph alternatives
-- [Teams upload icon error + disabled Add (2026-10-29)](teams-app-upload-icon-invalid-and-add-disabled-2026-10-29.md) — "too small" undocumented; Add disabled = Available-to/org-wide custom setting
-- [NAA pre-auth of Teams/broker IDs (2026-10-29)](naa-preauthorized-teams-clients-2026-10-29.md) — not needed (docs explicit); IDs are Teams-SSO only; broker undocumented
-- [NAA in Teams tenant authority + guest (2026-10-19)](naa-teams-tenant-authority-guest-2026-10-19.md) — other-tenant NAA UNDOCUMENTED; popup fallback
-- [Outlook desktop unified button inert (2026-10-06)](outlook-desktop-unified-button-inert-2026-10-06.md) — classic >=2307; 24-72h; #6768
-- [Task pane width (2026-10-04)](office-addin-taskpane-width-2026-10-04.md) — runtime setWidth (Win 2507+); manifest preferredWidth preview-only
-- [Launch ms-word: from task pane (2026-10-03)](office-addin-launch-ms-word-uri-2026-10-03.md) — openBrowserWindow http(s)-only; anchor-click works Win
-- [Word unified manifest GA (2026-09-30)](word-unified-manifest-ga-status-2026-09-30.md) — GA Win 2501+/Mac/web; schema 1.30
-- [Word add-in save collision (2026-09-08)](word-addin-save-collision-path-2026-09-08.md) — /api/office/save Replace = silent overwrite
-- [Word desktop document.url for SPE (2026-09-08)](word-desktop-document-url-spe-2026-09-08.md) — AMBER; needs live probe
-- [Office Dialog for MDA record (2026-09-08)](office-dialog-mda-record-open-2026-09-08.md) — no evidence MDA works in dialog
-- [Word doc-identity (2026-09-09)](word-document-identity-desk-research-2026-09-09.md) — customXmlParts=WordApi 1.4 vs manifest 1.3
-- [Custom XML parts vs markup (2026-09-09)](customxml-parts-vs-markup-manifest-2026-09-09.md) — i4i removed in-body only, not parts
-- [Word extensibility platform (2026-09-01)](word-extensibility-platform-2026-09-01.md) — WordApi 1.9 GA; TrackAll only revision-author path
-- [Legal-AI redline surfaces (2026-07-22)](legal-ai-redline-surface-landscape-2026-07-22.md) — incumbents redline in Word add-in
-- [Enterprise Teams tab + Entra SSO (2026-08-02)](teams-app-embed-external-webapp-enterprise-2026-08-02.md) — install paths, SSO/OBO, manifest v1.29
+- [NAA web/new Outlook fallback + redirect](naa-web-newoutlook-fallback-redirect-2026-11-03.md) — createNestable falls back to std PCA w/ SAME
+- [TAC INVALID_PRIVILEGE](teams-admin-center-invalid-privilege-2026-10-29.md) — undocumented code = "no admin role" page;
+- [Teams upload icon error + disabled Add](teams-app-upload-icon-invalid-and-add-disabled-2026-10-29.md) — "too small" undocumented; Add disabled =
+- [NAA pre-auth of Teams/broker IDs](naa-preauthorized-teams-clients-2026-10-29.md) — not needed (docs explicit); IDs are
+- [NAA in Teams tenant authority + guest](naa-teams-tenant-authority-guest-2026-10-19.md) — other-tenant NAA UNDOCUMENTED; popup
+- [Outlook desktop unified button inert](outlook-desktop-unified-button-inert-2026-10-06.md) — classic >=2307; 24-72h; #6768
+- [Task pane width](office-addin-taskpane-width-2026-10-04.md) — runtime setWidth (Win 2507+); manifest
+- [Launch ms-word: from task pane](office-addin-launch-ms-word-uri-2026-10-03.md) — openBrowserWindow http(s)-only; anchor-click
+- [Word unified manifest GA](word-unified-manifest-ga-status-2026-09-30.md) — GA Win 2501+/Mac/web; schema 1.30
+- [Word add-in save collision](word-addin-save-collision-path-2026-09-08.md) — /api/office/save Replace = silent overwrite
+- [Word desktop document.url for SPE](word-desktop-document-url-spe-2026-09-08.md) — AMBER; needs live probe
+- [Office Dialog for MDA record](office-dialog-mda-record-open-2026-09-08.md) — no evidence MDA works in dialog
+- [Word doc-identity](word-document-identity-desk-research-2026-09-09.md) — customXmlParts=WordApi 1.4 vs manifest 1.3
+- [Custom XML parts vs markup](customxml-parts-vs-markup-manifest-2026-09-09.md) — i4i removed in-body only, not parts
+- [Word extensibility platform](word-extensibility-platform-2026-09-01.md) — WordApi 1.9 GA; TrackAll only revision-author
+- [Legal-AI redline surfaces](legal-ai-redline-surface-landscape-2026-07-22.md) — incumbents redline in Word add-in
+- [Enterprise Teams tab + Entra SSO](teams-app-embed-external-webapp-enterprise-2026-08-02.md) — install paths, SSO/OBO, manifest v1.29
 
 ## Compose / DOCX / OOXML / editors
-- [docx editor fidelity (2026-08-19)](docx-editor-fidelity-third-answer-2026-08-19.md) — paraId duplicate in AlternateContent
-- [Word pagination + NFR-03 (2026-07-28)](word-rendering-pagination-nfr03-2026-07-28.md) — page/line is layout-time; Graph format=pdf
-- [MS-platform multiformat AI editing (2026-07-22)](ms-platform-multiformat-ai-editing-2026-07-22.md) — SPE+WOPI+Office delegates fidelity
-- [Editor-server bridge primitives (2026-07-22)](editor-server-bridge-primitives-2026-07-22.md) — stable-ID anchoring, op schemas, rebasing
-- [SuperDoc license v2 (2026-07-22)](superdoc-license-v2-buildvsbuy-2026-07-22.md) — AGPL-3.0 v1.45.0; not byte-preserving
-- [Browser docx editor engines (2026-07-22)](browser-docx-editor-engines-landscape-2026-07-22.md) — SuperDoc vs OnlyOffice/Collabora/Syncfusion/Aspose
-- [Stable position anchoring (2026-07-22)](stable-position-anchoring-ooxml-editor-2026-07-22.md) — paraId/bookmarks/SDT/Yjs
-- [Browser docx market patterns (2026-07-21)](browser-docx-editing-market-patterns-2026-07-21.md) — lane fidelity survey
-- [Legal-AI docx editing comparison (2026-07-21)](legal-ai-docx-editing-comparison-2026-07-21.md) — Harvey/Legora/OSS round-trip
-- [Server .docx authoring + numbering (2026-07-18)](server-docx-authoring-numbering-2026-07-18.md) — abstractNum recipe
-- [docx delta fidelity (2026-07-16)](docx-delta-fidelity-roundtrip-2026-07-16.md) — retained-original+delta; w14:paraId
-- [ProseMirror AI authoring + TC (2026-07-16)](prosemirror-ai-authoring-trackchanges-2026-07-16.md) — OSS track-changes libs
-- [TipTap licensing (2026-07-16)](tiptap-licensing-editor-arch-2026-07-16.md) — MIT base OK; DOCX import/export is Pro
-- [OpenXML/DOCX Compose R2 (2026-06-29)](openxml-docx-compose-r2-2026-06-29.md) — OpenXml SDK 3.x MIT; 423 race
-- [Adeu architecture (2026-06-29)](adeu-architecture-study-2026-06-29.md) — CriticMarkup asymmetry; reverse-order apply
-- [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template
+- [docx editor fidelity](docx-editor-fidelity-third-answer-2026-08-19.md) — paraId duplicate in AlternateContent
+- [Word pagination + NFR-03](word-rendering-pagination-nfr03-2026-07-28.md) — page/line is layout-time; Graph format=pdf
+- [MS-platform multiformat AI editing](ms-platform-multiformat-ai-editing-2026-07-22.md) — SPE+WOPI+Office delegates fidelity
+- [Editor-server bridge primitives](editor-server-bridge-primitives-2026-07-22.md) — stable-ID anchoring, op schemas, rebasing
+- [SuperDoc license v2](superdoc-license-v2-buildvsbuy-2026-07-22.md) — AGPL-3.0 v1.45.0; not byte-preserving
+- [Browser docx editor engines](browser-docx-editor-engines-landscape-2026-07-22.md) — SuperDoc vs OnlyOffice/Collabora/Syncfusion/A
+- [Stable position anchoring](stable-position-anchoring-ooxml-editor-2026-07-22.md) — paraId/bookmarks/SDT/Yjs
+- [Browser docx market patterns](browser-docx-editing-market-patterns-2026-07-21.md) — lane fidelity survey
+- [Legal-AI docx editing comparison](legal-ai-docx-editing-comparison-2026-07-21.md) — Harvey/Legora/OSS round-trip
+- [Server .docx authoring + numbering](server-docx-authoring-numbering-2026-07-18.md) — abstractNum recipe
+- [docx delta fidelity](docx-delta-fidelity-roundtrip-2026-07-16.md) — retained-original+delta; w14:paraId
+- [ProseMirror AI authoring + TC](prosemirror-ai-authoring-trackchanges-2026-07-16.md) — OSS track-changes libs
+- [TipTap licensing](tiptap-licensing-editor-arch-2026-07-16.md) — MIT base OK; DOCX import/export is Pro
+- [OpenXML/DOCX Compose R2](openxml-docx-compose-r2-2026-06-29.md) — OpenXml SDK 3.x MIT; 423 race
+- [Adeu architecture](adeu-architecture-study-2026-06-29.md) — CriticMarkup asymmetry; reverse-order apply
+- [Dataverse Word templates](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template
 
 ## Dataverse / Power Platform / MDA
-- [User BU change semantics (2026-10-28)](dataverse-user-bu-change-semantics-2026-10-28.md) — roles stripped, owned records move (defaults); SetBusinessSystemUser bound + DoNotMoveAllRecords; Assign moves BU + Cascade All
-- [T191a flagged-external baseline (2026-10-21)](uac191a-flagged-external-dataverse-baseline-2026-10-21.md) — hierarchy off; matrix on; root default team Deep = org-wide; prvRead/WriteUser min Local; BU change strips roles
-- [Dataverse cascade delete (2026-10-18)](dataverse-cascade-delete-2026-10-18.md) — Delete opts Cascade/RemoveLink/Restrict; multi-parent rule any-action; async 5,000; child priv check UNDOCUMENTED; restore 30 vs 90d
-- [Dataverse audit defaults (2026-10-16)](dataverse-audit-defaults-2026-10-16.md) — new-env default undocumented; retention 30 vs Forever conflict; share=14/48/49; org PATCH supported
-- [navigateTo dialog chrome vs dark mode (2026-10-05)](navigateto-dialog-chrome-dark-mode-2026-10-05.md) — no hideHeader; MDA dark mode unsupported
-- [PP licensing (2026-10-13)](pp-licensing-multiplexing-isv-workforce-partners-2026-10-13.md) — no API-only SKU; non-licensed req pool 25k/day
-- [PAYG + B2B guest Dataverse users (2026-10-07)](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence
-- [Autonumber on existing col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text->autonumber documented; seed 1000
-- [MDA clickable form banner (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification; PCF MessageBar REC
-- [Impersonation async/Functions (2026-09-14)](dataverse-impersonation-async-functions-2026-09-14.md) — S2S app controls access
-- [Secure families via access teams (2026-10-12)](dataverse-secure-family-access-teams-2026-10-12.md) — templates 4/entity; owner-team-per-family alt
-- [RetrievePrincipalAccess vs privileges (2026-10-09)](dataverse-retrieveprincipalaccess-vs-privilege-2026-10-09.md) — privilege gates shares
-- [POA Grant/Modify/Revoke (2026-09-15)](dataverse-poa-grant-modify-revoke-semantics-2026-09-15.md) — ModifyAccess REPLACES
-- [Background work hosting (2026-09-12)](background-work-hosting-best-practice-2026-09-12.md) — separate compute; Durable Task Scheduler GA
-- [Plugins state + alternatives (2026-09-25)](dataverse-plugins-state-alternatives-2026-09-25.md) — .NET Fx only; input to ADR-002
-- [LOB data INTO Dataverse (2026-09-24)](dataverse-ingestion-landing-options-2026-09-24.md) — REC own worker on UpsertMultiple
-- [Dataverse env provisioning E2E (2026-08-22)](dataverse-env-provisioning-e2e-2026-08-22.md) — restrictGuestUserAccess default TRUE
-- [Record restriction / Secure Project (2026-08-20)](dataverse-record-restriction-secure-project-2026-08-20.md) — no record deny
-- [Cascade-share parent-child (2026-08-18)](dataverse-cascade-share-parent-child-access-2026-08-18.md) — one parental 1:N Cascade All
-- [Record-access security messaging (2026-07-16)](dataverse-record-access-security-2026-07-16.md) — additive union
-- [Web API create rows (2026-07)](dataverse-webapi-create-rows-2026-07.md) — 204+OData-EntityId; @odata.bind
-- [Dataverse Search config (2026-07-21)](dataverse-search-config-2026-07-21.md) — org enable UI-only
-- [Dataverse MCP + Foundry MCP auth (2026-07-05)](dataverse-mcp-refresh-2026-07-05.md) — delegated-only; metered
-- [knowledgearticle vs SPE P&P (2026-08-06)](dataverse-knowledgearticle-vs-spe-pnp-library-2026-08-06.md) — skip; SPE + sprk_policy
-- [appnotification modal-on-click (2026-08-20)](appnotification-modal-click-schema-2026-08-20.md) — navigationTarget:"dialog"
-- [navigateTo pre-populate lookup (2026-08-17)](navigateto-prepopulate-lookup-createfromentity-2026-08-17.md) — 3-key convention
-- [Hide form-header entity name (2026-08-18)](uci-hide-form-header-entity-name-2026-08-18.md) — setFormEntityName(" ")
-- [Hide single-tab pivot (2026-08-18)](uci-single-tab-navigator-hide-2026-08-18.md) — setTabNavigatorVisible(false)
-- [UCI open specific view (2026-08-14)](uci-navigate-to-specific-view-2026-08-14.md) — main.aspx URL reliable
-- [UCI global onload hook (2026-08-14)](uci-global-app-onload-hook-2026-08-14.md) — no supported global event
-- [MDA custom help pane (2026-08-14)](mda-custom-help-pane-2026-08-14.md) — not a fit
-- [PCF React/Fluent versions (2026-07)](pcf-react-platform-library-2026-07.md) — max React 16.14.0
-- [PCF ESLint CI (2026-06)](spaarke-pcf-client-quality-eslint-2026-06.md) — --legacy-peer-deps skipped eslint peer
+- [User BU change semantics](dataverse-user-bu-change-semantics-2026-10-28.md) — roles stripped, owned records move (defaults)
+- [T191a flagged-external baseline](uac191a-flagged-external-dataverse-baseline-2026-10-21.md) — hierarchy off; matrix on; root default team
+- [Dataverse cascade delete](dataverse-cascade-delete-2026-10-18.md) — Delete opts Cascade/RemoveLink/Restrict
+- [Dataverse audit defaults](dataverse-audit-defaults-2026-10-16.md) — new-env default undocumented; retention 30
+- [navigateTo dialog chrome vs dark mode](navigateto-dialog-chrome-dark-mode-2026-10-05.md) — no hideHeader; MDA dark mode unsupported
+- [PP licensing](pp-licensing-multiplexing-isv-workforce-partners-2026-10-13.md) — no API-only SKU; non-licensed req pool
+- [PAYG + B2B guest Dataverse users](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence
+- [Autonumber on existing col](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text->autonumber documented; seed 1000
+- [MDA clickable form banner](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification; PCF MessageBar REC
+- [Impersonation async/Functions](dataverse-impersonation-async-functions-2026-09-14.md) — S2S app controls access
+- [Secure families via access teams](dataverse-secure-family-access-teams-2026-10-12.md) — templates 4/entity; owner-team-per-family
+- [RetrievePrincipalAccess vs privileges](dataverse-retrieveprincipalaccess-vs-privilege-2026-10-09.md) — privilege gates shares
+- [POA Grant/Modify/Revoke](dataverse-poa-grant-modify-revoke-semantics-2026-09-15.md) — ModifyAccess REPLACES
+- [Background work hosting](background-work-hosting-best-practice-2026-09-12.md) — separate compute; Durable Task Scheduler GA
+- [Plugins state + alternatives](dataverse-plugins-state-alternatives-2026-09-25.md) — .NET Fx only; input to ADR-002
+- [LOB data INTO Dataverse](dataverse-ingestion-landing-options-2026-09-24.md) — REC own worker on UpsertMultiple
+- [Dataverse env provisioning E2E](dataverse-env-provisioning-e2e-2026-08-22.md) — restrictGuestUserAccess default TRUE
+- [Record restriction / Secure Project](dataverse-record-restriction-secure-project-2026-08-20.md) — no record deny
+- [Cascade-share parent-child](dataverse-cascade-share-parent-child-access-2026-08-18.md) — one parental 1:N Cascade All
+- [Record-access security messaging](dataverse-record-access-security-2026-07-16.md) — additive union
+- [Web API create rows](dataverse-webapi-create-rows-2026-07.md) — 204+OData-EntityId; @odata.bind
+- [Dataverse Search config](dataverse-search-config-2026-07-21.md) — org enable UI-only
+- [Dataverse MCP + Foundry MCP auth](dataverse-mcp-refresh-2026-07-05.md) — delegated-only; metered
+- [knowledgearticle vs SPE P&P](dataverse-knowledgearticle-vs-spe-pnp-library-2026-08-06.md) — skip; SPE + sprk_policy
+- [appnotification modal-on-click](appnotification-modal-click-schema-2026-08-20.md) — navigationTarget:"dialog"
+- [navigateTo pre-populate lookup](navigateto-prepopulate-lookup-createfromentity-2026-08-17.md) — 3-key convention
+- [Hide form-header entity name](uci-hide-form-header-entity-name-2026-08-18.md) — setFormEntityName(" ")
+- [Hide single-tab pivot](uci-single-tab-navigator-hide-2026-08-18.md) — setTabNavigatorVisible(false)
+- [UCI open specific view](uci-navigate-to-specific-view-2026-08-14.md) — main.aspx URL reliable
+- [UCI global onload hook](uci-global-app-onload-hook-2026-08-14.md) — no supported global event
+- [MDA custom help pane](mda-custom-help-pane-2026-08-14.md) — not a fit
+- [PCF React/Fluent versions](pcf-react-platform-library-2026-07.md) — max React 16.14.0
+- [PCF ESLint CI](spaarke-pcf-client-quality-eslint-2026-06.md) — --legacy-peer-deps skipped eslint peer
 
 ## .NET / Azure hosting / messaging
-- [Azure Monitor OTel log sampling (2026-10-27)](azure-monitor-otel-log-sampling-2026-10-27.md) — EnableTraceBasedLogsSampler=true drops logs; set false
-- [.NET 8->10 migration (2026-08-10)](dotnet-8-to-10-migration-2026-08-10.md) — .NET 8 EOS 2026-11-10
-- [.NET 10 breaking-changes re-scrape (2026-08-11)](net10-breaking-changes-rescrape-2026-08-11.md) — no new entries
-- [.NET 8->10 NuGet compat (2026-08-10)](net10-upgrade-package-compat-2026-08-10.md) — zero blockers
-- [Kiota CVE-2026-44503 (2026-08-11)](kiota-cve-2026-44503-tfm-2026-08-11.md) — fix Kiota.Abstractions 1.22.0
-- [.NET 10 on App Service Linux (2026-08-10)](dotnet10-appservice-linux-2026-08-10.md) — port 8080
-- [Functions Flex + .NET 10 (2026-08-13)](functions-flex-consumption-net10-2026-08-13.md) — supported; Core Tools 4.7.0 regression
-- [Per-customer Redis (2026-09-30)](redis-per-customer-stamp-amr-decision-2026-09-30.md) — ACR retires 2028-09-30; AMR B1 ~$47
-- [Azure Managed Redis (2026-06-26)](azure-managed-redis-2026-06-26.md) — pricing superseded 09-30
-- [Assistant push channel (2026-07-15)](assistant-push-channel-2026-07-15.md) — REC Azure SignalR + outbox
-- [SignalR vs SSE (2026-07-16)](signalr-vs-sse-notification-fabric-2026-07-16.md) — defer SignalR to r2
-- [ACS Chat integration (2026-07-16)](acs-chat-integration-2026-07-16.md) — BYOI tokens; React-19 gap
-- [BFF Dataverse HTTP unification (2026-06-23)](bff-dataverse-http-unification-2026-06.md) — REC IDataverseHttpClient
-- [Customer-stamp pricing (2026-08-12)](spaarke-customer-stamp-pricing-2026-08-12.md) — ~$3.5-4.5K/mo per customer
-- [EXO sidecar identity (2026-10-03)](exo-sidecar-identity-2026-10-03.md) — MI-FIC -AccessToken recommendation
-- [EXO RBAC-for-Apps design (2026-10-04)](exo-rbac-for-apps-design-2026-10-04.md) — cmdlet sequence, escalation, limits
-- [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization = primary .onmicrosoft.com
+- [Azure Monitor OTel log sampling](azure-monitor-otel-log-sampling-2026-10-27.md) — EnableTraceBasedLogsSampler=true drops logs
+- [.NET 8->10 migration](dotnet-8-to-10-migration-2026-08-10.md) — .NET 8 EOS 2026-11-10
+- [.NET 10 breaking-changes re-scrape](net10-breaking-changes-rescrape-2026-08-11.md) — no new entries
+- [.NET 8->10 NuGet compat](net10-upgrade-package-compat-2026-08-10.md) — zero blockers
+- [Kiota CVE-2026-44503](kiota-cve-2026-44503-tfm-2026-08-11.md) — fix Kiota.Abstractions 1.22.0
+- [.NET 10 on App Service Linux](dotnet10-appservice-linux-2026-08-10.md) — port 8080
+- [Functions Flex + .NET 10](functions-flex-consumption-net10-2026-08-13.md) — supported; Core Tools 4.7.0 regression
+- [Per-customer Redis](redis-per-customer-stamp-amr-decision-2026-09-30.md) — ACR retires 2028-09-30; AMR B1 ~$47
+- [Azure Managed Redis](azure-managed-redis-2026-06-26.md) — pricing superseded 09-30
+- [Assistant push channel](assistant-push-channel-2026-07-15.md) — REC Azure SignalR + outbox
+- [SignalR vs SSE](signalr-vs-sse-notification-fabric-2026-07-16.md) — defer SignalR to r2
+- [ACS Chat integration](acs-chat-integration-2026-07-16.md) — BYOI tokens; React-19 gap
+- [BFF Dataverse HTTP unification](bff-dataverse-http-unification-2026-06.md) — REC IDataverseHttpClient
+- [Customer-stamp pricing](spaarke-customer-stamp-pricing-2026-08-12.md) — ~$3.5-4.5K/mo per customer
+- [EXO sidecar identity](exo-sidecar-identity-2026-10-03.md) — MI-FIC -AccessToken recommendation
+- [EXO RBAC-for-Apps design](exo-rbac-for-apps-design-2026-10-04.md) — cmdlet sequence, escalation, limits
+- [EXO app-only DC-write error](exo-apponly-dc-write-error-2026-10-04.md) — -Organization = primary .onmicrosoft.com
 
 ## AI platform / models / competitors
-- [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins (Claude auto-convert, MCP) w/o admin; Word legal not extensible; store 4-6 wks
-- [Copilot for Legal + Cowork + plugin registry (2026-10-29)](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — legal plugins GA 10-15, Legal Agent retired; .docx playbooks only; ISV MCP plugin path; Business-apps plugin writes Dataverse
-- [Foundry + Work IQ delta (2026-10-29)](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines GA; Work IQ `retrieve` (SPE, preview); Dataverse-in-Work-IQ deprioritised; AF 1.26
-- [Dataverse/M365 Copilot/Fabric IQ delta (2026-10-29)](dataverse-m365-copilot-platform-delta-2026-10-29.md) — BYO-MCP cert NOT GA (Dec 2026); Business Apps in Work IQ default-on; Fabric IQ new ontology (preview); DA v1.9; MDA default agent
-- [Action presets + AI config authoring (2026-10-22)](configurable-action-catalogs-ai-config-authoring-2026-10-22.md) — code=contract, data=preset; strict schema limits; draft-only agent, human publish, report-only precedent
-- [CU vs DocIntel for law-firm invoices + gpt-4o successor (2026-10-14)](content-understanding-vs-docintel-invoices-2026-10-14.md) — CU GA 2025-11-01 custom analyzer w/ per-subfield grounding; coding stays AOAI; gpt-4o/4.1 retire 2027-04-14; GPT-6 exists
-- [Copilot agent for B2B guests (2026-10-08)](m365-copilot-agent-guest-crosstenant-2026-10-08.md) — guests can't use agents cross-tenant
-- [Foundry IQ + Work IQ (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — supersedes 07-14 Work IQ memo
-- [Fabric IQ vs Dataverse ontology (2026-09-21)](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology preview; complements
-- [Authority-model MS scan (2026-09-21)](authority-model-ms-platform-scan-2026-09-21.md) — build authority model, adopt identity+audit
-- [Legal Word-AI + MCP (2026-09-01)](legal-word-ai-mcp-landscape-2026-09-01.md) — Legora MCP client; Harvey server+client
-- [MCP ecosystem publishing (2026-09-01)](mcp-ecosystem-publishing-2026-09-01.md) — Entra no DCR/CIMD
-- [Legal-AI competitive landscape (2026-07)](legal-ai-competitive-landscape-2026-07.md) — quartet validated
-- [Azure OpenAI reasoning models (2026-07)](azure-openai-reasoning-models-2026-07.md) — gpt-5 @ medium; westus3
-- [Work IQ GA refresh (2026-07-14)](work-iq-ga-refresh-2026-07-14.md) — SUPERSEDED
+- [Federated connector vs plugin vs DA for MCP widget+writes](federated-connector-widgets-writes-2026-11-05.md) — connector = no context switch, writes GA Oct
+- [Copilot entry points: @, /, suggested prompts](copilot-entry-points-mention-slash-prompts-2026-11-05.md) — @=agents(+skills per RM569213); / in Cowork
+- [Opal (Frontier) computer-use agent](opal-frontier-computer-use-agent-2026-11-05.md) — browser-only CUA on W365 for Agents Cloud PC
+- [Legal enablement-kit deploy paths](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins
+- [Copilot for Legal + Cowork + plugin registry](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — legal plugins GA 10-15, Legal Agent retired
+- [Foundry + Work IQ delta](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines GA
+- [Dataverse/M365 Copilot/Fabric IQ delta](dataverse-m365-copilot-platform-delta-2026-10-29.md) — BYO-MCP cert NOT GA (Dec 2026); Business
+- [Action presets + AI config authoring](configurable-action-catalogs-ai-config-authoring-2026-10-22.md) — code=contract, data=preset; strict schema
+- [CU vs DocIntel for law-firm invoices + gpt-4o successor](content-understanding-vs-docintel-invoices-2026-10-14.md) — CU GA 2025-11-01 custom analyzer w
+- [Copilot agent for B2B guests](m365-copilot-agent-guest-crosstenant-2026-10-08.md) — guests can't use agents cross-tenant
+- [Foundry IQ + Work IQ](foundry-iq-work-iq-state-2026-09-21.md) — supersedes 07-14 Work IQ memo
+- [Fabric IQ vs Dataverse ontology](fabric-iq-vs-dataverse-ontology-2026-09-21.md) — ontology preview; complements
+- [Authority-model MS scan](authority-model-ms-platform-scan-2026-09-21.md) — build authority model, adopt identity+audit
+- [Legal Word-AI + MCP](legal-word-ai-mcp-landscape-2026-09-01.md) — Legora MCP client; Harvey server+client
+- [MCP ecosystem publishing](mcp-ecosystem-publishing-2026-09-01.md) — Entra no DCR/CIMD
+- [Legal-AI competitive landscape](legal-ai-competitive-landscape-2026-07.md) — quartet validated
+- [Azure OpenAI reasoning models](azure-openai-reasoning-models-2026-07.md) — gpt-5 @ medium; westus3
+- [Work IQ GA refresh](work-iq-ga-refresh-2026-07-14.md) — SUPERSEDED
 - [Foundry memory public](foundry-memory-now-public.md) — GAP-memory.md superseded
 - [Cosmos Gremlin direction](cosmos-gremlin-direction.md) — soft signals away
-- [Insights Engine pre-design (2026-05-19)](insights-engine-pre-design-2026-05.md) — five-topic research
-- [Insights Engine vs /narrate (2026-06-25)](insights-engine-vs-narrate-2026-06-25.md) — /narrate for briefings
-- [File-aware playbook routing (2026-06-19)](file-aware-playbook-routing-2026-06.md) — filename TF-IDF 96%
-- [R6 destination routing (2026-06-19)](r6-destination-routing-2026-06-19.md) — NodeRoutingConfig per-node
-- [Stateful chat memory (2026-06-19)](stateful-chat-memory-2026-06.md) — JIT retrieval
-- [Lavern multi-agent legal (2026-05-20)](lavern-multi-agent-legal-system.md) — debate, grounding verifier
-- [Lavern follow-up (2026-05-20)](lavern-followup-2026-05-20.md) — WebSocket streaming
+- [Insights Engine pre-design](insights-engine-pre-design-2026-05.md) — five-topic research
+- [Insights Engine vs /narrate](insights-engine-vs-narrate-2026-06-25.md) — /narrate for briefings
+- [File-aware playbook routing](file-aware-playbook-routing-2026-06.md) — filename TF-IDF 96%
+- [R6 destination routing](r6-destination-routing-2026-06-19.md) — NodeRoutingConfig per-node
+- [Stateful chat memory](stateful-chat-memory-2026-06.md) — JIT retrieval
+- [Lavern multi-agent legal](lavern-multi-agent-legal-system.md) — debate, grounding verifier
+- [Lavern follow-up](lavern-followup-2026-05-20.md) — WebSocket streaming
 - [Lavern seeded datasets](lavern-seeded-datasets.md) — 5 legal datasets in SQLite FTS5
 - [Lavern Precedent Board](lavern-precedent-board.md) — promotion/decay
 
 ## Meta
-- [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention
-- [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked
-- [Dataverse duplicate detection API (2026-10-15)](dataverse-duplicate-detection-api-default-2026-10-15.md) — suppressed by default
-- [xms_edov claim (2026-10-23)](entra-xms-edov-claim-2026-10-23.md) — needs email claim; absent vs false undocumented
-- [A9 dev Entra setup (2026-10-19)](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk
-- [Law-dept benchmarks + OCG provisions (2026-11-03)](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates; CNA/Allianz/PSU/DE OCG text; all use 0.1-hr increments
+- [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
+- [Cascade delete privileges/Archive](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked, whole op fails
+- [Defender for Storage overwrite->rescan](defender-storage-overwrite-rescan-2026-11-05.md) — Put Blob/PutBlockList overwrite triggers an
+- [Dataverse duplicate detection API](dataverse-duplicate-detection-api-default-2026-10-15.md) — suppressed by default
+- [xms_edov claim](entra-xms-edov-claim-2026-10-23.md) — needs email claim; absent vs false undocumented
+- [A9 dev Entra setup](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk
+- [MCP server in .NET BFF + Copilot DA widget](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + official Extensions.Apps
+- [Copilot as Spaarke surface + Frontier](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace (UX
+- [Law-dept benchmarks + OCG provisions](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates
+- [SPE container type limit/delete](spe-container-type-limit-delete-2026-11-16.md) — 25/tenant, standard not deletable, create

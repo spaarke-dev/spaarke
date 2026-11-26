@@ -20,10 +20,20 @@ namespace Spaarke.ArchTests;
 public sealed class RecordRepairReachabilityTests
 {
     /// <summary>
-    /// Members allowed to reference Repair, each with its reason. Empty until task 052 (which is hard-blocked on task 033).
+    /// Members allowed to reference Repair, each with its reason. Task 052b added the first production caller, the scheduled
+    /// repair pass (the app-only metadata wiring it needed landed in 052a).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> AllowedReferences =
-        new Dictionary<string, string>(StringComparer.Ordinal);
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob::RunTableAsync"] =
+                "Task 052b, the scheduled pass: system principal, forward-only (go-live and task 050's marker, re-checked by Repair "
+                + "through the pass context), task and account excluded, contacts owner-only through the resolver, claimed per table.",
+            ["Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob::RunOnDemandTableAsync"] =
+                "Task 052c, the on-demand run: the same job, lease, per-table claim, forward-only and product-principal rules (the "
+                + "job re-checks the window against go-live before any read), one table the pass sweeps, one window started by a "
+                + "SystemAdmin through the typed admin route; the scheduled pass's state is not touched.",
+        };
 
     [Fact]
     public void RecordRepair_HasNoProductionCaller_UntilTask052ListsOne()
@@ -87,7 +97,7 @@ internal sealed class RepairReachabilityControlCallsTheWrapper(RepairReachabilit
 /// <summary>MUST FIRE: Repair taken as a method group.</summary>
 internal sealed class RepairReachabilityControlMethodGroup(RecordCreationService creation)
 {
-    internal Func<string, Guid, CancellationToken, Task<RecordRepairOutcome>> Take() => creation.RepairAsync;
+    internal Func<string, Guid, CancellationToken, RecordRepairPassContext?, Task<RecordRepairOutcome>> Take() => creation.RepairAsync;
 }
 
 /// <summary>MUST FIRE: Repair called inside a lambda (counted for the member it is written in).</summary>

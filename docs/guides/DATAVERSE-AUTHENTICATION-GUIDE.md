@@ -213,18 +213,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" />
-  <!-- Version managed in Directory.Packages.props -->
+  <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.26" />
 </ItemGroup>
 ```
 
-**File**: `Directory.Packages.props`
-
-```xml
-<ItemGroup>
-  <PackageVersion Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.1.32" />
-</ItemGroup>
-```
+The version is pinned in the `.csproj` itself; Spaarke does not use central package management (see `docs/procedures/DEPENDENCY-MANAGEMENT.md`). The `.csproj` is authoritative if this snippet drifts.
 
 ---
 

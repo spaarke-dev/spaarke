@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.38"
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.39"
            display-name-key="Document Relationship Viewer"
-           description-key="Rebuilt with @spaarke/auth tenant-resolved authority (v1.0.38)"
+           description-key="Graph types, API client, node card and layout shared with the code page through @spaarke/ui-components (v1.0.39)"
            control-type="virtual">
 
     <external-service-usage enabled="true">

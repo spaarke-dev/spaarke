@@ -796,6 +796,44 @@
             <Description description="The id of the CONTACT who issued this grant, as text — written and cleared by the BFF in the same write as Granted By (Contact), so it survives that contact's deletion (the lookup's Delete cascade empties the lookup). Set while the lookup is empty means the issuing contact was deleted: the reconciliation job ends such an undated grant. Field-secured; BFF-written only. unified-access-control-r2 task 140, session 27 round 50 item 2." languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_PairedSystemUser">
+          <Type>lookup</Type>
+          <Name>sprk_pairedsystemuser</Name>
+          <LogicalName>sprk_pairedsystemuser</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>0</IsAuditEnabled>
+          <IsSecured>1</IsSecured>
+          <IntroducedVersion>1.1.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="Paired Internal User" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="The internal user this contact grant was written WITH: Manage Access shared the record with this user and gave the contact that represents them workforce-app access in the same step. Revoking the share removes this grant, and the reconciliation job ends it when the user no longer holds a share on the record. Empty on a grant staff wrote for the contact deliberately. Written by the BFF only (field-secured). unified-access-control-r2 task 193, owner decision (iii)." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_GrantedDate">
           <Type>datetime</Type>
           <Name>sprk_granteddate</Name>

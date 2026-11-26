@@ -117,6 +117,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
         // T186 follow-up - the storage blob endpoint H4b sets as SessionFileStore__BlobEndpoint.
         repo.LastWrittenRun.InterStepState.StorageBlobEndpoint.Should().Be("https://sprkacmeprod.blob.core.windows.net/");
+        repo.LastWrittenRun.InterStepState.OntologyWriterClientId.Should().Be("ontology-writer-client-id");
+        repo.LastWrittenRun.InterStepState.OntologyWriterObjectId.Should().Be("ontology-writer-object-id");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -664,6 +666,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
             RedisEndpoint = "r.westus2.redis.azure.net:10000",
             ContentSafetyEndpoint = "https://cs.cognitiveservices.azure.com/",
             StorageBlobEndpoint = "https://x.blob.core.windows.net/",
+            OntologyWriterClientId = "ontology-writer-client",
+            OntologyWriterObjectId = "ontology-writer-object",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -685,6 +689,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [InlineData(nameof(BicepDeployOutputs.RedisEndpoint))]
     [InlineData(nameof(BicepDeployOutputs.ContentSafetyEndpoint))]
     [InlineData(nameof(BicepDeployOutputs.StorageBlobEndpoint))]
+    [InlineData(nameof(BicepDeployOutputs.OntologyWriterClientId))]
+    [InlineData(nameof(BicepDeployOutputs.OntologyWriterObjectId))]
     public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
     {
         // Task 245a: the three outputs H2a now persists for downstream handlers are
@@ -710,6 +716,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
             RedisEndpoint = blankField == nameof(BicepDeployOutputs.RedisEndpoint) ? "" : complete.RedisEndpoint,
             ContentSafetyEndpoint = blankField == nameof(BicepDeployOutputs.ContentSafetyEndpoint) ? "" : complete.ContentSafetyEndpoint,
             StorageBlobEndpoint = blankField == nameof(BicepDeployOutputs.StorageBlobEndpoint) ? "" : complete.StorageBlobEndpoint,
+            OntologyWriterClientId = blankField == nameof(BicepDeployOutputs.OntologyWriterClientId) ? "" : complete.OntologyWriterClientId,
+            OntologyWriterObjectId = blankField == nameof(BicepDeployOutputs.OntologyWriterObjectId) ? "" : complete.OntologyWriterObjectId,
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
@@ -740,6 +748,71 @@ public sealed class H2aBicepInfraDeployHandlerTests
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         runner.LastRequest!.SignalREnabled.Should().Be(expected);
+    }
+
+    // ---------- ISS-022: the SignalR host name H4b needs for the keyless managed-identity string ----------
+
+    [Fact]
+    public async Task Iss022_SignalRDeployed_PersistsTheHostName_ToInterStepState()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-iss022-a");
+        var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: true)),
+            FakeArmKeyVaultRefProbe.Match(), new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        repo.LastWrittenRun!.InterStepState.SignalRHostName.Should().Be("sprk-acme-prod-signalr.service.signalr.net");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRNotDeployed_LeavesTheHostNameNull()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-iss022-b");
+        var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: false)),
+            FakeArmKeyVaultRefProbe.Match(), new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        repo.LastWrittenRun!.InterStepState.SignalRHostName.Should().BeNull("H4b writes no SignalR setting unless SignalR was deployed");
+    }
+
+    [Fact]
+    public async Task Iss022_SignalRDeployedButHostNameBlank_FailsQuarantineRequired_NamingTheField()
+    {
+        var complete = BuildOutputs(signalRDeployed: true);
+        var outputs = new BicepDeployOutputs
+        {
+            ResourceGroupName = complete.ResourceGroupName,
+            UserAssignedIdentityResourceId = complete.UserAssignedIdentityResourceId,
+            UserAssignedIdentityObjectId = complete.UserAssignedIdentityObjectId,
+            UserAssignedIdentityClientId = complete.UserAssignedIdentityClientId,
+            AppServiceName = complete.AppServiceName,
+            AppServiceStagingSlotName = complete.AppServiceStagingSlotName,
+            OpenAiEndpoint = complete.OpenAiEndpoint,
+            AiSearchEndpoint = complete.AiSearchEndpoint,
+            CosmosEndpoint = complete.CosmosEndpoint,
+            KeyVaultName = complete.KeyVaultName,
+            KeyVaultUri = complete.KeyVaultUri,
+            ServiceBusFullyQualifiedNamespace = complete.ServiceBusFullyQualifiedNamespace,
+            RedisEndpoint = complete.RedisEndpoint,
+            ContentSafetyEndpoint = complete.ContentSafetyEndpoint,
+            StorageBlobEndpoint = complete.StorageBlobEndpoint,
+            OntologyWriterClientId = complete.OntologyWriterClientId,
+            OntologyWriterObjectId = complete.OntologyWriterObjectId,
+            SignalRDeployed = true,
+            SignalRHostName = "",
+        };
+        var handler = BuildHandler(new FakeRepository(BuildRun(), etag: "etag-iss022-c"), FakeBicepDeployRunner.Success(outputs),
+            FakeArmKeyVaultRefProbe.Match(), new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.BicepDeployOutputsIncomplete);
+        failure.Diagnostic.Should().Contain(nameof(BicepDeployOutputs.SignalRHostName));
     }
 
     // ---------- A38b requireSecretFreeIdentity gate — retired by task 225b ----------
@@ -981,7 +1054,10 @@ public sealed class H2aBicepInfraDeployHandlerTests
         RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
         ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
         StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/",
+        OntologyWriterClientId = "ontology-writer-client-id",
+        OntologyWriterObjectId = "ontology-writer-object-id",
         SignalRDeployed = signalRDeployed,
+        SignalRHostName = signalRDeployed ? "sprk-acme-prod-signalr.service.signalr.net" : string.Empty,
     };
 
     /// <summary>Repository fake — records last written run.</summary>

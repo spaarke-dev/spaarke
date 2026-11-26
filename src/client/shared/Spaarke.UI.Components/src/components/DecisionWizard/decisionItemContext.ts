@@ -22,7 +22,12 @@ import type {
   SuppressionStatus,
 } from './decisionWizardTypes';
 
-export type DecisionLookup = (request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>;
+export type DecisionLookup = ((request: Omit<DecisionLookupRequest, 'core'>) => Promise<ILookupItem[]>) & {
+  /** The host's `minChars` (optional seam), carried through the item-scoped wrapper. */
+  minChars?: number;
+  /** The host's `failureText` (optional seam), carried through the item-scoped wrapper. */
+  failureText?: string;
+};
 
 /** The side-pane lookup as a step sees it: the item's core record is already filled in. */
 export type DecisionOpenLookupForItem = ((
@@ -48,6 +53,8 @@ export interface DecisionItemContextValue {
   failure: DecisionCommitFailure | null;
   /** A failed attempt pins the review: its fields and choices are read-only until the attempt is repeated. */
   locked: boolean;
+  /** Task 191 fix round 1: the failure that pinned the review (what the locked note says depends on it); null when not locked. */
+  lockedBy: DecisionCommitFailure | null;
   /** Items known to be closed (recorded here, resolved by Also resolve, or opened closed). */
   closedIds: ReadonlySet<string>;
   /** The route's 200 answer for the item just recorded (warnings, per-item states); null otherwise. */
@@ -62,6 +69,10 @@ export interface DecisionItemContextValue {
   openItemsLeft: number | null;
   /** "Now" for ages and due states; injectable for tests. */
   today: Date;
+  /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: no box, as before. */
+  collectBecause?: boolean;
+  /** Optional seam: an evidence line that names a record (`ref` = `{table}:{guid}`) gets "Open in Spaarke" through `openRecord`. Absent or false: none, as before. */
+  evidenceLinks?: boolean;
 }
 
 export const DecisionItemContext = React.createContext<DecisionItemContextValue | null>(null);

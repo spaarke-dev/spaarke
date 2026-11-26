@@ -65,6 +65,7 @@ public class FieldMappingPushDocumentSourceTests
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_analysises");
         host.Entities.Setup(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
+        host.ArrangeSourceGateRead("sprk_document", secureFlag: null);
         host.FieldMappings
             .Setup(f => f.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -238,6 +239,28 @@ public class FieldMappingPushDocumentSourceTests
     [InlineData("sprk_billingexport", "sprk_csvdocument,sprk_jsondocument", null)]
     public void DocumentOwnershipParentColumn_IsFixedByTheTargetTable(string target, string lookups, string? expected) =>
         FieldMappingEndpoints.DocumentOwnershipParentColumn(target, lookups.Split(',')).Should().Be(expected);
+
+    /// <summary>
+    /// fm task 056: a citation (<c>RecordOwnershipResolver.IsCitation</c>) never files a row, so it is never the parent lookup and
+    /// is not counted. Synthetic relationship metadata over an existing citation pair: <c>sprk_procedureassignment.sprk_excludedpolicy</c>
+    /// cites a <c>sprk_policy</c>; beside one non-citation lookup to <c>sprk_policy</c> that one resolves, and two non-citation
+    /// lookups are still ambiguous (the existing 409's count).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_excludedpolicy,sprk_regardingpolicy", "sprk_regardingpolicy", 1)]
+    [InlineData("sprk_regardingpolicy,sprk_excludedpolicy", "sprk_regardingpolicy", 1)]
+    [InlineData("sprk_excludedpolicy,sprk_regardingpolicy,sprk_otherpolicy", null, 2)]
+    [InlineData("sprk_excludedpolicy", null, 0)]
+    public void ResolveParentLookup_LeavesCitationsOut_BeforeCounting(string policyLookups, string? expected, int expectedMatches)
+    {
+        var relationships = policyLookups.Split(',')
+            .Select(column => Row(("ReferencingAttribute", column), ("ReferencedEntity", "sprk_policy")))
+            .Append(Row(("ReferencingAttribute", "sprk_regardingmatter"), ("ReferencedEntity", "sprk_matter")))
+            .ToList();
+
+        FieldMappingEndpoints.ResolveParentLookup(relationships, "sprk_policy", "sprk_procedureassignment")
+            .Should().Be((expected, expectedMatches));
+    }
 
     public static TheoryData<string> RefusedDocumentShapes => new() { "no-read", "external-hidden", "external-narrowing-faults" };
 

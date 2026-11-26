@@ -339,6 +339,63 @@ function Find-LeakyDependencies {
     }
 }
 
+function Find-MissingWebResourceReferences {
+    <#
+    .SYNOPSIS A form, ribbon, sitemap or app module in the package source must not point at a Spaarke web resource the
+              package does not contain: the import fails in any environment that lacks it ("dependent component
+              WebResource ... does not exist"). SpaarkeMaster 1.3.1.0-1.3.2.0 shipped the Invoice main form's Files
+              section with no sprk_invoicefiles web resource, and dev never showed it because dev's form differed.
+              Hand-edited form or ribbon XML never passes through Find-LeakyDependencies (that list is written only by
+              an export), so this reads the source itself. Returns one line per missing name.
+    .PARAMETER SourceFolder The unpacked solution folder (src/dataverse/solutions/SpaarkeMaster).
+    .PARAMETER Prefix Only names with this prefix are checked; other publishers' web resources come from their own
+              solutions.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SourceFolder,
+        [string]$Prefix = 'sprk_'
+    )
+    # Get-Item, not Resolve-Path: the root must be spelled the way Get-ChildItem spells the files under it. Resolve-Path
+    # keeps a PSDrive name (Pester's TestDrive:) or an 8.3 short name (RALPHS~1 in $env:TEMP), and then the
+    # WebResources/ exclusion and the relative paths in the report break.
+    $root = (Get-Item -LiteralPath $SourceFolder).FullName.TrimEnd('\', '/')
+    $webResourceRoot = Join-Path $root 'WebResources'
+
+    # Packaged names: every WebResources/**/*.data.xml <Name>. Dataverse names are case-insensitive.
+    $packaged = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    if (Test-Path $webResourceRoot) {
+        foreach ($f in Get-ChildItem -Path $webResourceRoot -Recurse -File -Filter '*.data.xml') {
+            $name = ([xml](Get-Content $f.FullName -Raw)).WebResource.Name
+            if ($name) { [void]$packaged.Add([string]$name) }
+        }
+    }
+
+    # References: the XML outside WebResources/ (web resource content is code and text, not references).
+    $p = [regex]::Escape($Prefix)
+    $patterns = @(
+        "\`$webresource:($p[^""'&<>;?\s]+)",          # ribbon, sitemap, app module: $webresource:name
+        "<Url>\s*($p[^<?\s]+?)\s*</Url>",               # form web resource control
+        "Library\s+name=""($p[^""]+)""",                  # form script library
+        "/WebResources/($p[^""'&<>;?\s]+)"               # absolute web resource URL
+    )
+    $missing = [ordered]@{}
+    $files = Get-ChildItem -Path $root -Recurse -File -Filter '*.xml' |
+        Where-Object { -not $_.FullName.StartsWith($webResourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) }
+    foreach ($f in $files) {
+        $text = Get-Content $f.FullName -Raw
+        foreach ($pattern in $patterns) {
+            foreach ($m in [regex]::Matches($text, $pattern)) {
+                $name = $m.Groups[1].Value
+                if ($packaged.Contains($name)) { continue }
+                $rel = $f.FullName.Substring($root.Length).TrimStart('\', '/') -replace '\\', '/'
+                if (-not $missing.Contains($name)) { $missing[$name] = New-Object 'System.Collections.Generic.List[string]' }
+                if (-not $missing[$name].Contains($rel)) { $missing[$name].Add($rel) }
+            }
+        }
+    }
+    return $missing.Keys | ForEach-Object { "web resource $_ is referenced but not packaged <- $($missing[$_] -join ', ')" }
+}
+
 function Get-NextPackageVersion {
     <#
     .SYNOPSIS The package's next version: an explicit -Version (must be higher than the current one, compared part by
@@ -490,5 +547,6 @@ function Resolve-PackageImportPlan {
 
 Export-ModuleMember -Function Get-PackageComponentTypeCode, Read-PackageScope, Get-PackageRuleComponents, `
     Get-SolutionMembershipKeys, Compare-PackageScope, Get-EntityNameMap, Find-EnvironmentVariableValues, Find-LeakyDependencies, `
+    Find-MissingWebResourceReferences, `
     Get-NextPackageVersion, `
     Get-PackedSolutionInfo, New-SpaarkeMasterManifest, Compare-PackageVersion, Get-InstalledPackage, Resolve-PackageImportPlan

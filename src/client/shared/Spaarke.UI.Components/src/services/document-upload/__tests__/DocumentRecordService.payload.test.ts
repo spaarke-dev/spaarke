@@ -1,17 +1,17 @@
 /**
- * DocumentRecordService.buildRecordPayload — Unit tests for FR-WIZ-07.
+ * DocumentRecordService create payload — user-entered values plus the filing parent, nothing the server derives
+ * (field-mapping-server-write-path-r1 task 029, spec FR-16, FR-40).
  *
- * Scope: verifies that the `sprk_searchindexname` field flows through the Document
- * create payload when the caller resolves a non-empty value via the FR-WIZ-06
- * 3-step chain (parent record → parent's BU → empty), and is OMITTED when the
- * caller passes empty / undefined so the BFF tenant-default chain (FR-BFF-04)
- * takes over server-side.
+ * The payload is closed: the document name, the file's own name and size, the description and the parent bind. It carries
+ * no search index (`sprk_searchindexname`, the `sprk_AI_Search_Index@odata.bind` lookup): the index follows the content
+ * type and the server owns it, and the mapped fields, the owner and the I-1 stamp are applied by the child-records route.
+ * A caller written before task 029 that still passes an index name and id as extra arguments has them ignored.
  *
  * **Critical INV check** (design.md): The canonical Document container field is
  * `sprk_graphdriveid`. `sprk_containerid` MUST stay NULL on `sprk_document` —
  * Phase F backfill audit depends on this. Tests guard against accidental
  * regression by asserting `sprk_containerid` is NOT in the payload under any
- * code path (associated, unassociated, with index, without index).
+ * code path (associated, unassociated).
  *
  * **Pointer guard (unified-access-control-r2 task 166 f1, owner round 21 item 1)**: the create
  * payload carries NO SPE pointer (`sprk_graphdriveid` / `sprk_graphitemid`), and no `sprk_hasfile`
@@ -19,10 +19,6 @@
  * the service hands the SERVER's upload answer (task 076 — `SpeFileMetadata.driveId` + `id`) to the
  * BFF attach (`attachFile`), which verifies it and stamps the pointer. A row whose file the BFF
  * refuses is removed and reported.
- *
- * @see spec.md FR-WIZ-07
- * @see design.md INV (Document container field)
- * @see projects/spaarke-multi-container-multi-index-r1/notes/handoffs/026-docupload-resolver.md
  */
 
 import { DocumentRecordService } from '../DocumentRecordService';
@@ -164,74 +160,101 @@ function makeService(
 }
 
 // ---------------------------------------------------------------------------
-// FR-WIZ-07 — associated mode (parent context present)
+// The payload is user-entered values + the filing parent (FR-16, FR-40) — associated mode
 // ---------------------------------------------------------------------------
 
-describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mode)', () => {
-  it('includes sprk_searchindexname in payload when caller passes a non-empty value', async () => {
+/**
+ * Calls `createDocuments` the way a caller written before task 029 did: with a search index name and id as the 4th and 5th
+ * arguments. The signature no longer takes them, so the call goes through an untyped view of the method; the service
+ * must ignore what it was never meant to receive.
+ */
+function createWithRemovedIndexArgs(
+  svc: DocumentRecordService,
+  parent: ParentContext,
+  indexName: string,
+  indexId: string,
+  file: SpeFileMetadata = makeFile()
+): Promise<unknown> {
+  const legacy = svc.createDocuments as unknown as (...args: unknown[]) => Promise<unknown>;
+  return legacy.call(svc, [file], parent, makeFormData(), indexName, indexId);
+}
+
+/** Every payload key carrying a search index (the column or the lookup bind), whatever its casing. */
+function indexKeysOf(payload: Record<string, unknown>): string[] {
+  return Object.keys(payload).filter(k => /searchindex|search_index/i.test(k));
+}
+
+describe('DocumentRecordService payload — associated mode', () => {
+  it('sends exactly the user-entered values, the file metadata and the parent bind (no index, no mapped value)', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    const results = await svc.createDocuments(
-      [makeFile()],
-      makeParentContext(),
-      makeFormData(),
-      'spaarke-knowledge-index-v2'
-    );
+    const results = await svc.createDocuments([makeFile('report.docx', 9876)], makeParentContext(), {
+      documentName: 'Q1 Report',
+      description: 'Final',
+    });
 
     expect(results).toHaveLength(1);
     expect(results[0].success).toBe(true);
     expect(client.createCalls).toHaveLength(1);
+    expect(client.createCalls[0].entityLogicalName).toBe('sprk_document');
+    // Closed set: a key the user did not enter, and the wizard did not take from the file or the parent, fails this.
+    expect(client.createCalls[0].data).toEqual({
+      sprk_documentname: 'Q1 Report',
+      sprk_filename: 'report.docx',
+      sprk_filesize: 9876,
+      sprk_documentdescription: 'Final',
+      'sprk_Matter@odata.bind': '/sprk_matters(11111111-1111-1111-1111-111111111111)',
+    });
+  });
+
+  it('sends no search index even when a caller still passes one (sprk_searchindexname, sprk_AI_Search_Index bind)', async () => {
+    const client = makeCapturingClient();
+    const svc = makeService(client);
+
+    await createWithRemovedIndexArgs(
+      svc,
+      makeParentContext(),
+      'spaarke-knowledge-index-v2',
+      '33333333-3333-3333-3333-333333333333'
+    );
+
+    expect(client.createCalls).toHaveLength(1);
     const payload = client.createCalls[0].data;
-    expect(payload.sprk_searchindexname).toBe('spaarke-knowledge-index-v2');
+    expect(indexKeysOf(payload)).toEqual([]);
+    expect('sprk_searchindexname' in payload).toBe(false);
+    expect('sprk_AI_Search_Index@odata.bind' in payload).toBe(false);
+    expect(JSON.stringify(payload)).not.toContain('spaarke-knowledge-index-v2');
+    expect(JSON.stringify(payload)).not.toContain('sprk_aisearchindexes');
   });
 
-  it('OMITS sprk_searchindexname when caller passes undefined (BFF tenant default applies server-side)', async () => {
+  it('sends no owner, team, mapped-field or business-unit key (the server decides them, FR-02, FR-09)', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    await svc.createDocuments([makeFile()], makeParentContext(), makeFormData(), undefined);
-
-    expect(client.createCalls).toHaveLength(1);
-    expect('sprk_searchindexname' in client.createCalls[0].data).toBe(false);
-  });
-
-  it('OMITS sprk_searchindexname when caller passes empty string', async () => {
-    const client = makeCapturingClient();
-    const svc = makeService(client);
-
-    await svc.createDocuments([makeFile()], makeParentContext(), makeFormData(), '');
-
-    expect(client.createCalls).toHaveLength(1);
-    expect('sprk_searchindexname' in client.createCalls[0].data).toBe(false);
-  });
-
-  it('OMITS sprk_searchindexname when caller passes whitespace-only string (FR-WIZ-06 empty semantics)', async () => {
-    const client = makeCapturingClient();
-    const svc = makeService(client);
-
-    await svc.createDocuments([makeFile()], makeParentContext(), makeFormData(), '   ');
-
-    expect(client.createCalls).toHaveLength(1);
-    expect('sprk_searchindexname' in client.createCalls[0].data).toBe(false);
-  });
-
-  it('OMITS sprk_searchindexname when called without the searchIndexName argument at all (backward compat)', async () => {
-    const client = makeCapturingClient();
-    const svc = makeService(client);
-
-    // Call the 3-arg overload — proves existing callers that have not migrated yet still work.
     await svc.createDocuments([makeFile()], makeParentContext(), makeFormData());
 
-    expect(client.createCalls).toHaveLength(1);
-    expect('sprk_searchindexname' in client.createCalls[0].data).toBe(false);
+    const keys = Object.keys(client.createCalls[0].data);
+    expect(
+      keys.filter(k => /^(ownerid|owningteam|owninguser|owningbusinessunit|sprk_createdbyperson)/i.test(k))
+    ).toEqual([]);
+    // Only the five keys of the closed set above (name, file name, size, description, parent bind).
+    expect(keys.sort()).toEqual(
+      [
+        'sprk_Matter@odata.bind',
+        'sprk_documentdescription',
+        'sprk_documentname',
+        'sprk_filename',
+        'sprk_filesize',
+      ].sort()
+    );
   });
 
   it('DOES NOT add sprk_containerid to the Document payload (design.md INV — canonical container field is sprk_graphdriveid)', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    await svc.createDocuments([makeFile()], makeParentContext(), makeFormData(), 'spaarke-knowledge-index-v2');
+    await svc.createDocuments([makeFile()], makeParentContext(), makeFormData());
 
     expect(client.createCalls).toHaveLength(1);
     const payload = client.createCalls[0].data;
@@ -239,16 +262,6 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     // depends on this universally being NULL on sprk_document.
     expect('sprk_containerid' in payload).toBe(false);
     expect(payload.sprk_containerid).toBeUndefined();
-  });
-
-  it('DOES NOT add sprk_containerid even when searchIndexName is omitted (INV check on every code path)', async () => {
-    const client = makeCapturingClient();
-    const svc = makeService(client);
-
-    await svc.createDocuments([makeFile()], makeParentContext(), makeFormData());
-
-    expect(client.createCalls).toHaveLength(1);
-    expect('sprk_containerid' in client.createCalls[0].data).toBe(false);
   });
 
   it('hands the SERVER-reported file to the BFF attach, and never writes the pointer itself (task 166 f1)', async () => {
@@ -260,8 +273,7 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
       // A secure record's own container — the value only the server knows (task 076).
       [makeFile('contract.pdf', 12345, 'b!secure-record-own-container')],
       makeParentContext(),
-      makeFormData(),
-      'spaarke-knowledge-index-v2'
+      makeFormData()
     );
 
     expect(results[0].success).toBe(true);
@@ -287,15 +299,14 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     expect(client.deleteCalls).toEqual([{ entityLogicalName: 'sprk_document', id: 'created-doc-id-1' }]);
   });
 
-  it('preserves all pre-existing Document fields alongside the new sprk_searchindexname', async () => {
+  it('normalises the parent id in the bind (braces stripped, lowercased) and keeps every user value', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
     await svc.createDocuments(
       [makeFile('report.docx', 9876)],
       makeParentContext({ parentRecordId: '{22222222-2222-2222-2222-222222222222}' }),
-      { documentName: 'Q1 Report', description: 'Final' },
-      'spaarke-file-index'
+      { documentName: 'Q1 Report', description: 'Final' }
     );
 
     const payload = client.createCalls[0].data;
@@ -303,42 +314,47 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     expect(payload.sprk_filename).toBe('report.docx');
     expect(payload.sprk_filesize).toBe(9876);
     expect(payload.sprk_documentdescription).toBe('Final');
-    expect(payload.sprk_searchindexname).toBe('spaarke-file-index');
     // The pointer, the file flag and the path are the BFF's to write (task 166 f1).
     for (const column of BFF_ONLY_COLUMNS) {
       expect(column in payload).toBe(false);
     }
-    // Parent @odata.bind — sanitized GUID (braces stripped, lowercased)
     expect(payload['sprk_Matter@odata.bind']).toBe('/sprk_matters(22222222-2222-2222-2222-222222222222)');
-    // INV
     expect('sprk_containerid' in payload).toBe(false);
   });
 
-  it('applies the same searchIndexName to every Document in a multi-file batch', async () => {
+  it('sends the same closed set for every Document in a multi-file batch', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
     await svc.createDocuments(
       [makeFile('a.pdf'), makeFile('b.pdf'), makeFile('c.pdf')],
       makeParentContext(),
-      makeFormData(),
-      'spaarke-knowledge-index-v2'
+      makeFormData()
     );
 
     expect(client.createCalls).toHaveLength(3);
     for (const call of client.createCalls) {
-      expect(call.data.sprk_searchindexname).toBe('spaarke-knowledge-index-v2');
+      expect(indexKeysOf(call.data)).toEqual([]);
       expect('sprk_containerid' in call.data).toBe(false);
       expect('sprk_graphdriveid' in call.data).toBe(false);
+      expect(Object.keys(call.data).sort()).toEqual(
+        [
+          'sprk_Matter@odata.bind',
+          'sprk_documentdescription',
+          'sprk_documentname',
+          'sprk_filename',
+          'sprk_filesize',
+        ].sort()
+      );
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// FR-WIZ-07 — unassociated mode (no parent record bound)
+// The same closed set — unassociated mode (no parent record bound)
 // ---------------------------------------------------------------------------
 
-describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
+describe('DocumentRecordService payload — unassociated mode', () => {
   function unassociatedParent(): ParentContext {
     return {
       parentEntityName: '',
@@ -347,31 +363,42 @@ describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
     };
   }
 
-  it('includes sprk_searchindexname in unassociated payload when value provided', async () => {
+  it('sends only the user-entered values and the file metadata (no parent bind, no index)', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    await svc.createDocuments([makeFile()], unassociatedParent(), makeFormData(), 'spaarke-knowledge-index-v2');
+    await svc.createDocuments([makeFile('contract.pdf', 12345)], unassociatedParent(), makeFormData());
 
     expect(client.createCalls).toHaveLength(1);
-    expect(client.createCalls[0].data.sprk_searchindexname).toBe('spaarke-knowledge-index-v2');
+    expect(client.createCalls[0].data).toEqual({
+      sprk_documentname: 'Contract.pdf',
+      sprk_filename: 'contract.pdf',
+      sprk_filesize: 12345,
+      sprk_documentdescription: 'Initial draft',
+    });
   });
 
-  it('OMITS sprk_searchindexname in unassociated payload when value empty / undefined', async () => {
+  it('sends no search index even when a caller still passes one', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    await svc.createDocuments([makeFile()], unassociatedParent(), makeFormData());
+    await createWithRemovedIndexArgs(
+      svc,
+      unassociatedParent(),
+      'spaarke-knowledge-index-v2',
+      '33333333-3333-3333-3333-333333333333'
+    );
 
     expect(client.createCalls).toHaveLength(1);
-    expect('sprk_searchindexname' in client.createCalls[0].data).toBe(false);
+    expect(indexKeysOf(client.createCalls[0].data)).toEqual([]);
+    expect(JSON.stringify(client.createCalls[0].data)).not.toContain('spaarke-knowledge-index-v2');
   });
 
   it('NEVER adds sprk_containerid in unassociated payload (INV — same as associated mode)', async () => {
     const client = makeCapturingClient();
     const svc = makeService(client);
 
-    await svc.createDocuments([makeFile()], unassociatedParent(), makeFormData(), 'spaarke-knowledge-index-v2');
+    await svc.createDocuments([makeFile()], unassociatedParent(), makeFormData());
 
     expect('sprk_containerid' in client.createCalls[0].data).toBe(false);
   });
@@ -384,8 +411,7 @@ describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
     await svc.createDocuments(
       [makeFile('contract.pdf', 12345, 'drive-id-unassoc')],
       unassociatedParent(),
-      makeFormData(),
-      'spaarke-knowledge-index-v2'
+      makeFormData()
     );
 
     // Both code paths take the SAME route. They diverged historically, and a divergence here is how

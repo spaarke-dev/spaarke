@@ -24,7 +24,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <b>The ONE exception</b> (unified-access-control-r2 task 188, D7; CLAUDE.md §6.5 path B, APPROVED in owner round 111,
 /// 2026-10-21): the injected app-only NARROWING seams — <c>AppOnlyDocumentNarrowing</c> (with its hide-only overload
 /// <c>AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync</c>) and, off the tool namespace,
-/// <c>InternalRouteDocumentNarrowing</c>. They re-read documents by id under the BFF's app-only identity and return a HIDE
+/// <c>InternalRouteDocumentNarrowing</c>; the (a') invoice-family hiding (ebilling-r1 task 098); and
+/// <c>AppOnlyExternalVisibility</c> (uac-r2 task 191h, THE external visibility predicate of task 191b, asked by id for an
+/// external caller's rows). They re-read rows by id under the BFF's app-only identity and return a HIDE
 /// DECISION ONLY: no app-only row or column reaches a tool result, and every row a tool returns still comes from a read
 /// through this interface. Their consumers are an allow-list (<c>ExternalDocumentNarrowingGuardTests</c>, K7). See
 /// <c>.claude/constraints/auth.md</c>, "External document narrowing — D7".
@@ -144,6 +146,27 @@ public sealed record DataverseUserResponse
     /// available (identifier/validation text — not row content).
     /// </summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// True only when the failure is one the CALLER can fix by signing in again: the On-Behalf-Of exchange was
+    /// refused with <c>MsalUiRequiredException</c> (invalid_grant: an expired or revoked grant) whose classification is
+    /// neither <c>ConsentRequired</c> nor <c>MessageOnly</c> and which carries no claims challenge. False for every
+    /// other failure, including every other <see cref="DataverseUserClientErrorCodes.OboExchangeFailed"/> — the BFF's
+    /// own credential rejected (invalid_client, a federated-credential mismatch), an Entra timeout,
+    /// temporarily_unavailable or throttling are the server's fault, and a caller who signs in again gets the same
+    /// answer (#1571 review F1). The error code stays <c>OboExchangeFailed</c> for both, so consumers that do not
+    /// read this flag are unchanged.
+    /// </summary>
+    public bool IsCallerFixable { get; init; }
+
+    /// <summary>
+    /// True when Entra refused the On-Behalf-Of exchange for a reason a fresh sign-in cannot fix: admin consent missing
+    /// (<c>ConsentRequired</c>), a policy that only explains itself (<c>MessageOnly</c>, e.g. Conditional Access blocking
+    /// an unmanaged device), or a claims challenge the client cannot send (#1571 fix round 2). The organization's policy
+    /// refused the request; never set together with <see cref="IsCallerFixable"/>. The error code stays
+    /// <see cref="DataverseUserClientErrorCodes.OboExchangeFailed"/>.
+    /// </summary>
+    public bool IsRefusedByPolicy { get; init; }
 
     /// <summary>Creates a success response.</summary>
     public static DataverseUserResponse Ok(int statusCode, JsonElement? body) => new()

@@ -549,7 +549,7 @@
                         <labels>
                           <label description="Communications Page (grid)" languagecode="1033" />
                         </labels>
-                        <control id="WebResource_new_2" classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}">
+                        <control id="WebResource_CommunicationsGrid" classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}">
                           <parameters>
                             <Url>sprk_communicationspage.html</Url>
                             <PassParameters>false</PassParameters>
@@ -779,6 +779,27 @@
                     <row />
                     <row />
                     <row />
+                  </rows>
+                </section>
+                <section name="section_ebilling" id="{538CB90A-11B9-5276-6BFB-E2B637647278}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Billing firm" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{8728133F-A95E-3DBD-2296-D2D0AB4129DF}">
+                        <labels>
+                          <label description="Billing Firm" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingfirm" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingfirm" />
+                      </cell>
+                      <cell id="{8D8B35A6-7F77-670A-A31F-8696C5179061}">
+                        <labels>
+                          <label description="Billing Responsible" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingresponsible" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingresponsible" />
+                      </cell>
+                    </row>
                   </rows>
                 </section>
               </sections>
@@ -1451,6 +1472,7 @@
         <Library name="sprk_/scripts/bff_auth.js" libraryUniqueId="{1e82d24f-3e75-20b8-37e0-05fe29864648}" />
         <Library name="sprk_/scripts/assignedaccess_postsave.js" libraryUniqueId="{eb213817-b296-9b62-6137-113e5b8be344}" />
         <Library name="sprk_/scripts/accessstatus_banner.js" libraryUniqueId="{01cc0365-ad75-a93f-bd44-a8cdcb40fbc2}" />
+        <Library name="sprk_/scripts/communications_grid_onload.js" libraryUniqueId="{c0a1d6e2-4b7f-4e0a-9d3c-2f6b8e1a7c51}" />
       </formLibraries>
       <events>
         <event name="onload" application="false" active="false">
@@ -1462,6 +1484,7 @@
             <Handler functionName="Spaarke.MatterInsightCard.onLoad" libraryName="sprk_matter_insight_card_mount.js" handlerUniqueId="{93e6f182-d942-47db-b5f6-513d6b55eb00}" enabled="true" parameters="" passExecutionContext="true" />
             <Handler functionName="Spaarke.AssignedAccess.onLoad" libraryName="sprk_/scripts/assignedaccess_postsave.js" handlerUniqueId="{a7ee2da3-cc6e-8224-b5d5-715307f272ad}" enabled="true" parameters="" passExecutionContext="true" />
             <Handler functionName="Spaarke.AccessStatus.onLoad" libraryName="sprk_/scripts/accessstatus_banner.js" handlerUniqueId="{61d68a00-ef8d-ba28-c02a-6320abf82c13}" enabled="true" parameters="" passExecutionContext="true" />
+            <Handler functionName="Spaarke.CommunicationsGrid.onLoad" libraryName="sprk_/scripts/communications_grid_onload.js" handlerUniqueId="{c0a1d6e2-4b7f-4e0a-9d3c-2f6b8e1a7c52}" enabled="true" parameters="" passExecutionContext="true" />
           </Handlers>
         </event>
       </events>

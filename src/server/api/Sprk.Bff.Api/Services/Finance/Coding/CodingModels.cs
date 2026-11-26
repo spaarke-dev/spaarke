@@ -68,14 +68,18 @@ public sealed record CodingCoreRecord(string EntityLogicalName, Guid Id)
 public sealed class ResolvedCodeSet
 {
     private readonly Dictionary<string, string>[] _canonical;
+    private readonly Dictionary<string, Guid>[] _ids;
 
+    /// <param name="codeIds">ISS-051: the <c>sprk_billingcode</c> row of each allowed code, by kind and code (the spelling of the set). Kept out of
+    /// <see cref="InvoiceCodeOption"/>, which is what the model reads. Null (a set built without rows) gives every code no id.</param>
     public ResolvedCodeSet(
         Guid codeSetId,
         string codeSetName,
         CodeSetSource source,
         IReadOnlyList<InvoiceCodeOption> taskCodes,
         IReadOnlyList<InvoiceCodeOption> activityCodes,
-        IReadOnlyList<InvoiceCodeOption> expenseCodes)
+        IReadOnlyList<InvoiceCodeOption> expenseCodes,
+        IReadOnlyDictionary<(BillingCodeKind Kind, string Code), Guid>? codeIds = null)
     {
         CodeSetId = codeSetId;
         CodeSetName = codeSetName ?? throw new ArgumentNullException(nameof(codeSetName));
@@ -85,6 +89,30 @@ public sealed class ResolvedCodeSet
         ExpenseCodes = expenseCodes ?? throw new ArgumentNullException(nameof(expenseCodes));
 
         _canonical = [Index(taskCodes), Index(activityCodes), Index(expenseCodes)];
+        _ids =
+        [
+            new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase),
+        ];
+        foreach (var ((kind, code), id) in codeIds ?? new Dictionary<(BillingCodeKind, string), Guid>())
+        {
+            // Only a code that is in the allowed list gets an id: an id never makes a code allowed (FR-22).
+            if (id != Guid.Empty && _canonical[Slot(kind)].ContainsKey(code))
+            {
+                _ids[Slot(kind)].TryAdd(code, id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// ISS-051: the <c>sprk_billingcode</c> row of an allowed <paramref name="code"/> of <paramref name="kind"/> (matching as
+    /// <see cref="TryGetCode"/>), or <c>null</c> when the code is not in the set or the set was built without its rows.
+    /// </summary>
+    public Guid? CodeIdOf(BillingCodeKind kind, string? code)
+    {
+        var key = code?.Trim();
+        return !string.IsNullOrEmpty(key) && _ids[Slot(kind)].TryGetValue(key, out var id) ? id : null;
     }
 
     public Guid CodeSetId { get; }
@@ -152,6 +180,13 @@ public sealed record LineCodingRequest
     /// <summary>The lines to code. <see cref="InvoiceLineToCode.LineKey"/> must be unique within the request.</summary>
     public required IReadOnlyList<InvoiceLineToCode> Lines { get; init; }
 
+    /// <summary>
+    /// Whether FR-22 step 1 (a code set that holds every code the firm billed) may choose the set. False for an invoice submitted without a
+    /// firm (ebilling-r1 task 095c-3): the firm-code step is skipped and the record's code set (matter type, practice area, suggestion,
+    /// settings default) applies. Default true.
+    /// </summary>
+    public bool IncludeFirmCodes { get; init; } = true;
+
     /// <summary>Tenant id for the AI run context. Not sent to the model.</summary>
     public string? TenantId { get; init; }
 }
@@ -186,7 +221,10 @@ public sealed record RefusedCode(BillingCodeKind Kind, string Code, CodeRefusalR
 /// One code slot of a line: the AI's validated code next to the firm's as billed (D-05). <see cref="Mismatch"/> is true
 /// when both are present and differ.
 /// </summary>
-public sealed record LineCodeValue(string? Code, string? FirmCode, bool Mismatch);
+/// <param name="CodeId">ISS-051: the <c>sprk_billingcode</c> row of <see cref="Code"/> in the line's resolved set
+/// (<see cref="ResolvedCodeSet.CodeIdOf"/>), which the line's code lookup is set to. Null when there is no code, or when the code was stored
+/// before ISS-051 (its row was not recorded).</param>
+public sealed record LineCodeValue(string? Code, string? FirmCode, bool Mismatch, Guid? CodeId = null);
 
 /// <summary>The coding of one line.</summary>
 public sealed record LineCodingResult

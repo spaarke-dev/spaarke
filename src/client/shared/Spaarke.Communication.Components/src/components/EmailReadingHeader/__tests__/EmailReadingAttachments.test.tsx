@@ -8,7 +8,9 @@
  * opens the shared `RichFilePreviewDialog` (mocked — pulls iframe/Graph
  * machinery unsuitable for jsdom, same rationale as the PCF's own test mock),
  * the zero-attachments negative case (empty state, no crash, no phantom rows),
- * and dark-mode theming (ADR-021).
+ * dark-mode theming (ADR-021), and "Open file" (desktop) behaving like every other surface (ISS-004):
+ * an Office file launches the Office app through a hidden iframe, any other file downloads through the
+ * BFF, and a failure is shown to the user.
  */
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -65,6 +67,9 @@ jest.mock('@spaarke/ui-components', () => {
       return (
         <div data-testid="rich-file-preview-dialog" data-document-id={props.documentId}>
           <span data-testid="preview-doc-name">{props.documentName}</span>
+          <button data-testid="preview-open-file" onClick={() => props.onOpenFile('desktop')}>
+            open-file
+          </button>
           <button data-testid="preview-open-record" onClick={() => props.onOpenRecord()}>
             open-record
           </button>
@@ -101,6 +106,11 @@ function makeDataService(
 function makeNavigation(): IEmailAttachmentsNavigationService {
   return { openRecord: jest.fn().mockResolvedValue(undefined) };
 }
+
+afterEach(() => {
+  document.querySelectorAll('iframe').forEach(frame => frame.remove());
+  mockAuthenticatedFetch.mockReset();
+});
 
 describe('EmailReadingAttachments', () => {
   it('renders true attachments and excludes inline (cid:) images (FR-12)', async () => {
@@ -231,5 +241,173 @@ describe('EmailReadingAttachments', () => {
     await waitFor(() => expect(screen.getByText('Contract.pdf')).toBeInTheDocument());
     expect(consoleErrorSpy).not.toHaveBeenCalled();
     consoleErrorSpy.mockRestore();
+  });
+
+  // ── ebilling-r1 task 118: the profile's Invoice flag → badge + "Submit as invoice" ─────────────────────────────
+  describe('Invoice flag (task 118)', () => {
+    const DOCUMENT_TYPE_INVOICE = 100000001;
+    const DOCUMENT_TYPE_CONTRACT = 100000000;
+    const row = (id: string, name: string, doc: string | null) => ({
+      sprk_communicationattachmentid: id,
+      sprk_name: name,
+      sprk_attachmenttype: ATTACHMENT_TYPE_FILE,
+      _sprk_document_value: doc,
+    });
+
+    function renderFlagged(onSubmitAsInvoice?: (documentId: string) => void) {
+      const dataService = makeDataService(
+        [
+          row('a1', 'Invoice-10044725.pdf', 'doc-1'),
+          row('a2', 'Contract.pdf', 'doc-2'),
+          row('a3', 'notes.pdf', 'doc-3'),
+          row('a4', 'orphan.pdf', null),
+        ],
+        [
+          { sprk_documentid: 'doc-1', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_INVOICE },
+          { sprk_documentid: 'doc-2', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_CONTRACT },
+          // doc-3: not profiled yet - no type at all
+          { sprk_documentid: 'doc-3', sprk_hasfile: true, sprk_documenttype: null },
+        ]
+      );
+      renderWithProvider(
+        <EmailReadingAttachments
+          selectedId="comm-1"
+          dataService={dataService}
+          navigation={makeNavigation()}
+          apiBaseUrl="https://bff.example.com"
+          onSubmitAsInvoice={onSubmitAsInvoice}
+        />
+      );
+      return dataService;
+    }
+
+    it('shows the Invoice badge only on the attachment whose document is typed Invoice', async () => {
+      renderFlagged();
+      await waitFor(() => expect(screen.getByText('Invoice-10044725.pdf')).toBeInTheDocument());
+      const badges = screen.getAllByTestId('attachment-invoice-badge');
+      expect(badges).toHaveLength(1);
+      const flaggedRow = screen.getByText('Invoice-10044725.pdf').closest('[role="listitem"]') as HTMLElement;
+      expect(flaggedRow).toContainElement(badges[0]);
+      // Another type, no type yet, and no document at all show none.
+      for (const name of ['Contract.pdf', 'notes.pdf', 'orphan.pdf']) {
+        const other = screen.getByText(name).closest('[role="listitem"]') as HTMLElement;
+        expect(other.querySelector('[data-testid="attachment-invoice-badge"]')).toBeNull();
+        expect(other.querySelector('[data-testid="attachment-submit-as-invoice"]')).toBeNull();
+      }
+    });
+
+    it('reads the type in the existing single sprk_document query (query count unchanged)', async () => {
+      const dataService = renderFlagged();
+      await waitFor(() => expect(screen.getByText('Invoice-10044725.pdf')).toBeInTheDocument());
+      const calls = (dataService.retrieveMultipleRecords as jest.Mock).mock.calls;
+      expect(calls.map(c => c[0])).toEqual(['sprk_communicationattachment', 'sprk_document']);
+      expect(calls[1][1]).toContain('sprk_documenttype');
+    });
+
+    it('"Submit as invoice" opens the flow with that attachment document and does not open the preview', async () => {
+      const onSubmitAsInvoice = jest.fn();
+      renderFlagged(onSubmitAsInvoice);
+      await waitFor(() => expect(screen.getByText('Invoice-10044725.pdf')).toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('attachment-submit-as-invoice'));
+      expect(onSubmitAsInvoice).toHaveBeenCalledTimes(1);
+      expect(onSubmitAsInvoice).toHaveBeenCalledWith('doc-1');
+      expect(screen.queryByTestId('rich-file-preview-dialog')).not.toBeInTheDocument();
+    });
+
+    it('negative: a flagged attachment that is not a PDF keeps the badge but offers no "Submit as invoice"', async () => {
+      const dataService = makeDataService(
+        [row('a1', 'Invoice-scan.docx', 'doc-1'), row('a2', 'Invoice-10044725.PDF', 'doc-2')],
+        [
+          { sprk_documentid: 'doc-1', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_INVOICE },
+          { sprk_documentid: 'doc-2', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_INVOICE },
+        ]
+      );
+      renderWithProvider(
+        <EmailReadingAttachments
+          selectedId="comm-1"
+          dataService={dataService}
+          navigation={makeNavigation()}
+          apiBaseUrl="https://bff.example.com"
+          onSubmitAsInvoice={jest.fn()}
+        />
+      );
+      await waitFor(() => expect(screen.getByText('Invoice-scan.docx')).toBeInTheDocument());
+      expect(screen.getAllByTestId('attachment-invoice-badge')).toHaveLength(2);
+      const docxRow = screen.getByText('Invoice-scan.docx').closest('[role="listitem"]') as HTMLElement;
+      const pdfRow = screen.getByText('Invoice-10044725.PDF').closest('[role="listitem"]') as HTMLElement;
+      expect(docxRow.querySelector('[data-testid="attachment-submit-as-invoice"]')).toBeNull();
+      expect(pdfRow.querySelector('[data-testid="attachment-submit-as-invoice"]')).not.toBeNull();
+    });
+
+    it('without a handler the badge still shows and there is no action', async () => {
+      renderFlagged(undefined);
+      await waitFor(() => expect(screen.getByTestId('attachment-invoice-badge')).toBeInTheDocument());
+      expect(screen.queryByTestId('attachment-submit-as-invoice')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── ISS-004: "Open file" (desktop) ─────────────────────────────────────────────────────────────────────────────
+  describe('Open file (desktop)', () => {
+    async function openPreview() {
+      const dataService = makeDataService(
+        [
+          {
+            sprk_communicationattachmentid: 'a1',
+            sprk_name: 'Contract.docx',
+            sprk_attachmenttype: ATTACHMENT_TYPE_FILE,
+            _sprk_document_value: 'doc-1',
+          },
+        ],
+        [{ sprk_documentid: 'doc-1', sprk_hasfile: true, sprk_graphitemid: 'item-1' }]
+      );
+      renderWithProvider(
+        <EmailReadingAttachments
+          selectedId="comm-1"
+          dataService={dataService}
+          navigation={makeNavigation()}
+          apiBaseUrl="https://bff.example.com"
+        />
+      );
+      await waitFor(() => expect(screen.getByText('Contract.docx')).toBeInTheDocument());
+      fireEvent.click(screen.getByText('Contract.docx'));
+      fireEvent.click(await screen.findByTestId('preview-open-file'));
+    }
+
+    const jsonResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+
+    it('Office file: launches the desktop URL through a hidden iframe, without downloading', async () => {
+      mockAuthenticatedFetch.mockImplementation(async () =>
+        jsonResponse({
+          desktopUrl: 'ms-word:ofe|u|https://spe/contract.docx',
+          webUrl: 'https://spe/contract',
+          fileName: 'Contract.docx',
+        })
+      );
+      await openPreview();
+
+      await waitFor(() => {
+        const frame = document.querySelector('iframe');
+        expect(frame).not.toBeNull();
+        expect(frame!.getAttribute('src')).toBe('ms-word:ofe|u|https://spe/contract.docx');
+        expect(frame!.style.display).toBe('none');
+      });
+      const urls = mockAuthenticatedFetch.mock.calls.map(call => String(call[0]));
+      expect(urls.some(u => u.includes('/content'))).toBe(false);
+    });
+
+    it('a failed download shows a message in the surface instead of failing silently', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => {});
+      mockAuthenticatedFetch.mockImplementation(async (url: string) => {
+        if (url.includes('/open-links'))
+          return jsonResponse({ webUrl: 'https://spe/contract', fileName: 'Contract.pdf' });
+        throw new Error('HTTP 403');
+      });
+      await openPreview();
+
+      expect(await screen.findByTestId('attachment-open-error')).toHaveTextContent(
+        "Couldn't open the file. Try again, or download it from the record."
+      );
+      expect(document.querySelector('iframe')).toBeNull();
+    });
   });
 });

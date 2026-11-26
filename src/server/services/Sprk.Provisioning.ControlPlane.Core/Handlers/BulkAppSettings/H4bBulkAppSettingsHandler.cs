@@ -346,7 +346,8 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                     $"'{sourceKey}' from {source.Location}, which is absent or empty" +
                     (source.ProducerHandlerId is null
                         ? $" — supply it at intake ({source.Location})."
-                        : $" — {source.ProducerHandlerId} must complete before H4b.");
+                        : $" — {source.ProducerHandlerId} must complete before H4b. If {source.ProducerHandlerId} already " +
+                          "completed, the run predates this output and a resume does not re-run a completed handler: start a new run.");
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BulkAppSettingsRejectionCodes.PerEnvInputMissing, diagnostic, cancellationToken)
                     .ConfigureAwait(false);
@@ -631,11 +632,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 QuarantinedAt = DateTimeOffset.UtcNow,
             };
         }
-        run.GateStates[$"h4b-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h4b-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

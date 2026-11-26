@@ -906,3 +906,269 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 3. **046c dev apply: approved.** Core User gains its three AppendTo rights first and is verified; then Basic User's write rights on Spaarke tables are removed and verified. Rollback: `-Restore -Gap R3`. Users holding Basic plus an add-on without Core User are counted before the removal (2026-11-06 condition).
 4. **Stash `da43b8a2` (lint-staged automatic backup): drop it** once its content is confirmed committed.
 5. **mcp-bff re-merge:** the owner relays it; it does not hold this project.
+
+## 2026-11-07 — 033 dropped (owner, in fm's session)
+
+- The system creators of task 033 (generation, playbook, Signal, Decision) stay outside `RecordCreationService` as named exceptions under the W3 direction; ontology-r1 agreed that leaving the ledger writers out is valid. No field mapping goes into Signal or Decision Record rows.
+- 033's one piece another task needed (wiring the app-only column-metadata reader into Repair, including the Money attributes of #2124) moves into task 052.
+- Task 060's matrix names these creators as exceptions with guards.
+
+## 2026-11-07 — UAC-r2 review of the 032 design (`task/fm-032` a7b787ffbe): approved with conditions
+
+Binding on 032's implementation, together with ebilling-r1's answers (pending):
+- **Reader set (Q-U1):** a role-source assertion in `FeatureRolePrivilegeGuardTests` pins that `sprk_invoice` Read depth is never wider than the smallest core-table Read depth, so a widening fails CI.
+- **Partner columns (Q-U2):** the protected targets are the union of the invoice modules' `ReadableColumns`, plus the columns the invoice search-index document builder reads, unless ebilling-r1 shows partners have no search path to invoices. Ebilling-r1 confirms that partner notifications and exports render only module columns (Q-E5).
+- **#2188 exemption (Q-U3):** one entry, `Uses = 1`, pinned to the system-reader call site.
+- **Field security (Q-U4):**
+  - a metadata fault or an unknown `IsSecured` maps nothing;
+  - a source column missing from a successful metadata answer drops only its rule, with a Warning naming the rule;
+  - metadata is read per delivery, with no cache.
+- **Secure-source gate (Q-U5), required:** map nothing when the core record is Secure, or under no-access or hard-deny. Reuse Repair's `SourceMayBeCopiedAsync` logic, not a re-implementation. Tests: a Secure core maps nothing and writes the admin note (must fire); an ordinary core maps (must not fire).
+- **Mapped lookups (Q-U6):** written app-only with no AppendTo check, accepted. Filing and access-conferring lookups stay protected. Lookups that target `systemuser`, `team` or `contact` are protected too, unless they are on an explicit allow-list.
+
+## 2026-11-07 — ebilling-r1 review of the 032 design (a7b787ffbe): approved with conditions
+
+These conditions are fixed in the design before any code, together with UAC-r2's above. Checked against `work/ebilling-r1` e418803715.
+- **A refused mapped value (Q-E1): re-commit once without the mapped columns.**
+  - Only when `FailedRequestIndex == 0`, at least one column was mapped, and the outcome is not unknown.
+  - The commit and its catch are wrapped in one local function, called at most twice, so the second attempt goes through the whole existing catch chain.
+  - Request 0 and the submission update are rebuilt with the same count and order.
+  - §6 also checks option-set membership, numeric min, max and precision, and that a lookup target exists.
+  - Tests: refused once, refused twice, refused with nothing mapped.
+- **Fault note (Q-E2): faults only.** It is a new `AdminAttentionText` segment kind that `Merge` and `WithoutStopped` recognise, in a fixed order, codes only. The combined text stays within `AdminAttentionMaxLength` (500); the Signal segment shrinks to make room. A test covers the cap.
+- **Protected even when empty (Q-E3):** `sprk_currency`, `sprk_invoicedate`, `sprk_billingperiodstart` and `sprk_billingperiodend`, and `sprk_correlationid`.
+- **Re-delivery (Q-E4):** a test pins that two deliveries, the first rolled back, store exactly the second delivery's values, and that a resume reads nothing.
+- **Search index (Q-E5):** `InvoiceIndexDocument.InvoiceColumns` is excluded by reference. Partners have no search path to invoices; partner rendering is `ReadableColumns` only.
+- **Constructor (Q-E6):** three optional trailing parameters. A DI test resolves the persister from the real container with all three non-null, and one Warning is logged when the step does not run.
+- **C1, protected set:** an allow-list of target columns approved by ebilling-r1 and UAC-r2, with the deny-list as a second check. `sprk_billingexport` and `sprk_invoiceduedate` are protected unless the owner approves the due date as a target.
+- **C2, secure gate:** gate on the owner answer's secure-if-any, already resolved in the persister, so Secure ancestors are covered. Secure means map nothing and log a code, with no admin note. With UAC-r2 Q-U5, this also covers no-access and hard-deny, through Repair's `SourceMayBeCopiedAsync` logic, failing closed.
+- **C3, all or nothing:** any rule-fault warning from `ApplyFillOnly` means nothing is mapped and the note is written. A test covers it.
+- **C4, determinism:** a static resolver-field key set; ties in `ExecutionOrder` are broken by rule id; the lookup overload of `IsFilingLookup` is used.
+- **C5, money guard:** the persister exposes its owned-column list, so the step loads no money or firm string (`InvoiceMoneyColumnsAppOnlyWriteGuardTests`). That guard joins the regression list.
+
+**What 032's code waits on:** 052a's metadata reader (`task/fm-052a`), and the persister layout in `work/ebilling-r1`.
+- **UAC-r2 follow-up (2026-11-07):**
+  - UAC-r2 backs the allow-list (C1). The proposed list needs sign-off from both ebilling-r1 and UAC-r2.
+  - The secure-source gate also maps nothing when the core record is the object of any active, well-formed No Access entry, internal walls included. It reuses `NoAccessListReader` and `NoAccessShareEnforcer.TryClassify`, keyed alongside the owner answer's secure-if-any. A failed read maps nothing.
+  - Must-fire and must-not-fire tests.
+
+## 2026-11-07 — Owner approves the 045 recommendations (in fm's session)
+
+Design: `task/fm-045` f35b4d12b1, `notes/task-045-regarding-propagation-design.md`. The owner chose "follow recommendation" for Q1–Q12:
+- **Q1 (a):** the 18 tables that carry the full pair.
+- **Q2 (a):** the id is filled from the agreement columns, never from the stamp columns, and never from mapped lookups.
+- **Q3 (a):** a warning on clear only.
+- **Q4 (b):** updates keep the pair in step with a moved typed lookup, on all pair tables.
+- **Q5 (a):** an update reports a clear by log event; the response is unchanged.
+- **Q6 (c):** id-only pairs: only the reply copy is fixed.
+- **Q7:** display columns are re-derived on a move (b), and cleared otherwise (a). Renames go to the 052 report.
+- **Q8 (a):** the invoice family is re-derived on the row's own core-lookup change.
+- **Q9 (a):** direct writes are covered by the 052 report, Repair and column audit.
+- **Q10 (a):** the connections control's unlink is left as is.
+- **Q11 (a):** no change to the timing windows.
+- **Q12 (a):** the split is 045a (create step and guard 1), 045b (update planner and wiring, guard 2), 045c (invoice re-derivation, missing display columns, reply type, client number clear), plus a 052 report line.
+
+UAC-r2 (2026-11-07): the playbook Update Record and output-mapping paths run as the user, or app-only behind authoring controls. 045b adds no AppendTo check there.
+
+## 2026-11-08 — Owner decisions on 032, the repair pass, inbound mapping, checks and NFR-02 (in fm's session)
+
+- **032: option B.** Extracted invoices get Matter→Invoice mapping, including the access-conferring Assigned Attorney and Paralegal columns, with the matching access grant. The work is coordinated with ebilling-r1. ebilling-r1's answers (2026-11-08):
+  - nothing reads the invoice-level copies, now or planned, so the grant may be queued; no ebilling decision may ever read them;
+  - build on `work/ebilling-r1` after its task 082d, in a separate task branch; it reaches master in ebilling-r1's PR;
+  - mechanism: a post-commit, resumable step in `InvoiceSubmissionAfterSteps` that writes the grant first, then the fill-only columns.
+
+  Next: a design note (`notes/task-032b-design.md`, on `task/fm-032b-design`), reviewed by ebilling-r1 and UAC-r2 together. UAC-r2 signs off the grant path, and answers the re-file question (revoke or keep).
+- **Repair pass (052):** task and account are excluded. A contact must be owned by the customer's main business-unit team.
+  - Today, a contact created in the model-driven form is owned by the creating user. Dataverse's default applies, and no server code runs on that create (ADR-002: no plugins).
+  - BFF chat creates use the resolver's team.
+  - Nothing re-owns contacts after create. On dev, contacts were moved to the "Spaarke Business Unit 1" team by a manual re-own on 2026-11-02.
+  - Proposal: a contact owner-only rule in 052b's pass. It finds the main team per environment, and refuses and logs if it can't, never falling back to the creator. No field mapping on contacts. UAC-r2 reviews it.
+  - Open: which team is "main". The root BU "Spaarke"'s team, or a configured team?
+- **Inbound mapping:** recorded as a known gap, DI-022 (#2633).
+- **Checks:** (a) PASS. In place of (c), the owner hit a push-preview defect: a table with no profile failed the whole preview. It is fixed in scope as task 076c (`task-040-notes.md`).
+- **NFR-02:** the dev r3 run (`task-021-live.md`) shows a p95 delta of +1288 ms. The owner moved the verdict to UAT: "we'll test this in UAT". No 049d work starts on the dev result.
+
+## 2026-11-08 — 032b design reviews; owner on O1/O2 and the contact team (in fm's session)
+
+Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
+- **ebilling-r1 agrees to E1–E6.**
+  - **E4 condition:** the admin note uses the existing admin-attention writer, stays within the 500-character cap, and writes no status and no other column.
+  - **E6 condition:** sprk_description and sprk_highpriority never join the external invoice ReadableColumns or the firm-facing rendering without both projects' review.
+  - **Base:** 082d is merged into work/ebilling-r1 (7cd62a1710; tip d58e3a3554).
+- **UAC-r2 approves, with two conditions.**
+  - **C1:** the job payload pins the core (table, id) from the persister's committed result. Gate 2 requires invoice core == payload core == submission core, plus a must-fire re-point test.
+  - **C2:** settle U3 before 032b-2. Enumerate who resolves membership for sprk_invoice.
+    - If no caller does, the four assignee copies confer nothing. sprk_invoice leaves the registry, the copies become display copies, and the grant machinery goes.
+    - If any caller does, the copies are cleared on a core change and on Revoked/Declined.
+  - **U1, U2, U4, U5:** approved.
+- **Owner, O2 (move the mapping gates into a shared class):** approved. The owner also asked which other create processes need the same gates. An inventory of no-caller creators is in progress.
+- **Owner, O1 (after-save job vs inline):** not decided. The owner asked:
+  - what the implications are when a process fires on the field values (a form or server trigger);
+  - and stated that this must also hold for other record types that inherit the sprk_assigned* values.
+
+  The design note's round 2 answers this with a consumer inventory. It also evaluates inline-before-the-transaction if U3 lands on (c).
+- **Owner, contact owner team:** an environment setting is acceptable. First check whether a shared mechanism already exists, and use one consistent process rather than a parallel approach. An investigation is in progress.
+- **032b round 2 (9083f5df93), UAC-r2: approved (2026-11-08).**
+  - **U3 → (c), confirmed.** Re-checked on master and on work/ebilling-r1: the only rights-granting membership callers are asked for project, matter and work assignment only, so the sprk_invoice registry entry grants nothing. Dev has no app-setting override of the registry.
+  - **U7 accepted** from the access side. It is a visible product change (Daily Briefing stops selecting invoices through these columns), so the owner decides.
+  - **E7:** no further OK needed under (c), provided every gate still runs before any value is read.
+  - **Inline placement:** fine. C1 holds by construction.
+  - **Registry removal:** done in fm's branch with UAC-r2's review, landing before or with 032b-2, together with the guard. The PR text must state the push side effect: the four columns become one-time and are never re-pushed.
+- **032b round 2, ebilling-r1: confirmed (2026-11-08).**
+  - **Inline placement:** in `PersistCoreAsync`, after `FillInvoice` and before `BuildInvoiceCreateRequest`. Values go in request 0, there is one re-commit without them, and a resume never maps. The §7 constraint is accepted.
+  - **Conditions for 032b-2:**
+    - Branch from the CURRENT origin/work/ebilling-r1 tip (verify with `merge-base --is-ancestor`), and re-anchor line numbers.
+    - Add 082d's snapshot tests (`ProcedureSnapshot*`, the add-line and correction round trips from e552c406f8) to the regression list. `sprk_findingsjson` must survive the re-commit rebuild byte for byte.
+    - T-E7 asserts that `sprk_findingsjson` is identical to an unmapped run.
+    - Send ebilling-r1 the diff before it merges into their work branch.
+  - **Owner decisions still open:** O1 (both reviewers prefer inline) and U7 (Daily Briefing).
+- **Owner (2026-11-08): O1 inline placement: yes. U7 (Daily Briefing stops selecting invoices through the copied assignee columns): accepted.** With O2 approved earlier, the 032b design (9083f5df93) is final.
+  - 032b-1 (fm branch: shared gates, registry removal with its guard, inventory of no-caller creators) merges to master first.
+  - Then 032b-2 and 032b-3 run on the current work/ebilling-r1.
+- **Contact owner team:** reuse `ExternalAccess:CustomerBusinessUnitId`, which resolves the BU's single default Owner team. It already sets the owner for the four identity-contact creates and fails closed when unset or ambiguous. The owner did not object, so it applies to the repair pass's contact rule (052b) and to the chat contact create. UAC-r2 reviews.
+
+## 2026-11-08 — Task 060: ownership matrix; outbox and gate-record exceptions kept
+
+- §5.2 of `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` holds the per-table ownership matrix. It has 25 rows, one per `RecordTableRules.All` entry, and I-6 points to it.
+- **Notification outbox: keep.** Recipient-owned rows are the BFF's per-user delivery key (app-only reads filtered to the caller; no target-user parameter). No Spaarke role holds any privilege on the table, and the row is filed under nothing.
+- **`DecisionRecordWriter` gate record about an unfiled communication: keep.** It is owned by the communication's own owning user and shared Read with its internal sharees (D-144 as amended, D-169). Its readers follow the communication's. It is secure-if-any first and fails closed without a readable, active user owner.
+- Contact row: today's two rules, plus "052b, pending" (every contact to the `ExternalAccess:CustomerBusinessUnitId` team).
+- Found in passing: row I-18 is stale (the Signal owner is now the resolver's team): DI-023, #2636.
+
+## 2026-11-08 — 032b-1 review by UAC-r2; invoice Assigned To targeting (owner, in fm's session); mapping-source rule
+
+- **UAC-r2 approved 032b-1 on the access side** (63fb6ce98e, 79b1aab39c, 4d24082a95). `AssignedAccessMaterializer.RegistryFor` grants on root types only, so removing the invoice entry revokes nothing.
+- **Premise correction (UAC-r2 F1):** Office quick-create writes the invoice's Assigned To to `sprk_assignedto1` (`OfficeService.InvoiceAssignedToAttribute`). U7 was accepted on the belief that nothing writes it. The `MembershipOptions` comment now states the Office writer.
+- **Owner decision (corrected U7): invoice Assigned To targets people without conferring access.** Daily Briefing and notifications also read the invoice's `sprk_assignedto1/2`, outside the access-conferring registry. No new grant path; the registry/display-copy guard still holds. Keeps the standing rule "notifications target Created By and Assigned To". Built as task 032b-1b.
+- **Mapping-source rule (UAC-r2, 2026-11-08):** a source record that is secure (the secure-if-any answer the 032b gate uses; one predicate) maps only into a create that is secure from creation. Otherwise the create maps nothing and returns a warning with a stable code; a source whose answer faults maps nothing. Enforced in the shared `MapFieldsAsync`, so every create that maps on the server gets it. The Event, To Do, Invoice, Work Assignment and Report Card wizards still map in the browser until tasks 023–027 move them onto the server route (FR-22); until then this rule does not apply to their mapped values. The Project wizard preview turns Secure on and locks it when the chosen Matter is secure (a project under a secure parent is secure). Built in task 022's fix round 2.
+
+## 2026-11-09 — Direct message audience (owner)
+
+- Option A approved: a Direct message records both participants itself, `sprk_sentby` and a new `sprk_directrecipient` (lookup to systemuser), both stamped by the BFF at create and secured in 054b together with the message's thread lookup. The audience UAC-r2 task 198 grants to is exactly that pair; it is never read from the thread. Option C (the Direct team owns threads) was rejected: "threads do not move" stands. Detail in `tasks/054-direct-message-owner-team.poml`.
+
+## 2026-11-10 — Outbound Direct messages go through the pair thread (owner)
+
+- Option (a) approved: an outbound Direct message (a Message send with no `ThreadId` and no record filing) whose addressees resolve on the server to exactly one internal, enabled, non-application user other than the sender is filed into the Direct thread of that pair (`IDirectThreadAccessService.FindOrCreateDirectThreadAsync(sender, recipient)`), so piece 2 stamps `sprk_sentby` + `sprk_directrecipient` on it. Recipient resolution compares systemuser ids only. Any other send keeps today's path and gets no recipient (fail closed). Inbound stays fail-closed. UAC-r2 reviews the change (it changes how Direct threads are created and shared). Option (b), defer, was rejected. Detail: `notes/task-054-notes.md`, "054a piece 2b".
+
+## 2026-11-11 — 054b and piece 3 (owner)
+
+- **054b rule 2 guard: strict pair.** Filing never anchors a Direct-typed thread to a record when it is a strict Direct pair (`DirectMessageRecipient.ReadStrictPairShapeAsync`) or any of its messages carries `sprk_directrecipient`; a read fault means no anchor. Other Direct-typed threads (inbound email threads) still anchor, as decided 2026-10-11. A type-only guard was rejected because a thread created without a record is typed Direct.
+- **Piece 3 while the Direct settings are unset: send normally.** While both `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` are unset on an environment, the Direct owner rule is off: Direct messages keep today's owner and nothing is refused. Once the settings are set, a Direct message with a valid stamped pair is owned by the Direct team; a configuration that is set but invalid (one setting missing, an ambiguous name, a team with members, a business unit with users, the root or Secure unit) refuses a send with 409 before anything is sent, and after the row exists keeps today's owner and logs the Error (AC2). This refines AC2: "unset" is off, not invalid. Lets a BFF with piece 3 deploy before an environment's Direct setup.
+
+### 2026-11-11 (later) — piece 3 split and its open points
+
+- **Split.** Piece 3 runs as 3a (lookup state + the one owner step on the three join sites + pre-send refusal + source-scan ArchTest), then 3b (unfile direction), then 3c (registry/census/guard updates + notes). Reason: one agent could not hold it, and 3b needed UAC-r2's answer.
+- **Pre-send refusal scope (owner).** Only a 1:1 Message send (exactly one other person, no record filing) is refused when the Direct settings are set but invalid. Group, record-filed and email sends go out as today.
+- **Transient lookup fault before a 1:1 send (owner).** 503, "try again"; nothing is sent. 409 is kept for a configuration problem an admin must fix.
+- **Only one setting set (UAC-r2 agreed).** A new `PartiallyConfigured` refusal inside `DirectMessageOwnerTeam` (one lookup for the BFF and 198). `IsNotConfigured` only when BOTH are unset (whitespace = unset). Stable code `partially_configured` naming the missing setting by name. 198 then reads it as unknown (nothing granted or revoked; run status TeamUnknown with a Warning). Must-fire tests in 198's test files are named edits by this project; 198's production code is unchanged.
+- **Unfile cascade (UAC-r2 agreed, named edit by this project, reviewed by UAC-r2).** In `SecureChildReconciler` a content row follows its message to the Direct team only when the message's owner is the RESOLVED Direct team (ids, non-null). Secure-owned and ordinary messages keep today's behaviour. Lookup unknown/faulted/partial → no owner write (no KeepCreator fallback), logged with a stable event code; the next reconcile retries.
+
+### 2026-11-11 (later) — piece 3b, the unfile direction (owner)
+
+- **Unfile when the Direct team cannot be confirmed: refuse it.** For an eligible Direct message (valid stamped pair, thread typed Direct and not the default thread), an unfile whose lookup does not resolve is refused before anything is written: 409 for a configuration problem, 503 for a fault. Nothing changes and the user can retry. `NotConfigured` keeps today's behaviour. This is the same rule as the 1:1 send. If the lookup resolves but the owner write then fails, the error is logged and the 054c script is the recovery.
+- **Every unfile path follows the same rule.** The product re-file (`OwnedChildWrite.RefileAsync`), the generic record update, the AI Update Record action and the field-mapping push all use 3b's one unfile rule for a communication, so an unfile behaves the same whichever path does it.
+- **Scope note from the 3b scoping pass.** `IncomingAssociationResolver` is not an unfile site (a create question, and additive filings only). The `SecureChildReconciler` cascade needs no edit: a message's content rows have the message as their parent, so 3a's resolver rule answers for them. On an unfile from an ordinary record the 3b step moves the content rows itself; from a Secure record it leaves them to the reconciler pass, which also removes the secure mirror.
+
+### 2026-11-12 — piece 3b review outcome (UAC-r2, owner)
+
+- **#2722 decided (owner, via UAC-r2).** An unfiled communication that is not an eligible Direct message moves to its creator's business-unit team (D-11), except one that left a Secure or Restricted record, which keeps its former owner. 3b keeps Unchanged for it. UAC-r2 builds the rule as a follow-up after 3b reaches master, in the single decision point `RecordOwnershipResolver.NonDirectUnfileAnswer` (named in 3b for this), so there is one writer of that file at a time.
+- **Documents linked through `sprk_relatedcommunication` (UAC-r2, #2728).** A document whose only link to a Direct message is `sprk_relatedcommunication` keeps its owner when the message is unfiled. Making it follow its communication as an ownership parent is UAC-r2's follow-up, together with #2722. 3b does not move it (a second writer of the secure mirror was rejected). Recorded as a 3c known limit.
+- **3b approved by UAC-r2** (including the F3 `leavesSecureOwner` change and the guard), merged `--no-ff` onto the work branch.
+
+### 2026-11-12 — task 022b: Restricted mapping source (UAC-r2, round 75; from rounds 2, 67, 81, 84, 87)
+
+- **Agreement:** `sprk_agreement.sprk_accesspermission` is declared in the SOURCE set only, so the Restricted-source check reads it and fails closed. No inheritance or enforcement on agreements. `AccessPermissionTablesGuardTests` holds the code set equal to the solution with no ratchet.
+- **Project and work assignment (SUPERSEDED by the Q2 option (c) bullet below; nothing is written in the create for a root):** the root's value is set in the create from `SecureRootInheritance`'s own decision, unchanged: the value max(own, floor) AND the access record marking the floor part inherited and the caller's value own. The max is never written as the record's own value (round 87: only inherited strictness follows a parent down). The post-create step stays and agrees with the create. No second writer.
+- **Readings confirmed:** a Standard or Limited source maps unchanged (secure sources stay with the secure copy gate); an empty value is Standard; an unreadable value fails closed; the filing refusal reuses `record_creation.mapping_source_secure_filing` with Restricted wording (no client contract change).
+- **A document filed only through the regarding pair:** a known limit. The strip fails closed; a document's access permission is a display copy with no enforcement of its own (round 81), and the reconcile brings it in step.
+- **Repair and the field-mapping push:** task 022c (#2738, DI-027), started right after 022b merges, reviewed by UAC-r2.
+- **Project and work assignment (Q2, UAC-r2 revised to option c):** round 84 already treats a filed child by the parent-derived value from its first moment, so 022b only needs to KNOW the floor and never writes it. Named edit to `SecureRootInheritance`, approved by UAC-r2: `PlanCreateAsync`'s result also returns the Access Permission floor it already computes for the new row (read-only, with an explicit "undecided" when a parent could not be read). No write behaviour changes; task 175 F1-1 stands (a create never carries the access record; the cascade writes it after the create). A Restricted source maps into a project or work assignment only when the caller's own value is Restricted or the floor is Restricted; an undecided floor strips. Two adversarial passes cover the edit; it is listed separately in the diff to UAC-r2. If the floor cannot be separated without changing what `DecideParentsAsync` decides: option (b), the strip as a stated known limit, and UAC-r2 exposes it.
+- **Agreement (Q1, follow-up):** the source check is in place; no caller path reaches it yet (`EntityAccessFilter` has no agreement entity set). Recorded as a K; no entity set added in 022b.
+
+## 2026-11-12 — 022c rules (unified-access-control-r2 confirmed)
+
+- **Push filing:** a Restricted or Unreadable mapping source never changes a child's filing. Such a child is not written (`RefileNotAllowedReasonCode`), the same as rule (a) for a secure source.
+- **Row answer (Repair and push):** the row's stored `sprk_accesspermission`, Restricted only when it reads as the Restricted option. Anything else strips or skips.
+  - Repair: the row is skipped with `record_repair.mapping_source_restricted`.
+  - Push: the child gets `field_mapping.push.restricted_source_not_restricted`. An Unreadable source gives `UndeterminedReasonCode`.
+- **Reads:** the source column joins the existing source read. A child's value is read only when the source is Restricted or Unreadable.
+- **Known limit, in both the 022b and 022c notes:** Restricted-ness is decided at the write. A target loosened later keeps the mapped values, and nothing strips them again.
+
+## 2026-11-12 — Owner go-aheads (this session), and the 045d derive-failure rule
+
+- **Owner go-aheads, given in this session on 2026-11-12:**
+  - the PR to master for 022b and 022c;
+  - the class-aware sync-mode migration on dev. The dry run read 48 rules: 36 to demote to One-time (32 Assigned-To, 4 display copies), 12 plain data already at Manual Refresh, 0 unknown. `-Apply` waits for the owner's review of that list;
+  - task 054's live steps on dev, in the binding deploy order. UAC-r2 coordinates the dev BFF deploy from master `e9208abc5e`;
+  - tasks 045d and 052b.
+- **045d, a derive failure (main session):** when the invoice-family re-derive fails (`ReadFailedCode`, `ResolverFieldsIncompleteCode` or `RecordNotFoundCode`), the write is refused through the existing `InvoiceFamilyPreWrite` refusal mapping. The refusal contract is unchanged (NFR-07).
+  - Reason: the regarding pair decides filing, so a row whose core lookup changed is never written without its five fields (fail closed).
+  - UAC-r2 and ebilling-r1 review the diff.
+
+## 2026-11-12 — Owner answers: sync-mode applied on dev, PR #2768 merge when green, 045d option (b)
+
+- **Sync-mode on dev (owner: "Apply on dev"):** `Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -Verify` reported 36 changed, 0 failed, VERIFY PASS, exit 0. Assigned-To, display-copy and filing rules are One-time; plain data rules stay Manual Refresh. Other environments still need the owner's go.
+- **PR #2768 (022b + 022c, owner: "Merge when green"):** auto-merge is on, with a merge commit.
+- **045d, a blank name or number (owner: option (b), "write what it has"):** on the generic create and update paths, the record type, the id and the URL are always written; the name and the number are written when the record has them. A blank name or number no longer refuses. A missing catalog row, a missing record or a read fault still refuses through the `InvoiceFamilyPreWrite` mapping. The submission writers keep today's all-five rule unchanged.
+- **052b review (Opus):** the fix round covers:
+  - a re-own is refused for a table whose child relationships cascade on Assign (the allow-list starts empty);
+  - the contact owner rule applies only after the secure decision (a secure parent keeps today's answer);
+  - fault outcomes retry;
+  - an unconfigured customer team skips the contact table without moving its watermark.
+  
+  unified-access-control-r2 confirmed the resolver change with four conditions, all in that round. The deployment dependency is DI-028 (#2771).
+
+## 2026-11-13 — Invoice family: a regarding pair that disagrees with the core lookup is refused (owner, #2772)
+
+- **Owner decision, given in this session on 2026-11-13: "Refuse it"** (option (a) of #2772 / DI-029).
+- **The rule.** On every invoice-family table (invoice, billing event, approval, external identifier, correction, submission), a write's regarding pair (`sprk_regardingrecordid` plus its record type) must agree with the row's core lookup. The core lookup is the effective one: the stored value, or the value written in the same request. A write whose pair disagrees is refused through each path's existing refusal form, and nothing is written. A write that moves the core lookup still gets its pair and the five resolver fields derived by the server (045d).
+- **FR-23 amended for these tables.** The regarding pair stays pushable, but on an invoice-family table a pushed pair that disagrees with the child's core lookup is refused per child. On every other table FR-23 is unchanged.
+- **Views.** ebilling-r1 recommended (a). unified-access-control-r2: either option; there is no access effect while `SecureRootInheritance.BffManagedPairTables` holds no family table (pinned by 045d).
+- **Work:** task 045e, after 045d merges (same files).
+
+## 2026-11-13 — Invoice family: a filed invoice is never moved; children name their invoice's core record (owner, EB-D-231, #2794)
+
+Owner decision EB-D-231 (ebilling-r1, filed as #2794): a wrongly filed invoice is returned to the firm and resubmitted on the right record; it is never moved. Confirmed in this session 2026-11-13, with two answers:
+- **Builder:** this project builds it as task 045g (it owns `InvoiceFamilyCoreRecordGuard` through 045d/045e/045f); ebilling-r1 and unified-access-control-r2 review.
+- **Line detach:** clearing an invoice line's invoice is refused too, unless 045g's inventory finds a legitimate flow that needs it (then stop and ask).
+Rules: (1) every change to an invoice's core record after create is refused (the detach/move/reattach hint is replaced by "return and resubmit on the right record"); (2) approval, submission, correction and external-identifier rows name their invoice's core record, as lines already do; (3) a line's invoice is not cleared. 045g goes to master in its own PR after #2790.
+- **The Create Matter wizard (owner, 2026-11-13: "Build 045g, remove Invoice here"):** 045g's inventory found one product flow that moves an invoice: the Create Matter wizard's "Associate To: Invoice" option creates the matter, then re-files the chosen invoice onto it. Under rule (1) that step can never succeed, so 045g also removes Invoice from the wizard's Associate To options in the shared library (`CreateMatterWizard.tsx`). The other Associate To options are unchanged. The wizard's owning project and ebilling-r1 are told.
+- **An approval or correction always names its invoice (owner, 2026-11-13):** asked whether a BFF write (child-record PATCH, chat tool, playbook update, output orchestrator, field-mapping push) may clear the invoice of an approval or correction, the owner answered that an invoice may be for zero, "but not blank": an approval or correction always names its invoice. Clearing `sprk_invoice` on `sprk_invoiceapproval` or `sprk_invoicecorrection` is refused, as a line's is (rule 3). A submission's and an external identifier's invoice may still be cleared: a submission exists before its invoice, and an external identifier may be filed under its core record alone. ebilling-r1's commit undo clears a submission's invoice through its own service write, which these rules do not reach.
+- **An approval or correction is created with its invoice (owner, 2026-11-13):** the create-side twin of the ruling above. A BFF create of `sprk_invoiceapproval` or `sprk_invoicecorrection` with no `sprk_invoice` is refused. ebilling-r1 supports it; every Finance writer sets the invoice on these creates. Submission and external-identifier creates are unchanged. Task 045g, fix round 4.
+
+## 2026-11-20 — Direct messaging and private messages in a record's thread stay in this project (owner, #2922, #2923)
+
+- **Owner decision, given in this session on 2026-11-20:** "file both issues, but also we need to ensure this is not deferred to another project".
+- **The requirement.** A user can send a personal/private message to a named user, either (a) inside a communication thread associated with a record, or (b) as a standalone direct message with no record. For (b), the first message creates the pair's thread and every later message between the two users goes to it; the user sees these non-record conversations in a "Messages" view.
+- **Supersedes** the 2026-11-09 line "private messages in a record's context are deferred to `messages-enhancements-r1`". Both pieces are built here.
+- **(b) — task 055, #2922.** The server is built (054 pieces 2b and 3; #2919). The work is the client: a "New direct message" entry point choosing one internal user, a Messages view of the user's Direct threads, and a live check on dev. A Direct pair is two internal users (systemusers); external contacts are out of scope.
+- **(a) — task 056, #2923.** A new access rule: a private message in a record's thread is readable by its sender and its named recipient only. Design first, reviewed by unified-access-control-r2 before code; open questions are listed in #2923 and the 056 POML.
+
+## 2026-11-22 — Task 056a: private messages in a record's context (owner answers, in fm's session; UAC-r2 conditions C1–C6)
+
+Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access parts on C1–C6 (2026-11-22).
+
+- **Approved as recommended:**
+  - **Q0:** the message is shown in the record's conversation for its two participants. It is stored in the pair's Direct thread with a non-filing reference to the record.
+  - **Q1:** other readers of the record see nothing.
+  - **Q2.1–Q2.3:** secure and Restricted records are allowed when both participants read the record and pass the No Access check. On an effectively Restricted record, an external participant is refused.
+  - **Q4:** owner and audience as for Direct messages: the Direct team and the stamped pair.
+  - **Q5:** filing later is explicit and confirmed, with the context record suggested.
+  - **Q6:** shown in the record's conversation view (the pair only) and in the Messages view.
+- **Q2.4 (after the send), owner:** "not required if easier to remove access when access type changes or user access changes". Either behaviour is acceptable, so the easier one is chosen.
+  - The message stays readable by both participants after a later Restricted flag, No Access entry or lost Read. It has no filing parent, so nothing revokes it.
+  - The record reference is hidden from a viewer who can no longer read the record (C6).
+  - Removing access instead would need new machinery that watches record and user access changes.
+- **Q3 (recipient cannot read the record), owner:** the send is refused with "Recipient does not have required record access".
+  - The text covers every recipient-side cause: no Read, the No Access wall, and external on Restricted. It never says which cause applied.
+  - The "Send as a direct message instead" offer is optional. It is built only if it is a small addition in 056b.
+
+## 2026-11-22 — A private message always stays 1:1 and is never filed (owner, in fm's session; supersedes 056a Q5)
+
+- **Owner decision:** "let's just solve the 1:1 which is it always stays 1:1 - no filing".
+- **The rule.** A private message (a Direct message with a record reference) is never filed and never moved to another thread. Its audience is its two participants for its whole life. Its record reference stays as written at create and only decides where the two participants see it.
+- **Supersedes** 056a Q5 ("filing later is explicit and confirmed"). The clear-on-file change in the re-file core is dropped.
+- **Why.** Filing makes a message a record message, readable by everyone who reads the record, and the reference would go with it. Field security on the reference columns governs writes only, so keeping the audience to the pair is what keeps the reference private.
+- **Owner of the rule.** One refusal in the re-file core, so it holds for every writer: the filing route, the AI update tools, push, Office reconcile, thread moves and inbound association. Placement and authorship are agreed with UAC-r2 before code.
+- **A participant who wants the record's team to see something** sends an ordinary message on the record.
+- **Follow-up, not built here:** invite-only conversations, where participants may add named people who each pass the record-access check. The conversation then widens only by invitation, never by filing. Filed for `messages-enhancements-r1`.

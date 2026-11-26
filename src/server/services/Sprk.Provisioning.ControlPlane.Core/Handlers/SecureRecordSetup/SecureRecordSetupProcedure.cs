@@ -8,10 +8,23 @@
 // the standing-grant environment (S19 the Standing Grant Administrators profile and its lock on contact.sprk_standinggrant,
 // S20 the BFF's application users as its members, S21 the sprk_noaccessentry role split unified-access-control-r2 task 154
 // ships) — plus S22 (ISS-025 / #1803): the locks on contact.sprk_externalinvitedon and, once it ships,
-// contact.sprk_externalinvitecodehash, VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
+// contact.sprk_externalinvitecodehash (its auditing and Advanced Find also off), VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
 // contact.sprk_accesspermissiongrant, and S22 the locks on the BFF-only columns sprk_externalinvitedemailhash,
-// sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship. Every step READS first
-// and writes only what is missing, so a second run against a configured environment performs no write at all.
+// sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship — plus S23: the BFF's runtime Dataverse identity (the managed identity's
+// application user) holds the "Spaarke Ontology Service" role, and no team or interactive user does — plus S24 (#2605): the
+// ontology writer's application user (its own managed identity, never a BFF identity) holds exactly that role and is the
+// only member of the two ontology-writer field-security profiles; since task 267 (#2618) it sits ALONE in its own business
+// unit "Spaarke Ontology Writer" (H10), whose default team holds no role and is in no field-security profile, and holds that
+// unit's copy of the role — plus S25 (task 267, #2618): the customer unit's default team holds the customer-unit copy of
+// "Spaarke Basic User", so it can own ordinary records (contacts included — Dataverse requires the owner to hold Read) —
+// plus S26 (task 268; ebilling-r1 task 166, EB-D-200): the shipped lock on the invoice amounts and firm, VERIFIED ONLY —
+// plus S27 (task 270; unified-access-control-r2 #2799): the shipped lock on the invoice family's core-record lookups and
+// invoice links, and S28 (task 270; field-mapping task 054b): the shipped lock on the message-access columns, both VERIFIED
+// ONLY (S26–S28 share CheckBffManagedColumnLockAsync) — plus S29 (ebilling-r1 DEF-059): the BFF's two application users hold
+// "Spaarke Decision Record Reader" (Read on sprk_decisionrecord, nothing else), shipped in SpaarkeMaster 1.3.1.0; the role's
+// one privilege and its holders are verified only, and only the user-to-role association is written.
+// Every step READS first and writes only what is missing, so a second run against a configured environment performs no
+// write at all.
 //
 // THREE PHASES
 //   1. Read and refuse. Everything that already exists is read and checked before anything is written: a refusal
@@ -21,9 +34,11 @@
 //   2. Write what is missing — or, on a dry run, only record what would be written. Order: S1 unit → S3 team → S4 role
 //      → S5 grant → S6 strip (ALWAYS, after S5, even when S5 added nothing: creating a role injects ~9 platform
 //      privileges and AddPrivilegesRole re-injects the SharePoint four — setup guide §5.4) → S7 assign → S8 contain →
-//      S11 reader profile ↔ every default team → S12 writer profile ↔ the BFF's application users → S16 identity-link
-//      reader profile ↔ every default team → S17 identity-link writer profile ↔ the BFF's application users → S13 NULL
-//      flags.
+//      S11 reader profile ↔ every default team but the ontology writer unit's → S12 writer profile ↔ the BFF's
+//      application users → S16 identity-link reader profile ↔ every default team but the ontology writer unit's → S17
+//      identity-link writer profile ↔ the BFF's application users → S20 standing-grant profile → S23 runtime role → S24
+//      ontology writer role (its unit's copy) and profiles → S25 "Spaarke Basic User" on the customer unit's default team
+//      → S29 "Spaarke Decision Record Reader" on the BFF's application users → S13 NULL flags.
 //   3. Verify (S9): re-read the end state; anything but the codified state is a refusal.
 //
 // IDENTITY-LINK WRITERS. The BFF writes contact.sprk_externalobjectid and systemuser.sprk_primarycontact app-only with
@@ -31,8 +46,9 @@
 // exactly H10's two BFF application users — the same set as the BFF-managed writer profile (S12) and as the shipped
 // profile's description and UAC-r2's dev configuration — and nobody else (S17 refuses any other member).
 //
-// WHAT IT NEVER DOES: move a user, remove a team member or a profile member, re-parent a business unit, widen or
-// narrow an existing privilege, or create a field-security profile or secure a column. The profiles, both column locks
+// WHAT IT NEVER DOES: move a user (H10 moves the ontology writer into its own unit — task 267), remove a team member, a
+// profile member or a team's role, re-parent a business unit, widen or narrow an existing privilege, or create a
+// field-security profile or secure a column. The profiles, every column lock (S14, S18, S19, S22, S26–S28)
 // and the deny-list table ship in SpaarkeMaster (H6); this procedure verifies them and adds only the memberships,
 // which are data.
 //
@@ -54,13 +70,19 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 /// <param name="Target">The environment and the identity that signs in to it.</param>
 /// <param name="RoleSet">The codified set (embedded <c>config/secure-record-owner-role.json</c>).</param>
 /// <param name="BffApplicationUserIds">The BFF's Dataverse application users H10 registered — the only writer-profile members.</param>
+/// <param name="BffRuntimeApplicationUserId">S23: the Dataverse application user of the BFF's runtime identity, the user-assigned managed identity (InterStepState.SystemUserId); <see cref="Guid.Empty"/> = H10's output is missing.</param>
+/// <param name="OntologyWriterApplicationUserId">S24 (#2605): the Dataverse application user of the stamp's ontology writer managed identity (InterStepState.OntologyWriterSystemUserId); <see cref="Guid.Empty"/> = H10 has not created it.</param>
 /// <param name="CustomerBusinessUnitId">T259: the customer's business unit H10 created (InterStepState.CustomerBusinessUnitId).</param>
+/// <param name="OntologyWriterBusinessUnitId">S24 (task 267, #2618): the ontology writer's own business unit H10 created (InterStepState.OntologyWriterBusinessUnitId); <see cref="Guid.Empty"/> = H10 has not recorded it.</param>
 /// <param name="DryRun">Read everything, write nothing, return the plan.</param>
 public sealed record SecureRecordSetupRequest(
     SecureRecordSetupTarget Target,
     SecureRecordOwnerRoleSet RoleSet,
     IReadOnlyList<Guid> BffApplicationUserIds,
+    Guid BffRuntimeApplicationUserId,
+    Guid OntologyWriterApplicationUserId,
     Guid CustomerBusinessUnitId,
+    Guid OntologyWriterBusinessUnitId,
     bool DryRun);
 
 /// <summary>
@@ -111,8 +133,16 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S10/S12: Read/Create/Update on those columns; the BFF's application users are its only members.</summary>
     public const string WriterProfileName = "Spaarke BFF-Managed Field Writers";
 
-    /// <summary>S14: the platform's own field-security profile, exempt from the other-writer rule (owner decision F4).</summary>
+    /// <summary>The display name of <see cref="SystemAdministratorFieldSecurityProfileId"/> — for messages only; never matched.</summary>
     public const string SystemAdministratorProfileName = "System Administrator";
+
+    /// <summary>
+    /// S14/S18/S19/S22/S26–S28: the platform's own "System Administrator" field-security profile — a fixed ID in every environment,
+    /// which Dataverse grants every secured column — the only profile besides a lock's writer excused from the other-writer
+    /// rule (owner decision F4). Matched by ID, never by name (task 268 review: a look-alike name would be excused; the same ID
+    /// as scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 <c>$SystemAdministratorProfileId</c>).
+    /// </summary>
+    public static readonly Guid SystemAdministratorFieldSecurityProfileId = Guid.Parse("572329c1-a042-4e22-be47-367c6374ea45");
 
     /// <summary>S13/S14: the secure flag only the BFF writes (task 150).</summary>
     public const string SecureFlagColumn = "sprk_issecure";
@@ -152,6 +182,119 @@ public sealed class SecureRecordSetupProcedure
         ("contact", "sprk_identitycollisionparties"),
     ];
 
+    /// <summary>S26 (ebilling-r1 task 166, owner decision EB-D-200): the table whose amounts and firm only the BFF sets.</summary>
+    public const string InvoiceMoneyTable = "sprk_invoice";
+
+    /// <summary>
+    /// S26 (ebilling-r1 task 166, EB-D-200): the invoice columns that are field-secured, readable by everyone through
+    /// <see cref="ReaderProfileName"/> and settable only by the BFF through <see cref="WriterProfileName"/> — the billed total,
+    /// the five derived totals and the firm lookup (docs/data-model/sprk_invoice.md). Exactly the <c>$Columns</c> of
+    /// scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 and the package's grants (InvoiceMoneyColumnLockPackagedTests).
+    /// </summary>
+    public static readonly IReadOnlyList<string> InvoiceMoneyColumns =
+    [
+        "sprk_totalamount",
+        "sprk_approvedtotal",
+        "sprk_feestotal",
+        "sprk_expensestotal",
+        "sprk_lineadjustmentstotal",
+        "sprk_invoiceadjustmentstotal",
+        "sprk_vendororg",
+    ];
+
+    /// <summary>S26: the remedy an incomplete invoice money lock names.</summary>
+    internal const string InvoiceMoneyLockRemedy =
+        "The published SpaarkeMaster 1.3.0.0 predates ebilling task 166 and H6 skips an installed version: import a " +
+        "SpaarkeMaster release ABOVE 1.3.0.0 that carries task 166 (a new run, H6). Only where H7b has completed on this " +
+        "environment before (the BFF-managed profiles have their members; on a stamp's first H7b run they do not, and the " +
+        "script refuses) may the operator instead run scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, " +
+        "then -Verify) with the owner's OK, then resume. Nothing was written.";
+
+    /// <summary>
+    /// S27 (task 270; unified-access-control-r2 #2799): the invoice family's core-record lookups and invoice links, as
+    /// (table, column), that only the BFF application user writes — field-secured, readable by everyone through
+    /// <see cref="ReaderProfileName"/>, settable only through <see cref="WriterProfileName"/>. Exactly
+    /// scripts/common/InvoiceFamilyLockedColumns.psd1 (the ONE list, which InvoiceFamilyFieldLockGuardTests pins to the BFF's
+    /// InvoiceFamilyLockedWrite.LockedColumns); BffManagedLinkColumnLockListTests pins this list to that file.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string Column)> InvoiceFamilyLinkColumns =
+    [
+        ("sprk_billingevent", "sprk_invoice"),
+        ("sprk_billingevent", "sprk_matter"),
+        ("sprk_billingevent", "sprk_project"),
+        ("sprk_billingevent", "sprk_regardingworkassignment"),
+        ("sprk_externalidentifier", "sprk_regardinginvoice"),
+        ("sprk_externalidentifier", "sprk_regardingmatter"),
+        ("sprk_externalidentifier", "sprk_regardingproject"),
+        ("sprk_externalidentifier", "sprk_regardingworkassignment"),
+        ("sprk_invoice", "sprk_matter"),
+        ("sprk_invoice", "sprk_project"),
+        ("sprk_invoice", "sprk_regardingworkassignment"),
+        ("sprk_invoice", "sprk_supersedesinvoice"),
+        ("sprk_invoiceapproval", "sprk_invoice"),
+        ("sprk_invoiceapproval", "sprk_regardingmatter"),
+        ("sprk_invoiceapproval", "sprk_regardingproject"),
+        ("sprk_invoiceapproval", "sprk_regardingworkassignment"),
+        ("sprk_invoicecorrection", "sprk_invoice"),
+        ("sprk_invoicecorrection", "sprk_regardingmatter"),
+        ("sprk_invoicecorrection", "sprk_regardingproject"),
+        ("sprk_invoicecorrection", "sprk_regardingworkassignment"),
+        ("sprk_invoicesubmission", "sprk_invoice"),
+        ("sprk_invoicesubmission", "sprk_regardingmatter"),
+        ("sprk_invoicesubmission", "sprk_regardingproject"),
+        ("sprk_invoicesubmission", "sprk_regardingworkassignment"),
+    ];
+
+    /// <summary>S27: the remedy an incomplete invoice-family lock names.</summary>
+    internal const string InvoiceFamilyLockRemedy =
+        "SpaarkeMaster 1.3.1.0 and earlier do not carry the #2799 lock; 1.3.2.0 does (#2859): import SpaarkeMaster 1.3.2.0 " +
+        "or later (a new run, H6). Only where H7b has completed on this " +
+        "environment before (the BFF-managed profiles have their members; on a stamp's first H7b run they do not, and the " +
+        "script refuses) may the operator instead run scripts/Set-InvoiceFamilyFieldSecurity.ps1 (dry run, then " +
+        "-BffWritesInvoiceFamilyLinksAsApp -Apply, then -Verify) with the owner's OK, then resume. Nothing was written.";
+
+    /// <summary>
+    /// S28 (task 270; field-mapping-server-write-path-r1 task 054b): the message-access columns that decide who may read a
+    /// message, as (table, column) — field-secured with the BFF-managed Readers/Writers grants in SpaarkeMaster (1.3.1.0 on).
+    /// Exactly the packaged four of scripts/Set-ThreadFlagFieldSecurity.ps1's $Targets; the other four,
+    /// <see cref="OptionalMessageAccessColumns"/>, are not in the package. BffManagedLinkColumnLockListTests pins this list
+    /// and that one to the script and the package.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string Column)> MessageAccessColumns =
+    [
+        ("sprk_communicationthread", "sprk_threadtype"),
+        ("sprk_communicationthread", "sprk_isdefaultthread"),
+        ("sprk_communication", "sprk_sentby"),
+        ("sprk_communication", "sprk_communicationthread"),
+    ];
+
+    /// <summary>
+    /// S28: the message-access columns that are NOT in the package, as (table, column, the script that creates it). Each
+    /// exists only where that script ran, which provisioning does not do. Where a column is absent S28 notes it and goes on:
+    /// the direct recipient's absence keeps the Direct-message feature off (DirectMessage:* unset — deployment guide §7.4);
+    /// the three private-context references (field-mapping task 056b) belong to a private message, a Direct message that
+    /// names one core record, so without them the environment has no private-message context references. Where a column
+    /// exists, its lock must be whole like the packaged four.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Table, string Column, string CreatedBy)> OptionalMessageAccessColumns =
+    [
+        ("sprk_communication", "sprk_directrecipient", "scripts/Set-DirectRecipientSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextmatter", "scripts/Set-PrivateContextSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextproject", "scripts/Set-PrivateContextSchema.ps1"),
+        ("sprk_communication", "sprk_privatecontextworkassignment", "scripts/Set-PrivateContextSchema.ps1"),
+    ];
+
+    /// <summary>S28: the direct recipient, the optional column whose absence also keeps the Direct-message feature off.</summary>
+    internal const string DirectRecipientColumnName = "sprk_directrecipient";
+
+    /// <summary>S28: the remedy an incomplete message-access lock names.</summary>
+    internal const string MessageAccessLockRemedy =
+        "SpaarkeMaster 1.3.1.0 carries the lock on the four packaged columns (field-mapping task 054b): import it or a later " +
+        "release (a new run, H6). scripts/Set-ThreadFlagFieldSecurity.ps1 is the remedy only where " +
+        "sprk_communication.sprk_directrecipient exists (scripts/Set-DirectRecipientSchema.ps1 ran) and H7b has completed on " +
+        "this environment before; anywhere else, a stamp included, it refuses. There, with the owner's OK, run it with " +
+        "-SolutionUniqueName SpaarkeMaster (dry run, then -Apply, then -Verify), then resume. Nothing was written.";
+
     /// <summary>
     /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured
     /// <c>contact.sprk_standinggrant</c>. Without Read the platform silently strips the column from the BFF's app-only
@@ -166,6 +309,82 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>S19: the standing-grant flag's column.</summary>
     public const string StandingGrantColumn = "sprk_standinggrant";
+
+    /// <summary>
+    /// S23: the role (shipped in SpaarkeMaster, copied into every business unit) the BFF's runtime identity needs to read the
+    /// ontology tables. Only application users may hold it: no team and no interactive user.
+    /// </summary>
+    public const string OntologyServiceRoleName = "Spaarke Ontology Service";
+
+    /// <summary>
+    /// S29 (ebilling-r1 DEF-059): the role (shipped in SpaarkeMaster 1.3.1.0, copied into every unit) that gives the BFF's two
+    /// application users organization-wide Read on <c>sprk_decisionrecord</c> and nothing else. Only those two users may hold it
+    /// (never a person, a team, or another application user such as the ontology writer); it is assigned beside System
+    /// Administrator, which is never removed.
+    /// </summary>
+    public const string DecisionRecordReaderRoleName = "Spaarke Decision Record Reader";
+
+    /// <summary>S29: the one privilege the reader role holds (the role file and the role-privilege expectations pin the same).</summary>
+    public const string DecisionRecordReaderPrivilege = "prvReadsprk_DecisionRecord";
+
+    /// <summary>S29: the depth it holds it at.</summary>
+    public const string DecisionRecordReaderPrivilegeDepth = "Global";
+
+    /// <summary>S29: the SpaarkeMaster release that first ships the reader role.</summary>
+    public const string DecisionRecordReaderRoleMinimumRelease = "1.3.1.0";
+
+    /// <summary>
+    /// S29: the privileges the PLATFORM adds to a Spaarke role, which the exact-set check tolerates and reports on the
+    /// "Spaarke Decision Record Reader" root role at any depth (they are never required, never stripped here, and any other
+    /// privilege is still drift). Source: ebilling-r1 notes/120-billing-admin-role.md ("Platform defaults on the role" —
+    /// Dataverse puts the 5 plugin-metadata reads on every role it creates; <c>AddPrivilegesRole</c> re-injects the SharePoint
+    /// four, docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md section 5.4) and the same 9 names pinned in
+    /// scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1 (<c>$PlatformDefaults</c>). The four SharePoint privileges were
+    /// observed on the managed stamp ACME after a SpaarkeMaster 1.3.2.1 import (all Global).
+    /// </summary>
+    public static readonly IReadOnlyList<string> DecisionRecordReaderPlatformAddedPrivileges =
+    [
+        "prvReadPluginAssembly",
+        "prvReadPluginType",
+        "prvReadSdkMessage",
+        "prvReadSdkMessageProcessingStep",
+        "prvReadSdkMessageProcessingStepImage",
+        "prvCreateSharePointData",
+        "prvReadSharePointData",
+        "prvWriteSharePointData",
+        "prvReadSharePointDocument",
+    ];
+
+    /// <summary>
+    /// Task 267 (#2618): the business unit the ontology writer's application user lives in, ALONE — a direct child of the
+    /// root, neither the customer's unit nor the Secure Record unit. H10 creates it (and refuses a customer name that
+    /// resolves to it); S24 checks it by id. Its default team holds no role and is in no field-security profile, so the
+    /// writer inherits nothing (FR-21). Defined here, once.
+    /// </summary>
+    public const string OntologyWriterBusinessUnitName = "Spaarke Ontology Writer";
+
+    /// <summary>
+    /// S25 (task 267, #2618): the role (shipped in SpaarkeMaster, copied into every unit) the customer unit's default team
+    /// holds so it can own ordinary records — Dataverse requires an owner to hold Read on the table. It IS H11's default
+    /// guest role (one literal): every customer user already holds it, so the team's members gain nothing new.
+    /// </summary>
+    public const string BasicUserRoleName = UserProvisioning.H11UserProvisioningOptions.DefaultGuestSecurityRoleName;
+
+    /// <summary>
+    /// S24 (#2605): one of the two ontology-writer field-security profiles. Ships in SpaarkeMaster; its only member is the
+    /// ontology writer's application user.
+    /// </summary>
+    public const string OntologyWriterFieldWritersProfileName = "Spaarke Ontology Writer Field Writers";
+
+    /// <summary>
+    /// S24 (#2605): the other ontology-writer field-security profile. Ships in SpaarkeMaster (first published in 1.3.0.0); its
+    /// only member is the ontology writer's application user.
+    /// </summary>
+    public const string OntologyWriterFirmReasonProfileName = "Spaarke Ontology Writer Firm Reason Writers";
+
+    /// <summary>S24: the two ontology-writer profiles, in the order they are checked and written.</summary>
+    public static readonly IReadOnlyList<string> OntologyWriterProfileNames =
+        [OntologyWriterFieldWritersProfileName, OntologyWriterFirmReasonProfileName];
 
     /// <summary>S21: the table whose reads task 154 (owner decision O2) restricts to access administrators.</summary>
     public const string NoAccessEntryTable = "sprk_noaccessentry";
@@ -372,9 +591,11 @@ public sealed class SecureRecordSetupProcedure
         }
 
         // T259 §6 T3 — both BFF application users are in the customer's unit (never the root, never the secure unit).
+        var appUserUnits = new Dictionary<Guid, Guid?>();
         foreach (var appUser in request.BffApplicationUserIds.Distinct())
         {
             var appUserUnit = await dv.GetUserBusinessUnitAsync(t, appUser, ct).ConfigureAwait(false);
+            appUserUnits[appUser] = appUserUnit;
             if (appUserUnit != customerUnit.Id)
             {
                 return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit,
@@ -382,6 +603,210 @@ public sealed class SecureRecordSetupProcedure
                     $"customer's unit '{customerUnit.Name}' ({customerUnit.Id}) (INCOMING-145 §6 T3). Moving it strips its " +
                     "roles — an owner decision. Nothing was written.");
             }
+        }
+
+        // S23 (read half) — the BFF's runtime identity must hold "Spaarke Ontology Service"; no team and no interactive user may.
+        // Dataverse only assigns the copy that belongs to the USER's business unit, so the copy is resolved by the user's own
+        // unit (T3's reading when the user is one of the checked application users — no second query) and that unit must be
+        // the customer's. Every refusal here is before any write.
+        var runtimeUser = request.BffRuntimeApplicationUserId;
+        if (runtimeUser == Guid.Empty)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved,
+                $"The BFF's runtime Dataverse user (H10's systemUserId, the managed identity's application user) is not known: " +
+                $"H10 output missing, so '{OntologyServiceRoleName}' cannot be assigned. Nothing was written.");
+        }
+        if (!appUserUnits.TryGetValue(runtimeUser, out var runtimeUserUnit))
+        {
+            runtimeUserUnit = await dv.GetUserBusinessUnitAsync(t, runtimeUser, ct).ConfigureAwait(false);
+        }
+        if (runtimeUserUnit != customerUnit.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyServiceRoleUserOutsideCustomerBusinessUnit,
+                $"The BFF's runtime Dataverse user {runtimeUser} is in business unit {runtimeUserUnit?.ToString() ?? "(no such user)"}, " +
+                $"not the customer's business unit {customerUnit.Id}; '{OntologyServiceRoleName}' is assigned from the user's own " +
+                "unit and H10 puts the user in the customer's unit. Moving a user strips its roles - an owner decision. " +
+                "Nothing was written.");
+        }
+        var ontologyRoles = await dv.FindRolesAsync(t, OntologyServiceRoleName, customerUnit.Id, ct).ConfigureAwait(false);
+        if (ontologyRoles.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved,
+                $"Business unit '{customerUnit.Name}' ({customerUnit.Id}) has {ontologyRoles.Count} roles named " +
+                $"'{OntologyServiceRoleName}' (expected exactly one). It ships in SpaarkeMaster: import SpaarkeMaster (H6), then " +
+                "resume. Nothing was written.");
+        }
+        var ontologyRoleId = ontologyRoles[0].Id;
+        var ontologyHolderProblems = new List<string>();
+        foreach (var copy in await dv.FindRoleCopiesAsync(t, OntologyServiceRoleName, ct).ConfigureAwait(false))
+        {
+            var holderTeams = await dv.ListRoleTeamHoldersAsync(t, copy.Id, ct).ConfigureAwait(false);
+            if (holderTeams.Count > 0)
+            {
+                ontologyHolderProblems.Add($"teams [{Ids(holderTeams)}] hold the copy {copy.Id}");
+            }
+            var interactive = (await dv.ListRoleUsersAsync(t, copy.Id, ct).ConfigureAwait(false))
+                .Where(u => u.ApplicationId is null)
+                .Select(u => u.UserId)
+                .ToArray();
+            if (interactive.Length > 0)
+            {
+                ontologyHolderProblems.Add($"interactive users [{Ids(interactive)}] hold the copy {copy.Id}");
+            }
+        }
+        if (ontologyHolderProblems.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder,
+                $"'{OntologyServiceRoleName}' may be held by application users only, but " +
+                string.Join("; ", ontologyHolderProblems) +
+                ". Who holds the role is an operator decision; nothing is removed here. Nothing was written.");
+        }
+        var runtimeUserRoles = await dv.ListUserRolesAsync(t, runtimeUser, ct).ConfigureAwait(false);
+
+        // S24 (read half, #2605) — the ontology writer's application user (H10's ontologyWriterSystemUserId) holds exactly the
+        // copy of "Spaarke Ontology Service" in its OWN unit (task 267) and is the ONLY member of the two ontology-writer
+        // profiles. It is its own identity, never a BFF identity (those hold System Administrator — FR-21), so it may hold no
+        // other role. Every refusal here is before any write; nothing is ever removed from the writer or from a profile.
+        var writerUser = request.OntologyWriterApplicationUserId;
+        if (writerUser == Guid.Empty)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyWriterUnresolved,
+                "The ontology writer's Dataverse application user (H10's ontologyWriterSystemUserId) is not known. H10 creates it; " +
+                "a run whose H10 completed before the writer existed (task 266) never did - start a new run. Nothing was written.");
+        }
+        if (writerUser == runtimeUser || request.BffApplicationUserIds.Contains(writerUser))
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterIsBffIdentity,
+                $"The ontology writer's application user {writerUser} is one of the BFF's own application users, which hold " +
+                $"System Administrator. The writer must be its own identity holding only '{OntologyServiceRoleName}' (FR-21). " +
+                "Nothing was written.");
+        }
+        // Task 267 (#2618) — the writer's OWN unit, by id: it exists, is a DIRECT child of the root, is not the customer's
+        // unit (the Secure Record unit is compared once S1 resolves it, below), holds the writer and nobody else, and its
+        // default team is resolvable. The writer inherits nothing from the customer unit's default team (S25 gives that team
+        // a role) because it is not in that unit.
+        if (request.OntologyWriterBusinessUnitId == Guid.Empty)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitUnresolved,
+                $"The ontology writer's business unit (H10's ontologyWriterBusinessUnitId, '{OntologyWriterBusinessUnitName}') is " +
+                "not known. H10 creates it and moves the writer there; a run whose H10 completed before task 267 never recorded " +
+                "it, and a resume does not re-run a completed H10 - start a new run. Nothing was written.");
+        }
+        var writerBusinessUnit = await dv.GetBusinessUnitAsync(t, request.OntologyWriterBusinessUnitId, ct).ConfigureAwait(false);
+        if (writerBusinessUnit is null)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitMissing,
+                $"The ontology writer's business unit {request.OntologyWriterBusinessUnitId} (recorded by H10) does not exist. " +
+                "H10 created it and placed the writer in it; find out what removed it (an owner decision) before anything is " +
+                "configured. Nothing was written.");
+        }
+        if (writerBusinessUnit.ParentId != root.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitWrongParent,
+                $"The ontology writer's business unit '{writerBusinessUnit.Name}' ({writerBusinessUnit.Id}) has parent " +
+                $"{writerBusinessUnit.ParentId?.ToString() ?? "(none — it is the root)"}, not the root unit {root.Id}. It must be " +
+                "a DIRECT child of the root. Re-parenting a unit is an owner decision. Nothing was written.");
+        }
+        if (writerBusinessUnit.Id == customerUnit.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitIsReserved,
+                $"The ontology writer's business unit {writerBusinessUnit.Id} is the customer's own unit. The writer must be alone " +
+                "in its own unit so it inherits nothing from the customer unit's default team (#2618). H10 moves it; nothing is " +
+                "moved here. Nothing was written.");
+        }
+        var writerUnit = await dv.GetUserBusinessUnitAsync(t, writerUser, ct).ConfigureAwait(false);
+        if (writerUnit != writerBusinessUnit.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterOutsideItsBusinessUnit,
+                $"The ontology writer's application user {writerUser} is in business unit {writerUnit?.ToString() ?? "(no such user)"}, " +
+                $"not its own unit '{writerBusinessUnit.Name}' ({writerBusinessUnit.Id}); '{OntologyServiceRoleName}' is assigned " +
+                "from the user's own unit and H10 puts the writer in its own unit. Moving a user strips its roles - H10 moves the " +
+                "writer, H7b never does. Nothing was written.");
+        }
+        var writerUnitUsers = (await dv.ListBusinessUnitUsersAsync(t, writerBusinessUnit.Id, NamedPrincipalLimit + 1, ct)
+                .ConfigureAwait(false))
+            .Where(u => u != writerUser).ToArray();
+        if (writerUnitUsers.Length > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitHasOtherUsers,
+                $"The ontology writer's business unit '{writerBusinessUnit.Name}' ({writerBusinessUnit.Id}) holds systemusers other " +
+                $"than the writer ({Ids(writerUnitUsers)}). The unit is the writer's alone; moving users is an owner decision. " +
+                "Nothing was written.");
+        }
+        var writerDefaultTeams = await dv.FindDefaultTeamsAsync(t, writerBusinessUnit.Id, ct).ConfigureAwait(false);
+        if (writerDefaultTeams.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitUnresolved,
+                $"The ontology writer's business unit {writerBusinessUnit.Id} reports {writerDefaultTeams.Count} default teams " +
+                "(expected one). Nothing was written.");
+        }
+        var writerDefaultTeam = writerDefaultTeams[0];
+        var writerRoleCopies = await dv.FindRolesAsync(t, OntologyServiceRoleName, writerBusinessUnit.Id, ct).ConfigureAwait(false);
+        if (writerRoleCopies.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyWriterRoleUnresolved,
+                $"The ontology writer's business unit '{writerBusinessUnit.Name}' ({writerBusinessUnit.Id}) has " +
+                $"{writerRoleCopies.Count} roles named '{OntologyServiceRoleName}' (expected exactly one). Dataverse copies the " +
+                "root role into a new unit asynchronously: resume shortly. If it persists, import SpaarkeMaster (H6), then " +
+                "resume. Nothing was written.");
+        }
+        var writerRoleId = writerRoleCopies[0].Id;
+        var writerRoles = await dv.ListUserRolesAsync(t, writerUser, ct).ConfigureAwait(false);
+        var writerOtherRoles = writerRoles.Where(r => r.Id != writerRoleId).ToArray();
+        if (writerOtherRoles.Length > 0)
+        {
+            // Another unit's copy of the writer's own role: the environment kept the writer's roles when H10 moved it out of
+            // the customer unit (Dataverse strips them by default).
+            var keptOnMove = writerOtherRoles.Any(r => string.Equals(r.Name, OntologyServiceRoleName, StringComparison.OrdinalIgnoreCase))
+                ? $" A '{OntologyServiceRoleName}' copy from another unit means this environment kept the writer's roles when " +
+                  "it changed business unit (DoNotRemoveRolesOnChangeBusinessUnit, or record ownership across business units): " +
+                  "remove that copy from the writer by hand (owner OK), then resume."
+                : string.Empty;
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherRole,
+                $"The ontology writer's application user {writerUser} holds roles other than its unit's copy of " +
+                $"'{OntologyServiceRoleName}' ({writerRoleId}): [{string.Join(", ", writerOtherRoles.Select(r => $"'{r.Name}' {r.Id}"))}]. " +
+                "The writer holds that role only (FR-21). Removing a role is an operator decision; nothing is removed here." +
+                keptOnMove + " Nothing was written.");
+        }
+        var writerProfiles = new List<(Guid Id, string Name, IReadOnlyList<SecureSetupProfileUser> Users)>();
+        foreach (var profileName in OntologyWriterProfileNames)
+        {
+            var found = await dv.FindFieldSecurityProfilesAsync(t, profileName, ct).ConfigureAwait(false);
+            if (found.Count != 1)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyWriterProfileUnresolved,
+                    $"Field-security profile '{profileName}': found {found.Count} (expected exactly one). Both ontology-writer " +
+                    $"profiles ship in SpaarkeMaster; '{OntologyWriterFirmReasonProfileName}' first in 1.3.0.0. Upgrade SpaarkeMaster " +
+                    "(H6), then resume. Nothing was written.");
+            }
+            var members = await dv.ListProfileUsersAsync(t, found[0], ct).ConfigureAwait(false);
+            var memberTeams = await dv.ListProfileTeamsAsync(t, found[0], ct).ConfigureAwait(false);
+            var strayMembers = members.Where(u => u.UserId != writerUser).Select(u => u.UserId).ToArray();
+            if (strayMembers.Length > 0 || memberTeams.Count > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterProfileHasOtherMember,
+                    $"'{profileName}' has members other than the ontology writer's application user {writerUser}: users " +
+                    $"[{Ids(strayMembers)}], teams [{Ids(memberTeams)}]. Every one of them could write what only the ontology " +
+                    "writer may. Who belongs there is an operator decision; nothing is removed here. Nothing was written.");
+            }
+            writerProfiles.Add((found[0], profileName, members));
+        }
+        // A user holds every role of every team it is in (its unit's default team included) and every profile it or one of
+        // its teams is a member of, so "exactly this role and these profiles" is checked through all of them (FR-21).
+        var (writerTeamAccess, writerOtherProfiles) = await OntologyWriterExtraAccessAsync(dv, t, writerUser, writerDefaultTeam,
+            writerProfiles.Select(p => p.Id).ToArray(), ct).ConfigureAwait(false);
+        if (writerTeamAccess is not null)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterTeamAccess,
+                $"The {writerTeamAccess}. A user holds every role of every team it is in, so the writer would hold more than " +
+                $"'{OntologyServiceRoleName}' (FR-21). Team membership and team roles are operator decisions; nothing is removed " +
+                "here. Nothing was written.");
+        }
+        if (writerOtherProfiles is not null)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherProfile,
+                $"The {writerOtherProfiles}. The writer belongs to the two ontology-writer profiles only (FR-21). Removing a " +
+                "membership is an operator decision; nothing is removed here. Nothing was written.");
         }
 
         // S4 (root half) — a role of this name in the ROOT unit is copied into every unit, so a unit created below would
@@ -421,6 +846,17 @@ public sealed class SecureRecordSetupProcedure
 
         // S1 + §6 T2 — the unit, exactly one, a DIRECT child of the root (a sibling of the customer's unit).
         var units = await dv.FindBusinessUnitsByNameAsync(t, set.BusinessUnitName, ct).ConfigureAwait(false);
+        var customerAmongUnits = units.FirstOrDefault(u => u.Id == request.CustomerBusinessUnitId);
+        if (units.Count > 1 && customerAmongUnits is not null)
+        {
+            // Two units answer the Secure Record name and one is the customer's: report the real cause, not "rename one".
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit,
+                $"Dataverse finds {units.Count} business units for the Secure Record name '{set.BusinessUnitName}' " +
+                $"({Ids(units.Select(u => u.Id))}), and one is the customer's own unit ({customerAmongUnits.Id}, " +
+                $"'{customerAmongUnits.Name}', recorded by H10): Dataverse matches business-unit names without case or " +
+                "accents, so the customer's display name collides with the Secure Record name. Renaming a unit or moving its " +
+                "users is an owner decision. Nothing was written.");
+        }
         if (units.Count > 1)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.BusinessUnitAmbiguous,
@@ -428,6 +864,31 @@ public sealed class SecureRecordSetupProcedure
                 "refuses an ambiguous Secure Record unit (task 144); rename or remove the extra one. Nothing was written.");
         }
         var unit = units.Count == 1 ? units[0] : null;
+
+        // S1 — by ID, never by name in code: Dataverse's `name eq` ignores case AND accents, so on a stamp where H10 created
+        // the customer's unit under a name that differs from the Secure Record name only that way, the lookup above finds
+        // the CUSTOMER's unit. H10's own id check cannot catch this (the Secure Record unit did not exist yet when it ran):
+        // this is the backstop for that case — keep it alongside H10's. S2 would refuse too, but naming the wrong cause.
+        if (unit is not null && unit.Id == request.CustomerBusinessUnitId)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BusinessUnitIsCustomerUnit,
+                $"The business unit Dataverse finds for the Secure Record name '{set.BusinessUnitName}' is the customer's own " +
+                $"unit ({unit.Id}, '{unit.Name}', recorded by H10): Dataverse matches business-unit names without case or " +
+                "accents, so the customer's display name collides with the Secure Record name. The customer's unit holds the " +
+                "BFF's users and can never be the Secure Record unit; renaming a unit or moving its users is an owner " +
+                "decision. Nothing was written.");
+        }
+
+        // S24 (task 267) — by ID as well: the writer's own unit is never the Secure Record unit (H10 reserved the name both
+        // ways; this is the backstop for a unit renamed after H10 ran). S2 would refuse too, but naming the wrong cause.
+        if (unit is not null && unit.Id == writerBusinessUnit.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterBusinessUnitIsReserved,
+                $"The business unit Dataverse finds for the Secure Record name '{set.BusinessUnitName}' is the ontology writer's " +
+                $"own unit ({unit.Id}, '{unit.Name}', recorded by H10). The writer must never sit in the Secure Record unit; " +
+                "renaming a unit or moving its users is an owner decision. Nothing was written.");
+        }
+
         if (unit is not null && unit.ParentId != root.Id)
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BusinessUnitWrongParent,
@@ -544,8 +1005,9 @@ public sealed class SecureRecordSetupProcedure
                 $"'{WriterProfileName}' grants {SecureFlagColumn} on no table: the package's field-security lock (task 150) " +
                 "is missing. Import SpaarkeMaster (H6), then resume. Nothing was written.");
         }
-        var systemAdministratorProfiles = await dv.FindFieldSecurityProfilesAsync(t, SystemAdministratorProfileName, ct)
-            .ConfigureAwait(false);
+        // The platform's own profile, matched by its fixed ID, never by name: Dataverse's name filter ignores case and accents, so
+        // a look-alike profile named "System Administrator" (or "Systém Administrator") would otherwise be excused (task 268 review).
+        IReadOnlyCollection<Guid> systemAdministratorProfiles = [SystemAdministratorFieldSecurityProfileId];
         foreach (var table in lockedTables)
         {
             var secured = await dv.IsAttributeSecuredAsync(t, table, SecureFlagColumn, ct).ConfigureAwait(false);
@@ -576,6 +1038,59 @@ public sealed class SecureRecordSetupProcedure
                 $"Profiles other than '{WriterProfileName}' may create or update {SecureFlagColumn}: " +
                 $"{string.Join(", ", otherWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} on {p.EntityName}"))}. " +
                 "The lock is only as strong as its writer list (owner decision F4). Nothing was written.");
+        }
+
+        // S26 (ebilling-r1 task 166, EB-D-200) — the lock on the invoice amounts and firm ships in SpaarkeMaster: verify it is
+        // whole (secured, Readers read 4, Writers 4/4/4) and that nobody else may write. A BFF built from master assumes only it
+        // sets these columns. Verify only: nothing here is written or removed.
+        foreach (var column in InvoiceMoneyColumns)
+        {
+            var refusal = await CheckBffManagedColumnLockAsync(dv, t, InvoiceMoneyTable, column, readerProfileId, writerProfileId,
+                InvoiceMoneyLock, ct).ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                return Refuse(refusal.Class, refusal.Code, refusal.Diagnostic);
+            }
+        }
+
+        // S27 (task 270; unified-access-control-r2 #2799) — the lock on the invoice family's core-record lookups and invoice
+        // links ships in SpaarkeMaster (path A, owner 2026-11-16): verify it is whole and that nobody else may write. A BFF
+        // built from master writes these columns as the application after checking the person; without the lock a user could
+        // re-file a row through a form or the Web API. Verify only.
+        foreach (var (table, column) in InvoiceFamilyLinkColumns)
+        {
+            var refusal = await CheckBffManagedColumnLockAsync(dv, t, table, column, readerProfileId, writerProfileId,
+                InvoiceFamilyLock, ct).ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                return Refuse(refusal.Class, refusal.Code, refusal.Diagnostic);
+            }
+        }
+
+        // S28 (task 270; field-mapping tasks 054b, 056b) — the message-access lock: the four packaged columns always; the
+        // direct recipient and the three private-context references only where they exist (provisioning creates none of
+        // them), and where one exists its lock must be whole.
+        var messageAccessChecks = MessageAccessColumns
+            .Select(c => (c.Table, c.Column, CreatedBy: (string?)null))
+            .Concat(OptionalMessageAccessColumns.Select(c => (c.Table, c.Column, CreatedBy: (string?)c.CreatedBy)));
+        foreach (var (table, column, createdBy) in messageAccessChecks)
+        {
+            if (createdBy is not null
+                && await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false) is null)
+            {
+                notes.Add(column == DirectRecipientColumnName
+                    ? $"{table}.{column}: not in this environment ({createdBy} not run), so the Direct-message feature stays " +
+                      "off: leave DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName unset."
+                    : $"{table}.{column}: not in this environment ({createdBy} not run), so there is no private-message " +
+                      "context reference of that kind here.");
+                continue;
+            }
+            var refusal = await CheckBffManagedColumnLockAsync(dv, t, table, column, readerProfileId, writerProfileId,
+                MessageAccessLock, ct).ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                return Refuse(refusal.Class, refusal.Code, refusal.Diagnostic);
+            }
         }
 
         // S15 — the two identity-link profiles (INCOMING-141) ship in SpaarkeMaster: exactly one of each.
@@ -670,7 +1185,7 @@ public sealed class SecureRecordSetupProcedure
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
                 $"Profiles other than '{StandingGrantProfileName}' may create or update {StandingGrantTable}.{StandingGrantColumn}: " +
-                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team is its " +
                 "member). Only Standing Grant Administrators and System Administrator may create or update the standing grant; " +
                 "who was granted more is an operator decision. Nothing was written.");
         }
@@ -785,7 +1300,7 @@ public sealed class SecureRecordSetupProcedure
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InviteMarkerLockOtherWriter,
                 $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{InviteMarkerColumn}: " +
-                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team is its " +
                 "member). Whoever can write the marker can open a contact to an email bind. Nothing was written.");
         }
 
@@ -826,7 +1341,22 @@ public sealed class SecureRecordSetupProcedure
                     $" (the Readers profile must hold no row or 0/0/0 — every default team is its member). Only the BFF may " +
                     "touch the invite-code hash; who was granted access is an operator decision. Nothing was written.");
             }
-            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access.");
+
+            // Verified only (never changed): auditing and Advanced Find are both OFF on the column, as the package ships it
+            // (Entity.xml IsAuditEnabled 0, no ValidForAdvancedFind in DisplayMask) and Set-ExternalInviteCodeHashSchema.ps1 sets it.
+            // The seam returning null here would mean the column vanished between two reads: not a pass.
+            var exposure = await dv.GetAttributeExposureAsync(t, InviteTable, InviteCodeHashColumn, ct).ConfigureAwait(false);
+            if (exposure is null || exposure.IsAuditEnabled || exposure.IsValidForAdvancedFind)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InviteCodeHashExposureOn,
+                    $"{InviteTable}.{InviteCodeHashColumn}: IsAuditEnabled={(exposure is null ? "(column not readable)" : exposure.IsAuditEnabled)}, " +
+                    $"IsValidForAdvancedFind={(exposure is null ? "(column not readable)" : exposure.IsValidForAdvancedFind)} " +
+                    "(expected both false). The package ships the column with auditing and Advanced Find off; turn them off — " +
+                    "run scripts/Set-ExternalInviteCodeHashSchema.ps1 -Apply for the environment (it sets both off; it takes " +
+                    "-BffApplicationIds) and check it with -Verify — then resume. A SpaarkeMaster re-import does not clear a " +
+                    "value set by hand. H7b changes no column setting. Nothing was written.");
+            }
+            notes.Add($"{InviteTable}.{InviteCodeHashColumn}: present, secured, Writers 4/4/4, no other access, auditing and Advanced Find off.");
         }
 
         // S22 (#2317) — the BFF-only columns, as the invite-code hash: ABSENT is expected until the SpaarkeMaster release that
@@ -909,7 +1439,7 @@ public sealed class SecureRecordSetupProcedure
             {
                 return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter,
                     $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{AccessRemovedOnColumn}: " +
-                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team " +
+                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team " +
                     "is its member). Only the BFF records that a person's external access was removed. Nothing was written.");
             }
             notes.Add($"{InviteTable}.{AccessRemovedOnColumn}: present, secured, Readers 4/0/0, Writers 4/4/4, no other writer.");
@@ -934,6 +1464,129 @@ public sealed class SecureRecordSetupProcedure
                     $"{string.Join(", ", reaching.Take(NamedPrincipalLimit).Select(h => $"{h.Name ?? h.PrivilegeId.ToString()} at {h.Depth}"))}: " +
                     "every root-unit user reads every secure record by depth (INCOMING-145 §6 T4). Users belong in the " +
                     "customer's own unit; which roles the root default team holds is an owner decision. Nothing was written.");
+            }
+        }
+
+        // S25 (read half, task 267 / #2618) — the customer unit's default team owns ordinary records (contacts included,
+        // ContactIdentityBinder; I-6), and Dataverse requires an owner to hold Read on the table: it gets the customer-unit copy
+        // of "Spaarke Basic User", which every customer user already holds (H11). That copy must not reach the Secure Record
+        // unit: the customer unit is a direct child of the root (T1), so only GLOBAL depth on a codified secure table would.
+        var customerDefaultTeams = await dv.FindDefaultTeamsAsync(t, customerUnit.Id, ct).ConfigureAwait(false);
+        if (customerDefaultTeams.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.BasicUserRoleUnresolved,
+                $"The customer's business unit '{customerUnit.Name}' ({customerUnit.Id}) reports {customerDefaultTeams.Count} " +
+                "default teams (expected one). Nothing was written.");
+        }
+        var customerDefaultTeam = customerDefaultTeams[0];
+        var basicUserRoles = await dv.FindRolesAsync(t, BasicUserRoleName, customerUnit.Id, ct).ConfigureAwait(false);
+        if (basicUserRoles.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.BasicUserRoleUnresolved,
+                $"The customer's business unit '{customerUnit.Name}' ({customerUnit.Id}) has {basicUserRoles.Count} roles named " +
+                $"'{BasicUserRoleName}' (expected exactly one). It ships in SpaarkeMaster: import SpaarkeMaster (H6), then resume " +
+                "(Dataverse copies a root role into a unit asynchronously). Nothing was written.");
+        }
+        var basicUserRole = basicUserRoles[0];
+        var basicUserReaching = (await dv.GetRolePrivilegesAsync(t, basicUserRole.Id, ct).ConfigureAwait(false))
+            .Where(h => wantedIds.Contains(h.PrivilegeId) && Same(h.Depth, "Global"))
+            .ToArray();
+        if (basicUserReaching.Length > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.BasicUserRoleReachesSecureUnit,
+                $"'{BasicUserRoleName}' ({basicUserRole.Id}) in the customer's unit holds " +
+                $"{string.Join(", ", basicUserReaching.Take(NamedPrincipalLimit).Select(h => $"{h.Name ?? h.PrivilegeId.ToString()} at {h.Depth}"))}: " +
+                "on the customer unit's default team every customer user would read every secure record. The role ships in " +
+                "SpaarkeMaster; changing it is an owner decision. Nothing was written.");
+        }
+        var customerDefaultTeamRoles = await dv.ListTeamRolesAsync(t, customerDefaultTeam.Id, ct).ConfigureAwait(false);
+
+        // S29 (read half, ebilling-r1 DEF-059) — the BFF's two application users hold the customer-unit copy of "Spaarke Decision
+        // Record Reader" (Read on sprk_decisionrecord at Global, plus only the platform-added privileges in DecisionRecordReaderPlatformAddedPrivileges). The rules of
+        // scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1: the role in the ROOT unit holds that one privilege at Global and nothing outside the platform-added allow-list; any
+        // holder that is not one of the two BFF users (a person, another application user, a team) is drift. Verified only:
+        // this procedure strips a privilege from a role it creates (S6), never from one SpaarkeMaster ships, and removes no
+        // holder. Every refusal is before any write.
+        var readerRootRoles = await dv.FindRolesAsync(t, DecisionRecordReaderRoleName, root.Id, ct).ConfigureAwait(false);
+        if (readerRootRoles.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleUnresolved,
+                $"The root business unit has {readerRootRoles.Count} roles named '{DecisionRecordReaderRoleName}' (expected exactly " +
+                $"one). It ships in SpaarkeMaster {DecisionRecordReaderRoleMinimumRelease} or later: import SpaarkeMaster (H6), then " +
+                "resume. Nothing was written.");
+        }
+        var readerPrivilegeProblems = new List<string>();
+        var readerHeld = await dv.GetRolePrivilegesAsync(t, readerRootRoles[0].Id, ct).ConfigureAwait(false);
+        if (readerHeld.Count(h => Same(h.Name, DecisionRecordReaderPrivilege) && Same(h.Depth, DecisionRecordReaderPrivilegeDepth)) != 1)
+        {
+            readerPrivilegeProblems.Add($"it does not hold {DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth}");
+        }
+        var readerTolerated = readerHeld
+            .Where(h => DecisionRecordReaderPlatformAddedPrivileges.Any(p => Same(p, h.Name)))
+            .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        readerPrivilegeProblems.AddRange(readerHeld
+            .Where(h => !Same(h.Name, DecisionRecordReaderPrivilege)
+                        && !DecisionRecordReaderPlatformAddedPrivileges.Any(p => Same(p, h.Name)))
+            .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(NamedPrincipalLimit)
+            .Select(h => $"it holds {h.Name ?? h.PrivilegeId.ToString()} at {h.Depth}, outside its one-privilege set"));
+        if (readerPrivilegeProblems.Count > 0)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift,
+                $"The '{DecisionRecordReaderRoleName}' role ({readerRootRoles[0].Id}) is not " +
+                $"{DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth} plus only the platform-added privileges: {string.Join("; ", readerPrivilegeProblems)}. " +
+                "H7b changes no privilege of a role SpaarkeMaster ships: run " +
+                "scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <app-ids> -Apply " +
+                "(it strips what Dataverse added outside the declared privilege), then -Verify, then resume. Nothing was written.");
+        }
+        if (readerTolerated.Length > 0)
+        {
+            // Reported, not failed: the platform adds these to every Spaarke role; this step is verify-only on a managed role.
+            notes.Add($"'{DecisionRecordReaderRoleName}': tolerated platform-added privileges (verify-only, not stripped): " +
+                      string.Join(", ", readerTolerated.Select(h => $"{h.Name} at {h.Depth}")) + ".");
+        }
+        var readerHolderProblems = new List<string>();
+        foreach (var copy in await dv.FindRoleCopiesAsync(t, DecisionRecordReaderRoleName, ct).ConfigureAwait(false))
+        {
+            var holderTeams = await dv.ListRoleTeamHoldersAsync(t, copy.Id, ct).ConfigureAwait(false);
+            if (holderTeams.Count > 0)
+            {
+                readerHolderProblems.Add($"teams [{Ids(holderTeams)}] hold the copy {copy.Id}");
+            }
+            var foreignUsers = (await dv.ListRoleUsersAsync(t, copy.Id, ct).ConfigureAwait(false))
+                .Where(u => !bffUsers.Contains(u.UserId))
+                .ToArray();
+            if (foreignUsers.Length > 0)
+            {
+                readerHolderProblems.Add(
+                    $"{string.Join(", ", foreignUsers.Take(NamedPrincipalLimit).Select(u => u.ApplicationId is null ? $"person {u.UserId}" : $"application user {u.UserId}"))} " +
+                    $"hold the copy {copy.Id}");
+            }
+        }
+        if (readerHolderProblems.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleForeignHolder,
+                $"'{DecisionRecordReaderRoleName}' may be held only by the BFF's two application users, but " +
+                string.Join("; ", readerHolderProblems) +
+                ". Who holds the role is an operator decision; nothing is removed here. Nothing was written.");
+        }
+        var readerCopies = await dv.FindRolesAsync(t, DecisionRecordReaderRoleName, customerUnit.Id, ct).ConfigureAwait(false);
+        if (readerCopies.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleUnresolved,
+                $"Business unit '{customerUnit.Name}' ({customerUnit.Id}) has {readerCopies.Count} roles named " +
+                $"'{DecisionRecordReaderRoleName}' (expected exactly one). It ships in SpaarkeMaster " +
+                $"{DecisionRecordReaderRoleMinimumRelease} or later: import SpaarkeMaster (H6), then resume (Dataverse copies a root " +
+                "role into a unit asynchronously). Nothing was written.");
+        }
+        var readerCopyId = readerCopies[0].Id;
+        var readerPending = new List<Guid>();
+        foreach (var bffUser in bffUsers)
+        {
+            if ((await dv.ListUserRolesAsync(t, bffUser, ct).ConfigureAwait(false)).All(r => r.Id != readerCopyId))
+            {
+                readerPending.Add(bffUser);
             }
         }
 
@@ -1055,8 +1708,11 @@ public sealed class SecureRecordSetupProcedure
             actions.Add($"remove '{SystemAdministratorRoleName}' from the new unit's default team if it arrives holding it");
         }
 
-        // S11 — every business unit's default team reads the BFF-managed columns (a new unit is a re-run of this step).
-        var allDefaultTeams = await dv.FindDefaultTeamsAsync(t, null, ct).ConfigureAwait(false);
+        // S11 — every business unit's default team reads the BFF-managed columns (a new unit is a re-run of this step) —
+        // except the ontology writer unit's (task 267): it is in NO field-security profile, so the writer inherits none.
+        var allDefaultTeams = (await dv.FindDefaultTeamsAsync(t, null, ct).ConfigureAwait(false))
+            .Where(d => d.Id != writerDefaultTeam.Id && d.BusinessUnitId != writerBusinessUnit.Id)
+            .ToArray();
         var readerTeams = await dv.ListProfileTeamsAsync(t, readerProfileId, ct).ConfigureAwait(false);
         foreach (var defaultTeam in allDefaultTeams.Where(d => !readerTeams.Contains(d.Id)).ToArray())
         {
@@ -1075,7 +1731,7 @@ public sealed class SecureRecordSetupProcedure
                 () => dv.AssociateProfileUserAsync(t, writerProfileId, bffUser, ct)).ConfigureAwait(false);
         }
 
-        // S16 — as S11: every business unit's default team reads the identity-binding columns.
+        // S16 — as S11: every business unit's default team reads the identity-binding columns (the writer unit's excepted).
         var linkReaderTeams = await dv.ListProfileTeamsAsync(t, linkReaderProfileId, ct).ConfigureAwait(false);
         foreach (var defaultTeam in allDefaultTeams.Where(d => !linkReaderTeams.Contains(d.Id)).ToArray())
         {
@@ -1102,6 +1758,43 @@ public sealed class SecureRecordSetupProcedure
                 () => dv.AssociateProfileUserAsync(t, standingProfileId, bffUser, ct)).ConfigureAwait(false);
         }
 
+        // S23 - the BFF's runtime identity holds the customer-unit copy of "Spaarke Ontology Service". Other application users
+        // that hold the role (the app-registration user included) are allowed and never touched.
+        if (runtimeUserRoles.All(r => r.Id != ontologyRoleId))
+        {
+            await Write($"give BFF runtime user {runtimeUser} the role '{OntologyServiceRoleName}'",
+                () => dv.AssociateUserRoleAsync(t, runtimeUser, ontologyRoleId, ct)).ConfigureAwait(false);
+        }
+
+        // S24 - the ontology writer holds its own unit's copy of "Spaarke Ontology Service" and is in both writer profiles.
+        if (writerRoles.All(r => r.Id != writerRoleId))
+        {
+            await Write($"give ontology writer user {writerUser} the role '{OntologyServiceRoleName}' (its unit's copy {writerRoleId})",
+                () => dv.AssociateUserRoleAsync(t, writerUser, writerRoleId, ct)).ConfigureAwait(false);
+        }
+        foreach (var profile in writerProfiles.Where(p => p.Users.All(u => u.UserId != writerUser)).ToArray())
+        {
+            await Write($"add ontology writer user {writerUser} to '{profile.Name}'",
+                () => dv.AssociateProfileUserAsync(t, profile.Id, writerUser, ct)).ConfigureAwait(false);
+        }
+
+        // S25 - the customer unit's default team holds the customer-unit copy of "Spaarke Basic User". Only the missing
+        // association is written; no role is ever removed from the team.
+        if (customerDefaultTeamRoles.All(r => r.Id != basicUserRole.Id))
+        {
+            await Write($"give the customer unit's default team '{customerDefaultTeam.Name}' ({customerDefaultTeam.Id}) the role " +
+                        $"'{BasicUserRoleName}' ({basicUserRole.Id})",
+                () => dv.AssociateTeamRoleAsync(t, customerDefaultTeam.Id, basicUserRole.Id, ct)).ConfigureAwait(false);
+        }
+
+        // S29 - each BFF application user (the app registration's and the managed identity's) holds the customer-unit copy of
+        // "Spaarke Decision Record Reader", beside System Administrator. Only the missing association is written; nothing is removed.
+        foreach (var bffUser in readerPending)
+        {
+            await Write($"give BFF application user {bffUser} the role '{DecisionRecordReaderRoleName}' (its unit's copy {readerCopyId})",
+                () => dv.AssociateUserRoleAsync(t, bffUser, readerCopyId, ct)).ConfigureAwait(false);
+        }
+
         // S13 — no NULL secure flag may remain (a new environment has none; an upgraded one has the pre-column rows). It
         // runs before the BFF deploy because H9 waits for H7b, and a task-150 BFF refuses an EMPTY flag.
         foreach (var table in lockedIdentities)
@@ -1123,10 +1816,86 @@ public sealed class SecureRecordSetupProcedure
         var problems = await VerifyAsync(dv, t, set, wantedIds, businessUnitId!.Value, teamId!.Value, roleId!.Value,
             defaultTeamId!.Value, [(readerProfileId, ReaderProfileName), (linkReaderProfileId, IdentityLinkReaderProfileName)],
             [(writerProfileId, WriterProfileName), (linkWriterProfileId, IdentityLinkWriterProfileName)],
-            standingProfileId, bffUsers, lockedIdentities, ct).ConfigureAwait(false);
+            standingProfileId, bffUsers, lockedIdentities, writerDefaultTeam.Id, ct).ConfigureAwait(false);
+        // S25 verify: the association is visible (missing = a write not yet visible, Resumable).
+        var basicUserHeld = (await dv.ListTeamRolesAsync(t, customerDefaultTeam.Id, ct).ConfigureAwait(false))
+            .Any(r => r.Id == basicUserRole.Id);
+        if (!basicUserHeld)
+        {
+            problems.Add($"the customer unit's default team {customerDefaultTeam.Id} does not hold '{BasicUserRoleName}' " +
+                         $"({basicUserRole.Id}) after it was given");
+        }
+        // S29 verify: every BFF application user shows the reader role (missing = a write not yet visible, Resumable).
+        var readerNotHeld = new List<Guid>();
+        foreach (var bffUser in bffUsers)
+        {
+            if ((await dv.ListUserRolesAsync(t, bffUser, ct).ConfigureAwait(false)).All(r => r.Id != readerCopyId))
+            {
+                readerNotHeld.Add(bffUser);
+                problems.Add($"BFF application user {bffUser} does not hold '{DecisionRecordReaderRoleName}' ({readerCopyId}) after it was assigned");
+            }
+        }
+        var ontologyNotHeld = (await dv.ListUserRolesAsync(t, runtimeUser, ct).ConfigureAwait(false)).All(r => r.Id != ontologyRoleId);
+        if (ontologyNotHeld)
+        {
+            problems.Add($"BFF runtime user {runtimeUser} does not hold '{OntologyServiceRoleName}' ({ontologyRoleId}) after it was assigned");
+        }
+        // S24 verify. A missing role or membership is a write not yet visible (Resumable). Anything MORE than that appeared
+        // between the read and now, and nothing here removes it (QuarantineRequired, like the read half).
+        var writerProblems = new List<string>();
+        var writerExtras = new List<string>();
+        var writerRoleIds = (await dv.ListUserRolesAsync(t, writerUser, ct).ConfigureAwait(false)).Select(r => r.Id).ToHashSet();
+        if (!writerRoleIds.Contains(writerRoleId))
+        {
+            writerProblems.Add($"ontology writer user {writerUser} does not hold '{OntologyServiceRoleName}' ({writerRoleId}) after it was assigned");
+        }
+        if (writerRoleIds.Any(id => id != writerRoleId))
+        {
+            writerExtras.Add($"ontology writer user {writerUser} holds roles [{Ids(writerRoleIds)}], expected exactly " +
+                             $"'{OntologyServiceRoleName}' ({writerRoleId})");
+        }
+        foreach (var profile in writerProfiles)
+        {
+            var members = (await dv.ListProfileUsersAsync(t, profile.Id, ct).ConfigureAwait(false)).Select(u => u.UserId).ToHashSet();
+            var memberTeams = await dv.ListProfileTeamsAsync(t, profile.Id, ct).ConfigureAwait(false);
+            if (!members.Contains(writerUser))
+            {
+                writerProblems.Add($"the ontology writer {writerUser} is not a member of '{profile.Name}' after it was added");
+            }
+            if (members.Any(id => id != writerUser) || memberTeams.Count > 0)
+            {
+                writerExtras.Add($"'{profile.Name}' members are users [{Ids(members)}] and teams [{Ids(memberTeams)}], " +
+                                 $"expected only the ontology writer {writerUser}");
+            }
+        }
+        var (verifyTeamAccess, verifyOtherProfiles) = await OntologyWriterExtraAccessAsync(dv, t, writerUser, writerDefaultTeam,
+            writerProfiles.Select(p => p.Id).ToArray(), ct).ConfigureAwait(false);
+        if (verifyTeamAccess is not null)
+        {
+            writerExtras.Add(verifyTeamAccess);
+        }
+        if (verifyOtherProfiles is not null)
+        {
+            writerExtras.Add(verifyOtherProfiles);
+        }
+        if (writerExtras.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured,
+                "The ontology writer holds more than its role and its two profiles after the writes: " +
+                string.Join("; ", writerExtras.Concat(writerProblems).Concat(problems)) +
+                ". Something changed the writer between the read and the re-read; nothing is removed here - an operator decides.");
+        }
+        problems.AddRange(writerProblems);
         if (problems.Count > 0)
         {
-            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.VerifyFailed,
+            return Refuse(FailureClass.Resumable,
+                ontologyNotHeld && problems.Count == 1
+                    ? SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld
+                    : readerNotHeld.Count > 0 && readerNotHeld.Count == problems.Count
+                        ? SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleNotHeld
+                    : writerProblems.Count == problems.Count
+                        ? SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured
+                        : SecureRecordSetupRejectionCodes.VerifyFailed,
                 "The re-read state is not the codified one: " + string.Join("; ", problems) +
                 ". Dataverse may still be applying a write; resume re-runs every step (each reads first).");
         }
@@ -1172,7 +1941,8 @@ public sealed class SecureRecordSetupProcedure
         ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, SecureRecordOwnerRoleSet set, IReadOnlySet<Guid> wantedIds,
         Guid businessUnitId, Guid teamId, Guid roleId, Guid defaultTeamId,
         IReadOnlyList<(Guid Id, string Name)> readerProfiles, IReadOnlyList<(Guid Id, string Name)> writerProfiles,
-        Guid standingProfileId, IReadOnlyList<Guid> bffUsers, IReadOnlyList<SecureSetupTableIdentity> lockedTables, CancellationToken ct)
+        Guid standingProfileId, IReadOnlyList<Guid> bffUsers, IReadOnlyList<SecureSetupTableIdentity> lockedTables,
+        Guid ontologyWriterDefaultTeamId, CancellationToken ct)
     {
         var problems = new List<string>();
 
@@ -1220,8 +1990,10 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
-        // S11/S16: every default team in each reader profile; S12/S17: each writer profile = the BFF's application users.
-        var allDefaultTeams = await dv.FindDefaultTeamsAsync(t, null, ct).ConfigureAwait(false);
+        // S11/S16: every default team but the ontology writer unit's in each reader profile, and that one in neither (task
+        // 267); S12/S17: each writer profile = the BFF's application users.
+        var allDefaultTeams = (await dv.FindDefaultTeamsAsync(t, null, ct).ConfigureAwait(false))
+            .Where(d => d.Id != ontologyWriterDefaultTeamId).ToArray();
         foreach (var (readerProfileId, readerProfileName) in readerProfiles)
         {
             var readerTeams = await dv.ListProfileTeamsAsync(t, readerProfileId, ct).ConfigureAwait(false);
@@ -1229,6 +2001,10 @@ public sealed class SecureRecordSetupProcedure
             if (unread.Length > 0)
             {
                 problems.Add($"default teams [{Ids(unread)}] are not in '{readerProfileName}'");
+            }
+            if (readerTeams.Contains(ontologyWriterDefaultTeamId))
+            {
+                problems.Add($"the ontology writer unit's default team {ontologyWriterDefaultTeamId} is in '{readerProfileName}'");
             }
         }
 
@@ -1285,6 +2061,124 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>A field permission's read/create/update, or "(none)" when there is no row.</summary>
     private static string Rights(SecureSetupFieldPermission? p)
         => p is null ? "(none)" : $"{p.CanRead}/{p.CanCreate}/{p.CanUpdate}";
+
+    /// <summary>
+    /// What one shipped BFF-managed column lock (S26, S27, S28) refuses with, and the words its messages use.
+    /// <paramref name="LockDescription"/> names the lock ("the invoice amounts and firm (ebilling task 166)");
+    /// <paramref name="Harm"/> says what an incomplete lock lets a user do; <paramref name="OwnerRule"/> is the sentence a
+    /// stray writer breaks; <paramref name="Remedy"/> ends an incomplete-lock message.
+    /// </summary>
+    private sealed record BffManagedColumnLock(
+        string IncompleteCode, string OtherWriterCode, string LockDescription, string Harm, string OwnerRule, string Remedy);
+
+    /// <summary>A refusal a lock check returns; the caller turns it into the procedure's outcome.</summary>
+    private sealed record LockRefusal(FailureClass Class, string Code, string Diagnostic);
+
+    private static readonly BffManagedColumnLock InvoiceMoneyLock = new(
+        SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete,
+        SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
+        "the invoice amounts and firm (ebilling task 166)",
+        "a user could set them",
+        "Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner decision.",
+        InvoiceMoneyLockRemedy);
+
+    private static readonly BffManagedColumnLock InvoiceFamilyLock = new(
+        SecureRecordSetupRejectionCodes.InvoiceFamilyLockIncomplete,
+        SecureRecordSetupRejectionCodes.InvoiceFamilyLockOtherWriter,
+        "the invoice family's core-record lookups and invoice links (#2799)",
+        "a user could re-file an invoice-family row past the BFF's checks",
+        "Only the BFF writes what an invoice-family row is filed under and which invoice it belongs to (#2799); who else may " +
+        "is an owner decision.",
+        InvoiceFamilyLockRemedy);
+
+    private static readonly BffManagedColumnLock MessageAccessLock = new(
+        SecureRecordSetupRejectionCodes.MessageAccessLockIncomplete,
+        SecureRecordSetupRejectionCodes.MessageAccessLockOtherWriter,
+        "the message-access columns (field-mapping task 054b)",
+        "a user could change who may read a message",
+        "Only the BFF writes who may read a message (field-mapping task 054b); who else may is an owner decision.",
+        MessageAccessLockRemedy);
+
+    /// <summary>
+    /// S26/S27/S28: one shipped BFF-managed column lock on <paramref name="table"/>.<paramref name="column"/> is whole — the
+    /// column exists and is secured, the Readers profile reads it (4), the Writers profile reads, creates and updates it
+    /// (4/4/4) — and no profile but the Writers and the platform System Administrator profile (by its fixed ID, never by name)
+    /// may create or update it. Grants on a column of the same name on ANOTHER table are ignored. Reads only.
+    /// </summary>
+    /// <returns>Null when the lock is whole; otherwise Resumable (incomplete) or QuarantineRequired (another writer).</returns>
+    private static async Task<LockRefusal?> CheckBffManagedColumnLockAsync(
+        ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, string table, string column,
+        Guid readerProfileId, Guid writerProfileId, BffManagedColumnLock lockRule, CancellationToken ct)
+    {
+        var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
+            .Where(p => Same(p.EntityName, table))
+            .ToArray();
+        var secured = await dv.IsAttributeSecuredAsync(t, table, column, ct).ConfigureAwait(false);
+        var reader = columnPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+        var writer = columnPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+        if (secured != true
+            || reader is null || reader.CanRead != FieldPermissionAllowed
+            || writer is null || writer.CanRead != FieldPermissionAllowed || writer.CanCreate != FieldPermissionAllowed
+            || writer.CanUpdate != FieldPermissionAllowed)
+        {
+            return new LockRefusal(FailureClass.Resumable, lockRule.IncompleteCode,
+                $"{table}.{column}: IsSecured={secured?.ToString() ?? "(no such column)"}, " +
+                $"'{ReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
+                $"'{WriterProfileName}' read/create/update={Rights(writer)} (expected secured, 4, 4/4/4). The package's " +
+                $"lock on {lockRule.LockDescription} is incomplete: {lockRule.Harm}. {lockRule.Remedy}");
+        }
+        var otherWriters = columnPermissions
+            .Where(p => p.ProfileId != writerProfileId
+                        && p.ProfileId != SystemAdministratorFieldSecurityProfileId
+                        && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+            .ToArray();
+        if (otherWriters.Length > 0)
+        {
+            return new LockRefusal(FailureClass.QuarantineRequired, lockRule.OtherWriterCode,
+                $"Profiles other than '{WriterProfileName}' may create or update {table}.{column}: " +
+                $"{string.Join(", ", otherWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={Rights(p)}"))}" +
+                (otherWriters.Any(p => p.ProfileId == readerProfileId)
+                    ? $" — '{ReaderProfileName}' among them, so every user (every default team is its member)" : string.Empty) +
+                $". {lockRule.OwnerRule} Nothing is removed here. Nothing was written.");
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// S24: what the ontology writer would hold beyond its own role and profiles - roles inherited through a team (any team
+    /// other than its unit's default team, or a role on that default team), direct membership of any other profile, and
+    /// (task 267) its unit's default team in ANY field-security profile. Each is null when there is none.
+    /// </summary>
+    private static async Task<(string? TeamAccess, string? OtherProfiles)> OntologyWriterExtraAccessAsync(
+        ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, Guid writerUser, SecureSetupTeam writerDefaultTeam,
+        IReadOnlyCollection<Guid> writerProfileIds, CancellationToken ct)
+    {
+        var teams = await dv.ListUserTeamsAsync(t, writerUser, ct).ConfigureAwait(false);
+        var otherTeams = teams.Where(team => team.Id != writerDefaultTeam.Id).ToArray();
+        var inherited = (await dv.ListTeamRolesAsync(t, writerDefaultTeam.Id, ct).ConfigureAwait(false))
+            .Select(role => $"'{role.Name}' {role.Id} through '{writerDefaultTeam.Name}' {writerDefaultTeam.Id}")
+            .ToArray();
+        var teamAccess = otherTeams.Length > 0 || inherited.Length > 0
+            ? $"ontology writer user {writerUser} is in teams other than its unit's default team " +
+              $"[{string.Join(", ", otherTeams.Select(team => $"'{team.Name}' {team.Id}"))}] and inherits roles from that " +
+              $"default team [{string.Join(", ", inherited)}]"
+            : null;
+
+        var otherProfiles = (await dv.ListUserProfilesAsync(t, writerUser, ct).ConfigureAwait(false))
+            .Where(id => !writerProfileIds.Contains(id)).ToArray();
+        var teamProfiles = await dv.ListTeamProfilesAsync(t, writerDefaultTeam.Id, ct).ConfigureAwait(false);
+        var profileProblems = new List<string>();
+        if (otherProfiles.Length > 0)
+        {
+            profileProblems.Add($"ontology writer user {writerUser} is a direct member of other field-security profiles [{Ids(otherProfiles)}]");
+        }
+        if (teamProfiles.Count > 0)
+        {
+            profileProblems.Add($"the ontology writer unit's default team '{writerDefaultTeam.Name}' {writerDefaultTeam.Id} is a " +
+                                $"member of field-security profiles [{Ids(teamProfiles)}] (it must be in none)");
+        }
+        return (teamAccess, profileProblems.Count > 0 ? string.Join("; ", profileProblems) : null);
+    }
 
     private static string Ids(IEnumerable<Guid> ids)
     {

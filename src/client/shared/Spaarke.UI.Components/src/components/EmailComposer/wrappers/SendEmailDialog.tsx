@@ -9,7 +9,8 @@
  * pre-seam source of double chrome). The `ComposerActionBar` stays in the body
  * (Messages-shape: smart body, dumb frame). Callback mapping unchanged:
  *   - engine `onSent(result)` → `props.onSent?.(communicationId)` then `onClose()`
- *   - engine `onCancel` / shell × → `onClose`
+ *   - engine `onCancel` / shell × → `onClose` (the × through the engine's `requestCancel`, so a typed draft
+ *     asks "Discard this email?" first and the session's uploads are cleaned up — task 220)
  *   - `alert` dismiss: no Esc/backdrop close (owner UAT 2026-07-30 item 12)
  *
  * This is THE canonical dialog wrapper (design §5.1.1) — it supersedes the legacy
@@ -19,6 +20,7 @@
  * No `@spaarke/auth` import (ADR-028) — `authenticatedFetch` is injected via props.
  */
 import * as React from 'react';
+import { MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { SprkModal } from '../../SprkModal';
 
 import { EmailComposer } from '../EmailComposer';
@@ -37,6 +39,8 @@ import type {
   IEmailAiDraftAction,
   IEmailAiDraftRequest,
   IEmailAiDraftResult,
+  IEmailComposerHandle,
+  IUploadedLocalAttachment,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type {
@@ -136,9 +140,11 @@ export interface ISendEmailDialogProps {
   /**
    * Resolve a locally-picked file to a governed `sprk_document` (item 9b) so it
    * flows into the send payload. Forwarded verbatim to the engine via the
-   * `...composerProps` spread; omitted → local picks stay display-only.
+   * `...composerProps` spread; omitted → local picks stay display-only. A
+   * `discard` on the result lets the composer remove that document again when
+   * the email is not sent (task 220; see `IUploadedLocalAttachment`).
    */
-  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
+  onUploadLocalAttachment?: (file: File) => Promise<IUploadedLocalAttachment>;
   /**
    * Resolve a recipient-openable SPE sharing link for a linked document (R2 item 12). Forwarded to
    * the engine via `...composerProps`; omitted → links keep their original internal URL.
@@ -244,7 +250,20 @@ export interface ISendEmailDialogProps {
    * MDA/PCF hosts that wire the native lookup callbacks. (owner UAT 2026-08-12.)
    */
   nonBlocking?: boolean;
+  /**
+   * A short host note shown as a warning bar above the composer (unified-access-control-r2 task 196): e.g. the
+   * TrackingFieldTrio "Email members" host says when some recipients could not be loaded, so a pre-filled To line that
+   * is narrower than the record's people never reads as complete. Omitted → the dialog renders exactly as before.
+   */
+  notice?: string;
 }
+
+const useStyles = makeStyles({
+  // Only when a notice is shown: the bar on top, the composer filling the rest of the body.
+  withNotice: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+  notice: { flexShrink: 0, margin: tokens.spacingHorizontalM },
+  composerArea: { flex: 1, minHeight: 0 },
+});
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
   const {
@@ -258,8 +277,10 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     fullBleed,
     uiScale,
     nonBlocking,
+    notice,
     ...composerProps
   } = props;
+  const styles = useStyles();
 
   // Shell title: mirrors the engine's mode-derived header word (which the seam
   // suppresses), honoring the same `titleOverride` hosts already pass (e.g.
@@ -316,10 +337,41 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     [nonBlocking]
   );
 
+  // The shell's × goes through the composer (task 220, #2946): a typed draft asks "Discard this email?" first, and on
+  // discard the documents the composer uploaded are cleaned up before `onClose` runs — the same path as its Cancel.
+  const composerRef = React.useRef<IEmailComposerHandle>(null);
+  const requestClose = React.useCallback(() => {
+    if (composerRef.current) composerRef.current.requestCancel();
+    else onClose();
+  }, [onClose]);
+
+  const composer = (
+    <EmailComposer
+      ref={composerRef}
+      {...composerProps}
+      // Wrap the native-lookup callbacks so the modal auto-hides while the
+      // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
+      onLookupRecipients={wrapLookup(composerProps.onLookupRecipients)}
+      onLookupRecord={wrapLookup(composerProps.onLookupRecord)}
+      onAddRelationship={wrapLookup(composerProps.onAddRelationship)}
+      associations={mergedAssociations}
+      mount="dialog"
+      mode={effectiveMode}
+      // The shell draws title + window controls — suppress the engine's header.
+      hostOwnsChrome
+      onSent={result => {
+        onSent?.(result.communicationId);
+        onClose();
+      }}
+      onCancel={onClose}
+      onError={onError}
+    />
+  );
+
   return (
     <SprkModal
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
       yieldToSidePane={lookupHidden}
       title={title}
       // fullBleed hosts (record-modal reply, dedicated compose window) start —
@@ -339,25 +391,16 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
       padded={false}
       uiScale={uiScale}
     >
-      <EmailComposer
-        {...composerProps}
-        // Wrap the native-lookup callbacks so the modal auto-hides while the
-        // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
-        onLookupRecipients={wrapLookup(composerProps.onLookupRecipients)}
-        onLookupRecord={wrapLookup(composerProps.onLookupRecord)}
-        onAddRelationship={wrapLookup(composerProps.onAddRelationship)}
-        associations={mergedAssociations}
-        mount="dialog"
-        mode={effectiveMode}
-        // The shell draws title + window controls — suppress the engine's header.
-        hostOwnsChrome
-        onSent={result => {
-          onSent?.(result.communicationId);
-          onClose();
-        }}
-        onCancel={onClose}
-        onError={onError}
-      />
+      {notice ? (
+        <div className={styles.withNotice}>
+          <MessageBar intent="warning" layout="multiline" className={styles.notice} data-testid="send-email-notice">
+            <MessageBarBody>{notice}</MessageBarBody>
+          </MessageBar>
+          <div className={styles.composerArea}>{composer}</div>
+        </div>
+      ) : (
+        composer
+      )}
     </SprkModal>
   );
 }

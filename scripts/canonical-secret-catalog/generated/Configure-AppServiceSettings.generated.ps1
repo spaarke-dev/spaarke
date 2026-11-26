@@ -77,6 +77,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$KvVaultUri,
 
+    [Parameter(Mandatory = $true)]
+    [string]$OntologyWriterClientId,
+
     [Parameter(Mandatory = $false)]
     [string]$OpenaiMonthlyLimitUsd = '',
 
@@ -85,6 +88,12 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$ServiceBusFqns,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SignalrEnabled = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$SignalrMsiConnectionString = '',
 
     [Parameter(Mandatory = $true)]
     [string]$SpeContainerId,
@@ -165,6 +174,7 @@ $settings = @(
     "ManagedIdentity__ClientId=$UamiClientId",
     "Membership__EventPublisher__ServiceBusNamespace=$ServiceBusFqns",
     "Membership__JunctionUpdater__ServiceBusNamespace=$ServiceBusFqns",
+    "Ontology__Writer__ManagedIdentityClientId=$OntologyWriterClientId",
     "PublicConfig__BffUrl=$BffUrl",
     "PublicConfig__MsalClientId=$BffAppClientId",
     "PublicConfig__TenantId=$TenantId",
@@ -179,6 +189,10 @@ $settings = @(
 )
 
 if (-not [string]::IsNullOrWhiteSpace($OpenaiMonthlyLimitUsd)) { $settings += "AiSpendLimit__MonthlyLimitUsd=$OpenaiMonthlyLimitUsd" }
+
+if (-not [string]::IsNullOrWhiteSpace($SignalrMsiConnectionString)) { $settings += "Notifications__SignalR__ConnectionString=$SignalrMsiConnectionString" }
+
+if (-not [string]::IsNullOrWhiteSpace($SignalrEnabled)) { $settings += "Notifications__SignalR__Enabled=$SignalrEnabled" }
 
 for ($i = 0; $i -lt $AiSearchIndexNames.Count; $i++) { $settings += "AiSearch__AllowedIndexes__$i=$($AiSearchIndexNames[$i])" }
 

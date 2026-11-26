@@ -29,7 +29,7 @@ For example, if your Dataverse organization name is `contoso`, the MCP server UR
 
 There are multiple ways to connect to a Dataverse MCP server:
 
-- Microsoft Copilot Studio. To learn how to connect to MCP through Dataverse MCP go to [Connect to Dataverse with model context protocol in Microsoft Copilot Studio](data-platform-mcp-copilot-studio.md).
+- Microsoft Copilot Studio. To learn how to connect to MCP through Dataverse MCP go to [Connect to Dataverse with model context protocol in Microsoft Copilot Studio](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/data-platform-mcp-copilot-studio).
 - Visual Studio GitHub Copilot and Copilot CLI. To learn how to connect to GitHub Copilot in Visual Studio Code or Copilot CLI go to [Connect Dataverse MCP with GitHub Copilot in Visual Studio Code and Copilot CLI](data-platform-mcp-vscode.md).
 - Non-Microsoft clients such as Claude desktop and Claude Code. To learn how to connect through Dataverse MCP go to [Connect Dataverse MCP with non-Microsoft clients](data-platform-mcp-other-clients.md).
 

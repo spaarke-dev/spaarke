@@ -592,7 +592,8 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "msg-002", TestSessionId, ChatMessageRole.Assistant,
                         "Here are the findings.", 20, now.AddMinutes(-1), 2)
-                ]) { OwnerOid = IntegrationTestConstants.TestUserId });
+                ])
+            { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // Error session -- same structure but different ID
         MockDataverseRepository
@@ -604,7 +605,8 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
                 PlaybookId: TestPlaybookId,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: []) { OwnerOid = IntegrationTestConstants.TestUserId });
+                Messages: [])
+            { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // Returns null for unknown session IDs (triggers 404)
         MockDataverseRepository

@@ -16,7 +16,7 @@
 import * as React from 'react';
 import { makeStyles, tokens, Card, CardHeader, Button, Tooltip, Text, Divider } from '@fluentui/react-components';
 import { Open20Regular, Globe20Regular, ArrowExpand20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import type { DocumentNodeData } from '../types/graph';
+import type { DocumentNodeData } from '@spaarke/ui-components/dist/components/DocumentRelationshipGraph';
 
 /**
  * Props for NodeActionBar component

@@ -70,7 +70,10 @@ import {
   DocumentEmailWizard,
   type IDocumentEmailWizardItem,
 } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/components/EmailComposer';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
+import { openInDesktopApp, OPEN_IN_DESKTOP_FAILED_MESSAGE } from '@spaarke/ui-components/dist/utils/openInDesktopApp';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 
 /**
@@ -330,6 +333,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Find Similar dialog state — URL of the web resource to show in the iframe dialog
   const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
+  // Task 194: the Dataverse lookup side pane opens in this page. While the Email documents wizard or the Find Similar
+  // viewer has it open, those dialogs yield to it; a preview open under them must yield too, or it covers the pane.
+  const [wizardLookupOpen, setWizardLookupOpen] = useState(false);
+  const [findSimilarLookupOpen, setFindSimilarLookupOpen] = useState(false);
+
   // ── v1.1.49 — Host-level preview dialog state (Item 6) ─────────────────
   // Both list view AND card view now route preview-open through the SAME
   // host-mounted FilePreviewDialog so the navigation set (Prev/Next) is
@@ -359,6 +367,12 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Initialize services (memoized to prevent recreation)
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
   const navigationService = useMemo(() => new NavigationService(), []);
+  // Composer handlers for the Email Documents wizard (task 183, D-219): recipient side pane, record lookup, file upload,
+  // template picker, AI draft and the Spaarke record-link resolver. Built here, in the host, so the wizard never touches Xrm.
+  const emailComposeHandlers = useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: apiBaseUrl }),
+    [apiBaseUrl]
+  );
   // Dedicated metadata service for FR-DOC-05 (Tags filter). Note: useFilterOptions
   // below also uses a singleton DataverseMetadataService — we mount a second
   // instance here to keep the Tags fetch independently cacheable and to avoid
@@ -661,37 +675,21 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     (result: SearchResult, mode: 'web' | 'desktop') => {
       apiService
         .getOpenLinks(result.documentId)
-        .then(async openLinks => {
-          // Desktop protocol available (Word, Excel, PowerPoint) — open in native app
-          if (openLinks.desktopUrl) {
-            return window.open(openLinks.desktopUrl, '_self');
-          }
-          // No desktop protocol — download via BFF and let OS open with default app
-          // (e.g. Adobe Acrobat for PDFs). SPE webUrl requires SharePoint permissions
-          // users may not have, so we stream through the BFF's /content endpoint.
-          try {
-            const contentUrl = `${apiBaseUrl}/api/documents/${encodeURIComponent(result.documentId)}/content`;
-            const response = await authenticatedFetch(contentUrl);
-            if (response.ok) {
-              const blob = await response.blob();
-              const objectUrl = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = objectUrl;
-              a.download = openLinks.fileName ?? result.name ?? 'document';
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(objectUrl);
-              return;
-            }
-          } catch (err) {
-            console.error('[SemanticSearchControl] Download failed, falling back:', err);
-          }
-          // Final fallback to webUrl
-          return window.open(openLinks.webUrl, '_blank', 'noopener,noreferrer');
-        })
+        .then(openLinks =>
+          // Office files open in the Office app; anything else downloads through the BFF (shared
+          // behaviour, ISS-004). No SharePoint webUrl fallback: a read-only user on a secure record
+          // cannot open it.
+          openInDesktopApp({
+            bffBaseUrl: apiBaseUrl,
+            documentId: result.documentId,
+            links: openLinks,
+            fetch: authenticatedFetch,
+            fallbackFileName: result.name ?? undefined,
+          })
+        )
         .catch(err => {
           console.error('[SemanticSearchControl] Failed to open file:', err);
+          void getXrm('openErrorDialog')?.Navigation?.openErrorDialog?.({ message: OPEN_IN_DESKTOP_FAILED_MESSAGE });
         });
     },
     [apiService, apiBaseUrl]
@@ -1852,7 +1850,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.85 • Built 2026-10-09</Text>
+        <Text size={100}>v1.1.94 • Built 2026-11-25</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so
@@ -1874,7 +1872,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           documentType={hostPreviewTarget.documentType}
           createdAt={hostPreviewTarget.createdAt}
           createdBy={hostPreviewTarget.createdBy}
-          onClose={() => setHostPreviewDocId(null)}
+          // Task 194: the wizard and Find Similar are non-modal (no backdrop of their own), so a click around them
+          // lands on this preview's light-dismiss backdrop. While one is stacked on it the preview stays, so the user
+          // returns to it when that dialog closes.
+          onClose={() => {
+            if (emailWizardOpen || findSimilarUrl) return;
+            setHostPreviewDocId(null);
+          }}
           fetchPreviewUrl={() => handlePreviewTelemetry(hostPreviewTarget)}
           onFetchSummary={() => handleSummary(hostPreviewTarget)}
           onOpenFile={mode => handleOpenFileTelemetry(hostPreviewTarget, mode)}
@@ -1887,11 +1891,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           navigationTotal={hostPreviewNavSet.length}
           currentIndex={hostPreviewIndex >= 0 ? hostPreviewIndex : undefined}
           onNavigate={handleHostPreviewNavigate}
+          yieldToSidePane={wizardLookupOpen || findSimilarLookupOpen}
         />
       )}
 
       {/* Find Similar — shared iframe dialog */}
-      <FindSimilarViewerDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
+      {/* Task 194: the viewer's Email documents lookup opens in this page, so this dialog yields to it while it is open. */}
+      <FindSimilarViewerDialog
+        open={!!findSimilarUrl}
+        onClose={() => setFindSimilarUrl(null)}
+        url={findSimilarUrl}
+        yieldToFrameSidePane
+        onFrameSidePaneLookupChange={setFindSimilarLookupOpen}
+      />
 
       {/* Document Email Wizard — unified single-doc + bulk Email surface.
           When launched from a row's 3-dot menu, `handleEmailDocument`
@@ -1928,6 +1940,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
+        emailComposeHandlers={emailComposeHandlers}
+        // Task 194: the PCF shares the Dataverse page's document, so the To/Cc/Bcc side pane would open behind a
+        // blocking wizard; non-blocking, the wizard yields to the pane while a lookup is open.
+        nonBlocking
+        onSidePaneLookupChange={setWizardLookupOpen}
         // Named `lg` size (1280px / 85vh) matches the FilePreviewDialog footprint so the wizard
         // doesn't jump in size when stacked over an open preview (ontology task 111).
         size="lg"

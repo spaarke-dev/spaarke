@@ -45,6 +45,7 @@ import {
   _resetNavPropCacheForTests,
 } from '../RegardingResolver/handlers/ResolverWriteHandler';
 import {
+  discoverNavProps as sharedDiscoverNavProps,
   _resetNavPropCacheForTests as _resetSharedNavPropCache,
   _resetRecordNumberFieldCacheForTests,
   _resetDisplayNameFieldCacheForTests,
@@ -885,6 +886,42 @@ describe('ResolverWriteHandler', () => {
     const result = await discoverHostNavProps('sprk_communication', fetchImpl as unknown as typeof fetch);
     expect(result).toEqual([]);
   });
+
+  // Pattern D (#2803 / #2804): the handler no longer keeps a private nav-prop cache — it reads and fills the SHARED one,
+  // so the metadata query runs once per entity however many writers ask for it.
+  test('discoverHostNavProps shares its cache with the shared discoverNavProps (one metadata query, not two)', async () => {
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+    await sharedDiscoverNavProps('sprk_todo', fetchImpl as unknown as typeof fetch);
+
+    const viaHandler = await discoverHostNavProps('sprk_todo', fetchImpl as unknown as typeof fetch);
+
+    expect(viaHandler.length).toBeGreaterThan(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test('discoverHostNavProps requests the lowercased host entity (a wrong-case `entity` input still resolves)', async () => {
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+
+    const entries = await discoverHostNavProps('sprk_Todo', fetchImpl as unknown as typeof fetch);
+
+    expect(entries.length).toBeGreaterThan(0);
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("LogicalName='sprk_todo'");
+  });
+
+  test('applyRegardingSelection on an unknown entity type keeps the handler-specific error prefix', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_nothing', recordId: MATTER_1, recordName: 'X' },
+      resolveAllowedCatalog('sprk_matter,sprk_project'),
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      '[RegardingResolver] Unknown entity type "sprk_nothing". Allowed: sprk_matter, sprk_project.'
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1081,9 +1118,7 @@ describe('v1.6.0 BFF re-file (task 147 r1)', () => {
   // Sweep integration (169 on top of 147): this list also held 'a record outside the core taxonomy (unclassified: budget)'.
   // Task 169 made the budget an INTERMEDIATE (its sprk_matter / sprk_project name its root), so no to-do catalog target
   // is unclassified any more; the budget's NEW-host decision is pinned by the test that follows this one.
-  test.each([
-    ['a child with no core-ancestor stamp (no-ancestor)', 'sprk_communication', COMM_ORPHAN],
-  ])(
+  test.each([['a child with no core-ancestor stamp (no-ancestor)', 'sprk_communication', COMM_ORPHAN]])(
     'a NEW host filed under %s is REFUSED — its secure ancestry cannot be seen here',
     async (_label, entityType, id) => {
       const webApi = makeWebApi();
@@ -1148,5 +1183,97 @@ describe('v1.6.0 BFF re-file (task 147 r1)', () => {
     );
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe('re-regarding a saved host: no previous number outlives the pair (045c review round 3)', () => {
+  const NUMBER_COLUMN = 'sprk_regardingrecordnumber';
+
+  /** A web api whose `sprk_recordtype_ref` row names a number field, and whose target row holds `numberValue`. */
+  function webApiWithNumber(numberField: string | null, numberValue: string | null) {
+    const base = makeWebApi();
+    base.retrieveMultipleRecords.mockImplementation(async (entity: string, query: string) => {
+      if (entity === 'sprk_recordtype_ref') {
+        if (query.includes('$select=sprk_regardingrecordnumberfield')) {
+          return { entities: [{ sprk_regardingrecordnumberfield: numberField }] };
+        }
+        return { entities: [{ sprk_recordtype_refid: 'rt-1', sprk_recorddisplayname: 'RT' }] };
+      }
+      if (entity === 'sprk_matter' && numberField && query.includes(`$select=${numberField}`)) {
+        return { entities: [{ [numberField]: numberValue }] };
+      }
+      return { entities: [] };
+    });
+    return base;
+  }
+
+  const select = { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'Acme' };
+
+  beforeEach(() => {
+    _resetNavPropCacheForTests();
+    _resetSharedNavPropCache();
+    _resetRecordNumberFieldCacheForTests();
+    _resetDisplayNameFieldCacheForTests();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test('a target with no number nulls the old one in the same update', async () => {
+    const webApi = webApiWithNumber(null, null);
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      select,
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(NUMBER_COLUMN in payload).toBe(true);
+    expect(payload[NUMBER_COLUMN]).toBeNull();
+  });
+
+  test('a target that has a number writes the new number (never nulls it)', async () => {
+    const webApi = webApiWithNumber('sprk_matternumber', 'MAT-2');
+    await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      select,
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(payload[NUMBER_COLUMN]).toBe('MAT-2');
+  });
+
+  test('a host without the regarding pair gets no number key (a missing column is a 400)', async () => {
+    const webApi = webApiWithNumber(null, null);
+    const narrowHost: NavPropRow[] = [navRow('sprk_regardingmatter', 'sprk_matter', 'Matter')];
+    await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_widget', hostRecordId: HOST_TODO },
+      select,
+      undefined,
+      makeFetch({ sprk_widget: narrowHost }) as unknown as typeof fetch
+    );
+
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(NUMBER_COLUMN in payload).toBe(false);
+  });
+
+  test('a NEW host stages nothing extra: the payload carries no number key', async () => {
+    const webApi = webApiWithNumber(null, null);
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: undefined },
+      select,
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    expect(NUMBER_COLUMN in (result.payload as Record<string, unknown>)).toBe(false);
   });
 });

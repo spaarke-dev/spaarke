@@ -328,7 +328,8 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
             when (ex.RefusalCode is Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.FixedAfterCreateReasonCode
-                      or Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterReasonCode)
+                      or Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterReasonCode
+                      or Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode)
         {
             // The core record pair is fixed after create on BFF update paths, and (task 048) a Signal, a Decision Record and a
             // Budget Revision are changed only by their writers: the configured payload was refused before any row was read or

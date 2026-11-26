@@ -30,6 +30,7 @@ internal static class ControlPlaneErrorCodes
     public const string IntakeUnknownKey = "intake-unknown-key";
     public const string IntakeInvalidEnvironmentName = "intake-invalid-environment-name";
     public const string IntakeInvalidSolutionPackageType = "intake-invalid-solution-package-type"; // T218b
+    public const string IntakeInvalidReferenceDataPack = "intake-invalid-reference-data-pack"; // data-setup plan D4
     public const string TenantIdRequired = "tenant-id-required";
     public const string SubscriptionIdRequired = "subscription-id-required";
     // T228: the operator-created Dataverse environment, and the container type (G19) — required for every model.
@@ -43,6 +44,9 @@ internal static class ControlPlaneErrorCodes
     // --- POST /api/runs: registry + concurrency ---------------------------------------
     public const string RegistryCustomerMismatch = "registry-customer-mismatch";
     public const string RegistrySetupStatusNotInProgress = "registry-setup-status-not-in-progress";
+    // ISS-031: a run against an existing stamp (sprk_provisionedon set) needs intake upgradeOfProvisionedOn equal to the row's.
+    public const string RegistryUpgradeNotAcknowledged = "registry-upgrade-not-acknowledged";
+    public const string RegistryUpgradeProvisionedOnMismatch = "registry-upgrade-provisioned-on-mismatch";
     public const string CustomerRunInFlight = "customer-run-in-flight";
     public const string RunGuardUnavailable = "run-guard-unavailable";
     public const string RunIdCollision = "run-id-collision";

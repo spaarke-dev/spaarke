@@ -177,7 +177,6 @@ public class EntityAccessFilterCharacterizationTests : IClassFixture<OfficeSaveT
     [InlineData("contact", "contacts")]
     [InlineData("sprk_matter", "sprk_matters")]
     [InlineData("sprk_project", "sprk_projects")]
-    [InlineData("sprk_invoice", "sprk_invoices")]
     [InlineData("sprk_todo", "sprk_todos")]
     public async Task PostOfficeSave_ForEachSupportedTargetType_ProbesThatTypesCollection(
         string entityType, string expectedEntitySet)

@@ -812,7 +812,7 @@ public static class FileAccessEndpoints
 
             // 5. Edit access (owner round 70): a SECURE container has no standing members, so a caller with Write on
             //    the secure record gets a just-in-time writer role before the URL is useful to them.
-            var edit = await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct);
+            var edit = await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct, itemId: document.GraphItemId);
 
             // 6. Return structured JSON response (not redirect)
             // Office Online enforces the user's own role when they open the URL.
@@ -957,7 +957,7 @@ public static class FileAccessEndpoints
             // 9. Edit access (owner round 70): just-in-time writer role on a SECURE container for a caller with Write on
             //    the secure record. A caller without Write gets the same pointers and no grant — SharePoint refuses
             //    them, and the in-app preview (broker) is their view path.
-            await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct, describeSharedContainer: false);
+            await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct, describeSharedContainer: false, itemId: document.GraphItemId);
 
             // 10. Return response
             return TypedResults.Ok(new OpenLinksResponse(

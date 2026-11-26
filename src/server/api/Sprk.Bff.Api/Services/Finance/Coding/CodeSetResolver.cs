@@ -79,9 +79,19 @@ public sealed class CodeSetResolver
     /// <paramref name="coreRecord"/>.
     /// </summary>
     /// <exception cref="LineCodingException"><see cref="LineCodingException.NoCodeSet"/>: no step produced a usable set.</exception>
+    public Task<ResolvedCodeSet> ResolveAsync(
+        CodingCoreRecord coreRecord,
+        IReadOnlyList<InvoiceLineToCode> lines,
+        CancellationToken cancellationToken = default) =>
+        ResolveAsync(coreRecord, lines, includeFirmCodes: true, cancellationToken);
+
+    /// <inheritdoc cref="ResolveAsync(CodingCoreRecord, IReadOnlyList{InvoiceLineToCode}, CancellationToken)"/>
+    /// <param name="includeFirmCodes">False skips step 1 (the firm's own codes): ebilling-r1 task 095c-3, an invoice submitted without a firm.
+    /// Steps 2 to 5 are unchanged.</param>
     public async Task<ResolvedCodeSet> ResolveAsync(
         CodingCoreRecord coreRecord,
         IReadOnlyList<InvoiceLineToCode> lines,
+        bool includeFirmCodes,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coreRecord);
@@ -93,11 +103,8 @@ public sealed class CodeSetResolver
                 nameof(coreRecord));
         }
 
-        // 1. The firm's own task codes.
-        var firmCodes = DistinctFirmTaskCodes(lines);
-        var firmSetId = await FindSetContainingAllAsync(firmCodes, cancellationToken).ConfigureAwait(false);
-        if (firmSetId is { } fromFirm
-            && await LoadAsync(fromFirm, CodeSetSource.FirmCodes, cancellationToken).ConfigureAwait(false) is { } firm)
+        // 1. The firm's own task codes (skipped for an invoice with no firm, task 095c-3).
+        if (includeFirmCodes && await ResolveFirmCodesAsync(lines, cancellationToken).ConfigureAwait(false) is { } firm)
         {
             return firm;
         }
@@ -164,6 +171,20 @@ public sealed class CodeSetResolver
         LoadAsync(codeSetId, source, cancellationToken);
 
     // ── Step 1 ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// FR-22 step 1 alone: the set that holds every task code the firm billed on <paramref name="lines"/>, or <c>null</c> when none does (or
+    /// the firm billed none). <see cref="ResolveAsync(CodingCoreRecord, IReadOnlyList{InvoiceLineToCode}, bool, CancellationToken)"/> runs it
+    /// first. Ebilling-r1 task 095d-2a-1 (EB-D-186): the re-run after Set firm asks only this step, because it is the only step the firm
+    /// changes; steps 2-5 gave the same set at intake, so no AI suggestion (step 4) is asked to decide whether a line is re-coded.
+    /// </summary>
+    internal async Task<ResolvedCodeSet?> ResolveFirmCodesAsync(IReadOnlyList<InvoiceLineToCode> lines, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        return await FindSetContainingAllAsync(DistinctFirmTaskCodes(lines), cancellationToken).ConfigureAwait(false) is { } fromFirm
+            ? await LoadAsync(fromFirm, CodeSetSource.FirmCodes, cancellationToken).ConfigureAwait(false)
+            : null;
+    }
 
     private static List<string> DistinctFirmTaskCodes(IReadOnlyList<InvoiceLineToCode> lines)
     {
@@ -261,23 +282,24 @@ public sealed class CodeSetResolver
         }
 
         var codes = await LoadCodesAsync(setId, ct).ConfigureAwait(false);
-        var task = ToOptions(codes, BillingCodeKind.Task);
+        var ids = new Dictionary<(BillingCodeKind Kind, string Code), Guid>(); // ISS-051: the row of each allowed code, for the line's code lookups
+        var task = ToOptions(codes, BillingCodeKind.Task, ids);
         if (task.Count == 0)
         {
             _logger.LogWarning("Line coding: code set {CodeSetId} from {Source} has no active task codes; skipping", setId, source);
             return null;
         }
 
-        var activity = ToOptions(codes, BillingCodeKind.Activity);
+        var activity = ToOptions(codes, BillingCodeKind.Activity, ids);
         if (activity.Count == 0)
         {
-            activity = await LoadSharedAsync(ActivitySetName, BillingCodeKind.Activity, ct).ConfigureAwait(false);
+            activity = await LoadSharedAsync(ActivitySetName, BillingCodeKind.Activity, ids, ct).ConfigureAwait(false);
         }
 
-        var expense = ToOptions(codes, BillingCodeKind.Expense);
+        var expense = ToOptions(codes, BillingCodeKind.Expense, ids);
         if (expense.Count == 0)
         {
-            expense = await LoadSharedAsync(ExpenseSetName, BillingCodeKind.Expense, ct).ConfigureAwait(false);
+            expense = await LoadSharedAsync(ExpenseSetName, BillingCodeKind.Expense, ids, ct).ConfigureAwait(false);
         }
 
         var name = setRow.GetAttributeValue<string>("sprk_name") ?? string.Empty;
@@ -288,10 +310,11 @@ public sealed class CodeSetResolver
             task.Count,
             activity.Count,
             expense.Count);
-        return new ResolvedCodeSet(setId, name, source, task, activity, expense);
+        return new ResolvedCodeSet(setId, name, source, task, activity, expense, ids);
     }
 
-    private async Task<List<InvoiceCodeOption>> LoadSharedAsync(string setName, BillingCodeKind kind, CancellationToken ct)
+    private async Task<List<InvoiceCodeOption>> LoadSharedAsync(
+        string setName, BillingCodeKind kind, Dictionary<(BillingCodeKind Kind, string Code), Guid> ids, CancellationToken ct)
     {
         var setId = await FindSetByNameAsync(setName, ct).ConfigureAwait(false);
         if (setId is null)
@@ -301,7 +324,7 @@ public sealed class CodeSetResolver
             return [];
         }
 
-        return ToOptions(await LoadCodesAsync(setId.Value, ct).ConfigureAwait(false), kind);
+        return ToOptions(await LoadCodesAsync(setId.Value, ct).ConfigureAwait(false), kind, ids);
     }
 
     private async Task<Guid?> FindSetByNameAsync(string name, CancellationToken ct)
@@ -333,7 +356,8 @@ public sealed class CodeSetResolver
         return await RetrieveAllAsync(query, ct).ConfigureAwait(false);
     }
 
-    private static List<InvoiceCodeOption> ToOptions(IEnumerable<Entity> codes, BillingCodeKind kind)
+    /// <summary>The allowed codes of <paramref name="kind"/> (first row per code wins); each kept code's row id goes into <paramref name="ids"/> (ISS-051).</summary>
+    private static List<InvoiceCodeOption> ToOptions(IEnumerable<Entity> codes, BillingCodeKind kind, Dictionary<(BillingCodeKind Kind, string Code), Guid> ids)
     {
         var options = new List<InvoiceCodeOption>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -348,6 +372,11 @@ public sealed class CodeSetResolver
             if (string.IsNullOrEmpty(code) || !seen.Add(code))
             {
                 continue;
+            }
+
+            if (row.Id != Guid.Empty)
+            {
+                ids.TryAdd((kind, code), row.Id);
             }
 
             var guidance = row.GetAttributeValue<string>("sprk_guidancetext");

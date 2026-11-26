@@ -19,7 +19,7 @@
 |---|---|
 | **`sprk_playbookconsumer`** (Dataverse entity) | A row per (consumer surface, environment, optional code) → playbook FK. Data-driven so a redirect changes Dataverse only, not BFF code. |
 | **`IConsumerRoutingService`** ([`Services/Ai/PublicContracts/ConsumerRoutingService.cs:53`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs)) | Looks up the row, picks the best match for the calling context, caches 5 min. |
-| **`IInvokePlaybookAi`** ([`Services/Ai/PublicContracts/InvokePlaybookAi.cs:42`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs)) | Non-streaming facade — calls `PlaybookOrchestrationService.ExecuteAsync` (Path B), aggregates SSE stream into `PlaybookInvocationResult`, returns to caller. |
+| **`IInvokePlaybookAi`** (`Services/Ai/PublicContracts/InvokePlaybookAi.cs:42`) | Non-streaming facade — calls `PlaybookOrchestrationService.ExecuteAsync` (Path B), aggregates SSE stream into `PlaybookInvocationResult`, returns to caller. |
 
 ### The Triangle — visual
 
@@ -256,7 +256,7 @@ Adding a consumer is configuration + a constant. Removing one is the same in rev
 
 ## 7. `IInvokePlaybookAi.InvokePlaybookAsync` — non-streaming semantics
 
-The facade at [`Services/Ai/PublicContracts/InvokePlaybookAi.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs) aggregates a streaming `IAsyncEnumerable<PlaybookStreamEvent>` into a single `PlaybookInvocationResult`. Key behaviour:
+The facade at `Services/Ai/PublicContracts/InvokePlaybookAi.cs` aggregates a streaming `IAsyncEnumerable<PlaybookStreamEvent>` into a single `PlaybookInvocationResult`. Key behaviour:
 
 1. **No document context** — at line 68-73 the facade constructs `PlaybookRunRequest { DocumentIds = Array.Empty<Guid>(), Parameters = parameters }`. Empty DocumentIds is the **intended** path for invoke-by-payload callers (per `InvokePlaybookAi.cs:64-67` comment).
 2. **Always Path B** — line 86: `_orchestrator.ExecuteAsync(request, context.HttpContext, ct)` (the OBO node-based orchestrator). Path C (app-only) is not facade-accessible.

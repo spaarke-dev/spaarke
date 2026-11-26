@@ -15,10 +15,12 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// remembered: <c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>, record reads and every other
 /// caller question still go to Dataverse every time (ADR-009: no authorization answer is cached). A write (POST, PATCH,
 /// DELETE) passes through and forgets everything remembered.</para>
-/// <para><b>For how long, for whom.</b> One instance wraps one caller's client for one create's step 5 and is then dropped
-/// (a local of <c>RecordCreationService.DecideAsync</c>): nothing is shared across steps, creates, requests or callers. The
-/// other steps keep the caller's own client, so a read they make is asked as before (a stamp bind whose metadata read fails
-/// still fails), and a pre-write rule still receives the caller's own client. Each hit returns its own freshly parsed body
+/// <para><b>For how long, for whom.</b> One instance wraps one caller's client for one create's step 5, and (task 049c) a
+/// second instance for the same create's steps 2 and 3 (the caller's payload, then the merge of the mapped values, which
+/// re-read the table's relationships and the entity sets step 2 read); each is then dropped (locals of
+/// <c>RecordCreationService.DecideAsync</c>): nothing is shared across those groups, creates, requests or callers. The
+/// other steps (3½, the pre-write rules, 6 to 10) keep the caller's own client, so a read they make is asked as before (a
+/// stamp bind whose metadata read fails still fails), and a pre-write rule still receives the caller's own client. Each hit returns its own freshly parsed body
 /// (a parsed body is not shared across threads), and the store is concurrent, because the caller checks ask in parallel
 /// (task 049 Part A).</para>
 /// <para><b>Repeats it removes</b> (measured from the source): a mapped create's step 5 asks the same table's privilege

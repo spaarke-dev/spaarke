@@ -670,8 +670,13 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             .Setup(d => d.GetDocumentAsync(id.ToString(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = id.ToString(), Name = "Re Acme", GraphDriveId = "drive-1", GraphItemId = "item-1",
-                FileName = "Re Acme.eml", IsEmailArchive = true, HasFile = true
+                Id = id.ToString(),
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
             });
         _fx.SpeMock
             .Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>()))

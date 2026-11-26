@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Models.FieldMapping;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.DataMutation.Communication;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
@@ -43,7 +44,7 @@ public class RefilePathRestampTests
         var services = new ServiceCollection()
             .AddSingleton(world.Restamper)
             .AddSingleton<IRecordOwnershipResolver>(new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble())
-            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+            .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Mock().AnsweringNoPrivateMessage().Object)
             .BuildServiceProvider();
         var core = new UpdateRecordActionCore(
             new Mock<IFieldMappingDataverseService>().Object,
@@ -79,7 +80,7 @@ public class RefilePathRestampTests
         world.Patches.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Task 156 path: the playbook output orchestrator's DataverseUpdateHandler re-stamps the children of the record it re-filed")]
+    [Fact(DisplayName = "Task 156 path: DataverseUpdateHandler re-stamps the children of the record it re-filed")]
     public async Task DataverseUpdateHandler_RestampsTheCommunicationsChildren()
     {
         var world = CommunicationWorld();
@@ -108,6 +109,7 @@ public class RefilePathRestampTests
         var fieldMapping = new Mock<IFieldMappingDataverseService>().Object;
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             fieldMapping,
             world.Restamper,
             [
@@ -141,6 +143,7 @@ public class RefilePathRestampTests
             .FailWrite("sprk_todo", TodoUnderEvent);
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             new Mock<IFieldMappingDataverseService>().Object,
             world.Restamper,
             [
@@ -235,7 +238,7 @@ public class RefilePathRestampTests
             It.IsAny<Guid>(), It.IsAny<Sprk.Bff.Api.Services.Communication.FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(), It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact(DisplayName = "Task 129: the playbook output orchestrator's DataverseUpdateHandler re-filing a communication reconciles its thread once")]
+    [Fact(DisplayName = "Task 129: DataverseUpdateHandler re-filing a communication reconciles its thread once")]
     public async Task DataverseUpdateHandler_ReFilingACommunication_ReconcilesItsThreadOnce_AndAPlainWriteNever()
     {
         var world = CommunicationWorld();
@@ -268,7 +271,7 @@ public class RefilePathRestampTests
                 .AddSingleton(world.Restamper)
                 .AddSingleton(ownership)
                 .AddSingleton(threads)
-                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Service())
+                .AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.Mock().AnsweringNoPrivateMessage().Object)
                 .BuildServiceProvider()
                 .GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
@@ -283,10 +286,18 @@ public class RefilePathRestampTests
             [("sprk_regardingdocument", "sprk_document", Document), ("sprk_regardingmatter", "sprk_matter", MatterA)],
             pairId: MatterA.ToString());
 
-    /// <summary>A communication now filed under matter B and a to-do under it still copying A.</summary>
-    private static StampWorld CommunicationWorld() => new StampWorld()
-        .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
-        .Row("sprk_todo", TodoUnderCommunication,
-            [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
-            pairId: Communication.ToString());
+    /// <summary>
+    /// A communication now filed under matter B and a to-do under it still copying A. The communication is an ordinary message
+    /// (fm task 056: the private-message guard's read of it, through the world's service, finds no context reference).
+    /// </summary>
+    private static StampWorld CommunicationWorld()
+    {
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_todo", TodoUnderCommunication,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+        Mock.Get(world.Service).AnsweringNoPrivateMessage();
+        return world;
+    }
 }
