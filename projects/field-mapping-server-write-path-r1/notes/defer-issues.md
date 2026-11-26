@@ -432,3 +432,33 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. `CreateMatterWizard.tsx` awaits `resolveUserBuDefaults()` (systemuser, then businessunit) and passes the result as `_cascadeDefaults`, which `matterService.createMatter` never reads. |
 | **Need** | Remove the prop, its hosts' wiring and the unused parameter; keep `EntityCreationService.resolveUserBuDefaults` for its container callers; test that a matter create makes no systemuser or businessunit read. |
 | **Status** | Filed. Out of 035 scope (no wizard-logic changes). |
+
+## DI-045 — Field-mapping push cost scales with the child count; a 500-child push can exceed the request limit (#2098)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-18, PR #2094 measurement; recorded in this project 2026-11-26 (task 063). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2098 |
+| **Class** | Pre-existing, out of scope (spec: `/push` performance is separate work). About 17 Dataverse calls per child, run serially, so a 500-child push can pass App Service's 230 s request limit and the caller gets a timeout instead of counts. |
+| **Need** | Run the push as a queued job (ADR-004 `IJobHandler`) with a progress and result record, or batch the reads with bounded parallelism and take the isolation read from the re-file's own row read. Measure before and after with the call-counting world in `RefileWriterBindShapeTests`. |
+| **Status** | Filed (existing issue; status comment posted 2026-11-26). Not fixed in this project. |
+
+## DI-046 — Audit the uses of the Assign privilege in Spaarke roles before removing it (owner: unified-access-control-r2)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-19, design review; owner decision Q12. Filed 2026-11-26 (task 063). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3245 |
+| **Class** | Follow-up, out of scope for this project. Owner decision Q12 hides the native Assign command now (task 051) and sequences any role change after an audit. |
+| **Need** | An audit of every role holding the Assign privilege on a standard-owned table and its legitimate use; then a reviewed role change or a written exception per grant. UAC-r2 owns the change. |
+| **Status** | Filed to UAC-r2. Not done in this project. |
+
+## DI-047 — Demo data v2 writes the deprecated event status column; EventStatusDeprecationTests fails on master (found in the 063 gates)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 063 gates (re-run on the work branch with master 24d53fb333 merged). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3246 |
+| **Class** | Pre-existing, another project's code (#3110, demo dataset v2). `scripts/demo-data/DemoDataLib.ps1:100` and `reference-names.json:6` name `sprk_eventstatus`; `statuscode` is authoritative (D-28). The guard test fails 1 of 13. |
+| **Need** | Seed event status through `statuscode`/`statecode`; the guard then passes. |
+| **Status** | Filed and reported. Not fixed here (not this project's files). |
