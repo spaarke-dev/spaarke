@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-043: an Office save to the suggested record confirms it, and the review panel shows a written regarding instead of "No confident match"</title>
     <phase>Phase 7: fixes before close (owner dev check of 136–138, owner go 2026-11-25)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF write on a communication as the caller (ADR-008 A1 instance) plus a shared UI component; tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,6 +81,6 @@ The owner then saved the same email from the Outlook add-in to that same matter.
     <cost-of-doing-nothing>An email the user explicitly filed from Outlook stays in Needs Review as "No confident match". A reviewer may file it again, or accept the pending create-new-record proposal and make a duplicate record.</cost-of-doing-nothing>
   </justification>
 
-  <notes></notes>
+  <notes>Done 2026-11-26. PR #3214 merged 152397ab11. Empty candidates: SerializeProvenance dropped all candidates/signals past the 10,000-char column (fixed). Two adversarial passes (opus); uac-r2 condition: Resolved drives ThreadContinuityRung auto-file of every regarding, so a save confirms only when the picked record is the SOLE regarding and the pair type is written (RequirePairType), else NotConfirmable → FiledUnconfirmed (pane notice). Dev BFF live in 6a2a569ac9 (uac-r2 gate PASS); Console auto-deploy, sprk_communicationreconciliation and sprk_emailpage verified byte-identical to master. Owner live check PASS. Follow-up ISS-044 #3202 (upload capture on an auto-file-off tenant).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
