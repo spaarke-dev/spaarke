@@ -382,7 +382,8 @@ export interface SavedDocumentState {
   lastSave: SaveTarget['mode'];
   /**
    * Task 131 (#2171): set when the save worked but the email it reconciled to could not be filed to the chosen record
-   * (the server's `SaveResponse.emailFiling` was `NotPermitted` / `Failed`). Absent otherwise. Held here, with the saved
+   * (the server's `SaveResponse.emailFiling` was `NotPermitted` / `Failed`), or is filed there but could not be confirmed
+   * (`FiledUnconfirmed`, task 140). Absent otherwise. Held here, with the saved
    * document, so the notice survives a tab switch like the confirmation bar does.
    */
   emailFilingProblem?: EmailFilingProblem;
