@@ -156,3 +156,18 @@ Moved SDK calls (code-mapper estimates): archive 13-16, thread 8-11, enrichment 
 - **Q4.** The inline fallback's 2 s enqueue bound: accept it, or bell instead (no inline work) on an enqueue fault?
 - **Q5.** The email bell once per task, or once per decision (add the decision id to `AssignTaskEmailPayload`)?
 - **Q6.** Is `EnrichAsync` safe to re-run (create-task, propose, assessment-event), or does it need a durable guard?
+
+## field-mapping-r1 review (2026-11-25)
+- **Q0: declined.** Their spec has no post-send background work, and their CommunicationService changes were the create-time mapping and owner steps, not the archive/thread/enrichment tail. They have asked their owner. Until then, plan on **Path A**: a recorded project exception in OUR spec, with field-mapping reviewing the CommunicationService hunks. **Needs our owner's approval.**
+- **Q2: yes.** Read `sprk_bodyformat` and `sprk_bcc` for outgoing rows; both are written on every send (CS:3226/3245, :3461/:3478). Keep the HTML default when the column is null. Bcc goes only into the .eml, never into a response or log.
+- **Q3: the lock is not enough.**
+  - The job re-runs `FindExistingArchiveDocumentAsync` after the PUT and before the create.
+  - The manual route returns AlreadyArchived when it finds a row.
+  - The lock covers the normal case. A detected duplicate is logged as an Error.
+  - An alternate key only if duplicates show up in telemetry: it is a schema change that needs their owner's go per environment.
+- **Q4:** keep the inline fallback with the 2 s bound. One Warning log with the communication id; no response change.
+- **Q6:** EnrichAsync is partly safe to re-run.
+  - propose is idempotent (~847-881); the triage update is additive (~550).
+  - create-task and assessment-event (~268) are NOT verified. Add an existing-row lookup by communication id if either can create a second row; don't trust the cache marker.
+- **Q1, Q5:** ours and ontology's.
+- **#3193 fix:** field-mapping will check that CallerMetadataReadMemo stays per caller AND per request.
