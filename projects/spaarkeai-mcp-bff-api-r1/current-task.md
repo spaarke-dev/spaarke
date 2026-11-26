@@ -22,11 +22,11 @@
   - Owner decision: an archive failure is reported where the user can fix it, via a bell to the communication record's "Save to SharePoint" (`decisions.md`). ontology amended D-216.
   - **Q0 blocker:** our spec forbids background work, so field-mapping-r1 is asked to own and build the handler. Also open: Q1-Q6 in §9.
 - **Part D scoping:** `notes/iss-010-commit-latency.md` "Part D scoping". D1 (BU/team config memo) is not started.
-- **Heading change (D-227, owner "Apply to both"):** PR **#3199** (`ux/decision-finding-first`, worktree `C:\wtux`, head `4491eab395`): FoundStep h2 = finding; IssueLine line 1 = finding, line 2 = subject; the Copilot widget's DecideLane billing rows also lead with the finding (DecideLane UI stays with r1; mcp-r2 confirmed no conflict and merges master after). ontology-r1 is reviewing. Auto-merge off; merge = owner.
-  - After merge: tell mcp-r2; deploys = Console auto, LegalWorkspace code-page deploy, BFF deploy for the widget (owner per-SHA go).
+- **Heading change (D-227): MERGED** #3199 as `14f45b7412` at 02:51:34Z 2026-11-26 (owner "Yes, merge #3199"; ontology-r1 approved after review fixes F4/K3a/K3b). Told ontology-r1, mcp-r2, uac-r2.
+  - Deploys still to do: Console redeploys from master automatically (check it ran); LegalWorkspace needs a code-page deploy; the widget ships with the next BFF deploy (owner per-SHA go via uac-r2). Worktree `C:\wtux` can be removed (Remove-WorktreeSafe.ps1, owner approval).
 - **Owner rules from today:** a failed email send must surface on every surface (the send stays inline); the email bell on the final fallback failure is agreed with ontology.
 - **Dev BFF deploy 2026-11-26 ~01:52Z (uac-r2 BEFORE notice, owner go):** master `1e64e94168` replaces `aa933c09e6` (rollback). Carries #3161 (so the 042 NFR-01 50-call check can run after it), #3164, #3167, #3160, #3174, #3180; NOT #3193/#3192. LIVE 01:56:50Z 2026-11-26 (uac-r2: 42.05 MB, 4/4 SHA match, healthz 200, MCP 5 tools, widget sha = dist); 30-min gate ~02:27Z. Fourth NFR-01 restart window to exclude: ~01:52-01:57Z 2026-11-26. Any decision commit after 01:56:50Z counts toward the NFR-01 p95 on this build.
-- **#3199 review:** ontology F4 (billing row column) + K3a + K3b fixed at `564069baa4`; re-check requested.
+- **#3193:** all three reviewers approve at `5257be262f` (ontology-r1, uac-r2, field-mapping-r1 incl. K2/K4). Owner is HOLDING the merge (merged #3199 only). Publish-size delta not re-measured since `deda2211f0`.
 - **042 open items:** Chat resolve, the because-rationale check (read the run-3 Decision Record read-only), the billing link-out check, the runbook re-run by a second admin, and NFR-01 50 calls after #3161 is deployed. 042 no longer gates r2.
 - **Uncommitted:** none. Worktrees `C:\wt3184`, `C:\wt3184c` and `C:\wtux` hold the agents' branches; remove them only via `Remove-WorktreeSafe.ps1` after the owner approves.
 
