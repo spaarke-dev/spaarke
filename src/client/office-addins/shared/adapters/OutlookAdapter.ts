@@ -79,6 +79,26 @@ function createHostAdapterError(code: HostAdapterErrorCode, message: string, inn
   return { code, message, innerError };
 }
 
+/** Task 139 (F3): shown when the selected email changed under an adapter that was serving another one. */
+const ITEM_CHANGED_MESSAGE = 'The selected email changed. Open the pane on the email you want to save.';
+
+/** Two Office item objects for the same email (read mode: same non-empty `itemId`) are not a change of email. */
+function isSameEmail(a: Office.Item, b: Office.Item): boolean {
+  const idA = (a as { itemId?: unknown }).itemId;
+  const idB = (b as { itemId?: unknown }).itemId;
+  return typeof idA === 'string' && idA !== '' && idA === idB;
+}
+
+/**
+ * Task 139 (F2): `getItemIdAsync` fails with `ItemNotSaved` on a compose draft that has no id yet. That is "no id",
+ * not a failure to read the item.
+ */
+function isItemNotSaved(error: { name?: string; message?: string } | null | undefined): boolean {
+  return /item\s*not\s*saved|has not been saved|hasn't been saved/i.test(
+    `${error?.name ?? ''} ${error?.message ?? ''}`
+  );
+}
+
 /**
  * `Office.MailboxEnums.AttachmentType` → {@link AttachmentInfo.attachmentType}. Compared as lower-case strings, not
  * against the enum object, so an unknown or absent value maps to `undefined` instead of throwing (task 116a).
@@ -105,6 +125,13 @@ export class OutlookAdapter implements IHostAdapter {
   private _initialized = false;
   private _mailbox: Office.Mailbox | null = null;
   private _currentMode: ItemMode = 'unknown';
+  /**
+   * Task 139 (review F3): the item this adapter first served. A pinned pane stays open while the user selects another
+   * email, and `mailbox.item` then becomes that other email; a Save already running for the first email would go on
+   * reading the second one's body and attachments. Once an item has been served, a different `mailbox.item` is
+   * refused (ITEM_CHANGED). An adapter that has not seen an item yet (opened with nothing selected) adopts the first.
+   */
+  private _servedItem: Office.Item | null = null;
 
   /**
    * Check if Mailbox requirement set is supported.
@@ -172,6 +199,12 @@ export class OutlookAdapter implements IHostAdapter {
     if (!item) {
       throw createHostAdapterError('NO_ITEM_SELECTED', 'No email item is currently selected or available.');
     }
+
+    // Task 139 (F3): never read a different email than the one this adapter served.
+    if (this._servedItem && item !== this._servedItem && !isSameEmail(this._servedItem, item)) {
+      throw createHostAdapterError('ITEM_CHANGED', ITEM_CHANGED_MESSAGE);
+    }
+    this._servedItem = item;
 
     // Task 139: the mode is read once, at initialize(). A pane that opened with no item (nothing selected, or several
     // emails selected) cached 'unknown', and would keep refusing the item that is there when the user retries. Read the
@@ -291,11 +324,18 @@ export class OutlookAdapter implements IHostAdapter {
     if (this._currentMode === 'compose') {
       // In compose mode, we need to get the item ID asynchronously
       const composeItem = item as Office.MessageCompose;
+      // Task 139 (F2): a client below Mailbox 1.8 has no getItemIdAsync, and a draft that was never saved has no id.
+      // Both are "no id" (as the null-value case already was), never a failure: the pane must open on a new draft.
+      if (typeof composeItem.getItemIdAsync !== 'function') {
+        return '';
+      }
       return new Promise((resolve, reject) => {
         composeItem.getItemIdAsync(result => {
           if (result.status === Office.AsyncResultStatus.Succeeded) {
             // ItemId may be null for unsaved drafts
             resolve(result.value ?? '');
+          } else if (isItemNotSaved(result.error)) {
+            resolve('');
           } else {
             reject(
               createHostAdapterError('CONTENT_RETRIEVAL_FAILED', result.error?.message ?? 'Failed to get item ID')
@@ -725,6 +765,7 @@ export class OutlookAdapter implements IHostAdapter {
         }
 
         this._mailbox = Office.context.mailbox;
+        this._servedItem = this._mailbox?.item ?? null;
         this._currentMode = this.determineMode(this._mailbox?.item ?? null);
         this._initialized = true;
 

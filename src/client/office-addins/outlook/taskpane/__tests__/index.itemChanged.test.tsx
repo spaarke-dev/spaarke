@@ -192,6 +192,8 @@ describe('Outlook pane: ItemChanged', () => {
 
   it('restarts the pane on the new email: per-email state is gone, the new email is read', async () => {
     const { screen, waitFor, fireEvent } = pane.rtl;
+    // Own starting point (this test must not depend on which tests ran before it).
+    await pane.changeItem(readItem('CCC'));
     await waitFor(() => expect(screen.getByText('item:CCC')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Mark saved' }));
     await waitFor(() => expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument());
@@ -204,10 +206,9 @@ describe('Outlook pane: ItemChanged', () => {
   });
 
   it('makes no auth call: no sign-in and no auth initialize after the first start', async () => {
-    // The first start initialized auth once; the changes made since (this suite shares one boot) made no auth call.
+    // The first start initialized auth once (counted in beforeAll, before `clearMocks` wipes call history for each
+    // test). The calls checked below are the ones made DURING this test, i.e. by the change it makes.
     expect(initializeCallsAtBoot).toBe(1);
-    expect(pane.authService.initialize).not.toHaveBeenCalled();
-    expect(pane.authService.signIn).not.toHaveBeenCalled();
 
     await pane.changeItem(readItem('EEE'));
     await pane.rtl.waitFor(() => expect(pane.rtl.screen.getByText('item:EEE')).toBeInTheDocument());
@@ -220,6 +221,8 @@ describe('Outlook pane: ItemChanged', () => {
 
   it('shows the select-an-email message when the new item is null, and Retry opens the email once one is selected', async () => {
     const { screen, waitFor, fireEvent } = pane.rtl;
+    // Own starting point (this test must not depend on which tests ran before it).
+    await pane.changeItem(readItem('EEE'));
     await waitFor(() => expect(screen.getByText('item:EEE')).toBeInTheDocument());
 
     await pane.changeItem(null);
@@ -282,5 +285,64 @@ describe('Outlook pane: ItemChanged cannot be registered', () => {
 
     await pane.rtl.waitFor(() => expect(pane.rtl.screen.getByText('item:AAA')).toBeInTheDocument());
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ItemChanged'), expect.any(Error));
+  });
+});
+
+describe('Outlook pane: the newly selected email cannot be started', () => {
+  let error: jest.SpyInstance;
+  beforeEach(() => {
+    error = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  it('does not leave the previous email up looking live: it says why, and Retry starts the pane on the new email', async () => {
+    const pane = await bootPane();
+    const { screen, waitFor, fireEvent } = pane.rtl;
+    await waitFor(() => expect(screen.getByText('item:AAA')).toBeInTheDocument());
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires -- same module registry as the booted pane
+    const { OutlookAdapter } = require('@shared/adapters/OutlookAdapter');
+    jest
+      .spyOn(OutlookAdapter.prototype, 'initialize')
+      .mockRejectedValueOnce({ code: 'UNKNOWN_ERROR', message: 'Outlook could not open this email.' });
+
+    await pane.changeItem(readItem('BBB'));
+
+    await waitFor(() => expect(visible(pane.rtl, 'Outlook could not open this email.')).toHaveLength(1));
+    expect(screen.queryByText('item:AAA')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('save-view')).not.toBeInTheDocument();
+    expect(error).toHaveBeenCalled();
+
+    // The next initialize() is the real one.
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(screen.getByText('item:BBB')).toBeInTheDocument());
+    expect(visible(pane.rtl, 'Outlook could not open this email.')).toHaveLength(0);
+  });
+
+  it('a slower, earlier failure never replaces what a later change put on screen', async () => {
+    const pane = await bootPane();
+    const { screen, waitFor } = pane.rtl;
+    await waitFor(() => expect(screen.getByText('item:AAA')).toBeInTheDocument());
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires -- same module registry as the booted pane
+    const { OutlookAdapter } = require('@shared/adapters/OutlookAdapter');
+    let failFirst: (reason: unknown) => void = () => undefined;
+    jest.spyOn(OutlookAdapter.prototype, 'initialize').mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          failFirst = reject;
+        })
+    );
+
+    await pane.changeItem(readItem('BBB')); // starts, still pending
+    await pane.changeItem(readItem('CCC')); // the real initialize: this one wins
+    await waitFor(() => expect(screen.getByText('item:CCC')).toBeInTheDocument());
+
+    await pane.rtl.act(async () => {
+      failFirst({ code: 'UNKNOWN_ERROR', message: 'too late' });
+    });
+
+    expect(screen.getByText('item:CCC')).toBeInTheDocument();
+    expect(visible(pane.rtl, 'too late')).toHaveLength(0);
   });
 });

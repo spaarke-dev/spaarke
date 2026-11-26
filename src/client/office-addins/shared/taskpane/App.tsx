@@ -359,9 +359,21 @@ export const App: React.FC<AppProps> = ({
         await hostAdapter.initialize();
       }
 
-      // Build host context from new adapter methods
-      const itemId = await hostAdapter.getItemId();
-      const subject = await hostAdapter.getSubject();
+      // Build host context from new adapter methods. Task 139 (review F2): these reads only feed `hostContext`, so
+      // their failure is not a reason to refuse to start (a new unsaved compose draft has no item id; an older
+      // client has no getItemIdAsync). The one exception is NO_ITEM_SELECTED: with no email there is nothing to
+      // work on, and the pane says so with Retry.
+      let itemId = '';
+      let subject = '';
+      try {
+        itemId = await hostAdapter.getItemId();
+        subject = await hostAdapter.getSubject();
+      } catch (itemError) {
+        if ((itemError as { code?: unknown } | null | undefined)?.code === 'NO_ITEM_SELECTED') {
+          throw itemError;
+        }
+        console.warn('[Spaarke] Could not read the item id / subject at start-up; continuing', itemError);
+      }
       const itemType = hostAdapter.getItemType();
 
       const context: IHostContext = {
@@ -546,8 +558,11 @@ export const App: React.FC<AppProps> = ({
 
   // Runs once per pane session, after authentication (the resolver call needs a token), so it also covers
   // the "sign in after pane load" path — "do not resolve on every render" (task 013 step 6).
+  // Task 139 (review F1): also only once the pane has STARTED. The adapter's capabilities depend on its item mode,
+  // which is unknown while start-up has failed (no item); after a successful Retry the mode is known, so the
+  // lookup must run then (`isInitializing` / `startupFailure` are dependencies for that reason).
   useEffect(() => {
-    if (!isAuthenticated || identityResolutionAttempted.current) {
+    if (!isAuthenticated || isInitializing || startupFailure || identityResolutionAttempted.current) {
       return;
     }
     const capabilities = hostAdapter.getCapabilities();
@@ -558,7 +573,14 @@ export const App: React.FC<AppProps> = ({
       identityResolutionAttempted.current = true;
       void resolveOpenEmailIdentity();
     }
-  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity, resolveOpenEmailIdentity]);
+  }, [
+    isAuthenticated,
+    isInitializing,
+    startupFailure,
+    hostAdapter,
+    resolveOpenDocumentIdentity,
+    resolveOpenEmailIdentity,
+  ]);
 
   // Task 111: the Save tab filed the open document to a record. The identity (which the card and the green box read)
   // and the saved context (Create To Do's regarding) take the record at once — no reload, no re-resolve.

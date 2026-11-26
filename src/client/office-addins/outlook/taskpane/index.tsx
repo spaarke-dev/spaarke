@@ -8,6 +8,9 @@ import type { IHostAdapter } from '@shared/adapters';
 import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 import { readInitialAction, type InitialAction } from '@shared/taskpane/initialAction';
+import { describeStartupFailure } from '@shared/taskpane/utils/errorMessages';
+import { useTheme } from '@shared/taskpane/hooks/useTheme';
+import { Button, FluentProvider, MessageBar, MessageBarActions, MessageBarBody } from '@fluentui/react-components';
 
 // Version information. Like the Word pane (task 089), this is the unified package's version injected at build time
 // (`UNIFIED_PACKAGE.VERSION` → `process.env.ADDIN_PACKAGE_VERSION`). It was a hand-maintained '1.0.22' — the old
@@ -157,6 +160,30 @@ function renderApp(hostAdapter: IHostAdapter, firstOpen: boolean) {
 }
 
 /**
+ * Task 139 (review F4): what the pane shows when it could not be started on the newly selected email. It must NOT leave
+ * the previous email's pane up looking live. Retry tries to start the pane on whatever is selected now.
+ */
+const ItemStartFailure: React.FC<{ message: string; noItemSelected: boolean; onRetry: () => void }> = ({
+  message,
+  noItemSelected,
+  onRetry,
+}) => {
+  const { theme } = useTheme();
+  return (
+    <FluentProvider theme={theme}>
+      <MessageBar intent={noItemSelected ? 'info' : 'error'} layout="multiline">
+        <MessageBarBody>{message}</MessageBarBody>
+        <MessageBarActions>
+          <Button appearance="primary" size="small" onClick={onRetry}>
+            Retry
+          </Button>
+        </MessageBarActions>
+      </MessageBar>
+    </FluentProvider>
+  );
+};
+
+/**
  * The selected email changed (the manifest sets SupportsPinning, so a pinned pane stays open while the user moves
  * between emails). Start the pane fresh on the new item.
  *
@@ -172,6 +199,21 @@ async function handleItemChanged(): Promise<void> {
     hostAdapter = await HostAdapterFactory.createAndInitialize(adapterHostType);
   } catch (error) {
     console.error('[Spaarke] Could not start the pane on the newly selected item:', error);
+    // A later change owns the pane; only the latest one may replace what is on screen.
+    if (sequence !== itemChangeSequence) return;
+    // Task 139 (review F4): do not leave the previous email's pane up. Remount under a new key as a failure view.
+    appKey += 1;
+    const failure = describeStartupFailure(error);
+    reactRoot?.render(
+      <React.StrictMode>
+        <ItemStartFailure
+          key={appKey}
+          message={failure.message}
+          noItemSelected={failure.noItemSelected}
+          onRetry={() => void handleItemChanged()}
+        />
+      </React.StrictMode>
+    );
     return;
   }
   if (sequence !== itemChangeSequence) return;

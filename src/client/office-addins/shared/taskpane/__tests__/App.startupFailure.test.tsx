@@ -19,6 +19,7 @@ import { App } from '../App';
 import type { IHostAdapter } from '@shared/adapters';
 import { authService } from '@shared/services';
 import * as SaveViewModule from '../components/views/SaveView';
+import * as IdentityService from '../services/documentIdentityService';
 
 jest.mock('@shared/services', () => ({
   authService: {
@@ -65,6 +66,7 @@ jest.mock('../services/documentIdentityService', () => ({
 
 const isAuthenticated = authService.isAuthenticated as jest.Mock;
 const SaveView = SaveViewModule.SaveView as unknown as jest.Mock;
+const resolveEmailIdentity = IdentityService.resolveEmailIdentity as jest.Mock;
 
 const CAPABILITIES = {
   canGetAttachments: true,
@@ -91,7 +93,29 @@ const CAPABILITIES = {
   supportedRequirementSet: 'Mailbox 1.8',
 };
 
-function adapter(overrides: Record<string, unknown> = {}, hostType: 'outlook' | 'word' = 'outlook'): IHostAdapter {
+/**
+ * What the item's mode lets the adapter do, as the real adapters report it (review F1): an Outlook pane with no item
+ * is in mode 'unknown' and can resolve nothing; once an email is selected it is 'read' and can resolve the email's
+ * identity. A Word pane resolves the open document's identity from its URL.
+ */
+type Mode = 'unknown' | 'read';
+function capabilitiesFor(hostType: 'outlook' | 'word', mode: Mode) {
+  return {
+    ...CAPABILITIES,
+    canResolveEmailIdentity: hostType === 'outlook' && mode === 'read',
+    canGetDocumentUrl: hostType === 'word' && mode === 'read',
+  };
+}
+
+/**
+ * A host adapter whose capabilities FOLLOW `state.mode` (a test moves it, as the real adapter does when an item
+ * appears). `overrides` win.
+ */
+function adapter(
+  overrides: Record<string, unknown> = {},
+  hostType: 'outlook' | 'word' = 'outlook',
+  state: { mode: Mode } = { mode: 'read' }
+): IHostAdapter {
   return {
     isInitialized: () => true,
     initialize: jest.fn(),
@@ -99,9 +123,30 @@ function adapter(overrides: Record<string, unknown> = {}, hostType: 'outlook' | 
     getSubject: jest.fn(async () => 'Subject'),
     getItemType: () => (hostType === 'outlook' ? 'email' : 'document'),
     getHostType: () => hostType,
-    getCapabilities: () => CAPABILITIES,
+    getCapabilities: () => capabilitiesFor(hostType, state.mode),
+    getEmailIdentityKeys: jest.fn(async () => ({ internetMessageId: '<id@example.com>', itemId: 'item-1' })),
+    getDocumentUrl: jest.fn(async () => 'https://contoso.sharepoint.com/a.docx'),
+    readDocumentStamp: jest.fn(async () => null),
     ...overrides,
   } as unknown as IHostAdapter;
+}
+
+/**
+ * Start-up that fails `failures.length` times in `initialize()` (the host adapter's own start), then works. Start-up
+ * failures other than "no email selected" come from here: the item id / subject reads are best-effort (review F2).
+ */
+function initializeFailing(...failures: unknown[]) {
+  let ready = false;
+  let attempt = 0;
+  return {
+    isInitialized: () => ready,
+    initialize: jest.fn(async () => {
+      if (attempt < failures.length) {
+        throw failures[attempt++];
+      }
+      ready = true;
+    }),
+  };
 }
 
 /** A `HostAdapterError` as `createHostAdapterError` builds it: a plain object, NOT an `Error`. */
@@ -118,30 +163,27 @@ beforeEach(() => {
   isAuthenticated.mockImplementation(() => true);
   (authService.getAccessToken as jest.Mock).mockImplementation(async () => 'token');
   (authService.getAccount as jest.Mock).mockImplementation(() => ({ name: 'Guest User', username: 'g@example.com' }));
-  SaveView.mockImplementation(() => <div data-testid="save-view">Save view</div>);
+  SaveView.mockImplementation(({ documentIdentity }: { documentIdentity?: { kind?: string } }) => (
+    <div data-testid="save-view">
+      Save view
+      {documentIdentity?.kind === 'resolved' ? <span>Saved to Spaarke</span> : null}
+    </div>
+  ));
+  resolveEmailIdentity.mockImplementation(async () => null);
 });
 
 describe('start-up failure text', () => {
   it('shows an adapter { code, message } failure with its own message, not "Failed to initialize"', async () => {
-    const host = adapter({
-      getSubject: jest.fn(async () => {
-        throw adapterError('CONTENT_RETRIEVAL_FAILED', 'Failed to get subject');
-      }),
-    });
+    const host = adapter(initializeFailing(adapterError('INVALID_HOST', 'Expected Outlook host, but got: Word')));
 
     render(<App hostAdapter={host} title="Spaarke" />);
 
-    await waitFor(() => expect(visible('Failed to get subject')).toHaveLength(1));
+    await waitFor(() => expect(visible('Expected Outlook host, but got: Word')).toHaveLength(1));
     expect(screen.queryByText('Failed to initialize')).not.toBeInTheDocument();
   });
 
   it('shows the message of a thrown Error', async () => {
-    const host = adapter({
-      initialize: jest.fn(async () => {
-        throw new Error('Office.js is not ready');
-      }),
-      isInitialized: () => false,
-    });
+    const host = adapter(initializeFailing(new Error('Office.js is not ready')));
 
     render(<App hostAdapter={host} title="Spaarke" />);
 
@@ -154,11 +196,7 @@ describe('start-up failure text', () => {
     ['a blank message', { code: 'UNKNOWN_ERROR', message: '   ' }],
     ['a non-string message', { message: 42 }],
   ])('falls back to a generic sentence when the thrown value is %s', async (_label, thrown) => {
-    const host = adapter({
-      getItemId: jest.fn(async () => {
-        throw thrown;
-      }),
-    });
+    const host = adapter(initializeFailing(thrown));
 
     render(<App hostAdapter={host} title="Spaarke" />);
 
@@ -210,11 +248,7 @@ describe('no email selected', () => {
 describe('Retry, not Sign in', () => {
   it('a SIGNED-IN user with a start-up failure gets Retry and never the Sign in screen', async () => {
     isAuthenticated.mockImplementation(() => true);
-    const host = adapter({
-      getItemId: jest.fn(async () => {
-        throw adapterError('UNKNOWN_ERROR', 'Unable to determine item mode');
-      }),
-    });
+    const host = adapter(initializeFailing(adapterError('UNKNOWN_ERROR', 'Unable to determine item mode')));
 
     render(<App hostAdapter={host} title="Spaarke" />);
 
@@ -225,12 +259,12 @@ describe('Retry, not Sign in', () => {
   });
 
   it('Retry reads the sign-in state again and opens the signed-in pane when start-up now works', async () => {
-    const getItemId = jest
-      .fn()
-      .mockRejectedValueOnce(adapterError('CONTENT_RETRIEVAL_FAILED', 'Failed to get item ID'))
-      .mockResolvedValue('item-1');
-
-    render(<App hostAdapter={adapter({ getItemId })} title="Spaarke" />);
+    render(
+      <App
+        hostAdapter={adapter(initializeFailing(adapterError('CONTENT_RETRIEVAL_FAILED', 'Failed to get item ID')))}
+        title="Spaarke"
+      />
+    );
     await waitFor(() => expect(visible('Failed to get item ID')).toHaveLength(1));
 
     fireEvent.click(retryButton()!);
@@ -251,17 +285,130 @@ describe('Retry, not Sign in', () => {
   });
 
   it('Word shows the same failure text and Retry (the shared start-up path)', async () => {
-    const getItemId = jest
-      .fn()
-      .mockRejectedValueOnce(adapterError('NOT_INITIALIZED', 'Adapter not initialized. Call initialize() first.'))
-      .mockResolvedValue('https://contoso.sharepoint.com/a.docx');
+    const host = adapter(
+      initializeFailing(adapterError('NOT_INITIALIZED', 'Adapter not initialized. Call initialize() first.')),
+      'word'
+    );
 
-    render(<App hostAdapter={adapter({ getItemId }, 'word')} title="Spaarke" />);
+    render(<App hostAdapter={host} title="Spaarke" />);
 
     await waitFor(() => expect(visible('Adapter not initialized. Call initialize() first.')).toHaveLength(1));
     expect(signInButton()).not.toBeInTheDocument();
 
     fireEvent.click(retryButton()!);
     await waitFor(() => expect(screen.getByTestId('save-view')).toBeInTheDocument());
+  });
+});
+
+describe('item id / subject reads are best-effort at start-up (review F2)', () => {
+  it.each([
+    [
+      'getItemId',
+      {
+        getItemId: jest.fn(async () => {
+          throw adapterError('CONTENT_RETRIEVAL_FAILED', 'Failed to get item ID');
+        }),
+      },
+    ],
+    [
+      'getSubject',
+      {
+        getSubject: jest.fn(async () => {
+          throw adapterError('CONTENT_RETRIEVAL_FAILED', 'Failed to get subject');
+        }),
+      },
+    ],
+  ])('a failing %s does not stop the pane from starting', async (_label, overrides) => {
+    render(<App hostAdapter={adapter(overrides)} title="Spaarke" />);
+
+    await waitFor(() => expect(screen.getByTestId('save-view')).toBeInTheDocument());
+    expect(retryButton()).not.toBeInTheDocument();
+    expect(visible('Failed to get item ID')).toHaveLength(0);
+    expect(visible('Failed to get subject')).toHaveLength(0);
+  });
+
+  it('NO_ITEM_SELECTED from the item reads still stops the start-up', async () => {
+    const host = adapter({
+      getSubject: jest.fn(async () => {
+        throw adapterError('NO_ITEM_SELECTED', 'No email item is currently selected or available.');
+      }),
+    });
+
+    render(<App hostAdapter={host} title="Spaarke" />);
+
+    await waitFor(() => expect(visible('Select an email to use Spaarke.')).toHaveLength(1));
+  });
+});
+
+describe('the saved-or-not lookup runs after a successful Retry (review F1)', () => {
+  const savedOutcome = {
+    kind: 'resolved',
+    documentId: 'doc-1',
+    documentName: 'Email.eml',
+    fileName: 'Email.eml',
+    relatedRecord: null,
+  };
+
+  it('Outlook: the adapter had no item (mode unknown) at start; after Retry the email is looked up and shown as saved', async () => {
+    const state: { mode: Mode } = { mode: 'unknown' };
+    resolveEmailIdentity.mockImplementation(async () => savedOutcome);
+    const getItemId = jest.fn(async () => {
+      if (state.mode === 'unknown') {
+        throw adapterError('NO_ITEM_SELECTED', 'No email item is currently selected or available.');
+      }
+      return 'item-1';
+    });
+    const host = adapter({ getItemId }, 'outlook', state);
+
+    render(<App hostAdapter={host} title="Spaarke" />);
+    await waitFor(() => expect(visible('Select an email to use Spaarke.')).toHaveLength(1));
+    expect(resolveEmailIdentity).not.toHaveBeenCalled();
+
+    // The user selects an email; the adapter derives its mode when it is next asked.
+    state.mode = 'read';
+    fireEvent.click(retryButton()!);
+
+    await waitFor(() => expect(screen.getByTestId('save-view')).toBeInTheDocument());
+    await waitFor(() => expect(resolveEmailIdentity).toHaveBeenCalledTimes(1));
+    expect(resolveEmailIdentity).toHaveBeenCalledWith({ internetMessageId: '<id@example.com>', itemId: 'item-1' });
+    await waitFor(() => expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument());
+  });
+
+  it('Outlook: an email that is there from the start is looked up exactly once', async () => {
+    resolveEmailIdentity.mockImplementation(async () => savedOutcome);
+
+    render(<App hostAdapter={adapter()} title="Spaarke" />);
+
+    await waitFor(() => expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument());
+    expect(resolveEmailIdentity).toHaveBeenCalledTimes(1);
+  });
+
+  it('Word: a document identity failure at start-up, then Retry, resolves the open document', async () => {
+    const state: { mode: Mode } = { mode: 'unknown' };
+    (IdentityService.resolveDocumentIdentity as jest.Mock).mockImplementation(async () => savedOutcome);
+    let failed = false;
+    const host = adapter(
+      {
+        isInitialized: () => state.mode === 'read',
+        initialize: jest.fn(async () => {
+          if (!failed) {
+            failed = true;
+            throw adapterError('NOT_INITIALIZED', 'Adapter not initialized. Call initialize() first.');
+          }
+          state.mode = 'read';
+        }),
+      },
+      'word',
+      state
+    );
+
+    render(<App hostAdapter={host} title="Spaarke" />);
+    await waitFor(() => expect(visible('Adapter not initialized. Call initialize() first.')).toHaveLength(1));
+    expect(IdentityService.resolveDocumentIdentity).not.toHaveBeenCalled();
+
+    fireEvent.click(retryButton()!);
+
+    await waitFor(() => expect(IdentityService.resolveDocumentIdentity).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument());
   });
 });
