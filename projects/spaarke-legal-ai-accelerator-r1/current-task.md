@@ -1,19 +1,18 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-26 late (Claude Desktop session `acclerator-r1`; #3237 merged, engines synced). **Open owner questions:** remove the two finished worktrees/branches (`spaarke-wt-accelerator-redline-skip`, `spaarke-wt-accelerator-src-to-master`; only via `Remove-WorktreeSafe.ps1`)? **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
+> **Last Updated**: 2026-11-26 late (Claude Desktop session `acclerator-r1`; #3237 merged, engines synced). Both finished worktrees and their branches (local + remote) removed on the owner's OK. **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
 
 ## 2026-11-26: PR #3237 MERGED (squash `244171569a`) — redline engine skip-and-report mode (for intake-pipeline-r1)
 
 - `--skip-unplaceable REPORT.json` (closed code set agreed with intake; they message us before changing it), `--refused` on summary_table/check_outputs, reproducible .docx (`safe_docx.write_parts`), exit-3 stderr carries `code`/`edit`. Default mode unchanged for our skills.
 - The five engine files were copied from master into this branch (`git checkout origin/master -- src/accelerators/core/engines`), so `src/accelerators` here == master again. No full master merge (this branch is far behind master).
-- Leftover branches/worktrees to remove on the owner's OK, only with `Remove-WorktreeSafe.ps1`: `work/accelerator-redline-skip-unplaceable` (`C:\code_files\spaarke-wt-accelerator-redline-skip`) and `work/legal-ai-accelerator-src-to-master` (`C:\code_files\spaarke-wt-accelerator-src-to-master`).
 - The package in OneDrive still carries the pre-#3237 engines inside the skills; no rebuild needed for interactive use (default mode unchanged).
 
 ## 2026-11-26: PR #3163 MERGED (squash `4c80b81ed4`, 12:07 UTC)
 
 - `src/accelerators/` is on master and identical to this branch (checked: no diff). From now on every `src/accelerators` change goes to master through its own PR (branch from master); the mirror-to-#3163 rule is retired.
 - intake-pipeline-r1 builds its engine image from `src/accelerators/core/engines` on master: **message it BEFORE any change to the engine CLI contract** (args, output paths, exit codes).
-- Branch `work/legal-ai-accelerator-src-to-master` and worktree `C:\code_files\spaarke-wt-accelerator-src-to-master` still exist; remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`, on the owner's OK.
+- Its branch and worktree were removed 2026-11-26 (owner OK).
 
 ## 2026-11-26: Word desktop round 2 recorded (`results.md` "Tier tests round 2: Word desktop")
 
