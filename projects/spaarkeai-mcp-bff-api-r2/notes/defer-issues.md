@@ -287,7 +287,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   shared abstraction (§11), so it is out of 031's scope.
 - **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
 
-## D-031-2 — GET /api/ai/analysis/{id} on an uncached read answers Status "Completed", DocumentName = the analysis name and CompletedOn = ModifiedOn for EVERY row (found by task 031's reviews)
+## D-031-2 — GET /api/ai/analysis/{id} on an uncached read answers Status "Completed", DocumentName = the analysis name and CompletedOn = ModifiedOn for EVERY row (found by task 031's reviews) → #3233
 - **Status**: deferred (draft issue for the main session to file). REST bytes are a contract change, so task 031 did not touch the loader; `spaarke_get_analysis` drops the three fields instead (`GetAnalysisTool` remarks; `AnalysisToolsContractTests.Get_NeverRunAnalysis_OverTheRealLoader_DoesNotSayCompleted`).
 - **Title**: `Analysis read (GET /api/ai/analysis/{id}) reports Completed, a document name and a completion time that were never recorded`
 - **Body**:
