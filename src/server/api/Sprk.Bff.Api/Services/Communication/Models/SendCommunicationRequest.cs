@@ -171,6 +171,18 @@ public sealed record SendCommunicationRequest
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     internal bool CreateThreadPrivate { get; init; }
+
+    /// <summary>
+    /// ISS-010 part E (#3184; spaarkeai-mcp-bff-api-r1 spec ADR Tensions, ADR-052 row): the work after a successful send (thread,
+    /// .eml archive, enrichment, participant index, communication-arrived) runs in the queued <c>CommunicationPostSend</c> job
+    /// instead of in the request. The send, the <c>sprk_communication</c> create, the Internet-Message-Id stamp, the archive opt-in
+    /// read and the attachment rows stay inline. Set only by the decision senders (Assign Task, the budget inquiry, the decision's
+    /// send-email / send-reminder). Email only, and never with attachments, a thread, system mail or server-send options (refused
+    /// before anything is sent). Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>: server code sets it,
+    /// a request body never can.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal bool DeferPostSend { get; init; }
 }
 
 /// <summary>
