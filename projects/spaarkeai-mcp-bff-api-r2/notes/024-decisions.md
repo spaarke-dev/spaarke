@@ -80,3 +80,13 @@ rework: none task 024
 3. Owned+public across pages: see the fixed item under Results (PlaybookSummary.OwnerId is mapped from _ownerid_value; no Services/Ai change).
 4. K2 hardening: control characters, CR/LF/tab and Unicode line/paragraph separators in a playbook name become spaces in the text lines only; structuredContent keeps the name.
 5. Tests added: strict-service double for the unauthenticated-context case, owned-list fault (playbook.list-failed), 101-character nameFilter (playbook.invalid-argument).
+
+## Verifiers (main session, 2026-11-25; two adversarial passes, opus, per D-024-extract)
+
+- Pass 1 (caller authorization, tenant isolation): no F-class findings. K4: the shared method logs the caller's oid ({UserId}) on the MCP path too; same as task 007's seam; ADR-015 permits GUID ids, NFR-05 strict reading is an owner question (project-wide, not 024's).
+- Pass 2 (REST parity, result shape, tests): three F1 (low), fixed in 4b8d9e4c39 / 39dfaef51c, merged:
+  - client abort on the list routes now 499 at Debug (was 500 + Error log since 024 passed RequestAborted);
+  - account-refusal text covers transient resolver faults;
+  - an owned public playbook appears once, as owned, across pages (OwnerSystemUserId on the owned result; REST bytes unchanged).
+  - Plus K2 hardening (control characters in names become spaces in text lines) and the extra negative tests.
+- Fix diff re-checked by the main session (endpoint catch order, tool de-duplication, TextSafe). 024 done.
