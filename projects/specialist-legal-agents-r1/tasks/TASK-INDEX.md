@@ -19,7 +19,7 @@
 | 010 | Check the agreement-review Action row and its input schema in DEV | 2 | ✅ [done] | none | Group B | sonnet / high | STANDARD |
 | 011 | Spike branch: spike_get_profile and spike_review_nda (never merged) | 2 | ✅ [done] | 002, 006, 010 | alone | opus / high | FULL |
 | 015 | Spike dev deploy through uac-r2 | 2 | ✅ [done] | 011 | alone (owner go) | sonnet / high | STANDARD |
-| 020 | Test agent packages for G1, G5 and G2 | 3 | 🔲 [open] | 002, 004, 015 | alone (owner uploads) | sonnet / high | STANDARD |
+| 020 | Test agent packages for G1, G5 and G2 | 3 | 🔄 [wip] | 002, 004, 015 | alone (owner uploads) | sonnet / high | STANDARD |
 | 021 | G3 run: profile resolution, run key and agent identity | 3 | 🔲 [open] | 015, 020 | Group C | sonnet / high | STANDARD |
 | 022 | G1-NDA runs: pilots, full runs and verdict | 3 | 🔲 [open] | 003, 020 | Group C | sonnet / high | STANDARD |
 | 023 | G5 routing runs and G2 checks | 3 | 🔲 [open] | 020 | Group C | sonnet / high | STANDARD |

@@ -117,3 +117,5 @@ To be written after the DEV run.
   - uac-r2's 30-min gate (18:31Z) and its full test pass are reported separately.
 - **Latency:** not measured in task 015. Calling the tools needs a signed-in Copilot user (the connector token), so p95 per tool (at least 10 calls each) is measured from App Insights during the first owner run, task 021.
 - COPILOT-PLATFORM-COORDINATION was told that the spike tools are visible to every dev connector user.
+- **30-min gate PASS** (uac-r2, 18:00–18:31Z): 68 requests. The only 5xx was the pre-existing /healthz/catalog 503. No exceptions from the spike tools. uac-r2's full test pass on this SHA is still running.
+- **Full test pass GREEN** (uac-r2, after triage): build 0/0 and ArchTests 2845/2845. There were 14 unit failures, all load timeouts. An isolated re-run passed 13 of them. The last one, EventStatusDeprecationTests, is the known demo-data issue #3175, not BFF code. No rollback: `d307d67e36` stays live.

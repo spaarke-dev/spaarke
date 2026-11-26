@@ -4,7 +4,7 @@
     <title>Test agent packages for G1, G5 and G2</title>
     <phase>3 Test runs</phase>
     <gate>after 002, 004 and 015</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
     <model-tier>sonnet</model-tier>
