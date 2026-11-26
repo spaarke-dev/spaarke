@@ -9,6 +9,10 @@
 // summary and no item (nothing to Open). Must-not-fire: a record the writer did not create (WriterCreatedRecord), a secure-child record of a
 // family the caller is not in, a no-core record that is not the caller's, a gate record on a core record or communication the caller cannot
 // read, a half or non-core stamp, and a record decided before the window.
+//
+// Fix round 1 (review F1, K2 scope): the gate records are their own read, joined to the communication so only those whose email the caller
+// reads come back and count toward its bound; the records that resolved Signals are a read of their own, bounded as before. A writer record
+// that resolved no Signal and is not a gate record (billing, Record Procedure, assign-firm) is neither listed nor counted.
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
@@ -122,7 +126,7 @@ public sealed partial class SignalReadRouteTests
         // the caller reads as themselves (its owner, or a person it is shared with) lists the record (D-35/D-39).
         world.GateDecision(readers: [Alice, Bob], communication: alicesMessage, number: "DR-00901");
         world.GateDecision(readers: [Alice, Bob], communication: bobsMessage, number: "DR-00902");
-        world.GateDecision(readers: [Alice, Bob], number: "DR-00903"); // no core, no communication: never listed
+        world.GateDecision(readers: [Alice, Bob], number: "DR-00903", withoutCommunication: true); // no core, no communication: never listed
 
         var alice = await OkAsync(world, Alice, "?set=decided");
         var group = Lane(alice, "Decide").GetProperty("groups").EnumerateArray().Single();
@@ -271,11 +275,68 @@ public sealed partial class SignalReadRouteTests
     }
 
     [Fact]
-    public async Task DecidedSet_ACommunicationReadFault_Is503_NotAShorterList()
+    public async Task DecidedSet_GateRecordsOnEmailTheCallerCannotRead_AreNotReturned_NorCounted_SoTheTabAnswers()
     {
-        var world = new World();
-        world.GateDecision(readers: [Alice], communication: world.Record("sprk_communication", [Alice]));
-        world.FaultingTables.Add("sprk_communication");
+        // F1: a Console User's Deep read returns every gate record of the business unit (D-144), and the gate writes one per assessed email.
+        // Only the records whose email the caller reads come back (the inner join), so a busy unit's volume never 503s the tab.
+        var world = new World { PageSize = 1 };
+        var m = world.Matter(readers: [Alice, Bob]);
+        for (var i = 0; i < SignalReadService.MaxPages + 2; i++)
+        {
+            world.GateDecision(readers: [Alice, Bob], core: (MatterType, m), communication: world.Record("sprk_communication", [Bob]),
+                number: $"DR-0200{i}");
+        }
+
+        world.GateDecision(readers: [Alice, Bob], core: (MatterType, m), communication: world.Record("sprk_communication", [Alice]),
+            number: "DR-00910", decidedOn: "2026-10-14T10:00:00Z");
+
+        RecordNumbers(await OkAsync(world, Alice, "?set=decided")).Should().Equal("DR-00910");
+        var fetch = Uri.UnescapeDataString(world.Requests.Last(r => r.StartsWith("sprk_decisionrecords?", StringComparison.Ordinal)
+            && r.Contains("sprk_communication", StringComparison.Ordinal))).Replace('\'', '"');
+        fetch.Should().Contain("<link-entity name=\"sprk_communication\" from=\"sprk_communicationid\" to=\"sprk_regardingcommunication\" link-type=\"inner\"")
+            .And.NotContain("\"sprk_steps\" />").And.NotContain("\"sprk_followons\" />");
+
+        // Must fire: the caller who CAN read them all is over the bound, and is told so (503), never shown a shorter history.
+        (await GetAsync(world, Bob, "?set=decided")).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact]
+    public async Task DecidedSet_MustNotFire_AWriterRecordThatResolvedNoSignal_AndIsNotAGateRecord_IsNeitherListedNorCounted()
+    {
+        // K2 scope (D-231 decided only gate records): a Record Procedure, billing or assign-firm record with no Signal is not listed, and
+        // the records that resolved Signals are bounded on their own, so a volume of these never 503s the tab. The owner decides the rest.
+        var world = new World { PageSize = 1 };
+        var m = world.Matter(readers: [Alice]);
+        for (var i = 0; i < SignalReadService.MaxPages + 2; i++)
+        {
+            world.Decision(readers: [Alice], number: $"DR-0300{i}", core: (MatterType, m),
+                steps: "{\"reviewId\":\"0b7a9b5e-2222-4c2e-9a54-000000000226\",\"resolvedSignalIds\":[],\"steps\":[]}");
+        }
+
+        // A person's review filed under an email it resolved no Signal on (a confirming user): not a gate record either.
+        world.Decision(readers: [Alice], number: "DR-03999", communication: world.Record("sprk_communication", [Alice]),
+            steps: "{\"reviewId\":\"0b7a9b5e-3333-4c2e-9a54-000000000226\",\"resolvedSignalIds\":[],\"steps\":[]}");
+        var s = world.Signal(Decide, core: (MatterType, m), sets: ["decided"], resolvedOn: world.Now.AddDays(-1),
+            decisionRecord: world.Decision(readers: [Alice], number: "DR-00040"));
+
+        var body = await OkAsync(world, Alice, "?set=decided");
+
+        DecidedRows(body).Should().Equal([(s, "DR-00040")]);
+        AllRecords(body).Should().BeEmpty();
+        body.ToString().Should().NotContain("DR-0300").And.NotContain("DR-03999");
+    }
+
+    [Fact]
+    public async Task DecidedSet_TheRecordsThatResolvedSignals_AreStillBounded_503()
+    {
+        var world = new World { PageSize = 1 };
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), sets: ["decided"], resolvedOn: world.Now.AddDays(-1),
+            decisionRecord: world.Decision(readers: [Alice]));
+        for (var i = 0; i < SignalReadService.MaxPages; i++)
+        {
+            world.Resolves(world.Decision(readers: [Alice], number: $"DR-0400{i}"), s);
+        }
 
         (await GetAsync(world, Alice, "?set=decided")).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }

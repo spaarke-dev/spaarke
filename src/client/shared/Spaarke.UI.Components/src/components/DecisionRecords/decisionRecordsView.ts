@@ -76,12 +76,13 @@ export function countByFilter(rows: readonly DecisionRecordRow[]): Record<Decisi
 }
 
 /**
- * The row's headline: the core record's name (when it has one) and what the item was; for a record with no item, the record's own
+ * The row's headline: the core record's name (when it has one) and the finding. D-227: the finding is the rule's short name, falling
+ * back to the Signal's stored title, then the subject's name, and never the stored sentence. For a record with no item, the record's own
  * summary (task 226). Never blank.
  */
 export function rowTitle(row: DecisionRecordRow): string {
   const what =
-    (row.item ? (row.item.title ?? row.item.ruleShortName ?? row.item.subjectName) : row.decision.summary) ??
+    (row.item ? (row.item.ruleShortName ?? row.item.title ?? row.item.subjectName) : row.decision.summary) ??
     'Decision';
   return row.core?.name ? `${row.core.name} - ${what}` : what;
 }

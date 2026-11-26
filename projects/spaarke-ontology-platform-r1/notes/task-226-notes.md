@@ -30,7 +30,7 @@ The Decided set now reads the records first and keeps every existing rule for de
   Every later rule still applies (core readability, the Do-lane "mine" read, the witness rule, duplicates). At (10), each record is
   listed once under each of its Signals that survived, carrying that record (`VisibleRow.Decision`). A record none of whose Signals
   survived is not listed. The link is the writer's `resolvedSignalIds`, not the Signal's lookup, which a later review overwrites.
-- **Records with no Signal (10b).** These are email-gate records, and any other writer record that names no Signal. They are kept by
+- **Records with no Signal (10b).** Email-gate records only, since fix round 1 (see below). They are kept by
   the record's own stamps:
   - Core pair present: kept only when the caller's own batched read of that core returns it. This reuses `ReadReadableCoresAsync`,
     so a type outside `CoreAncestorResolver.CoreRecordEntities` is dropped (K2).
@@ -91,6 +91,37 @@ gave **2 failed, 16 passed**: the reviewed-twice test and the gate-row test.
   in 3 unrelated files). eslint on the changed files: clean. `client-lint check --package ui-components`: ok.
 - New baseline: `tests/integration/contract/Api/Signals/Baselines/worklist.200.decided.json`, recorded with `SPAARKE_GOLDEN_RECORD=1`.
 
+## Fix round 1 (review of PR #3277)
+
+- **F1: the Decided tab could return a permanent 503.** The record read was bounded at `MaxPages` before any core, communication or
+  Signal filter ran. The gate writes a record for every assessed email (authorize and deny), and a Console User has Deep read on
+  `sprk_decisionrecord` (D-144), so a busy business unit would pass the bound within 90 days. The read is now two queries, run at the
+  same time, each with its own `MaxPages` bound and both keeping `WriterCreatedRecord` and the 90-day `sprk_decidedon` window:
+  - `DecidedRecordsFetch`: records that resolved Signals (`sprk_steps not-like '%"resolvedSignalIds":[[]]%'`), with the same columns as
+    before. This bounds about what the Signal-first read bounded.
+  - `GateRecordsFetch`: the gate's records, found the way the writer finds one (`FindGateRecordAsync`): filed under a communication,
+    `sprk_confirmedby` null, and no Signal resolved. The query has an **inner** link to `sprk_communication`, so only records whose email
+    the caller can read come back and count. It selects only what the tab shows: no `sprk_steps`, `sprk_followons` or confirmer link.
+  - **Deviation from the review's wording.** The review asked to identify gate records by `sprk_deciderrole`. No such column exists: the
+    decider role is stored only inside `sprk_factsnapshot`. The columns used above are the writer's own identification of a gate
+    record. The LIKE needs `[[]` because `[` opens a character class in a Dataverse LIKE.
+  - The separate caller read of communications (`ReadReadableIdsAsync`) is gone, because the join replaces it. Its test
+    (`DecidedSet_ACommunicationReadFault_Is503_NotAShorterList`) was removed: there is no such read left to fault.
+- **F2:** the Shape comment now says the Decide lane can have a Not filed group of records (a gate record with no core record).
+- **K2 scope:** only gate records are listed without a Signal; see Known limits.
+- **D-227 (main session's request):** `rowTitle` now names the finding as `ruleShortName ?? title ?? subjectName ?? 'Decision'`, keeping
+  the core-name prefix. A new jest case fails on the old order.
+- **New tests:**
+  - Gate records on email the caller cannot read, more than `MaxPages` pages of them, are neither returned nor counted (200). The join
+    and the narrow column list are asserted, and the caller who can read them all gets a 503 (the must-fire twin).
+  - Writer records that resolved no Signal and are not gate records, more than the bound, are neither listed nor counted. This includes
+    a person's review filed under an email.
+  - The records that resolved Signals are still bounded (503).
+  - The gate writer's envelope text is pinned.
+- **Fake changes:** `GateDecision` now files each record under a communication its readers can read, by default (`withoutCommunication`
+  opts out). The fake evaluates LIKE / not-like on `sprk_steps`, null / not-null lookups and the inner communication join. A reviewed
+  record carries `_sprk_confirmedby_value`.
+
 ## Known limits (K-class)
 
 - A deactivated Signal's records are not listed: the template keeps `statecode eq 0`, so deactivation hides the item and its history,
@@ -99,12 +130,21 @@ gave **2 failed, 16 passed**: the reviewed-twice test and the gate-row test.
   only the record differs.
 - A record whose `resolvedSignalIds` names a Signal it did not actually close is listed under that Signal, if the caller sees it. Only
   the writer writes the envelope, so the record is not forged.
-- Non-gate writer records with no Signal (if any exist, for example a record-procedure record) are listed under the same core rule as
-  gate records.
+- **Billing, Record Procedure and assign-firm records with no Signal are not listed** (fix round 1, review K2 scope). D-231 decided
+  gate records only; the owner is to decide the rest. Such a record is read by neither Decided query, so it is not counted either.
+- **K2: a gate record's core record is judged by the caller's own read of the record's core pair** (`ReadReadableCoresAsync`, the same
+  rule as a Signal's core), not by any membership the gate computed when it wrote the record.
+- **K4: a no-core record that is not a gate record is never listed, even to its owner.** A no-core gate record is listed only through the
+  caller's read of its communication.
+- A gate record on a core record the caller can read, filed under a communication the caller cannot read, is not listed. The inner join
+  comes first, so that is stricter than the core rule alone. A caller with no Read on `sprk_communication` gets an empty gate read: the
+  query answers 403, which is treated as "the records are omitted".
+- The two Decided queries split the writer's records by a LIKE on the stored envelope's compact `"resolvedSignalIds":[]`. The gate
+  writer's tests pin that text (`DecisionRecordWriterTests.GateDecision`, both outcomes). A record with no `sprk_steps` is in neither
+  query; it was unclassifiable before as well.
 
 ## Found, not fixed
 
-- `decisionRecordsView.rowTitle` puts the item title before `ruleShortName`, the opposite of D-227's order. It is out of scope here
-  (D-106) and should be reported to the main session.
+- None open. The `rowTitle` order (D-227) was fixed in fix round 1 at the main session's request.
 
 rework: none task 226

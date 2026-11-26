@@ -117,6 +117,44 @@ describe('the Decision Record tab', () => {
     expect(first).toHaveTextContent('Judgement');
   });
 
+  it("the finding is the rule's short name, then the stored title, then the subject, and never the sentence (D-227)", async () => {
+    const finding = {
+      ...BODY,
+      lanes: [
+        {
+          lane: 'Decide',
+          groups: [
+            {
+              core: MATTER,
+              notFiled: false,
+              items: [
+                item('s-rule', 'Judgement', 'DR-00021', '2026-10-09T09:00:00Z', {
+                  ruleShortName: 'Budget gap',
+                  title: 'Fee change without a budget revision',
+                  subjectName: 'RE: revised fees',
+                  sentence: 'Fees rose 12% with no budget revision on file.',
+                }),
+                item('s-subject', 'Judgement', 'DR-00020', '2026-10-08T09:00:00Z', {
+                  title: null,
+                  subjectName: 'RE: revised fees',
+                  sentence: 'Fees rose 12% with no budget revision on file.',
+                }),
+              ],
+            },
+          ],
+        },
+        BODY.lanes[1],
+      ],
+    };
+    renderTab(okService(finding));
+    await screen.findByTestId('decision-records-widget');
+    const [rule, subject] = screen.getAllByTestId('record-row');
+    expect(rule).toHaveTextContent('Acme v. Beta - Budget gap');
+    expect(rule).not.toHaveTextContent('Fee change without a budget revision');
+    expect(subject).toHaveTextContent('Acme v. Beta - RE: revised fees');
+    expect(subject).not.toHaveTextContent('Fees rose 12%');
+  });
+
   it('filters by record class: only records of that class show, and the counts describe the full list', async () => {
     const user = userEvent.setup();
     renderTab(okService());

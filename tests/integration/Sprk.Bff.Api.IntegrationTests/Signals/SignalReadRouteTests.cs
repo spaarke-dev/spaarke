@@ -2543,6 +2543,9 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             if (!signals.Contains(signal)) signals.Add(signal);
         }
 
+        /// <summary>Task 226 fix round 1: the systemuser a reviewed record's sprk_confirmedby names (any record built with a confirmer).</summary>
+        public static readonly Guid ConfirmingUser = new("dddddddd-0000-0000-0000-000000000226");
+
         public Guid Decision(
             Guid[] readers,
             string number = "DR-00001",
@@ -2573,6 +2576,8 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 ["sprk_steps"] = steps,
                 ["sprk_followons"] = followOns ?? "[]",
                 ["by.fullname"] = by,
+                // Task 226 fix round 1: a record with a confirming user carries the lookup (a gate record has none).
+                ["_sprk_confirmedby_value"] = by is null ? null : ConfirmingUser,
                 ["sprk_name"] = name,
             };
             if (core is { } pair)
@@ -2586,12 +2591,15 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             return id;
         }
 
-        /// <summary>Task 226: an email-gate Decision Record (D-139): it resolved no Signal, so its stored envelope lists none.</summary>
+        /// <summary>Task 226: an email-gate Decision Record (D-139): it resolved no Signal, so its stored envelope lists none.
+        /// The record is filed under <paramref name="communication"/>, or, by default, a new communication the same
+        /// <paramref name="readers"/> can read (every gate record is made on one); <paramref name="withoutCommunication"/> leaves it unfiled.</summary>
         public Guid GateDecision(
             Guid[] readers, (Guid Type, Guid Id)? core = null, Guid? communication = null, string number = "DR-00900",
-            string name = "Judgement: Send the reply", string decidedOn = "2026-10-14T09:30:00Z", Guid? createdBy = null) =>
+            string name = "Judgement: Send the reply", string decidedOn = "2026-10-14T09:30:00Z", Guid? createdBy = null,
+            bool withoutCommunication = false) =>
             Decision(readers, number: number, decidedOn: decidedOn, by: null, reason: "policy.allow", createdBy: createdBy, name: name,
-                core: core, communication: communication,
+                core: core, communication: withoutCommunication ? null : communication ?? Record("sprk_communication", readers),
                 steps: "{\"reviewId\":\"0b7a9b5e-1111-4c2e-9a54-000000000226\",\"resolvedSignalIds\":[],\"steps\":[{\"code\":\"send\",\"label\":\"Send the reply\",\"taken\":true,\"values\":null,\"outcome\":\"Authorized\",\"written\":[]}]}",
                 followOns: "[{\"actionCode\":\"notify\",\"entity\":null,\"id\":null}]");
 
@@ -3036,15 +3044,36 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 var onBehalfOfEmpty = drFetch.Descendants("condition").Any(c => (string?)c.Attribute("attribute") == "createdonbehalfby" && (string?)c.Attribute("operator") == "null");
                 var nameLinked = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "systemuser"
                     && (string?)l.Attribute("to") == "sprk_confirmedby" && (string?)l.Attribute("link-type") == "outer" && (string?)l.Attribute("alias") == "by");
+                // Task 226 fix round 1: the Decided reads' other conditions, as Dataverse evaluates them on the stored row: sprk_steps
+                // like / not-like (a null never matches either), a not-null / null lookup, and an INNER link to sprk_communication, which
+                // Dataverse trims by the caller's read of the linked row.
+                var conditions = drFetch.Root!.Element("entity")!.Elements("filter").Descendants("condition")
+                    .Where(c => (string?)c.Attribute("attribute") is "sprk_steps" or "sprk_regardingcommunication" or "sprk_confirmedby")
+                    .Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string?)c.Attribute("value"))).ToList();
+                var emailJoined = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "sprk_communication"
+                    && (string?)l.Attribute("to") == "sprk_regardingcommunication" && (string?)l.Attribute("link-type") == "inner");
+                bool Matches(Dictionary<string, object?> row) => conditions.All(c => c switch
+                {
+                    ("sprk_steps", "like", var p) => row.GetValueOrDefault("sprk_steps") is string s && SqlLike(s, p!),
+                    ("sprk_steps", "not-like", var p) => row.GetValueOrDefault("sprk_steps") is string s && !SqlLike(s, p!),
+                    (var a, "not-null", _) => row.GetValueOrDefault($"_{a}_value") is not null,
+                    (var a, "null", _) => row.GetValueOrDefault($"_{a}_value") is null,
+                    _ => throw new InvalidOperationException($"The fake does not evaluate {c}."),
+                });
+                bool EmailReadable(Dictionary<string, object?> row) => !emailJoined
+                    || (row.GetValueOrDefault("_sprk_regardingcommunication_value") is Guid email
+                        && Records.TryGetValue(email, out var r) && r.Table == "sprk_communication" && r.Readers.Contains(me2));
                 var found = DecisionRecords
                     .Where(r => (wanted is null || wanted.Contains(r.Key)) && r.Value.Readers.Contains(me2))
                     .Where(r => since is null || DateTimeOffset.Parse((string)r.Value.Row["sprk_decidedon"]!, System.Globalization.CultureInfo.InvariantCulture) >= since)
                     .Where(r => createdBy is null || DecisionRecordCreator[r.Key] == createdBy)
                     // Task 223 (DI-144): and the createdonbehalfby-is-empty half of WriterCreatedRecord, as Dataverse evaluates it.
                     .Where(r => !onBehalfOfEmpty || !DecisionRecordOnBehalfOf.ContainsKey(r.Key))
-                    .OrderByDescending(r => (string)r.Value.Row["sprk_decidedon"]!).ThenBy(r => r.Key)
+                    .Select(r => (r.Key, Row: RecordRow(r.Key, r.Value.Row)))
+                    .Where(r => Matches(r.Row) && EmailReadable(r.Row))
+                    .OrderByDescending(r => (string)r.Row["sprk_decidedon"]!).ThenBy(r => r.Key)
                     // Like Dataverse, a column comes back only when the query selects it (the name only through the confirming-user link).
-                    .Select(r => RecordRow(r.Key, r.Value.Row)
+                    .Select(r => r.Row
                         .Where(kv => kv.Key == "by.fullname" ? nameLinked : selected.Contains(AttributeOf(kv.Key)))
                         .ToDictionary(kv => kv.Key, kv => kv.Value))
                     .ToList();
@@ -3119,6 +3148,29 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 .Select(r => select.ToDictionary(c => c, c => c == $"{table}id" ? r.Key : r.Value.Columns.GetValueOrDefault(c)))
                 .ToList();
             return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
+        }
+
+        /// <summary>A SQL LIKE as Dataverse evaluates it: <c>%</c>, <c>_</c> and <c>[...]</c> character classes (so <c>[[]</c> is a literal
+        /// bracket), case-insensitive.</summary>
+        private static bool SqlLike(string value, string pattern)
+        {
+            var regex = new System.Text.StringBuilder("^");
+            for (var i = 0; i < pattern.Length; i++)
+            {
+                var ch = pattern[i];
+                if (ch == '%') regex.Append(".*");
+                else if (ch == '_') regex.Append('.');
+                else if (ch == '[')
+                {
+                    var close = pattern.IndexOf(']', i + 2);
+                    regex.Append('[').Append(System.Text.RegularExpressions.Regex.Escape(pattern[(i + 1)..close]).Replace(@"\^", "^")).Append(']');
+                    i = close;
+                }
+                else regex.Append(System.Text.RegularExpressions.Regex.Escape(ch.ToString()));
+            }
+
+            return System.Text.RegularExpressions.Regex.IsMatch(value, regex.Append('$').ToString(),
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
         }
 
         /// <summary>A Web API row key's FetchXML attribute name (<c>_x_value</c> is the lookup <c>x</c>).</summary>
