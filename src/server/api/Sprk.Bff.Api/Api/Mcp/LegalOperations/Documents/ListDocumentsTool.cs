@@ -195,12 +195,11 @@ internal sealed class ListDocumentsTool : McpToolDefinition
             listed.Count,
             rows.Count >= ServiceRowLimit);
 
-        // "No documents are filed" is only true when the source returned none. Rows that came back and were all narrowed away (or hidden
-        // by a narrowing that failed closed) must not be reported as an empty matter: the model would tell the user there are none.
+        // One neutral line for every empty list. "No documents are filed" would be false when rows came back and were all narrowed away
+        // (or hidden by a narrowing that failed closed), and a different line for that case would tell an external caller that hidden
+        // documents exist, which the narrowing exists to hide (023 re-check K3).
         var summary = listed.Count == 0
-            ? (rows.Count > 0 || body.HasMore
-                ? "No documents you can see are filed under this matter."
-                : "No documents are filed under this matter.")
+            ? "No documents to show under this matter."
             : $"{listed.Count} document(s) filed under this matter, newest first"
               + (body.HasMore ? "; there may be more than this." : ".")
               + "\n" + string.Join("\n", listed.Select(r => "- " + DocumentToolSupport.LineOf(r)));

@@ -78,3 +78,11 @@ rework: none task 023
   (defer-issues.md D-023-3). Until then `regarding` (list) and `regardingMatter` / `regardingProject` (get) carry `entityType` and `id`
   only, and the get text has no "Filed under ..." line. `DocumentToolsWorld` no longer seeds a name, so the double gives what production
   gives; `BothTools_NeverCarryAMatterOrProjectName_EvenWhenTheSourceRowHoldsOne` seeds names on purpose to prove none is passed through.
+
+## Fix re-check (main session, 2026-11-25; scoped sonnet pass over the fix diff 7c48cb304b)
+
+- No F-class findings. Existence oracle: none (both 503 sites follow an allowed authorization decision).
+- K3 fixed by the main session: the empty-list text is now one neutral line, "No documents to show under this matter.", for an empty matter, a fully narrowed list and a narrowing that failed closed. Separate lines would tell an external caller that hidden documents exist. This supersedes D-023-empty-text. Still open: `hasMore` is computed before narrowing, so a fully hidden page of 50 shows count 0 with hasMore true. That is pre-existing and belongs with the 50-row cap issue, #3206.
+- T1 fixed: a test for an HttpClient timeout (TaskCanceledException) in the links step, which keeps the metadata and sets linksError.
+- K1 (recorded): a production `AuthorizationService.AuthorizeAsync` fault is caught inside that service and answered as a deny, so the get tool's authorization-fault 503 is reachable only with a throwing double. In production a rights-read fault answers the uniform not-found, which fails closed. The 503 covers the row read.
+- K2 (recorded, kept): the fault log carries the exception type only, by the D-023-fault choice (NFR-05). A programming error inside the read step therefore shows as a retryable 503 with no stack in the tool log; `GetDocumentAsync` logs its own exception before rethrowing.

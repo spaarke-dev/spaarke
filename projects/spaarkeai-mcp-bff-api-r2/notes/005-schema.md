@@ -62,7 +62,7 @@ The owner decided `sprk_playbookrun` ("AI Run") is the one AI-run record for eng
 | Table | Column | Change | Type / target | Required level | Choice made |
 |---|---|---|---|---|---|
 | `sprk_playbookrun` | `sprk_playbookid` | make optional (metadata update of the existing lookup; skipped if already `None`) | Lookup → `sprk_analysisplaybook` | ApplicationRequired → **None** | A prompted or coded run has no playbook. Done by GET of the lookup attribute, `RequiredLevel.Value = "None"`, PUT with `MSCRM.MergeLabels` (the repo's `Add-CustomerIdColumn.ps1` pattern) |
-| `sprk_playbookrun` | `sprk_runkind` | add | Choice, **local** option set: Engine `100000000`, Prompted `100000001`, Coded `100000002` | None (form default Engine) | Spaarke's 100000000+ value convention; local, not a global set, because only this column uses it (the pattern of `Add-AnalysisToolAvailableInContexts.ps1`). Engine is the default so a row written without it reads as an engine run |
+| `sprk_playbookrun` | `sprk_runkind` | add | Choice, **local** option set: Engine `100000000`, Prompted `100000001`, Coded `100000002` | None (form default Engine) | Spaarke's 100000000+ value convention; local, not a global set, because only this column uses it (the pattern of `Add-AnalysisToolAvailableInContexts.ps1`). The form default is Engine; a Web API write without the column stores null (DefaultFormValue applies to forms only), so the store always writes it and a future kind reader must treat null as unknown, not Engine (005 re-check K3) |
 | `sprk_playbookrun` | `sprk_analysisactionid` | add | Lookup → `sprk_analysisaction` | None | Created through its 1:N relationship (a lookup cannot be created on the Attributes endpoint, per the skill) |
 | `sprk_playbookrun` | `sprk_playbookconsumerid` | add | Lookup → `sprk_playbookconsumer`, display name "Binding" | None | same |
 | `sprk_playbookrun` | `sprk_parentrunid` | add | Lookup → `sprk_playbookrun` (self) | None | Self-relationship, like `sprk_parentpersonaid` (`Create-AiPersonaEntity.ps1`) |
@@ -124,3 +124,12 @@ Acceptance criterion 3 ("serialise identically") cannot hold byte for byte; item
 ## 6. Ledger text (uac-r2 to review)
 
 The `CallerScopedOnly` reasons for the four `/api/ai/playbooks/runs/{runId}…` routes in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` said "unreachable by construction" (a scoped in-memory store). Task 005 rewrote them to the new basis: the request's own in-memory run, else the stored run for the caller who started it only (`ReadOwnedStoredRunAsync`). No route, filter or status code changed.
+
+## Rework re-check (main session, 2026-11-25; scoped sonnet pass over 99e18a53b3)
+
+- F1, fixed by the main session: the required-level PUT now sets `@odata.type` = `Microsoft.Dynamics.CRM.LookupAttributeMetadata`, as `Add-CustomerIdColumn.ps1:126` does. Without it, Dataverse reads the PUT as the abstract base type and refuses it (0x80048d19), which would stop the owner's run after the columns were created. The script parse-checks clean. It still has not been run anywhere.
+- K1: the end-of-run verification checks column and lookup types and the two required levels, but not option values, lookup targets or delete behaviour.
+- K2: a missing attribute is detected by HTTP 404; any other status throws, which fails safe.
+- K3: fixed in §2.1. The form default does not apply to Web API writes.
+- K4: the read path tells "not an engine run" apart by a null playbook id, not by `sprk_runkind`. The first reader for prompted or coded runs must switch to the run kind.
+- Unchanged: before the columns exist, every engine run's persist write fails safe (`playbook_run_persist_failed`), as before the rework (known limit 9: deploy order).

@@ -152,7 +152,7 @@ public sealed class DocumentToolsContractTests
 
         IsError(result).Should().BeFalse();
         result.GetProperty("structuredContent").GetProperty("documents").GetArrayLength().Should().Be(0);
-        result.GetProperty("content")[0].GetProperty("text").GetString().Should().Be("No documents are filed under this matter.");
+        result.GetProperty("content")[0].GetProperty("text").GetString().Should().Be("No documents to show under this matter.");
     }
 
     [Fact]
@@ -298,6 +298,24 @@ public sealed class DocumentToolsContractTests
         var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
         text.Should().Contain("Master services agreement.docx").And.Contain("Links are not available");
         result.GetRawText().Should().NotContain("secret", "ADR-015: the fault's message never reaches the model");
+    }
+
+    [Fact]
+    public async Task Get_WhenTheOpenLinksTimeOut_StillReturnsTheMetadata_AndSaysTheLinksAreUnavailable()
+    {
+        // An HttpClient timeout is a TaskCanceledException the caller did not cause: before the 023 fix it escaped the links step and cost
+        // the whole call; now it costs the links only (023 re-check T1).
+        var world = new DocumentToolsWorld { SpeLinksFault = new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 100 seconds elapsing.") };
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var result = await host.CallAsync(GetTool, new { documentId = DocumentToolsWorld.ReadableDocumentId });
+
+        IsError(result).Should().BeFalse("a links timeout costs the links, not the call");
+        var body = result.GetProperty("structuredContent");
+        body.GetProperty("document").GetProperty("name").GetString().Should().Be("Master services agreement.docx");
+        body.TryGetProperty("links", out _).Should().BeFalse();
+        body.GetProperty("linksError").GetProperty("reasonCode").GetString().Should().Be(GetDocumentTool.LinksUnavailableReasonCode);
+        result.GetRawText().Should().NotContain("HttpClient.Timeout", "ADR-015: the fault's message never reaches the model");
     }
 
     [Fact]

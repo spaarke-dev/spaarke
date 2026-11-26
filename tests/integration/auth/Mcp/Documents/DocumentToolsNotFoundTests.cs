@@ -193,12 +193,12 @@ public sealed class DocumentToolsNotFoundTests
         result.StructuredContent!.Value.GetProperty("count").GetInt32().Should().Be(0, "fail closed: a narrowing that cannot decide shows nothing");
         Bytes(result).Should().NotContain("Master services agreement").And.NotContain(DocumentToolsWorld.ReadableDocumentId);
         Text(result).Should().Be(
-            "No documents you can see are filed under this matter.",
+            "No documents to show under this matter.",
             "rows came back and none could be shown, so the matter is not reported as empty");
     }
 
     [Fact]
-    public async Task List_WhenRowsCameBackButTheNarrowingHidesEveryOne_NeverSaysTheMatterHasNoDocuments()
+    public async Task List_WhenRowsCameBackButTheNarrowingHidesEveryOne_SaysTheNeutralLine_NeitherEmptyNorHidden()
     {
         var world = new DocumentToolsWorld { CallerIsExternal = true };
         world.HiddenByNarrowing.Add(Guid.Parse(DocumentToolsWorld.ReadableDocumentId));
@@ -209,12 +209,12 @@ public sealed class DocumentToolsNotFoundTests
 
         result.IsError.Should().NotBe(true);
         result.StructuredContent!.Value.GetProperty("count").GetInt32().Should().Be(0);
-        Text(result).Should().Be("No documents you can see are filed under this matter.");
-        Text(result).Should().NotContain("No documents are filed", "the matter has documents; the caller may not see them");
+        Text(result).Should().Be("No documents to show under this matter.");
+        Text(result).Should().NotContain("No documents are filed", "the matter has documents; the caller may not see them, and the text must not say so either way");
     }
 
     [Fact]
-    public async Task List_ForAMatterTheSourceHoldsNoDocumentsFor_StillSaysNoDocumentsAreFiled()
+    public async Task List_ForAMatterTheSourceHoldsNoDocumentsFor_SaysTheSameNeutralLineAsAFullyHiddenList()
     {
         var world = new DocumentToolsWorld();
         var empty = Guid.Parse("23000000-0000-4000-8000-0000000000c2");
@@ -223,7 +223,7 @@ public sealed class DocumentToolsNotFoundTests
 
         var result = await run.ListAsync(empty, run.Http());
 
-        Text(result).Should().Be("No documents are filed under this matter.");
+        Text(result).Should().Be("No documents to show under this matter.");
     }
 
     // ---- unexpected faults (F1): isError document.unavailable 503, fixed text; the caller's own cancellation propagates --------------

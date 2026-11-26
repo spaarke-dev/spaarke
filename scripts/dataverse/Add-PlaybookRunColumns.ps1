@@ -322,6 +322,9 @@ foreach ($optional in $OptionalLookups) {
     }
     $before = $attr.RequiredLevel.Value
     $attr.PSObject.Properties.Remove("@odata.context")
+    # A read through the LookupAttributeMetadata cast carries no @odata.type; without it the PUT is read as the abstract base type and refused
+    # (0x80048d19, recorded in scripts/ebilling/Deploy-EbillingProcedureSchema.ps1). Same as Add-CustomerIdColumn.ps1:126.
+    $attr | Add-Member -NotePropertyName '@odata.type' -NotePropertyValue 'Microsoft.Dynamics.CRM.LookupAttributeMetadata' -Force
     $attr.RequiredLevel.Value = "None"
     Invoke-Dv -Method PUT -Endpoint "EntityDefinitions(LogicalName='$($optional.Entity)')/Attributes(LogicalName='$($optional.Name)')" -Body $attr -ExtraHeaders @{ "MSCRM.MergeLabels" = "true" } | Out-Null
     Write-Host "  relaxed  $($optional.Entity).$($optional.Name) (RequiredLevel $before -> None)" -ForegroundColor Green
