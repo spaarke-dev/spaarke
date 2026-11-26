@@ -30,14 +30,16 @@ on:
         required: false
         type: boolean
         default: false
-  # Dry run only: proves a change to this workflow, to the decisions widget (its 3 MB size gate and the embedded-resource test run here)
-  # or to the BFF project file (the EmbeddedResource that carries the widget) still builds, gates and writes the manifest.
+  # Dry run only: proves a change to this workflow, to a widget (the decisions and briefing widgets' 3 MB size gates and the embedded-resource
+  # tests run here) or to the BFF project file (the EmbeddedResource that carries the widgets) still builds, gates and writes the manifest.
   pull_request:
     paths:
       - '.github/workflows/publish-bff-artifact.yml'
       - 'src/client/widgets/spaarke-decisions/**'
+      - 'src/client/widgets/spaarke-briefing/**'
       - 'src/client/widgets/shared/**'
       - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
+      - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
       - 'src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj'
 
 permissions:
@@ -109,6 +111,13 @@ jobs:
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
 
+      # spaarkeai-mcp-bff-api-r2 task 034 (FR-09, FR-16, NFR-03): the Daily Briefing widget, embedded the same way (ui://spaarke/briefing.html).
+      - name: 'Build the Spaarke briefing widget (size gate: fails above 3 MB)'
+        working-directory: src/client/widgets/spaarke-briefing
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
       - name: Build
         run: dotnet build ${{ env.API_PROJECT }} -c Release --no-restore
 
@@ -128,15 +137,25 @@ jobs:
           fi
           echo "Decisions widget is embedded."
 
+      - name: Verify the briefing widget is embedded in the published BFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -aq "Sprk.Bff.Api.Widgets.briefing.html" ./publish/Sprk.Bff.Api.dll; then
+            echo "::error::The published Sprk.Bff.Api.dll does not embed the briefing widget (Sprk.Bff.Api.Widgets.briefing.html). The widget build step did not produce src/client/widgets/spaarke-briefing/dist/index.html."
+            exit 1
+          fi
+          echo "Briefing widget is embedded."
+
       # The contract test that reads ui://spaarke/decisions.html back through a real MCP host is a SkippableFact: in a build made
       # WITHOUT the widget it skips, and a skip is reported green. Here the widget was built first, so the built case MUST run and pass;
       # a skipped or missing result fails the job. (The not-built case is expected to be the skipped one.) Release is the configuration
       # the earlier steps built, so nothing is rebuilt but the test project.
-      - name: 'Gate: decisions widget resource serves the built page (the built case must run, not skip)'
+      - name: 'Gate: widget resources serve the built pages (the built case of each must run, not skip)'
         shell: bash
         run: |
           set -euo pipefail
-          dotnet test tests/unit/Sprk.Bff.Api.Tests/             -c Release             --filter "FullyQualifiedName~DecisionsWidgetResourceTests"             --logger "trx;LogFileName=widget-resource.trx"             --results-directory ./gate-results/widget
+          dotnet test tests/unit/Sprk.Bff.Api.Tests/             -c Release             --filter "FullyQualifiedName~DecisionsWidgetResourceTests|FullyQualifiedName~BriefingWidgetResourceTests"             --logger "trx;LogFileName=widget-resource.trx"             --results-directory ./gate-results/widget
           python3 - <<'PY'
           import glob, sys
           import xml.etree.ElementTree as ET
@@ -144,18 +163,19 @@ jobs:
           ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
           files = glob.glob('gate-results/widget/**/*.trx', recursive=True)
           if not files:
-              print('::error::No trx file was written for DecisionsWidgetResourceTests.')
+              print('::error::No trx file was written for the widget resource tests.')
               sys.exit(1)
           outcomes = {}
           for path in files:
               for result in ET.parse(path).getroot().iter(ns + 'UnitTestResult'):
                   outcomes[result.get('testName')] = result.get('outcome')
-          built = {name: outcome for name, outcome in outcomes.items() if 'ResourcesRead_WhenTheWidgetIsBuilt' in name}
-          print('DecisionsWidgetResourceTests outcomes:', outcomes)
-          if len(built) != 1 or set(built.values()) != {'Passed'}:
-              print('::error::The built-widget case of DecisionsWidgetResourceTests did not run and pass (found: %s). A skip means the BFF under test did not embed the widget.' % (built or 'no such test'))
-              sys.exit(1)
-          print('Built-widget case passed.')
+          print('Widget resource test outcomes:', outcomes)
+          for widget_tests in ('DecisionsWidgetResourceTests', 'BriefingWidgetResourceTests'):
+              built = {name: outcome for name, outcome in outcomes.items() if widget_tests in name and 'ResourcesRead_WhenTheWidgetIsBuilt' in name}
+              if len(built) != 1 or set(built.values()) != {'Passed'}:
+                  print('::error::The built-widget case of %s did not run and pass (found: %s). A skip means the BFF under test did not embed the widget.' % (widget_tests, built or 'no such test'))
+                  sys.exit(1)
+              print('Built-widget case of %s passed.' % widget_tests)
           PY
 
       - name: Compute build identifiers (buildId + sha)
