@@ -30,6 +30,12 @@
 #   is not `==`-pinned with a --hash (the hash pin is a supply-chain control and
 #   Trivy cannot see its absence).
 #
+# In-image tests (task 001, FR-01(a)): after the build and before any scan or
+# push, the job's unittest suite runs INSIDE the built image (no network,
+# synthetic corpus mounted read-only), and its golden-parity test compares the
+# engines' outputs there with a reference run of the same engines on the runner.
+# A difference fails the build; outputs are never normalised to pass.
+#
 # Trivy gate: fails the build on any FIXABLE HIGH or CRITICAL finding
 # (ignore-unfixed: true, exit-code: 1). Same posture as the sidecar workflow
 # (amended there 2026-08-27): a gate that can go red with no action open to
@@ -71,11 +77,17 @@ on:
     paths:
       - 'src/server/services/Sprk.Intake.EngineJob/**'
       - 'src/accelerators/core/engines/**'
+      - 'src/accelerators/practices/nda/skills/nda-review/assets/summary-intro.md'
+      - 'src/accelerators/practices/nda/evals/**'
       - '.github/workflows/build-intake-engine-image.yml'
   pull_request:
     paths:
       - 'src/server/services/Sprk.Intake.EngineJob/**'
       - 'src/accelerators/core/engines/**'
+      # The summary intro is COPYed into the image; the synthetic corpus, golden plan and run_local_e2e.py
+      # CASES are the in-image parity test's fixtures.
+      - 'src/accelerators/practices/nda/skills/nda-review/assets/summary-intro.md'
+      - 'src/accelerators/practices/nda/evals/**'
       - '.github/workflows/build-intake-engine-image.yml'
   workflow_dispatch:
     inputs:
@@ -181,6 +193,42 @@ jobs:
           load: true
           tags: |
             ${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
+
+      # FR-01(a), task 001: the engines inside the image must produce the same outputs as a run of the same engines
+      # outside it. Step 1 runs them on the runner (Python 3.11 + the same hash-pinned requirements) and writes a
+      # manifest; step 2 runs the job's whole test suite INSIDE the built image, with the golden-parity test
+      # compared to that manifest. Output identity is defined in tests/test_golden_parity.py (DOCX_IDENTITY).
+      # Before any scan or push, so a broken image never publishes. Synthetic corpus only (NFR-10): only the
+      # practice's evals/ and the summary-intro assets are mounted, read-only, with no network.
+      - name: Set up Python 3.11 (reference run for golden parity)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Golden parity and entrypoint tests inside the image
+        shell: bash
+        env:
+          JOB_DIR: src/server/services/Sprk.Intake.EngineJob
+          NDA_DIR: src/accelerators/practices/nda
+        run: |
+          set -euo pipefail
+          ref="${IMAGE_NAME}:${{ steps.tags.outputs.sha_tag }}"
+          python -m venv /tmp/parity-venv
+          /tmp/parity-venv/bin/pip install --quiet --require-hashes --only-binary=:all: -r "$JOB_DIR/requirements.txt"
+          mkdir -p /tmp/parity-ref
+          /tmp/parity-venv/bin/python "$JOB_DIR/tests/test_golden_parity.py" --write-manifest /tmp/parity-ref/reference.json
+          docker run --rm --network none \
+            -v "$PWD/$JOB_DIR/tests:/app/tests:ro" \
+            -v "$PWD/$NDA_DIR/evals:/parity/nda/evals:ro" \
+            -v "$PWD/$NDA_DIR/skills/nda-review/assets:/parity/nda/skills/nda-review/assets:ro" \
+            -v /tmp/parity-ref:/parity/ref:ro \
+            -e INTAKE_ENGINES_DIR=/app/engines \
+            -e INTAKE_NDA_PRACTICE_DIR=/parity/nda \
+            -e INTAKE_SUMMARY_INTRO=/app/assets/summary-intro.md \
+            -e INTAKE_PARITY_REFERENCE_MANIFEST=/parity/ref/reference.json \
+            -e INTAKE_PARITY_REQUIRE_REFERENCE=1 \
+            --entrypoint python \
+            "$ref" -m unittest discover -s /app/tests -t /app -v
 
       # Reporting scan: every HIGH/CRITICAL finding, fixed or not, into SARIF. It never
       # fails the job (exit-code 0); the gate is the next step. Both findings classes
