@@ -235,7 +235,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   run record to poll, so FR-14's start/status pair was not built. At the dev deploy, record p50/p95 of `/render` for real users; if p95 is near
   27 s, either add a run-record-backed start/status or cache the last briefing. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
 
-## D-034-2 — saved preferences not applied: the tool and the widget's first view ignore the user's saved Daily Digest preferences
+## D-034-2 — saved preferences not applied: the tool and the widget's first view ignore the user's saved Daily Digest preferences → #3232
 - **Status**: deferred (draft issue for the main session to file; the owner may instead narrow FR-09 to "default preferences"). The default-window half (BFF 120 h vs
   Console 168 h) is FIXED in task 034's verifier fixes: a call with no arguments now gets the Console's defaults, 5 days and 168 hours. See `notes/034-decisions.md`, F4.
 - **Draft issue** — title: `spaarke_get_briefing: apply the caller's saved Daily Digest preferences (windows and disabled channels)`.
