@@ -300,6 +300,8 @@ public sealed class McpHostContractTests
                 "spaarke_get_briefing", // r2 task 034
                 "spaarke_start_analysis", // r2 task 031
                 "spaarke_get_analysis", // r2 task 031
+                "spaarke_get_playbook_run", // r2 task 030
+                "spaarke_run_playbook", // r2 task 030
             ],
             "FR-01: tools/list returns exactly the pinned tools (each new tool task adds its row); the paging tool is spaarke_list_decision_page (task 022)");
 

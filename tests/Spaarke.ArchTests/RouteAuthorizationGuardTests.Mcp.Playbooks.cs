@@ -16,5 +16,18 @@ public partial class RouteAuthorizationGuardTests
             + "over OBO, PublicOnly, paging), with exactly IHttpContextAccessor.HttpContext; no caller or no systemuser is "
             + "UserContextRequired. Bare [Authorize]: an A10 workforce user, like the REST playbook group."),
         // --- end task 024 ---
+
+        // --- task 030 (spaarke_run_playbook, spaarke_get_playbook_run) ---
+        new McpTool("RunPlaybookTool", "", "IPlaybookRunAi",
+            "FR-05/FR-14, reversible write: IPlaybookRunAi.StartAsCallerAsync with exactly IHttpContextAccessor.HttpContext decides with "
+            + "task 007's PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync (the execute route's rule: document ids, parameter "
+            + "policy, playbook use, every document and record parameter, the run's user) as the caller before anything runs, then "
+            + "starts the engine's person-run entry as a detached caller run (ADR-052 amendment 2026-11-26) with the authorized inputs and "
+            + "007's RunUserId. The tool adds no check (input caps only); its idempotencyKey is per caller. Bare [Authorize]."),
+        new McpTool("GetPlaybookRunTool", "", "IPlaybookRunAi",
+            "FR-05/FR-14, read-only: IPlaybookRunAi.ReadAsCallerAsync with exactly IHttpContextAccessor.HttpContext returns a run only to "
+            + "the caller whose oid started it (this process's run table, then GetRunStatusAsync: in memory, then task 005's durable "
+            + "record by StartedByOid); another caller's run and an unknown id are one not-found. Bare [Authorize]."),
+        // --- end task 030 ---
     };
 }
