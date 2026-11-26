@@ -238,6 +238,22 @@ public record EmailMetadata
     public List<string>? SelectedAttachmentFileNames { get; init; }
 
     /// <summary>
+    /// spaarkeai-word-add-in-r1 task 141: the saved email's <c>.eml</c> <c>sprk_document</c> this save ADDS attachments to.
+    /// When set, the save is an attachments add, not an email save: it creates no <c>.eml</c> and uploads nothing; it adds,
+    /// as children of this document, exactly the attachments named in <see cref="SelectedAttachmentFileNames"/> that the
+    /// STORED <c>.eml</c> holds and that are not saved under it yet. It needs no earlier job under the same idempotency key.
+    /// </summary>
+    /// <remarks>
+    /// <para>The request names the document, so the route's filter checks it: <c>write</c> on it
+    /// (<c>OfficeVersionSaveAuthorizationFilter</c>, the version save's gate), as the version save does for
+    /// <c>Document.ExistingDocumentId</c>. <see cref="SaveRequest.TargetEntity"/> must be the record the <c>.eml</c> is filed
+    /// to (the route's <c>EntityAccessFilter</c> checks it as for any save) and the selection must name at least one file:
+    /// the route refuses either missing with a 400.</para>
+    /// <para>Absent (every older client, and every ordinary email save): unchanged behaviour.</para>
+    /// </remarks>
+    public Guid? SavedDocumentId { get; init; }
+
+    /// <summary>
     /// Task 046 (b): <c>true</c> when the generated <c>.eml</c> name is SYSTEM-DERIVED (the email's own subject);
     /// <c>false</c> when the user TYPED it in the pane's "Document Name" box (sent in <see cref="DocumentName"/> since
     /// #2416; an older add-in sent it in <see cref="Subject"/>). Only a system-derived name is STORED with a short unique suffix, so two emails with the same subject and

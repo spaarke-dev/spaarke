@@ -305,6 +305,8 @@ public static class FileAccessEndpoints
             ResolveEmailIdentityRequest? request,
             IGenericEntityService dataverse,
             [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+            IDocumentDataverseService documents,
+            Spaarke.Core.Auth.IAuthorizationService authorizationService,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -317,7 +319,69 @@ public static class FileAccessEndpoints
                     "resolve-email-identity reached its handler without a filter-resolved identity.");
             }
 
-            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct));
+            var response = await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct);
+            var savedAttachmentNames = await ReadSavedAttachmentNamesAsync(
+                identity.DocumentId, documents, authorizationService, context, logger, ct);
+            return TypedResults.Ok(response with { SavedAttachmentNames = savedAttachmentNames });
+        }
+
+        /// <summary>
+        /// Task 141: the names of the saved <c>.eml</c>'s child documents (its saved attachments) that the CALLER may read, by the
+        /// planner's one name rule (<see cref="Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf"/>), or
+        /// <see langword="null"/> (the field is omitted) when they cannot be read.
+        /// </summary>
+        /// <remarks>
+        /// ADR-008 Amendment A1: the children are found by this lookup (the request names only the email's keys), so each one is
+        /// checked here, as the caller, with the check the route's filter makes on the parent: <c>read</c> through
+        /// <see cref="InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync"/> (the root grants, then the external document
+        /// narrowing). A child the caller may not read is left out. Only the lookup runs before the check; no child content is
+        /// read at all. Fail closed: a read or a check that faults omits the whole field, so the pane never claims an attachment
+        /// is unsaved on a guess and keeps today's behaviour.
+        /// </remarks>
+        static async Task<IReadOnlyList<string>?> ReadSavedAttachmentNamesAsync(
+            Guid emlDocumentId,
+            IDocumentDataverseService documents,
+            Spaarke.Core.Auth.IAuthorizationService authorizationService,
+            HttpContext context,
+            ILogger logger,
+            CancellationToken ct)
+        {
+            try
+            {
+                var userId = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(context.User);
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return null;
+                }
+
+                var children = (await documents.GetDocumentsByParentAsync(emlDocumentId, ct)).ToList();
+                var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context);
+                var names = new List<string>();
+                foreach (var child in children)
+                {
+                    if (!Guid.TryParse(child.Id, out var childId))
+                    {
+                        continue;
+                    }
+
+                    var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                        context, authorizationService, userId, new[] { childId }, "read", token,
+                        "email-identity:saved-attachments", logger, ct);
+                    if (decision.IsAllowed)
+                    {
+                        names.AddRange(Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf(child));
+                    }
+                }
+
+                return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "Email identity: the saved attachments of document {DocumentId} could not be read; the field is omitted.",
+                    emlDocumentId);
+                return null;
+            }
         }
 
         /// <summary>

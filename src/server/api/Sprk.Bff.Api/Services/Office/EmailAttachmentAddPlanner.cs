@@ -115,17 +115,74 @@ public class EmailAttachmentAddPlanner
         string? targetLogicalName,
         Guid targetRecordId,
         CancellationToken cancellationToken)
+        => (await PlanCoreAsync(emlDocumentId, emlItemId, selection, targetLogicalName, targetRecordId, cancellationToken)).Plan;
+
+    /// <summary>
+    /// Task 141: why <see cref="PlanForSavedEmailAsync"/> has no plan to act on.
+    /// </summary>
+    public enum SavedEmailOutcome
+    {
+        /// <summary>There is a plan: names to add, names the <c>.eml</c> does not hold, or both.</summary>
+        Planned,
+
+        /// <summary>Every name asked for already has a child document: nothing to add or report.</summary>
+        NothingToAdd,
+
+        /// <summary>The document is gone, is not a saved email (<c>.eml</c>), or has no file to read the attachments from.</summary>
+        NotASavedEmail,
+
+        /// <summary>The <c>.eml</c> is not filed to the request's record (<see cref="IsFiledTo"/>).</summary>
+        NotFiledToTheRecord,
+
+        /// <summary>The stored <c>.eml</c> could not be read.</summary>
+        Unreadable,
+    }
+
+    /// <summary>
+    /// Task 141: the plan for an add-attachments save that NAMES the saved email (<c>SaveRequest.Email.SavedDocumentId</c>), so it
+    /// needs no earlier job under the same key. The same plan as <see cref="PlanAsync"/> (filing check, children first, the ONE
+    /// selection over the STORED <c>.eml</c>, <see cref="ExcludeAlreadySaved"/>), read from the document's own SPE pointer instead
+    /// of a job's, plus a check that the document is a saved email at all. It says why there is no plan, so the save can refuse
+    /// instead of answering "already saved". Read-only. A read that faults throws.
+    /// </summary>
+    /// <param name="selection">The names to add. The caller never passes <c>null</c> or <c>[]</c>: the request validator
+    /// refuses an add that names none.</param>
+    public async Task<(SavedEmailOutcome Outcome, Plan? Plan)> PlanForSavedEmailAsync(
+        Guid emlDocumentId,
+        IReadOnlyCollection<string> selection,
+        string? targetLogicalName,
+        Guid targetRecordId,
+        CancellationToken cancellationToken)
+        => await PlanCoreAsync(emlDocumentId, emlItemId: null, selection, targetLogicalName, targetRecordId, cancellationToken);
+
+    /// <summary>
+    /// The plan shared by both triggers. <paramref name="emlItemId"/> is the SPE item an earlier job uploaded (task 138: the
+    /// <c>.eml</c> must still point at it), or <see langword="null"/> when the request named the document (task 141: its own
+    /// pointer is used, and it must be a saved email).
+    /// </summary>
+    private async Task<(SavedEmailOutcome Outcome, Plan? Plan)> PlanCoreAsync(
+        Guid emlDocumentId,
+        string? emlItemId,
+        IReadOnlyCollection<string>? selection,
+        string? targetLogicalName,
+        Guid targetRecordId,
+        CancellationToken cancellationToken)
     {
         var eml = await _documents.GetDocumentAsync(emlDocumentId.ToString("D"), cancellationToken);
+        var itemId = emlItemId ?? eml?.GraphItemId;
         if (eml is null
             || string.IsNullOrEmpty(eml.GraphDriveId)
-            || !string.Equals(eml.GraphItemId, emlItemId, StringComparison.Ordinal))
+            || string.IsNullOrEmpty(itemId)
+            || !string.Equals(eml.GraphItemId, itemId, StringComparison.Ordinal)
+            || (emlItemId is null && !IsSavedEmail(eml)))
         {
-            // A deleted .eml, or one that no longer points at the item its save uploaded: no child is created under it.
+            // A deleted .eml, one that no longer points at the item its save uploaded, or (task 141) a named document that is
+            // not a saved email: no child is created under it.
             _logger.LogInformation(
-                "Email re-save: the saved .eml document {DocumentId} is gone or no longer points at its item; nothing to add",
+                "Email re-save: the saved .eml document {DocumentId} is gone, is not a saved email, or no longer points at its "
+                + "item; nothing to add",
                 emlDocumentId);
-            return null;
+            return (SavedEmailOutcome.NotASavedEmail, null);
         }
 
         var filing = await _entities.RetrieveAsync(
@@ -137,7 +194,7 @@ public class EmailAttachmentAddPlanner
             _logger.LogWarning(
                 "Email re-save: the saved .eml document {DocumentId} is not filed to this request's record; nothing is added",
                 emlDocumentId);
-            return null;
+            return (SavedEmailOutcome.NotFiledToTheRecord, null);
         }
 
         // The children first: a selection whose every name already has a child has nothing missing, whatever the .eml holds,
@@ -150,14 +207,14 @@ public class EmailAttachmentAddPlanner
             _logger.LogInformation(
                 "Email re-save: every selected attachment already has a child under .eml document {DocumentId}; nothing to add",
                 emlDocumentId);
-            return null;
+            return (SavedEmailOutcome.NothingToAdd, null);
         }
 
-        var stream = await _speFileStore.DownloadFileAsync(eml.GraphDriveId, emlItemId, cancellationToken);
+        var stream = await _speFileStore.DownloadFileAsync(eml.GraphDriveId, itemId, cancellationToken);
         if (stream is null)
         {
             _logger.LogWarning("Email re-save: the saved .eml of document {DocumentId} could not be read; nothing to add", emlDocumentId);
-            return null;
+            return (SavedEmailOutcome.Unreadable, null);
         }
 
         EmailAttachmentSelection chosen;
@@ -186,11 +243,12 @@ public class EmailAttachmentAddPlanner
                 missing.Count, chosen.Wanted.Count, emlDocumentId, notStored.Count);
 
             return missing.Count == 0 && notStored.Count == 0
-                ? null
-                : new Plan(emlDocumentId, eml.GraphDriveId, emlItemId, eml.FileName ?? eml.Name, eml.FileSize ?? 0, missing)
-                {
-                    NotStored = notStored,
-                };
+                ? (SavedEmailOutcome.NothingToAdd, null)
+                : (SavedEmailOutcome.Planned,
+                    new Plan(emlDocumentId, eml.GraphDriveId, itemId, eml.FileName ?? eml.Name, eml.FileSize ?? 0, missing)
+                    {
+                        NotStored = notStored,
+                    });
         }
         finally
         {
@@ -336,6 +394,33 @@ public class EmailAttachmentAddPlanner
     /// file name, so either one equal to it, case-insensitive as the selection is, is that attachment.
     /// </summary>
     internal static bool IsAlreadySaved(DocumentEntity child, string attachmentFileName) =>
-        string.Equals(child.Name, attachmentFileName, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(child.FileName, attachmentFileName, StringComparison.OrdinalIgnoreCase);
+        SavedNamesOf(child).Any(name => string.Equals(name, attachmentFileName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The attachment names <paramref name="child"/> counts as saving: its <c>sprk_documentname</c> and its
+    /// <c>sprk_filename</c> (the non-empty ones). THE name rule: <see cref="IsAlreadySaved"/> is "the attachment's file name is
+    /// one of these, case-insensitive", and task 141's <c>savedAttachmentNames</c> on the email identity response is these names
+    /// for every child the caller may read, so the pane marks an attachment saved by the same rule (a case-insensitive match).
+    /// </summary>
+    internal static IEnumerable<string> SavedNamesOf(DocumentEntity child)
+    {
+        if (!string.IsNullOrEmpty(child.Name))
+        {
+            yield return child.Name;
+        }
+
+        if (!string.IsNullOrEmpty(child.FileName))
+        {
+            yield return child.FileName;
+        }
+    }
+
+    /// <summary>
+    /// Task 141: whether a document the request named is a saved email: flagged an email archive, or stored as a <c>.eml</c>
+    /// (the Office save writes both). Anything else (a Word document, an attachment child) has no stored email to read
+    /// attachments from.
+    /// </summary>
+    internal static bool IsSavedEmail(DocumentEntity document) =>
+        document.IsEmailArchive == true
+        || (document.FileName?.EndsWith(".eml", StringComparison.OrdinalIgnoreCase) ?? false);
 }

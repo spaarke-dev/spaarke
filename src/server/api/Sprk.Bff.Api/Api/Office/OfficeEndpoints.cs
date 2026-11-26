@@ -198,7 +198,7 @@ public static class OfficeEndpoints
                 mayReplayResponse: SaveResponseMayBeReplayed)
             .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
             .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
-            .AddOfficeVersionSaveAuthorizationFilter() // word-add-in-r1 task 023 - FR-11 version save: "write" on the existing sprk_document
+            .AddOfficeVersionSaveAuthorizationFilter() // task 023 - FR-11 version save, and task 141 - a saved email's attachments add: "write" on the sprk_document the body names
             .Accepts<SaveRequest>("application/json")
             .Produces<SaveResponse>(StatusCodes.Status202Accepted)
             .Produces<SaveResponse>(StatusCodes.Status200OK) // For duplicate detection
@@ -263,7 +263,9 @@ public static class OfficeEndpoints
         // re-save that would add attachments checks the caller's current "write" on the saved .eml before anything runs
         // (OfficeService.AuthorizeEmailAttachmentAddAsync), because that path is decided inside the save, after the
         // idempotency lookup, where no route filter can see it — ADR-008 Amendment A1 (a resource only the service's own
-        // lookup identifies is checked where it is found). Every other check stays at the endpoint.
+        // lookup identifies is checked where it is found). Task 141's add that NAMES the saved .eml (email.savedDocumentId) is
+        // not such a path: the version-save filter checks "write" on that named document before the handler runs.
+        // Every other check stays at the endpoint.
         AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {
@@ -515,6 +517,23 @@ public static class OfficeEndpoints
                         "OFFICE_VALIDATION",
                         "Validation Error",
                         "Email metadata is required when ContentType is Email.",
+                        correlationId);
+                }
+
+                // Task 141: an attachments add names the saved email, the record it is filed to and at least one attachment.
+                // Without a record or a name there is nothing it could add, and it never falls back to an email save.
+                if (OfficeService.SavedEmailAttachmentAddDocumentId(request) is not null
+                    && (request.TargetEntity is null
+                        || request.Email.SelectedAttachmentFileNames is not { Count: > 0 } names
+                        || names.Any(string.IsNullOrWhiteSpace)))
+                {
+                    logger.LogWarning(
+                        "Attachments add without a record or attachment names, correlation {CorrelationId}",
+                        correlationId);
+                    return ProblemDetailsHelper.OfficeValidationError(
+                        "OFFICE_VALIDATION",
+                        "Validation Error",
+                        "Adding attachments to a saved email needs the record it is filed to and the names of the attachments.",
                         correlationId);
                 }
                 break;
