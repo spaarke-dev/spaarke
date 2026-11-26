@@ -2572,6 +2572,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "spaarke-intake-pipeline-r1 task 012 (FR-08)"
       }
+    },
+    {
+      "caseId": "GU-151",
+      "family": "agreement-edit-plan",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "the intake NDA harness asks for a tracked-change edit plan for a segmented inbound NDA against the pinned Spaarke NDA standard (spaarke-intake-pipeline-r1 task 004, FR-02)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.AgreementEditPlan constant (added by spaarke-intake-pipeline-r1 task 004). A Linear AI Consumer, same shape as GU-142 invoice-classify: invoked server-side through IAgreementAi.BuildEditPlanAsync (the agreement-edit-plan Action run through IActionRunner), never chat/loop-projected and never Click-dispatched (the Binding carries no tool description, surfaces or chips). Dedicated coverage (segmentation input, closed para_key anchoring, the exact-match pre-check and its refusal codes, schema validation against the pinned edit-plan schema) lives in tests/integration/seam/Intake/AgreementAiEditPlanSeamTests.cs, and the Action mirror contract in tests/integration/contract/Catalog/AgreementEditPlanActionContractTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "intake-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "agreement-edit-plan",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarke-intake-pipeline-r1 task 004 (FR-02)"
+      }
     }
   ]
 }
