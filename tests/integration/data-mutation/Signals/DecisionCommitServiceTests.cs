@@ -98,6 +98,29 @@ public sealed partial class DecisionCommitServiceTests
 
     internal sealed class Rig
     {
+        /// <summary>
+        /// ISS-010 part C: inside a decision commit's access window, FR-51 and the executors ask the probe's
+        /// <c>GetCallerRightsForRecordsOrUnknownAsync</c> and <c>CallerPrivilegeAnswerAsync</c> (so an unknown answer is never kept).
+        /// A Moq probe that scripts only <c>GetCallerRightsAsync</c> / <c>CallerHoldsPrivilegeAsync</c> answers those two from what it
+        /// scripted (an answered <see cref="AccessRights"/> is a known answer; a held privilege is Held, otherwise NotHeld), so every
+        /// test's script, including a per-test override, still decides.
+        /// </summary>
+        internal static void AnswerAccessWindowFormsFromThePlainQuestions(Mock<CallerRecordAccessProbe> probe)
+        {
+            probe.Setup(p => p.GetCallerRightsForRecordsOrUnknownAsync(
+                    It.IsAny<string?>(), It.IsAny<IReadOnlyList<(string EntitySet, Guid RecordId)>>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string? token, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct) =>
+                {
+                    var answers = new List<AccessRights?>();
+                    foreach (var (set, id) in targets)
+                        answers.Add(await probe.Object.GetCallerRightsAsync(token, set, id, ct));
+                    return (IReadOnlyList<AccessRights?>)answers;
+                });
+            probe.Setup(p => p.CallerPrivilegeAnswerAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string? token, string privilege, CancellationToken ct) =>
+                    await probe.Object.CallerHoldsPrivilegeAsync(token, privilege, ct) ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld);
+        }
+
         public Dictionary<Guid, Entity> Signals { get; } = new();
         public Dictionary<Guid, int> Versions { get; } = new();
         public HashSet<Guid> CallerCannotRead { get; } = new();
@@ -412,6 +435,7 @@ public sealed partial class DecisionCommitServiceTests
                     RightsAsked.Add((set, id));
                     return Rights.TryGetValue((set, id), out var granted) ? granted : AllRights;
                 });
+            AnswerAccessWindowFormsFromThePlainQuestions(Probe);
 
             var jobs = new Mock<JobSubmissionService>(MockBehavior.Loose, Options.Create(new ServiceBusOptions { QueueName = "test" }),
                 NullLogger<JobSubmissionService>.Instance, new Mock<ServiceBusClient>().Object);

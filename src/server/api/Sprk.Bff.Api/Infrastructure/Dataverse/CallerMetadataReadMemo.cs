@@ -66,8 +66,10 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     /// row write forgets nothing; otherwise a memo of its own, exactly as before (a job, every create that does not go through
     /// <c>ChildRecordEndpoints.CreateAsync</c>, and any other <see cref="IDataverseUserClient"/> even inside a request).
     /// </summary>
+    /// <remarks>ISS-010 part C: the decision commit's access-window view (<c>DecisionAccessWindowCallerClient</c>) counts as
+    /// the <see cref="DataverseUserClient"/>, because the window builds it only over that type.</remarks>
     internal static CallerMetadataReadMemo For(IDataverseUserClient inner, RequestScope? requestReads) =>
-        requestReads is not null && inner is DataverseUserClient
+        requestReads is not null && inner is DataverseUserClient or Sprk.Bff.Api.Services.Signals.DecisionAccessWindowCallerClient
             ? new CallerMetadataReadMemo(inner, requestReads.Store, forgetOnWrite: false)
             : new CallerMetadataReadMemo(inner);
 

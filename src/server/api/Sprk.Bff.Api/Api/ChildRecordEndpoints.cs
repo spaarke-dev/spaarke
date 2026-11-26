@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -319,7 +320,8 @@ public static class ChildRecordEndpoints
                     // ISS-010 (#3184): every create of this request shares its table-metadata answers (the decision commit runs four).
                     MetadataReads = CallerMetadataReadMemo.RequestScope.Of(httpContext),
                 },
-                RecordCreationPrincipal.ForCaller(user, CallerObjectId(httpContext)),
+                // ISS-010 C: inside a decision commit's access window, the caller's client answers its access GETs from the window.
+                RecordCreationPrincipal.ForCaller(DecisionAccessWindow.Of(httpContext)?.CallerClient(user) ?? user, CallerObjectId(httpContext)),
                 ct)
             .ConfigureAwait(false);
 

@@ -255,6 +255,11 @@ internal static class DecisionExec
     {
         try
         {
+            // ISS-010 C: inside a decision commit's access window, a kept answer (or the probe's, kept when known); null denies.
+            if (DecisionAccessWindow.Of(http) is { } window)
+                return await window.CallerRightsAsync(probe, http, entitySet, id, ct).ConfigureAwait(false) is { } known
+                    && OperationAccessPolicy.HasRequiredRights(known, operation);
+
             var rights = await probe.GetCallerRightsAsync(TokenHelper.ExtractBearerTokenOrNull(http), entitySet, id, ct).ConfigureAwait(false);
             return OperationAccessPolicy.HasRequiredRights(rights, operation);
         }
@@ -270,6 +275,10 @@ internal static class DecisionExec
     {
         try
         {
+            // ISS-010 C: inside a decision commit's access window, a kept Held/NotHeld (or the probe's answer); Faulted is a no.
+            if (DecisionAccessWindow.Of(http) is { } window)
+                return await window.CallerPrivilegeAsync(probe, http, privilege, ct).ConfigureAwait(false) == CallerPrivilegeAnswer.Held;
+
             return await probe.CallerHoldsPrivilegeAsync(TokenHelper.ExtractBearerTokenOrNull(http), privilege, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1303,7 +1312,9 @@ public abstract class ChildCreateExecutorBase : DecisionExecutorBase
 
     protected IGenericEntityService Entities => _entities;
 
-    protected override async Task<DecisionActionOutcome> WriteAsync(DecisionActionRequest request, CancellationToken ct)
+    /// <remarks>Sealed (ISS-010 C): the decision commit's access window serves this step only because all its asks come before
+    /// its ONE write (<c>CreateChildAsync</c>), so no subclass may add a second write.</remarks>
+    protected sealed override async Task<DecisionActionOutcome> WriteAsync(DecisionActionRequest request, CancellationToken ct)
     {
         var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
         if (BuildColumns(request, payload) is { } refusal)

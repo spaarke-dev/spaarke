@@ -1298,11 +1298,16 @@ public sealed class DecisionCommitService
         // ---- (1c') FR-51: as the caller, Write on every Signal's subject and AppendTo on its core record. A decision acts on the
         // item and files a record under the matter, even when it only dismisses or approves (record-only actions write nothing
         // of their own, so no executor preflight would ask). Fails closed.
+        // ISS-010 C: from here the commit's caller-access answers are kept per request (DecisionAccessWindow): FR-51, every
+        // preflight and step 1's execute share window 0; the record-access part clears after every step; it is closed for the
+        // replay, before the Decision Record and before the follow-ups, and removed on every return path (using).
+        using var accessWindow = DecisionAccessWindow.Open(http, confirmedBy);
         if (await CallerMayDecideAsync(http, p.Core, p.Resolved, ct).ConfigureAwait(false) is { } denied)
             return denied with { ReviewId = reviewId };
 
         if (finishing)
         {
+            accessWindow.Close();
             // The ledger forgot the outcome (or never got it): the record answers, validated and authorized as above, and any
             // Signal not yet closed with it is closed with the RECORD's resolution (never the body's).
             var (resolution, dismissalText) = existingRecord!.RecordedResolution();
@@ -1457,6 +1462,7 @@ public sealed class DecisionCommitService
 
             _executors.TryGet(step.Def.Code, out var executor);
             DecisionActionOutcome outcome;
+            accessWindow.BeginStep(executor);
             try
             {
                 outcome = await executor.ExecuteAsync(Request(http, p, step, LandedFor(step, landedInquiry)), writeCt).ConfigureAwait(false);
@@ -1466,11 +1472,16 @@ public sealed class DecisionCommitService
                 _logger.LogError(DecisionCommitEvents.StepFailed, ex, "Decision commit: {Code} threw for review {ReviewId}.", step.Def.Code, reviewId);
                 outcome = DecisionActionOutcome.Failed(step.Def.Code, DecisionActionReasons.WriteFailed, "The step did not finish; it may have been applied.");
             }
+            finally
+            {
+                accessWindow.EndStep();
+            }
 
             var record = ToStep(step, outcome);
             executed.Add(record);
             if (outcome.Status != DecisionActionStatus.Done)
             {
+                accessWindow.Close();
                 var failed = Failure(reviewId, step, outcome, executed, p);
                 _logger.LogError(DecisionCommitEvents.StepFailed,
                     "Decision commit: step {Phase} ({Code}) {Status} for review {ReviewId}: {ReasonCode}. No record written; {Landed} write(s) landed.",
@@ -1483,6 +1494,7 @@ public sealed class DecisionCommitService
         }
 
         // ---- (5) The ONE Decision Record, listing what actually happened --------------------------------------------------
+        accessWindow.Close();
         var steps = RecordSteps(p, executed);
         var followOns = RecordFollowOns(p, executed);
         Guid recordId;
