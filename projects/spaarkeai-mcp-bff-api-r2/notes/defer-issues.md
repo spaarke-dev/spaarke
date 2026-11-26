@@ -304,7 +304,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 - **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
 
 ## D-035-1 — `SearchResultsWidget` requires a score and always draws a relevance badge; the MCP search tools expose none
-- **Status**: deferred (draft issue for the main session to file). Found while writing task 035; the widget hides the badge with a CSS rule on the component's `className` (D-035-score) instead of editing the shared component (ADR-012; the brief forbids it).
+- **Status**: deferred, filed as #3234. Found while writing task 035; the widget hides the badge with a CSS rule on the component's `className` (D-035-score) instead of editing the shared component (ADR-012; the brief forbids it).
 - **Title**: `SearchResultsWidget: make score optional so hosts without a relevance score do not need a hidden badge`
 - **Body**:
   `src/client/shared/Spaarke.AI.Widgets/src/outputs/output-widgets/SearchResultsWidget.tsx` types `SearchResultItem.score` as a required `number` and always renders
@@ -315,7 +315,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   existing ones stay). Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
 
 ## D-035-2 — do Copilot Chat and Cowork send the tool call's arguments (`ui/notifications/tool-input`) to the widget? (verify at deploy 039 / E2E 043)
-- **Status**: deferred (a check, not a defect). The widget's heading ("Search results for <query>") and "Load more" need `McpHostConnection.toolInput`.
+- **Status**: deferred, filed as #3235 (a check, not a defect). The widget's heading ("Search results for <query>") and "Load more" need `McpHostConnection.toolInput`.
 - **Title**: `Verify Copilot hosts deliver tool-input to the search results widget`
 - **Body**:
   Task 035 reads the arguments of the call that opened the widget through the SDK's `ontoolinput` (shared `mcpHost.ts`). It is in the MCP Apps spec, but no host was
