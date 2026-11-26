@@ -4,6 +4,24 @@
 
 ---
 
+## Customer stamps: `ai-content/` (fixed primary keys, seeded by H12a)
+
+On a customer stamp, the AI content comes from `ai-content/`, not from the scripts below. Provisioning handler H12a
+(`DataverseWebApiAiContentSeeder`) writes it **create-if-missing with the authoring environment's primary keys**. Clients
+hard-code playbook ids, and Binding (`sprk_playbookconsumer`) ids are ledger and chip identities. Write order: types →
+tools → skills → knowledge → actions → playbooks → playbook N:N → nodes → node N:N → canvas → Bindings. A set whose lookups
+or links point at a row it does not carry is refused before anything is written. Existing rows are never updated;
+differences are reported in the run notes.
+
+- **Source**: `ai-content/Export-AiContent.ps1` reads spaarkedev1 (GET only) and writes the JSON. Its header lists what is
+  exported and what is left out (model-deployment pins, run/index state, links to runtime records), and why. The output is
+  deterministic: re-export, then review the diff in a PR.
+- **Which playbooks**: the `$Playbooks` list in the script (owner decision 2, 2026-11-26), each with the reason it ships.
+- **Embedded**: `Sprk.Provisioning.ControlPlane.Core.csproj` embeds every `ai-content/**/*.json`. The content hash is part of
+  H12a's idempotency key, so a merged re-export re-seeds on the next upgrade run.
+
+---
+
 ## Quick Start
 
 ### Deploy Everything (Recommended)

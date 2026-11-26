@@ -126,6 +126,9 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
+        // ISS-010 part E (#3184; spec ADR Tensions, ADR-052 row): the deferred post-send work of a decision email, ONE ADR-004 job on
+        // the main queue (ServiceBusJobProcessor), scoped like the other queue handlers.
+        services.AddScoped<IJobHandler, CommunicationPostSendJobHandler>();
         // Budget Inquiry executor (ontology task 070): called by the decision commit route; scoped because it holds the
         // caller's IDataverseUserClient. The sender delegates to the singleton CommunicationService above.
         // Task 160 (D-181): the inquiry email's record link by recipient and the record's name for the footer, read at send time.

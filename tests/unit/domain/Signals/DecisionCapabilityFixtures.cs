@@ -87,6 +87,9 @@ internal static class DecisionCapabilityFixtures
             Unused<DecisionCommitFollowUps>(),
             new Mock<Spaarke.Scheduling.IScheduledJobLease>(MockBehavior.Strict).Object,
             Unused<DecisionPlanReadStamp>(),
+            Unused<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(),
+            new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance),
+            new Mock<IDataverseUserClient>(MockBehavior.Strict).Object,
             TimeProvider.System,
             NullLogger<DecisionCommitService>.Instance);
 

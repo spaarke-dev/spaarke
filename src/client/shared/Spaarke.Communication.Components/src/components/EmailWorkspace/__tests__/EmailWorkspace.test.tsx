@@ -438,6 +438,61 @@ describe('Save to SharePoint: attachments the archive refused (PR #2248)', () =>
     // The record re-read after a successful archive is the last thing the handler does.
     await waitFor(() => expect(screen.getByTestId('email-reading-header')).toBeInTheDocument());
     expect(screen.queryByTestId('archive-refused-notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('archive-failure-notice')).not.toBeInTheDocument();
+  });
+});
+
+describe('Save to SharePoint: a refused save is shown, not only logged (ISS-010 part E run 3)', () => {
+  const IN_PROGRESS = {
+    type: 'https://spaarke.com/errors/archive_in_progress',
+    title: 'Archive in progress',
+    detail: 'This email is being saved to SharePoint already. Try again shortly.',
+    status: 409,
+    extensions: { code: 'archive_in_progress' },
+  };
+
+  /** An authenticatedFetch whose archive POST fails as `failure` (a thrown ApiError, as `@spaarke/auth` does, or a non-ok answer). */
+  function fetchFailing(
+    failure: { thrown: true; status: number; problem: unknown } | { thrown: false; status: number; problem: unknown }
+  ): jest.Mock {
+    return jest.fn().mockImplementation(async (url: string) => {
+      if (!String(url).endsWith('/archive'))
+        return { ok: true, status: 200, text: async () => '<p>rendered</p>' } as unknown as Response;
+      if (failure.thrown)
+        throw Object.assign(new Error(`HTTP ${failure.status}`), {
+          name: 'ApiError',
+          status: failure.status,
+          problemDetails: failure.problem,
+        });
+      return { ok: false, status: failure.status, json: async () => failure.problem } as unknown as Response;
+    });
+  }
+
+  async function saveToSharePoint(authenticatedFetch: jest.Mock): Promise<HTMLElement> {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    renderWorkspace({ hideList: true, initialSelectedId: COMMUNICATION_ID, authenticatedFetch });
+    fireEvent.click(await screen.findByRole('button', { name: 'Save to SharePoint' }));
+    return screen.findByTestId('archive-failure-notice');
+  }
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([true, false])(
+    'a 409 archive_in_progress says the email is already being saved, not "failed" (thrown: %s)',
+    async thrown => {
+      const notice = await saveToSharePoint(fetchFailing({ thrown, status: 409, problem: IN_PROGRESS }));
+
+      expect(notice).toHaveTextContent('This email is being saved to SharePoint already. Try again shortly.');
+      expect(notice).not.toHaveTextContent(/failed/i);
+    }
+  );
+
+  it('any other refusal shows the server detail as a failure', async () => {
+    const notice = await saveToSharePoint(
+      fetchFailing({ thrown: true, status: 403, problem: { detail: 'You cannot add documents to this email.' } })
+    );
+
+    expect(notice).toHaveTextContent('Save to SharePoint failed (403): You cannot add documents to this email.');
   });
 });
 

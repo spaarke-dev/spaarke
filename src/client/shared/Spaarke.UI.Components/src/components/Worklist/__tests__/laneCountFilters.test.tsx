@@ -8,7 +8,8 @@
  *  - the cards are MetricCard instances (role=button, aria-pressed, disabled at 0), not StatTiles
  *  - clicking a card filters the existing list in place; clicking the selected card again returns to All; a selection
  *    whose count falls to 0 resolves back to All
- *  - the All card carries "n of m done today" when the host supplies done-today
+ *  - the All card carries "n of m done today" when the host supplies done-today, and its aria-label says it too
+ *  - notes follow the prototype (W-7): Decide "N overdue" else "oldest N days"; Coming due "next due 2 Oct"; other Do "N past due" (#1688)
  */
 
 import '@testing-library/jest-dom';
@@ -30,6 +31,8 @@ import {
 } from '..';
 
 const TODAY = new Date(2026, 9, 9, 12, 0, 0); // 9 Oct 2026, viewer-local
+/** "12 Oct" in the test runner's locale: the card formats a due day the way the Do lines do. */
+const DAY_12_OCT = new Date(2026, 9, 12).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
 let n = 0;
 function item(
@@ -149,9 +152,120 @@ describe('buildLaneCountCards', () => {
     expect(cards.map(c => [c.label, c.value, c.note])).toEqual([
       ['All', 4, '2 past due'],
       ['Finish or reschedule', 2, '2 past due'],
-      ['Coming due', 1, undefined],
+      ['Coming due', 1, `next due ${DAY_12_OCT}`],
       ['Chase a response', 1, undefined],
     ]);
+  });
+
+  it('Coming due carries the prototype W-7 note "next due <day>": the earliest due date of the card, never a past-due count (#1688)', () => {
+    const items = [
+      item('Do', 'comingDue', { dueDate: '2026-10-20' }),
+      item('Do', 'comingDue', { dueDate: '2026-10-12' }),
+      item('Do', 'comingDue', { dueDate: '2026-10-15' }),
+      item('Do', 'finishOrReschedule', { dueDate: '2026-10-01' }),
+    ];
+    const { cards } = build('Do', items);
+    expect(cards.find(c => c.label === 'Coming due')!.note).toBe(`next due ${DAY_12_OCT}`);
+    expect(cards.find(c => c.label === 'Coming due')!.ariaLabel).toBe(`Coming due, 3 Do items, next due ${DAY_12_OCT}`);
+    // The All card keeps its own note and the other work types keep "N past due".
+    expect(cards[0].note).toBe('1 past due');
+    expect(cards.find(c => c.label === 'Finish or reschedule')!.note).toBe('1 past due');
+  });
+
+  it('Coming due never calls a date that has passed the "next due" (an item awaits the nightly move for up to a day) (#1688 review F1)', () => {
+    const DAY_8_OCT = new Date(2026, 9, 8).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const comingDue = (items: WorklistItem[]) => build('Do', items).cards.find(c => c.label === 'Coming due')!;
+    // Only past-due dated items: the truthful note is the past-due count, as on master.
+    const stale = comingDue([item('Do', 'comingDue', { dueDate: '2026-10-08' })]);
+    expect(stale.note).toBe('1 past due');
+    expect(stale.note).not.toContain(DAY_8_OCT);
+    expect(stale.ariaLabel).toBe('Coming due, 1 Do item, 1 past due');
+    expect(
+      comingDue([
+        item('Do', 'comingDue', { dueDate: '2026-10-07' }),
+        item('Do', 'comingDue', { dueDate: '2026-10-08' }),
+      ]).note
+    ).toBe('2 past due');
+    // Mixed: "next" skips the passed date and names the earliest one that is today or later.
+    const mixed = comingDue([
+      item('Do', 'comingDue', { dueDate: '2026-10-08' }),
+      item('Do', 'comingDue', { dueDate: '2026-10-15' }),
+      item('Do', 'comingDue', { dueDate: '2026-10-12' }),
+    ]);
+    expect(mixed.note).toBe(`next due ${DAY_12_OCT}`);
+    // Due today is still upcoming.
+    expect(
+      comingDue([
+        item('Do', 'comingDue', { dueDate: '2026-10-09' }),
+        item('Do', 'comingDue', { dueDate: '2026-10-08' }),
+      ]).note
+    ).toBe(`next due ${new Date(2026, 9, 9).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`);
+    // A passed date plus an undated item: nothing upcoming to name, so the past-due count.
+    expect(comingDue([item('Do', 'comingDue', { dueDate: '2026-10-08' }), item('Do', 'comingDue')]).note).toBe(
+      '1 past due'
+    );
+  });
+
+  it('Coming due: with no due date on any item the note says so; an empty card has no note', () => {
+    const { cards } = build('Do', [
+      item('Do', 'comingDue'),
+      item('Do', 'finishOrReschedule', { dueDate: '2026-10-06' }),
+    ]);
+    expect(cards.find(c => c.label === 'Coming due')!.note).toBe('next due —');
+    const empty = build('Do', [item('Do', 'finishOrReschedule', { dueDate: '2026-10-06' })]).cards;
+    expect(empty.find(c => c.label === 'Coming due')!.note).toBeUndefined();
+  });
+
+  it('negative: only the Coming due card gets the next-due note (not All, not the other Do types, never a Decide card)', () => {
+    const doCards = build('Do', doItems()).cards;
+    expect(doCards.filter(c => c.note?.startsWith('next due')).map(c => c.label)).toEqual(['Coming due']);
+    const decideCards = build('Decide', [item('Decide', 'comingDue' as WorkType, { dueDate: '2026-10-20' })]).cards;
+    expect(decideCards.some(c => c.note?.startsWith('next due'))).toBe(false);
+  });
+
+  it('Decide cards say "N overdue" when they hold items past their due date, else "oldest N days" (#1688)', () => {
+    const items = [
+      item('Decide', 'askOutsideCounsel', { raisedOn: '2026-10-05T10:00:00', dueDate: '2026-10-07' }), // overdue
+      item('Decide', 'askOutsideCounsel', { raisedOn: '2026-10-08T10:00:00', dueDate: '2026-10-08' }), // overdue
+      item('Decide', 'approveOrRebudget', { raisedOn: '2026-10-07T08:00:00', dueDate: '2026-10-09' }), // due today: not overdue
+      item('Decide', 'chaseReply', { raisedOn: '2026-10-06T08:00:00', dueDate: '2026-10-20' }), // not yet due
+    ];
+    const { cards } = build('Decide', items);
+    expect(cards.map(c => [c.label, c.note])).toEqual([
+      ['All', '2 overdue'],
+      ['Ask outside counsel', '2 overdue'],
+      ['Approve or rebudget', 'oldest 2 days'],
+      ['Chase a reply', 'oldest 3 days'],
+    ]);
+    expect(cards[1].ariaLabel).toBe('Ask outside counsel, 2 Decide items, 2 overdue');
+  });
+
+  it('a Decide item with no due date is never overdue: the card keeps "oldest N days"', () => {
+    const { cards } = build('Decide', decideItems());
+    expect(cards.some(c => c.note?.includes('overdue'))).toBe(false);
+  });
+
+  it('the aria-label announces "n of m done today" when the card has progress, and only then (#1688)', () => {
+    const items = doItems();
+    const withDone = build('Do', items, 'all', { doneToday: 3 }).cards;
+    expect(withDone[0].progress).toEqual({ done: 3, total: 7 });
+    expect(withDone[0].ariaLabel).toBe('All, 4 Do items, 2 past due, 3 of 7 done today');
+    // No other card has progress, so no other label mentions it.
+    withDone.slice(1).forEach(c => expect(c.ariaLabel).not.toContain('done today'));
+    // Without doneToday, or with nothing at all to count, there is no progress and nothing to announce.
+    expect(build('Do', items).cards[0].ariaLabel).toBe('All, 4 Do items, 2 past due');
+    const none = build('Do', [], 'all', { doneToday: 0 }).cards[0];
+    expect(none.progress).toEqual({ done: 0, total: 0 });
+    expect(none.ariaLabel).not.toContain('done today');
+  });
+
+  it('the rendered card exposes the progress in its accessible name', () => {
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <LaneHost lane="Do" items={doItems()} doneToday={3} />
+      </FluentProvider>
+    );
+    expect(screen.getByRole('button', { name: /3 of 7 done today/ })).toBeInTheDocument();
   });
 
   it('marks exactly the resolved selection as selected; type cards disable at 0, All never does', () => {

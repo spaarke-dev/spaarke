@@ -1764,6 +1764,17 @@ public sealed class ContactIdentityBinder
                             continue; // the row changed under us — re-decide against fresh rows
                         }
 
+                        if (write.Status == StoreWriteStatus.Forbidden)
+                        {
+                            // A missing privilege on the contact PATCH: permanent, an operator fix, so not the retryable
+                            // bind_failed (R4 task 043, UAC review). Answered like the registration bind's Forbidden.
+                            _logger.LogError(
+                                "[ID-BIND] First-sign-in bind on contact {ContactId} refused ({DenyCode}): Dataverse refused the "
+                                + "write for a missing privilege (the BFF application user needs write on the contact). Nothing was bound.",
+                                target.ContactId, ContactBindingDecision.DenyContactCreateUnavailable);
+                            return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
+                        }
+
                         // A failed bind is NOT "resolved anyway": a contact is resolved only once its binding is
                         // written, so the next sign-in retries the bind.
                         return ContactBindingResult.Denied(ContactBindingDecision.DenyContactBindFailed);
@@ -1830,6 +1841,14 @@ public sealed class ContactIdentityBinder
                                 LogOwnerPrivilegeMissing(
                                     "First sign-in create", $"oid#{HashForLog(request.CallerOid)}", ContactBindingDecision.DenyOwnerUnconfigured);
                                 return ContactBindingResult.Denied(ContactBindingDecision.DenyOwnerUnconfigured);
+                            case StoreWriteStatus.Forbidden:
+                                // A missing privilege on the create: permanent, not the retryable create_failed (R4 task 043,
+                                // UAC review). Same code as the registration create's Forbidden.
+                                _logger.LogError(
+                                    "[ID-BIND] First-sign-in create refused ({DenyCode}): Dataverse refused the write for a "
+                                    + "missing privilege (the BFF application user needs create on contact). Nothing was created.",
+                                    ContactBindingDecision.DenyContactCreateUnavailable);
+                                return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
                             default:
                                 return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
                         }

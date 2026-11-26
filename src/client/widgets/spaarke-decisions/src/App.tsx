@@ -9,6 +9,7 @@ import { FluentProvider, Spinner, Text, makeStyles, tokens } from '@fluentui/rea
 import { createWorklistService, type WorklistData } from '@spaarke/ui-components/components/Worklist/worklistService';
 import { DecideLane, type OpenWizardEvent } from './lane/DecideLane';
 import { consoleBaseUrlOf } from './lane/billingLinkOut';
+import { doneTodayOf } from './lane/doneToday';
 import { createDecideLaneFetch } from './lane/decideLaneFetch';
 import { useMcpHost } from './mcp/mcpHostContext';
 import { hostThemeName, themeFromHostContext } from './theme/hostTheme';
@@ -51,6 +52,10 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
   const [request, setRequest] = React.useState<WizardRequest | null>(null);
   const requests = React.useRef(0);
   const [reloadToken, setReloadToken] = React.useState(0);
+  // "Done today" is the figure the opening call carried; it is not read again. A decision recorded here moves an item out of the lane, so
+  // the figure (and "n of m") would be wrong from then on: it is not shown again rather than shown wrong. A new widget opens with the
+  // server's current figure.
+  const [recordedHere, setRecordedHere] = React.useState(false);
 
   const openWizard = React.useCallback(
     (event: OpenWizardEvent) => {
@@ -68,7 +73,12 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
     wizardOpen.current = active;
   }, []);
   const canOpenWizard = React.useCallback(() => !wizardOpen.current, []);
+  const onRecorded = React.useCallback(() => {
+    setRecordedHere(true);
+    reloadLane();
+  }, [reloadLane]);
   const consoleBaseUrl = consoleBaseUrlOf(toolResult);
+  const doneToday = recordedHere ? undefined : doneTodayOf(toolResult);
 
   return (
     <main className={styles.root} aria-label="Spaarke decisions">
@@ -81,7 +91,7 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
           request={request}
           getLane={getLane}
           consoleBaseUrl={consoleBaseUrl}
-          onRecorded={reloadLane}
+          onRecorded={onRecorded}
           onReloadLane={reloadLane}
           laneReads={laneReads}
           onActiveChange={onActiveChange}
@@ -91,6 +101,7 @@ function Shell({ onOpenWizard }: { onOpenWizard?: (event: OpenWizardEvent) => vo
             consoleBaseUrl={consoleBaseUrl}
             openLink={openLink}
             onOpenWizard={openWizard}
+            doneToday={doneToday}
             reloadToken={reloadToken}
             onData={onData}
             canOpenWizard={canOpenWizard}

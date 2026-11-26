@@ -15,7 +15,7 @@
  * - `resolveRegarding` maps a grid row → its CONFIRMED `ReconcileRegarding | null`
  *   (NFR-10 gate) via the shipped pure `derivePrimaryReview` reducer.
  */
-import { ASSOCIATION_STATUS_RESOLVED_VALUE, COMMUNICATION_REGARDING_FIELDS } from './provenance';
+import { ASSOCIATION_STATUS_RESOLVED_VALUE, COMMUNICATION_REGARDING_FIELDS, type FiledAssociation } from './provenance';
 import type { EmailWorkspaceWebApi } from '../../components/EmailWorkspace/EmailWorkspace.types';
 import type { EmailConnectionsReviewProps } from '../../components/EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
 import type { ReconcileRegarding } from '../../components/ReconcileTabs/FieldUpdateReconcileTab';
@@ -61,6 +61,12 @@ export function buildResolveReview(
       regardingRecordName: str(record, 'sprk_regardingrecordname'),
       regardingRecordNumber: str(record, 'sprk_regardingrecordnumber'),
       regardingRecordType: str(record, 'sprk_regardingrecordtypename'),
+      // word-add-in-r1 task 142 (ISS-043 reopened): the written regarding. Without these the review reduced a filed
+      // Suggested row to a denorm-only primary with no id, so the panel said "No confident match" (task 140's
+      // 'needs-confirmation' needs the typed lookup's id). Present once the workspace's on-open enrichment has merged the
+      // full record; a lightweight grid row without the lookups renders as before.
+      regardingRecordId: normGuid(str(record, 'sprk_regardingrecordid')),
+      filedAssociations: readFiledRegardings(record),
       writeContext: {
         webApi,
         hostEntity: COMMUNICATION_ENTITY,
@@ -97,6 +103,22 @@ function regardingLookupValue(record: Record<string, unknown>, field: string): s
 }
 
 /**
+ * The row's written typed regarding lookups, in `COMMUNICATION_REGARDING_FIELDS` slot order, each with the lookup's
+ * display name (its `FormattedValue` annotation, else the GUID). Same read as `EmailWorkspace.mapping`'s
+ * `readFiledAssociations`, kept here so this Layer-1 module takes no runtime import from the component layer.
+ */
+function readFiledRegardings(record: Record<string, unknown>): FiledAssociation[] {
+  const filed: FiledAssociation[] = [];
+  for (const { field, entityType } of COMMUNICATION_REGARDING_FIELDS) {
+    const recordId = regardingLookupValue(record, field);
+    if (!recordId) continue;
+    const name = str(record, `_${field}_value@OData.Community.Display.V1.FormattedValue`);
+    filed.push({ entityType, recordId, recordName: name || recordId });
+  }
+  return filed;
+}
+
+/**
  * Row → CONFIRMED `ReconcileRegarding | null` (NFR-10 gate). The tabs un-gate
  * only when the record is Resolved AND a typed regarding lookup with a real
  * entity + GUID can be reconstructed from the row.
@@ -116,13 +138,9 @@ export function resolveRegarding(record: Record<string, unknown>): ReconcileRega
   if (num(record, 'sprk_associationstatus') !== ASSOCIATION_STATUS_RESOLVED_VALUE) return null;
 
   const primaryId = normGuid(str(record, 'sprk_regardingrecordid'));
-  let firstFiled: ReconcileRegarding | null = null;
-  for (const { field, entityType } of COMMUNICATION_REGARDING_FIELDS) {
-    const recordId = regardingLookupValue(record, field);
-    if (!recordId) continue;
-    if (!firstFiled) firstFiled = { entityType, recordId };
-    // Prefer the typed lookup that IS the denorm primary (owns the display fields).
-    if (primaryId && recordId === primaryId) return { entityType, recordId };
-  }
-  return firstFiled;
+  const filed = readFiledRegardings(record);
+  if (filed.length === 0) return null;
+  // Prefer the typed lookup that IS the denorm primary (owns the display fields), else the first filed slot.
+  const pick = (primaryId ? filed.find(f => f.recordId === primaryId) : undefined) ?? filed[0];
+  return { entityType: pick.entityType, recordId: pick.recordId };
 }

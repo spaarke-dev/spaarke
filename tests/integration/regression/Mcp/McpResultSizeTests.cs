@@ -160,6 +160,9 @@ public sealed class McpResultSizeTests
         await host.CallAsync(GetDecisionPlanTool.ToolName, new { signalId = capability.TargetSignalId }, Token);
 
         afterShow.Should().Be(1, "opening the widget reads the lane once");
+        // DEF-001 (FR-13): beside it, one read of the caller's closed-today set (small, and in parallel), for the cards' "done today". It is
+        // not a whole-lane read; it is counted apart so a second lane read creeping back is still seen above.
+        capability.Lane.ClosedTodayReads.Should().Be(1, "show reads the closed-today set once");
         (afterPage - afterShow).Should().Be(1, "each further page");
         (capability.WorklistReads - afterPage).Should().Be(0, "opening an item never reads the whole lane");
         capability.RowReads.Should().Be(1, "opening an item reads its one row");

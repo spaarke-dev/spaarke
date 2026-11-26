@@ -400,6 +400,24 @@ public class ContactIdentityBinderOwnerTeamTests
 
     private void GivenDataverseRefusesTheOwner() => _store.CreateStatusOverride = StoreWriteStatus.OwnerPrivilegeMissing;
 
+    // R4 task 043 (UAC review): a create refused for the BFF's own missing privilege is permanent, so it is
+    // contact_create_unavailable (a 403), not the retryable contact_create_failed (a 503 since FR-28).
+    [Fact]
+    public async Task TheFirstSignInCreate_RefusedForAMissingPrivilege_IsCreateUnavailable_NotTheRetryableCreateFailed()
+    {
+        GivenOneDefaultTeam();
+        _store.CreateStatusOverride = StoreWriteStatus.Forbidden;
+        var log = new BindingLogCapture<ContactIdentityBinder>();
+        var oid = Guid.NewGuid();
+
+        var result = await OwnedBinder(CustomerBu, log: log).ResolveWorkforceCallerAsync(Member(oid), oid, Stamp, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactCreateUnavailable);
+        _store.Contacts.Should().BeEmpty();
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("missing privilege"));
+    }
+
     [Fact]
     public async Task TheFirstSignInCreate_RefusedForItsOwnersPrivilege_IsTheOwnerUnconfiguredRefusal_AndLogsWhyAtError()
     {
@@ -479,7 +497,10 @@ public class ContactIdentityBinderOwnerTeamTests
         var link = await binder.EnsureSystemUserLinkAsync(userId, applyWrites: true, CancellationToken.None);
         var registration = await RegistrationsReasonAsync(binder, CustomerBu);
 
-        signIn.DenyCode.Should().Be(ContactBindingDecision.DenyContactCreateFailed);
+        // R4 task 043 (UAC review): the sign-in create's Forbidden is now create_unavailable (permanent), like registration's.
+        signIn.DenyCode.Should().Be(fault == StoreWriteStatus.Forbidden
+            ? ContactBindingDecision.DenyContactCreateUnavailable
+            : ContactBindingDecision.DenyContactCreateFailed);
         link.Outcome.Should().Be(SystemUserLinkOutcome.Failed);
         link.DenyCode.Should().Be(ContactBindingDecision.DenyContactCreateFailed);
         registration.Should().Be(fault == StoreWriteStatus.Forbidden

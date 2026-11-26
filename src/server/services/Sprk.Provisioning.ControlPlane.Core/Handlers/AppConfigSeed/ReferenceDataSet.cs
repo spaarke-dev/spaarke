@@ -77,6 +77,8 @@ internal static class ReferenceDataSet
         "sprk_eventtype_ref",
         "sprk_agreementtype",
         "sprk_triagecategory",
+        // ISS-045: the 17 grid configurations product code hard-codes by dev row id (see Export-ReferenceData.ps1).
+        "sprk_gridconfiguration",
     ];
 
     /// <summary>
@@ -90,6 +92,7 @@ internal static class ReferenceDataSet
             ["sprk_eventtype_ref"] = "sprk_eventtypecode",
             ["sprk_agreementtype"] = "sprk_key",
             ["sprk_triagecategory"] = "sprk_name",
+            ["sprk_gridconfiguration"] = "sprk_name",
         };
 
     /// <summary>

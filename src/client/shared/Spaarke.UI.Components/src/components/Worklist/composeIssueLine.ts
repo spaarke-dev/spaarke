@@ -49,6 +49,11 @@ export function formatAge(raisedOn: string | null | undefined, today: Date): str
   return days === 0 ? 'today' : `${days}d`;
 }
 
+/** "2 Oct": the day and short month of a due date, in the viewer's locale (the form a Do line and a count card both show). */
+export function formatDueDay(due: Date): string {
+  return due.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
 /**
  * The due state of a Do item: "5d overdue" / "3d late" / "due today" / "due 2 Oct". The tier is the shared
  * `dueUrgencyForDays` of the calendar-day distance from the viewer's today.
@@ -64,7 +69,7 @@ export function formatDueState(
   const tone = dueUrgencyForDays(days);
   if (days < 0) return { text: `${-days}d ${pastDueWording}`, tone };
   if (days === 0) return { text: 'due today', tone };
-  return { text: `due ${due.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`, tone };
+  return { text: `due ${formatDueDay(due)}`, tone };
 }
 
 export function composeIssueLine(item: WorklistItem, today: Date = new Date()): IssueLineView {
