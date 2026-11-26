@@ -36,9 +36,11 @@
 
     WHAT IS LEFT OUT, AND WHY (environment-specific values must not travel to a stamp)
       - sprk_modeldeploymentid on actions and nodes: sprk_aimodeldeployment rows are created by H12c with
-        stamp-generated ids, after H12a. No executor reads the node pin (AiAnalysisNodeExecutor copies it into
-        ToolExecutionContext, which no handler reads), and every action pin is empty. The copies of the pin inside
-        canvas JSON and node sprk_configjson ("modelDeploymentId") are blanked for the same reason.
+        stamp-generated ids, after H12a. An empty pin means the configured default deployment:
+        AiCompletionNodeExecutor passes it as the deployment name and null falls back to the configured model
+        (OpenAiClient), and AiAnalysisNodeExecutor only copies it into ToolExecutionContext, which no tool reads.
+        Every action pin is empty. The copies of the pin inside canvas JSON and node sprk_configjson
+        ("modelDeploymentId") are blanked for the same reason.
       - sprk_analysisid (tools, skills, knowledge, actions): a link to a runtime analysis record.
       - sprk_documentid (knowledge): a link to a document record of the authoring environment.
       - Playbook run and index state: sprk_containerid, sprk_indexhash, sprk_indexstatus, sprk_lastindexedat,

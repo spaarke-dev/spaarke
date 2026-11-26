@@ -180,19 +180,84 @@ public sealed partial class DataverseWebApiAiContentSeederTests
 
         var success = outcome.Should().BeOfType<AiContentSeedOutcome.Success>().Subject;
         dataverse.Row("sprk_analysisplaybooks", Playbook).Should().BeNull("the customer's row holds the name");
-        dataverse.Body("sprk_playbooknodes", Node).GetProperty("sprk_playbookid@odata.bind").GetString()
-            .Should().Be($"/sprk_analysisplaybooks({Other})");
-        dataverse.Writes.Should().NotContain(w => w.StartsWith("LINK sprk_analysisplaybook_action", StringComparison.Ordinal)
-                                                 || w.StartsWith("LINK sprk_playbook_skill", StringComparison.Ordinal),
-            "a customer's playbook found by name gets no links from the seed");
+        dataverse.Body("sprk_playbookconsumers", Consumer).GetProperty("sprk_Playbook@odata.bind").GetString()
+            .Should().Be($"/sprk_analysisplaybooks({Other})", "a routing row resolves to the row that holds the name");
+        dataverse.Row("sprk_playbooknodes", Node).Should().BeNull("a node would change what the customer's playbook runs");
+        dataverse.Writes.Should().NotContain(w => w.StartsWith("LINK ", StringComparison.Ordinal),
+            "neither the customer's playbook nor a node that was not created gets links from the seed");
         dataverse.Writes.Should().NotContain("PATCH sprk_analysisplaybooks canvas");
         success.Summary.Should().Contain("COLLISION").And.Contain(Other);
+        success.Summary.Should().Contain($"sprk_playbooknode/{Node} 'Analyze' was NOT created");
         dataverse.Body("sprk_analysistools", Tool).GetProperty("sprk_ToolTypeId@odata.bind").GetString()
             .Should().Be($"/sprk_aitooltypes({Other})", "a type row matches by name");
         success.Summary.Should().NotContain("sprk_aitooltype '", "a type matched by name is expected, not reported");
     }
 
+    [Fact]
+    public async Task W2_AReExportThatRenamesARowAndReusesItsCode_CreatesTheNewRow_NotACollision()
+    {
+        var dataverse = new InMemoryDataverse();
+        await Seed(dataverse, Files());
+        dataverse.Writes.Clear();
+
+        // The next export renamed Action (SUM@v1 -> SUM@v2) and added Other under the old code and name.
+        var files = Files();
+        files["sprk_analysisaction.json"] = Table("sprk_analysisaction", "sprk_analysisactions", "fixedId", [["sprk_actioncode"], ["sprk_name"]],
+            ["sprk_actioncode", "sprk_name", "sprk_systemprompt", "sprk_temperature"], [],
+            (Action, new() { ["sprk_actioncode"] = "SUM@v2", ["sprk_name"] = "Summarize v2", ["sprk_systemprompt"] = "new", ["sprk_temperature"] = 0.2 }),
+            (Other, new() { ["sprk_actioncode"] = "SUM@v1", ["sprk_name"] = "Summarize", ["sprk_systemprompt"] = "old", ["sprk_temperature"] = 0.2 }));
+
+        var outcome = await Seed(dataverse, files);
+
+        var success = outcome.Should().BeOfType<AiContentSeedOutcome.Success>().Subject;
+        dataverse.Writes.Should().Equal("POST sprk_analysisactions");
+        dataverse.Row("sprk_analysisactions", Other).Should().NotBeNull("Action is present under its own id, so it is not a customer row");
+        success.Summary.Should().NotContain("COLLISION");
+        success.Summary.Should().Contain($"sprk_analysisaction/{Action} 'Summarize v2' differs in", "the renamed row is reported, never written");
+    }
+
     // ---- the embedded export ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void W2_TheEmbeddedCanvases_DisagreeWithTheNodeRowsOnlyWhereDevDoes()
+    {
+        // Ratchet: these are dev's own canvas/node drifts (2026-11-26), copied as they are, because a playbook run syncs the
+        // canvas into node rows and only logs a bad reference per node (NodeService.SyncCanvasToNodesAsync), so a stamp behaves
+        // as dev does. A re-export that adds drift fails here: fix the canvas on dev first, or accept it in review and add it here.
+        AiContentSet.Embedded.CanvasGaps().Should().BeEquivalentTo(KnownDevCanvasGaps);
+    }
+
+    [Fact]
+    public void W2_CanvasGaps_FindsAMissingReference_ACanvasOnlyNode_AndANodeOffTheCanvas()
+    {
+        var files = Files();
+        files[AiContentSet.CanvasFile] = JsonSerializer.Serialize(new
+        {
+            table = "sprk_analysisplaybook",
+            column = "sprk_canvaslayoutjson",
+            rows = new[]
+            {
+                new Dictionary<string, string>
+                {
+                    ["sprk_analysisplaybookid"] = Playbook,
+                    ["sprk_canvaslayoutjson"] = JsonSerializer.Serialize(new
+                    {
+                        nodes = new object[]
+                        {
+                            new { id = "c1", data = new { actionId = Other, toolIds = new[] { Tool }, skillIds = Array.Empty<string>() } },
+                        },
+                    }),
+                },
+            },
+        });
+
+        var gaps = AiContentSet.FromFiles(files).CanvasGaps();
+
+        gaps.Should().BeEquivalentTo(
+            $"{Playbook} canvas node c1: actionId {Other} is not in sprk_analysisaction",
+            $"{Playbook} node row {Node} 'Analyze' is not on the canvas",
+            $"{Playbook} canvas node c1 has no node row");
+    }
 
     [Fact]
     public void W2_TheEmbeddedExport_IsComplete_AndHasNoMissingDependency()
@@ -226,6 +291,40 @@ public sealed partial class DataverseWebApiAiContentSeederTests
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------------------------
+
+    /// <summary>Dev's canvas/node drift on 2026-11-26 (filed for a dev-side fix; see the W2 PR). Shrink this list, never grow it silently.</summary>
+    private static readonly string[] KnownDevCanvasGaps =
+    [
+        // PB-002 Document Profile: the canvas names an action deleted on dev; "Save Profile" was never synced to a row.
+        "18cf3cc8-02ec-f011-8406-7c1e520aa4df canvas node node_1772304431311_wnrfaowez: actionId ec2ef00f-7c16-f111-8343-7c1e520aa4df is not in sprk_analysisaction",
+        "18cf3cc8-02ec-f011-8406-7c1e520aa4df canvas node node_1772236478565_0h13rtirj has no node row",
+        // PB-008 Create New Matter Pre-Fill: "Entity Name Validator" is on the canvas only.
+        "2d660cad-d418-f111-8343-7ced8d1dc988 canvas node node_1782477270462_pehsxfjnu has no node row",
+        // PB-009 NDA and PB-003 Email Analysis: one unconfigured "AI Analysis" canvas node, no node rows.
+        "86c243fe-2eda-f011-8406-7ced8d1dc988 canvas node node_1768579935609_2dtvqmzsx has no node row",
+        "bc71facf-6af1-f011-8406-7ced8d1dc988 canvas node node_1768839166775_8ueg2ag72 has no node row",
+        // matter-health-single: the canvas uses the node rows' primary keys as canvas ids, but no row carries __canvasNodeId.
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row 1e5ff113-4a65-f111-ab0c-70a8a590c51c 'declineInsufficient' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row 669c5310-4a65-f111-ab0c-7ced8ddc4cc6 'queryKpiAssessments' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row 679c5310-4a65-f111-ab0c-7ced8ddc4cc6 'synthesize' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row 689c5310-4a65-f111-ab0c-7ced8ddc4cc6 'groundCitations' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row a2d49d0d-4a65-f111-ab0c-70a8a590c51c 'queryMatterContext' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row a3d49d0d-4a65-f111-ab0c-70a8a590c51c 'checkSufficiency' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row c4284512-4a65-f111-ab0c-7ced8ddc4a05 'retrieveObservations' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row d7284512-4a65-f111-ab0c-7ced8ddc4a05 'ReturnInsightArtifactNode' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c node row de284512-4a65-f111-ab0c-7ced8ddc4a05 'persistEnvelope' is not on the canvas",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node 1e5ff113-4a65-f111-ab0c-70a8a590c51c has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node 669c5310-4a65-f111-ab0c-7ced8ddc4cc6 has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node 679c5310-4a65-f111-ab0c-7ced8ddc4cc6 has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node 689c5310-4a65-f111-ab0c-7ced8ddc4cc6 has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node a2d49d0d-4a65-f111-ab0c-70a8a590c51c has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node a3d49d0d-4a65-f111-ab0c-70a8a590c51c has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node c4284512-4a65-f111-ab0c-7ced8ddc4a05 has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node d7284512-4a65-f111-ab0c-7ced8ddc4a05 has no node row",
+        "a0d49d0d-4a65-f111-ab0c-70a8a590c51c canvas node de284512-4a65-f111-ab0c-7ced8ddc4a05 has no node row",
+        // Create New Project Pre-Fill: the "Start" row is not on the canvas.
+        "fc343e9c-3460-f111-ab0b-7c1e521b425f node row f6c3b5d7-aa75-f111-ab0e-7ced8ddc4cc6 'Start' is not on the canvas",
+    ];
 
     private static async Task<AiContentSeedOutcome> Seed(InMemoryDataverse dataverse, Dictionary<string, string> files, CountingCredential? credential = null)
     {

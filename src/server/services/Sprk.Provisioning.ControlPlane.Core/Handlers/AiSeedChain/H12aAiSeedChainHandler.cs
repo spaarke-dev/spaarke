@@ -37,6 +37,7 @@
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H12a
 //     row: idempotency key = h12a-{customerId}-{manifestHash}; manifestHash =
 //     SHA-256 of manifest.yaml so any change forces a re-seed on next run.
+//     W2 (L56) folds the AI content hash into that position (BuildIdempotencyKey).
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback
 //     taxonomy: Pre-write validation failures are Resumable (operator fixes
 //     params + resumes). Partial seed (some rows exist with broken FK) is
@@ -92,9 +93,10 @@
 //           §4.1 preamble; parity with H2a / H0 / H0.5).
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H12a",
-//           IdempotencyKey==h12a-{customerId}-{manifestHash}). Match ⇒
-//           Success no-op. manifestHash is a deterministic SHA-256 of
-//           manifest.yaml — content change forces a new key + re-seed.
+//           IdempotencyKey==h12a-{customerId}-{SHA-256(manifestHash:contentHash)}).
+//           Match ⇒ Success no-op. manifestHash is a deterministic SHA-256 of
+//           manifest.yaml and contentHash of the embedded AI content set, so a
+//           change to either forces a new key + re-seed.
 //
 // DOWNSTREAM (wave note):
 //   H12a does NOT enqueue a specific successor. Downstream H12b (task 071)
@@ -257,7 +259,21 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         }
 
         var manifestHash = manifestSuccess.ContentHash;
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash, _aiContentSeeder.ContentHash);
+
+        // The embedded AI content set is loaded on first use; an unreadable set is a build defect, reported under the
+        // content seed's own code instead of escaping as a handler exception.
+        string contentHash;
+        try
+        {
+            contentHash = _aiContentSeeder.ContentHash;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, AiSeedChainRejectionCodes.AiContentMissingDependency,
+                $"AI content set could not be read: {ex.GetType().Name}: {ex.Message}. Nothing was written.", cancellationToken).ConfigureAwait(false);
+        }
+
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash, contentHash);
 
         // (5) Level-3 idempotency: durable no-op on duplicate. A change to
         //     manifest.yaml (any content byte) produces a new hash + key, so

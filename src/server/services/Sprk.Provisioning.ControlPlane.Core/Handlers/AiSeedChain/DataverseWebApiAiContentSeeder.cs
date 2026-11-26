@@ -25,6 +25,10 @@
 //     present by a match key (code, name, routing key) under another id is a
 //     COLLISION: not created, reported, and its id is used for references so
 //     links and routing rows still resolve. Type rows match by name silently.
+//     Match keys are compared only against rows that are not source rows, so a
+//     source row present under its own id never makes another one "collide".
+//     A node whose playbook COLLIDED is not created (it would change what the
+//     customer's playbook runs); it is reported.
 //     Otherwise POST with the source id, the non-null columns and each lookup as
 //     @odata.bind to the (mapped) target row. A create can never update: a row
 //     that appears between the read and the POST makes Dataverse reject the
@@ -55,6 +59,12 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
 {
     private const string ODataVersion = "4.0";
     private const int MaxListed = 15;
+
+    /// <summary>Child tables and the lookup to the parent that owns them; a child of a collided parent is not created.</summary>
+    private static readonly Dictionary<string, string> OwnedBy = new(StringComparer.Ordinal)
+    {
+        ["sprk_playbooknode"] = "sprk_playbookid",
+    };
 
     private readonly HttpClient _httpClient;
     private readonly Func<string, TokenCredential> _credentialFactory;
@@ -221,12 +231,20 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
             byId[Guid.Parse(row.GetProperty(table.PrimaryKey).GetString()!, CultureInfo.InvariantCulture)] = row;
         }
 
-        // Match-key indexes over the rows that were there BEFORE this seed (rows created now never shadow later source rows).
+        // Match-key indexes over the rows that were there BEFORE this seed (rows created now never shadow later source rows)
+        // and that are NOT source rows: a source row already present by its own id is that row, so its (possibly older) code
+        // or name must not make another source row look like a collision after a re-export renames one and reuses the name.
+        var sourceIds = table.Rows.Select(r => r.Id).ToHashSet();
         var indexes = table.MatchKeys.Select(key =>
         {
             var index = new Dictionary<string, Guid>(StringComparer.Ordinal);
             foreach (var (id, row) in byId)
             {
+                if (sourceIds.Contains(id))
+                {
+                    continue;
+                }
+
                 if (KeyOf(key, column => row.TryGetProperty(column, out var v) ? v : default) is { } k)
                 {
                     index.TryAdd(k, id);
@@ -259,6 +277,19 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
                     run.Reported.Add($"{table.Table}/{row.Id} '{row.DisplayName}' {string.Join(" and ", findings)}");
                 }
 
+                continue;
+            }
+
+            // A child row (a node) of a parent that resolved to a customer's own row (a COLLISION) is not ours to add: it
+            // would change what that playbook runs. Not created, not mapped (its links are skipped), reported.
+            if (OwnedBy.TryGetValue(table.Table, out var ownerColumn)
+                && table.Lookups.FirstOrDefault(l => l.Column == ownerColumn) is { } ownerLookup
+                && row.Lookups[ownerColumn] is { } ownerId
+                && run.IdMap.TryGetValue(ownerLookup.Target, out var ownerMap)
+                && ownerMap.TryGetValue(ownerId, out var ownerMapped)
+                && ownerMapped != ownerId)
+            {
+                run.Reported.Add($"{table.Table}/{row.Id} '{row.DisplayName}' was NOT created: its {ownerLookup.Target} collided with the existing row {ownerMapped}");
                 continue;
             }
 
@@ -335,8 +366,9 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
 
         foreach (var group in association.Pairs.GroupBy(p => p.Source))
         {
-            // Only rows that carry the source id are ours to link; a customer's row found by a match key is left as it is.
-            if (sourceMap[group.Key] != group.Key)
+            // Only rows that carry the source id are ours to link; a customer's row found by a match key is left as it is,
+            // and a child row skipped because its parent collided has no mapping at all.
+            if (!sourceMap.TryGetValue(group.Key, out var sourceMapped) || sourceMapped != group.Key)
             {
                 continue;
             }

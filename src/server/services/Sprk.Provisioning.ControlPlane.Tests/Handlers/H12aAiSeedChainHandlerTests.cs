@@ -417,6 +417,25 @@ public sealed class H12aAiSeedChainHandlerTests
         repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task W2_AnUnreadableEmbeddedContentSet_FailsResumable_WithTheContentCode_NotAHandlerException()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-16");
+        var content = FakeAiContentSeeder.UnreadableSet();
+        var runner = FakeSeedManifestRunner.Success("must not run");
+        var handler = BuildHandler(repo, FakeSeedManifestReader.CleanWithHash(ManifestHash), runner, content);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(AiSeedChainRejectionCodes.AiContentMissingDependency);
+        failure.Diagnostic.Should().Contain("could not be read").And.Contain("x.json");
+        content.CallCount.Should().Be(0);
+        runner.CallCount.Should().Be(0);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -619,8 +638,12 @@ public sealed class H12aAiSeedChainHandlerTests
             _calls = calls;
         }
 
-        public string ContentHash => Hash;
+        public string ContentHash => _hashThrows ? throw new InvalidOperationException("Embedded AI content resource 'x.json' is missing.") : Hash;
         public int CallCount { get; private set; }
+
+        private bool _hashThrows;
+
+        public static FakeAiContentSeeder UnreadableSet() => new(null, null, null) { _hashThrows = true };
         public SeedManifestInvocationRequest? LastRequest { get; private set; }
 
         public static FakeAiContentSeeder Succeeds(string summary = "AI content OK", List<string>? calls = null)

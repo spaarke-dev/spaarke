@@ -293,6 +293,110 @@ internal sealed class AiContentSet
         return problems;
     }
 
+    /// <summary>Canvas-node data keys that name rows of another table.</summary>
+    private static readonly (string Key, string Table)[] CanvasReferences =
+    [
+        ("actionId", "sprk_analysisaction"),
+        ("skillIds", "sprk_analysisskill"),
+        ("knowledgeIds", "sprk_analysisknowledge"),
+        ("toolIds", "sprk_analysistool"),
+    ];
+
+    /// <summary>
+    /// Where a canvas disagrees with the rows it draws: a canvas node that names an action, skill, knowledge or tool the set does
+    /// not carry, a canvas node with no node row, and a node row that is not on its playbook's canvas. Not a refusal: the canvas
+    /// is the dev canvas as it is, and a playbook run syncs it into node rows and logs a bad reference per node
+    /// (NodeService.SyncCanvasToNodesAsync), so a stamp behaves as dev does. The embedded-export test pins the list, so new
+    /// drift in a re-export fails the build and is either fixed on dev first or accepted in review.
+    /// </summary>
+    internal IReadOnlyList<string> CanvasGaps()
+    {
+        var gaps = new List<string>();
+        if (Canvas is null || !Tables.TryGetValue(NodeTable, out var nodes))
+        {
+            return gaps;
+        }
+
+        foreach (var (playbookId, value) in Canvas.Rows)
+        {
+            using var document = JsonDocument.Parse(value);
+            var canvasIds = new HashSet<string>(StringComparer.Ordinal);
+            if (document.RootElement.TryGetProperty("nodes", out var canvasNodes) && canvasNodes.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var node in canvasNodes.EnumerateArray())
+                {
+                    var nodeId = node.TryGetProperty("id", out var idValue) ? idValue.GetString() ?? string.Empty : string.Empty;
+                    canvasIds.Add(nodeId);
+                    if (!node.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    foreach (var (key, table) in CanvasReferences)
+                    {
+                        if (!data.TryGetProperty(key, out var reference))
+                        {
+                            continue;
+                        }
+
+                        var referenced = reference.ValueKind == JsonValueKind.Array
+                            ? reference.EnumerateArray().Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : null)
+                            : [reference.ValueKind == JsonValueKind.String ? reference.GetString() : null];
+                        foreach (var text in referenced)
+                        {
+                            if (Guid.TryParse(text, CultureInfo.InvariantCulture, out var id)
+                                && Tables.TryGetValue(table, out var target) && target.Rows.All(r => r.Id != id))
+                            {
+                                gaps.Add($"{playbookId} canvas node {nodeId}: {key} {id} is not in {table}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            var rowCanvasIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var row in nodes.Rows.Where(r => r.Lookups.TryGetValue("sprk_playbookid", out var p) && p == playbookId))
+            {
+                var canvasNodeId = CanvasNodeIdOf(row);
+                if (canvasNodeId is null || !canvasIds.Contains(canvasNodeId))
+                {
+                    gaps.Add($"{playbookId} node row {row.Id} '{row.DisplayName}' is not on the canvas");
+                }
+
+                if (canvasNodeId is not null)
+                {
+                    rowCanvasIds.Add(canvasNodeId);
+                }
+            }
+
+            gaps.AddRange(canvasIds.Where(c => !rowCanvasIds.Contains(c)).Order(StringComparer.Ordinal)
+                .Select(c => $"{playbookId} canvas node {c} has no node row"));
+        }
+
+        return gaps;
+    }
+
+    private static string? CanvasNodeIdOf(AiContentRow row)
+    {
+        if (!row.Values.TryGetValue("sprk_configjson", out var config) || config.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(config.GetString()!);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty("__canvasNodeId", out var id) && id.ValueKind == JsonValueKind.String
+                ? id.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     // ---- parsing ---------------------------------------------------------------------------------------------------
 
     /// <summary>Parses one table file. Text arrays (multi-line values) are joined with <c>"\n"</c>.</summary>
