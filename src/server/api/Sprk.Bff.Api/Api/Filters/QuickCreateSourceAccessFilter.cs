@@ -40,7 +40,8 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// <para><b>Why it exists.</b> <c>RecordCreationService</c> reads the named source record <b>app-only</b> to apply the
 /// Field Mapping Framework, then writes the mapped values onto a new matter the caller OWNS. Without this filter any
 /// authenticated caller could name any record id and read its mapped fields back through their own new matter. The
-/// client engine never had that exposure because it reads through <c>Xrm.WebApi</c> as the user.</para>
+/// former client engine (deleted in field-mapping-server-write-path-r1 task 035) did not have that exposure because it read
+/// through <c>Xrm.WebApi</c> as the user.</para>
 ///
 /// <para><b>What is shared (CLAUDE.md §11).</b> Mechanism and tables are reused, not re-declared: the SAME
 /// <see cref="CallerRecordAccessProbe"/> (OBO <c>RetrievePrincipalAccess</c>), the SAME logical-name → entity-set

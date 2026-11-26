@@ -397,7 +397,7 @@ describe('xrmContext', () => {
     });
 
     // Task 021 (FR-20): the single shared accessor replacing the two former
-    // private `getXrmPage()` duplicates in FieldMappingHandler.ts and
+    // private `getXrmPage()` duplicates in the former FieldMappingHandler.ts and
     // MatterHeaderView.tsx.
 
     it('should return window.Xrm.Page when it exists', () => {

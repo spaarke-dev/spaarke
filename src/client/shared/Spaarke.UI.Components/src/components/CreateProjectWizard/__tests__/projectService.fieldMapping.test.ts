@@ -13,7 +13,7 @@
  *     the data service is BFF-decorated; with no BFF connection the create is refused and nothing is written;
  *   - the AssociateToStep selection travels as the explicit mapping source in the QUERY STRING, and the body is the same
  *     with or without it; the secure intent travels there too;
- *   - `applyFieldMappings` is never imported and never called, and no field-mapping profile is read;
+ *   - no client mapping engine is imported or called, and no field-mapping profile is read;
  *   - no client access sync after the create;
  *   - the route's warnings reach the result; a refusal is a failed create with the root-create wording.
  */
@@ -27,14 +27,9 @@ import type { IDataService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
 import type { IUserBuCascadeDefaults } from '../../../services/EntityCreationService';
 import { _resetNavPropCacheForTests } from '../../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../../services/FieldMappingService';
 import { ASSIGNED_ACCESS_SYNC_PATH } from '../../../services/assignedAccessSync';
 import { withBffChildWrites } from '../../../utils/adapters/bffChildWriteAdapter';
 import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
-
-jest.mock('../../../services/FieldMappingService', () => ({
-  applyFieldMappings: jest.fn(),
-}));
 
 const BFF_BASE = 'https://example.test';
 const ROUTE = `${BFF_BASE}/api/v1/child-records/sprk_project`;
@@ -99,8 +94,6 @@ const MATTER_ASSOCIATION: AssociationResult = {
 const BU_DEFAULTS: IUserBuCascadeDefaults = {
   businessUnitId: 'bu-1',
   containerId: 'bu-container',
-  searchIndexName: 'bu-search-index',
-  searchIndexId: 'bu-index-guid',
 };
 
 /** Nav-prop metadata for sprk_project, so every user-picked lookup binds under its own navigation property. */
@@ -314,7 +307,7 @@ describe('ProjectService — creates through the server write path (task 022, FR
     }
   );
 
-  it('does not map on the client: applyFieldMappings is never called and no field-mapping profile is read', async () => {
+  it('does not map on the client: no field-mapping profile is read', async () => {
     const fetchMock = makeFetch();
     await new ProjectService(makeDataService(), fetchMock, BFF_BASE).createProject(
       makeForm(),
@@ -322,7 +315,6 @@ describe('ProjectService — creates through the server write path (task 022, FR
       MATTER_ASSOCIATION
     );
 
-    expect(applyFieldMappings).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/field-mappings/'))).toEqual([]);
   });
 
@@ -337,9 +329,8 @@ describe('ProjectService — creates through the server write path (task 022, FR
     }
   });
 
-  it('projectService.ts neither imports nor calls applyFieldMappings, FieldMappingService, the BU cascade or the access sync', () => {
+  it('projectService.ts neither imports nor calls FieldMappingService, the BU cascade or the access sync', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../projectService.ts'), 'utf8');
-    expect(source).not.toMatch(/applyFieldMappings/);
     expect(source).not.toMatch(/FieldMappingService/);
     expect(source).not.toMatch(/applyUserBuDefaults/);
     expect(source).not.toMatch(/syncAssignedAccess/);

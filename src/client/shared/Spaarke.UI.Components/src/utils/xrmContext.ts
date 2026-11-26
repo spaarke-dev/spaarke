@@ -17,7 +17,7 @@
  * (`setValue`) and, where the caller needs it, reading the current value or
  * dirty state. `getValue`/`getIsDirty` are optional because not every
  * consumer of {@link getXrmPage} needs them (declared narrower where they
- * do — see `FieldMappingHandler.ts`'s local `IXrmPageAttributeLike`).
+ * do; the former field-mapping handler, deleted in task 035, declared its own narrower type).
  */
 export interface XrmPageAttributeLike {
   setValue(value: unknown): void;
@@ -494,7 +494,7 @@ export function getXrm(
  *
  * THE single shared accessor (FR-20) — consolidates the two near-identical
  * private `getXrmPage()` duplicates that previously lived in
- * `FieldMappingHandler.ts` and `MatterHeaderView.tsx`. Resolves through
+ * the former `FieldMappingHandler.ts` (deleted in task 035) and `MatterHeaderView.tsx`. Resolves through
  * {@link getXrm} with the `'page'` capability (task 081 / C-8), so it uses the
  * one frame walk: the nearest frame whose Xrm has `Page`. Before task 081 it
  * had its own window -> parent walk; the result is unchanged wherever that

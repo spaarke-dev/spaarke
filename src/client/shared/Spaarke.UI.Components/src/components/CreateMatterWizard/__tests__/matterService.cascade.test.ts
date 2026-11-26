@@ -26,8 +26,6 @@ import type { IUploadedFile } from '../wizardTypes';
 
 const MOCK_BU_ID = 'bu-guid-xyz';
 const MOCK_CONTAINER_ID = 'spe-container-from-host';
-const MOCK_BU_SEARCH_INDEX = 'spaarke-knowledge-index-v2';
-const MOCK_BU_SEARCH_INDEX_ID = 'index-guid-from-bu';
 const BFF_BASE = 'https://example.test';
 const ROUTE = `${BFF_BASE}/api/v1/child-records/sprk_matter`;
 
@@ -97,13 +95,11 @@ describe('MatterService — BU cascade defaults are not written onto the matter 
     jest.clearAllMocks();
   });
 
-  it('writes none of the cascade columns when the host resolved the full BU defaults (name, index id, container)', async () => {
+  it('writes none of the cascade columns when the host resolved the BU defaults (BU id, container)', async () => {
     const fetchMock = makeFetch();
     const cascadeDefaults: IUserBuCascadeDefaults = {
       businessUnitId: MOCK_BU_ID,
       containerId: MOCK_CONTAINER_ID,
-      searchIndexName: MOCK_BU_SEARCH_INDEX,
-      searchIndexId: MOCK_BU_SEARCH_INDEX_ID,
     };
 
     const service = new MatterService(makeDataService(), fetchMock, BFF_BASE, MOCK_CONTAINER_ID);
@@ -112,8 +108,6 @@ describe('MatterService — BU cascade defaults are not written onto the matter 
     expect(result.status).toBe('success');
     const body = createBody(fetchMock);
     expectNoCascadeColumns(body);
-    expect(JSON.stringify(body)).not.toContain(MOCK_BU_SEARCH_INDEX);
-    expect(JSON.stringify(body)).not.toContain(MOCK_BU_SEARCH_INDEX_ID);
     expect(JSON.stringify(body)).not.toContain(MOCK_CONTAINER_ID);
   });
 
@@ -122,7 +116,6 @@ describe('MatterService — BU cascade defaults are not written onto the matter 
     const cascadeDefaults: IUserBuCascadeDefaults = {
       businessUnitId: MOCK_BU_ID,
       containerId: 'cascade-container-should-be-ignored',
-      searchIndexName: MOCK_BU_SEARCH_INDEX,
     };
 
     // No host container: the only container in play is the cascade's.
@@ -145,25 +138,6 @@ describe('MatterService — BU cascade defaults are not written onto the matter 
     const body = createBody(second);
     expectNoCascadeColumns(body);
     expect(JSON.stringify(body)).not.toContain('cascade-container-should-be-ignored');
-  });
-
-  it('creates the matter when cascadeDefaults.searchIndexName is undefined (Phase A.5 ordering scenario)', async () => {
-    const fetchMock = makeFetch();
-    const cascadeDefaults: IUserBuCascadeDefaults = {
-      businessUnitId: MOCK_BU_ID,
-      containerId: MOCK_CONTAINER_ID,
-      searchIndexName: undefined,
-    };
-
-    const result = await new MatterService(makeDataService(), fetchMock, BFF_BASE, MOCK_CONTAINER_ID).createMatter(
-      makeForm(),
-      [],
-      {},
-      cascadeDefaults
-    );
-
-    expect(result.status).toBe('success');
-    expectNoCascadeColumns(createBody(fetchMock));
   });
 
   it('creates the matter when cascadeDefaults is omitted entirely, and makes no BU lookup on the client', async () => {
@@ -196,7 +170,7 @@ describe('MatterService — file indexing names no search index (task 021 fix ro
     jest.restoreAllMocks();
   });
 
-  it('calls indexUploadedFiles without a search index name, even when the host resolved one', async () => {
+  it('calls indexUploadedFiles with no search index argument (the index follows the content type)', async () => {
     const file = { id: 'item-1', name: 'a.pdf', size: 10, webUrl: 'https://x/a.pdf', driveId: 'b!drive' };
     jest.spyOn(EntityCreationService.prototype, 'uploadFilesToSpe').mockResolvedValue({
       success: true,
@@ -212,7 +186,6 @@ describe('MatterService — file indexing names no search index (task 021 fix ro
     const cascadeDefaults: IUserBuCascadeDefaults = {
       businessUnitId: MOCK_BU_ID,
       containerId: MOCK_CONTAINER_ID,
-      searchIndexName: MOCK_BU_SEARCH_INDEX,
     };
 
     const result = await new MatterService(
@@ -227,6 +200,5 @@ describe('MatterService — file indexing names no search index (task 021 fix ro
     expect(index).toHaveBeenCalledTimes(1);
     const args = index.mock.calls[0];
     expect(args).toHaveLength(4);
-    expect(JSON.stringify(args)).not.toContain(MOCK_BU_SEARCH_INDEX);
   });
 });

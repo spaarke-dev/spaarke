@@ -121,3 +121,14 @@ POML step 3 said to pass `mappingSource` only when the filing parent differs fro
 **Found:** DI-043 / #3176. The wizard silently drops TXT/PPTX/MSG/EML files it says it accepts. Pre-existing.
 - The first live attempt used a TXT file, which hit this; the check was rerun with a PDF.
 - The matter form showed an "Access status unavailable…" banner on MAT-000113 throughout. It was not investigated here, and the uploads were unaffected.
+
+## Follow-up: guard G7 (2026-11-25, after word-add-in-r1 #3157 merged)
+
+- Rule agreed with word-add-in-r1 (task 138 condition 1): `EmailAttachmentAddPlanner` only reads. A missing attachment is created only by `UploadFinalizationWorker.ProcessSingleAttachmentAsync`, which G1, G3 and G6 already scan.
+- `OfficeDocumentSaveGuardTests.G7_*`:
+  - any call on `_documents` / `_entities` whose name is not a read, either field passed to another method, any Create/Update/Upsert/Delete/Associate call, an upsert, a create or update request, or a new `sprk_document` entity fails;
+  - a read count per field catches a rename.
+- Controls: must-fire (9 findings) and must-not-fire (reads, a comment, `Add`, a `CreatedAt`-style name; the first real run flagged `.CreatedAt(`, fixed by requiring the verb to end at a capital or the end of the name).
+- Negative demonstration on the real file: an injected `_documents.UpdateDocumentAsync(…, new UpdateDocumentRequest(), …)` gave 3 findings; after the revert, 20/20 pass.
+- Not done (word-add-in-r1 marked it optional): "OfficeService's add branch writes only its `sprk_processingjob` row". The branch has no method boundary a scan can isolate without false positives.
+- Enforced by: `tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs` (CI and the Stop hook).
