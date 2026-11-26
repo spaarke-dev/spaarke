@@ -29,7 +29,7 @@
 | 024 | `spaarke_list_playbooks` | 1 | ✅ [done] | 020 | Group F | sonnet / high | FULL |
 | 025 | Task read tools: `spaarke_list_tasks`, `spaarke_get_task` | 1 | 🔄 [wip] | 006, 020 | Group F | sonnet / high | FULL |
 | 026 | `spaarke_get_portfolio` | 1 | ✅ [done] | 020 | Group F | sonnet / high | FULL |
-| 027 | Search result authorization into shared methods (prerequisite for 022; added 2026-11-25) | 1 | 🔄 [wip] | 009, 020 | Group F | opus / high | FULL |
+| 027 | Search result authorization into shared methods (prerequisite for 022; added 2026-11-25) | 1 | ✅ [done] | 009, 020 | Group F | opus / high | FULL |
 | 029 | Deploy Phase 1 to dev; routing-eval run A | 1 | 🔲 [open] | 019, 020–026 | Group G (alone) | sonnet / high | STANDARD |
 | 030 | Playbook run tools: `spaarke_run_playbook`, `spaarke_get_playbook_run` | 2 | 🔲 [open] | 005, 007, 020, 024 | Group H | opus / high | FULL |
 | 031 | Analysis tools: `spaarke_start_analysis`, `spaarke_get_analysis` | 2 | 🔲 [open] | 020 | Group H | opus / high | FULL |
@@ -46,7 +46,7 @@
 | 043 | Dev E2E as the test user in Chat and Cowork | 3 | 🔲 [open] | 049 | Group M | sonnet / high | STANDARD |
 | 090 | Project wrap-up | Wrap-up | 🔲 [open] | 003, 004, 041, 042, 043, 049 | Group O (alone) | sonnet / high | STANDARD |
 
-Rows are in execution order within each phase. Task numbers 013–018, 027–028, 037–038, 044–048 are unused (reserved for adopted defects or splits).
+Rows are in execution order within each phase. Task numbers 013–018, 028, 037–038, 044–048 are unused (reserved for adopted defects or splits).
 
 ## Gates and external conditions
 
