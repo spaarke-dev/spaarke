@@ -1,5 +1,28 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-26 02:30–03:00Z — read-only checks on dev BFF `1e64e94168` (uac-r2, live 01:56:50Z, 30-min gate PASS 02:27Z; rollback `aa933c09e6`)
+
+- Main session; nothing written. This build adds #3161 `75e01f35f1`, #3164 `ef1dc4f2c9` (task 224) and #3167 `feef9a9c72` (task 223). Tasks 209, 217, 221 and 222 were already on dev.
+- **Nightly re-evaluation, 02:30Z** (ScheduledJob, attempt 1): Succeeded in 43.7 s. 164 items, policiesEvaluated 6, policyFailures 0, written 2, unchanged 154, noDatedEvidence 8, evidenceRedacted 0, closed 0, anomalies 0.
+- **Task 224 PASS:** this is the first run with the redaction cursor live. There was no deleted-policy bound Warning, so the pass finished inside the bound and the cursor was cleared as designed; the run did not fail.
+- **Tasks 209 and 217 PASS:**
+  - Neither changed read failed or fell back: no truncation failure, no "falls back to the full sweep" Warning.
+  - Every Dataverse SDK call in the run (Organization.svc, 25% sampled, n=129) took p50 84 ms, p95 246 ms, max 915 ms.
+  - Limit: the SDK telemetry does not name the query, so the join (209) and the LIKE read (217) are bounded by the whole-run figures above rather than timed one by one.
+- **Task 223 PASS (no user-visible change):**
+  - Console Worklist (Claude in Chrome, new tab) loaded with the same lanes: Decide 36 / 8 / 0 / 28.
+  - `GET /api/v1/signals/worklist` returned 200 with 88 Work Items.
+  - The Ontology admin Rules and Classification tabs loaded.
+- **Task 222 and #3161 timings** (`GET` under the main session's own token, curl from the workstation, one fresh TLS connection per call):
+  - Worklist, 10 reads: cold 3.14 s, warm 1.22–1.74 s. App Insights 7-day server-side baseline: p50 1.99 s, p95 3.45 s.
+  - `decision-plan`, 9 reads on approveOrRebudget items: 1.02–1.98 s. 7-day server-side baseline: p50 0.87 s, p95 1.32 s. The client figures include network and TLS.
+  - Plan reads on billing "Submission integrity" items return 422 `plan_missing`. This is expected: billing items carry no work type and open the invoice review instead.
+  - Worklist requests are sampled at 25% in App Insights, so single browser loads often do not appear. That is why these timings were taken directly.
+- **Warnings at 02:30Z, both pre-existing:**
+  - "no core-ancestor stamp" rose from 55 to 82. This is more `sprk_todo`, `sprk_event` and `sprk_communication` rows plus 2 `sprk_invoice`; nothing new in kind.
+  - SECURE-CENSUS rose from 3 to 15. The cause is a demo account created 2026-11-25 20:44Z, before the deploy. uac-r2 confirmed it is known, the owner chose to keep it as is on dev, and it is an accepted dev artifact. Details were passed privately.
+- **Still open:** 214 (needs an email sent from the app on dev, owner), #2650 timing.
+
 ## 2026-11-25 18:15Z — manual signal re-evaluation on dev (owner "Yes, run it"; task 218 dev check)
 
 - Dev BFF `a1b7db1def` (uac-r2 deploy, live 15:58:53Z; 30-min gate passed 16:29Z). Also checked on it: task 210 (rule wizard column display names; "How this was determined" reads "created on") and task 211 (Assign to lookup lists emails) PASS in the Console, nothing saved.
