@@ -158,3 +158,19 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 - **Title**: `GET /api/ai/chat/playbooks re-implements the owned/public playbook list instead of PlaybookEndpoints.ListPlaybooksForCallerAsync`
 - **Body**: `ChatEndpoints.cs` ~:1830-:1900 resolves the owner (`ResolveCallerSystemUserIdAsync`), lists owned then public at page size 50 and de-duplicates by id — the same rules task 024 made one method for (and the MCP tool's union). It differs: on an unresolvable systemuser it lists public only, on an owned-list fault it continues with public only, and it answers the kill switch 503. Failure scenario: a future change to the owner or fail-closed rule in the shared method (e.g. D-024-1) silently misses the picker. Fix: call the shared method twice (owned, public) and keep only the picker's own union and 503 mapping.
 - **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Task (tech debt).
+## From task 027 (2026-11-25)
+
+### D-027-1: POST /api/ai/search and /api/ai/search/count return the raw exception message as the 500 `detail` (pre-existing, found in passing)
+
+- **GitHub issue**: #3212 (filed by the main session; fix assigned to task 022)
+- **Title**: `Semantic search 500s echo ex.Message in ProblemDetails.detail (Search Failed / Count Failed)`
+- **Body**:
+  `src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs` `Search` (catch-all, `title: "Search Failed", detail: ex.Message`)
+  and `Count` (`"Count Failed"`, same) return the exception text of any non-`SdapProblemException` failure to the caller. Failure
+  scenario: an Azure AI Search or Dataverse enrichment failure whose message names the search endpoint, index name, a filter
+  fragment or a Dataverse URL is shown to the signed-in user, and an MCP tool that maps a REST-equivalent 500 would hand it to the
+  model. ADR-019 MUST NOT leak; the sibling `RecordSearchEndpoints` already fixed this (fixed text plus
+  `code = RECORD_SEARCH_FAILED`, exception logged). Fix: the same fixed text and a stable code for both routes. Not fixed in 027:
+  the task's constraint freezes the REST bytes of these routes, and the catch is not an access decision. Task 022 must not
+  surface search exceptions' messages in tool results.
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
