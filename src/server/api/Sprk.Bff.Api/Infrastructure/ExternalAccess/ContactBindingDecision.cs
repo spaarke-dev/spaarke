@@ -787,8 +787,9 @@ public sealed record CreateAroundRemovalDecision(
 public static class ContactBindingDecision
 {
     // ── Deny codes (auth.md: {domain}.{area}.{action}.{reason}) ─────────────────────────────────────
-    // Each deny has its OWN code: on every plane the HTTP answer is the same 403, so the code is the only
-    // thing in the audit trail that tells an outage from an identity conflict from an ordinary non-contact.
+    // Each deny has its OWN code, the only thing in the audit trail that tells one cause from another. On every
+    // plane the HTTP answer is a 403, EXCEPT the three faults (lookup, create, bind failed), which the caller
+    // resolver answers with a retryable 503 (CallerPrincipalResolution.IsBinderFault; R4 FR-28, ADR-028).
 
     /// <summary>The caller's own oid is unusable.</summary>
     public const string DenyUnidentifiableCaller = "sdap.access.deny.unidentifiable_caller";

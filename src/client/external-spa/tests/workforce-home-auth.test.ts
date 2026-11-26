@@ -1486,8 +1486,10 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
 
     it('is retried behind the spinner: fault, fault, then the workspace shows', async () => {
       h.script = { [ME]: [BIND_FAULT, problem(503, 'sdap.access.deny.contact_lookup_failed'), ME_OK] };
+      // Fake timers BEFORE the gate renders, so the first retry wait is always on the fake clock; shouldAdvanceTime
+      // keeps anything else that waits on a timer moving.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
       const g = await renderGate();
-      vi.useFakeTimers();
       await g.act(async () => {
         await vi.advanceTimersByTimeAsync(1000);
         await vi.advanceTimersByTimeAsync(2000);
@@ -1500,8 +1502,8 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
 
     it('retries used up: the message with a Retry (never the workspace, never the generic error); Retry runs it again', async () => {
       h.script = { [ME]: [BIND_FAULT, BIND_FAULT, BIND_FAULT, BIND_FAULT, ME_OK] };
+      vi.useFakeTimers({ shouldAdvanceTime: true });
       const g = await renderGate();
-      vi.useFakeTimers();
       await g.act(async () => {
         for (const ms of [1000, 2000, 4000]) await vi.advanceTimersByTimeAsync(ms);
       });

@@ -24,7 +24,16 @@
  * Fluent v9 semantic tokens only — zero hardcoded hex (ADR-021).
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text, Spinner, Button } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  Spinner,
+  Button,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+} from '@fluentui/react-components';
 import {
   PortalWorkspaceShell,
   QuickStartPane,
@@ -116,7 +125,6 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   const [meAttempt, setMeAttempt] = React.useState(0);
   React.useEffect(() => {
     let cancelled = false;
-    setMeBinderFault(false);
     fetchMeEntitlements(teamsHost)
       .then(res => {
         if (!cancelled) setMe(res);
@@ -247,12 +255,20 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   if (meBinderFault) {
     return (
       <div className={s.statusRoot}>
-        <Text size={500} weight="semibold">
-          {BINDER_FAULT_MESSAGE}
-        </Text>
-        <Button appearance="primary" onClick={() => setMeAttempt(n => n + 1)}>
-          Retry
-        </Button>
+        <MessageBar intent="warning">
+          <MessageBarBody>{BINDER_FAULT_MESSAGE}</MessageBarBody>
+          <MessageBarActions>
+            <Button
+              appearance="primary"
+              onClick={() => {
+                setMeBinderFault(false);
+                setMeAttempt(n => n + 1);
+              }}
+            >
+              Retry
+            </Button>
+          </MessageBarActions>
+        </MessageBar>
       </div>
     );
   }

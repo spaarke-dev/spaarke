@@ -65,11 +65,13 @@ public sealed class BinderFaultStatusTests
         ShouldBeTheBinderFault(status, json, code);
     }
 
-    [Fact]
-    public async Task WorkforceStrategy_TheHomeContactLookupFails_TheRealResolverAndBinder_Answer503LookupFailed()
+    [Theory]
+    [InlineData("link")]    // the home-link step cannot be read
+    [InlineData("contact")] // the link step answers (no link), the home-contact step cannot be read
+    public async Task WorkforceStrategy_AHomeLookupFails_TheRealResolverAndBinder_Answer503LookupFailed(string step)
     {
-        _store.HomeLinkLookupStatus = LookupStatus.Failed;
-        _store.HomeContactLookupStatus = LookupStatus.Failed;
+        if (step == "link") _store.HomeLinkLookupStatus = LookupStatus.Failed;
+        else _store.HomeContactLookupStatus = LookupStatus.Failed;
 
         var (status, json) = await WorkforceAnswerAsync(HomeResolver(), HomeUser());
 

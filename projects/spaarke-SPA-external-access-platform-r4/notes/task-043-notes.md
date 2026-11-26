@@ -67,7 +67,33 @@ The 404 branch ("Project Not Found") is removed. `403 || 404` shows the one acce
 ## Test scope note
 All tests cover the stated contract and its must-not-fire and negative cases. `ProjectPage.noAccess.test.tsx` is the regression test for the fold (every bug fix gets one).
 
+## Adversarial reviews (two passes, auth; opus)
+**Pass 1 (server).** The mapping is correct: only `ContactIdentityBinder` produces the three codes, never for a definite refusal; there is no stray 503; no identifiers are added. Fixed in scope:
+- **F1** `ExternalRegistrationEndpoints.cs`: the registration POST answered a home link/contact lookup fault with 403 "cannot be registered". It now answers 503 `sdap.access.registration_unavailable`, like its own binder faults and like `/me`. New contract test `FailedHomeLookup_BeforeRegistering_Is503Unavailable_NotA403_NothingWritten` (link, contact) in `tests/integration/contract/Api/ExternalAccess/ExternalRegistrationEndpointsTests.cs`.
+- **Docs:** `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (first sign-in is now `503 contact_lookup_failed`) and the `ContactBindingDecision.cs` comment ("the same 403 on every plane").
+- **Test:** the home-lookup case in BinderFaultStatusTests never reached the contact step; it is now a theory over the link step and the contact step.
+
+Filed (outside scope, pre-existing): **D-43 #3264** (Dataverse exceptions in the workforce resolver answer 403; a privilege-refused bind now retries forever — known limit of this task until D-43); **D-44 #3265** (the workforce resolver logs caller identifiers).
+
+**Pass 2 (client).** The `/me` and `/me/entitlements` paths are correct. Fixed in scope:
+- **F1** `ProjectPage.tsx`: the project read is a partner's first BFF call when they open a project link (no gate on CIAM). A binder 503 there showed the raw ProblemDetails JSON and was never retried. Now the read runs through `withBinderFaultRetry`, then the message with Retry (`projectAttempt`). The generic error is a fixed sentence: the server body is never shown. Tests in `ProjectPage.noAccess.test.tsx`: binder exhaustion → the message, 4 reads, no JSON; Retry reads again; a 500 shows the fixed sentence with no body and one read.
+- **K4/K5** `WorkspaceHomePage.tsx`: the message is now a warning MessageBar (a live region, matching the gate), and Retry clears the state in the click handler.
+- **K6** gate tests: fake timers are installed before the gate renders (`shouldAdvanceTime`), so the first wait is always on the fake clock.
+
+Known limits recorded (K):
+- **K2:** a superseded run (unmount during the waits) can send up to 3 more GETs over about 7 s. No state is set after unmount, and production builds do not double-run effects.
+- **K3:** the other `/me` callers stay as audited above.
+
+**Seeding proofs for the fixes.** The registration branch disabled → both new contract cases fail. The ProjectPage retry removed → the binder test fails. Both restored.
+
+## Gates
+- `dotnet build` BFF: 0 errors. Related BFF tests: 193/193 after the fixes (462/462 before them on the wider filter). ArchTests: 2845/2845.
+- SPA: `tsc --noEmit` exit 0; eslint clean on the changed files.
+  - Full vitest before the review fixes: 2166/2167. The one failure, `ProjectPage.createAgreesWithList` "Upload is offered", was a 5.5 s load timeout and passes 12/12 alone.
+  - After the fixes, the 7 affected files pass, except two 60 s cold-import timeouts under load (AuthGuard sign-in, Teams AC1). Both pass alone.
+- **Publish size**, fresh master `51ce01a116` vs branch `675457fbb4`: short-path worktrees `C:\wt043m` / `C:\wt043b`, `dotnet publish -c Release`, `Compress-Archive`, 194 files each. Zips 43,661,147 → 43,661,371 bytes, **+224 bytes** (≈ 43.7 MB, under 55/60 MB). The review fixes add a few lines to one endpoint file: no package or DI change.
+- CVE: `dotnet list package --vulnerable --include-transitive`: no vulnerable packages. No package change.
+
 ## Open at this checkpoint
-- Reviews: code-review, adr-check, two adversarial passes (auth).
-- Publish-size delta vs a fresh master build; CVE check; conflict check.
+- code-review + adr-check.
 - UAC review via uac-r2 (send the diff summary); record it here and in the PR.
