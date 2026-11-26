@@ -199,4 +199,23 @@ public sealed class AnalysisCreateContractBaselineTests
             """{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.10","title":"Record owner unresolved","status":409,"detail":"The analysis was not saved: double: refused.","reasonCode":"record_owner_secure_parent_not_isolated"}""");
         host.AppOnlyCreates.Should().BeEmpty();
     }
+
+    // ---- 500 (verifier fix K: the generic failure was not frozen) ------------------------------------------------------------
+
+    [Fact(DisplayName = "031 baseline 500: a create that faults is the route's generic 'Failed to create analysis record', no exception text")]
+    public async Task Create_Fault_Is500_Frozen()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        host.AppOnly
+            .Setup(a => a.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse said: secret detail"));
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        await AssertFrozenAsync(response, HttpStatusCode.InternalServerError, ProblemJson,
+            """{"type":"https://tools.ietf.org/html/rfc7231#section-6.6.1","title":"Internal Server Error","status":500,"detail":"Failed to create analysis record."}""");
+    }
 }
