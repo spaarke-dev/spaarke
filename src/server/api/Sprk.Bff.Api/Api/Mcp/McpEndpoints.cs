@@ -58,6 +58,7 @@ public static class McpEndpoints
         app.MapMcp(LegalOperationsRoute)
             .RequireAuthorization()
             .RequireMcpConnectorToken()
+            .RequireMcpOriginCheck()
             .RequireRateLimiting("mcp")
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
             .WithMetadata(new McpAreaMetadata(LegalOperationsArea))
