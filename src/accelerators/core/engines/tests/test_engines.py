@@ -813,6 +813,24 @@ class SkipUnplaceableTests(Base):
         self.assertIsNone(report)
         self.assertFalse(os.path.exists(self.path("redline.docx")))
 
+    def test_skip_mode_exit_3_stderr_names_keys_never_clause_text(self):
+        clause = "CLAUSE-TEXT-MARKER"
+        broken = [  # one of each contract break an edit can carry, every text value holding the marker
+            {"para": f"7. Term. {clause}", "find": f"{clause} three", "replacment": f"{clause} five"},
+            {"para": f"7. Term. {clause}", "find": f"{clause} a", "after": f"{clause} b", "insert": clause},
+            {"para": f"7. Term. {clause}", "after": f"{clause} b", "insert": clause, "replace": clause},
+            {"para": f"7. Term. {clause}", "find": f"{clause} a", "insert": clause},
+            {"para": f"7. Term. {clause}", "find": f"{clause} a"},
+            {"para": f"7. Term. {clause}", "find": f"{clause} a", "comment": clause, "replace": "x",
+             "summary": {"n": 1, "section": clause}},
+            {"para": f"7. Term. {clause}", "find": "   ", "replace": clause},
+        ]
+        for edit in broken:
+            rc, report, _, err = self.skip_run(dict(MIN, edits=[edit]))
+            self.assertEqual(rc, 3, msg=edit)
+            self.assertNotIn(clause, err, msg=edit)
+            self.assertNotIn("code", json.loads(err), msg=edit)
+
     def test_dry_run_writes_only_the_report(self):
         rc, report, _, _ = self.skip_run(extra=("--dry-run",))
         self.assertEqual(rc, 0)
