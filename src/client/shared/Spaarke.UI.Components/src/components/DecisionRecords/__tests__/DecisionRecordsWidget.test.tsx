@@ -83,7 +83,7 @@ const BODY = {
 const serviceFor = (read: WorklistService['read']): WorklistService => ({
   read,
   findInquiryForTodo: jest.fn(async () => null),
-  recordDisposition: jest.fn(async () => ({ todoCompleted: true })),
+  recordDisposition: jest.fn(async () => ({ todoCompleted: true, signalRefreshQueued: true })),
 });
 const okService = (body: unknown = BODY) => serviceFor(jest.fn(async set => parseWorklistResponse(body, set)));
 

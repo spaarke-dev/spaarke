@@ -171,13 +171,13 @@ describe('the inquiry routes (task 154 read, task 071 write)', () => {
     const service = createWorklistService({
       fetch: async (url, init) => {
         calls.push([url, init]);
-        return ok({ serviceRequestId: SERVICE_REQUEST_ID, todoCompleted: true });
+        return ok({ serviceRequestId: SERVICE_REQUEST_ID, todoCompleted: true, signalRefreshQueued: true });
       },
       baseUrl: 'https://bff.test',
     });
     await expect(
       service.recordDisposition(SERVICE_REQUEST_ID, { replyCommunicationId: REPLY.newest, disposition: 100000001 })
-    ).resolves.toEqual({ todoCompleted: true });
+    ).resolves.toEqual({ todoCompleted: true, signalRefreshQueued: true });
     expect(calls[0][0]).toBe(`https://bff.test/api/v1/inquiries/${SERVICE_REQUEST_ID}/disposition`);
     expect(calls[0][1]).toMatchObject({ method: 'POST' });
     expect(JSON.parse(String(calls[0][1]?.body))).toEqual({
@@ -194,14 +194,26 @@ describe('the inquiry routes (task 154 read, task 071 write)', () => {
         fetch: async () => ({ ok: true, status: 200, json: readBody }) as unknown as Response,
         baseUrl: 'https://bff.test',
       }).recordDisposition('s', send);
-    await expect(answer(async () => ({ todoCompleted: true }))).resolves.toEqual({ todoCompleted: true });
-    await expect(answer(async () => ({ todoCompleted: false }))).resolves.toEqual({ todoCompleted: false });
-    await expect(answer(async () => ({}))).resolves.toEqual({ todoCompleted: false });
+    const none = { todoCompleted: false, signalRefreshQueued: false };
+    await expect(answer(async () => ({ todoCompleted: true }))).resolves.toEqual({
+      todoCompleted: true,
+      signalRefreshQueued: false,
+    });
+    await expect(answer(async () => ({ todoCompleted: true, signalRefreshQueued: true }))).resolves.toEqual({
+      todoCompleted: true,
+      signalRefreshQueued: true,
+    });
+    await expect(answer(async () => ({ todoCompleted: true, signalRefreshQueued: 'yes' }))).resolves.toEqual({
+      todoCompleted: true,
+      signalRefreshQueued: false,
+    });
+    await expect(answer(async () => ({ todoCompleted: false }))).resolves.toEqual(none);
+    await expect(answer(async () => ({}))).resolves.toEqual(none);
     await expect(
       answer(async () => {
         throw new SyntaxError('no body');
       })
-    ).resolves.toEqual({ todoCompleted: false });
+    ).resolves.toEqual(none);
   });
 
   it('a refused disposition carries the status and the reason code, returned or thrown', async () => {

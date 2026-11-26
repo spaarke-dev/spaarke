@@ -1269,13 +1269,17 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 032 (D-12, D-48): the event-triggered pass. Evaluates every enabled <b>Decide-lane</b> policy about
     /// <paramref name="subjectEntity"/> for the ONE subject, through <see cref="EvaluatePolicyAsync"/> - the SAME evaluation,
     /// episode planner and writer path as the nightly pass (a second path is how the two come to disagree). Do-lane policies
-    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A policy limited to a matter (task 102b) is evaluated only
+    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>) unless <paramref name="includeDoLane"/> (task 228). A policy limited to a matter (task 102b) is evaluated only
     /// when the trigger's subject is that matter (otherwise it is not applicable); a tenant-scoped or mis-scoped policy is skipped with
     /// the nightly Warning and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
     /// revision recorded through a decision leaves its Acted Signal Acted.
+    /// <para>Task 228 (#1991): <paramref name="includeDoLane"/> also evaluates the Do-lane policies about the subject (the inquiry
+    /// disposition trigger, whose subject is the To Do it just completed), through the same path: a Do-lane Signal closed as
+    /// ConditionCleared gets D-145b's one Routine closure record, exactly as on the nightly run.</para>
     /// </summary>
     /// <exception cref="InvalidOperationException">The enabled policies could not be read; the caller must retry.</exception>
-    internal async Task<SubjectEvaluationResult> EvaluateSubjectAsync(string subjectEntity, Guid subjectId, CancellationToken ct)
+    internal async Task<SubjectEvaluationResult> EvaluateSubjectAsync(
+        string subjectEntity, Guid subjectId, CancellationToken ct, bool includeDoLane = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectEntity);
         if (subjectId == Guid.Empty) throw new ArgumentException("A subject id is required.", nameof(subjectId));
@@ -1297,7 +1301,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         var scope = new SubjectScope(subjectEntity, subjectId);
-        foreach (var policy in policies.Where(p => p.Lane == SignalWriter.LaneDecide))
+        foreach (var policy in policies.Where(p => p.Lane == SignalWriter.LaneDecide || (includeDoLane && p.Lane == SignalWriter.LaneDo)))
         {
             ct.ThrowIfCancellationRequested();
             await EvaluatePolicyAsync(policy, counts, ct, scope).ConfigureAwait(false);
