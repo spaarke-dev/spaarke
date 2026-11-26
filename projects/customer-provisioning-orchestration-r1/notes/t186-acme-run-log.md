@@ -318,3 +318,4 @@ master `af4cfb4527` (temp worktree `wtcp2`). Handoff: `runs/85561c4a-0c28-41a8-a
 | 11-25 22:35–23:30 | H6 ✓ SpaarkeMaster 1.3.3.0 managed (~55 min) | — |
 | 11-25 23:31–23:52 | H7b, H4b, H9 (swap 23:49, 34.93 MB), H7, H11, H12a/b/c (37 reference + 87 taxonomy rows, Communication type), H14a/m/H14, H13 ✓ → **Completed** | — |
 | 11-25 23:52–11-26 00:15 | Registry Ready/1.3.3.0; role expectations 8/8; Step 6e read-only items PASS; prod `/healthz` 200, staging 503 under 80–99 % plan CPU | U2-L03 (plan sizing) |
+| 11-26 ~00:30–00:40 | Demo dataset loaded (owner "proceed"): WhatIf 123 planned / 0 errors → load 123 created → re-run WhatIf 123 existing. Both BFF slots `/healthz` 200 | — |
