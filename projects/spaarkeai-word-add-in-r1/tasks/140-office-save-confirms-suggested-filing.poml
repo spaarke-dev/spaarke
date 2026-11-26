@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="140" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>ISS-043: an Office save to the suggested record confirms it, and the review panel shows a written regarding instead of "No confident match"</title>
+    <phase>Phase 7: fixes before close (owner dev check of 136–138, owner go 2026-11-25)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF write on a communication as the caller (ADR-008 A1 instance) plus a shared UI component; tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization-relevant write, two subsystems, and a root cause still to diagnose (empty provenance candidates).</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>bff-api, office-addins, react, authorization</tags>
+  </metadata>
+
+  <prompt>Owner 2026-11-25: "ISS-043 should be fixed here; and yes confirm the suggestion" (the owner wrote ISS-034; the session read it as ISS-043, said so, and the owner can correct it). The communications project that owns this area is closed. GitHub #3194.
+
+Observed on dev, on one `sprk_communication` that came in by inbound processing:
+- `sprk_associationstatus` = Suggested (100000003);
+- a matter regarding is written, so the grid shows the link chip;
+- the provenance has `decision.status` Suggested, `autoFiled` false, `topConfidence` 0.9895;
+- `rungsFired` = AiClassification, ExplicitReference, ParticipantCorrelation, RecordNameMatch;
+- `candidates` is EMPTY.
+
+The owner then saved the same email from the Outlook add-in to that same matter. The pane said "Filed to …". The row still reads Suggested, stays in Needs Review, and the reconcile panel's Related-to shows "No confident match". The provenance JSON is in the main session's scratchpad: `C:\Users\RALPHS~1\AppData\Local\Temp\claude\209538ce9c5d7b60\7f04408f-387f-4eed-87c1-8a2e70d5a445\scratchpad\iss043-provenance.json`. Use it as a test fixture, but replace any id with a synthetic one.</prompt>
+
+  <goal>After an Office save to the record a communication already points at, that communication is confirmed: `sprk_associationstatus` = Resolved. It therefore leaves Needs Review, and the panel shows it as filed. A Suggested row whose regarding is written shows that record in the reconcile panel ("needs confirmation"), never "No confident match". The reason the provenance carries no candidates is diagnosed, and fixed if it is a defect in scope; otherwise it is filed.</goal>
+
+  <constraints>
+    <constraint source="owner 2026-11-25">The user's pick in the Office save is a human confirmation. Confirm only when the communication's current primary regarding IS the save's record. Never move a filing to another record (task 121's rule stands). Never confirm a communication filed elsewhere.</constraint>
+    <constraint source="ADR-008 Amendment A1 / task 121">`ReconciledEmailFiling` is a known A1 instance: the communication is found by the service's own Message-ID lookup. The confirm write runs as part of it, with all seven A1 conditions:
+      - the caller's Write on that exact communication id, through the same `CallerRecordAccessProbe` path the filing already uses, before the write;
+      - fail closed: a refusal or fault leaves the row as it was, and never fails the save;
+      - tested, and the route ledger reason updated if its wording names what the filing does.</constraint>
+    <constraint source="reuse (CLAUDE.md §11)">Reuse the existing confirmation semantics: the review panel's Confirm is a plain host-field write, `sprk_associationstatus` = Resolved (`advanceAssociationStatus` in `Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts`); the send path is `CommunicationService.MarkFiledBySender`. Use the server's existing generic update seam and `AssociationStatusCodes.Resolved`. Add no new route, column or service.</constraint>
+    <constraint source="project">Decide, with evidence, whether the UNFILED-then-filed path (`ApplyToExistingRecordAsync`) also ends Resolved. If the user picked the record, it should. Check what status `NarrowToRecord` carries from the capture decision and what `AssociationStatusMapper` gives an explicit caller-supplied regarding. Then make both paths end Resolved, or state why not.</constraint>
+    <constraint source="project">Report the outcome in `SaveResponse.EmailFiling`, as task 131 does for the filing. Add a new outcome value only if the pane needs it; check the pane's reader in `src/client/office-addins` first, and keep the wire contract backward compatible.</constraint>
+    <constraint source="ADR-045 / project">Panel: change `derivePrimaryReview` in `src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts`. A row that is Suggested (or otherwise not Resolved) and has its regarding written (`denorm` present, or a filed association) gets that record as its primary in state 'needs-confirmation', with the existing Confirm/Undo behaviour. Keep 'requires-review' for rows with no regarding written. Keep the conflict (Ambiguous) rule. Shared logic only; no client recompute of engine decisions.</constraint>
+    <constraint source="project">Diagnose why `candidates` is empty when ExplicitReference and RecordNameMatch fired. Candidate places to check: the provenance writer, a guard that strips candidates (the private-message guard in `IncomingAssociationResolver`), the AI triage downgrade, or `NarrowToRecord`. If the cause is a defect in these files, fix it with a fail-before test. If it is elsewhere, report it with file:line and a failure scenario.</constraint>
+    <constraint source="coordination">Do not touch fm-owned create paths (`OfficeService.CreateTodoAsync`, `OfficeDocumentPersistence`, `UploadFinalizationWorker`, `RecordTableRules`). Shared files: whoever lands second rebases. Do not edit TASK-INDEX.md, current-task.md, any CLAUDE.md, `.claude/` or ci-gated-suites.txt.</constraint>
+    <constraint source="BFF hygiene (§10)">Publish-size delta against a fresh master build; `dotnet list package --vulnerable`; no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/ReconciledEmailFiling.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Office/SaveResponse.cs</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read the task 121 filing and the engine's status mapping. Write the fail-before tests: a save to the record a Suggested row already points at leaves it Suggested today (red); the unfiled path's resulting status; `derivePrimaryReview` on the fixture shows "requires-review" with no primary today (red).</step>
+    <step>Server: confirm (Resolved) after the caller's Write check when the primary regarding is the save's record; fail closed; report the outcome. Decide on the unfiled path, with evidence.</step>
+    <step>Client: `derivePrimaryReview` gives a written regarding a primary in 'needs-confirmation'. Run the Spaarke.Communication.Components tests and its consumers' typecheck.</step>
+    <step>Diagnose the empty candidates; fix in scope or report.</step>
+    <step>Gates: BFF build (0 warnings), the affected BFF test classes and ArchTests (full), Communication.Components jest + typecheck + ESLint/Prettier, office-addins jest if `SaveResponse` handling changed, publish delta, vulnerable packages.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">An Office save to record M, where the existing communication is Suggested and its primary regarding is M, leaves it Resolved, after a Write check as the caller on that communication.</criterion>
+    <criterion testable="true">If that Write check refuses or faults, the communication is unchanged, and the save still succeeds and reports the outcome.</criterion>
+    <criterion testable="true">Negative: a communication filed to a different record N is neither moved nor confirmed by a save to M.</criterion>
+    <criterion testable="true">Negative: an already Resolved communication gets no extra write.</criterion>
+    <criterion testable="true">The unfiled-then-filed path's final status is decided with evidence, and tested.</criterion>
+    <criterion testable="true">`derivePrimaryReview` on a Suggested row with a written regarding and no candidates returns 'needs-confirmation' with that record as primary. A row with no regarding written still returns 'requires-review'. An Ambiguous conflict still stays red.</criterion>
+    <criterion testable="true">The empty-candidates cause is stated with file:line, and fixed with a test or reported with a failure scenario.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Modifies the existing task 121 filing (`ReconciledEmailFiling`), `derivePrimaryReview`, and possibly the `SaveResponse` outcome values.</existing>
+    <extension>Extends them, reusing the panel's existing confirm write and status code; no new route, column or service.</extension>
+    <cost-of-doing-nothing>An email the user explicitly filed from Outlook stays in Needs Review as "No confident match". A reviewer may file it again, or accept the pending create-new-record proposal and make a duplicate record.</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -53,7 +53,7 @@ GitHub states were read live on 2026-11-24. "Ours" means this project owns the f
 | ISS-037 | [#2172](https://github.com/spaarke-dev/spaarke/issues/2172) | Communication owner | AI task-candidate subjects derived from email text are logged. |
 | ISS-038 | [#2421](https://github.com/spaarke-dev/spaarke/issues/2421) | Communication owner | Suggestions ignore an existing filing when re-evaluating. |
 | ISS-042 | [#3137](https://github.com/spaarke-dev/spaarke/issues/3137) | Owners of `ChildRecordEndpoints` and `OntologyAdminCapabilityProbe` | Every MSAL OBO failure there is treated alike, so consent / policy blocks answer "sign in again" (a loop) and server faults look like caller faults. Office routes fixed in task 136. |
-| ISS-043 | [#3194](https://github.com/spaarke-dev/spaarke/issues/3194) | Communication owner (project closed; the owner to name who takes it) | A Suggested inbound email with its regarding written stays in Needs Review, and its panel shows "No confident match". Details below. |
+| ISS-043 → **task 140** | [#3194](https://github.com/spaarke-dev/spaarke/issues/3194) | This project (owner 2026-11-25: fix here; an Office save confirms the suggestion) | A Suggested inbound email with its regarding written stays in Needs Review, and its panel shows "No confident match". Details below. |
 
 Not ours, and not filed by this project, though they mention it: #1564, #2178, #2226 (UAC-r2), #1102 and #1105 (UAC-r2 route sweeps).
 
@@ -1362,7 +1362,7 @@ The typed name became the .eml Subject header, sprk_emailsubject and sprk_docume
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owned elsewhere: the communications area; the owner names who takes it) |
+| **Status** | In progress here as **task 140** (owner 2026-11-25: "fix here; yes confirm the suggestion") |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-25 (owner's dev check of tasks 136–138; pre-existing, not caused by them) |
 | **Source** | Owner screenshots + a read of the `sprk_communication` row on dev |
