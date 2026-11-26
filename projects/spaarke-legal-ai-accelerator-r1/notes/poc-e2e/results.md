@@ -750,3 +750,12 @@ the dev BFF. Runs since then that had Spaarke MCP on and may have been routed th
 "Generic (a)" (*review this NDA* with Spaarke MCP added, 2026-11-25 evening), and any 2026-11-26 Word run with
 Spaarke MCP on. Until the tools are gone, run NDA tests with **Spaarke MCP switched off** unless the test is about
 the MCP. A `NO_PROFILE` or spike result is this tool, not a probe failure.
+
+**WP-1 retry (owner, Word desktop, 2026-11-26, Spaarke MCP off, script skill chip):** again
+`Spaarke Word probe · instructions loaded · WPI-1112-A`. **Result: Word desktop did not load the script skill.**
+Two tries, no `WPS-1112-A` at all: not the script's line, and not the skill's own fallback line
+("scripts not run · WPS-1112-A") either, so Word never read that skill's instructions. It answered from the
+plugin's instructions-only skill instead. Together with WP-2 (pass): Word desktop uses a plugin's
+instructions-only skills and its MCP tools, but not a skill that ships Python scripts. A Word edition of
+`/nda-review` therefore can't run our engines in Word; the mechanics would have to run server-side as MCP tools.
+(Not checked: whether `spaarke-word-probe-script` appeared in the **+** list.)
