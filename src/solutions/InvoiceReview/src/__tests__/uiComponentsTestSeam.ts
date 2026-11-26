@@ -41,6 +41,16 @@ export {
   InvoiceSubmissionError,
 } from '../../../../client/shared/Spaarke.UI.Components/src/components/InvoiceSubmission/types';
 
+// Task 195: the cross-frame dirty-check protocol's message types (the page answers the Console modal's request; `useDirtyCheck.ts`).
+export {
+  DIRTY_CHECK_REQUEST_TYPE,
+  DIRTY_CHECK_RESULT_TYPE,
+} from '../../../../client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/types';
+export type {
+  IDirtyCheckRequest,
+  IDirtyCheckResponse,
+} from '../../../../client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/types';
+
 /** Stand-in for 108's viewer: renders the highlight as data and loads the bytes once through the page's loader. */
 export function PdfHighlightViewer(props: IPdfHighlightViewerProps) {
   const { loadData, highlight } = props;

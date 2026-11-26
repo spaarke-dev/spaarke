@@ -21,6 +21,9 @@
  * Billing items (D-207, task 175): a Work Item with `invoiceReview` is decided only in the Invoice Review page, so activating one
  * calls the host's `openInvoiceReview` (a dialog on its invoice, focused on its line) INSTEAD of the wizard, and the lanes are read
  * again when that dialog closes. The wizard's browse set leaves billing items out, so "next" never reaches one.
+ * Task 195: when the host also supplies `invoiceReviewClientUrl`, the page opens in-app on the shared modal shell instead
+ * (`InvoiceReviewModal`: ADR-050's launch rule) with "N of M" browse over the billing items of that list, and `openInvoiceReview`
+ * stays the fallback for a host that cannot supply the URL.
  *
  * Task: spaarke-ontology-platform-r1, task 059 (task 175 added the billing items). Fluent v9 tokens only (ADR-021). No React 18-only API (shared with PCF hosts).
  */
@@ -47,7 +50,11 @@ import type {
   DecisionOpenLookup,
   DecisionOpenRecord,
 } from '../DecisionWizard/decisionWizardTypes';
+import { getEffectiveDarkMode } from '../../utils/themeStorage';
 import type { LaneFilterKey } from './laneCountFilters';
+import { buildInvoiceBrowseSet } from './invoiceReviewBrowse';
+import type { InvoiceBrowseSet } from './invoiceReviewBrowse';
+import { InvoiceReviewModal } from './InvoiceReviewModal';
 import { INVOICE_REVIEW_FAILED } from './openInvoiceReview';
 import { hasInvoiceReview } from './types';
 import type { InvoiceReviewTarget, OpenItemEvent, WorklistLane } from './types';
@@ -90,6 +97,13 @@ export interface WorklistWidgetProps {
    * and never opens the wizard.
    */
   openInvoiceReview?: (target: InvoiceReviewTarget) => Promise<unknown>;
+  /**
+   * The org's client URL (`Xrm.Utility.getGlobalContext().getClientUrl()`, read by the HOST: this widget has no Xrm, ADR-012). When
+   * supplied, activating a billing item opens Invoice Review IN-APP on the shared modal shell (`InvoiceReviewModal`, task 195, ADR-050),
+   * with "N of M" previous / next browse over the billing items of the list it was activated from, and the lanes are read again when
+   * it closes. Absent (or empty), the `openInvoiceReview` path above runs unchanged.
+   */
+  invoiceReviewClientUrl?: string;
   /** The email aggregate row (task 054's card), placed at the top of the Do lane. */
   aggregateRow?: React.ReactNode;
   /**
@@ -152,6 +166,7 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   openRecord,
   launchWizard = launchDecisionWizard,
   openInvoiceReview,
+  invoiceReviewClientUrl,
   aggregateRow,
   narrative,
   today: todayProp,
@@ -164,6 +179,11 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   const [filters, setFilters] = React.useState<Record<WorklistLane, LaneFilterKey>>({ Decide: 'all', Do: 'all' });
   const [notice, setNotice] = React.useState<Notice | null>(null);
   const [picker, setPicker] = React.useState<PickerState | null>(null);
+  // The in-app Invoice Review modal (task 195): its browse set, taken when it opens and never changed while it is open, so a lane
+  // reload under it cannot reshuffle "N of M".
+  // `theme` is what THIS frame (the Console) resolved when it opened, handed to the page so a dark Console never gets a light page (the
+  // page is two frames below the model-driven app, out of reach of the navbar check that only walks one parent frame).
+  const [reviewModal, setReviewModal] = React.useState<{ browse: InvoiceBrowseSet; theme: 'dark' | 'light' } | null>(null);
   // Every open takes the next sequence number; a lookup that returns after a later open is stale and is dropped, so a slow lookup can
   // never put a picker on top of the wizard (or the picker of another To Do) the person opened since. `pendingTodoId` is the To Do whose
   // lookup is the latest in flight (a second click on it is ignored). An object, not a `let`: set across an await, which control-flow
@@ -275,11 +295,21 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   // it closes. The promise settling is the only signal (no postMessage); a rejection reads again too, since the dialog may have done
   // work before it failed. Never reaches the wizard.
   const openReview = React.useCallback(
-    async (review: InvoiceReviewTarget) => {
+    async (review: InvoiceReviewTarget, browse?: InvoiceBrowseSet) => {
       const state = opens.current;
       state.seq += 1; // supersedes any inquiry lookup still in flight
       state.pendingTodoId = null;
       setNotice(null);
+      // Task 195: with the org client URL the page opens in-app on the shared modal shell, with browse over `browse` (the billing
+      // items of the list it was activated from). Without it, the navigateTo path below runs as before.
+      if (invoiceReviewClientUrl) {
+        // The shared resolver, run in this (the Console's) frame: stored preference, URL flag, then the navbar of the frame above.
+        setReviewModal({
+          browse: browse ?? buildInvoiceBrowseSet([review], review),
+          theme: getEffectiveDarkMode() ? 'dark' : 'light',
+        });
+        return;
+      }
       if (!openInvoiceReview) {
         setNotice({ text: INVOICE_REVIEW_FAILED, intent: 'warning' });
         return;
@@ -291,8 +321,14 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       }
       if (state.mounted) reload();
     },
-    [openInvoiceReview, reload]
+    [openInvoiceReview, invoiceReviewClientUrl, reload]
   );
+
+  // The in-app Invoice Review modal closed: read the lanes again, exactly as when the navigateTo promise settles.
+  const closeReviewModal = React.useCallback(() => {
+    setReviewModal(null);
+    if (opens.current.mounted) reload();
+  }, [reload]);
 
   // A Do row whose subject is a To Do may be an inquiry-outcome To Do (D-111): ask the BFF first. Only the lanes can hold one (a closed
   // copy has nothing left to record). 404 / not an inquiry opens the wizard as for any row; a failed lookup opens nothing, because
@@ -302,7 +338,15 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       const state = opens.current;
       const opened = findItem(sourceSet, rawEvent.itemId);
       if (opened?.item.invoiceReview && hasInvoiceReview(opened.item)) {
-        await openReview(opened.item.invoiceReview);
+        // The browse set (task 195): the billing items of the list this was activated from, in the order shown.
+        const browse = buildInvoiceBrowseSet(
+          rawEvent.visibleList.map(id => {
+            const other = findItem(sourceSet, id);
+            return other && hasInvoiceReview(other.item) ? other.item.invoiceReview : null;
+          }),
+          opened.item.invoiceReview
+        );
+        await openReview(opened.item.invoiceReview, browse);
         return;
       }
       // The wizard never browses to a billing item (D-207): its set is the visible list without them.
@@ -489,6 +533,17 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
             setPicker(null);
             void launchFor(event, 'lanes');
           }}
+        />
+      )}
+
+      {reviewModal && invoiceReviewClientUrl && (
+        <InvoiceReviewModal
+          open
+          onClose={closeReviewModal}
+          clientUrl={invoiceReviewClientUrl}
+          targets={reviewModal.browse.targets}
+          startIndex={reviewModal.browse.startIndex}
+          theme={reviewModal.theme}
         />
       )}
 

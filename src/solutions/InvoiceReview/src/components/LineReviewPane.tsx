@@ -55,6 +55,7 @@ import {
 } from '../services/reviewModel';
 import { noteMember, noteProblem } from '../services/noteModel';
 import { NoteField } from './NoteField';
+import { useReportDirty } from './useDirtyCheck';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL, padding: tokens.spacingHorizontalL },
@@ -237,6 +238,10 @@ function DecisionForm({
   // Task 095f-2ui: one optional note for whichever decision is chosen; kept in this form across a refused send (409, 503, a refused note).
   const [note, setNote] = React.useState('');
   const [amountText, setAmountText] = React.useState(suggestedAmount !== null ? suggestedAmount.toFixed(2) : '');
+  // Task 195: unsaved work, for the Console modal's "discard what you haven't saved?" before it browses to another invoice. A note or a
+  // reason typed, or a reduce amount changed from the one the form opened with; choosing a radio alone is not work to lose.
+  const [openedAmountText] = React.useState(amountText);
+  useReportDirty(note.trim() !== '' || reason.trim() !== '' || amountText !== openedAmountText);
 
   // "Suggested" with no suggestion (the rules re-ran and the finding is gone) decides nothing: Confirm stays disabled.
   const effective: DecisionAction | null =
