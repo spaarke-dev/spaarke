@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "720484517038749111"
+      "templateHash": "16247619226876372473"
     }
   },
   "parameters": {
@@ -219,7 +219,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Engine image reference ({registry}.azurecr.io/sprk-intake-engine:{tag}). Required when deployIntakeEngine is true; the tag comes from the image build workflow (task 003)."
+        "description": "Engine image pinned by digest ({loginServer}/sprk-intake-engine@sha256:{digest}, from provisioning-artifacts/intake-engine/latest.json). Empty = deploy the engine infrastructure and identity WITHOUT the Job, because Job creation validates the image pull and the identity's AcrPull on the platform ACR is granted by provisioning after this deployment. Deploy again with the image to create or upgrade the Job."
       }
     },
     "intakeEngineRegistryLoginServer": {
@@ -4303,7 +4303,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "16881022448270677655"
+              "templateHash": "12477459638130124694"
             }
           },
           "parameters": {
@@ -4402,8 +4402,9 @@
             },
             "image": {
               "type": "string",
+              "defaultValue": "",
               "metadata": {
-                "description": "Full image reference, for example {registry}.azurecr.io/sprk-intake-engine:{tag}. The tag comes from the image build (task 003)."
+                "description": "Full image reference pinned by digest: {loginServer}/sprk-intake-engine@sha256:{digest}, read from provisioning-artifacts/intake-engine/latest.json (build-intake-engine-image.yml). EMPTY = deploy everything except the Job: Container Apps validates the image pull when the Job is created, so the Job identity's AcrPull on the platform ACR must exist first, and that grant is made by provisioning after this deployment creates the identity. Deploy again with the image to create (or upgrade) the Job."
               }
             },
             "stagingStorageAccountName": {
@@ -4473,6 +4474,7 @@
             }
           },
           "variables": {
+            "deployJob": "[not(empty(parameters('image')))]",
             "serviceBusDataSenderRoleId": "69a216fc-b8fb-44d8-bc22-1f3c2cd27a39",
             "serviceBusDataReceiverRoleId": "4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0",
             "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
@@ -4639,6 +4641,7 @@
               ]
             },
             {
+              "condition": "[variables('deployJob')]",
               "type": "Microsoft.App/jobs",
               "apiVersion": "2025-01-01",
               "name": "[parameters('jobName')]",
@@ -4762,11 +4765,11 @@
             },
             "jobName": {
               "type": "string",
-              "value": "[parameters('jobName')]"
+              "value": "[if(variables('deployJob'), parameters('jobName'), '')]"
             },
             "jobId": {
               "type": "string",
-              "value": "[resourceId('Microsoft.App/jobs', parameters('jobName'))]"
+              "value": "[if(variables('deployJob'), resourceId('Microsoft.App/jobs', parameters('jobName')), '')]"
             },
             "requestQueueName": {
               "type": "string",

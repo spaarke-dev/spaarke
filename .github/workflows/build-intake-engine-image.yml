@@ -258,6 +258,7 @@ jobs:
         run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
 
       - name: Push image (SHA tag + date-versioned semver tag -- NEVER `latest`)
+        id: push
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
@@ -267,6 +268,55 @@ jobs:
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.semver_tag }}
+
+      # The pinned image for provisioning (customer-provisioning-orchestration-r1, #3210), published the way
+      # publish-bff-artifact.yml publishes the BFF for H9: a versioned manifest, a rollback pointer, then
+      # `intake-engine/latest.json`, read back. L2 pins the DIGEST from it, never a tag (tags can be re-pushed).
+      # Runs only after a green push, so latest.json only ever names an image that passed the Trivy gate.
+      - name: Publish image manifest (versioned, previous pointer, latest)
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          ACCOUNT: ${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}
+          CONTAINER: provisioning-artifacts
+          DIGEST: ${{ steps.push.outputs.digest }}
+          BUILD_ID: ${{ steps.tags.outputs.semver_tag }}
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACCOUNT}" ]; then echo "::error::Repo variable PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is not set."; exit 1; fi
+          if ! [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then echo "::error::Push step returned no image digest ('${DIGEST}')."; exit 1; fi
+          mkdir -p out
+          jq -n \
+            --arg image "${ACR_LOGIN_SERVER}/${IMAGE_NAME}@${DIGEST}" \
+            --arg digest "${DIGEST}" \
+            --arg repository "${ACR_LOGIN_SERVER}/${IMAGE_NAME}" \
+            --arg buildId "${BUILD_ID}" \
+            --arg shaTag "${SHA_TAG}" \
+            --arg sha "${GITHUB_SHA}" \
+            '{schemaVersion: 1, image: $image, digest: $digest, repository: $repository, buildId: $buildId, tags: [$shaTag, $buildId], sha: $sha}' \
+            > out/engine-manifest.json
+          blob() { az storage blob "$@" --account-name "${ACCOUNT}" --container-name "${CONTAINER}" --auth-mode login; }
+
+          blob upload --name "intake-engine/intake-engine-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/engine-manifest.json --overwrite false
+
+          # Rollback pointer: keep the manifest being replaced, unless latest already names this commit (a re-run).
+          latest_exists=$(blob exists --name intake-engine/latest.json --query exists -o tsv)
+          if [ "${latest_exists}" = "true" ]; then
+            blob download --name intake-engine/latest.json --file out/previous-latest.json --overwrite true
+            if grep -q "${GITHUB_SHA}" out/previous-latest.json; then
+              echo "latest already names this commit (re-run) -- keeping the existing rollback pointer."
+            else
+              blob upload --name intake-engine/latest.previous.json --file out/previous-latest.json --overwrite true
+            fi
+          fi
+          blob upload --name intake-engine/latest.json --file out/engine-manifest.json --overwrite true
+
+          # Read back what L2 will read.
+          blob download --name intake-engine/latest.json --file out/readback.json --overwrite true
+          jq -e --arg d "${DIGEST}" --arg s "${GITHUB_SHA}" '.digest == $d and .sha == $s' out/readback.json > /dev/null \
+            || { echo "::error::intake-engine/latest.json read-back does not match this build."; exit 1; }
+          echo "intake-engine/latest.json: $(cat out/readback.json)"
 
       - name: Summary
         if: always()
@@ -280,5 +330,6 @@ jobs:
               echo "- Pushed: no (pull_request builds never publish)"
             else
               echo "- Pushed to: \`${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}\`"
+              echo "- Digest: \`${{ steps.push.outputs.digest }}\` → \`provisioning-artifacts/intake-engine/latest.json\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -107,8 +107,12 @@ param registryName string = ''
 @description('Grant the identity AcrPull on registryName (local registry only; ignored when registryLoginServer is set).')
 param grantAcrPull bool = true
 
-@description('Full image reference, for example {registry}.azurecr.io/sprk-intake-engine:{tag}. The tag comes from the image build (task 003).')
-param image string
+@description('Full image reference pinned by digest: {loginServer}/sprk-intake-engine@sha256:{digest}, read from provisioning-artifacts/intake-engine/latest.json (build-intake-engine-image.yml). EMPTY = deploy everything except the Job: Container Apps validates the image pull when the Job is created, so the Job identity\'s AcrPull on the platform ACR must exist first, and that grant is made by provisioning after this deployment creates the identity. Deploy again with the image to create (or upgrade) the Job.')
+param image string = ''
+
+// The Job is created only with an image (see the `image` description): create-time pull validation would fail
+// before provisioning can grant the new identity AcrPull on the platform registry.
+var deployJob = !empty(image)
 
 @description('Stamp storage account name; the staging container lives in it (intake-staging-storage.bicep).')
 param stagingStorageAccountName string
@@ -322,7 +326,7 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
 // CONTAINER APPS JOB -- event trigger, KEDA azure-servicebus on the request queue, identity auth
 // ============================================================================
 
-resource engineJob 'Microsoft.App/jobs@2025-01-01' = {
+resource engineJob 'Microsoft.App/jobs@2025-01-01' = if (deployJob) {
   name: jobName
   location: location
   tags: tags
@@ -414,7 +418,8 @@ resource engineJob 'Microsoft.App/jobs@2025-01-01' = {
 
 output environmentName string = managedEnvironment.name
 output environmentId string = managedEnvironment.id
-output jobName string = engineJob.name
-output jobId string = engineJob.id
+// Empty until a deployment passes the image (see `image`).
+output jobName string = deployJob ? engineJob.name : ''
+output jobId string = deployJob ? engineJob.id : ''
 output requestQueueName string = requestQueue.name
 output completionQueueName string = completionQueue.name

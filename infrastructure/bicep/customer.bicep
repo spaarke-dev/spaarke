@@ -143,7 +143,7 @@ param redisHighAvailability string = 'Enabled'
 @description('Deploy the intake engine: a Container Apps environment + event-triggered Job (KEDA Service Bus) running as its own least-privileged identity, the stamp-private `intake-staging` blob container with a 7-day lifecycle delete rule, and the `intake-engine-requests` and `intake-engine-completions` queues. Default false: existing stamps are unchanged until provisioning opts in (customer-provisioning-orchestration-r1 owes the call).')
 param deployIntakeEngine bool = false
 
-@description('Engine image reference ({registry}.azurecr.io/sprk-intake-engine:{tag}). Required when deployIntakeEngine is true; the tag comes from the image build workflow (task 003).')
+@description('Engine image pinned by digest ({loginServer}/sprk-intake-engine@sha256:{digest}, from provisioning-artifacts/intake-engine/latest.json). Empty = deploy the engine infrastructure and identity WITHOUT the Job, because Job creation validates the image pull and the identity\'s AcrPull on the platform ACR is granted by provisioning after this deployment. Deploy again with the image to create or upgrade the Job.')
 param intakeEngineImage string = ''
 
 @description('Login server of the platform ACR that holds the engine image (platform-controlplane.bicep output acrLoginServer). The decided registry for dev and Model 1 stamps. When set, intakeEngineRegistryName is ignored and provisioning grants AcrPull on the platform ACR to output intakeEngineIdentityObjectId.')
