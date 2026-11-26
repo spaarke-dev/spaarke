@@ -14,7 +14,7 @@
 | 004 | Dataverse MCP: research re-check and deployment-guide admin paragraph | 0 | ✅ [done] | none | Group A | sonnet / high | MINIMAL |
 | 005 | Durable playbook run status (`sprk_playbookrun` / `sprk_playbooknoderun`) | 0 | ✅ [done] | none | Group A | opus / high | FULL |
 | 006 | Events capability extraction and must-not-leak proofs | 0 | ✅ [done] | none | Group A | opus / high | FULL |
-| 008 | Finance summary authorization into one shared method | 0 | 🔄 [wip] | none | Group A | opus / high | FULL |
+| 008 | Finance summary authorization into one shared method | 0 | ✅ [done] | none | Group A | opus / high | FULL |
 | 009 | Record search: no query built from raw query text (proof) | 0 | ✅ [done] | none | Group A | opus / high | FULL |
 | 010 | Daily Briefing data seam in `Spaarke.DailyBriefing.Components` | 0 | ✅ [done] | none | Group A | sonnet / xhigh | FULL |
 | 011 | EmailComposer MCP host (sibling of the Xrm host) | 0 | ✅ [done] | none | Group A | sonnet / high | FULL |

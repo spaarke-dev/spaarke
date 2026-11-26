@@ -1,15 +1,15 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (030 done: cap race fixed, uac-r2 re-check clean, CAPABILITY-INDEX rows 50-51)
-> **Phase**: Phase 0 and Phase 1 code complete. Phase 2: 031, 034, 035 done; 030 done (amendment awaits owner sign-off), 032 next; 033 and 036 blocked on owner decisions.
+> **Last Updated**: 2026-11-26 (owner answers applied; 005, 008, 030 done; 037/038 added; 033 and 038 running; draft PR #3259)
+> **Phase**: Phase 0 code complete except 012 live check. Phase 1 code complete. Phase 2: 030, 031, 034, 035 done; 033, 038 running; 037 next; 032 escalated; 036 waits on #3181.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **State** | 030 ✅ done 2026-11-26. Built c005cdb47d; review fixes 258579bddb; cap race fixed 203de60ce1 (starts in flight reserve a place under a lock; fail-before proven). uac-r2 re-check of c005cdb47d..203de60ce1: no blocking; its nit (state the cap of 3 in the amendment) applied to both ADR-052 files. CAPABILITY-INDEX rows 50 (detached playbook run) and 51 (Console link) applied. Master merged 80ac987a4e (pins + affected tests 289/289, ArchTests 117/117). ADR-052 amendment still PROPOSED until the owner's security sign-off. |
-| **Next (exact)** | (1) Owner: security sign-off on the ADR-052 amendment text (docs/adr/ADR-052-workload-placement.md "AMENDMENT 2026-11-26"); Q17/Q18. (2) Task 032 (matter summary; follows 030): code can proceed, only its dev check needs the 012 go. (3) When mcp-r1 asks, review ISS-007 #3242 before it merges. (4) When #3213 merges, fold CAPABILITY-INDEX row 35. |
-| **Uncommitted** | None after the 030 close-out commit. |
+| **State** | Done today: 030, 005 (schema on dev), 008 (Path A; two opus passes plus uac-r2, ebilling-r1 and ontology-r1: no blocking; CAPABILITY-INDEX 52). 012's dev PATCH is applied; its live-run check moves to 039. ADR-052 amendment ACCEPTED (owner sign-off). New tasks 037 (run-results widget) and 038 (instructions argument). Draft PR #3259 is open for the consumer typecheck (CI pending). 032 stopped at its escalation (notes/032-decisions.md). Running in sub-agents: 038, 033. |
+| **Next (exact)** | (1) Merge and verify 038, then 033 (two passes each, uac-r2 re-check), when each agent reports. (2) Start 037 after 038 merges. (3) Read #3259's client-typecheck result. (4) Owner: #3181 (a or b), E1, NFR-05 wording, 032 option. (5) 036 waits on #3181; 039 waits on 019/029 and E1. |
+| **Uncommitted** | None after this commit. |
 | **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
 
 ## Status (TASK-INDEX is authoritative)
@@ -24,29 +24,12 @@
 - 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions
-1. **005:** the go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev. Also the earlier §4 acceptance-criterion-3 question in notes/005-schema.md.
-2. **012:** the go for the registry-key PATCH on dev.
-3. **008:** the ADR-028 A10 conflict, Path A (recommended) or Path C.
-4. **#3181:** fix (a) or (b), before 036 (not 025).
-5. **019:** is runbook E1 done? Plus #3186.
-6. **design.md** lacks `<hot-path-declaration>`.
-7. **Consumer tsc** for DailyBriefing and LegalWorkspace, via a draft PR.
-8. **REST changes made or proposed:**
-   - #3205: empty portfolio cached;
-   - #3208: playbook lists answer 500 with AI disabled, should be 503;
-   - #3215: document names never filled, affecting 3 outputs;
-   - D-027-2: an empty record page past the end now reports count 0 (done);
-   - 024: a client abort on the playbook lists now returns 499 (done).
-9. **D-023-preview:** the preview link is withheld from model-visible output (fail-closed; spec FR-04 lists it). The owner may reverse it.
-10. **NFR-05:** do logs carrying the oid (007/024 shared methods) count as "claims"?
-11. **uac-r2:** the document list checks Read on the matter, not on each document (023 D1).
-12. **Stray processes:** four python.exe processes from other sessions have been spinning for days (PIDs 41460, 43772, 84288, 93720). The user decides.
-13. **Cowork review skill pairing (recorded 2026-11-26, for accelerator-r1):** `notes/cross-project-cowork-review-skill.md`. A Spaarke Cowork skill (for example `nda-review`) sits on top of this project's tools. Gaps for accelerator-r1 to decide: getting the document file into the sandbox, and matter email through `spaarke_compose_email`, not Outlook. No r2 action.
-14. **RESOLVED 2026-11-26 (D-030-run-model): Option A.** Runs continue after the start reply, acting as the user, under a narrow ADR-052 amendment (Path B) that lands with 030. The final amendment text goes back to the owner for security sign-off; unified-access-control-r2 reviews it. Option 4 is withdrawn: it sent long runs to the Console.
-15. **MCP AI-tool rate limit (034 review K3, project-wide):** MCP tools sit under the `mcp` limiter (60 per minute per user), while the REST AI routes they wrap use `ai-batch` (20 per minute, queue 5). A model can therefore trigger about three times more LLM renders per user than the Console can (briefing, analysis, run). Add a per-tool limiter, or accept it?
-16. **FR-09 saved preferences (034, #3232):** the briefing tool now uses the Console's default windows (5 days, 168 hours), but not a user's saved Daily Digest preferences: no BFF reader of `sprk_userpreference` exists. Either narrow FR-09's "equals the Console" to default preferences, or approve a new caller-scoped preference reader (§11 surface).
-17. **Playbook run results in Copilot (030 review, product):** when a run finishes, `spaarke_get_playbook_run` returns status plus counts only (ADR-015 minimal output), and the Console link opens the first document because the Console has no run view. So a Copilot user learns the run finished, not what it found. Options: a run-results widget fed by an app-only tool, or a model-visible summary of the outputs (would need an ADR-015 check). Owner decides.
-18. **Run instructions argument (030 review):** the engine accepts free-text "user context or instructions" per run (`PlaybookRunRequest.UserContext`); the MCP tool does not expose it, so a Copilot user cannot say "focus on indemnity". Add a capped optional `instructions` argument? Owner decides.
+Answered 2026-11-26: see notes/decisions.md D-owner-answers-2026-11-26 (1, 2, 3, 6, 7, 8, 9, 11, 12, 13, 15, 16, 17, 18 and the amendment sign-off). Still open:
+1. **#3181:** fix (a) read the name only after a caller Read check, or (b) require Read + AppendTo. Recommendation (b). Needed before 036.
+2. **019 / runbook E1:** not done. The owner does E1 (both "Spaarke AI" Registry rows: uninstall, then delete), then gives a go for the SHA through uac-r2. #3186 is a code follow-up.
+3. **NFR-05 and oid in logs:** recommendation: an oid is an opaque id, not a claim. Narrow NFR-05 to "no tokens, names, emails, UPNs, roles or other claim values; oid/tid allowed as audit ids".
+4. **032 matter summary (escalation, notes/032-decisions.md):** the matter-summary Binding is not a playbook (SUM-CHAT@v1, chat-session dispatch), so 030's run path cannot start it. Option 2 (recommended now): read-only v1, which needs an FR-10 amendment to drop "starts a run". Option 1 (later): author a matter-subject JPS playbook. Option 3 rejected.
+5. **Stray-process prevention:** a watchdog plus a Bash pre-check (proposal sent to the owner).
 
 ## Issues filed this wave
 #3234 #3235 #3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
