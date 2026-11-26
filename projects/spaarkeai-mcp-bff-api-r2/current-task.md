@@ -43,7 +43,7 @@
 14. **030 run-detach (🔔 ADR conflict, blocks 030 start and 032):** a run must outlive the stateless MCP request. Options 1-4 in `notes/030-decisions.md`; recommended Option 4 (run inside the request up to ~25 s, else hand off to the Console), plus ship `spaarke_get_playbook_run` now. Options 1-3 need an ADR-052, ADR-039 or ADR-028 A10 exception.
 
 ## Issues filed this wave
-#3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
+#3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
 
 ## Peer coordination
 - **mcp-r1:** #3199 merged and brought into this branch. #2575 (r1 ISS-001, the legacy Copilot agent code) was handed to us 2026-11-26: task 001 (8a92da8751) removes it, so the merge PR body must say "Closes #2575". r1 owns the ISS-010 files and the Decision wizard heading files; message r1 before editing them.
