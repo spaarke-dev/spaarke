@@ -44,8 +44,11 @@ public enum InquiryResolutionOutcome
 /// <param name="ServiceRequestId">The Inquiry, when one was identified.</param>
 /// <param name="Error">A caller-safe reason for any outcome but Resolved.</param>
 /// <param name="TodoCompleted">The "Record the outcome" To Do was found and completed (false when there was none, or it could not be completed; the log says which).</param>
+/// <param name="SignalRefreshQueued">Task 228 (#1991): the completed To Do's re-evaluation was queued, so its Signal closes within seconds
+/// (false when the To Do was not completed or the queue refused it: the nightly run closes it).</param>
 public sealed record InquiryResolutionResult(
-    InquiryResolutionOutcome Outcome, Guid? ServiceRequestId = null, string? Error = null, bool TodoCompleted = false)
+    InquiryResolutionOutcome Outcome, Guid? ServiceRequestId = null, string? Error = null, bool TodoCompleted = false,
+    bool SignalRefreshQueued = false)
 {
     public bool Succeeded => Outcome == InquiryResolutionOutcome.Resolved;
 }
@@ -243,14 +246,18 @@ public sealed class InquiryDispositionService(
             {
                 var todoCompleted = await CompleteTodoAsync(serviceRequestId, ct).ConfigureAwait(false);
                 await ConfirmSuggestedAssociationAsync(replyCommunicationId, ReadLong(reply.Body, "sprk_associationstatus"), ct).ConfigureAwait(false);
+                var signalRefreshQueued = false;
                 if (todoCompleted)
                 {
                     // Task 228 (#1991): the completed To Do's open Do-lane Signal closes now, not at the nightly run. Never throws: a false
-                    // is logged by the trigger, and the nightly run closes it.
-                    await signals.EnqueueAsync(
-                        SignalTriggerKind.InquiryDisposition, TodoTable, TodoIdFor(serviceRequestId), serviceRequestId, ct: ct).ConfigureAwait(false);
+                    // is logged by the trigger, and the nightly run closes it. CancellationToken.None: the disposition is already written,
+                    // so a client abort must neither skip the queue nor fault the call after the record exists.
+                    signalRefreshQueued = await signals.EnqueueAsync(
+                        SignalTriggerKind.InquiryDisposition, TodoTable, TodoIdFor(serviceRequestId), serviceRequestId,
+                        ct: CancellationToken.None).ConfigureAwait(false);
                 }
-                return new(InquiryResolutionOutcome.Resolved, serviceRequestId, TodoCompleted: todoCompleted);
+                return new(InquiryResolutionOutcome.Resolved, serviceRequestId, TodoCompleted: todoCompleted,
+                    SignalRefreshQueued: signalRefreshQueued);
             }
 
             if (patch.StatusCode == 412 && attempt == 0)

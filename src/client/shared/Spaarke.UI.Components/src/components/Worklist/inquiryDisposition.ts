@@ -43,11 +43,15 @@ export function inquiryTodoIdOf(item: WorklistRouteItem): string | null {
 export const INQUIRY_LOOKUP_FAILED = 'This To Do could not be opened because its inquiry could not be read. Try again.';
 
 /**
- * Shown after a recorded outcome whose To Do was completed. The server queues a re-evaluation of the To Do (#1991, DI-101), which
- * closes its Signal within seconds; the reload that follows the record can still be faster than that, so the row may show once more.
+ * Shown after a recorded outcome whose To Do was completed AND whose re-evaluation the server queued (`signalRefreshQueued`, #1991,
+ * DI-101): the job closes its Signal within seconds; the reload that follows the record can still be faster, so the row may show once more.
  */
 export const OUTCOME_RECORDED_TODO_DONE =
   'Outcome recorded and the To Do completed. This item leaves the list shortly; refresh to see it go.';
+
+/** Shown after a recorded outcome whose To Do was completed but whose re-evaluation could not be queued: the nightly check closes it. */
+export const OUTCOME_RECORDED_TODO_DONE_NIGHTLY =
+  "Outcome recorded. This item stays in the list until tonight's check closes it.";
 
 /** Shown after a recorded outcome whose To Do the server could not complete. */
 export const OUTCOME_RECORDED_TODO_OPEN =

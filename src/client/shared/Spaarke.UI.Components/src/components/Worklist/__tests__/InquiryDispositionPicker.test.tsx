@@ -460,11 +460,12 @@ describe('while a lookup is in flight', () => {
 describe('a recorded outcome says so, and the row that stays is not opened again', () => {
   const RECORDED_DONE =
     'Outcome recorded and the To Do completed. This item leaves the list shortly; refresh to see it go.';
+  const RECORDED_NIGHTLY = "Outcome recorded. This item stays in the list until tonight's check closes it.";
   const RECORDED_OPEN = 'Outcome recorded, but the To Do could not be completed. Complete it from the To Do.';
 
-  async function record(todoCompleted: boolean) {
+  async function record(todoCompleted: boolean, signalRefreshQueued = todoCompleted) {
     const service = inquiryService();
-    service.recordDisposition.mockResolvedValue({ todoCompleted });
+    service.recordDisposition.mockResolvedValue({ todoCompleted, signalRefreshQueued });
     const utils = renderWidget(service);
     await ready();
     await userEvent.click(line(T1));
@@ -475,11 +476,18 @@ describe('a recorded outcome says so, and the row that stays is not opened again
     return { service, ...utils };
   }
 
-  it('todoCompleted true: says the To Do completed and the item leaves shortly, with no nightly wait', async () => {
-    await record(true);
+  it('todoCompleted and the refresh queued: says the To Do completed and the item leaves shortly, with no nightly wait', async () => {
+    await record(true, true);
     const notice = await screen.findByTestId('worklist-notice');
     expect(notice).toHaveTextContent(RECORDED_DONE);
     expect(notice.textContent).not.toMatch(/tonight|nightly/i);
+  });
+
+  it('todoCompleted but the refresh not queued: keeps the nightly wording, never "leaves shortly"', async () => {
+    await record(true, false);
+    const notice = await screen.findByTestId('worklist-notice');
+    expect(notice).toHaveTextContent(RECORDED_NIGHTLY);
+    expect(notice.textContent).not.toMatch(/shortly/i);
   });
 
   it('todoCompleted false: says the To Do could not be completed', async () => {
@@ -567,7 +575,7 @@ describe('nothing is set after the widget has gone', () => {
     const errors = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const service = inquiryService();
-      const finish = { run: (_: { todoCompleted: boolean }) => {} };
+      const finish = { run: (_: { todoCompleted: boolean; signalRefreshQueued: boolean }) => {} };
       service.recordDisposition.mockImplementation(
         () =>
           new Promise(resolve => {
@@ -584,7 +592,7 @@ describe('nothing is set after the widget has gone', () => {
       const reads = service.read.mock.calls.length;
       utils.unmount();
       await act(async () => {
-        finish.run({ todoCompleted: true });
+        finish.run({ todoCompleted: true, signalRefreshQueued: true });
       });
       expect(service.read).toHaveBeenCalledTimes(reads);
       expect(errors).not.toHaveBeenCalled();
@@ -613,7 +621,7 @@ describe('end to end over the route client (the BFF is the only thing the widget
         if (url.endsWith(`/api/v1/inquiries/for-todo/${TODO_ID.inquiry}`)) return respond(inquiryForTodo);
         if (url.includes('/api/v1/inquiries/for-todo/')) return respond({ title: 'Not found' }, 404);
         if (url.endsWith(`/api/v1/inquiries/${SERVICE_REQUEST_ID}/disposition`)) {
-          return respond({ serviceRequestId: SERVICE_REQUEST_ID, todoCompleted: true });
+          return respond({ serviceRequestId: SERVICE_REQUEST_ID, todoCompleted: true, signalRefreshQueued: true });
         }
         return respond({}, 500);
       },

@@ -60,6 +60,7 @@ import { InquiryDispositionPicker } from './InquiryDispositionPicker';
 import {
   INQUIRY_LOOKUP_FAILED,
   OUTCOME_RECORDED_TODO_DONE,
+  OUTCOME_RECORDED_TODO_DONE_NIGHTLY,
   OUTCOME_RECORDED_TODO_OPEN,
   inquiryTodoIdOf,
 } from './inquiryDisposition';
@@ -177,8 +178,8 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
     };
   }, []);
   // To Dos whose outcome was recorded in this widget instance, with the notice each one was told. The server completes the To Do and
-  // queues a re-evaluation that closes its Signal within seconds (#1991, DI-101); the reload right after the record can beat that job,
-  // so the row may stay until the next read, and opening it again would show a picker or wizard for finished work.
+  // queues a re-evaluation that closes its Signal within seconds (#1991, DI-101); the reload right after the record can beat that job
+  // (and when the queue refused it, the row stays until the nightly check), so opening it again would show a picker or wizard for finished work.
   const recordedTodos = React.useRef(new Map<string, Notice>());
 
   // "Today" moves forward each time the lanes are read again.
@@ -471,9 +472,12 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
           subjectName={picker.subjectName}
           service={service}
           onRecorded={result => {
-            const told: Notice = result.todoCompleted
-              ? { text: OUTCOME_RECORDED_TODO_DONE, intent: 'info' }
-              : { text: OUTCOME_RECORDED_TODO_OPEN, intent: 'warning' };
+            // The notice says only what the server did: "leaves shortly" when the re-evaluation was queued, else the nightly wait.
+            const told: Notice = !result.todoCompleted
+              ? { text: OUTCOME_RECORDED_TODO_OPEN, intent: 'warning' }
+              : result.signalRefreshQueued
+                ? { text: OUTCOME_RECORDED_TODO_DONE, intent: 'info' }
+                : { text: OUTCOME_RECORDED_TODO_DONE_NIGHTLY, intent: 'info' };
             recordedTodos.current.set(picker.todoId, told);
             setPicker(null);
             setNotice(told);

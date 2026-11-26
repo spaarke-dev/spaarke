@@ -120,6 +120,11 @@ export interface InquiryDispositionRequest {
 export interface RecordDispositionResult {
   /** The "Record the outcome" To Do was completed server-side (false when none was found or it could not be completed). */
   todoCompleted: boolean;
+  /**
+   * Task 228 (#1991): the To Do's re-evaluation was queued, so its row leaves the list within seconds. False (or missing, or an
+   * unreadable body) means it leaves at the nightly check, and the notice must say so.
+   */
+  signalRefreshQueued: boolean;
 }
 
 export interface WorklistService {
@@ -458,10 +463,10 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
       try {
         body = await response.json();
       } catch {
-        return { todoCompleted: false };
+        return { todoCompleted: false, signalRefreshQueued: false };
       }
-      const flag = (body as { todoCompleted?: unknown } | null)?.todoCompleted;
-      return { todoCompleted: flag === true };
+      const flags = body as { todoCompleted?: unknown; signalRefreshQueued?: unknown } | null;
+      return { todoCompleted: flags?.todoCompleted === true, signalRefreshQueued: flags?.signalRefreshQueued === true };
     },
 
     async narrate(request: WorklistNarrativeRequest): Promise<WorklistNarrativeText | null> {

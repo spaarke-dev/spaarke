@@ -315,6 +315,7 @@ export function fakeService(bodies: Partial<Record<WorklistSetName, Raw>> = ROUT
     recordDisposition: jest.fn(
       async (_id: string, _request: InquiryDispositionRequest): Promise<RecordDispositionResult> => ({
         todoCompleted: true,
+        signalRefreshQueued: true,
       })
     ),
   };

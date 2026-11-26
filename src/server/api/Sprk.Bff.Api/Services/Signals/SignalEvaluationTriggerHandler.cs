@@ -87,8 +87,9 @@ public class SignalEvaluationTrigger
     }
 
     /// <summary>Queues an evaluation of the Decide-lane policies for one subject (<paramref name="subjectEntity"/>,
-    /// <paramref name="subjectId"/>). <paramref name="sourceId"/> is the record that raised it (the communication or the
-    /// revision) and only names the job. Returns whether the job was queued.</summary>
+    /// <paramref name="subjectId"/>); for <see cref="SignalTriggerKind.InquiryDisposition"/> (task 228) the Do-lane policies too, so the
+    /// completed inquiry To Do's Signal closes now (<see cref="IncludesDoLane"/>). <paramref name="sourceId"/> is the record that raised
+    /// it (the communication, the revision or the inquiry) and only names the job. Returns whether the job was queued.</summary>
     public virtual async Task<bool> EnqueueAsync(
         SignalTriggerKind kind, string subjectEntity, Guid subjectId, Guid sourceId, string? correlationId = null, CancellationToken ct = default)
     {

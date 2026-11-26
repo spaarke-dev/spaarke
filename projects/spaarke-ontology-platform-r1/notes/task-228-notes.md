@@ -42,40 +42,51 @@ whether the host returns `{ success: false, reasonCode }` (new optional field on
   which then evaluates Do-lane policies for that subject as well as Decide-lane ones. Every other trigger is unchanged (Decide lane only).
 - This is the nightly job's own subject path, so the close is the nightly close: ConditionCleared, no `sprk_decisionrecord` on the Signal,
   D-61 (a second run writes nothing).
-- The Worklist notice no longer says the row waits for tonight's check: "Outcome recorded and the To Do completed. This item leaves the list
-  shortly; refresh to see it go." The widget keeps its per-instance `recordedTodos` map, because the reload right after the record can beat
-  the job, and opening the row again must not show a picker for finished work.
+- The enqueue runs on `CancellationToken.None` (review round 1, K1): the disposition writes are done by then, so a client abort neither skips
+  the queue nor faults the call after the record exists.
+- Its result rides back as `InquiryResolutionResult.SignalRefreshQueued` and the 200 body's `signalRefreshQueued` (review round 1, K2), so the
+  Worklist notice says only what was done: "Outcome recorded and the To Do completed. This item leaves the list shortly; refresh to see it
+  go." when it was queued, and the old "Outcome recorded. This item stays in the list until tonight's check closes it." when it was not (or
+  the flag is missing). The widget keeps its per-instance `recordedTodos` map, because the reload right after the record can beat the job,
+  and opening the row again must not show a picker for finished work. The 200 body field is additive (an older client ignores it).
 
-### Interpretation to confirm in review (D-145b vs BR-1)
-Because the trigger reuses the nightly Do-lane path, it writes D-145b's one **Routine** closure Decision Record for the ConditionCleared
-close (record class Routine, naming who changed the To Do). That is the record the nightly run would have written anyway; it is not a BR-1
-human-resolution record, and the disposition's own Decision Record (written by the disposition service) is unchanged. No other record is
-added. If the owner wants the immediate close to write no Routine record, that would need a flag on the evaluator path; not done.
+### The Routine closure record (D-145b)
+Because the trigger reuses the nightly Do-lane path, the ConditionCleared close writes D-145b's one **Routine** closure Decision Record
+(record class Routine, naming who changed the To Do). D-145b is the rule that governs it, not BR-1: each disposition still ends with exactly
+one such record, the one the nightly run would otherwise write, under the same idempotent key, so a later nightly run (or a second trigger)
+writes nothing more (D-61; tested). The disposition's own Decision Record is unchanged and no other record is added. (Review round 1: the
+POML's BR-1 wording is being corrected by the main session.)
 
 ## Escalation trigger
 Not fired: no plugin, no new route, no schema change, and To Dos with no open inquiry complete exactly as before (tested: no inquiry, no hint
 and no matter, a closed inquiry, an inbound service request, a non-closing update, a non-To-Do table).
 
 ## Known limits
-- K: if the enqueue fails (Service Bus down), the Worklist says the item leaves shortly, but the Signal closes only at the next nightly run.
-  The failure is logged by `SignalEvaluationTrigger`; the user-visible effect is the pre-#1991 behaviour.
+- K: if the enqueue fails (Service Bus down), the Signal closes only at the next nightly run; the Worklist then keeps the nightly wording.
+  The failure is logged by `SignalEvaluationTrigger`.
+- K: #1984 is not fixed in substance (review round 1). The guard holds on the BFF child-records route, but no UI reaches that route to close
+  a To Do: SmartTodo Kanban and LegalWorkspace close To Dos through `Xrm.WebApi`, the chat tool `dataverse.update_record` has no inquiry
+  check, and neither does the native form's Deactivate. The main session files these bypasses and takes the routing question to the owner;
+  this PR therefore says "Refs #1984".
 - K: the check adds one or two caller reads (the inquiry, or the matter's open inquiries) to a To Do write that closes the To Do. Writes that
   do not close a To Do are unaffected.
 
-## Found, not fixed (other close paths that bypass the BFF owner)
+## Found, not fixed (other close paths that bypass the BFF owner; filed by the main session)
 These close a To Do without going through `ChildRecordEndpoints.UpdateAsync`, so an open inquiry's To Do can still be completed or dismissed
 there. Out of this task's scope (the POML names the child-records route and TodoDetail); to be filed:
 1. SmartTodo Kanban / LegalWorkspace: `Spaarke.SmartTodo.Components/src/services/TodoDataverseService.ts` `updateTodoStatus` and
    `dismissTodo` (~98, ~109) write `statecode`/`statuscode` directly through `Xrm.WebApi`; used by `src/solutions/SmartTodo/src/hooks/useSmartTodoBridge.ts`
    and `src/solutions/LegalWorkspace/src/hooks/useSmartToDoBridge.ts`.
-2. The chat update tool, `Services/Ai/Handlers/DataverseUpdateRecordHandler.cs`, can set a To Do's state.
+2. The chat update tool, `Services/Ai/Handlers/DataverseUpdateRecordHandler.cs` (~195-215), can set a To Do's state.
+2a. The native model-driven form's Deactivate on a To Do.
 3. TodoDetail has no in-repo host that passes `reasonCode`; a host that maps the BFF 409 to `{ success:false, error }` without the reason code
    shows its own error text, not the new words.
 
 ## §11 answers
 - **Existing**: `FindOpenInquiryOfTodoAsync` (the Worklist's identification), `SignalEvaluationTrigger` + `SignalEvaluationTriggerHandler`
   (ADR-004 event-trigger path), `SignalReevaluationJob.EvaluateSubjectAsync` (the nightly subject path), `DecisionCommitReasons.InquiryDispositionRequired`.
-- **Extension**: all extended, nothing new: one enum value, one optional parameter, one predicate, constants. No new service, route, DI
+- **Extension**: all extended, nothing new: one enum value, one optional parameter, one predicate, constants, one result property and
+  one additive field on the disposition's 200 body (`signalRefreshQueued`). No new service, route, DI
   registration or package. `InquiryDispositionService` takes the already-registered singleton `SignalEvaluationTrigger`.
 - **Cost of doing nothing**: an open inquiry's To Do can be completed from TodoDetail, leaving the inquiry with no recorded outcome and no
   prompt (#1984); a recorded outcome leaves its Worklist row up until the next night (#1991).
@@ -83,9 +94,12 @@ there. Out of this task's scope (the POML names the child-records route and Todo
 ## Tests
 - Integration (`tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.InquiryTodoClose.cs`): 409 by hint and by
   matter fallback; dismiss / statuscode-only / statecode-only refused; must-not-fire cases; 503 on lookup and matter-list faults, with log.
-- Unit (`InquiryDispositionTests`): enqueue once with the right arguments; none on To Do 404/403 or refused disposition; failed enqueue still Resolved.
+- Unit (`InquiryDispositionTests`): enqueue once with the right arguments and `SignalRefreshQueued` true; none (and false) on To Do 404/403
+  or refused disposition; a failed enqueue still Resolved with `SignalRefreshQueued` false; a client abort after the writes still queues,
+  on a token that cannot be cancelled; the 200 body carries the flag (true and false).
 - Domain (`SignalReevaluationJobInquiryDispositionTriggerTests.cs`): the trigger closes the Do-lane Signal as ConditionCleared with one Routine
   record; again writes nothing; a still-holding To Do closes nothing; other kinds leave the Do lane alone; only the new kind includes the Do lane.
-- Jest: TodoDetail 409 words (resolved, thrown, dismiss, other refusal); Worklist notice wording without "tonight".
+- Jest: TodoDetail 409 words (resolved, thrown, dismiss, other refusal); Worklist notice: "leaves shortly" only when the refresh was queued,
+  the nightly wording when it was not; the service reads `signalRefreshQueued` only as a literal true.
 
 rework: none task 228
