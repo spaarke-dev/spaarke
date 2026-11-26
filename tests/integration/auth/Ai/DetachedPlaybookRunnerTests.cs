@@ -194,6 +194,46 @@ public sealed class DetachedPlaybookRunnerTests
         afterOneFinished.Outcome.Should().Be(PlaybookRunStartOutcome.Started, "a finished run frees its place");
     }
 
+    [Fact(DisplayName = "030 bounded: starts still in flight count towards the per-caller cap, so starts that arrive together cannot pass it; a released start frees its place")]
+    public async Task Start_ConcurrentStartsInFlight_CountTowardsTheCap()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Script = PlaybookRunWorld.NeverAccepts(cancelled);
+
+        // Three starts in flight: none accepted yet, so none is in the run table. Each holds a reservation.
+        using var inFlight = new CancellationTokenSource();
+        var starts = Enumerable.Range(0, PlaybookRunLimits.MaxConcurrentRunsPerCaller)
+            .Select(_ => world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, inFlight.Token))
+            .ToList();
+
+        // Refused at once, before any await; without the reservation this start would pass the cap and wait out the accept budget
+        // on the fake clock, so the bound below turns that regression into a failure instead of a hang.
+        using var fourthWait = new CancellationTokenSource();
+        var fourthStart = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, fourthWait.Token);
+        fourthStart.IsCompleted.Should().BeTrue("a start beyond the cap is refused before any await");
+        var fourth = await fourthStart;
+        fourth.Outcome.Should().Be(PlaybookRunStartOutcome.RunLimit, "the three starts in flight already hold the caller's places");
+
+        // The caller goes away: the three starts end and release their reservations.
+        inFlight.Cancel();
+        foreach (var start in starts)
+        {
+            await FluentActions.Awaiting(() => start.WaitAsync(TimeSpan.FromSeconds(15))).Should().ThrowAsync<OperationCanceledException>();
+        }
+
+        using var again = new CancellationTokenSource();
+        var afterRelease = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, again.Token);
+        if (afterRelease.IsCompleted)
+        {
+            (await afterRelease).Outcome.Should().NotBe(PlaybookRunStartOutcome.RunLimit, "released starts free their places");
+        }
+
+        again.Cancel();
+        await FluentActions.Awaiting(() => afterRelease.WaitAsync(TimeSpan.FromSeconds(15))).Should().ThrowAsync<OperationCanceledException>();
+    }
+
     [Fact(DisplayName = "030 bounded: the tool answers a start beyond the per-caller cap as isError playbook.run-limit, status 429, and keeps no retry key")]
     public async Task Tool_BeyondThePerCallerCap_Is429RunLimit()
     {

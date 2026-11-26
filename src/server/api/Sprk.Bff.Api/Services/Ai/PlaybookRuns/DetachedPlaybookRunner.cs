@@ -86,6 +86,8 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
     internal static readonly TimeSpan Retention = TimeSpan.FromHours(1);
 
     private readonly ConcurrentDictionary<Guid, DetachedRun> _runs = new();
+    private readonly Dictionary<string, int> _pendingStarts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _pendingGate = new();
     private readonly IServiceScopeFactory _scopes;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly TimeProvider _time;
@@ -115,13 +117,67 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         ArgumentNullException.ThrowIfNull(documentIds);
         Prune();
 
-        // Condition 5: at most MaxConcurrentRunsPerCaller runs running per caller in this process, checked before anything else.
-        if (CallerResolution.ResolveObjectId(http.User) is { } requester && RunningCount(requester) >= PlaybookRunLimits.MaxConcurrentRunsPerCaller)
+        // Condition 5: at most MaxConcurrentRunsPerCaller runs per caller in this process, checked before anything else. Starts still
+        // in flight (authorizing, pre-warming, waiting for the accept) hold a reservation, taken atomically with the count, so starts
+        // that arrive together cannot all pass. A run is briefly counted twice (reserved and running) between its accept and the
+        // release below; that errs towards refusing.
+        var requester = CallerResolution.ResolveObjectId(http.User);
+        if (requester is { } reserving && !TryReserveStart(reserving))
         {
             _logger.LogInformation("Detached playbook run not started - Outcome: {Outcome}, CorrelationId: {CorrelationId}", RunLimitReasonCode, http.TraceIdentifier);
             return new PlaybookRunStartResult(PlaybookRunStartOutcome.RunLimit, null, null);
         }
 
+        try
+        {
+            return await StartReservedAsync(http, playbookId, documentIds, parameters, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (requester is { } reserved)
+            {
+                ReleaseStart(reserved);
+            }
+        }
+    }
+
+    private bool TryReserveStart(string callerOid)
+    {
+        lock (_pendingGate)
+        {
+            _pendingStarts.TryGetValue(callerOid, out var pending);
+            if (RunningCount(callerOid) + pending >= PlaybookRunLimits.MaxConcurrentRunsPerCaller)
+            {
+                return false;
+            }
+
+            _pendingStarts[callerOid] = pending + 1;
+            return true;
+        }
+    }
+
+    private void ReleaseStart(string callerOid)
+    {
+        lock (_pendingGate)
+        {
+            if (_pendingStarts.TryGetValue(callerOid, out var pending) && pending > 1)
+            {
+                _pendingStarts[callerOid] = pending - 1;
+            }
+            else
+            {
+                _pendingStarts.Remove(callerOid);
+            }
+        }
+    }
+
+    private async Task<PlaybookRunStartResult> StartReservedAsync(
+        HttpContext http,
+        Guid playbookId,
+        Guid[] documentIds,
+        IReadOnlyDictionary<string, string>? parameters,
+        CancellationToken cancellationToken)
+    {
         // Condition 6: authorized first, inside the request, by task 007's one method; no check of our own.
         var authorization = await PlaybookAuthorizationFilter
             .AuthorizePlaybookRunAsync(http, playbookId, documentIds, parameters, cancellationToken)
