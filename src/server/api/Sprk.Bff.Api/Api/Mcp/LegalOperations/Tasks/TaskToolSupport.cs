@@ -137,15 +137,17 @@ internal static class TaskToolSupport
 
         if (!string.IsNullOrEmpty(row.Status))
         {
-            parts.Add(row.Status);
+            parts.Add(McpText.SingleLine(row.Status));
         }
 
         if (!string.IsNullOrEmpty(row.Priority))
         {
-            parts.Add(row.Priority);
+            parts.Add(McpText.SingleLine(row.Priority));
         }
 
-        return parts.Count == 0 ? $"{row.Subject} (id {row.Id})" : $"{row.Subject} ({string.Join(", ", parts)}; id {row.Id})";
+        // The subject is user-authored: on one line, so it cannot start a row or a link line of its own. Structured content keeps it as it is.
+        var subject = McpText.SingleLine(row.Subject);
+        return parts.Count == 0 ? $"{subject} (id {row.Id})" : $"{subject} ({string.Join(", ", parts)}; id {row.Id})";
     }
 
     /// <summary>

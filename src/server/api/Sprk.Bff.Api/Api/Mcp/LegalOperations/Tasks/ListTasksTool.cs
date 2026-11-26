@@ -245,7 +245,9 @@ internal sealed class ListTasksTool : McpToolDefinition
         var body = new ListBody(rows, rows.Count, page.TotalCount, page.PageNumber, page.PageSize, page.HasNextPage, truncated);
 
         var header = rows.Count == 0
-            ? "No tasks match."
+            ? (page.TotalCount > 0
+                ? $"No tasks on page {page.PageNumber}; {page.TotalCount} match across {page.TotalPages} page(s)."
+                : "No tasks match.")
             : $"{rows.Count} task(s) on page {page.PageNumber} of {page.TotalPages} ({page.TotalCount} match)"
               + (truncated ? "; the list was cut to fit, so narrow it with status, a due date range or a smaller pageSize."
                   : page.HasNextPage ? $"; send pageNumber {page.PageNumber + 1} for more." : ".");
