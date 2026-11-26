@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G6 coexistence runs; results to accelerator-r1</title>
+    <phase>3 Test runs</phase>
+    <gate>after 005 and the owner switching on Legal for Cowork</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run coordination and scoring against a written kit and pass rule</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the G6 kit in Chat and Cowork with Legal for Cowork on, record which owner each prompt reached and invoke-vs-recommend, and send the results to accelerator-r1.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in scoring LLM routing tests.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g6/README.md has the filled results, the verdict and a record of the message sent to accelerator-r1.</goal>
+
+  <context>
+    <background>Spec FR-07. G6 subsumes the accelerator T-P2. Never edit the accelerator worktree; send results by message.</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g6/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+    <constraint source="project">Results reach accelerator-r1 only by a session message; this task writes nothing in the accelerator worktree.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm with the owner that Legal for Cowork is on for both users</step>
+    <step order="2">Hand over the prompt set; record</step>
+    <step order="3">Score capture in both directions; record invoke vs recommend and the playbook probe</step>
+    <step order="4">Send the summary to the accelerator-r1 session; record the send in the README</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g6/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every prompt has its observed owner per surface.</criterion>
+    <criterion testable="true">The verdict states whether any capture occurred in either direction.</criterion>
+    <criterion testable="true">Invoke vs recommend and the playbook probe each have a recorded result.</criterion>
+    <criterion testable="true">The README records the message sent to accelerator-r1.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

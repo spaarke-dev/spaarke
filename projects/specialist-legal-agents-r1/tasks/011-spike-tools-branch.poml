@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>Spike branch: spike_get_profile and spike_review_nda (never merged)</title>
+    <phase>2 Spike tools and dev deploy</phase>
+    <gate>after 002, 006 and 010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs code; tags include bff-api and auth</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive: per-user profile isolation and fail-closed caller resolution (tags auth)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Works on a separate branch and depends on 002, 006 and 010</parallel-reason>
+    <deps>002,006,010</deps>
+    <tags>bff-api, ai, auth, testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>On a new branch spike/specialist-agents-phase0 cut from current origin/master, add two read-only MCP spike tools on /mcp/legal-operations: spike_get_profile (caller to test profile) and spike_review_nda (agreement-review via IActionRunner with the profile bound as inputs), plus header-name logging and branch-only tests. The branch is never merged.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke BFF MCP tool host, ASP.NET Core Minimal APIs and Entra caller resolution.</role>
+  <goal>Branch spike/specialist-agents-phase0 is pushed with the two tools, the test-profile files (A, B, patent A, patent B) keyed by the real systemuserids, header-name logging, and passing tests for fail-closed and profile isolation; master is unchanged.</goal>
+
+  <context>
+    <background>Spec FR-02, FR-03, NFR-04, NFR-05; reuse verdicts in notes/reuse-scan.md. Copy ShowDecisionsTool for the shape. IActionRunner BoundInputs overload; apply the model tier explicitly (#1934). mcp-r2 owns Api/Mcp on master; this branch never merges so it does not collide.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Context/CallerSystemUserResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/IActionRunner.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolCatalog.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs</file>
+      <file role="canonical-reference">tests/integration/auth/Mcp/McpCallerPathTests.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Spike/SpikeGetProfileTool.cs (spike branch only)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Spike/SpikeReviewNdaTool.cs (spike branch only)</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g1-nda/profiles/profile-a.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Prerequisite task output</dependency>
+      <dependency task="006" status="pending">Prerequisite task output</dependency>
+      <dependency task="010" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">All work is on branch spike/specialist-agents-phase0; nothing in this task is committed to master or to work/specialist-legal-agents-r1 except the results note; a PR, if opened, is titled "[DO NOT MERGE]".</constraint>
+    <constraint source="ADR-028">Both tools sit on the existing /mcp/legal-operations route behind RequireMcpConnectorToken, the rate limit and the kill switch; no new route, server or OAuth registration is added.</constraint>
+    <constraint source="ADR-008">Authorization for both tools comes from the existing endpoint-filter chain; the tools add no bypass.</constraint>
+    <constraint source="ADR-039">Both tools are read-only (readOnlyHint true) and cataloged; neither writes data or triggers side effects.</constraint>
+    <constraint source="ADR-043">spike_review_nda passes profile positions only as inputs declared in the Action input schema (agreement-review or agreement-review-spike per task 010).</constraint>
+    <constraint source="project">Caller resolution uses ICallerSystemUserResolver; an unresolved caller returns isError CALLER_UNRESOLVED and a caller with no test profile returns isError NO_PROFILE; neither path returns another user's profile or a default profile.</constraint>
+    <constraint source="project">Header logging records header names only; values, Authorization, cookies and tokens are never logged or committed (NFR-05).</constraint>
+    <constraint source="ADR-038">Spike tests live on the spike branch only; no test is added to master suites.</constraint>
+    <constraint source="project">The spike adds no package reference; publish size stays at master's (.claude/constraints/bff-extensions.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/specialist-legal-agents-r1/notes/reuse-scan.md</file>
+    </files>
+    <patterns>
+      <pattern name="MCP tool" location="src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs">Tool definition, [McpArea], result shape</pattern>
+      <pattern name="Caller resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/Context/CallerSystemUserResolver.cs">Unresolved, never a guess</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">git fetch; create spike/specialist-agents-phase0 from origin/master in a separate worktree (never switch branches in the main worktree)</step>
+    <step order="2">Fill the real systemuserids for the owner and the test user into copies of the four test profiles placed under the spike branch (read them from DEV read-only)</step>
+    <step order="3">Add SpikeGetProfileTool: resolve caller, load test profile by systemuserid, return a data-guarded instruction block plus profileVersion; fail closed</step>
+    <step order="4">Add SpikeReviewNdaTool: resolve caller and profile, run the Action via IActionRunner BoundInputs with the positions as declared inputs and the profile tier set explicitly; return the structured review plus profileVersion and latency</step>
+    <step order="5">Add header-name logging (names only) on the spike tools</step>
+    <step order="6">Write branch tests: NO_PROFILE, CALLER_UNRESOLVED, user A never receives user B's profile, header values never logged</step>
+    <step order="7">dotnet build and dotnet test on the branch; push the branch; record the branch SHA in phase0/g3/README.md on work/specialist-legal-agents-r1</step>
+    <step order="8">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ICallerSystemUserResolver or IActionRunner signatures differ from spec FR-02, STOP and escalate per root CLAUDE.md §6.</trigger>
+    <trigger>If the spike would need a new package, route, OAuth registration or a master change, STOP and escalate.</trigger>
+    <trigger>If any input, sample or source this task would use contains or references answer-key/ or a real NDA, STOP: do not copy it, and escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+  <justification>
+    <existing>notes/reuse-scan.md rows "Caller to per-user profile" and "Server-side review with a profile"; CAPABILITY-INDEX row 16 (Action spine); ShowDecisionsTool.cs is the shape to copy</existing>
+    <extension>Yes, they wrap existing ICallerSystemUserResolver and IActionRunner; the only new parts are a static test-profile lookup (profile tables are Phase 1) and two branch-only tool classes</extension>
+    <cost-of-doing-nothing>Without them G1 variants (a)/(b)/(c) and G3 cannot run, so the D-A7 go/no-go has no evidence</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="dotnet">Build and test the BFF on the spike branch</tool>
+    <tool name="terminal">git worktree and branch commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">spike/specialist-agents-phase0: src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Spike/</output>
+    <output type="test">spike/specialist-agents-phase0: spike tool tests</output>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g3/README.md (branch SHA, test results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a caller with a test profile, spike_get_profile returns that caller's profile block and its profileVersion.</criterion>
+    <criterion testable="true">Negative: a caller with no test profile gets isError NO_PROFILE; an unresolved caller gets isError CALLER_UNRESOLVED; neither receives any profile.</criterion>
+    <criterion testable="true">Negative: a test proves user A never receives user B's profile (both tools).</criterion>
+    <criterion testable="true">spike_review_nda runs agreement-review (or agreement-review-spike) through IActionRunner with the positions as declared inputs and the profile tier applied, returning the review, profileVersion and latency.</criterion>
+    <criterion testable="true">Negative: a test proves header values, Authorization and cookies are never logged.</criterion>
+    <criterion testable="true">dotnet build and dotnet test pass on the spike branch; master has no new commit from this task.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Use a throwaway worktree for the spike branch (never switch the project worktree). Seeding proof requested for the profile-isolation guard only (tenant-isolation outcome).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

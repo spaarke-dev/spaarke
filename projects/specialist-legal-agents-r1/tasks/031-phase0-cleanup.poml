@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>Clean-up: tenant, DEV and inventory</title>
+    <phase>4 Decision and clean-up</phase>
+    <gate>after 030</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 4 deployment-touching clean-up with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist-driven clean-up with a prescriptive order</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial clean-up after the decision</parallel-reason>
+    <deps>030</deps>
+    <tags>deploy, devops</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove every Phase 0 artifact: test agents and packages (owner), the DEV agreement-review-spike row if created (owner go), the spike tools from dev (next master deploy), and close the inventory rows.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Spaarke environment hygiene.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/README.md shows every artifact with a removal status of removed (or an owner-accepted exception), and the coordination inventory rows are closed.</goal>
+
+  <context>
+    <background>Spec FR-14. Tenant removals are the owner's. The spike branch is never merged; it may be deleted after the decision.</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">Deletion of agreement-review-spike in DEV happens only on the owner's go; the production agreement-review row is never touched.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">List every inventory row not yet removed</step>
+    <step order="2">Write the owner's removal checklist (admin center) and ask</step>
+    <step order="3">On the owner's go, delete agreement-review-spike in DEV if it exists</step>
+    <step order="4">Confirm the dev BFF tool list shows no spike_* tools after the next master deploy</step>
+    <step order="5">Tell coordination to close the rows; record</step>
+    <step order="6">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every inventory row has removal status removed or an owner-accepted exception.</criterion>
+    <criterion testable="true">The dev tool list shows no spike_* tools (recorded).</criterion>
+    <criterion testable="true">agreement-review-spike no longer exists in DEV, or was never created (recorded).</criterion>
+    <criterion testable="true">The coordination close request is recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

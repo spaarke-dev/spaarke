@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G3 run: profile resolution, run key and agent identity</title>
+    <phase>3 Test runs</phase>
+    <gate>after 015 and 020</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run coordination and scoring against a written kit and pass rule</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>015,020</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run G3 on dev: prove caller to systemuser to test profile to profileVersion within the latency budget, record which request headers Copilot sends (names only), and answer whether a run can be keyed and whether the calling agent can be identified.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in App Insights KQL and the Spaarke MCP host.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g3/README.md records the headers seen per surface and caller kind, the fail-closed results, yes/no for "can we key a run" and "can we identify the agent", and a Phase 1 recommendation.</goal>
+
+  <context>
+    <background>Spec FR-03. App Insights sampling is about 25%; the BFF logs no caller identity; use several turns per check and attribute by tester and time.</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g3/README.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="pending">Prerequisite task output</dependency>
+      <dependency task="020" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">Results record header names only; no header value, token or cookie is written to any file.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Prepare the G3 prompts for the owner and the test user, Chat and Cowork, tenant connector and agent action</step>
+    <step order="2">Ask the owner to run them; record times</step>
+    <step order="3">Query App Insights (PowerShell form) for the spike header-name logs and tool results</step>
+    <step order="4">Record per surface and caller kind: headers seen, profileVersion consistency within a run, fail-closed results</step>
+    <step order="5">Write the yes/no answers and the Phase 1 recommendation</step>
+    <step order="6">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g3/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The README records headers seen per surface and per caller kind (tenant connector vs agent action).</criterion>
+    <criterion testable="true">It records NO_PROFILE and CALLER_UNRESOLVED results from dev.</criterion>
+    <criterion testable="true">It answers yes or no to "can we key a run" and "can we identify the agent", each with evidence.</criterion>
+    <criterion testable="true">Every call in one run shows the same profileVersion, or the mismatch is recorded.</criterion>
+    <criterion testable="true">Negative: no file contains a header value, token or cookie.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

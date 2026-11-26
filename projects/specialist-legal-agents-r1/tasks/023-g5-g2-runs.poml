@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G5 routing runs and G2 checks</title>
+    <phase>3 Test runs</phase>
+    <gate>after 020</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run coordination and scoring against a written kit and pass rule</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the G5 baseline against Spaarke Legal Review, then the three-function area agent with controls, and answer the three G2 packaging questions.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in scoring LLM routing tests.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g5/README.md and projects/specialist-legal-agents-r1/phase0/g2/README.md have filled results sheets and verdicts.</goal>
+
+  <context>
+    <background>Spec FR-06 and FR-08. Fallback if G5 fails: one agent per function, persona server-side.</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g5/README.md</file>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g2/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">Pass rules are applied exactly as spec FR-04/FR-06 state them: pilot of 10 cases per variant and surface; a variant below 90% in its pilot stops; survivors get the full run; G1 pass = at least 95% adherence on both surfaces, 0 ratchet escapes, 0 cross-profile bleed; G5 pass = at least 95% routing, 0 functions invoked on controls.</constraint>
+    <constraint source="project">Before the owner uploads or installs any tenant artifact named in this task, its R4 inventory row (artifact, owner project, scope = owner + test user, removal plan, removal date) is sent to COPILOT-PLATFORM-COORDINATION (Issue #3006) and quoted in the test README (FR-01, R7).</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the baseline agent instruction version</step>
+    <step order="2">Hand over the baseline and main prompt sets; record</step>
+    <step order="3">Score routing and controls; apply the pass rule; write the fallback if it fails</step>
+    <step order="4">Record the three G2 answers with evidence</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g5/README.md</output>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g2/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">G5 baseline and main results are recorded with routing accuracy and control results.</criterion>
+    <criterion testable="true">The G5 verdict applies FR-06 (95% routing, no function on any control).</criterion>
+    <criterion testable="true">Each G2 question is answered yes, no or untestable with evidence.</criterion>
+    <criterion testable="true">Negative: any re-upload or copy of the baseline agent has an R4 row.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

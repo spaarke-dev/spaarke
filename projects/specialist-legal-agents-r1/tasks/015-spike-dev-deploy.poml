@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>Spike dev deploy through uac-r2</title>
+    <phase>2 Spike tools and dev deploy</phase>
+    <gate>after 011 and the owner's per-SHA go</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 2 deployment step with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment coordination step with a prescriptive sequence</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment; serial and owner-gated</parallel-reason>
+    <deps>011</deps>
+    <tags>deploy, azure, bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Get the spike branch SHA deployed to the dev BFF through unified-access-control-r2's deploy slot on the owner's go, and verify the spike tools are listed and answer within 30 s.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke BFF deployment path.</role>
+  <goal>The dev BFF runs the spike SHA; projects/specialist-legal-agents-r1/phase0/g3/README.md records the SHA, deploy time, the tools/list evidence and p95 latency for both tools.</goal>
+
+  <context>
+    <background>Spec FR-02, NFR-04, NFR-06. Deploys go through the uac-r2 session only. The spike base must contain current master plus mcp-r2 merged work so nothing rolls back; the next master deploy removes the spike.</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g3/README.md</file>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">This task never runs a BFF deploy itself; it asks the uac-r2 session to deploy the named SHA after the owner's go, and never uses az webapp deploy directly.</constraint>
+    <constraint source="project">Before asking, verify the spike SHA contains origin/master (git merge-base --is-ancestor origin/master SHA) so the deploy rolls nothing back.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Verify origin/master is an ancestor of the spike SHA; if not, rebase the spike branch first</step>
+    <step order="2">Ask the owner for the go on the named SHA</step>
+    <step order="3">On the go, message the uac-r2 session with the SHA and the reason (Phase 0 spike, removed by the next master deploy)</step>
+    <step order="4">After the deploy, check tools/list on /mcp/legal-operations shows spike_get_profile and spike_review_nda</step>
+    <step order="5">Measure p95 latency for each tool over at least 10 calls; record it</step>
+    <step order="6">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+    <trigger>If the spike SHA does not contain origin/master, STOP; do not deploy.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g3/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">phase0/g3/README.md records the deployed SHA, the deploy time and the owner's go (quoted).</criterion>
+    <criterion testable="true">tools/list on dev shows both spike tools.</criterion>
+    <criterion testable="true">p95 latency per tool is recorded; a tool over 30 s is recorded as a finding, not hidden.</criterion>
+    <criterion testable="true">Negative: no deploy happens without the owner's go and without origin/master in the SHA.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>Go/no-go record: phase0/G1-decision.md</title>
+    <phase>4 Decision and clean-up</phase>
+    <gate>after 007 and 021-026</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new decision file with explicit ADR constraints</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Synthesis and recommendation across all Phase 0 evidence; architectural judgment for D-A7, D-A12, D-A13</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on every run</parallel-reason>
+    <deps>007,021,022,023,024,025,026</deps>
+    <tags>ai</tags>
+    <estimated-effort>3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write the go/no-go record from the Phase 0 evidence, with a recommendation for each of D-A7, D-A12 and D-A13 and the Phase 1 inputs, so the owner can decide D-A7.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Program architect for the specialist-agent runtime.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/G1-decision.md exists with the G1-NDA and G1-PAT results, G3, G5, G6 and G2, the three recommendations, and the Phase 1 inputs.</goal>
+
+  <context>
+    <background>Spec FR-13. Phase 1 run path: prompted Action via IActionResolver + IActionRunner behind a PublicContracts facade; ICodedWorkflow for multi-step; tier applied explicitly (#1934); the facade calls the one gate; runs recorded on sprk_playbookrun through PlaybookRunRecordStore.</background>
+    <relevant-files>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/G1-decision.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/notes/phase0-desk-items.md</file>
+      <file role="canonical-reference">docs/architecture/playbook-architecture.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="007" status="pending">Prerequisite task output</dependency>
+      <dependency task="021" status="pending">Prerequisite task output</dependency>
+      <dependency task="022" status="pending">Prerequisite task output</dependency>
+      <dependency task="023" status="pending">Prerequisite task output</dependency>
+      <dependency task="024" status="pending">Prerequisite task output</dependency>
+      <dependency task="025" status="pending">Prerequisite task output</dependency>
+      <dependency task="026" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The Phase 1 inputs use the Action / coded-workflow model; none proposes the frozen node-graph engine.</constraint>
+    <constraint source="ADR-040">The record names sprk_playbookrun through PlaybookRunRecordStore as the durable run record, not the session ledger.</constraint>
+    <constraint source="project">The record recommends; it does not decide. The owner records D-A7 in design.md §12.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/specialist-legal-agents-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Collect each test verdict with its evidence link</step>
+    <step order="2">Write a recommendation for D-A7, D-A12 and D-A13, each tied to evidence</step>
+    <step order="3">Write the Phase 1 inputs (run path, run record, gate, tier)</step>
+    <step order="4">Ask the owner to record D-A7 in design.md §12</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the evidence does not support a clear recommendation for D-A7, say so and list the missing evidence rather than forcing a choice.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/G1-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The record summarises every Phase 0 test with a link to its results.</criterion>
+    <criterion testable="true">D-A7, D-A12 and D-A13 each have a recommendation tied to cited evidence.</criterion>
+    <criterion testable="true">The Phase 1 inputs name the Action/coded-workflow model, explicit tier, the one gate and the AI-run record.</criterion>
+    <criterion testable="true">Negative: the record does not edit design.md; the owner records D-A7.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

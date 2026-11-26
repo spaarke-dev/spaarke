@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G5 routing kit and G2 packaging questions</title>
+    <phase>1 Test kits, content and desk items</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation and test-script creation only</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation / test-kit authoring against an explicit spec and the phase0/g8 reference</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write the G5 function-routing kit (baseline against the Spaarke Legal Review agent, then a three-function area agent) and the G2 kit for the three packaging questions.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Writes precise LLM routing test protocols.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g5/README.md (setup, baseline step, prompt set with out-of-scope controls, results sheet, pass rule, fallback) and projects/specialist-legal-agents-r1/phase0/g2/README.md (the three questions, how each is tested, evidence columns) exist.</goal>
+
+  <context>
+    <background>Spec FR-06 and FR-08. The functions are NDA review, agreement review and legal hold review. Build rules BR-1 to BR-7 are in notes/agent-package-identity-and-distribution.md.</background>
+    <relevant-files>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g5/README.md</file>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g2/README.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/notes/agent-package-identity-and-distribution.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every file this task writes is synthetic or drawn from public sources. No file, prompt or package written by this task quotes, copies, links or names a path under `answer-key/`, or contains text from the real NDAs (Corteva, RPX/Helios); check each written file against the `FORBIDDEN_IN_PACKAGE` list in `origin/work/spaarke-legal-ai-accelerator-r1:src/accelerators/build/gates.py` (NFR-02).</constraint>
+    <constraint source="project">This task uploads, installs or changes nothing in the Microsoft 365 tenant, Dataverse, Azure or the dev BFF; it writes only files under projects/specialist-legal-agents-r1/.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+    <constraint source="project">Pass rules are applied exactly as spec FR-04/FR-06 state them: pilot of 10 cases per variant and surface; a variant below 90% in its pilot stops; survivors get the full run; G1 pass = at least 95% adherence on both surfaces, 0 ratchet escapes, 0 cross-profile bleed; G5 pass = at least 95% routing, 0 functions invoked on controls.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>projects/specialist-legal-agents-r1/notes/agent-package-identity-and-distribution.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the G5 baseline step: confirm the Spaarke Legal Review agent instruction version, then run the prompt set against it</step>
+    <step order="2">Write the main G5 prompt set: at least 30 in-scope prompts spread across the three functions and at least 10 out-of-scope controls, each with its expected function or "none"</step>
+    <step order="3">Write the G5 results sheet and the pass rule from FR-06, and the fallback (one agent per function, persona server-side)</step>
+    <step order="4">Write phase0/g2/README.md: SKILL.md plus agent in one package; two agents in one package; practice plugin depending on the core plugin; each with how to test and an evidence column</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an input this task depends on differs from what spec.md states (a file, an Action row, a tool contract), STOP and escalate per root CLAUDE.md §6 rather than adapting the design.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g5/README.md</output>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g2/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The G5 prompt set has at least 30 in-scope prompts covering all three functions and at least 10 controls, each with an expected owner.</criterion>
+    <criterion testable="true">The G5 pass rule matches spec FR-06 (95% routing, no function on any control).</criterion>
+    <criterion testable="true">phase0/g2/README.md lists the three FR-08 questions, each with a test method and a yes/no/untestable result cell.</criterion>
+    <criterion testable="true">Negative: no prompt references answer-key/ or a real NDA.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

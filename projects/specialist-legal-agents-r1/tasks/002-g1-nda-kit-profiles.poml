@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G1-NDA kit: test profiles A and B, prompt script, results sheet</title>
+    <phase>1 Test kits, content and desk items</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates new files (test kit) with explicit project constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation / test-kit authoring against an explicit spec and the phase0/g8 reference</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the G1-NDA test kit: two attorney test profiles that differ on at least five NDA positions, the numbered prompt script for variants (a), (b) and (c) in Chat and Cowork, the results sheet, and the separate FR-05 row for tool-returned instructions.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in NDA review positions and in writing measurable LLM test protocols.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g1-nda/ holds README.md (setup, prompt script, results sheet, pass rule, FR-05 row) and profiles/profile-a.json and profiles/profile-b.json (status: test), each with a profileVersion string, the five differing positions and a placeholder systemuserid key.</goal>
+
+  <context>
+    <background>Spec FR-04 and FR-05. Positions derive from the accelerator NDA baseline positions. Profile A is keyed to the owner, B to the test user (demo@); the real systemuserids are filled in by task 011, not here.</background>
+    <relevant-files>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g1-nda/README.md</file>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g1-nda/profiles/profile-a.json</file>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g1-nda/profiles/profile-b.json</file>
+      <file role="canonical-reference">origin/work/spaarke-legal-ai-accelerator-r1:src/accelerators/practices/nda/positions/</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every file this task writes is synthetic or drawn from public sources. No file, prompt or package written by this task quotes, copies, links or names a path under `answer-key/`, or contains text from the real NDAs (Corteva, RPX/Helios); check each written file against the `FORBIDDEN_IN_PACKAGE` list in `origin/work/spaarke-legal-ai-accelerator-r1:src/accelerators/build/gates.py` (NFR-02).</constraint>
+    <constraint source="project">Accelerator content is read only with `git show origin/work/spaarke-legal-ai-accelerator-r1:&lt;path&gt;` from this worktree. This task never checks out, edits or writes in the accelerator worktree or branch, and never reads `answer-key/`.</constraint>
+    <constraint source="project">This task uploads, installs or changes nothing in the Microsoft 365 tenant, Dataverse, Azure or the dev BFF; it writes only files under projects/specialist-legal-agents-r1/.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+    <constraint source="project">Pass rules are applied exactly as spec FR-04/FR-06 state them: pilot of 10 cases per variant and surface; a variant below 90% in its pilot stops; survivors get the full run; G1 pass = at least 95% adherence on both surfaces, 0 ratchet escapes, 0 cross-profile bleed; G5 pass = at least 95% routing, 0 functions invoked on controls.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">List the accelerator baseline positions with git show (positions/ only; never answer-key/)</step>
+    <step order="2">Choose five positions that differ between A and B: term, residuals, non-solicit, governing law, uncapped-indemnity flag; record each position's A value, B value and how an output shows which one was applied</step>
+    <step order="3">Write profile-a.json and profile-b.json with status: test, profileVersion (e.g. "g1-a-v1"), the five positions, model tier, and systemuserid: "TO-BE-SET-BY-011"</step>
+    <step order="4">Write the prompt script: numbered prompts per variant (a)/(b)/(c) x surface (Chat/Cowork) x profile (A as owner, B as test user), referencing corpus documents from task 003 by file name, including ratchet probes and the FR-05 instruction-following probes</step>
+    <step order="5">Write the results sheet columns: prompt no, variant, surface, profile, time UTC, expected position, observed position, pass/fail, profileVersion seen, App Insights evidence</step>
+    <step order="6">Write the pass rule exactly as spec FR-04 states it</step>
+    <step order="7">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any input, sample or source this task would use contains or references answer-key/ or a real NDA, STOP: do not copy it, and escalate per root CLAUDE.md §6.</trigger>
+    <trigger>If an input this task depends on differs from what spec.md states (a file, an Action row, a tool contract), STOP and escalate per root CLAUDE.md §6 rather than adapting the design.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g1-nda/README.md</output>
+    <output type="data">projects/specialist-legal-agents-r1/phase0/g1-nda/profiles/profile-a.json</output>
+    <output type="data">projects/specialist-legal-agents-r1/phase0/g1-nda/profiles/profile-b.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Profiles A and B differ on exactly the five named positions (or more), and each difference states how it is observable in a review output.</criterion>
+    <criterion testable="true">Each profile file parses as JSON and carries status: test and a profileVersion.</criterion>
+    <criterion testable="true">The prompt script covers every combination of variant (a/b/c), surface (Chat/Cowork) and profile (A/B), with 10 pilot cases per variant and surface marked.</criterion>
+    <criterion testable="true">README.md contains a separate FR-05 results row for tool-returned instructions, per surface.</criterion>
+    <criterion testable="true">The pass rule text matches spec FR-04 (95% both surfaces, 0 escapes, 0 bleed; otherwise (c)).</criterion>
+    <criterion testable="true">Negative: no file references answer-key/ or a real NDA; a grep for "answer-key", "Corteva", "RPX" and "Helios" over phase0/g1-nda/ returns nothing.</criterion>
+  </acceptance-criteria>
+
+  <notes>Task 003 writes the corpus the prompt script references; agree file names by using corpus/nda-NN.md (NN = 01..10) and bluefin-harbor as the existing corpus name.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

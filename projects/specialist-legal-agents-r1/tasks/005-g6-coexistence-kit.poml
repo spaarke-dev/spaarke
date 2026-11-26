@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G6 coexistence kit (extends T-P2)</title>
+    <phase>1 Test kits, content and desk items</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation and test-script creation only</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation / test-kit authoring against an explicit spec and the phase0/g8 reference</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write the G6 kit that tests whether Spaarke functions and Microsoft Legal for Cowork capture each other's tasks, starting from the accelerator T-P2 prompt set.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Writes precise LLM routing test protocols.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g6/README.md exists with the precondition (owner switches on Legal for Cowork), the extended prompt set with expected owner per prompt, the invoke-vs-recommend probe, the exported-playbook probe for review-contract and Word Run Review, the results sheet and the pass rule.</goal>
+
+  <context>
+    <background>Spec FR-07. T-P2 is in origin/work/spaarke-legal-ai-accelerator-r1:projects/spaarke-legal-ai-accelerator-r1/notes/component-protocol.md (5 prompts x 2 configurations). G6 subsumes T-P2; results go to accelerator-r1 in task 024.</background>
+    <relevant-files>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g6/README.md</file>
+      <file role="canonical-reference">origin/work/spaarke-legal-ai-accelerator-r1:projects/spaarke-legal-ai-accelerator-r1/notes/component-protocol.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every file this task writes is synthetic or drawn from public sources. No file, prompt or package written by this task quotes, copies, links or names a path under `answer-key/`, or contains text from the real NDAs (Corteva, RPX/Helios); check each written file against the `FORBIDDEN_IN_PACKAGE` list in `origin/work/spaarke-legal-ai-accelerator-r1:src/accelerators/build/gates.py` (NFR-02).</constraint>
+    <constraint source="project">Accelerator content is read only with `git show origin/work/spaarke-legal-ai-accelerator-r1:&lt;path&gt;` from this worktree. This task never checks out, edits or writes in the accelerator worktree or branch, and never reads `answer-key/`.</constraint>
+    <constraint source="project">This task uploads, installs or changes nothing in the Microsoft 365 tenant, Dataverse, Azure or the dev BFF; it writes only files under projects/specialist-legal-agents-r1/.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the T-P2 row and prompt set with git show</step>
+    <step order="2">Copy the T-P2 prompts by reference (cite them) and extend to at least 15 prompts across Spaarke-owned and Microsoft-owned tasks, each with its expected owner, for Chat and Cowork</step>
+    <step order="3">Add the invoke-vs-recommend probe (can a Spaarke agent invoke review-contract / summarize-redlines, or only recommend them) and the exported test playbook probe</step>
+    <step order="4">Write the results sheet and the pass rule from FR-07</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any input, sample or source this task would use contains or references answer-key/ or a real NDA, STOP: do not copy it, and escalate per root CLAUDE.md §6.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g6/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The prompt set has at least 15 prompts, each with an expected owner (Spaarke or Microsoft), for both Chat and Cowork.</criterion>
+    <criterion testable="true">The T-P2 source is cited by path and the original five prompts are included or referenced.</criterion>
+    <criterion testable="true">The invoke-vs-recommend and exported-playbook probes each have their own result rows.</criterion>
+    <criterion testable="true">The pass rule matches spec FR-07 (no capture in either direction across the shared set).</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

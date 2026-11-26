@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G1-PAT repeat for variants still in contention</title>
+    <phase>3 Test runs</phase>
+    <gate>after 022 verdict</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run coordination and scoring against a written kit and pass rule</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on the G1-NDA verdict</parallel-reason>
+    <deps>022</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Repeat the FR-04 measurement on patents for the variants (a)/(b) still in contention after G1-NDA, and record whether G1-PAT confirms or contradicts it.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in scoring LLM adherence tests.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g1-pat/README.md has results and a statement that G1-PAT confirms or contradicts G1-NDA.</goal>
+
+  <context>
+    <background>Spec FR-11. No patent server-side tool. If no variant (a)/(b) survived G1-NDA, record "not run: no variant in contention".</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g1-pat/README.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g1-nda/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">Pass rules are applied exactly as spec FR-04/FR-06 state them: pilot of 10 cases per variant and surface; a variant below 90% in its pilot stops; survivors get the full run; G1 pass = at least 95% adherence on both surfaces, 0 ratchet escapes, 0 cross-profile bleed; G5 pass = at least 95% routing, 0 functions invoked on controls.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the G1-NDA verdict; list the variants in contention</step>
+    <step order="2">If none, record "not run" with the reason and finish</step>
+    <step order="3">Otherwise hand over the G1-PAT script; score with the FR-04 thresholds</step>
+    <step order="4">State confirms or contradicts</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g1-pat/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The README lists the variants run and why.</criterion>
+    <criterion testable="true">Results apply the FR-04 thresholds.</criterion>
+    <criterion testable="true">The README states confirms or contradicts G1-NDA.</criterion>
+    <criterion testable="true">Negative: no variant that failed G1-NDA is run.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

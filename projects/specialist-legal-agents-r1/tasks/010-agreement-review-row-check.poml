@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>Check the agreement-review Action row and its input schema in DEV</title>
+    <phase>2 Spike tools and dev deploy</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Explicit ADR constraint (ADR-043 declared inputs); may lead to a DEV data write</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only Dataverse query plus a prepared JSON copy against a clear reference</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ai, dataverse</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Find out whether the agreement-review Action row is deployed in DEV and whether its input schema can declare the profile positions; if not, prepare (but do not create) a DEV-only agreement-review-spike copy and ask the owner.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Spaarke JPS Actions (sprk_analysisaction) and the Dataverse Web API.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g1-nda/action-check.md records the DEV row's existence, sprk_actioncode, input schema and model tier; if a copy is needed, projects/specialist-legal-agents-r1/phase0/g1-nda/agreement-review-spike.action.json is prepared with the profile inputs declared, and the owner's go is requested.</goal>
+
+  <context>
+    <background>Spec FR-02 and Unresolved Question 1. ADR-043: undeclared inputs are dropped. The production row is never edited. The Dataverse MCP server was disconnected on 2026-11-26; use a read-only Web API query.</background>
+    <relevant-files>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g1-nda/action-check.md</file>
+      <file role="new">projects/specialist-legal-agents-r1/phase0/g1-nda/agreement-review-spike.action.json</file>
+      <file role="canonical-reference">infra/dataverse/actions/agreement-review.action.json</file>
+      <file role="canonical-reference">scripts/Deploy-AnalysisAction.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043">The spike copy declares every profile position it receives in its input schema; nothing relies on an undeclared input.</constraint>
+    <constraint source="project">This task performs read-only Dataverse queries only. It never edits the production agreement-review row, and it creates agreement-review-spike in DEV only after the owner says go in chat.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>scripts/Deploy-AnalysisAction.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read infra/dataverse/actions/agreement-review.action.json (input schema, model tier)</step>
+    <step order="2">Query DEV read-only for sprk_analysisaction where sprk_actioncode is agreement-review; record existence, input schema and tier</step>
+    <step order="3">If the deployed input schema can carry the five profile positions as declared inputs, record "no copy needed"</step>
+    <step order="4">Otherwise write agreement-review-spike.action.json (copy with the positions declared, actioncode agreement-review-spike) and the exact Deploy-AnalysisAction.ps1 command, then ask the owner for the go</step>
+    <step order="5">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+    <trigger>If the DEV row is missing entirely, STOP and report; do not create a production-named row.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g1-nda/action-check.md</output>
+    <output type="data">projects/specialist-legal-agents-r1/phase0/g1-nda/agreement-review-spike.action.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">action-check.md states whether the DEV agreement-review row exists, its input schema and its model tier, with the query used.</criterion>
+    <criterion testable="true">If a copy is needed, agreement-review-spike.action.json declares all five profile positions as inputs and uses actioncode agreement-review-spike.</criterion>
+    <criterion testable="true">Negative: no Dataverse write happens in this task without the owner's recorded go; the production row is unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

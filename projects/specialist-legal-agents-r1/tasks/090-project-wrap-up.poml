@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>Phase 0 wrap-up</title>
+    <phase>Wrap-up</phase>
+    <gate>after all tasks</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close quality gates and documentation</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist-driven wrap-up</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Last task; depends on all</parallel-reason>
+    <deps>001,002,003,004,005,006,007,010,011,015,020,021,022,023,024,025,026,030,031</deps>
+    <tags>devops</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close Phase 0: run the final quality gates, clean the project folder, update README and plan status, write lessons learned, and hand the umbrella on to the Phase 1 child project. Do not archive the umbrella without the owner's go.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Project closer for the Spaarke delivery process.</role>
+  <goal>README.md and plan.md show Phase 0 complete; notes/lessons-learned.md has the Phase 0 lessons; TASK-INDEX.md is all done; the owner has been asked whether Issue #3002 stays open for Phases 1-4.</goal>
+
+  <context>
+    <background>task-create Step 3.7. The umbrella continues: Phases 1-4 are child projects (design §4). /devops-project-archive runs only on the owner's go.</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/README.md</file>
+      <file role="modify">projects/specialist-legal-agents-r1/plan.md</file>
+      <file role="new">projects/specialist-legal-agents-r1/notes/lessons-learned.md</file>
+      <file role="modify">projects/specialist-legal-agents-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Prerequisite task output</dependency>
+      <dependency task="002" status="pending">Prerequisite task output</dependency>
+      <dependency task="003" status="pending">Prerequisite task output</dependency>
+      <dependency task="004" status="pending">Prerequisite task output</dependency>
+      <dependency task="005" status="pending">Prerequisite task output</dependency>
+      <dependency task="006" status="pending">Prerequisite task output</dependency>
+      <dependency task="007" status="pending">Prerequisite task output</dependency>
+      <dependency task="010" status="pending">Prerequisite task output</dependency>
+      <dependency task="011" status="pending">Prerequisite task output</dependency>
+      <dependency task="015" status="pending">Prerequisite task output</dependency>
+      <dependency task="020" status="pending">Prerequisite task output</dependency>
+      <dependency task="021" status="pending">Prerequisite task output</dependency>
+      <dependency task="022" status="pending">Prerequisite task output</dependency>
+      <dependency task="023" status="pending">Prerequisite task output</dependency>
+      <dependency task="024" status="pending">Prerequisite task output</dependency>
+      <dependency task="025" status="pending">Prerequisite task output</dependency>
+      <dependency task="026" status="pending">Prerequisite task output</dependency>
+      <dependency task="030" status="pending">Prerequisite task output</dependency>
+      <dependency task="031" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The project folder is not renamed or moved; the umbrella is archived only on the owner's go.</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /code-review and /adr-check over the Phase 0 changes on work/specialist-legal-agents-r1; fix every F-class finding</step>
+    <step order="2">Run /repo-cleanup projects/specialist-legal-agents-r1; review; archive handoffs</step>
+    <step order="3">Update README.md (Phase 0 complete) and plan.md (milestones checked)</step>
+    <step order="4">Append Phase 0 lessons to notes/lessons-learned.md</step>
+    <step order="5">Verify every task is done; ask the owner whether to archive or keep #3002 open for Phases 1-4</step>
+    <step order="6">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any F-class review finding cannot be fixed in scope, file it with /project-defer-issue-tracking and tell the owner.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/README.md</output>
+    <output type="docs">projects/specialist-legal-agents-r1/plan.md</output>
+    <output type="docs">projects/specialist-legal-agents-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review and adr-check have run with no open F-class finding.</criterion>
+    <criterion testable="true">README.md and plan.md show Phase 0 complete.</criterion>
+    <criterion testable="true">notes/lessons-learned.md has at least one Phase 0 entry.</criterion>
+    <criterion testable="true">Every TASK-INDEX.md row shows ✅ [done], [cancelled] or [deferred].</criterion>
+    <criterion testable="true">Negative: the umbrella is not archived without the owner's go.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

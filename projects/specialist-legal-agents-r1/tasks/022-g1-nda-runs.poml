@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="specialist-legal-agents-r1">
+  <metadata>
+    <title>G1-NDA runs: pilots, full runs and verdict (GO/NO-GO)</title>
+    <phase>3 Test runs</phase>
+    <gate>after 003 and 020</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Phase 3 integration testing with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run coordination and scoring against a written kit and pass rule</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003,020</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run G1-NDA as staged in the kit: 10-case pilots per variant and surface, stop variants below 90%, full runs for survivors, then score adherence, bleed and ratchet escapes and record the verdict.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in scoring LLM adherence tests.</role>
+  <goal>projects/specialist-legal-agents-r1/phase0/g1-nda/README.md has the filled results sheet with App Insights evidence, the FR-05 row, and a verdict per variant and surface against the FR-04 thresholds.</goal>
+
+  <context>
+    <background>Spec FR-04 and FR-05. Profile A is the owner, B the test user. Variant (c) uses spike_review_nda. Old G8 agents must be removed first (2026-11-30).</background>
+    <relevant-files>
+      <file role="modify">projects/specialist-legal-agents-r1/phase0/g1-nda/README.md</file>
+      <file role="canonical-reference">projects/specialist-legal-agents-r1/phase0/g1-nda/corpus/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Prerequisite task output</dependency>
+      <dependency task="020" status="pending">Prerequisite task output</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tenant and admin-center actions (uploads, installs, switch-ons, removals), Dataverse writes and BFF deploys in this task are done by the owner or on the owner's explicit go in chat; the agent prepares instructions and records results.</constraint>
+    <constraint source="project">Pass rules are applied exactly as spec FR-04/FR-06 state them: pilot of 10 cases per variant and surface; a variant below 90% in its pilot stops; survivors get the full run; G1 pass = at least 95% adherence on both surfaces, 0 ratchet escapes, 0 cross-profile bleed; G5 pass = at least 95% routing, 0 functions invoked on controls.</constraint>
+    <constraint source="project">Every file this task writes is synthetic or drawn from public sources. No file, prompt or package written by this task quotes, copies, links or names a path under `answer-key/`, or contains text from the real NDAs (Corteva, RPX/Helios); check each written file against the `FORBIDDEN_IN_PACKAGE` list in `origin/work/spaarke-legal-ai-accelerator-r1:src/accelerators/build/gates.py` (NFR-02).</constraint>
+    <constraint source="project">Files are written only under the output paths listed in this task; no file under .claude/, src/, tests/ or another project folder is changed on work/specialist-legal-agents-r1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/specialist-legal-agents-r1/CLAUDE.md</file>
+      <file>projects/specialist-legal-agents-r1/spec.md</file>
+      <file>projects/specialist-legal-agents-r1/phase0/g8/README.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the G8 artifacts are removed (inventory) before the first run</step>
+    <step order="2">Hand the owner and test user the pilot script; record times</step>
+    <step order="3">Score each pilot decision against the corpus README; stop any variant below 90%</step>
+    <step order="4">Hand over the full-run script for survivors; score</step>
+    <step order="5">Record bleed, ratchet escapes, FR-05 instruction-following, profileVersion per decision, and the verdict</step>
+    <step order="6">Update tasks/TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed token is mandatory) and set the POML &lt;status&gt; to completed; run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">Record any deviation from the plan in projects/specialist-legal-agents-r1/notes/decisions.md (one dated line)</step>
+  </steps>
+
+  <escalation>
+    <trigger>When the next step is a tenant click, a prompt run by the owner or test user, a Dataverse write or a deploy, STOP, write the exact instructions into the task README, and ask the owner in chat; do not perform or simulate it.</trigger>
+    <trigger>If a run shows any cross-profile bleed, record it and tell the owner before continuing; do not change the profiles mid-run.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Run shell commands (git show for read-only accelerator content)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/specialist-legal-agents-r1/phase0/g1-nda/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every variant and surface has a pilot score; variants below 90% are marked stopped.</criterion>
+    <criterion testable="true">Survivors have full-run adherence per surface, bleed count and ratchet-escape count.</criterion>
+    <criterion testable="true">Every logged decision cites its run time and profileVersion.</criterion>
+    <criterion testable="true">The verdict applies FR-04 exactly: (a)/(b) pass only at 95% on both surfaces with 0 escapes and 0 bleed; otherwise (c).</criterion>
+    <criterion testable="true">The FR-05 row records the share of runs that followed tool-returned instructions, per surface.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md for the FR this task implements.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
