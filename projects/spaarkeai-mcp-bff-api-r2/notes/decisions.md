@@ -72,3 +72,23 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
 - **Why not a separate task:** it is small, it touches no file another running task touches (023, 026 and 027 don't name `PlaybookEndpoints`), and the pattern is settled.
 - **Why not a new PublicContracts facade:** it would be a new interface plus a DI registration (root CLAUDE.md §11) for no gain.
 - **Verification:** two verifier passes, because it touches caller resolution.
+
+## D-run-record-decided — `sprk_playbookrun` is the one AI-run record (2026-11-25; releases D-run-record-hold)
+- **Source:** the owner's decision ("yes extend", 2026-11-25), relayed by specialist-legal-agents-r1. Rationale: `notes/playbook-concept-and-run-record-2026-11-25.md` on `work/specialist-legal-agents-r1` @ 1cf6845687.
+- **Decision:** `sprk_playbookrun` (display name "AI Run") records engine, prompted-Action and coded-workflow runs.
+- **Split of the schema work:**
+  - **r2 task 005 (shared columns):**
+    - `sprk_playbookrun`:
+      - `sprk_playbookid` becomes optional;
+      - add a run-kind choice (engine / prompted / coded), a lookup to `sprk_analysisaction`, a lookup to `sprk_playbookconsumer` (Binding) and a parent-run self-lookup;
+      - plus 005's planned columns: correlation/idempotency id, error code, regarding, summary.
+    - `sprk_playbooknoderun`: `sprk_playbooknodeid` becomes optional; add an Action lookup; plus 005's started-on, completed-on and sequence.
+  - **specialist-legal-agents-r1 Phase 1:** a profile-version lookup (to `sprk_agentprofileversion`, not yet created) and a gate-decision reference.
+- **Writes:**
+  - Engine runs are written by `PlaybookOrchestrationService` (r2 FR-13; run kind = engine).
+  - Action and coded runs are written at the PublicContracts facade or the coded-workflow seam by specialist-legal-agents-r1 Phase 1.
+  - r2 proposed that all of them go through 005's `PlaybookRunRecordStore`, so one component owns the row shape (ADR-002: one owner per invariant). Answer pending.
+- **Still needed:**
+  - the owner's explicit go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev (root §5; this decision is a design choice, not that go);
+  - task 030 keeps its ADR-039 check (the node engine stays frozen);
+  - check specialist-legal-agents-r1's docs/ADR PR (ADR-039 + AI architecture doc) against 005's column list when it arrives.
