@@ -15,11 +15,7 @@
 
 ## Next action (exact)
 
-1. **Coordination checks on 020 (in progress).**
-   - R3: add "test" to the Cowork package names (`spaarke-legal-g1{a,b,c}-cowork` → `-cowork-test`) and the skills (`spaarke-g1-nda-review-*` → `spaarke-test-g1-nda-review-*`, `spaarke-g2-marker` → `spaarke-test-g2-marker`). Update folders, manifests, READMEs and UPLOAD.md, rezip, re-run the FORBIDDEN check, and send the renamed rows.
-   - Routing isolation: add to the G1 kit that runs switch on ONE variant at a time, with the accelerator `nda-review` and `nda-library-review` skills OFF for the owner and demo@; any `spike_review_nda` call under (a)/(b) counts as a deviation.
-   - R1′: do not cite it as an approved rule (the owner decision is pending).
-   - Then reply to coordination.
+1. Coordination checks on 020: DONE (d1cf402ec2; test markers, run isolation, R1′ wording; reply sent).
 2. **Owner decision:** whether to add the G5 stub tools `spike_review_agreement` / `spike_review_legal_hold` (a spike change, then review, then a uac-r2 deploy).
 3. **Owner:** upload per `phase0/g1-nda/packages/UPLOAD.md` (owner + demo@ only). Remove the G8 artifacts by 2026-11-30.
 4. Then 021/022 runs. The latency p95 check moved into 021.
