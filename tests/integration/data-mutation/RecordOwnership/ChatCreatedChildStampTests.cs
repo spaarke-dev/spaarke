@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Agent;
+using Sprk.Bff.Api.Services.Ai.Handoff;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai;

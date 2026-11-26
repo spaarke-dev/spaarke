@@ -28,8 +28,8 @@ namespace Spaarke.Dataverse;
 /// <c>PackageReference</c> is introduced either.</para>
 ///
 /// <para><b>Only ONE consumer needs this interface.</b> <c>DataverseAccessDataSource</c> lives in this
-/// assembly and cannot see the implementation. The three BFF-side consumers —
-/// <c>GraphClientFactory</c>, <c>DataverseUserClient</c>, <c>AgentTokenService</c> — can inject the
+/// assembly and cannot see the implementation. The two BFF-side consumers —
+/// <c>GraphClientFactory</c> and <c>DataverseUserClient</c> — can inject the
 /// implementation <b>concretely</b>, which ADR-010 prefers. Do not add the interface to call sites that
 /// do not need it.</para>
 ///

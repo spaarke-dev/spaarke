@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Deploy Phase 0 to dev (gated on runbook E1 and per-SHA go)</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>BLOCKED until the owner confirms runbook E1 is done AND gives a go for the exact SHA in uac-r2's session</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task with live verification</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment through the existing bff-deploy skill; judgment points are escalation triggers</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment to the shared dev BFF; runs alone</parallel-reason>
+    <deps>001, 002, 005, 006, 007, 008, 009</deps>
+    <tags>deploy, azure, app-service, bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Once the owner has confirmed runbook E1 (both "Spaarke AI" Registry rows uninstalled and deleted) and given a go for the exact SHA, deploy the merged Phase 0 BFF to dev through unified-access-control-r2's session with the bff-deploy skill, and verify /api/agent/message returns 404, health, the MCP decision tools and the Console still work.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Azure App Service deployment of the Spaarke BFF.</role>
+  <goal>The approved SHA runs on the dev BFF; /api/agent/message answers 404; /healthz 200; r1's five tools still list for the test user; Console smoke passes; deploy evidence and rollback SHA are recorded.</goal>
+
+  <context>
+    <background>Spec FR-01 acceptance ("/api/agent/message answers 404 on dev"), Dependencies ("before the removal PR deploys to dev the owner has completed runbook E1"; "dev deploys through unified-access-control-r2's session with the owner's go per SHA"). Runbook: projects/copilot-platform-coordination/notes/removal-runbook.md on work/copilot-platform-coordination. Phase 0 tasks 010, 011 (client libraries) and 004/012 (docs, Dataverse) do not change the BFF artifact; 005's schema change must be on dev before its code deploys.</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/tasks/041-dev-bff-deploy-gated.poml (deploy shape)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">BFF agent removal merged</dependency>
+      <dependency task="005" status="pending">Run persistence merged and its dev schema applied</dependency>
+      <dependency task="006" status="pending">Events capability merged</dependency>
+      <dependency task="007" status="pending">Playbook auth shared method merged</dependency>
+      <dependency task="008" status="pending">Finance auth shared method merged</dependency>
+      <dependency task="009" status="pending">Record-search proof merged</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy only after (a) the owner confirms runbook E1 in this session (record the date) and (b) the owner gives an explicit go for the exact SHA; the deploy runs in uac-r2's session. Otherwise the task stays blocked.</constraint>
+    <constraint source="project">Use the bff-deploy skill (scripts/Deploy-BffApi.ps1); never raw az webapp deploy --clean. Only the dev BFF is touched; no App Service setting changes.</constraint>
+    <constraint source="project">005's columns must exist on dev before the build that writes them deploys (check notes/005-schema.md); if not, stop.</constraint>
+    <constraint source="ADR-029">Record the published size (at or under 60 MB) in the deploy note.</constraint>
+    <constraint source="project">Run context-handoff after the deploy (root CLAUDE.md §5).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Record in notes/deploy-dev-019.md: the owner's E1 confirmation (date) and go for SHA {sha}. If either is missing, stop.</step>
+    <step order="2">Confirm 005's dev schema is applied (notes/005-schema.md); run /conflict-check; confirm the branch or master SHA to deploy.</step>
+    <step order="3">Deploy with the bff-deploy skill in uac-r2's session; record the previous SHA for rollback and the publish size.</step>
+    <step order="4">Verify: /healthz 200; POST /api/agent/message (authenticated) returns 404; tools/list on /mcp/legal-operations returns r1's tools for the test user; Console smoke (worklist, Daily Briefing, a playbook run, an event list).</step>
+    <step order="5">Run context-handoff.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not confirmed E1 or not given a go for this exact SHA, STOP; do not deploy.</trigger>
+    <trigger>If /healthz or the Console smoke fails after deploy, roll back to the recorded SHA and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">scripts/Deploy-BffApi.ps1 via the bff-deploy skill</tool>
+    <tool name="terminal">curl for probes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">dev BFF at the approved SHA</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/deploy-dev-019.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/deploy-dev-019.md records E1 confirmation, the owner's go with the exact SHA, the deployed SHA, the rollback SHA and the publish size (at or under 60 MB).</criterion>
+    <criterion testable="true">Negative: without both gate conditions recorded, no deploy happened.</criterion>
+    <criterion testable="true">On dev: /healthz 200; authenticated POST /api/agent/message returns 404.</criterion>
+    <criterion testable="true">tools/list returns r1's tools unchanged for the test user; the Console smoke passes.</criterion>
+    <criterion testable="true">No App Service setting changed and no environment other than dev was touched.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01, Dependencies. Plan risk R1/R3.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>spaarke_run_playbook: optional `instructions` argument (user focus for the run)</title>
+    <phase>2 Long-running work, AI, widgets, task writes</phase>
+    <gate>Owner decision 2026-11-26 (notes/decisions.md D-owner-answers-2026-11-26 #18: "yes add this feature but make easy for user to use and do not add many other steps"). Needs 030 (done). Before starting, merge origin/work/spaarkeai-mcp-bff-api-r2 and origin/master into the branch (merge, never rebase).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a model-callable write tool's input contract, its idempotency fingerprint and the detached-run helper's contract</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-bounded change over 030's code with exact files and tests to copy</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RunPlaybookTool.cs and IPlaybookRunAi.cs, which 037 may also touch; run 038 before 037</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let a Copilot user steer a playbook run in plain words ("focus on indemnity and termination"). Add an optional string argument `instructions` to spaarke_run_playbook and pass it to the engine's existing per-run user context (PlaybookRunRequest.UserContext), the same field the Console's run request uses. No new step for the user: the model fills it from what the user already said, and leaves it out when they said nothing. No confirmation prompt, no extra tool call, no widget change.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool handlers and the JPS playbook run request.</role>
+  <goal>A user who says what to focus on gets a run that uses it, with no extra step; a run without it behaves exactly as today.</goal>
+
+  <context>
+    <background>Owner Q18 (current-task.md); 030 review. 030: Api/Mcp/LegalOperations/Playbooks/RunPlaybookTool.cs, Services/Ai/PublicContracts/IPlaybookRunAi.cs (StartAsCallerAsync(HttpContext, playbookId, Guid[] documentIds, parameters, ct)), Services/Ai/PlaybookRuns/DetachedPlaybookRunner.cs (builds PlaybookRunRequest { PlaybookId, DocumentIds, Parameters }). Find how the REST execute route sets UserContext and copy its rules (trim, length cap). Idempotency: McpIdempotency.FingerprintOf (CAPABILITY-INDEX row 48).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/RunPlaybookTool.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IPlaybookRunAi.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRuns/DetachedPlaybookRunner.cs</file>
+      <file role="modify">tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunToolsContractTests.cs</file>
+      <file role="modify">tests/integration/auth/Ai/DetachedPlaybookRunnerTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunWorld.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="completed">run start path</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Optional argument; absent, empty or whitespace = today's behaviour exactly (no UserContext set). Cap it (use the REST route's cap if one exists, else 2,000 characters) and refuse over-length input with an isError invalid-argument result, never silent truncation. Tool description gains one short sentence: "Optional: what the user asked the run to focus on, in their words; omit if they said nothing." Keep the description ≤ 1,024 characters and re-run the routing eval descriptions check if one exists.</constraint>
+    <constraint source="project">The instructions are part of the idempotency fingerprint: the same key with different instructions is a conflict, as with any other input.</constraint>
+    <constraint source="NFR-05">Never log the instructions text (it is user query text). Log only whether it was present and its length.</constraint>
+    <constraint source="ADR-015">Do not echo the instructions in model-visible output or the run record.</constraint>
+    <constraint source="ADR-052">The text travels inside the detached run's request object in memory only, like the other inputs; no new storage. Do not change the helper's authorization, caps or token handling.</constraint>
+    <constraint source="ADR-039">No edits to PlaybookOrchestrationService, executors or node graphs; use the existing UserContext field. If the engine has no such field on the path 030 uses, STOP and report.</constraint>
+    <constraint source="ADR-029">Placement Justification and publish-size delta vs fresh master in the PR (.claude/rules/bff-hygiene.md item 4).</constraint>
+    <constraint source="ADR-038">Tests on KEEP paths; fail-before for each behaviour test; bounded waits only.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/030-decisions.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find the REST route's UserContext handling (cap, trimming) and the engine field; record in notes/038-decisions.md.</step>
+    <step order="2">Tests first: instructions reach PlaybookRunRequest.UserContext; absent leaves it unset; over-length refused; fingerprint differs; logs carry no text.</step>
+    <step order="3">Add the argument, pass it through IPlaybookRunAi and the runner; update the description.</step>
+    <step order="4">Build, affected tests, ArchTests (Mcp, DetachedHttpContextGuard), format check, publish-size delta.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The engine has no per-run user context on the path 030 uses, or using it would need an engine edit.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>PlaybookRunRequest.UserContext (engine, used by the Console); spaarke_run_playbook (030).</existing>
+    <extension>Extends the existing tool and helper contract with one optional field; no new surface.</extension>
+    <cost-of-doing-nothing>A Copilot user cannot tell a run what to focus on, which the Console allows (owner Q18).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">A call with instructions starts a run whose request carries them as UserContext.</criterion>
+    <criterion testable="true">A call without them (or blank) produces a request identical to today's.</criterion>
+    <criterion testable="true">Over-length instructions return isError invalid-argument; no run starts.</criterion>
+    <criterion testable="true">Same idempotency key with different instructions does not replay the earlier run.</criterion>
+    <criterion testable="true">Negative: no log line, model-visible text or stored record contains the instructions text.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner Q18, 2026-11-26.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the full protocol.</protocol>
+  </execution>
+</task>

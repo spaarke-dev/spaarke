@@ -185,6 +185,12 @@ public static class AnalysisServicesModule
         });
         services.AddSingleton<Services.Ai.Metering.AiSpendLimit>();
 
+        // spaarkeai-mcp-bff-api-r2 task 030 (FR-05, FR-14; ADR-052 amendment 2026-11-26) — IPlaybookRunAi, the one detached
+        // caller run. UNCONDITIONAL per ADR-032 F.1: its consumers (the MCP run tools) are registered whenever MCP is on, and it
+        // degrades itself (it resolves the engine and HandoffUrlBuilder per call from the caller's scope; under compound-OFF the
+        // Null engine refuses and the start answers Unavailable). Singleton: its run table must outlive a request scope.
+        services.AddSingleton<Services.Ai.PublicContracts.IPlaybookRunAi, Services.Ai.PlaybookRuns.DetachedPlaybookRunner>();
+
         // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
         // TRULY UNCONDITIONAL, mirroring the always-mapped
         // WorkspaceFileEndpoints.MapWorkspaceFileEndpoints (the non-AI /api/workspace/files/summarize
@@ -1351,6 +1357,11 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Insights.Routing.IInsightsActionRouter,
                            Sprk.Bff.Api.Services.Ai.Insights.Routing.InsightsActionRouter>();
 
+        // spaarkeai-mcp-bff-api-r2 task 005 (FR-13): the durable run record PlaybookOrchestrationService writes on the
+        // run's own path and reads when a run is not in memory. Concrete only (ADR-010): its test seam is
+        // IGenericEntityService. Registered beside its only consumer, so the compound-OFF branch never needs a peer
+        // (NullPlaybookOrchestrationService does not take it; ADR-032 F.1 static scan: no endpoint injects it).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PlaybookRuns.PlaybookRunRecordStore>();
         services.AddScoped<IPlaybookOrchestrationService, PlaybookOrchestrationService>();
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).

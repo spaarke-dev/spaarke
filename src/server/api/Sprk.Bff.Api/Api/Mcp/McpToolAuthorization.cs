@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
@@ -54,6 +55,25 @@ public static class McpToolAuthorization
     {
         "",
         "SystemAdmin",
+    };
+
+    /// <summary>
+    /// The argument a model-callable write must require (spaarkeai-mcp-bff-api-r2 NFR-06): the caller's retry key. A retry with the
+    /// same key and the same caller returns the first result instead of writing again.
+    /// </summary>
+    public const string IdempotencyKeyArgument = "idempotencyKey";
+
+    /// <summary>
+    /// The CLOSED list of model-callable writes (spaarkeai-mcp-bff-api-r2 NFR-06, verifier fix F2): the only tools that may be not
+    /// read-only, not app-only and a declared reversible write. <see cref="ValidateTool"/> refuses a reversible-write tool whose name is not
+    /// here, so a tool does not become model-callable for a write because it declared the right hints. Add a name here with the task that
+    /// adds the tool (task 030 <c>spaarke_run_playbook</c>, task 036 its task writes); the tool's tests must prove it honours its key
+    /// (<see cref="McpIdempotency"/>). An allow-list, not a pattern: <c>McpAuthTests</c> pins the shape and the list.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ModelCallableWrites = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "spaarke_start_analysis",
+        "spaarke_run_playbook", // r2 task 030: starts a detached caller run (ADR-052 amendment 2026-11-26); retry key per caller
     };
 
     // The full name of the ASP.NET Core anonymity metadata interface. Matched by name because the anonymity guard
@@ -161,7 +181,7 @@ public static class McpToolAuthorization
     /// Throws <see cref="InvalidOperationException"/> when <paramref name="tool"/> (built by <paramref name="definition"/>) breaks
     /// the per-tool rule: no <c>[Authorize]</c> on the tool class; enforced <c>[Authorize]</c> metadata that differs from the
     /// class's own; anonymity metadata; a policy outside <see cref="AllowedToolPolicies"/>; an authentication scheme named on the
-    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only and is not app-only (O-14). Called by <see cref="McpToolCatalog"/> for every tool at startup.
+    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only, not app-only and not a declared reversible write named in <see cref="ModelCallableWrites"/> (O-14 narrowed by r2 NFR-06). Called by <see cref="McpToolCatalog"/> for every tool at startup.
     /// </summary>
     public static void ValidateTool(McpServerTool tool, Type definition)
     {
@@ -219,14 +239,40 @@ public static class McpToolAuthorization
             throw new InvalidOperationException($"{where} has no title (FR-03).");
         }
 
-        // O-14: no model-callable write tool in v1. A tool that is not read-only must be app-only: _meta.ui.visibility is exactly
-        // ["app"]. A missing, empty or wider list (a tool with no visibility is model-visible by default) refuses startup.
-        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta))
+        // O-14, narrowed by r2 NFR-06 (owner 2026-11-25): a tool that is not read-only must be app-only (_meta.ui.visibility exactly
+        // ["app"]; a missing, empty or wider list is model-visible by default) UNLESS it declares itself a reversible write: explicitly
+        // not destructive, explicitly idempotent, and requiring the idempotencyKey string argument. Anything else refuses startup.
+        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta) && !IsReversibleWrite(tool.ProtocolTool))
         {
             throw new InvalidOperationException(
-                $"{where} is not read-only, so it must be app-only: set _meta.ui.visibility to exactly [\"app\"] (O-14: no model-callable write tool).");
+                $"{where} is not read-only, so it must be app-only (set _meta.ui.visibility to exactly [\"app\"]) or a reversible write "
+                + $"(Destructive = false, Idempotent = true and a required '{IdempotencyKeyArgument}' string argument) (O-14, NFR-06).");
+        }
+
+        // NFR-06, closed: a reversible write that is model-visible must also be NAMED in ModelCallableWrites, so a new write tool
+        // is a reviewed addition to one list, never a tool that passed because its hints were right.
+        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta) && !ModelCallableWrites.Contains(name))
+        {
+            throw new InvalidOperationException(
+                $"{where} is a model-callable write that is not in McpToolAuthorization.ModelCallableWrites. Add it there (with its task) or make it "
+                + "app-only (set _meta.ui.visibility to exactly [\"app\"]) (NFR-06).");
         }
     }
+
+    // NFR-06: what a model-callable write declares. The declaration is checked here; each such tool's tests prove it honours the key.
+    private static bool IsReversibleWrite(ModelContextProtocol.Protocol.Tool tool) =>
+        tool.Annotations is { DestructiveHint: false, IdempotentHint: true }
+        && tool.InputSchema.ValueKind == JsonValueKind.Object
+        && tool.InputSchema.TryGetProperty("required", out var required)
+        && required.ValueKind == JsonValueKind.Array
+        && required.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == IdempotencyKeyArgument)
+        && tool.InputSchema.TryGetProperty("properties", out var properties)
+        && properties.ValueKind == JsonValueKind.Object
+        && properties.TryGetProperty(IdempotencyKeyArgument, out var key)
+        && key.ValueKind == JsonValueKind.Object
+        && key.TryGetProperty("type", out var type)
+        && type.ValueKind == JsonValueKind.String
+        && type.GetString() == "string";
 
     private static bool IsAppOnly(JsonObject? meta) =>
         meta?["ui"] is JsonObject ui

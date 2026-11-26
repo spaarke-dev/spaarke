@@ -29,8 +29,8 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// user-OBO audit greps this file for that guarantee.
 /// </para>
 /// <para>
-/// Confidential-client configuration mirrors the proven OBO precedents
-/// (<c>AgentTokenService</c>, <c>DataverseAccessDataSource</c>): primary keys
+/// Confidential-client configuration mirrors the proven OBO precedent
+/// (<c>DataverseAccessDataSource</c>): primary keys
 /// <c>AzureAd:TenantId/ClientId/ClientSecret</c> (the BFF's own registration — required
 /// because the inbound token's audience is the BFF app), with legacy fallbacks
 /// <c>TENANT_ID</c>/<c>API_APP_ID</c>/<c>API_CLIENT_SECRET</c>. Dataverse environment URL from

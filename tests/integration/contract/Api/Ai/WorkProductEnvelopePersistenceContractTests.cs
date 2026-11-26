@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// the session persistence seam (<see cref="ChatSessionManager.UpdateSessionCacheAsync"/>)
 /// and the user-OBO Dataverse Web API (<see cref="IDataverseUserClient"/>), stubbed with
 /// rows shaped like the seeded spaarkedev1 catalog (task 047: topic
-/// <c>matter-summary</c> → <c>sprk_matter.sprk_mattersummary</c>).
+/// <c>matter-summary</c> → <c>sprk_matter.sprk_recordsummary</c>).
 /// </para>
 /// <para>
 /// <b>KEEP rationale (maintain-class, contract path)</b>: the envelope is a cross-system
@@ -119,7 +119,7 @@ public class WorkProductEnvelopePersistenceContractTests
         // Assert — the PATCHed envelope carries EVERY schema-required member, correctly valued.
         dataverse.PatchedPath.Should().Be($"sprk_matters({HostRecordId:D})");
         using var patchBody = JsonDocument.Parse(dataverse.PatchedBody!);
-        var envelopeText = patchBody.RootElement.GetProperty("sprk_mattersummary").GetString()!;
+        var envelopeText = patchBody.RootElement.GetProperty("sprk_recordsummary").GetString()!;
         using var envelope = JsonDocument.Parse(envelopeText);
         var root = envelope.RootElement;
 
@@ -281,7 +281,7 @@ public class WorkProductEnvelopePersistenceContractTests
 
     /// <summary>
     /// User-OBO Web API double shaped like the seeded spaarkedev1 catalog (task 047):
-    /// registry topic <c>matter-summary</c> → <c>sprk_matter.sprk_mattersummary</c>.
+    /// registry topic <c>matter-summary</c> → <c>sprk_matter.sprk_recordsummary</c>.
     /// Records the "patch" event for ordering proof and captures the PATCH for inspection.
     /// </summary>
     private sealed class FakeDataverseUserClient : IDataverseUserClient
@@ -295,7 +295,7 @@ public class WorkProductEnvelopePersistenceContractTests
             List<string> events,
             string registryTopic = "matter-summary",
             string registryHostEntity = "sprk_matter",
-            string registryTargetField = "sprk_mattersummary")
+            string registryTargetField = "sprk_recordsummary")
         {
             _events = events;
             _registryTopic = registryTopic;
