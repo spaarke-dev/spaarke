@@ -119,3 +119,29 @@
 ### D-026-2: two real-host tests pin the exact tool set and fail for any new tool (follow-up for the main session, not a defect)
 
 - `tests/integration/contract/Api/Mcp/McpHostContractTests.cs` `RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyTheFiveV1Tools` (the names list and `HaveCount(5)`) and `tests/integration/auth/Mcp/McpCallerPathTests.cs` `Test5_TheRealBffHost_TheTwoStaticSchemaTools_PublishExactlyTheirPinnedArguments_ASchemaPinNotAnInjectionProof` (the static-schema dictionary; `spaarke_get_portfolio` is a static-schema tool with no arguments: add `["spaarke_get_portfolio"] = []`, or add it to `InferredSchemaTools`) fail as soon as the first r2 tool lands. Tasks 023/024/026/027 run in parallel, so none edits them; update once after the wave merges.
+
+## From task 023 (2026-11-25)
+
+### D-023-1: GetDocumentsByLookupAsync returns at most 50 rows with no ordering, so the matter document list can silently miss documents
+
+- **GitHub issue**: not filed by the wave agent (wave rule); the main session files it.
+- **Title**: `IDocumentDataverseService.GetDocumentsByMatterAsync: TopCount 50 and no OrderBy; matters with more documents are cut arbitrarily`
+- **Body**:
+  `DataverseServiceClientImpl.GetDocumentsByLookupAsync` (the query behind `GetDocumentsByMatterAsync` / `GetDocumentsByProjectAsync`) sets
+  `TopCount = 50` and no order. Failure scenario: a matter with 60 documents shows 50 arbitrary ones in the email attachment picker
+  (task 011, through `spaarke_list_documents`) and the cut changes between calls. Task 023 tells the model (`hasMore` is true at exactly
+  50 rows) but cannot page or order, because the source has no paging. Task 040's same-matter check must not rely on list membership
+  (use `DocumentEntity.MatterId`, D7). Fix: order by `modifiedon desc` and add a paging cookie or an explicit limit parameter to the
+  service method. Out of scope for 023 (shared Spaarke.Dataverse surface, another consumer set).
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+### D-023-2: GET /api/v1/documents?containerId= has no caller and carries a known type-bug (found in passing)
+
+- **GitHub issue**: not filed by the wave agent (wave rule); the main session files it.
+- **Title**: `DataverseDocumentsEndpoints.ListDocumentsAsync: a route with zero callers, kept behind two authorization gates`
+- **Body**:
+  The container-keyed list route (`DataverseDocumentsEndpoints.ListDocumentsAsync`) has no caller in the repository (searched src/ and
+  tests/ for the path), and the project's task 078 section 4 already notes a type bug on it. Task 023 did not reuse it (the picker asks
+  by matter). Failure scenario: a dead route is still an authorization surface that must stay correct (two filters guard it) and that a
+  refactor can break unnoticed. Fix: delete it with its filter wiring or give it a caller and a test. Out of scope for 023.
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Task.

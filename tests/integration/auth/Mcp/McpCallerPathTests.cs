@@ -320,6 +320,9 @@ public sealed class McpCallerPathTests
         {
             ["spaarke_show_decisions"] = ["category"],
             ["spaarke_list_decision_page"] = ["cursor"],
+            ["spaarke_list_documents"] = ["regardingEntityType", "regardingId"], // r2 task 023
+            ["spaarke_get_document"] = ["documentId"], // r2 task 023
+            ["spaarke_get_portfolio"] = [], // r2 task 026
         }, options => options.WithStrictOrdering());
     }
 
