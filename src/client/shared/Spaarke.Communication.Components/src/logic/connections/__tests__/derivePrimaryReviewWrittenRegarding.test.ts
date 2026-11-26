@@ -143,6 +143,38 @@ describe('derivePrimaryReview — a written regarding that no human confirmed (t
     expect(model.candidates.map(c => c.targetId)).toEqual([MATTER_ID, OTHER_MATTER_ID]);
   });
 
+  it('a written matter beats an UNWRITTEN candidate at 100% on a Suggested row (review pass 2, item 5)', () => {
+    // Before: the 100% candidate N was "auto-matched" first and became the primary, so Confirm would file N beside M.
+    const json = provenanceWith([candidate(OTHER_MATTER_ID, 1.0), candidate(MATTER_ID, 0.9, { written: true })]);
+
+    const model = derivePrimaryReview(json, SUGGESTED, FILED_MATTER, { ...DENORM, recordId: MATTER_ID });
+
+    expect(model.state).toBe('needs-confirmation');
+    expect(model.primary).toMatchObject({ entity: 'sprk_matter', targetId: MATTER_ID, targetName: 'Acme v Beta' });
+    expect(summarizePrimaryReview(model)).toEqual({ tone: 'yellow', label: 'Needs confirmation' });
+  });
+
+  it('an auto-filed row keeps its auto-matched 100% primary (review pass 2, item 5 must-not-change)', () => {
+    const doc = JSON.parse(
+      provenanceWith([candidate(OTHER_MATTER_ID, 1.0), candidate(MATTER_ID, 0.9, { written: true })])
+    );
+    doc.decision.autoFiled = true;
+
+    const model = derivePrimaryReview(JSON.stringify(doc), SUGGESTED, FILED_MATTER, { ...DENORM, recordId: MATTER_ID });
+
+    expect(model.state).toBe('needs-confirmation');
+    expect(model.primary).toMatchObject({ targetId: OTHER_MATTER_ID });
+  });
+
+  it('a Resolved row with a 100% candidate is still confirmed on the written record (must not change)', () => {
+    const json = provenanceWith([candidate(OTHER_MATTER_ID, 1.0)], 'Resolved');
+
+    const model = derivePrimaryReview(json, ASSOCIATION_STATUS_RESOLVED_VALUE, FILED_MATTER, DENORM);
+
+    expect(model.state).toBe('confirmed');
+    expect(model.primary).toMatchObject({ targetId: MATTER_ID });
+  });
+
   it('an unknown status (a view selecting the typed lookups but not the status) keeps requires-review (review item 6)', () => {
     // The row may be Ambiguous: without its status it must not read as a yellow suggestion.
     const model = derivePrimaryReview(null, null, FILED_MATTER, undefined);

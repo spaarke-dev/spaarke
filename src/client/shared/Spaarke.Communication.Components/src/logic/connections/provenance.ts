@@ -854,15 +854,8 @@ export function derivePrimaryReview(
     if (primary) return { state: 'confirmed', candidates, allCandidates, primary };
   }
 
-  // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
-  // an ambiguous conflict (2+ competing high-confidence candidates stay 🔴).
   const hasConflict = doc.candidates.some(c => c.conflict);
   const top = ranked[0];
-  const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
-  if (autoMatched && top) {
-    const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
-    return { state: 'needs-confirmation', candidates, allCandidates, primary };
-  }
 
   // 🟡 Needs confirmation — a regarding is WRITTEN (a filed typed lookup, or the denorm primary) but no human confirmed it
   // (word-add-in-r1 task 140, ISS-043): the engine filed a suggestion, or its provenance trail carries no candidates. The
@@ -873,21 +866,40 @@ export function derivePrimaryReview(
   const statusKnown = associationStatus !== null && associationStatus !== undefined;
   const ambiguous = hasConflict || associationStatus === ASSOCIATION_STATUS_AMBIGUOUS_VALUE;
   const unconfirmed = statusKnown && !ambiguous && associationStatus !== ASSOCIATION_STATUS_RESOLVED_VALUE;
-  if (unconfirmed && (filedList.length > 0 || !!denorm?.recordName)) {
-    const primary = resolveConfirmedPrimary(ranked, filedList, denorm);
-    if (primary?.targetId) {
-      // The primary is shown as the card it is confirmed from: a written record that no candidate carries (an empty
-      // trail) leads the candidate list.
-      const inList = (list: PrimaryCandidate[]): boolean =>
-        list.some(c => primaryKey(c.entity, c.targetId) === primaryKey(primary.entity, primary.targetId));
-      return {
-        state: 'needs-confirmation',
-        candidates: inList(candidates) ? candidates : [primary, ...candidates].slice(0, PRIMARY_CANDIDATE_SLOTS),
-        allCandidates: inList(allCandidates) ? allCandidates : [primary, ...allCandidates],
-        primary,
-      };
-    }
+  const written =
+    unconfirmed && (filedList.length > 0 || !!denorm?.recordName)
+      ? resolveConfirmedPrimary(ranked, filedList, denorm)
+      : undefined;
+  const writtenReview = (primary: PrimaryCandidate): PrimaryReviewModel => {
+    // The primary is shown as the card it is confirmed from: a written record that no candidate carries (an empty trail)
+    // leads the candidate list.
+    const inList = (list: PrimaryCandidate[]): boolean =>
+      list.some(c => primaryKey(c.entity, c.targetId) === primaryKey(primary.entity, primary.targetId));
+    return {
+      state: 'needs-confirmation',
+      candidates: inList(candidates) ? candidates : [primary, ...candidates].slice(0, PRIMARY_CANDIDATE_SLOTS),
+      allCandidates: inList(allCandidates) ? allCandidates : [primary, ...allCandidates],
+      primary,
+    };
+  };
+
+  // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
+  // an ambiguous conflict (2+ competing high-confidence candidates stay 🔴).
+  const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
+  if (autoMatched && top) {
+    // Task 140 review pass 2: on an unconfirmed row the engine did NOT auto-file, a 100% candidate is only a suggestion.
+    // The WRITTEN record (pair-preferred) is what the row is filed under, so it stays the primary; Confirm on the candidate
+    // would file it beside the written one. Resolved and auto-filed rows keep the auto-matched primary.
+    const writtenWins =
+      !!written?.targetId &&
+      doc.decision.autoFiled !== true &&
+      primaryKey(written.entity, written.targetId) !== primaryKey(top.entity, top.targetId);
+    if (written && writtenWins) return writtenReview(written);
+    const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
+    return { state: 'needs-confirmation', candidates, allCandidates, primary };
   }
+
+  if (written?.targetId) return writtenReview(written);
 
   // 🔴 Requires review — the reviewer picks from candidates (or links another record).
   return { state: 'requires-review', candidates, allCandidates };
