@@ -246,7 +246,7 @@ Microsoft Copilot users can reach Spaarke today only through r1's five decision 
 
 - **ADR-001:** Minimal API BFF, one pipeline; tools sit on the existing MCP host.
 - **ADR-002:** no plugins. Each record invariant keeps one server-side owner: the events capability for task writes, `CommunicationService` for send, `RecordCreationService` for analysis. The client previews only; security fails closed.
-- **ADR-004 / ADR-052:** no new background work. Playbook runs keep their in-process execution; FR-13 only persists status on that path.
+- **ADR-004 / ADR-052:** no new background job, queue or hosted service. Playbook runs keep their in-process execution; FR-13 only persists status on that path. A run started from Copilot continues in-process after the start reply, acting as the user, under the ADR-052 amendment (D-030-run-model, owner 2026-11-26).
 - **ADR-008:** authorization through policies; tool classes follow `McpToolAuthorization` (an `[Authorize]` allow-list).
 - **ADR-010:** feature-module DI (`AddMcpModule`); register new capabilities in the existing modules.
 - **ADR-012:** reuse `@spaarke/ui-components` and the existing shared packages; no per-project libraries.
@@ -333,6 +333,9 @@ Overlap evidence: `notes/reuse-scan.md`.
 Two items were checked and found compliant (Path C):
 - **Model-callable reversible writes** (owner, 2026-11-25) don't conflict with ADR-028 A10. A10 forbids relying on a host consent prompt, and these writes are validated on the server with idempotency keys.
 - **Persisting run status** isn't background work under ADR-052. It is written on the run's existing execution path.
+
+One tension resolved by the owner (Path B, 2026-11-26, notes/decisions.md D-030-run-model):
+- **A playbook run continues after `spaarke_run_playbook` replies, acting as the user** (FR-05, FR-14). ADR-052 §5 keeps the caller's token inside its request; the amendment adds one narrow exception (shared helper, memory only, capped run length). The amendment lands with task 030.
 
 ## Success Criteria
 

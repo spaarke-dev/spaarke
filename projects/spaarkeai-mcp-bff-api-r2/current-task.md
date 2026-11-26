@@ -8,7 +8,7 @@
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
 | **State** | 035 (search results widget) merged 4f56fbbe54, review fixes merged (550e4bcb71) plus a main-session re-check fix; CAPABILITY-INDEX row 49 applied; issues #3234, #3235 filed. Merged-tree gates at 4f56fbbe54: ArchTests 2859, `Mcp|Search` unit 1538, widget jest Decisions 400, Briefing 130, Search results 117. CI now runs each widget's full jest (`ci-tier1-blocking.yml`). |
-| **Next (exact)** | No code task can start without an owner decision: Q14 (030 run model; unblocks 030 then 032), 008 A10 Path A or C (unblocks 033), #3181 fix choice (unblocks 036), Q16 (FR-09 preferences). Deploys 019/029/039 wait on owner gates. 040 (email) needs 039. When #3213 merges, fold CAPABILITY-INDEX row 35. |
+| **Next (exact)** | 030: draft the ADR-052 amendment (after the MSAL long-running OBO research), then build on it; then 032. Still owner-blocked: 008 A10 Path A or C (unblocks 033), #3181 fix choice (unblocks 036), Q16 (FR-09 preferences). Deploys 019/029/039 wait on owner gates. 040 (email) needs 039. When #3213 merges, fold CAPABILITY-INDEX row 35. |
 | **Uncommitted** | None after the 035 done commit; pushed. |
 | **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
 
@@ -20,7 +20,7 @@
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
 - ✅ **Phase 2 done:** 031, 034, 035 (publish about 42 MB; 035 adds +0.23 MB).
-- 🛑 **030:** stopped before code (owner Q14). 032 waits on it.
+- 🔄 **030:** owner chose Option A (D-030-run-model); ADR-052 amendment being drafted, then build. 032 follows 030.
 - 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions
@@ -42,7 +42,7 @@
 11. **uac-r2:** the document list checks Read on the matter, not on each document (023 D1).
 12. **Stray processes:** four python.exe processes from other sessions have been spinning for days (PIDs 41460, 43772, 84288, 93720). The user decides.
 13. **Cowork review skill pairing (recorded 2026-11-26, for accelerator-r1):** `notes/cross-project-cowork-review-skill.md`. A Spaarke Cowork skill (for example `nda-review`) sits on top of this project's tools. Gaps for accelerator-r1 to decide: getting the document file into the sandbox, and matter email through `spaarke_compose_email`, not Outlook. No r2 action.
-14. **030 run-detach (🔔 ADR conflict, blocks 030 start and 032):** a run must outlive the stateless MCP request. Options 1-4 in `notes/030-decisions.md`; recommended Option 4 (run inside the request up to ~25 s, else hand off to the Console), plus ship `spaarke_get_playbook_run` now. Options 1-3 need an ADR-052, ADR-039 or ADR-028 A10 exception.
+14. **RESOLVED 2026-11-26 (D-030-run-model): Option A.** Runs continue after the start reply, acting as the user, under a narrow ADR-052 amendment (Path B) that lands with 030. The final amendment text goes back to the owner for security sign-off; unified-access-control-r2 reviews it. Option 4 is withdrawn: it sent long runs to the Console.
 15. **MCP AI-tool rate limit (034 review K3, project-wide):** MCP tools sit under the `mcp` limiter (60 per minute per user), while the REST AI routes they wrap use `ai-batch` (20 per minute, queue 5). A model can therefore trigger about three times more LLM renders per user than the Console can (briefing, analysis, run). Add a per-tool limiter, or accept it?
 16. **FR-09 saved preferences (034, #3232):** the briefing tool now uses the Console's default windows (5 days, 168 hours), but not a user's saved Daily Digest preferences: no BFF reader of `sprk_userpreference` exists. Either narrow FR-09's "equals the Console" to default preferences, or approve a new caller-scoped preference reader (§11 surface).
 

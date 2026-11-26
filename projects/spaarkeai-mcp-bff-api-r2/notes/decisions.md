@@ -112,3 +112,18 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
   - no second run store or writer;
   - if the implementation would need any engine change, stop and report: that would fail the check, and the 🔔 ADR Conflict goes to the owner.
 - **Peer:** specialist-legal-agents-r1 raised the HOLD. This result is reported to it in the shared notes status file.
+
+## D-030-run-model — playbook runs continue after the start reply, acting as the user (Option A) — owner, 2026-11-26
+
+- **Owner's words (this session, 2026-11-26):** "Copilot rarely executed in 30 seconds - many operations take minutes. We should not require max 30 window because likely will not stay in windows and then always have to rerun. I'm not following what it means that user then runs in console - are you saying then goes to Spaarke system? If yes they breaks the entire UX of working in Copilot", then "Yes option A".
+- **Decision:** `spaarke_run_playbook` replies within seconds with a run id (FR-14 start + status, unchanged). The run continues in the BFF for minutes after that reply, **acting as the user who started it** (delegated access, every read limited to that user's access). Copilot reads progress and the result through `spaarke_get_playbook_run`. Nobody is sent to the Spaarke Console to finish a run.
+- **Rejected:**
+  - Option 4: run inside the request, else hand off to the Console. It breaks the Copilot experience.
+  - Option 3: the app's identity. It reads data wider than the user's access.
+  - Option 2: Dataverse impersonation plus an engine change. It is blocked on #988–#990, covers Dataverse only, and is an engine change. It stays the longer-term target.
+- **ADR consequence, CLAUDE.md §6.5 Path B:**
+  - ADR-052 §5 MUST NOT ("the caller's token must not leave the BFF request that holds it") and B1 are amended with a narrow, named exception: one shared helper, process memory only, never stored or logged, capped run length, the user's own started run only.
+  - The amendment lands with the 030 code.
+  - It needs the owner's security sign-off (given in principle by this decision; the final text goes back to the owner) and a review by unified-access-control-r2.
+- **Replaces:** the "ADR-052 Path C" line in spec.md ADR Tensions for run persistence. The run continuing after the reply is now Path B.
+- **Also unblocks:** task 032 (matter summary starts a run). Compose's informal detach (#3224) should move onto the same helper; that is a follow-up, not this project.
