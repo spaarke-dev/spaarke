@@ -46,3 +46,16 @@ The nearest existing component is `RecordOwnerLookupCache` (`RecordOwnershipReso
 
 ## 6. Order
 After #3193 merges, because it reuses #3193's `RequestScope` plumbing on the same route. It is independent of Part C (C wraps the caller's `IDataverseUserClient`; D1 covers app-only reads), but both touch `RecordCreationService` and `ChildRecordEndpoints`. Build one after the other on separate branches, never in parallel.
+
+## field-mapping-r1 answer to Q5 (2026-11-26)
+**Ownership corrected:**
+- `RecordOwnershipResolver`, `SecureChildShareSynchronizer`, `SecureRecordOwnerTeam` and `SecureRootInheritance` are **uac-r2's**. uac-r2 reviews the cache type, its thread safety, R2/R3/R7, the synchronizer's optional parameter, and Q1–Q4.
+- `RecordCreationService` (including `OwnerQuestionOf`, `:1484`), `RecordCreationRequest`, and the create half of `ChildRecordEndpoints` are **field-mapping-r1's**. They review those hunks.
+
+**Agreed, with conditions:**
+1. Create mode only. The field is null by default, as with `MetadataReads`. Repair mode (`RecordRepairPassJob`, ADR-036) and every create that does not go through `ChildRecordEndpoints` get no cache.
+2. Same answers as today. A with-cache vs without-cache test shows the same owner and the same refusals for a team-owned root, a secure child and the `NoOwnerSource` refusal.
+3. Failures are never kept, and "not found" is not kept either, so a misconfigured secure BU refuses the same way on every create in the request. A faulted `Lazy<Task<T>>` entry is removed. Test: two concurrent first reads, the first throws, and the next read goes to the wire.
+4. R7 is keyed by AAD object id.
+5. Two adversarial passes, because owner resolution is security-relevant (root §8.5).
+6. Order: after #3193, and one at a time with Part C. Ping field-mapping-r1 before branching, because their task 052 (repair pass) also touches `RecordCreationService`. Whoever merges second updates from master. We merge master in; we never rebase. Placement and the publish-size delta go in the PR.
