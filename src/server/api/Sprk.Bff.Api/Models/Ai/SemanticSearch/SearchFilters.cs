@@ -37,6 +37,16 @@ public sealed record SearchFilters
     /// </summary>
     [JsonPropertyName("dateRange")]
     public DateRangeFilter? DateRange { get; init; }
+
+    /// <summary>
+    /// Filter by matter type: record ids of the matter type (<c>sprk_mattertype</c>). A document matches when the
+    /// matter or project it belongs to has one of these types. Values that are not GUIDs are ignored.
+    /// </summary>
+    [JsonPropertyName("matterTypes")]
+    public IReadOnlyList<string>? MatterTypes { get; init; }
+
+    /// <summary>The most matter types one request may name (semantic search and record search).</summary>
+    public const int MaxMatterTypes = 50;
 }
 
 /// <summary>

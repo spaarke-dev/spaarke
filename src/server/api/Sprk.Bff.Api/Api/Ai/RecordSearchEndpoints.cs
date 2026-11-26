@@ -142,6 +142,12 @@ public static class RecordSearchEndpoints
             });
         }
 
+        // Validate: matterTypes is bounded
+        if (request.Filters?.MatterTypes is { Count: > Sprk.Bff.Api.Models.Ai.SemanticSearch.SearchFilters.MaxMatterTypes })
+        {
+            return SemanticSearchEndpoints.TooManyMatterTypesProblem();
+        }
+
         // The filter's decision. Absent = the filter did not run: refuse rather than serve unfiltered.
         // This is the forcing function — if someone detaches AddRecordSearchAuthorizationFilter, this
         // route stops answering instead of quietly reverting to the tenant-wide enumeration it used to be.

@@ -407,6 +407,14 @@ public sealed class RecordSearchService : IRecordSearchService
                 );
                 filterParts.Add($"({string.Join(" or ", refFilters)})");
             }
+
+            // MatterTypes filter (single-valued string field, GUID ids only)
+            var matterTypesFilter = Sprk.Bff.Api.Services.Ai.SemanticSearch.SearchFilterBuilder
+                .BuildMatterTypesFilter(request.Filters.MatterTypes);
+            if (matterTypesFilter is not null)
+            {
+                filterParts.Add(matterTypesFilter);
+            }
         }
 
         return string.Join(" and ", filterParts);
@@ -626,6 +634,7 @@ public sealed class RecordSearchService : IRecordSearchService
             orgs = Sorted(request.Filters?.Organizations),
             people = Sorted(request.Filters?.People),
             refs = Sorted(request.Filters?.ReferenceNumbers),
+            matterTypes = Sorted(request.Filters?.MatterTypes),
             index = string.IsNullOrWhiteSpace(request.SearchIndexName)
                 ? null
                 : request.SearchIndexName.Trim().ToLowerInvariant(),

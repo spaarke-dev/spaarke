@@ -77,6 +77,11 @@ public static class SearchErrorCodes
     public const string InvalidEntityTypes = "INVALID_ENTITY_TYPES";
 
     /// <summary>
+    /// matterTypes filter names more values than a request may carry.
+    /// </summary>
+    public const string TooManyMatterTypes = "TOO_MANY_MATTER_TYPES";
+
+    /// <summary>
     /// User does not have access to the requested entity.
     /// </summary>
     public const string EntityAccessDenied = "ENTITY_ACCESS_DENIED";

@@ -316,6 +316,8 @@ public static class ChildRecordEndpoints
                     CorrelationId = httpContext.TraceIdentifier,
                     Mapping = mapping,
                     SecureFromCreation = secureIntent,
+                    // ISS-010 (#3184): every create of this request shares its table-metadata answers (the decision commit runs four).
+                    MetadataReads = CallerMetadataReadMemo.RequestScope.Of(httpContext),
                 },
                 RecordCreationPrincipal.ForCaller(user, CallerObjectId(httpContext)),
                 ct)

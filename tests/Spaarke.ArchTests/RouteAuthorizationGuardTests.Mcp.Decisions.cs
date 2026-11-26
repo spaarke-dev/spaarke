@@ -27,9 +27,10 @@ public partial class RouteAuthorizationGuardTests
             + "lookup route's service); the plan names the table and scope. Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
         // ── task 022 ──
         new McpTool("ShowDecisionsTool", "", "IDecisionCapability",
-            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecidePageAsync (one "
-            + "read; the counts come from the lanes response the page carries, NFR-01) with IHttpContextAccessor.HttpContext's User; "
-            + "privileged rows reduced to a count before the model sees them."),
+            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecidePageAsync (the counts "
+            + "come from the lanes response the page carries, NFR-01), plus one parallel ListDecideAsync(ClosedToday) read for the "
+            + "per-category closedToday counts (DEF-001, #2832; left out when that read fails), both with IHttpContextAccessor.HttpContext's "
+            + "User; privileged rows reduced to a count before the model sees them."),
         new McpTool("ListDecisionPageTool", "", "IDecisionCapability",
             "spaarke_list_decision_page (FR-05, app-only, read-only): one page of the caller's Decide lane through ListDecidePageAsync "
             + "with IHttpContextAccessor.HttpContext's User; the cursor is the only input."),

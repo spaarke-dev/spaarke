@@ -311,9 +311,11 @@ public static class SecureRecordSetupRejectionCodes
     public const string DecisionRecordReaderRoleUnresolved = "secure_setup.decision_record_reader_role_unresolved";
 
     /// <summary>
-    /// S29: the role in the root unit does not hold exactly <c>prvReadsprk_DecisionRecord</c> at Global (a privilege Dataverse
-    /// added, or the declared one missing or at another depth). Verified, never written: Resumable, remedy
-    /// <c>scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -Apply</c>.
+    /// S29: the role in the root unit does not hold exactly <c>prvReadsprk_DecisionRecord</c> at Global plus only the
+    /// platform-added privileges (<c>DecisionRecordReaderPlatformAddedPrivileges</c>, reported and accepted). Verified, never
+    /// written: Resumable. Remedy for a privilege outside that set: <c>scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -Apply</c>,
+    /// which strips only those. A declared privilege that is missing or at another depth is not something the script repairs
+    /// (it exits 2): restore the role from SpaarkeMaster.
     /// </summary>
     public const string DecisionRecordReaderRoleDrift = "secure_setup.decision_record_reader_role_drift";
 
