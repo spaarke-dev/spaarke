@@ -52,15 +52,15 @@ public sealed class DocumentToolsNotFoundTests
 
         public HttpContext Http(bool authenticated = true) => DocumentToolsWorld.RequestFor(Services, authenticated: authenticated);
 
-        public Task<CallToolResult> GetAsync(string documentId, HttpContext? http) =>
+        public Task<CallToolResult> GetAsync(string documentId, HttpContext? http, CancellationToken cancellationToken = default) =>
             GetDocumentTool.RunAsync(
                 Args(Arg(documentId)), http, World.Documents.Object, Services.GetRequiredService<IAuthorizationService>(),
                 Services.GetRequiredService<SpeFileStore>(), Services.GetRequiredService<RecordContainerResolver>(),
-                NullLogger.Instance, CancellationToken.None);
+                NullLogger.Instance, cancellationToken);
 
-        public Task<CallToolResult> ListAsync(Guid matterId, HttpContext? http) =>
+        public Task<CallToolResult> ListAsync(Guid matterId, HttpContext? http, CancellationToken cancellationToken = default) =>
             ListDocumentsTool.RunAsync(
-                ListArgs(matterId), http, World.Documents.Object, World.Probe, NullLogger.Instance, CancellationToken.None);
+                ListArgs(matterId), http, World.Documents.Object, World.Probe, NullLogger.Instance, cancellationToken);
     }
 
     /// <summary>The whole result as bytes: the error flag, the text the model reads and the structured body.</summary>
@@ -192,6 +192,115 @@ public sealed class DocumentToolsNotFoundTests
         result.IsError.Should().NotBe(true);
         result.StructuredContent!.Value.GetProperty("count").GetInt32().Should().Be(0, "fail closed: a narrowing that cannot decide shows nothing");
         Bytes(result).Should().NotContain("Master services agreement").And.NotContain(DocumentToolsWorld.ReadableDocumentId);
+        Text(result).Should().Be(
+            "No documents you can see are filed under this matter.",
+            "rows came back and none could be shown, so the matter is not reported as empty");
+    }
+
+    [Fact]
+    public async Task List_WhenRowsCameBackButTheNarrowingHidesEveryOne_NeverSaysTheMatterHasNoDocuments()
+    {
+        var world = new DocumentToolsWorld { CallerIsExternal = true };
+        world.HiddenByNarrowing.Add(Guid.Parse(DocumentToolsWorld.ReadableDocumentId));
+        world.HiddenByNarrowing.Add(Guid.Parse(DocumentToolsWorld.SecondReadableDocumentId));
+        var run = new Run(world);
+
+        var result = await run.ListAsync(DocumentToolsWorld.MatterId, run.Http());
+
+        result.IsError.Should().NotBe(true);
+        result.StructuredContent!.Value.GetProperty("count").GetInt32().Should().Be(0);
+        Text(result).Should().Be("No documents you can see are filed under this matter.");
+        Text(result).Should().NotContain("No documents are filed", "the matter has documents; the caller may not see them");
+    }
+
+    [Fact]
+    public async Task List_ForAMatterTheSourceHoldsNoDocumentsFor_StillSaysNoDocumentsAreFiled()
+    {
+        var world = new DocumentToolsWorld();
+        var empty = Guid.Parse("23000000-0000-4000-8000-0000000000c2");
+        world.ReadableMatters.Add(empty);
+        var run = new Run(world);
+
+        var result = await run.ListAsync(empty, run.Http());
+
+        Text(result).Should().Be("No documents are filed under this matter.");
+    }
+
+    // ---- unexpected faults (F1): isError document.unavailable 503, fixed text; the caller's own cancellation propagates --------------
+
+    private static string Text(CallToolResult result) => string.Concat(result.Content.OfType<TextContentBlock>().Select(c => c.Text));
+
+    private static void ShouldBeUnavailable(CallToolResult result)
+    {
+        result.IsError.Should().BeTrue();
+        Reason(result).Should().Be(DocumentToolSupport.UnavailableReasonCode);
+        result.StructuredContent!.Value.GetProperty("status").GetInt32().Should().Be(503);
+        result.StructuredContent!.Value.GetProperty("correlationId").GetString().Should().Be(DocumentToolsWorld.TraceId);
+        Bytes(result).Should().NotContain("secret", "fixed text: no exception text reaches the model");
+    }
+
+    [Fact]
+    public async Task Get_WhenTheDocumentReadThrows_IsUnavailable503_WithTheCorrelationId_AndNoExceptionText()
+    {
+        var run = new Run(new DocumentToolsWorld { DocumentReadFault = new InvalidOperationException("secret dataverse detail") });
+
+        ShouldBeUnavailable(await run.GetAsync(DocumentToolsWorld.ReadableDocumentId, run.Http()));
+    }
+
+    [Fact]
+    public async Task Get_WhenTheAuthorizationReadThrows_IsUnavailable503_NotTheNotFound()
+    {
+        var run = new Run(new DocumentToolsWorld { AuthorizationFault = new InvalidOperationException("secret authorization detail") });
+
+        ShouldBeUnavailable(await run.GetAsync(DocumentToolsWorld.ReadableDocumentId, run.Http()));
+    }
+
+    [Fact]
+    public async Task Get_WhenTheReadTimesOutWithATaskCanceledNotFromTheCaller_IsUnavailable503()
+    {
+        var run = new Run(new DocumentToolsWorld { DocumentReadFault = new TaskCanceledException("secret HttpClient timeout") });
+
+        ShouldBeUnavailable(await run.GetAsync(DocumentToolsWorld.ReadableDocumentId, run.Http(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Get_WhenTheCallerCancels_TheCancellationPropagates()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var run = new Run(new DocumentToolsWorld { DocumentReadFault = new OperationCanceledException(cts.Token) });
+
+        var act = () => run.GetAsync(DocumentToolsWorld.ReadableDocumentId, run.Http(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task List_WhenTheDocumentReadThrows_IsUnavailable503_NotAnEmptyList()
+    {
+        var run = new Run(new DocumentToolsWorld { DocumentReadFault = new InvalidOperationException("secret dataverse detail") });
+
+        ShouldBeUnavailable(await run.ListAsync(DocumentToolsWorld.MatterId, run.Http()));
+    }
+
+    [Fact]
+    public async Task List_WhenTheReadTimesOutWithATaskCanceledNotFromTheCaller_IsUnavailable503()
+    {
+        var run = new Run(new DocumentToolsWorld { DocumentReadFault = new TaskCanceledException("secret HttpClient timeout") });
+
+        ShouldBeUnavailable(await run.ListAsync(DocumentToolsWorld.MatterId, run.Http(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task List_WhenTheCallerCancels_TheCancellationPropagates()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var run = new Run(new DocumentToolsWorld { DocumentReadFault = new OperationCanceledException(cts.Token) });
+
+        var act = () => run.ListAsync(DocumentToolsWorld.MatterId, run.Http(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]

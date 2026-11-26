@@ -169,14 +169,25 @@ internal sealed class ListDocumentsTool : McpToolDefinition
         }
 
         // 2. The matter's documents, then the external document narrowing once over the whole list (the list route's second gate).
-        var rows = (await documents.GetDocumentsByMatterAsync(matterId, null, cancellationToken)).ToList();
-        var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(http!, rows.Select(d => d.Id), "mcp-document-list", logger);
-        var listed = (visibility.Narrowed ? rows.Where(d => visibility.IsShown(d.Id)) : rows)
-            .OrderByDescending(d => d.ModifiedOn)
-            .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(d => d.Id, StringComparer.Ordinal)
-            .Select(DocumentToolSupport.RowOf)
-            .ToList();
+        // A fault in either read is "could not answer" (503), never an empty list and never an escaped exception; only the caller's own
+        // cancellation propagates (a timeout that is not theirs, such as an HttpClient's TaskCanceledException, is a fault).
+        List<DocumentEntity> rows;
+        List<DocumentRow> listed;
+        try
+        {
+            rows = (await documents.GetDocumentsByMatterAsync(matterId, null, cancellationToken)).ToList();
+            var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(http!, rows.Select(d => d.Id), "mcp-document-list", logger);
+            listed = (visibility.Narrowed ? rows.Where(d => visibility.IsShown(d.Id)) : rows)
+                .OrderByDescending(d => d.ModifiedOn)
+                .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(d => d.Id, StringComparer.Ordinal)
+                .Select(DocumentToolSupport.RowOf)
+                .ToList();
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return DocumentToolSupport.Fault(ex, ToolName, "the document list read", http, logger);
+        }
 
         var matterName = rows.Select(d => d.MatterName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
         var body = new ListBody(
@@ -185,8 +196,12 @@ internal sealed class ListDocumentsTool : McpToolDefinition
             listed.Count,
             rows.Count >= ServiceRowLimit);
 
+        // "No documents are filed" is only true when the source returned none. Rows that came back and were all narrowed away (or hidden
+        // by a narrowing that failed closed) must not be reported as an empty matter: the model would tell the user there are none.
         var summary = listed.Count == 0
-            ? "No documents are filed under this matter."
+            ? (rows.Count > 0 || body.HasMore
+                ? "No documents you can see are filed under this matter."
+                : "No documents are filed under this matter.")
             : $"{listed.Count} document(s) filed under this matter, newest first"
               + (body.HasMore ? "; there may be more than this." : ".")
               + "\n" + string.Join("\n", listed.Select(r => "- " + DocumentToolSupport.LineOf(r)));

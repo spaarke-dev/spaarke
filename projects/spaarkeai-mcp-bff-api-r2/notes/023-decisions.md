@@ -58,3 +58,24 @@ security property the helper owns, one case each per tool).
 - ArchTests: 2848 passed (the two ledger rows included).
 
 rework: none task 023
+
+## Verifier-finding fixes (round 2)
+- D-023-preview: preview link withheld from model-visible output (fail-closed); a widget that needs preview gets it through an app-only
+  path in a later task; owner may reverse. `spaarke_get_document` no longer calls `FileAccessEndpoints.MintPreviewUrlAsync`, and neither
+  its text nor `structuredContent.links` carries a preview or embed URL (links = `desktopUrl`, `webUrl` only). Reason: the preview URL is
+  minted app-only, outlives the request, works without a Dataverse check and is model-visible (NFR-07, ADR-015). The REST routes are
+  unchanged (`FileAccessLinkRoutesFrozenBytesTests`). Supersedes the preview parts of D3 and D5 for the tool.
+- D-023-fault: an unexpected fault in the authorization or Dataverse reads of either tool is an `isError` `document.unavailable` (503) with
+  fixed text and the correlation id (the model-visible text carries no exception text; the log carries the exception type only). The
+  catch is `when (!cancellationToken.IsCancellationRequested)`: an `HttpClient` timeout (`TaskCanceledException`) is mapped, the caller's
+  own cancellation propagates. An open-links fault (SDAP problem or other) still returns the metadata with `linksError`.
+- D-023-empty-text: the list says "No documents are filed under this matter." only when the source returned no rows; when rows came back
+  and none survived the narrowing (or it failed closed), or the list may be cut, it says "No documents you can see are filed under this
+  matter."
+- OPEN, not changed (needs owner go): matter and project NAMES are null in production. `DataverseServiceClientImpl.MapToDocumentEntityWithLookups`
+  sets `MatterId`/`ProjectId` only, so `regarding.name` and `regardingMatter.name` are absent from the tools. Setting `MatterName` /
+  `ProjectName` from the lookup `EntityReference.Name` would also change REST responses: `POST /api/ai/search` with `associatedOnly=true`
+  (`SemanticSearchService.MapDocumentEntityToSearchResult`: `parentEntityName` null -> the name),
+  `GET /api/ai/visualization/related/{documentId}` (`VisualizationService.CreateParentHubNode`: label "Matter"/"Project" -> the name) and
+  the index-file parent stamp (`DocumentIndexParentResolver.DecideAsync` -> `ParentEntityContext.EntityName`, "Unknown ..." fallback -> the
+  name; used by `RagEndpoints` index paths). `DocumentToolsWorld` still seeds `MatterName` until that is decided.

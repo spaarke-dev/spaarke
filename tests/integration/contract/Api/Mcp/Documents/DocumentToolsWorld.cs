@@ -85,6 +85,19 @@ internal sealed class DocumentToolsWorld
     /// <summary>When true the narrowing delegate is not registered, so an external caller's narrowing faults (it must fail closed).</summary>
     public bool NarrowingUnavailable { get; set; }
 
+    /// <summary>When set, both Dataverse document reads (one document, a matter's documents) throw it: a Dataverse fault or an HttpClient timeout.</summary>
+    public Exception? DocumentReadFault { get; set; }
+
+    /// <summary>When set, the per-document Read decision throws it (the authorization service's own Dataverse read faulting).</summary>
+    public Exception? AuthorizationFault
+    {
+        get => Authorization.Fault;
+        set => Authorization.Fault = value;
+    }
+
+    /// <summary>When set, the app-only drive-item read behind the open links throws it (a Graph fault).</summary>
+    public Exception? SpeLinksFault { get; set; }
+
     public Mock<IDocumentDataverseService> Documents { get; } = new();
 
     public RecordingAuthorization Authorization { get; } = new();
@@ -112,11 +125,14 @@ internal sealed class DocumentToolsWorld
 
         Documents
             .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string id, CancellationToken _) => Rows.GetValueOrDefault(id));
+            .ReturnsAsync((string id, CancellationToken _) =>
+                DocumentReadFault is { } fault ? throw fault : Rows.GetValueOrDefault(id));
         Documents
             .Setup(d => d.GetDocumentsByMatterAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid matter, Guid? _, CancellationToken _) =>
-                (IEnumerable<DocumentEntity>)(ByMatter.TryGetValue(matter, out var rows) ? rows.ToList() : []));
+                DocumentReadFault is { } fault
+                    ? throw fault
+                    : (IEnumerable<DocumentEntity>)(ByMatter.TryGetValue(matter, out var rows) ? rows.ToList() : []));
     }
 
     public static DocumentEntity Document(string id, string name, long? size, DateTime modified) =>
@@ -160,7 +176,7 @@ internal sealed class DocumentToolsWorld
         services.AddSingleton(Documents.Object);
         services.AddSingleton<IAuthorizationService>(Authorization);
         services.AddSingleton<CallerRecordAccessProbe>(Probe);
-        services.AddSingleton<SpeFileStore>(_ => new RecordingStore(SpeCalls));
+        services.AddSingleton<SpeFileStore>(_ => new RecordingStore(SpeCalls, () => SpeLinksFault));
         services.AddScoped(_ => TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("b!drive-", StringComparison.Ordinal)));
 
         var callers = new Mock<ICallerSystemUserResolver>();
@@ -205,9 +221,17 @@ internal sealed class DocumentToolsWorld
 
         public ConcurrentQueue<string> Asked { get; } = new();
 
+        /// <summary>When set, a decision throws it instead of answering.</summary>
+        public Exception? Fault { get; set; }
+
         public Task<AuthorizationResult> AuthorizeAsync(AuthorizationContext context, CancellationToken ct = default)
         {
             Asked.Enqueue($"{context.Operation}:{context.ResourceId}:{context.UserId}");
+            if (Fault is { } fault)
+            {
+                throw fault;
+            }
+
             var allowed = context.Operation == "read" && !string.IsNullOrEmpty(context.UserAccessToken) && Readable.Contains(context.ResourceId);
             return Task.FromResult(new AuthorizationResult
             {
@@ -257,18 +281,19 @@ internal sealed class DocumentToolsWorld
     private sealed class RecordingStore : SpeFileStore
     {
         private readonly ConcurrentQueue<string> _calls;
+        private readonly Func<Exception?> _linksFault;
 
-        public RecordingStore(ConcurrentQueue<string> calls)
-            : this(calls, Mock.Of<IGraphClientFactory>())
+        public RecordingStore(ConcurrentQueue<string> calls, Func<Exception?> linksFault)
+            : this(calls, linksFault, Mock.Of<IGraphClientFactory>())
         {
         }
 
-        private RecordingStore(ConcurrentQueue<string> calls, IGraphClientFactory factory)
-            : this(calls, factory, TestSpeOwnership.AllowAll(factory))
+        private RecordingStore(ConcurrentQueue<string> calls, Func<Exception?> linksFault, IGraphClientFactory factory)
+            : this(calls, linksFault, factory, TestSpeOwnership.AllowAll(factory))
         {
         }
 
-        private RecordingStore(ConcurrentQueue<string> calls, IGraphClientFactory factory, SpeContainerOwnershipGuard guard)
+        private RecordingStore(ConcurrentQueue<string> calls, Func<Exception?> linksFault, IGraphClientFactory factory, SpeContainerOwnershipGuard guard)
             : base(
                 new ContainerOperations(factory, guard, NullLogger<ContainerOperations>.Instance),
                 new DriveItemOperations(factory, guard, NullLogger<DriveItemOperations>.Instance),
@@ -276,6 +301,7 @@ internal sealed class DocumentToolsWorld
                 new UserOperations(factory, NullLogger<UserOperations>.Instance))
         {
             _calls = calls;
+            _linksFault = linksFault;
         }
 
         public override Task<string?> GetEmbedPreviewUrlAsync(
@@ -289,6 +315,11 @@ internal sealed class DocumentToolsWorld
             string driveId, string itemId, IEnumerable<string>? selectFields = null, CancellationToken ct = default)
         {
             _calls.Enqueue($"driveitem:{driveId}/{itemId}");
+            if (_linksFault() is { } fault)
+            {
+                throw fault;
+            }
+
             return Task.FromResult<SpeDriveItemSummary?>(new SpeDriveItemSummary(
                 itemId, "Brief.docx", 3, ExpectedWebUrl, null,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document", null, null, null));
