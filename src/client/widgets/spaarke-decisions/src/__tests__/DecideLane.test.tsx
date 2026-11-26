@@ -228,7 +228,7 @@ describe('the lane renders the Console lane', () => {
     expect(screen.getByTestId('lane-count-Decide')).toHaveTextContent('70');
   });
 
-  it('shows no "done today" line unless a count is given (no tool returns it), and shows it when given', async () => {
+  it('shows no "done today" line unless a count is given (an older server sends none)', async () => {
     renderLane(pagingHost(seventyItems()).callTool);
     await ready();
     expect(within(lane()).queryByText(/done today/)).not.toBeInTheDocument();

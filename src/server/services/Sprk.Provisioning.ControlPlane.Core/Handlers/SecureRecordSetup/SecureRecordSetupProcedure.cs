@@ -1536,9 +1536,11 @@ public sealed class SecureRecordSetupProcedure
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.DecisionRecordReaderRoleDrift,
                 $"The '{DecisionRecordReaderRoleName}' role ({readerRootRoles[0].Id}) is not " +
                 $"{DecisionRecordReaderPrivilege} at {DecisionRecordReaderPrivilegeDepth} plus only the platform-added privileges: {string.Join("; ", readerPrivilegeProblems)}. " +
-                "H7b changes no privilege of a role SpaarkeMaster ships: run " +
+                "H7b changes no privilege of a role SpaarkeMaster ships. For a privilege outside that set, run " +
                 "scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <app-ids> -Apply " +
-                "(it strips what Dataverse added outside the declared privilege), then -Verify, then resume. Nothing was written.");
+                "(it strips only those and keeps the platform-added ones), then -Verify, then resume. If the declared privilege is " +
+                "missing or at another depth, the role is not as SpaarkeMaster ships it and the script refuses (exit 2): restore " +
+                "the role from SpaarkeMaster, then resume. Nothing was written.");
         }
         if (readerTolerated.Length > 0)
         {
