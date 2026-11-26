@@ -10,6 +10,41 @@
 
 ## Open (in priority order)
 
+### ISS-048 — H13 fails a run on one Cost Management 429 instead of retrying
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-26 |
+| **Source** | ACME upgrade run `7a7cbda1-325e-4cad-a1a5-351bb866d414`: all handlers before H13 completed; H13 failed 05:51:52Z with `h13-cost-query-infra-fault` on a single HTTP 429 from Azure Cost Management |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3222 |
+
+**Description**
+
+H13's cost-envelope check (`ArmCostEnvelopeChecker`) makes one Cost Management query and classifies any failure, a 429
+included, as `h13-cost-query-infra-fault` (Resumable) on the first attempt. Cost Management throttles hard per tenant
+and per scope, so a 429 is an expected transient answer. H10 already retries 429/5xx with bounded backoff
+(`H10Propagation`); H13's cost query does not. Concrete failure: run 7a7cbda1 needs a manual `POST /resume` to finish,
+for a fault that waiting a minute would have cleared.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ArmCostEnvelopeChecker.cs`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs` ~L505-L545
+- Reference: `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/H10Propagation.cs`
+
+**Suggested fix**
+
+Bounded retry on 429/5xx honouring Retry-After (capped) before classifying the infra fault. Tests: 429 then 200 passes;
+429 throughout still fails Resumable.
+
+**Estimated effort**: 2-4 hours
+**Blockers**: none
+**Related**: T186 audit retry pattern (H10)
+
+---
+
 ### ISS-047 — Skill Step 1f sets a stamp's registry Environment Type from the control-plane tier, not the customer
 
 | Field | Value |
