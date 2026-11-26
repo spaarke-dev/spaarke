@@ -114,8 +114,7 @@ def unique_key(i, texts, min_len):
 def anchor_text(p):
     """The texts ooxml_redline.Redliner._locate searches, from the redliner's own functions (no second copy)."""
     from ooxml_redline import Redliner  # imported here: without --anchor-text this module needs nothing from it
-    editable = "".join(Redliner._run_char(c) for r in p.findall(q("r")) for c in r if c.tag != q("rPr"))
-    return {"visible": Redliner.visible_text(p), "editable": editable}
+    return {"visible": Redliner.visible_text(p), "editable": Redliner.editable_text(p)}
 
 
 def segment(path, min_key=12, with_anchor_text=False):
