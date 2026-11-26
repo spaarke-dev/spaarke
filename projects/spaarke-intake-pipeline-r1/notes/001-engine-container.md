@@ -38,6 +38,17 @@ Consequences for the wrapper design (needs a decision, not an engine edit):
 - Task 002 Bicep comments say `DefaultAzureCredential + AZURE_CLIENT_ID`; the POML says `ManagedIdentityCredential(client_id=...)`. Compatible (the wrapper reads `AZURE_CLIENT_ID`); note only.
 - Env vars defined by task 002 for the wrapper: `AZURE_CLIENT_ID`, `INTAKE_SERVICEBUS_FQDN`, `INTAKE_REQUEST_QUEUE`, `INTAKE_COMPLETION_QUEUE`, `INTAKE_STAGING_ACCOUNT_URL`, `INTAKE_STAGING_CONTAINER`, `INTAKE_MAX_DELIVERY_COUNT` (5), `INTAKE_JOB_TIMEOUT_SECONDS` (600), `APPLICATIONINSIGHTS_CONNECTION_STRING`.
 
+## Skip-and-report mode: proposed accelerator contract (2026-11-26, not built yet; OFF in the job until their PR merges)
+
+Relayed by the coordinator from the accelerator session; one PR to master after their owner's go-ahead.
+
+- `ooxml_redline.py PLAN DOCX REDLINE [--external EXT] [--clean CLEAN] [--dry-run] --skip-unplaceable REPORT.json`. Each edit is tried alone; a refused edit leaves nothing partial. Exit codes in this mode: 0 = outputs written (even if every edit was refused; read the report), 2 = bad input, 3 = the plan breaks the contract (`validate_plan`), never "an edit didn't fit". stdout JSON gains `"refused": <count>`. With `--dry-run`, only REPORT.json is written. Without the flag, behaviour is unchanged.
+- REPORT.json is codes only (no clause text, no find/replace strings, no paragraph keys): `{"engine":"ooxml_redline","report_version":1,"edits_total":N,"edits_applied":N,"refused":[{"edit":<0-based index>,"code":"..."}],"bookmarks_refused":[{"bookmark":"NDA_Sec10","code":"..."}]}`.
+- Closed code set: `para_not_found`, `para_not_unique`, `not_found`, `not_unique`, `in_existing_markup`, `word_boundary`, `old_not_in_find`, `crosses_markup`, `crosses_field_or_drawing`, `in_field_result`, `nothing_after_heading`, `bookmark_exists`. Bookmark names are loggable identifiers. In skip mode stderr says nothing about refusals; default-mode stderr still quotes clause text and must never be logged.
+- `summary_table.py ... --refused REPORT.json` adds "by hand" rows; `check_outputs.py ... --refused REPORT.json` validates the report and expects only the applied edits plus one by-hand row per refused edit.
+- Job behaviour in skip mode (to implement, off by default): pass `--refused` to `summary_table` and `check_outputs`; upload REPORT.json at a deterministic output path beside the documents; the completion carries the refused count and the codes (never text); an unknown code is a non-retryable contract error. Default mode stays: exit 3 → `plan_does_not_fit` with the index and a reason code parsed defensively; stderr is never logged.
+- Default-mode reason codes should reuse this closed set, so the BFF sees one vocabulary in both modes. Map each `PlanError` message to the nearest code, and fall back to `plan_invalid` / `unrecognised` when there is no edit prefix or no match.
+
 ## Escalation 2 (2026-11-26, after the owner's "A with B as backup" decision): `.docx` outputs are not byte-reproducible
 
 POML trigger 3 ("container output not byte-identical to the local run: STOP and record the diff; do not normalise") fires before any container is built: **two local runs of the same engines on the same machine already differ.**
