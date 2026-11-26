@@ -107,7 +107,9 @@ public interface INodeService
     /// <c>sprk_issystemplaybook</c> is true, OR <c>sprk_playbooktype</c> is 2 (Notification), OR any of its
     /// nodes lacks <c>__canvasNodeId</c> (a node written by a repo deploy script; the flag is NULL on some
     /// system playbooks, so it cannot be relied on alone). Fails closed: if the playbook or its nodes cannot
-    /// be read, it throws. Callers that persist the canvas JSON must call this first.
+    /// be read, it throws. Callers that persist the canvas JSON must call this first, and so must the per-node
+    /// create, update, delete and scopes routes (#1498); the per-node writes stamp <c>__canvasNodeId</c>, so they do
+    /// not make a user-authored playbook look repo-deployed.
     /// </summary>
     /// <exception cref="ProtectedPlaybookCanvasSyncException">The playbook is protected or cannot be verified.</exception>
     /// <returns>A permit carrying the node snapshot the guard read, for the permit overload of

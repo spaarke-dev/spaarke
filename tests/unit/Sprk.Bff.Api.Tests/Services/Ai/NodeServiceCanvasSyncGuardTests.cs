@@ -16,8 +16,9 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
-/// D-97 / PB-08: repo-deployed system playbooks are read-only for canvas-to-node sync.
-/// A fake Dataverse handler records every non-GET call so "nothing was written" is asserted directly.
+/// D-97 / PB-08: repo-deployed system playbooks are read-only for canvas-to-node sync, and (#1498) for the per-node
+/// create, update, delete and scopes routes. A fake Dataverse handler records every non-GET call so "nothing was
+/// written" is asserted directly.
 /// </summary>
 public class NodeServiceCanvasSyncGuardTests
 {
@@ -38,22 +39,59 @@ public class NodeServiceCanvasSyncGuardTests
         public HttpStatusCode? PlaybookStatusFromSecondRead;
         public List<(string? ConfigJson, Guid Id)> Nodes = [];
         public List<string> Writes { get; } = [];
+        public List<(string Method, string Url, string Body)> WriteBodies { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        private static readonly System.Text.RegularExpressions.Regex SingleNode =
+            new(@"sprk_playbooknodes\(([0-9a-fA-F-]{36})\)(/[^?]*)?");
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             if (ThrowTimeout) throw new TaskCanceledException("timeout");
             var url = request.RequestUri!.ToString();
+            var single = SingleNode.Match(url);
             if (request.Method != HttpMethod.Get)
             {
                 Writes.Add($"{request.Method} {url}");
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+                var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
+                WriteBodies.Add((request.Method.Method, url, body));
+                var written = new HttpResponseMessage(HttpStatusCode.NoContent);
+
+                // Node create: the stored row is what later reads (and the guard) see.
+                if (request.Method == HttpMethod.Post && url.EndsWith("/sprk_playbooknodes", StringComparison.Ordinal))
+                {
+                    var id = Guid.NewGuid();
+                    Nodes.Add((ConfigOf(body), id));
+                    written.Headers.Add("OData-EntityId", $"https://org.example.crm.dynamics.com/api/data/v9.2/sprk_playbooknodes({id})");
+                }
+                else if (request.Method == HttpMethod.Patch && single.Success && !single.Groups[2].Success)
+                {
+                    var id = Guid.Parse(single.Groups[1].Value);
+                    var i = Nodes.FindIndex(n => n.Id == id);
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    if (i >= 0 && doc.RootElement.TryGetProperty("sprk_configjson", out _))
+                        Nodes[i] = (ConfigOf(body), id);
+                }
+
+                return written;
+            }
+
+            if (single.Success)
+            {
+                // Relationship reads (skills / knowledge / tools): none.
+                if (single.Groups[2].Success) return Json(HttpStatusCode.OK, "{\"value\":[]}");
+                var id = Guid.Parse(single.Groups[1].Value);
+                var node = Nodes.FirstOrDefault(n => n.Id == id);
+                if (node.Id == Guid.Empty) return Json(HttpStatusCode.NotFound, "{}");
+                return Json(HttpStatusCode.OK,
+                    "{\"sprk_playbooknodeid\":\"" + id + "\",\"_sprk_playbookid_value\":\"" + PlaybookId + "\",\"sprk_name\":\"n\",\"sprk_configjson\":"
+                    + (node.ConfigJson is null ? "null" : System.Text.Json.JsonSerializer.Serialize(node.ConfigJson)) + "}");
             }
 
             if (url.Contains("sprk_analysisplaybooks("))
             {
                 PlaybookReads++;
                 var status = PlaybookReads > 1 && PlaybookStatusFromSecondRead is { } later ? later : PlaybookStatus;
-                return Task.FromResult(Json(status, PlaybookJson));
+                return Json(status, PlaybookJson);
             }
 
             if (url.Contains("sprk_playbooknodes"))
@@ -62,10 +100,18 @@ public class NodeServiceCanvasSyncGuardTests
                 var rows = string.Join(",", Nodes.Select(n =>
                     "{\"sprk_playbooknodeid\":\"" + n.Id + "\",\"sprk_name\":\"n\",\"sprk_configjson\":"
                     + (n.ConfigJson is null ? "null" : System.Text.Json.JsonSerializer.Serialize(n.ConfigJson)) + "}"));
-                return Task.FromResult(Json(NodesStatus, "{\"value\":[" + rows + "]}"));
+                return Json(NodesStatus, "{\"value\":[" + rows + "]}");
             }
 
-            return Task.FromResult(Json(HttpStatusCode.OK, "{\"value\":[]}"));
+            return Json(HttpStatusCode.OK, "{\"value\":[]}");
+        }
+
+        private static string? ConfigOf(string body)
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("sprk_configjson", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
+                ? c.GetString()
+                : null;
         }
 
         private static HttpResponseMessage Json(HttpStatusCode code, string body) =>
@@ -353,5 +399,191 @@ public class NodeServiceCanvasSyncGuardTests
         (await act.Should().ThrowAsync<ProtectedPlaybookCanvasSyncException>())
             .Which.Reason.Should().Be(ProtectedPlaybookReason.SystemFlag);
         h.Writes.Should().BeEmpty();
+    }
+
+    // ---- Per-node routes (#1498): same guard, zero writes on a protected playbook ----
+
+    public enum NodeRoute { Create, Update, Delete, Scopes }
+
+    private const string SystemFlagPlaybook = "{\"sprk_name\":\"matter-health-single\",\"sprk_issystemplaybook\":true,\"sprk_playbooktype\":0}";
+    private const string NotificationPlaybook = "{\"sprk_name\":\"New Work Assignments\",\"sprk_issystemplaybook\":null,\"sprk_playbooktype\":2}";
+    private const string UnflaggedPlaybook = "{\"sprk_name\":\"Unflagged\",\"sprk_issystemplaybook\":null,\"sprk_playbooktype\":0}";
+
+    private static Task<IResult> Invoke(NodeRoute route, NodeService svc, Guid nodeId, string? configJson = null) => route switch
+    {
+        NodeRoute.Create => NodeEndpoints.CreateNode(
+            PlaybookId,
+            new CreateNodeRequest { Name = "Added", ActionId = Guid.NewGuid(), OutputVariable = "out", ConfigJson = configJson },
+            Ctx(), svc, NullLoggerFactory.Instance, CancellationToken.None),
+        NodeRoute.Update => NodeEndpoints.UpdateNode(
+            PlaybookId, nodeId, new UpdateNodeRequest { Name = "Renamed", ConfigJson = configJson },
+            Ctx(), svc, NullLoggerFactory.Instance, CancellationToken.None),
+        NodeRoute.Delete => NodeEndpoints.DeleteNode(
+            PlaybookId, nodeId, Ctx(), svc, NullLoggerFactory.Instance, CancellationToken.None),
+        _ => NodeEndpoints.UpdateNodeScopes(
+            PlaybookId, nodeId, new NodeScopesRequest { SkillIds = [Guid.NewGuid()] },
+            Ctx(), svc, NullLoggerFactory.Instance, CancellationToken.None)
+    };
+
+    [Theory]
+    [InlineData(NodeRoute.Create, "system")]
+    [InlineData(NodeRoute.Update, "system")]
+    [InlineData(NodeRoute.Delete, "system")]
+    [InlineData(NodeRoute.Scopes, "system")]
+    [InlineData(NodeRoute.Create, "notification")]
+    [InlineData(NodeRoute.Update, "notification")]
+    [InlineData(NodeRoute.Delete, "notification")]
+    [InlineData(NodeRoute.Scopes, "notification")]
+    [InlineData(NodeRoute.Create, "deployed-nodes")]
+    [InlineData(NodeRoute.Update, "deployed-nodes")]
+    [InlineData(NodeRoute.Delete, "deployed-nodes")]
+    [InlineData(NodeRoute.Scopes, "deployed-nodes")]
+    public async Task NodeRoute_OnRepoDeployedPlaybook_Returns409_WritesNothing(NodeRoute route, string shape)
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse
+        {
+            PlaybookJson = shape switch
+            {
+                "system" => SystemFlagPlaybook,
+                "notification" => NotificationPlaybook,
+                _ => UnflaggedPlaybook
+            },
+            // Deploy-shaped nodes (no marker), as on every repo-deployed playbook.
+            Nodes = [(DeployedConfig, nodeId), (DeployedConfig, Guid.NewGuid())]
+        };
+
+        var result = await Invoke(route, CreateService(h), nodeId, configJson: "{\"k\":1}");
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("playbook_read_only");
+        problem.ProblemDetails.Extensions["correlationId"].Should().Be("trace-133");
+        h.Writes.Should().BeEmpty("a per-node route must not change a repo-deployed playbook");
+    }
+
+    [Theory]
+    [InlineData(NodeRoute.Create)]
+    [InlineData(NodeRoute.Update)]
+    [InlineData(NodeRoute.Delete)]
+    [InlineData(NodeRoute.Scopes)]
+    public async Task NodeRoute_FlagOnlySystemPlaybookWithAllCanvasIds_Returns409_WritesNothing(NodeRoute route)
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse { PlaybookJson = SystemFlagPlaybook, Nodes = [(DesignerConfig, nodeId)] };
+
+        var result = await Invoke(route, CreateService(h), nodeId);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        h.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(NodeRoute.Create)]
+    [InlineData(NodeRoute.Update)]
+    [InlineData(NodeRoute.Delete)]
+    [InlineData(NodeRoute.Scopes)]
+    public async Task NodeRoute_WhenPlaybookCannotBeRead_Returns503_WritesNothing(NodeRoute route)
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse { PlaybookStatus = HttpStatusCode.InternalServerError, Nodes = [(DesignerConfig, nodeId)] };
+
+        var result = await Invoke(route, CreateService(h), nodeId);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("playbook_canvas_unverifiable");
+        h.Writes.Should().BeEmpty();
+    }
+
+    // ---- Must-not-fire: user-authored playbooks keep per-node edits, and stay unprotected ----
+
+    [Theory]
+    [InlineData(NodeRoute.Create, StatusCodes.Status201Created)]
+    [InlineData(NodeRoute.Update, StatusCodes.Status200OK)]
+    [InlineData(NodeRoute.Delete, StatusCodes.Status204NoContent)]
+    [InlineData(NodeRoute.Scopes, StatusCodes.Status200OK)]
+    public async Task NodeRoute_OnUserAuthoredPlaybook_Succeeds_AndLeavesItUnprotected(NodeRoute route, int expected)
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, nodeId), (DesignerConfig.Replace("canvas-1", "canvas-2"), Guid.NewGuid())] };
+        var svc = CreateService(h);
+
+        var result = await Invoke(route, svc, nodeId, configJson: "{\"k\":1}");
+
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(expected);
+        h.Writes.Should().NotBeEmpty();
+        var afterwards = () => svc.EnsureCanvasSyncAllowedAsync(PlaybookId);
+        await afterwards.Should().NotThrowAsync("a per-node edit must not make a user-authored playbook read-only");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{\"temperature\":0.2}")]
+    public async Task CreateNode_OnUserAuthoredPlaybook_StampsCanvasNodeId_KeepsOtherKeys(string? configJson)
+    {
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, Guid.NewGuid())] };
+
+        await Invoke(NodeRoute.Create, CreateService(h), Guid.Empty, configJson);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(h.Nodes.Last().ConfigJson!);
+        doc.RootElement.GetProperty("__canvasNodeId").GetString().Should().NotBeNullOrWhiteSpace();
+        if (configJson?.Contains("temperature") == true)
+            doc.RootElement.GetProperty("temperature").GetDouble().Should().Be(0.2);
+    }
+
+    [Fact]
+    public async Task CreateNode_ConfigWithItsOwnCanvasNodeId_IsStoredAsSent()
+    {
+        var h = new FakeDataverse();
+        const string sent = "{\"__canvasNodeId\":\"designer-7\",\"x\":1}";
+
+        await Invoke(NodeRoute.Create, CreateService(h), Guid.Empty, sent);
+
+        h.Nodes.Single().ConfigJson.Should().Be(sent);
+    }
+
+    [Fact]
+    public async Task UpdateNode_ReplacingConfigWithoutMarker_KeepsTheNodesCanvasNodeId()
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, nodeId)] };
+
+        var result = await Invoke(NodeRoute.Update, CreateService(h), nodeId, configJson: "{\"temperature\":0.5}");
+
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status200OK);
+        using var doc = System.Text.Json.JsonDocument.Parse(h.Nodes.Single().ConfigJson!);
+        doc.RootElement.GetProperty("__canvasNodeId").GetString().Should().Be("canvas-1");
+        doc.RootElement.GetProperty("temperature").GetDouble().Should().Be(0.5);
+    }
+
+    [Fact]
+    public async Task UpdateNode_WithoutConfig_DoesNotTouchConfigJson()
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, nodeId)] };
+
+        await Invoke(NodeRoute.Update, CreateService(h), nodeId, configJson: null);
+
+        h.WriteBodies.Should().ContainSingle(w => w.Method == "PATCH")
+            .Which.Body.Should().NotContain("sprk_configjson");
+        h.Nodes.Single().ConfigJson.Should().Be(DesignerConfig);
+    }
+
+    [Theory]
+    [InlineData(NodeRoute.Create, "[1,2]")]
+    [InlineData(NodeRoute.Create, "not json")]
+    [InlineData(NodeRoute.Update, "[1,2]")]
+    [InlineData(NodeRoute.Update, "\"text\"")]
+    public async Task NodeRoute_ConfigThatIsNotAJsonObject_Is400_WritesNothing(NodeRoute route, string configJson)
+    {
+        var nodeId = Guid.NewGuid();
+        var h = new FakeDataverse { Nodes = [(DesignerConfig, nodeId)] };
+
+        var result = await Invoke(route, CreateService(h), nodeId, configJson);
+
+        result.Should().BeAssignableTo<IStatusCodeHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        h.Writes.Should().BeEmpty("a config that cannot carry the marker would lock the playbook");
     }
 }

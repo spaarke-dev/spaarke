@@ -701,6 +701,26 @@ public static class PlaybookEndpoints
     }
 
     /// <summary>
+    /// The one response shape for a refused write to a repo-deployed system playbook (D-97 / PB-08, #1498): the canvas
+    /// save here and the per-node routes in <see cref="NodeEndpoints"/>. Unverifiable = the guard could not read
+    /// Dataverse (transient): 503, retryable. Otherwise the playbook is a repo-deployed system playbook: 409 with a
+    /// stable errorCode for the Designer.
+    /// </summary>
+    internal static IResult ReadOnlyPlaybookProblem(ProtectedPlaybookCanvasSyncException ex, HttpContext httpContext)
+    {
+        var unverifiable = ex.Reason == ProtectedPlaybookReason.Unverifiable;
+        return Results.Problem(
+            statusCode: unverifiable ? 503 : 409,
+            title: unverifiable ? "Playbook could not be verified" : "Playbook is read-only",
+            detail: ex.Message,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = unverifiable ? "playbook_canvas_unverifiable" : "playbook_read_only",
+                ["correlationId"] = httpContext.TraceIdentifier
+            });
+    }
+
+    /// <summary>
     /// Save canvas layout for a playbook.
     /// </summary>
     internal static async Task<IResult> SaveCanvasLayout(
@@ -740,18 +760,7 @@ public static class PlaybookEndpoints
         catch (ProtectedPlaybookCanvasSyncException ex)
         {
             logger.LogWarning("Canvas save refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
-            // Unverifiable = the guard could not read Dataverse (transient): 503, retryable. Otherwise the
-            // playbook is a repo-deployed system playbook: 409 with a stable errorCode for the Designer.
-            var unverifiable = ex.Reason == ProtectedPlaybookReason.Unverifiable;
-            return Results.Problem(
-                statusCode: unverifiable ? 503 : 409,
-                title: unverifiable ? "Playbook could not be verified" : "Playbook is read-only",
-                detail: ex.Message,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = unverifiable ? "playbook_canvas_unverifiable" : "playbook_read_only",
-                    ["correlationId"] = httpContext.TraceIdentifier
-                });
+            return ReadOnlyPlaybookProblem(ex, httpContext);
         }
         catch (Exception ex)
         {

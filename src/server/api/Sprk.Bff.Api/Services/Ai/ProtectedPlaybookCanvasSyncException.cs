@@ -17,9 +17,9 @@ public enum ProtectedPlaybookReason
 }
 
 /// <summary>
-/// Thrown by <see cref="INodeService"/> when a canvas-to-node sync would replace the nodes of a
-/// repo-deployed system playbook (D-97 / PB-08). The sync deletes every node without
-/// <c>__canvasNodeId</c> and recreates stubs, which destroys such a playbook.
+/// Thrown by <see cref="INodeService"/> when a canvas-to-node sync, or a per-node create, update, delete or
+/// scopes change (#1498), would change the nodes of a repo-deployed system playbook (D-97 / PB-08). The sync
+/// deletes every node without <c>__canvasNodeId</c> and recreates stubs, which destroys such a playbook.
 /// </summary>
 public sealed class ProtectedPlaybookCanvasSyncException : InvalidOperationException
 {
@@ -47,7 +47,7 @@ public sealed class ProtectedPlaybookCanvasSyncException : InvalidOperationExcep
             ProtectedPlaybookReason.RepoDeployedNodes =>
                 $"Playbook {label} has nodes deployed from the repository (no Designer canvas id) and is read-only in the Playbook Designer. Change it in the repo and redeploy.",
             _ =>
-                $"Playbook {label} could not be verified as safe to overwrite (its record or nodes could not be read), so the canvas save was refused. Retry later."
+                $"Playbook {label} could not be verified as safe to overwrite (its record or nodes could not be read), so the change was refused. Retry later."
         };
     }
 }
