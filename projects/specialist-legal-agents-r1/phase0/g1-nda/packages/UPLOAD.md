@@ -50,9 +50,9 @@ Absolute folder: `C:\code_files\spaarke-wt-specialist-legal-agents-r1\projects\s
 
 | # | Package | Zip | App id | Version | Install scope |
 |---|---|---|---|---|---|
-| 6 | G1 variant (a) Cowork skill, plugin `spaarke-legal-g1a-cowork` (skill `spaarke-g1-nda-review-a`) | `g1-nda\packages\spaarke-legal-g1a-cowork-1.0.0.zip` | `9c52e606-2574-48f5-b557-1f7246c19414` | 1.0.0 | owner + `demo@` only |
-| 7 | G1 variant (b) Cowork skill, plugin `spaarke-legal-g1b-cowork` (skill `spaarke-g1-nda-review-b`) | `g1-nda\packages\spaarke-legal-g1b-cowork-1.0.0.zip` | `6940e661-d067-4154-adb4-06366648c697` | 1.0.0 | owner + `demo@` only |
-| 8 | G1 variant (c) Cowork skill, plugin `spaarke-legal-g1c-cowork` (skill `spaarke-g1-nda-review-c`) | `g1-nda\packages\spaarke-legal-g1c-cowork-1.0.0.zip` | `391d8de8-e48b-4a66-84ba-ef9c764222fc` | 1.0.0 | owner + `demo@` only |
+| 6 | G1 variant (a) Cowork skill, plugin `spaarke-legal-g1a-cowork-test` (skill `spaarke-test-g1-nda-review-a`) | `g1-nda\packages\spaarke-legal-g1a-cowork-test-1.0.0.zip` | `9c52e606-2574-48f5-b557-1f7246c19414` | 1.0.0 | owner + `demo@` only |
+| 7 | G1 variant (b) Cowork skill, plugin `spaarke-legal-g1b-cowork-test` (skill `spaarke-test-g1-nda-review-b`) | `g1-nda\packages\spaarke-legal-g1b-cowork-test-1.0.0.zip` | `6940e661-d067-4154-adb4-06366648c697` | 1.0.0 | owner + `demo@` only |
+| 8 | G1 variant (c) Cowork skill, plugin `spaarke-legal-g1c-cowork-test` (skill `spaarke-test-g1-nda-review-c`) | `g1-nda\packages\spaarke-legal-g1c-cowork-test-1.0.0.zip` | `391d8de8-e48b-4a66-84ba-ef9c764222fc` | 1.0.0 | owner + `demo@` only |
 
 These carry **no action**: they use the tenant connector "Spaarke MCP", which each of the two users must already have connected (Copilot, Settings, Sources, Spaarke MCP, Connect; the same sign-in as before).
 
@@ -63,7 +63,7 @@ These carry **no action**: they use the tenant connector "Spaarke MCP", which ea
 3. Approve it there if asked.
 4. Wait: a plugin appeared under Browse plugins 10 to 30 minutes after upload last time.
 5. Each of the two users turns it on once in **Cowork, Customize**. After the first turn-on the skill can fail for a few minutes while its content syncs; retry in a new task.
-6. You can upload all three and switch on all three. The run prompts name the skill (`Use the spaarke-g1-nda-review-a skill.`), so they stay unambiguous. Switch on only the one under test if you prefer.
+6. You can upload all three and switch on all three. The run prompts name the skill (`Use the spaarke-test-g1-nda-review-a skill.`), so they stay unambiguous. Switch on only the one under test if you prefer.
 
 ## Check that it loaded (do this once per package, then stop)
 
@@ -72,11 +72,11 @@ These carry **no action**: they use the tenant connector "Spaarke MCP", which ea
 1. On the agent's **Data & tools** tab, look for the banner "This MCP server uses other tools, which may be changed by the publisher: ..." naming the package's action. Screenshot it. (Dynamic discovery shows this banner; V2 did.)
 2. Open the agent in Chat, in a new chat, as the owner. Send exactly: `List every tool and source you can use in this conversation`
    - **G1 agents and G5:** the list must include `spike_get_profile` and `spike_review_nda`. It may also list `spaarke_show_decisions`.
-   - **G2 agent:** same tools, and the skill `spaarke-g2-marker` may be named.
+   - **G2 agent:** same tools, and the skill `spaarke-test-g2-marker` may be named.
 3. If the tools are missing, **wait 10 minutes and ask once more in a new chat**. If they are still missing, stop and tell the session. Do not upload a corrected zip over it.
 4. Repeat step 2 as `demo@`. If `demo@` is asked to sign in, sign in with the demo account; that is expected on a first use.
 
-**Cowork plugins (rows 6 to 8):** in a new Cowork task, type `/` and check that the skill (`spaarke-g1-nda-review-a`, `-b` or `-c`) is listed under the plugin's name. Screenshot it. Do not run it yet.
+**Cowork plugins (rows 6 to 8):** in a new Cowork task, type `/` and check that the skill (`spaarke-test-g1-nda-review-a`, `-b` or `-c`) is listed under the plugin's name. Screenshot it. Do not run it yet.
 
 ## Tell the session when you are done
 

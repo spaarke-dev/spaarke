@@ -10,7 +10,7 @@
     "termsOfUseUrl": "https://www.example.com/termsofuse"
   },
   "name": {
-    "short": "spaarke-legal-g1b-cowork",
+    "short": "spaarke-legal-g1b-cowork-test",
     "full": "Spaarke legal G1 NDA test skill, variant B (Cowork, Phase 0)"
   },
   "description": {
@@ -24,7 +24,7 @@
   "accentColor": "#0F6CBD",
   "agentSkills": [
     {
-      "folder": "skills/spaarke-g1-nda-review-b"
+      "folder": "skills/spaarke-test-g1-nda-review-b"
     }
   ]
 }

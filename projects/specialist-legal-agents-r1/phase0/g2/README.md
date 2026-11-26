@@ -47,9 +47,9 @@ Fill in the table above at the end. Each question has its own method and evidenc
 |---|---|
 | App id | `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, version 1.0.0, short name `spaarke-legal-g2-q1-test`, namespace `spaarkeg2q1` |
 | Built from | the G5 package (`../g5/package/`): same MCP URL, A1 `reference_id`, dynamic discovery, agent v1.6, plugin v2.4, no query string |
-| Manifest | **1.30**, not 1.25: `agentSkills` exists only from 1.30 (checked against the published 1.25 and 1.30 schemas). The manifest holds both `copilotAgents.declarativeAgents` (one agent) and `agentSkills` (`skills/spaarke-g2-marker`). That is the one structural difference from the G5 package besides the instructions |
-| Skill | `skills/spaarke-g2-marker/SKILL.md`, name `spaarke-g2-marker` (the `spaarke-` prefix follows mcp-r1's naming gate; the kit's `g2-marker` was an example). Path and layout copied from mcp-r1's plugin package (`src/solutions/CopilotPlugins/spaarke/`: `agentSkills: [{ "folder": "skills/<name>" }]`, one `SKILL.md` per folder). Body: "When asked for the G2 marker, reply with the exact text G2-SKILL-OK and call no tool." |
-| Instructions | 1,893 characters: the G5 text plus two packaging-test sentences, "If the user asks for the G2 marker, use the skill spaarke-g2-marker and call no tool" and "If the user asks you to call the first read tool the server lists, call that one tool once and show its result". Without them the G5 line "call no tool for anything else" would make Q1-2 and Q1-3 fail for the wrong reason |
+| Manifest | **1.30**, not 1.25: `agentSkills` exists only from 1.30 (checked against the published 1.25 and 1.30 schemas). The manifest holds both `copilotAgents.declarativeAgents` (one agent) and `agentSkills` (`skills/spaarke-test-g2-marker`). That is the one structural difference from the G5 package besides the instructions |
+| Skill | `skills/spaarke-test-g2-marker/SKILL.md`, name `spaarke-test-g2-marker` (the `spaarke-` prefix follows mcp-r1's naming gate; the kit's `g2-marker` was an example). Path and layout copied from mcp-r1's plugin package (`src/solutions/CopilotPlugins/spaarke/`: `agentSkills: [{ "folder": "skills/<name>" }]`, one `SKILL.md` per folder). Body: "When asked for the G2 marker, reply with the exact text G2-SKILL-OK and call no tool." |
+| Instructions | 1,893 characters: the G5 text plus two packaging-test sentences, "If the user asks for the G2 marker, use the skill spaarke-test-g2-marker and call no tool" and "If the user asks you to call the first read tool the server lists, call that one tool once and show its result". Without them the G5 line "call no tool for anything else" would make Q1-2 and Q1-3 fail for the wrong reason |
 | Tools it will see | the same as the G5 agent: today `spike_get_profile`, `spike_review_nda`, `spaarke_show_decisions`. "The first read tool" is whichever the server lists first; Q1-2 passes on any single `tools/call` |
 | Forbidden-pattern check | 0 hits in the folder and in the zip |
 | Upload | The owner's, per `../g1-nda/packages/UPLOAD.md` row 5, after the R4 row is sent |
@@ -62,7 +62,7 @@ Fill in the table above at the end. Each question has its own method and evidenc
 | Q1-2 | Call the first read tool the server lists | agent selected | Agent action works: exactly one `tools/call` |
 | Q1-3 | Give me the G2 marker | agent selected | Skill is available to the agent: reply contains `G2-SKILL-OK`, no `tools/call` |
 | Q1-4 | Give me the G2 marker | plain Chat, no agent | Whether the skill is reachable without the agent |
-| Q1-5 | Call the first read tool the server lists | plain Chat, no agent | No leak: the agent's action is not pulled into plain Chat (R1′), same call count as before the upload |
+| Q1-5 | Call the first read tool the server lists | plain Chat, no agent | No leak: the agent's action is not pulled into plain Chat (evidence for the proposed R1′, which is still pending the owner's rules decision; not an approved rule), same call count as before the upload |
 
 **Decide**
 - **Yes:** Q1-2 shows one call, and Q1-3 returns the marker (in the agent, or in plain Chat if that is how the format delivers skills; record which).
@@ -167,7 +167,7 @@ For the one G2 package task 020 built. Sent by the main session to COPILOT-PLATF
 
 | Artifact | Kind | Owner project | Scope | Removal plan | Removal date |
 |---|---|---|---|---|---|
-| `spaarke-legal-g2-q1-test` (app id `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, v1.0.0) | App package, manifest 1.30: one declarative agent (v1.6) with one MCP action on `/mcp/legal-operations` (A1 `reference_id`, dynamic discovery) plus one marker skill `spaarke-g2-marker` | specialist-legal-agents-r1 | Owner + `demo@`, org catalog, never All users (R7) | Owner removes it in the admin center at the Phase 0 clean-up; coordination row closed after | at task 031 |
+| `spaarke-legal-g2-q1-test` (app id `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, v1.0.0) | App package, manifest 1.30: one declarative agent (v1.6) with one MCP action on `/mcp/legal-operations` (A1 `reference_id`, dynamic discovery) plus one marker skill `spaarke-test-g2-marker` | specialist-legal-agents-r1 | Owner + `demo@`, org catalog, never All users (R7) | Owner removes it in the admin center at the Phase 0 clean-up; coordination row closed after | at task 031 |
 
 ## Result
 

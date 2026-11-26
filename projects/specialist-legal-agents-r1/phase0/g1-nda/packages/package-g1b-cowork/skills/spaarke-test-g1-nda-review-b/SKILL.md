@@ -1,5 +1,5 @@
 ---
-name: spaarke-g1-nda-review-b
+name: spaarke-test-g1-nda-review-b
 description: Review a mutual NDA with built-in review guidance and the signed-in attorney's own NDA positions, which it fetches first with the Spaarke tool spike_get_profile. Phase 0 test skill, variant B. Use when the user names this skill, or asks to review an NDA or for their NDA positions. Do NOT use for other agreements, drafting, redlining, signing or sending.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: spaarke-g1-nda-review-c
+name: spaarke-test-g1-nda-review-c
 description: Send an NDA to Spaarke for review, where Spaarke applies the signed-in attorney's own NDA positions on the server with the tool spike_review_nda, and show the result. Phase 0 test skill, variant C. Use when the user names this skill, or asks to review an NDA or for their NDA positions. Do NOT use for other agreements, drafting, redlining, signing or sending.
 ---
 

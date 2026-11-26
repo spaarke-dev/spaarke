@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-26 ~18:10Z (001–015 done; spike live on dev)
+> **Last Updated**: 2026-11-26 ~19:30Z (checkpoint; task 020 built, coordination checks in progress)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 
@@ -9,15 +9,20 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 0 in execution. `spec.md` (2026-11-25), `plan.md`, project `CLAUDE.md`, 20 POMLs + `tasks/TASK-INDEX.md` (2026-11-26, lint PASS, no drift) |
-| **Active task** | 001–007, 010, 011, 015 ✅. Dev BFF = spike `d307d67e36` (live ~18:00Z; rollback 140c01219a). Next: 020 (test agent packages), then the 021–025 owner runs |
+| **Active task** | 001–015 ✅; spike `d307d67e36` live on dev (gate + full tests green). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8), G5 held |
 | **Stop points** | 010 DEV write (`agreement-review-spike`) needs the owner's go; 015 dev deploy needs the owner's per-SHA go via uac-r2 |
 | **Uncommitted** | see `git status` |
 
 ## Next action (exact)
 
-1. Task 020: build the test packages (G1 a/b/c, G5, G2). Each needs a fresh app id, the FORBIDDEN_IN_PACKAGE check and an R4 row to coordination before upload; `spike_get_profile` needs the `function` argument; only `nda-01`–`nda-10` may be uploaded. The owner uploads.
-2. Watch for uac-r2's 30-min gate (18:31Z) and its full test pass on `d307d67e36`. If either fails, the spike may be rolled back to 140c01219a.
-3. Owner by 2026-11-30: remove the G8 artifacts (this precedes 022).
+1. **Coordination checks on 020 (in progress).**
+   - R3: add "test" to the Cowork package names (`spaarke-legal-g1{a,b,c}-cowork` → `-cowork-test`) and the skills (`spaarke-g1-nda-review-*` → `spaarke-test-g1-nda-review-*`, `spaarke-g2-marker` → `spaarke-test-g2-marker`). Update folders, manifests, READMEs and UPLOAD.md, rezip, re-run the FORBIDDEN check, and send the renamed rows.
+   - Routing isolation: add to the G1 kit that runs switch on ONE variant at a time, with the accelerator `nda-review` and `nda-library-review` skills OFF for the owner and demo@; any `spike_review_nda` call under (a)/(b) counts as a deviation.
+   - R1′: do not cite it as an approved rule (the owner decision is pending).
+   - Then reply to coordination.
+2. **Owner decision:** whether to add the G5 stub tools `spike_review_agreement` / `spike_review_legal_hold` (a spike change, then review, then a uac-r2 deploy).
+3. **Owner:** upload per `phase0/g1-nda/packages/UPLOAD.md` (owner + demo@ only). Remove the G8 artifacts by 2026-11-30.
+4. Then 021/022 runs. The latency p95 check moved into 021.
 
 ## Open items outside the task list
 

@@ -34,7 +34,7 @@
   "validDomains": ["spaarke-bff-dev.azurewebsites.net"],
   "agentSkills": [
     {
-      "folder": "skills/spaarke-g2-marker"
+      "folder": "skills/spaarke-test-g2-marker"
     }
   ]
 }
