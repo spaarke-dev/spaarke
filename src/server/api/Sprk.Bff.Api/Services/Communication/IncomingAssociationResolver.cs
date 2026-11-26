@@ -805,9 +805,29 @@ public sealed class IncomingAssociationResolver
             Candidates = Array.Empty<CandidateTrace>(),
             Signals = Array.Empty<SignalTrace>(),
         };
-        var compactJson = JsonSerializer.Serialize(compact, ProvenanceJsonOptions);
-        if (compactJson.Length > ProvenanceMaxLength)
-            return compactJson[..ProvenanceMaxLength];
+
+        // Task 140 review: the trace alone can run past the column (a very long reason, a long list of rungs). Cutting the
+        // serialized text at the cap left invalid JSON, which every reader drops whole. Instead the trace detail is shed until
+        // the document fits — the reason first, then the rungs fired, then a minimal trace (short status and direction, no
+        // reason) that always fits — so what is stored is always valid JSON under the cap.
+        const int ReasonCap = 1000;
+        const int MinimalTextCap = 64;
+        if (!Fits(compact) && compact.Decision.Reason.Length > ReasonCap)
+            compact = compact with { Decision = compact.Decision with { Reason = compact.Decision.Reason[..ReasonCap] } };
+        if (!Fits(compact))
+            compact = compact with { RungsFired = Array.Empty<string>() };
+        if (!Fits(compact))
+        {
+            compact = compact with
+            {
+                Direction = Shorten(compact.Direction),
+                Decision = compact.Decision with { Status = Shorten(compact.Decision.Status), Reason = string.Empty },
+            };
+        }
+
+        static string Shorten(string text) => text.Length > MinimalTextCap ? text[..MinimalTextCap] : text;
+        static bool Fits(AssociationProvenance document) =>
+            JsonSerializer.Serialize(document, ProvenanceJsonOptions).Length <= ProvenanceMaxLength;
 
         var keptCandidates = KeepWhatFits(
             provenance.Candidates,

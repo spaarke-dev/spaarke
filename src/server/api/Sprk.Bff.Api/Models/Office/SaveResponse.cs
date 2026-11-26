@@ -86,24 +86,30 @@ public record SaveResponse
 
 /// <summary>
 /// Task 131 (#2171): the outcome of filing the reconciled email communication to the save's record. Serialized by name
-/// (<c>"Filed"</c>, <c>"AlreadyFiled"</c>, <c>"NotPermitted"</c>, <c>"Failed"</c>), as <see cref="ArtifactType"/> is.
-/// "Nothing to report" is not a member: the property is omitted instead.
+/// (<c>"Filed"</c>, <c>"AlreadyFiled"</c>, <c>"NotPermitted"</c>, <c>"Failed"</c>, <c>"FiledUnconfirmed"</c>), as
+/// <see cref="ArtifactType"/> is. "Nothing to report" is not a member: the property is omitted instead. A client ignores a
+/// value it does not know (task 131's reader), so a new member is additive.
 /// </summary>
 public enum EmailFilingOutcome
 {
     /// <summary>The email's communication was unfiled and is now filed to the save's record.</summary>
     Filed,
 
-    /// <summary>The communication was already filed (to any record) and was not moved. Task 140: when its primary regarding is
-    /// the save's own record and it was not yet confirmed, the save confirmed it where the caller may change it (Resolved);
-    /// otherwise it was left as it was.</summary>
+    /// <summary>The communication was already filed (to any record) and was not moved. Task 140: when the save's record is
+    /// its only regarding and it was not yet confirmed, the save confirmed it (Resolved); otherwise it was left as it
+    /// was.</summary>
     AlreadyFiled,
 
     /// <summary>The caller may not change the communication, so it was left unfiled.</summary>
     NotPermitted,
 
     /// <summary>The filing could not be completed; the communication was left as it was.</summary>
-    Failed
+    Failed,
+
+    /// <summary>Task 140: the communication is filed to the save's record alone, unconfirmed, and the save could not confirm
+    /// it (the caller may not change it, or the confirmation failed); it was left as it was and still needs confirming in
+    /// Spaarke.</summary>
+    FiledUnconfirmed,
 }
 
 /// <summary>

@@ -151,6 +151,48 @@ public sealed class AssociationProvenanceColumnCapTests
         keptSignals.Should().BeGreaterThan(0).And.BeLessThan(60);
     }
 
+    // ── Task 140 review (item 8): the trace alone past the column is still valid JSON under the cap ───────────────────────
+
+    [Fact]
+    public async Task AReasonAlonePastTheColumn_IsStillValidJson_UnderTheCap_KeepingTheWrittenCandidate()
+    {
+        var candidates = new List<CandidateTrace> { NameMatch(1, 0.95, written: true, id: WrittenMatter) };
+        var decision = Decision(candidates, []);
+        decision = decision with
+        {
+            Provenance = decision.Provenance with
+            {
+                Decision = decision.Provenance.Decision with { Reason = new string('x', 20_000) },
+            },
+        };
+
+        // WrittenProvenanceAsync parses the column's text: a cut at the cap is not JSON and throws.
+        var provenance = await WrittenProvenanceAsync(decision);
+
+        provenance.GetProperty("decision").GetProperty("status").GetString().Should().Be("Suggested");
+        provenance.GetProperty("decision").GetProperty("reason").GetString()!.Length.Should().BeLessThan(20_000);
+        provenance.GetProperty("candidates").EnumerateArray()
+            .Should().ContainSingle(c => c.GetProperty("written").GetBoolean(), "the reason is shed before the written candidate");
+    }
+
+    [Fact]
+    public void ATraceWhoseEveryPartRunsPastTheColumn_IsStillValidJson_UnderTheCap()
+    {
+        var decision = Decision([NameMatch(1, 0.95, written: true, id: WrittenMatter)], []);
+        var provenance = decision.Provenance with
+        {
+            Direction = new string('d', 12_000),
+            Decision = decision.Provenance.Decision with { Status = new string('s', 12_000), Reason = new string('x', 12_000) },
+            RungsFired = Enumerable.Range(0, 2_000).Select(i => $"Rung{i:D6}").ToList(),
+        };
+
+        var json = IncomingAssociationResolver.SerializeProvenance(provenance);
+
+        json.Length.Should().BeLessThanOrEqualTo(ColumnLength);
+        var act = () => JsonDocument.Parse(json).Dispose();
+        act.Should().NotThrow("a column value cut mid-document is unreadable to every reader");
+    }
+
     [Fact]
     public async Task ATrailThatFits_IsWrittenWhole()
     {
