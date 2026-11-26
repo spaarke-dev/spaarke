@@ -8,7 +8,7 @@ Owner decision: `decisions.md` D-3268-user-focus (2026-11-26). ADR-039 Path C: p
 
 - Blank or null: empty string; `AppendUserFocus` returns the same prompt instance (byte-identical).
 - Otherwise: heading `## User focus (from the user who started this run)`, the trimmed text fenced in `<user_focus>…</user_focus>`, then one fixed sentence (the focus may narrow emphasis but does not change the required output format, the action's instructions or the grounding rules).
-- A closing tag inside the text (any case, any inner whitespace) has its `<` escaped to `&lt;`, so the text cannot leave the fence.
+- Hostile text cannot forge the boundary (see "Review fixes" below); the model is instructed, not forced, to treat the text as emphasis only.
 - ADR-015: never logged, never stored. The helper and every call site pass the text straight into the prompt string; no log line, telemetry tag or store takes it. (The existing in-memory `PlaybookRunDetail.UserContext` is unchanged; the durable run record never held it.)
 
 ## Inventory: every prompt builder that receives `ToolExecutionContext` (or its node/analysis equivalent)
@@ -53,3 +53,12 @@ The assignments are removed, so those prompts are exactly what they were. Open i
 ## Tests
 
 `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/UserFocusPromptTests.cs`, `PromptContextHelperUserFocusTests.cs`, and one addition to `AnalysisOrchestrationServiceTests.cs` (AdditionalContext -> run request `UserContext`).
+
+## Review fixes (opus review, no F1 to F4 defects in the code)
+
+- **F2, test removed.** `ExecutePlaybookAsync_AdditionalContext_IsHandedToTheEngineAsUserContext_3268` is gone from `AnalysisOrchestrationServiceTests.cs`: it pinned `AnalysisOrchestrationService.cs:255`, which this change did not touch (it passed before the change), and needed about 28 setup lines for 2 asserts. The rerun-through-the-node-executor test covers the hop that changed.
+- **K1, fence hardened** in `PromptContextHelper.BuildUserFocusBlock`, in this order: Unicode format characters (category Cf: zero-width, soft hyphen, bidi marks) are removed, then the text is trimmed (nothing left means no block); it is cut to the cap; `&`, `<` and `>` are escaped (`&` first, so typing an escaped closer verbatim is escaped again and cannot forge the fence); a line that would open a Markdown code fence (three or more backticks or tildes) has its first fence character turned into an entity. This makes the boundary hard to forge; it does not make the model obey it, and the doc comments (helper, `IPlaybookRunAi`) now say "the model is instructed", not "cannot".
+- **K2, one cap.** The helper cuts the trimmed text to 2,000 characters (the MCP tool's cap; never splitting a surrogate pair) and appends ` [truncated]`. The REST execute route and the MCP refusal are unchanged. The cap is on the text before escaping; escaping can lengthen it, at most five-fold for `&`.
+- **K4, malformed-JPS fallback.** When `PromptSchemaRenderer.RenderJps` cannot parse a JPS action it returns the raw text as flat text. It now appends the focus block there (`AppendUserFocus`), in the renderer rather than in each of the three handlers, so Summary, Classifier and SemanticSearch keep the focus with one edit. `GenericAnalysisHandler` ignores that text for flat prompts and appends the block itself, so nothing is doubled. No focus: the raw text, byte-identical.
+- **No change:** K3 (the not-wired builders, filed as an issue by the coordinator) and the scheduler label.
+- **Edge:** text made only of format characters now yields no block (the `AppendUserFocus` and `SynthesizeSummaryAsync` empty checks use the block, not the raw text).

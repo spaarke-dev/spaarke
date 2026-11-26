@@ -163,9 +163,11 @@ public sealed class PromptSchemaRenderer
             // ADR-015: MUST NOT log prompt content — only log diagnostic identifier
             _logger.LogWarning("Failed to parse JPS schema; falling back to flat text rendering");
 
+            // #3268: the callers that send PromptText as it stands (Summary, Classifier, SemanticSearch) would otherwise drop the
+            // run's focus here; GenericAnalysisHandler ignores this text for flat prompts and appends the block itself.
             return new RenderedPrompt
             {
-                PromptText = rawPrompt,
+                PromptText = PromptContextHelper.AppendUserFocus(rawPrompt, userFocus),
                 Format = PromptFormat.FlatText
             };
         }

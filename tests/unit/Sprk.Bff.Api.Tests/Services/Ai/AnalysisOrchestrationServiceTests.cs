@@ -250,56 +250,6 @@ public class AnalysisOrchestrationServiceTests
             Times.Once);
     }
 
-    [Fact]
-    public async Task ExecutePlaybookAsync_AdditionalContext_IsHandedToTheEngineAsUserContext_3268()
-    {
-        // The chat rerun ("rerun with additional instructions") and the REST execute both arrive here as
-        // PlaybookExecuteRequest.AdditionalContext; the engine's run request carries it as UserContext, the field the
-        // prompt builders now read (#3268).
-        var playbookId = Guid.NewGuid();
-        var documentId = Guid.NewGuid();
-        var request = new PlaybookExecuteRequest
-        {
-            PlaybookId = playbookId,
-            DocumentIds = [documentId],
-            AdditionalContext = "focus on indemnity"
-        };
-        _playbookServiceMock.Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync(CreatePlaybook(playbookId, "Review"));
-        _scopeResolverMock.Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync(CreateEmptyScopes());
-        _dataverseServiceMock.Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>())).ReturnsAsync(CreateDocument(documentId));
-
-        // Node-based mode: the playbook has a node, so the run is delegated to the playbook engine.
-        _nodeServiceMock
-            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[]
-            {
-                new PlaybookNodeDto
-                {
-                    Id = Guid.NewGuid(), PlaybookId = playbookId, ActionId = Guid.NewGuid(), ToolIds = Array.Empty<Guid>(),
-                    Name = "Review", ExecutionOrder = 1, OutputVariable = "out", IsActive = true
-                }
-            });
-
-        PlaybookRunRequest? seen = null;
-        var orchestrator = new Mock<IPlaybookOrchestrationService>();
-        orchestrator
-            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>((r, _, _) => seen = r)
-            .Returns(EmptyEvents());
-        _mockHttpContext.RequestServices = new ServiceCollection().AddSingleton(orchestrator.Object).BuildServiceProvider();
-
-        await foreach (var _ in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None)) { }
-
-        seen.Should().NotBeNull("the playbook engine is asked to run");
-        seen!.UserContext.Should().Be("focus on indemnity");
-    }
-
-    private static async IAsyncEnumerable<PlaybookStreamEvent> EmptyEvents()
-    {
-        await Task.CompletedTask;
-        yield break;
-    }
-
     // ExecutePlaybookAsync_WithToolScopes_ResolvesToolsFromPlaybook REMOVED (C# test-diet): Skip since written; its only
     // assertion (ResolvePlaybookScopesAsync called once) is already made, with the same mocks, by
     // ExecutePlaybookAsync_ValidPlaybook_LoadsPlaybookAndResolvesScopesAndYieldsMetadata, and it never inspected the tools.

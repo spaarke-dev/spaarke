@@ -552,9 +552,8 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     {
         // #3268: the run's user focus belongs on the step that writes the final summary (the chunk summaries are
         // intermediate), placed before the output-format section. Empty (and the prompt unchanged) when there is none.
-        var focusSection = string.IsNullOrWhiteSpace(userFocus)
-            ? string.Empty
-            : PromptContextHelper.BuildUserFocusBlock(userFocus).TrimStart('\n') + "\n\n";
+        var focusBlock = PromptContextHelper.BuildUserFocusBlock(userFocus);
+        var focusSection = focusBlock.Length == 0 ? string.Empty : focusBlock.TrimStart('\n') + "\n\n";
 
         var combinedSummaries = string.Join("\n\n---\n\n", chunkSummaries.Select((s, i) => $"Section {i + 1}:\n{s}"));
 
