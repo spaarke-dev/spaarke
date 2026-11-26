@@ -233,7 +233,7 @@ Your review points: (2) UTBMS code without its description, (3) the highlight co
 - [ ] **Too-large file refused (DEF-052), only if convenient:** submit an invoice from email (Office add-in) marking an attachment bigger than the per-file limit (eBilling settings, default MB). Expected: a clear "Each marked file may be at most N MB. Nothing was submitted or saved." message; no invoice, no saved email. A portal upload over the limit was already refused before this change.
 - Nothing else in batch 4 is visible: ISS-053 is a build check, DEF-063 is a deploy-script fix.
 
-## Y. Batch 5 on dev (#3174): READY since 2026-11-26 01:59Z (dev BFF 1e64e94168 live 01:56:50Z; Invoice Review page from the same SHA 01:59:31Z, uac-r2's deploy; 30-minute gate due ~02:27Z)
+## Y. Batch 5 on dev (#3174): READY since 2026-11-26 01:59Z (dev BFF 1e64e94168 live 01:56:50Z; Invoice Review page from the same SHA 01:59:31Z, uac-r2's deploy; 30-minute gate PASSED 02:27Z, 146 requests, 0 5xx)
 - [ ] **A decision can't be left while it saves (ISS-016):** in Invoice Review, open an invoice decision (Approve, Reject or Return) and press Finish. While it saves, the ‹ › step buttons, ×, Escape, clicking outside and Cancel do nothing, and the extra buttons at the bottom left are greyed. When it finishes, the wizard closes or shows the result as before.
 - [ ] **Pages still open after the shared-code move (#2965), only if convenient:** AP Export, Invoice Files and the Rule Review page still open and load normally. Those three pages were not redeployed this time, so this check waits for our next page deploy.
 - Nothing else in batch 5 is visible: DEF-046 is a deploy-script fix, DEF-064 is a build check.
