@@ -38,8 +38,10 @@ public sealed class DecisionsWidgetResourceTests
         var list = await host.RpcAsync(McpEndpoints.LegalOperationsRoute, "resources/list", new { }, McpTestHost.MintToken(Caller));
 
         var resources = list.GetProperty("resources").EnumerateArray().ToList();
-        resources.Should().ContainSingle();
-        var widget = resources[0];
+        // THROWAWAY SPIKE (#3257), branch spike/spe-file-probe only: two sample-file resources are served beside the widget.
+        resources.Select(r => r.GetProperty("uri").GetString()).Should().BeEquivalentTo(
+            [WidgetUri, "spaarke-probe://file/small.docx", "spaarke-probe://file/large.docx"]);
+        var widget = resources.Single(r => r.GetProperty("uri").GetString() == WidgetUri);
         widget.GetProperty("uri").GetString().Should().Be(WidgetUri);
         widget.GetProperty("mimeType").GetString().Should().Be(ExpectedMimeType);
         AssertEmptyCsp(widget.GetProperty("_meta"));

@@ -323,6 +323,7 @@ public sealed class McpCallerPathTests
             // SPIKE BRANCH ONLY (specialist-legal-agents-r1 task 011, FR-02): the two never-merged spike tools, also static-schema.
             ["spike_get_profile"] = ["function"],
             ["spike_review_nda"] = ["documentText"],
+            ["SpaarkeMCP_spike_return_file"] = ["size", "variant"], // THROWAWAY SPIKE (#3257), branch spike/spe-file-probe only
         }, options => options.WithStrictOrdering());
     }
 

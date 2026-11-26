@@ -292,9 +292,10 @@ public sealed class McpHostContractTests
                 // SPIKE BRANCH ONLY (specialist-legal-agents-r1 task 011, FR-02): the two never-merged spike tools. Master keeps the five.
                 "spike_get_profile",
                 "spike_review_nda",
+                "SpaarkeMCP_spike_return_file", // THROWAWAY SPIKE (#3257), layered on the specialist spike SHA d307d67e36
             ],
             "FR-01: tools/list returns exactly the v1 tools; the paging tool is spaarke_list_decision_page (task 022)");
-        names.Should().HaveCount(7);
+        names.Should().HaveCount(8, "the five v1 tools, the two specialist spike tools and the file-probe spike tool");
 
         // tools/list is judged per tool policy for THIS caller (the SDK filter hides a tool the caller may not call), so a sixth tool behind a
         // stricter policy (e.g. SystemAdmin) would be invisible above. The catalog is the unfiltered set of the area.

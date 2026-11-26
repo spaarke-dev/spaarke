@@ -286,6 +286,15 @@
                       Condition="Exists('../../../client/widgets/spaarke-decisions/dist/index.html')" />
   </ItemGroup>
 
+  <!-- THROWAWAY SPIKE (issue #3257, gap 1; branch spike/spe-file-probe, never merged to master): two fixed sample .docx files for
+       SpaarkeMCP_spike_return_file. The .bin suffix keeps Git LFS (*.docx) from replacing them with pointers; the bytes are the .docx. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Api\Mcp\LegalOperations\Spike\spaarke-file-probe-small.docx.bin"
+                      LogicalName="Sprk.Bff.Api.SpikeFileProbe.small.docx" />
+    <EmbeddedResource Include="Api\Mcp\LegalOperations\Spike\spaarke-file-probe-large.docx.bin"
+                      LogicalName="Sprk.Bff.Api.SpikeFileProbe.large.docx" />
+  </ItemGroup>
+
   <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at
        config/secure-record-owner-role.json — LINKED (not copied) so the NFR-05 census (scheduled job + manual gate)
        reads the same bytes as scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and the setup guide. -->

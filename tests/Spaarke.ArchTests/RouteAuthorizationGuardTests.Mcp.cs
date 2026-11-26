@@ -64,6 +64,11 @@ public partial class RouteAuthorizationGuardTests
     // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
     private static readonly IReadOnlyList<McpTool> McpTools = new[]
     {
+        // --- THROWAWAY SPIKE (SpaarkeMCP_spike_return_file) ---
+        new McpTool("SpikeReturnFileTool", "", "DecisionCapability",
+            "Spike, file-delivery test (#3257), throwaway branch spike/spe-file-probe, never merged: read-only, no data access; returns one of two "
+            + "fixed embedded sample .docx files (variants a, b, c). The only gate is the caller's, DecisionCapability.HasSignedInCaller: none is UserContextRequired."),
+        // --- end spike ---
         // --- task 024 (spaarke_complete_decision) ---
         new McpTool("CompleteDecisionTool", "", "IDecisionCapability",
             "The one write tool, app-only (task 024, FR-08): a thin adapter that calls IDecisionCapability.CommitAsync with exactly "
@@ -889,14 +894,17 @@ public partial class RouteAuthorizationGuardTests
         // task 030's ResourceCollection of the real DecisionsWidgetResource), the catalog, the endpoints and the widget class itself.
         const string widgetPath = "Api/Mcp/LegalOperations/DecisionsWidgetResource.cs";
         var widgetUnit = new SourceUnit(widgetPath, ReadRepoFile("src/server/api/Sprk.Bff.Api/" + widgetPath)!);
+        // THROWAWAY SPIKE (#3257), branch spike/spe-file-probe only: the two sample-file resources McpModule registers beside the widget.
+        const string spikePath = "Api/Mcp/LegalOperations/Spike/SpikeFileProbeResources.cs";
+        var spikeUnit = new SourceUnit(spikePath, ReadRepoFile("src/server/api/Sprk.Bff.Api/" + spikePath)!);
         foreach (var path in new[] { "Infrastructure/DI/McpModule.cs", "Api/Mcp/McpToolCatalog.cs", "Api/Mcp/McpEndpoints.cs", "Api/Mcp/McpToolAuthorization.cs" })
         {
             var source = ReadRepoFile("src/server/api/Sprk.Bff.Api/" + path)!;
-            Assert.Empty(McpToolViolations(new[] { new SourceUnit(path, source), widgetUnit }, Array.Empty<McpTool>(), new HashSet<string>()));
+            Assert.Empty(McpToolViolations(new[] { new SourceUnit(path, source), widgetUnit, spikeUnit }, Array.Empty<McpTool>(), new HashSet<string>()));
         }
 
         Assert.Contains("ConfigureSessionOptions", ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
-        Assert.Contains("ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance }",
+        Assert.Contains("ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance, SpikeFileProbeSmallWidgetResource.Instance, SpikeFileProbeLargeWidgetResource.Instance }",
             ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
 
         // Task 030 widget exception (2026-11-14). Sanctioned: McpModule, a static Api/Mcp class, one Create(Read, ...), Read().
