@@ -212,12 +212,56 @@ public class PlaybookRunContext
     /// <summary>
     /// Marks the run as failed.
     /// </summary>
-    public void MarkFailed(string error)
+    /// <param name="error">The failure text the run routes return (already redacted by the caller).</param>
+    /// <param name="failureCode">
+    /// Stable code for the durable run record's <c>sprk_errorcode</c> (FR-13, task 005), e.g.
+    /// <c>playbook_node_failed</c>. Not part of any response body.
+    /// </param>
+    public void MarkFailed(string error, string failureCode = "playbook_run_failed")
     {
         State = PlaybookRunState.Failed;
         ErrorMessage = error;
+        FailureCode = failureCode;
         CompletedAt = DateTimeOffset.UtcNow;
     }
+
+    /// <summary>
+    /// Stable failure code of a <see cref="PlaybookRunState.Failed"/> run, written to the durable run record
+    /// (FR-13, task 005). <c>null</c> unless the run failed. Not part of any response body.
+    /// </summary>
+    public string? FailureCode { get; private set; }
+
+    // ── Durable run record bookkeeping (spaarkeai-mcp-bff-api-r2 task 005, FR-13) ─────────────────────
+    // Owned by PlaybookOrchestrationService; never part of a response body.
+
+    /// <summary>The run's <c>sprk_playbookrun</c> row has not been written yet.</summary>
+    internal const int RunRecordNotWritten = 0;
+
+    /// <summary>The run's <c>sprk_playbookrun</c> row exists; later writes update it.</summary>
+    internal const int RunRecordWritten = 1;
+
+    /// <summary>Creating the row failed; the run's later record writes are skipped.</summary>
+    internal const int RunRecordUnavailable = 2;
+
+    private int _runRecordState;
+    private int _nodeSequence;
+
+    /// <summary>
+    /// The starting request's trace id, captured when the run starts (the same id the run's failure event carries).
+    /// Captured, not read later: a run can outlive its request, and a pooled <see cref="HttpContext"/> must not be
+    /// read after the request ends. <c>null</c> for an app-only run.
+    /// </summary>
+    internal string? CorrelationId { get; init; }
+
+    /// <summary>Where the run's durable record stands (one of the <c>RunRecord*</c> constants).</summary>
+    internal int RunRecordState
+    {
+        get => Volatile.Read(ref _runRecordState);
+        set => Volatile.Write(ref _runRecordState, value);
+    }
+
+    /// <summary>The next node start sequence of this run (1, 2, 3, …), thread-safe for parallel batches.</summary>
+    internal int NextNodeSequence() => Interlocked.Increment(ref _nodeSequence);
 
     /// <summary>
     /// Marks the run as cancelled.

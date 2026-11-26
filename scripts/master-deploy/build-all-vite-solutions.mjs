@@ -13,7 +13,7 @@
 // transitively installed deps).
 //
 // Skips: directories without package.json or without vite.config.ts.
-//        Specifically: CopilotAgent, DemoRegistration, EventCommands,
+//        Specifically: DemoRegistration, EventCommands,
 //        SpaarkeCore, spaarke_insights, TodoDetailSidePane, webresources.
 
 import { execSync } from 'child_process';

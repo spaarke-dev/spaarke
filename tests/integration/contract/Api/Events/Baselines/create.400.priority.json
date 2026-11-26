@@ -1,0 +1,16 @@
+{
+  "case": "create.400.priority",
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"Priority\":[\"Priority must be a sprk_priority value: Low (100000000), Normal (100000001), High (100000002), Urgent (100000003).\"]}}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "Priority": [
+        "Priority must be a sprk_priority value: Low (100000000), Normal (100000001), High (100000002), Urgent (100000003)."
+      ]
+    }
+  }
+}

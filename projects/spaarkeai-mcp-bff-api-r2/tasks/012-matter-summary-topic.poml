@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Complete the matter-summary Insights topic (column, registry row, persister check)</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>scripts startable; the dev schema change and registry seed need the owner's explicit go</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a Dataverse column and a configuration row consumed by the live persister; may touch WorkProductRecordPersister (.cs) if the data path does not write it</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the documented matter-health precedent (BUILD-A-NEW-INSIGHT-CARD.md) with a data-driven persister; judgment points are escalation triggers</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns a new schema script, a seed script and notes; touches no file another Phase 0 task edits</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, fields, ai, integration-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Complete the matter-summary Insights topic so a summary is cached on the matter: add a target long-text column on sprk_matter, seed the sprk_aitopicregistry row for the existing Binding matter-summary (SUM-CHAT@v1) with sprk_hostentity sprk_matter and sprk_targetfield the new column and a TTL, and prove the persister writes it the way matter-health writes sprk_performancesummary. Dev schema and seed run only after the owner's go.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Insights topic registry, Binding rows and Dataverse schema scripts.</role>
+  <goal>A matter-summary run persists its envelope to the new sprk_matter column through WorkProductRecordPersister (no code change expected); the registry row gives the TTL task 032 reads through TopicRegistryTtlLookup; the evidence is recorded.</goal>
+
+  <context>
+    <background>Spec FR-10 prerequisite; owner 2026-11-25: complete the matter-summary topic, not matter-health. Discovery: Binding row matter-summary (SUM-CHAT@v1) exists (docs/data-model/sprk-playbookconsumer.md; infra/dataverse/inputschemas/sum-chat-v1.input.schema.json) but has no sprk_aitopicregistry row and no target column. WorkProductRecordPersister.cs:40-70: WHETHER a Binding persists is sprk_disposition = work_product on the Binding; WHERE is the registry row whose sprk_topicname equals the Binding's capability code, supplying sprk_hostentity + sprk_targetfield; writes are user-OBO PATCH with If-Match *. matter-health precedent: registry row c46b940e-… (TTL 60 min) → sprk_matter.sprk_performancesummary (BUILD-A-NEW-INSIGHT-CARD.md :56-66).</background>
+    <relevant-files>
+      <file role="new">scripts/dataverse/Add-MatterSummaryColumn.ps1 (idempotent; long-text column on sprk_matter, name chosen per the skill, for example sprk_aisummary)</file>
+      <file role="new">scripts/dataverse/Seed-MatterSummaryTopicRegistry.ps1 (idempotent upsert of the sprk_aitopicregistry row)</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r2/notes/012-matter-summary-topic.md (metadata read, chosen names, owner go, run evidence)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/WorkProductRecordPersister.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/TopicRegistryTtlLookup.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs</file>
+      <file role="canonical-reference">docs/guides/BUILD-A-NEW-INSIGHT-CARD.md (matter-health rows and registry fields)</file>
+      <file role="canonical-reference">docs/data-model/sprk-playbookconsumer.md</file>
+      <file role="canonical-reference">scripts/dataverse/Add-AnalysisRegardingRecordUrlColumn.ps1 (existing column-add script shape)</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">Read first (read-only, Dataverse MCP or Web API): the matter-summary Binding row (sprk_disposition, consumer code/type), the matter-health registry row's fields, and sprk_matter's existing long-text columns; record them in notes/012-matter-summary-topic.md before writing scripts.</constraint>
+    <constraint source="project">The schema script and the seed script are idempotent and target dev only; they run only after the owner's explicit go in this session (live change). Field security on the new column matches sprk_performancesummary's (copy, do not invent).</constraint>
+    <constraint source="ADR-039">The registry row carries target-mapping data only (sprk_topicname = the Binding's capability code, sprk_hostentity sprk_matter, sprk_targetfield the new column, TTL); no appsettings key, code list or new table. If the Binding's sprk_disposition is not work_product, record it and escalate rather than changing the Binding.</constraint>
+    <constraint source="ADR-002">No plugin; persistence stays in WorkProductRecordPersister's user-OBO PATCH. If a code change to the persister seems needed, STOP and escalate (it is shared by every work-product topic).</constraint>
+    <constraint source="project">The matter form, insight card and Console are not changed in this task (task 032 reads the column; showing it on a form is out of scope).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/guides/BUILD-A-NEW-INSIGHT-CARD.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/data-model/sprk-playbookconsumer.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Do the read-only metadata reads and write notes/012-matter-summary-topic.md.</step>
+    <step order="2">Write Add-MatterSummaryColumn.ps1 and Seed-MatterSummaryTopicRegistry.ps1 (idempotent, dev URL parameter, -WhatIf support).</step>
+    <step order="3">Ask the owner for the go; after it, run both against dev and record the output.</step>
+    <step order="4">Trigger one matter-summary run for a test matter as the test user (through the existing Insights/Console path) and confirm the new column holds the envelope; confirm TopicRegistryTtlLookup returns the seeded TTL; record evidence.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner has not given the go, STOP after step 2; do not run either script.</trigger>
+    <trigger>If the matter-summary Binding is not a work_product disposition, or the persister does not write the new column after the registry row exists, STOP and escalate with the evidence.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row "Matter AI summary" (owner answer: Insights cache, InsightsPlaybookExecutionCache + TopicRegistryTtlLookup); matter-health's sprk_matter.sprk_performancesummary + registry row c46b940e-… is the precedent. CAPABILITY-INDEX: no column-level row (data, not a component).</existing>
+    <extension>sprk_performancesummary cannot be reused: it holds matter-health's envelope and the registry maps one topic per target field. The registry, Binding and persister are reused unchanged; only one column and one row are added.</extension>
+    <cost-of-doing-nothing>The matter-summary Binding has nowhere to persist, so spaarke_get_matter_summary (task 032) never finds a cached summary and FR-10's "cached summary in ≤ 3 s" acceptance fails.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">scripts/dataverse/*.ps1 (dev, after owner go)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/dataverse/Add-MatterSummaryColumn.ps1</output>
+    <output type="code">scripts/dataverse/Seed-MatterSummaryTopicRegistry.ps1</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/012-matter-summary-topic.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/012-matter-summary-topic.md records the Binding's disposition and capability code, the matter-health registry fields copied, the chosen column name and field-security setting, the owner's go (date) and both script outputs.</criterion>
+    <criterion testable="true">Both scripts are idempotent: a second run reports no change.</criterion>
+    <criterion testable="true">After one matter-summary run for a test matter, the new sprk_matter column holds the envelope and TopicRegistryTtlLookup returns the seeded TTL for the topic.</criterion>
+    <criterion testable="true">Negative: without the owner's go, no script ran against dev (note states it).</criterion>
+    <criterion testable="true">Negative: no file under src/server/** changed.</criterion>
+  </acceptance-criteria>
+
+  <notes>BLOCKED (code complete, pending owner decision), 2026-11-25: dev already has the Binding (work_product), the registry row (target sprk_recordsummary, TTL 60) and the column, so no column or seed was needed; see notes/012-matter-summary-topic.md. Owner decides whether to run scripts/dataverse/Set-MatterSummaryTopicRegistryKey.ps1 (sprk_playbookname chat-summarize to matter-summary so TopicRegistryTtlLookup finds the TTL). rework: none task 012. Original notes: Spec FR-10 prerequisite, Assumptions ("Insights topic"). The column also needs to ship in the Dataverse solution for other environments: record that as a follow-up for the solution export (dataverse-deploy) in notes, not here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

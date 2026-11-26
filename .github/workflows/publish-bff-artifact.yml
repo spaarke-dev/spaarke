@@ -36,6 +36,7 @@ on:
     paths:
       - '.github/workflows/publish-bff-artifact.yml'
       - 'src/client/widgets/spaarke-decisions/**'
+      - 'src/client/widgets/shared/**'
       - 'src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj'
 
 permissions:

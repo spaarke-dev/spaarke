@@ -24,8 +24,10 @@ namespace Sprk.Bff.Api.Services.Ai.RecordSearch;
 /// (no vector results but keyword still works).
 /// </para>
 /// <para>
-/// Note: The spaarke-records-index does NOT have a tenantId field.
-/// Tenant isolation is enforced at the Dataverse level, not at the search index level.
+/// Tenant isolation: the spaarke-records-index has a <c>tenantId</c> field, and the implementation
+/// always applies a <c>tenantId eq '...'</c> filter (FR-12, spaarke-ai-azure-setup-dev-r1). Do not
+/// remove that filter: it is the search-layer tenant boundary. Per-row Dataverse access checks are
+/// applied on top of it by the REST endpoint; any other caller (background rungs, MCP tools) must apply its own.
 /// </para>
 /// </remarks>
 public interface IRecordSearchService

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Playbook run tools: spaarke_run_playbook, spaarke_get_playbook_run</title>
+    <phase>2 Long-running work, AI, widgets, task writes</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Model-callable write (run start) behind the shared playbook authorization; reads durable run records with an owner check; tags include auth</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-sensitive write path (shared authorization method, StartedByOid uniform not-found, idempotency) and the first user of the long-running pattern; project brief raises 030</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Playbooks/{RunPlaybook,GetPlaybookRun}Tool.cs; the Playbooks ledger partial was last edited by 024 (Phase 1, merged)</parallel-reason>
+    <deps>005, 007, 020, 024</deps>
+    <tags>bff-api, api, ai, auth, integration-test</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add spaarke_run_playbook (model-callable, reversible, idempotency key) that applies task 007's shared run authorization, starts a run through PlaybookOrchestrationService and returns {runId, status, consoleLink} within 5 s via task 020's McpLongRunning; and spaarke_get_playbook_run (read-only) that reads task 005's durable run record and returns status or the result summary, returning a uniform not-found for a run another user started.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the JPS playbook orchestration service and MCP tool handlers.</role>
+  <goal>Start then status round-trips; the authorization is 007's method, not a copy; a retried start with the same key returns the same runId; another user's runId is not-found; status survives a BFF restart because it reads the durable record.</goal>
+
+  <context>
+    <background>Spec FR-05, FR-13, FR-14, NFR-06. REST: Api/Ai/PlaybookRunEndpoints.cs (POST /execute :54; GET runs/{runId} :69; GET runs/{runId}/detail :108). Task 007's shared method (for example PlaybookRunAuthorization.AuthorizeRunAsync) returns a typed result with reasonCode. Task 005 persists sprk_playbookrun / sprk_playbooknoderun and reads them when the run is not in memory. Legacy owner rule: PlaybookRunStatus.StartedByOid (IPlaybookOrchestrationService.cs:692-728, JsonIgnore). Legacy start/poll shape: git show 37f0864afe:src/server/api/Sprk.Bff.Api/Api/Agent/AgentEndpoints.cs (:461-481).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/RunPlaybookTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/GetPlaybookRunTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Playbooks.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunToolsContractTests.cs (start shape ≤ 5 s with a fake engine, status shapes, idempotent retry)</file>
+      <file role="new">tests/integration/auth/Mcp/Playbooks/PlaybookRunToolsAuthTests.cs (refusals mirror REST reasonCodes; other user's run → not-found)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/PlaybookAuthorizationFilter.cs (after 007)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/McpLongRunning.cs (task 020)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs (idempotent write pattern)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Durable run records</dependency>
+      <dependency task="007" status="pending">Shared run authorization method</dependency>
+      <dependency task="020" status="pending">McpLongRunning, general McpToolResults</dependency>
+      <dependency task="024" status="pending">Playbooks ledger partial and list tool</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback; never pass or log the token). Authorization is exactly 007's shared method; the tool adds no check of its own and maps its typed refusal to McpToolResults with the same reasonCode REST returns.</constraint>
+    <constraint source="project">spaarke_run_playbook: readOnlyHint false, destructiveHint false, idempotentHint true; required idempotencyKey argument; a retry with the same key and caller returns the original runId without starting a second run (key scope and storage follow CompleteDecisionTool's pattern; no new store if r1's mechanism fits). Answers within 5 s: it returns after the run is accepted, never waits for completion (FR-14).</constraint>
+    <constraint source="project">spaarke_get_playbook_run: readOnlyHint true, idempotentHint true; reads through the same service methods as GET runs/{runId} (in-memory, then 005's durable record); a run whose StartedByOid is not the caller returns the same not-found as a missing run.</constraint>
+    <constraint source="ADR-015">Model-visible: run id, playbook name, status, progress and a result summary ≤ 1,000 chars; no node outputs or document content in text. Logs: tool name, latency, outcome/reasonCode, correlation id. Descriptions qualify "JPS playbook" (D-209).</constraint>
+    <constraint source="ADR-028">From task 007's verifier passes (notes/007-decisions.md), all binding here.
+      (1) The run must not use the MCP request's HttpContext after the tool returns. PlaybookOrchestrationService stores it in PlaybookRunContext (~:143-147, legacy path ~:910-921) and SendEmailNodeExecutor (~:230) reads it through the accessor, so a run outliving the response would run OBO with a null or another request's header. That is cross-user: F1 if left. Capture what the run needs, the caller token via the existing OBO path, before returning; or prove that the accepted-run path already detaches. Add a test.
+      (2) Pass the exact documentIds and parameters instances that were authorized to the run. Set RunUserId = result.RunUserId and StartedBy = Person, because a non-Person run honours Parameters["userId"].
+      (3) Before calling AuthorizePlaybookRunAsync, cap the documentIds count, the parameter count and the value length, and reject keys that differ only in letter case. The checks are sequential caller-scoped Dataverse calls, and 1,280 case-variant keys would break the 5 s budget.
+      (4) Truncate RejectedParameterKey (e.g. to 64 chars) in the model-visible result.
+      (5) A10: RunUserUnresolved is not the no-systemuser outcome. If the owner's 008 decision requires UserContextRequired for a no-row caller, resolve the caller's systemuser first.</constraint>
+    <constraint source="ADR-052">No polling loop, timer or BackgroundService in the tools; the run executes on the orchestration service's existing path.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 005, 007, 020, 024; read the run endpoints, 007's method and 005's store. A10: 007's RunUserUnresolved is NOT the no-systemuser outcome (notes/007-decisions.md); if the owner's 008 decision requires UserContextRequired for a no-row caller, resolve the caller's systemuser before calling AuthorizePlaybookRunAsync.</step>
+    <step order="2">Write RunPlaybookTool with idempotency and McpLongRunning.Started; write GetPlaybookRunTool with McpLongRunning.Status.</step>
+    <step order="3">Add ledger rows; write the contract and auth tests; run MCP suites, run tests from 005/007, ArchTests and conformance.</step>
+    <step order="4">Measure the publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the REST run-status routes have no StartedByOid check (any user can read any run), STOP and report it as a found security defect (uac-r2) before relying on them.</trigger>
+    <trigger>If idempotency needs a new store, STOP and escalate with the §11 answers.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>PlaybookOrchestrationService and the REST run routes (PlaybookRunEndpoints.cs); 007's shared authorization; 005's PlaybookRunRecordStore; 020's McpLongRunning; legacy agent start/poll (deleted).</existing>
+    <extension>All services are reused; the tools are thin adapters that compose them, as spec "Placement &amp; New Components" states.</extension>
+    <cost-of-doing-nothing>Copilot users cannot run a JPS playbook or see its result (FR-05 fails), and FR-14's start/status round trip has no first user.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/RunPlaybookTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/GetPlaybookRunTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunToolsContractTests.cs</output>
+    <output type="test">tests/integration/auth/Mcp/Playbooks/PlaybookRunToolsAuthTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Start returns { runId, status, consoleLink } within 5 s with a slow fake engine; status returns running, then completed with a result summary.</criterion>
+    <criterion testable="true">A retried start with the same idempotencyKey and caller returns the same runId; the engine is invoked once.</criterion>
+    <criterion testable="true">Negative: each refusal 007's method produces (playbook not usable, document not accessible, parameter policy) returns isError with the REST reasonCode and starts nothing.</criterion>
+    <criterion testable="true">Negative: user B's runId and a random runId return byte-identical not-found results for user A.</criterion>
+    <criterion testable="true">Status for a run absent from memory is read from the durable record (005's store faked at its boundary).</criterion>
+    <criterion testable="true">ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05, FR-13, FR-14, NFR-06. Two adversarial-verifier passes (auth). uac-r2 reviews; ontology-r1 reviewed 007. The restart check on dev runs in 039.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

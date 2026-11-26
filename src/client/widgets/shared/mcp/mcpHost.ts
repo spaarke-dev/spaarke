@@ -1,0 +1,81 @@
+/**
+ * A widget's connection to its MCP Apps host, shared by every Spaarke widget (spaarkeai-mcp-bff-api-r2 task 021, FR-16; written for the
+ * Decisions widget by spaarkeai-mcp-bff-api-r1 task 030, FR-12, and moved here unchanged).
+ *
+ * Built on `@modelcontextprotocol/ext-apps` 2.0.4. Against the 1.x samples (trey-research `useMcpApp.tsx`) the calls this module uses are
+ * unchanged: `useApp({ appInfo, capabilities, onAppCreated })`, `app.ontoolresult`, `app.onhostcontextchanged`, `app.getHostContext()`,
+ * `app.callServerTool({ name, arguments })`, `app.openLink({ url })` (risk R13; notes/task-030-notes.md). The 2.x entry used is
+ * `react-with-deps`, which bundles the SDK peers (`@modelcontextprotocol/client`, `core`, `zod`) that `--legacy-peer-deps` does not install.
+ *
+ * The widget holds no token and opens no connection of its own: everything goes through the host's postMessage bridge. The host is also
+ * what the theme comes from (`hostContext.theme`; the provider merges every host-context change, so a theme switch re-renders the
+ * widget; the Decisions widget maps it to a Fluent theme in its `theme/hostTheme.ts`). Components read the connection through
+ * `useMcpHost` (`mcpHostContext.ts`). `callTool` here rejects on a transport failure; `createWidgetMcpTransport` /
+ * `useWidgetMcpTransport` (`widgetMcpTransport.ts`) wrap it in a caller that never rejects and never waits forever.
+ */
+import { createElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useApp, type App } from '@modelcontextprotocol/ext-apps/react-with-deps';
+import type { CallServerTool, McpToolResult } from './mcpFetch';
+import { McpHostContext, type DisplayMode, type HostContext, type McpHostConnection } from './mcpHostContext';
+
+export { McpHostContext, useMcpHost, type McpHostConnection } from './mcpHostContext';
+
+export function McpHostProvider({ name, children }: { name: string; children: ReactNode }) {
+  const [hostContext, setHostContext] = useState<HostContext | undefined>(undefined);
+  const [toolResult, setToolResult] = useState<unknown>(null);
+
+  const { app, isConnected, error } = useApp({
+    appInfo: { name, version: '1.0.0' },
+    capabilities: {},
+    // Handlers are registered before the handshake so the first host context and tool result are not missed.
+    onAppCreated: (created: App) => {
+      created.ontoolresult = result => {
+        if (result?.structuredContent !== undefined) setToolResult(result.structuredContent);
+      };
+      // A change carries only the fields that changed: merge, never replace.
+      created.onhostcontextchanged = changed => setHostContext(previous => ({ ...previous, ...changed }));
+    },
+  });
+
+  // The context the host sent during the handshake (init), before any change notification.
+  useEffect(() => {
+    if (!app) return;
+    const initial = app.getHostContext();
+    if (initial) setHostContext(previous => ({ ...initial, ...previous }));
+  }, [app]);
+
+  const appRef = useRef<App | null>(null);
+  appRef.current = app;
+
+  const callTool = useCallback<CallServerTool>(async (toolName, args) => {
+    const current = appRef.current;
+    if (!current) throw new Error('The host is not connected.');
+    return (await current.callServerTool({ name: toolName, arguments: args })) as McpToolResult;
+  }, []);
+
+  const openLink = useCallback(async (url: string) => {
+    const current = appRef.current;
+    if (!current) return false;
+    const result = await current.openLink({ url });
+    return result.isError !== true;
+  }, []);
+
+  const requestDisplayMode = useCallback(async (mode: DisplayMode) => {
+    const current = appRef.current;
+    if (!current) return null;
+    try {
+      const result = await current.requestDisplayMode({ mode });
+      return result.mode;
+    } catch {
+      // A host that does not offer the mode (or the request timing out) is an answer, not a failure: the caller falls back.
+      return null;
+    }
+  }, []);
+
+  const value = useMemo<McpHostConnection>(
+    () => ({ isConnected, error, hostContext, toolResult, callTool, openLink, requestDisplayMode }),
+    [isConnected, error, hostContext, toolResult, callTool, openLink, requestDisplayMode]
+  );
+
+  return createElement(McpHostContext.Provider, { value }, children);
+}
