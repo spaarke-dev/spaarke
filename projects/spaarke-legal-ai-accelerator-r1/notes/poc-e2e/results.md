@@ -773,3 +773,11 @@ it uses `toString`; it didn't change the code, so nothing ran, and no paragraph,
 **Findings:** (1) Word desktop loaded the JS skill and followed it, keeping to "run exactly as written" instead of
 rewriting the code. (2) Word's code runner checks code before running it and refuses some identifiers;
 `toString` is one. Our code has to avoid them. Next: v0.3 without `toString` (or `padStart`).
+
+**WP-5 run 2 (owner, Word desktop, 2026-11-26, probe v0.3; the plugin shows as "Spaarke Word Probe (3)"):** again
+`Spaarke JS probe · code not run · WPJ-1126-A`. This time the runner gave a syntax error on the top-level
+`await Word.run(...)`. Copilot again didn't alter the code or use another method; the document is unchanged.
+**Findings:** `toString` is no longer the problem, so the identifier check passed. The runner doesn't accept a
+top-level `await`: it doesn't run code as an async module. Next: v0.4 calls `Word.run(...)` without `await`, and
+lets Copilot adjust only the outer wrapper line, reporting exactly what it changed, so we learn the form the
+runner expects while the inner code (which computes the hash) stays as written.
