@@ -18,6 +18,7 @@
 
 ## 🔔 Owner questions open
 
+0. Full demo environment plan `notes/demo-environment-plan.md` (2026-11-26, W1–W9, ~12–17 d): six decisions in its §5. Decision 1 (user token for the loader) is security-sensitive.
 1. ISS-040 #3089: retire the dead "Communication" event-type entry or add the row on dev.
 2. #3173: remove the retired Copilot agent's Bicep param + registry column, or keep dormant.
 3. ISS-038 #3018 decisions (`notes/iss038-upgrade-mode-design.md`: approve, Cosmos failover, CI hot path).

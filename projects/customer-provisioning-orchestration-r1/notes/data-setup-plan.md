@@ -3,6 +3,7 @@
 > **Status**: DRAFT plan for owner review, 2026-11-24. Nothing built yet.
 > **Asked by**: owner, 2026-11-24 ("populate reference lookup tables with standard values … and a set of test records so
 > the system can be demonstrated").
+> **Next**: the full demo environment (files, AI content, billing, personas, volume) is planned in `notes/demo-environment-plan.md` (2026-11-26).
 > **Related**: ISS-039 (#3075), L56 (`t186-acme-run-log.md`), ISS-037 (H12b workspaces), `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
 
 ## 1. What we found (read-only, 2026-11-24)
