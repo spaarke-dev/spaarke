@@ -161,6 +161,7 @@ The repo ships ONE import that lands everything: SpaarkeMaster (its WebResources
 - **OQ-3**: confirm `sprk_procedureversion` is out of the redirect (system-created by `ProcedureService`). Open.
 - **OQ-4 (open)**: should the home-grid New on matter, project, work assignment, event and document (today the wizard button, platform New hidden), and the subgrid "+ New", also be closed beyond this?
 - **OQ-5 (open)**: "+ Add KPI" and "New KPI Assessment" now do the same on one subgrid: keep both?
+- **Budget/KPI subgrid New: decided 2026-11-26** (owner "Yes, keep it"): the BFF create-then-open stays (decisions.md).
 
 ## 9. Out-of-scope defects (found, not fixed)
 

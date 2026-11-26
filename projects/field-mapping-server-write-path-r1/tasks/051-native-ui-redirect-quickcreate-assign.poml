@@ -4,7 +4,7 @@
     <title>Native UI: ribbon New opens the wizard, quick create off, OOB Assign hidden, Memo/KPI via BFF, -Verify script (FR-24)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>050+029 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes ribbon XML, web resources and Dataverse table metadata; tags include frontend, ribbon, deploy, scripts; deploys to Dataverse.</rigor-reason>
     <model-tier>sonnet</model-tier>

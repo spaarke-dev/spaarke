@@ -1180,3 +1180,10 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - **051 OQ-2 / OQ-3:** unchanged (invoice-family, ontology and service-request keep native New with Assign hidden; `sprk_procedureversion` stays in the 23).
 - **051 dev import:** approved ("yes can import 051").
 - **4b/4c reconfirmed:** "the copy should happen no matter of appendto - the mapping is a data consistency rule so should happen regardless of user's permissions." The 2026-10-27 decision stands and was never implemented (the create still drops a mapped ordinary lookup that fails the caller's AppendTo or field security). New task 064 implements it inside the 2026-10-27 boundaries: a mapped FILING lookup keeps the caller's AppendTo check (refuse); BFF-owned invariant columns are never copied; a field-secured source value is never copied into a non-field-secured target; the FR-04 source Read check stays as the caller.
+
+## 2026-11-26 — Owner: budget and KPI subgrid "+ New" stays the BFF create-then-open
+
+- The owner's answer was "Yes, keep it". On a matter or report card, the budget and KPI assessment subgrid "+ New" creates the row through `POST /api/v1/child-records/{table}`, so mapping and owner stay server-side, and then opens it. This is the behaviour before 051; the earlier "subgrid native" wording was corrected. Their form New stays native, and their home-grid New stays hidden.
+- Still open, and not blocking 051:
+  - OQ-4: should the home-grid and subgrid New close further?
+  - OQ-5: keep both "Add KPI Assessment" and "New KPI Assessment" on the KPI subgrid?
