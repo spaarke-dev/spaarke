@@ -198,7 +198,7 @@ internal sealed class ListPlaybooksTool : McpToolDefinition
         var used = 0;
         foreach (var row in rows)
         {
-            var line = $"- {TextSafe(row.Name)} ({row.OwnerKind}), id {row.Id:D}\n";
+            var line = $"- {McpText.SingleLine(row.Name)} ({row.OwnerKind}), id {row.Id:D}\n";
             var cost = JsonSerializer.SerializeToUtf8Bytes(row, Json).Length + JsonSerializer.SerializeToUtf8Bytes(line, Json).Length;
             if (used + cost > RowBudgetBytes)
             {
@@ -229,25 +229,6 @@ internal sealed class ListPlaybooksTool : McpToolDefinition
 
     private static string? Clip(string? value, int max) =>
         value is null || value.Length <= max ? value : string.Concat(value.AsSpan(0, max - 1), "…");
-
-    /// <summary>
-    /// A name for a line of the text content: every control character (CR, LF, tab, NEL, ...) and Unicode line or paragraph separator
-    /// becomes a space, so a user-authored name cannot start a line of its own and pass for another row (K2). The structured rows keep
-    /// the name as it is.
-    /// </summary>
-    private static string TextSafe(string value) =>
-        value.Any(IsLineBreaking)
-            ? string.Create(value.Length, value, static (span, v) =>
-            {
-                for (var i = 0; i < v.Length; i++)
-                {
-                    span[i] = IsLineBreaking(v[i]) ? ' ' : v[i];
-                }
-            })
-            : value;
-
-    private static bool IsLineBreaking(char c) =>
-        char.IsControl(c) || char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
 
     private static CallToolResult Error(PlaybookListResult result, HttpContext? http)
     {
