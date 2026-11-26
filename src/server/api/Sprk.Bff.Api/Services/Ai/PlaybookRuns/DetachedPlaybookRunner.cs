@@ -1,0 +1,585 @@
+using System.Collections.Concurrent;
+using System.Security.Claims;
+using Microsoft.Identity.Client;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Ai.Handoff;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+
+namespace Sprk.Bff.Api.Services.Ai.PlaybookRuns;
+
+// =====================================================================================================================
+// spaarkeai-mcp-bff-api-r2 task 030 — THE detached caller run (owner decision D-030-run-model; ADR-052 amendment 2026-11-26).
+//
+// PLACEMENT JUSTIFICATION (CLAUDE.md section 10; .claude/constraints/bff-extensions.md). In the BFF, beside the run record store it
+// shares the run with: the run is per-request work a user started (ADR-052: the placement is unchanged; the amendment allows only this
+// run to finish after its request). No queue, job, BackgroundService or other host; no package; one singleton DI registration (the
+// in-process run table must outlive a request scope). It reuses the engine's own person-run entry (IPlaybookOrchestrationService
+// .ExecuteAsync, the REST route's entry), task 007's authorization and task 005's record writer unchanged (ADR-039: no engine edit).
+//
+// COMPONENT JUSTIFICATION (CLAUDE.md section 11).
+//   Existing: Services/Compose/ComposeProfileDispatcher (the house precedent: a detached scope and HttpContext for a best-effort
+//     profile, with the #3224 accessor defect); PlaybookRunEndpoints.ExecutePlaybook (runs inside its request).
+//   Extension: ComposeProfileDispatcher is a Compose collaborator built by ComposeService, not a shared service, runs a profile not a
+//     playbook, suppresses no ExecutionContext flow (#3224) and has no cap, pre-warm or run table; the amendment names ONE helper for
+//     this work, and Compose moves onto it in a follow-up (#3224), not here.
+//   Cost of doing nothing: a playbook run started from Copilot either dies with the MCP request (the stateless host ends it at the
+//     reply) or runs on the request's disposed HttpContext, which is cross-user OBO (task 007 verifier, F1).
+// =====================================================================================================================
+
+/// <summary>
+/// The one shared detached-run helper (ADR-052 amendment 2026-11-26): runs a JPS playbook run a user started after that user's request
+/// has answered, acting as the user, and keeps its state in this process's memory for the user to read.
+/// </summary>
+/// <remarks>
+/// <para><b>The seven conditions, where each is met.</b></para>
+/// <list type="number">
+/// <item><b>Which work:</b> only <see cref="StartAsCallerAsync"/>, a JPS playbook run the caller started (no timer, webhook or system
+/// entry).</item>
+/// <item><b>One helper:</b> this class is the only production code that builds a detached <see cref="HttpContext"/> (ArchTest
+/// <c>DetachedHttpContextGuardTests</c>, with the Compose and Decision baseline).</item>
+/// <item><b>Memory only:</b> the caller's bearer header lives on the detached context and the captured launch only. It is never logged,
+/// cached, stored or put in an exception; log lines carry the outcome, reason code, latency and correlation id (NFR-05).</item>
+/// <item><b>No leak into the original request:</b> <see cref="ExecutionContext.SuppressFlow"/> wraps the launch, so setting
+/// <see cref="IHttpContextAccessor.HttpContext"/> inside the detached flow never clears the request's own holder (the #3224 defect).</item>
+/// <item><b>Bounded:</b> <see cref="PlaybookRunLimits.MaxRunDuration"/> (on <see cref="TimeProvider"/>) and
+/// <see cref="IHostApplicationLifetime.ApplicationStopping"/> cancel the run. Graph and Dataverse OBO tokens are obtained before the
+/// request answers. An authentication failure ends the run as failed (<see cref="AuthExpiredReasonCode"/>); nothing is retried, and
+/// nothing here calls the app-only entry.</item>
+/// <item><b>Authorized first:</b> task 007's method decides inside the request; the exact <c>documentIds</c> and <c>parameters</c>
+/// instances it decided on are the run's, with <c>RunUserId</c> = its <c>RunUserId</c> and <c>StartedBy = Person</c>.</item>
+/// <item><b>Visible:</b> this process's run table, then the engine's status read (task 005's durable record); a record left Running by a
+/// lost run is mapped to interrupted by the status tool.</item>
+/// </list>
+/// </remarks>
+internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
+{
+    /// <summary>The caller's delegated access could not be obtained at the start (pre-warm failed). Nothing ran.</summary>
+    internal const string AuthUnavailableReasonCode = PlaybookRunReasonCodes.AuthUnavailable;
+
+    /// <summary>The run's delegated access failed mid-run (expired assertion, consent or Conditional Access challenge).</summary>
+    internal const string AuthExpiredReasonCode = PlaybookRunReasonCodes.AuthExpired;
+
+    /// <summary>The run reached <see cref="PlaybookRunLimits.MaxRunDuration"/>.</summary>
+    internal const string TimeLimitReasonCode = PlaybookRunReasonCodes.TimeLimit;
+
+    /// <summary>The app shut down while the run was in flight.</summary>
+    internal const string HostStoppingReasonCode = PlaybookRunReasonCodes.HostStopping;
+
+    /// <summary>The engine did not accept the run within <see cref="PlaybookRunLimits.AcceptBudget"/>.</summary>
+    internal const string NotAcceptedReasonCode = PlaybookRunReasonCodes.NotAccepted;
+
+    /// <summary>The run failed (the engine's own terminal code when it names none).</summary>
+    internal const string FailedReasonCode = PlaybookRunReasonCodes.Failed;
+
+    /// <summary>How long a finished run stays in the run table (the durable record answers after that).</summary>
+    internal static readonly TimeSpan Retention = TimeSpan.FromHours(1);
+
+    private readonly ConcurrentDictionary<Guid, DetachedRun> _runs = new();
+    private readonly IServiceScopeFactory _scopes;
+    private readonly IHostApplicationLifetime _lifetime;
+    private readonly TimeProvider _time;
+    private readonly ILogger<DetachedPlaybookRunner> _logger;
+
+    public DetachedPlaybookRunner(
+        IServiceScopeFactory scopes,
+        IHostApplicationLifetime lifetime,
+        TimeProvider time,
+        ILogger<DetachedPlaybookRunner> logger)
+    {
+        _scopes = scopes;
+        _lifetime = lifetime;
+        _time = time;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async Task<PlaybookRunStartResult> StartAsCallerAsync(
+        HttpContext http,
+        Guid playbookId,
+        Guid[] documentIds,
+        IReadOnlyDictionary<string, string>? parameters,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(documentIds);
+        Prune();
+
+        // Condition 6: authorized first, inside the request, by task 007's one method; no check of our own.
+        var authorization = await PlaybookAuthorizationFilter
+            .AuthorizePlaybookRunAsync(http, playbookId, documentIds, parameters, cancellationToken)
+            .ConfigureAwait(false);
+        if (!authorization.IsAllowed || authorization.RunUserId is not { } runUserId)
+        {
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.Refused, authorization, null);
+        }
+
+        // Condition 1: capture what the run acts with while the request is alive (principal, bearer header, trace id).
+        var bearer = http.Request.Headers.Authorization.ToString();
+        var callerOid = CallerResolution.ResolveObjectId(http.User);
+        if (callerOid is null || !bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.Refused, PlaybookRunAuthorization.UserContextRequired, null);
+        }
+
+        // Condition 5: the delegated downstream tokens, obtained while the request is still authenticated.
+        if (!await PrewarmAsync(http, cancellationToken).ConfigureAwait(false))
+        {
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.AuthUnavailable, authorization, null);
+        }
+
+        var launch = new Launch(
+            new PlaybookRunRequest
+            {
+                PlaybookId = playbookId,
+                DocumentIds = documentIds,         // the exact instance authorized above
+                Parameters = parameters,           // the exact instance authorized above
+                RunUserId = runUserId,             // 007's resolved caller, never Parameters["userId"]
+                StartedBy = PlaybookRunStartedBy.Person,
+            },
+            http.User,
+            bearer,
+            http.TraceIdentifier,
+            callerOid,
+            _time,
+            _lifetime.ApplicationStopping);
+
+        // Condition 4: no ExecutionContext flow, so the detached flow's accessor write never touches this request's holder.
+        using (ExecutionContext.SuppressFlow())
+        {
+            _ = Task.Run(() => RunDetachedAsync(launch));
+        }
+
+        Guid? runId;
+        try
+        {
+            runId = await launch.Accepted.Task.WaitAsync(PlaybookRunLimits.AcceptBudget, _time, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            launch.Abandon();
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.NotAccepted, authorization, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller went away before the run was reported to anyone: stop it, so a retry never leaves two runs.
+            launch.Abandon();
+            throw;
+        }
+
+        return runId is { } id && _runs.TryGetValue(id, out var run)
+            ? new PlaybookRunStartResult(PlaybookRunStartOutcome.Started, authorization, run.Snapshot())
+            : new PlaybookRunStartResult(PlaybookRunStartOutcome.Unavailable, authorization, null);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlaybookRunView?> ReadAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        var callerOid = CallerResolution.ResolveObjectId(http.User);
+        if (callerOid is null || runId == Guid.Empty)
+        {
+            return null;
+        }
+
+        Prune();
+        if (_runs.TryGetValue(runId, out var live))
+        {
+            // Another caller's run is the same null as an unknown id (and is never read from the record either).
+            return PlaybookRunRecordStore.IsSameOid(live.StartedByOid, callerOid) ? live.Snapshot() : null;
+        }
+
+        // The engine's own status read, as GET /api/ai/playbooks/runs/{runId}: in memory, then the durable record for its starter.
+        var engine = http.RequestServices?.GetService<IPlaybookOrchestrationService>();
+        if (engine is null)
+        {
+            return null;
+        }
+
+        var status = await engine.GetRunStatusAsync(runId, cancellationToken).ConfigureAwait(false);
+        if (status is null || !PlaybookRunRecordStore.IsSameOid(status.StartedByOid, callerOid))
+        {
+            return null;
+        }
+
+        var metrics = status.Metrics;
+        return new PlaybookRunView(
+            status.RunId,
+            status.PlaybookId,
+            PhaseOf(status.State),
+            status.State == PlaybookRunState.Completed ? 100 : null,
+            metrics?.CompletedNodes ?? 0,
+            metrics?.FailedNodes ?? 0,
+            metrics?.SkippedNodes ?? 0,
+            ReasonCode: null,
+            status.StartedAt,
+            status.CompletedAt,
+            FromDurableRecord: true);
+    }
+
+    /// <inheritdoc />
+    public string? RunConsoleLink(HttpContext http, Guid? documentId) =>
+        http?.RequestServices?.GetService<HandoffUrlBuilder>()?.BuildConsoleUrl(documentId);
+
+    private static PlaybookRunPhase PhaseOf(PlaybookRunState state) => state switch
+    {
+        PlaybookRunState.Completed => PlaybookRunPhase.Completed,
+        PlaybookRunState.Failed => PlaybookRunPhase.Failed,
+        PlaybookRunState.Cancelled => PlaybookRunPhase.Cancelled,
+        _ => PlaybookRunPhase.Running,
+    };
+
+    /// <summary>
+    /// Obtains the caller's delegated Graph and Dataverse tokens through the existing factories while the request is authenticated, so
+    /// the run's later exchanges are answered from the caches those factories already keep (MSAL's OBO cache; the Graph Redis cache,
+    /// whose TTL now follows the token's expiry). Any failure refuses the start: a run that cannot act as the caller does not start.
+    /// </summary>
+    private async Task<bool> PrewarmAsync(HttpContext http, CancellationToken cancellationToken)
+    {
+        var graph = http.RequestServices?.GetService<IGraphClientFactory>();
+        var dataverse = http.RequestServices?.GetService<IDataverseUserClient>();
+        if (graph is null || dataverse is null)
+        {
+            _logger.LogWarning("Detached playbook run not started - Outcome: {Outcome}, CorrelationId: {CorrelationId}", AuthUnavailableReasonCode, http.TraceIdentifier);
+            return false;
+        }
+
+        try
+        {
+            await graph.ForUserAsync(http, cancellationToken).ConfigureAwait(false);
+            var whoAmI = await dataverse.GetAsync("WhoAmI", cancellationToken).ConfigureAwait(false);
+            if (!whoAmI.IsSuccess)
+            {
+                _logger.LogWarning("Detached playbook run not started - Outcome: {Outcome}, ErrorCode: {ErrorCode}, CorrelationId: {CorrelationId}",
+                    AuthUnavailableReasonCode, whoAmI.ErrorCode, http.TraceIdentifier);
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The exception type only: an MSAL or HTTP message is never logged here (it is not ours to vouch for).
+            _logger.LogWarning("Detached playbook run not started - Outcome: {Outcome}, ErrorType: {ErrorType}, CorrelationId: {CorrelationId}",
+                AuthUnavailableReasonCode, ex.GetType().Name, http.TraceIdentifier);
+            return false;
+        }
+    }
+
+    /// <summary>The detached body: a new scope, a detached HttpContext, the engine's person-run entry, drained to the end. Never throws.</summary>
+    private async Task RunDetachedAsync(Launch launch)
+    {
+        DetachedRun? run = null;
+        var token = launch.Token;
+        var started = _time.GetTimestamp();
+        try
+        {
+            await using var scope = _scopes.CreateAsyncScope();
+
+            // The only detached HttpContext in production code besides the ratchet baseline (condition 2).
+            var detached = new DefaultHttpContext
+            {
+                RequestServices = scope.ServiceProvider,
+                User = launch.User,
+                TraceIdentifier = launch.CorrelationId,
+                RequestAborted = token,
+            };
+            detached.Request.Headers.Authorization = launch.Bearer;
+
+            // Inside the suppressed flow: this sets a holder that belongs to the detached flow alone (condition 4).
+            var accessor = scope.ServiceProvider.GetService<IHttpContextAccessor>();
+            if (accessor is not null)
+            {
+                accessor.HttpContext = detached;
+            }
+
+            try
+            {
+                var engine = scope.ServiceProvider.GetRequiredService<IPlaybookOrchestrationService>();
+                await foreach (var evt in engine.ExecuteAsync(launch.Request, detached, token).ConfigureAwait(false))
+                {
+                    run ??= Register(evt, launch);
+                    run.Apply(evt, _time.GetUtcNow());
+                    launch.Accepted.TrySetResult(run.RunId);
+                }
+
+                if (token.IsCancellationRequested)
+                {
+                    // The engine ended the stream itself on our token (RunCancelled, no exception): say which stop it was.
+                    var (phase, reason) = launch.CancellationReason();
+                    run?.End(phase, reason, _time.GetUtcNow(), overrideCancelled: true);
+                }
+                else
+                {
+                    // A stream that ended with no terminal event is not a completed run.
+                    run?.End(PlaybookRunPhase.Failed, FailedReasonCode, _time.GetUtcNow(), overrideCancelled: false);
+                }
+            }
+            finally
+            {
+                if (accessor is not null)
+                {
+                    accessor.HttpContext = null;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            var (phase, reason) = launch.CancellationReason();
+            run?.End(phase, reason, _time.GetUtcNow(), overrideCancelled: true);
+        }
+        catch (Exception ex) when (IsAuthenticationFailure(ex))
+        {
+            // Fail closed: the run ends here. Nothing is retried, and never as the app.
+            run?.End(PlaybookRunPhase.Failed, AuthExpiredReasonCode, _time.GetUtcNow(), overrideCancelled: true);
+            _logger.LogWarning("Detached playbook run ended - Outcome: {Outcome}, ErrorType: {ErrorType}, CorrelationId: {CorrelationId}",
+                AuthExpiredReasonCode, ex.GetType().Name, launch.CorrelationId);
+        }
+        catch (Exception ex)
+        {
+            run?.End(PlaybookRunPhase.Failed, FailedReasonCode, _time.GetUtcNow(), overrideCancelled: true);
+            _logger.LogWarning("Detached playbook run ended - Outcome: {Outcome}, ErrorType: {ErrorType}, CorrelationId: {CorrelationId}",
+                FailedReasonCode, ex.GetType().Name, launch.CorrelationId);
+        }
+        finally
+        {
+            // A run that ended before the engine named it is reported to the waiting start as "no run".
+            launch.Accepted.TrySetResult(run?.RunId);
+            _logger.LogInformation("Detached playbook run finished - Outcome: {Outcome}, ReasonCode: {ReasonCode}, ElapsedMs: {ElapsedMs}, CorrelationId: {CorrelationId}",
+                run?.Phase.ToString() ?? "NotStarted", run?.ReasonCode, (long)_time.GetElapsedTime(started).TotalMilliseconds, launch.CorrelationId);
+            launch.Dispose();
+        }
+    }
+
+    private DetachedRun Register(PlaybookStreamEvent first, Launch launch)
+    {
+        var run = new DetachedRun(first.RunId, first.PlaybookId, launch.CallerOid, _time.GetUtcNow());
+        _runs[run.RunId] = run;
+        return run;
+    }
+
+    /// <summary>Drops finished runs older than <see cref="Retention"/> (and any entry older than the cap plus that), lazily, on use.</summary>
+    private void Prune()
+    {
+        var now = _time.GetUtcNow();
+        foreach (var (id, run) in _runs)
+        {
+            if (run.IsExpired(now))
+            {
+                _runs.TryRemove(id, out _);
+            }
+        }
+    }
+
+    /// <summary>
+    /// An authentication failure: MSAL needs the user (consent, Conditional Access, claims challenge, an expired or revoked grant), or
+    /// Entra refused the assertion (AADSTS500133, expired), anywhere in the exception chain.
+    /// </summary>
+    internal static bool IsAuthenticationFailure(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case MsalUiRequiredException:
+                    return true;
+                case MsalServiceException service when !string.IsNullOrEmpty(service.Claims)
+                                                      || string.Equals(service.ErrorCode, "invalid_grant", StringComparison.Ordinal)
+                                                      || service.Message.Contains("AADSTS500133", StringComparison.Ordinal):
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>What one start hands its detached flow, and the three ways the run can be stopped.</summary>
+    private sealed class Launch : IDisposable
+    {
+        private readonly CancellationTokenSource _abandon = new();
+        private readonly CancellationTokenSource _cap;
+        private readonly CancellationToken _stopping;
+        private readonly CancellationTokenSource _linked;
+
+        public Launch(
+            PlaybookRunRequest request,
+            ClaimsPrincipal user,
+            string bearer,
+            string correlationId,
+            string callerOid,
+            TimeProvider time,
+            CancellationToken stopping)
+        {
+            Request = request;
+            User = user;
+            Bearer = bearer;
+            CorrelationId = correlationId;
+            CallerOid = callerOid;
+            _stopping = stopping;
+            _cap = new CancellationTokenSource(PlaybookRunLimits.MaxRunDuration, time);
+            _linked = CancellationTokenSource.CreateLinkedTokenSource(_abandon.Token, _cap.Token, stopping);
+        }
+
+        public PlaybookRunRequest Request { get; }
+
+        public ClaimsPrincipal User { get; }
+
+        /// <summary>The caller's Authorization header: memory only, on the detached context; never logged or stored.</summary>
+        public string Bearer { get; }
+
+        public string CorrelationId { get; }
+
+        public string CallerOid { get; }
+
+        public CancellationToken Token => _linked.Token;
+
+        public TaskCompletionSource<Guid?> Accepted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Abandon()
+        {
+            try
+            {
+                _abandon.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run already ended.
+            }
+        }
+
+        /// <summary>Why the run's token was cancelled: shutdown first, then the cap, else the start gave up on it.</summary>
+        public (PlaybookRunPhase Phase, string Reason) CancellationReason() =>
+            _stopping.IsCancellationRequested ? (PlaybookRunPhase.Cancelled, HostStoppingReasonCode)
+            : _cap.IsCancellationRequested ? (PlaybookRunPhase.Failed, TimeLimitReasonCode)
+            : (PlaybookRunPhase.Cancelled, NotAcceptedReasonCode);
+
+        public void Dispose()
+        {
+            _linked.Dispose();
+            _cap.Dispose();
+            _abandon.Dispose();
+        }
+    }
+
+    /// <summary>One run in this process's run table: counts and state only (ADR-015), guarded by one lock.</summary>
+    private sealed class DetachedRun
+    {
+        private readonly object _gate = new();
+        private int _nodeCount;
+        private int _completed;
+        private int _failed;
+        private int _skipped;
+        private DateTimeOffset? _completedAt;
+
+        public DetachedRun(Guid runId, Guid playbookId, string startedByOid, DateTimeOffset startedAt)
+        {
+            RunId = runId;
+            PlaybookId = playbookId;
+            StartedByOid = startedByOid;
+            StartedAt = startedAt;
+        }
+
+        public Guid RunId { get; }
+
+        public Guid PlaybookId { get; }
+
+        public string StartedByOid { get; }
+
+        public DateTimeOffset StartedAt { get; }
+
+        public PlaybookRunPhase Phase { get; private set; } = PlaybookRunPhase.Running;
+
+        public string? ReasonCode { get; private set; }
+
+        public void Apply(PlaybookStreamEvent evt, DateTimeOffset now)
+        {
+            lock (_gate)
+            {
+                switch (evt.Type)
+                {
+                    case PlaybookEventType.RunStarted:
+                        _nodeCount = evt.Metrics?.TotalNodes ?? 0;
+                        break;
+                    case PlaybookEventType.NodeCompleted:
+                        _completed++;
+                        break;
+                    case PlaybookEventType.NodeFailed:
+                        _failed++;
+                        break;
+                    case PlaybookEventType.NodeSkipped:
+                        _skipped++;
+                        break;
+                    case PlaybookEventType.RunCompleted:
+                        TakeMetrics(evt.Metrics);
+                        Finish(PlaybookRunPhase.Completed, null, now);
+                        break;
+                    case PlaybookEventType.RunFailed:
+                        TakeMetrics(evt.Metrics);
+                        Finish(PlaybookRunPhase.Failed, string.IsNullOrEmpty(evt.ErrorCode) ? FailedReasonCode : evt.ErrorCode, now);
+                        break;
+                    case PlaybookEventType.RunCancelled:
+                        Finish(PlaybookRunPhase.Cancelled, null, now);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Ends a run that is still running. <paramref name="overrideCancelled"/> also re-labels a run the engine reported cancelled
+        /// without a reason (our own token stopped it: the cap, a shutdown, or an abandoned start).
+        /// </summary>
+        public void End(PlaybookRunPhase phase, string reason, DateTimeOffset now, bool overrideCancelled)
+        {
+            lock (_gate)
+            {
+                if (Phase == PlaybookRunPhase.Running || (overrideCancelled && Phase == PlaybookRunPhase.Cancelled && ReasonCode is null))
+                {
+                    Finish(phase, reason, now);
+                }
+            }
+        }
+
+        public bool IsExpired(DateTimeOffset now)
+        {
+            lock (_gate)
+            {
+                return _completedAt is { } done
+                    ? now - done > Retention
+                    : now - StartedAt > PlaybookRunLimits.MaxRunDuration + Retention;
+            }
+        }
+
+        public PlaybookRunView Snapshot()
+        {
+            lock (_gate)
+            {
+                int? progress = Phase == PlaybookRunPhase.Completed
+                    ? 100
+                    : _nodeCount > 0 ? Math.Min(99, (_completed + _failed + _skipped) * 100 / _nodeCount) : null;
+                return new PlaybookRunView(
+                    RunId, PlaybookId, Phase, progress, _completed, _failed, _skipped, ReasonCode, StartedAt, _completedAt, FromDurableRecord: false);
+            }
+        }
+
+        private void TakeMetrics(PlaybookRunMetrics? metrics)
+        {
+            if (metrics is null)
+            {
+                return;
+            }
+
+            _completed = metrics.CompletedNodes;
+            _failed = metrics.FailedNodes;
+            _skipped = metrics.SkippedNodes;
+        }
+
+        private void Finish(PlaybookRunPhase phase, string? reason, DateTimeOffset now)
+        {
+            Phase = phase;
+            ReasonCode = reason;
+            _completedAt = now;
+        }
+    }
+}

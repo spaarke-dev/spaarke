@@ -168,6 +168,12 @@ public static class AnalysisServicesModule
         });
         services.AddSingleton<Services.Ai.Metering.AiSpendLimit>();
 
+        // spaarkeai-mcp-bff-api-r2 task 030 (FR-05, FR-14; ADR-052 amendment 2026-11-26) — IPlaybookRunAi, the one detached
+        // caller run. UNCONDITIONAL per ADR-032 F.1: its consumers (the MCP run tools) are registered whenever MCP is on, and it
+        // degrades itself (it resolves the engine and HandoffUrlBuilder per call from the caller's scope; under compound-OFF the
+        // Null engine refuses and the start answers Unavailable). Singleton: its run table must outlive a request scope.
+        services.AddSingleton<Services.Ai.PublicContracts.IPlaybookRunAi, Services.Ai.PlaybookRuns.DetachedPlaybookRunner>();
+
         // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
         // TRULY UNCONDITIONAL, mirroring the always-mapped
         // WorkspaceFileEndpoints.MapWorkspaceFileEndpoints (the non-AI /api/workspace/files/summarize
