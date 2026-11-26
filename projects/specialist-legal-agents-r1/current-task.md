@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-26 (001–011 done; 015 waiting on the owner deploy go)
+> **Last Updated**: 2026-11-26 ~18:10Z (001–015 done; spike live on dev)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 
@@ -9,14 +9,15 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 0 in execution. `spec.md` (2026-11-25), `plan.md`, project `CLAUDE.md`, 20 POMLs + `tasks/TASK-INDEX.md` (2026-11-26, lint PASS, no drift) |
-| **Active task** | 001–007, 010, 011 ✅. Spike `spike/specialist-agents-phase0` head `d307d67e36` (contains origin/master; reviewed twice + fix re-check). 015 waits on the owner go for that SHA; the deploy goes through the uac-r2 session |
+| **Active task** | 001–007, 010, 011, 015 ✅. Dev BFF = spike `d307d67e36` (live ~18:00Z; rollback 140c01219a). Next: 020 (test agent packages), then the 021–025 owner runs |
 | **Stop points** | 010 DEV write (`agreement-review-spike`) needs the owner's go; 015 dev deploy needs the owner's per-SHA go via uac-r2 |
 | **Uncommitted** | see `git status` |
 
 ## Next action (exact)
 
-1. Owner go for dev deploy of `d307d67e36` (task 015). On go: re-check origin/master is still an ancestor, then message the uac-r2 session with the SHA. After the deploy: tools/list shows both spike tools; record p95 latency over at least 10 calls; warn other dev users that two spike tools appear.
-2. Then 020 (packages; R4 rows before any upload; `spike_get_profile` needs the `function` argument).
+1. Task 020: build the test packages (G1 a/b/c, G5, G2). Each needs a fresh app id, the FORBIDDEN_IN_PACKAGE check and an R4 row to coordination before upload; `spike_get_profile` needs the `function` argument; only `nda-01`–`nda-10` may be uploaded. The owner uploads.
+2. Watch for uac-r2's 30-min gate (18:31Z) and its full test pass on `d307d67e36`. If either fails, the spike may be rolled back to 140c01219a.
+3. Owner by 2026-11-30: remove the G8 artifacts (this precedes 022).
 
 ## Open items outside the task list
 

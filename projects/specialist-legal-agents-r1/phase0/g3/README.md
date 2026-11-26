@@ -111,3 +111,9 @@ To be written after the DEV run.
 - uac-r2 replied that the go must be given in its own session as "go BFF deploy d307d67e36". Before that it needs (1) an access review of both tools, sent 2026-11-26 (neither tool reads a per-user record or an SPE document; the Action-catalogue read is app-only), and (2) its own test pass on the SHA (full solution build plus the BFF and Arch suites, about 1.5 h).
 - At the time of the request the dev BFF was at `140c01219a` and master at `51ce01a116`, an ancestor of `d307d67e36`. The deploy also carries #2622, #3236, #3243 and #3247 to dev.
 - 2026-11-26: uac-r2 cleared the access review; its spot-check of 51ce01a116..d307d67e36 (12 BFF files) matched. Its non-blocking note: the profiles are keyed by two DEV systemuserids on a public branch, so they must keep holding synthetic test positions only, never a real person's legal positions. Its full test pass started about 17:20Z in `C:/wtdep29` (about 1.5 h). The deploy needs that pass green AND the owner's "go BFF deploy d307d67e36" in uac-r2's session.
+- **LIVE 2026-11-26 ~18:00Z** (uac-r2, hash-verified): the dev BFF runs `d307d67e36`, replacing `140c01219a` (the rollback target).
+  - `tools/list` on /mcp/legal-operations returns 7 tools, including `spike_get_profile` and `spike_review_nda`. App Insights shows uac-r2's tools/list POSTs at 18:02Z returning 200.
+  - healthz 200. `/healthz/catalog` returns 503, as it did before this deploy.
+  - uac-r2's 30-min gate (18:31Z) and its full test pass are reported separately.
+- **Latency:** not measured in task 015. Calling the tools needs a signed-in Copilot user (the connector token), so p95 per tool (at least 10 calls each) is measured from App Insights during the first owner run, task 021.
+- COPILOT-PLATFORM-COORDINATION was told that the spike tools are visible to every dev connector user.
