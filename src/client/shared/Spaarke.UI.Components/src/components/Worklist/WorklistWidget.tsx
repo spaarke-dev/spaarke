@@ -176,9 +176,9 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       state.mounted = false;
     };
   }, []);
-  // To Dos whose outcome was recorded in this widget instance, with the notice each one was told. The server completes the To Do but leaves its Signal open until the
-  // nightly job, so the row stays; opening it again would show a picker or wizard for finished work. Stopgap: #1991 (DI-101) closes
-  // the Signal in the same call, after which the row leaves the list on the reload and this set and its notice go.
+  // To Dos whose outcome was recorded in this widget instance, with the notice each one was told. The server completes the To Do and
+  // queues a re-evaluation that closes its Signal within seconds (#1991, DI-101); the reload right after the record can beat that job,
+  // so the row may stay until the next read, and opening it again would show a picker or wizard for finished work.
   const recordedTodos = React.useRef(new Map<string, Notice>());
 
   // "Today" moves forward each time the lanes are read again.

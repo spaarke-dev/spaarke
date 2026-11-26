@@ -3,8 +3,10 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
 
@@ -106,8 +108,12 @@ public sealed class InquiryDispositionTests
             + (version is null ? "" : ",\"versionnumber\":" + version) + "}";
     }
 
-    private static InquiryDispositionService Sut(FakeUser user) =>
-        new(user, Now, NullLogger<InquiryDispositionService>.Instance);
+    private static InquiryDispositionService Sut(FakeUser user, Mock<SignalEvaluationTrigger>? trigger = null) =>
+        new(user, Now, NullLogger<InquiryDispositionService>.Instance, (trigger ?? Trigger()).Object);
+
+    /// <summary>Task 228: the event-trigger enqueue (a mock: nothing is queued), answering <paramref name="queued"/>.</summary>
+    private static Mock<SignalEvaluationTrigger> Trigger(bool queued = true) =>
+        Sprk.Bff.Api.Tests.Domain.Signals.FilingSignalDoubles.Trigger(queued);
 
     private static FakeUser Open(string? reply = null, string? row = null)
     {
@@ -170,6 +176,59 @@ public sealed class InquiryDispositionTests
 
         result.Outcome.Should().Be(InquiryResolutionOutcome.Resolved);
         result.TodoCompleted.Should().BeFalse();
+    }
+
+    // ---- task 228 (#1991, DI-101): the completed To Do's Signal is re-evaluated now, not at the nightly run ----------
+
+    [Fact]
+    public async Task A_completed_todo_queues_the_evaluation_of_that_todo_through_the_event_trigger()
+    {
+        var user = Open();
+        var trigger = Trigger();
+
+        var result = await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000001, default);
+
+        result.TodoCompleted.Should().BeTrue();
+        trigger.Verify(t => t.EnqueueAsync(SignalTriggerKind.InquiryDisposition, "sprk_todo", InquiryDispositionService.TodoIdFor(Inquiry),
+            Inquiry, null, It.IsAny<CancellationToken>()), Times.Once);
+        trigger.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(404)]
+    [InlineData(403)]
+    public async Task A_todo_that_was_not_completed_queues_nothing(int todoStatus)
+    {
+        var user = Open();
+        user.TodoPatchStatus = todoStatus;
+        var trigger = Trigger();
+
+        await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000003, default);
+
+        trigger.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task A_refused_disposition_queues_nothing()
+    {
+        var user = Open(row: Json.Row(disposition: 100000000));
+        var trigger = Trigger();
+
+        var result = await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000001, default);
+
+        result.Outcome.Should().Be(InquiryResolutionOutcome.AlreadyResolved);
+        trigger.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task An_enqueue_that_fails_does_not_undo_the_recorded_disposition()
+    {
+        var user = Open();
+
+        var result = await Sut(user, Trigger(queued: false)).RecordDispositionAsync(Inquiry, Reply, 100000001, default);
+
+        result.Outcome.Should().Be(InquiryResolutionOutcome.Resolved, "the nightly run closes the Signal when the enqueue failed");
+        result.TodoCompleted.Should().BeTrue();
     }
 
     // ---- the refusals: nothing is written ------------------------------------------------------------------------

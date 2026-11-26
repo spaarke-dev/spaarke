@@ -458,7 +458,8 @@ describe('while a lookup is in flight', () => {
 });
 
 describe('a recorded outcome says so, and the row that stays is not opened again', () => {
-  const RECORDED_DONE = "Outcome recorded. This item stays in the list until tonight's check closes it.";
+  const RECORDED_DONE =
+    'Outcome recorded and the To Do completed. This item leaves the list shortly; refresh to see it go.';
   const RECORDED_OPEN = 'Outcome recorded, but the To Do could not be completed. Complete it from the To Do.';
 
   async function record(todoCompleted: boolean) {
@@ -474,9 +475,11 @@ describe('a recorded outcome says so, and the row that stays is not opened again
     return { service, ...utils };
   }
 
-  it('todoCompleted true: says the item stays until the nightly check closes it', async () => {
+  it('todoCompleted true: says the To Do completed and the item leaves shortly, with no nightly wait', async () => {
     await record(true);
-    expect(await screen.findByTestId('worklist-notice')).toHaveTextContent(RECORDED_DONE);
+    const notice = await screen.findByTestId('worklist-notice');
+    expect(notice).toHaveTextContent(RECORDED_DONE);
+    expect(notice.textContent).not.toMatch(/tonight|nightly/i);
   });
 
   it('todoCompleted false: says the To Do could not be completed', async () => {

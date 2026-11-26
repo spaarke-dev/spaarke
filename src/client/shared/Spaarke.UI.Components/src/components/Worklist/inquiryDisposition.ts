@@ -43,11 +43,11 @@ export function inquiryTodoIdOf(item: WorklistRouteItem): string | null {
 export const INQUIRY_LOOKUP_FAILED = 'This To Do could not be opened because its inquiry could not be read. Try again.';
 
 /**
- * Shown after a recorded outcome whose To Do was completed. The row stays until the nightly check closes its Signal.
- * Stopgap: #1991 (DI-101) closes the Signal in the same call; remove this wording and the session set in WorklistWidget then.
+ * Shown after a recorded outcome whose To Do was completed. The server queues a re-evaluation of the To Do (#1991, DI-101), which
+ * closes its Signal within seconds; the reload that follows the record can still be faster than that, so the row may show once more.
  */
 export const OUTCOME_RECORDED_TODO_DONE =
-  "Outcome recorded. This item stays in the list until tonight's check closes it.";
+  'Outcome recorded and the To Do completed. This item leaves the list shortly; refresh to see it go.';
 
 /** Shown after a recorded outcome whose To Do the server could not complete. */
 export const OUTCOME_RECORDED_TODO_OPEN =

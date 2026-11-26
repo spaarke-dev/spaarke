@@ -139,11 +139,16 @@ public sealed record FirmDispositionTally(Guid? FirmId, DispositionTally Disposi
 /// (<see cref="InquiryReplyTodoCreator"/>) is completed in the same call.</para>
 /// <para><b>Tallies run as the caller</b>: a user sees the tallies of the Inquiries they may read, nothing more. They are
 /// server-side aggregates, so there is no paging to truncate.</para>
+/// <para><b>The To Do's Signal (task 228, #1991, DI-101).</b> Once the To Do is completed, the evaluation of that To Do is queued
+/// through the event-trigger path (<see cref="SignalEvaluationTrigger"/>, D-12; kind <see cref="SignalTriggerKind.InquiryDisposition"/>):
+/// its open Do-lane Signal closes as ConditionCleared within the job's latency, not at the nightly run. The enqueue never throws; a
+/// failure leaves the nightly run to close it.</para>
 /// </remarks>
 public sealed class InquiryDispositionService(
     IDataverseUserClient user,
     TimeProvider clock,
-    ILogger<InquiryDispositionService> logger)
+    ILogger<InquiryDispositionService> logger,
+    SignalEvaluationTrigger signals)
 {
     internal const string ServiceRequest = "sprk_servicerequest";
     /// <summary>sprk_communication.sprk_direction: Incoming.</summary>
@@ -156,6 +161,34 @@ public sealed class InquiryDispositionService(
     internal const int StatusInactive = 2;
     /// <summary>sprk_todo.statuscode Completed (State Inactive).</summary>
     internal const int TodoStatusCompleted = 2;
+    /// <summary>sprk_todo.statuscode Dismissed (State Inactive; live option value, task 009).</summary>
+    internal const int TodoStatusDismissed = 659490002;
+    internal const string TodoTable = "sprk_todo";
+
+    /// <summary>
+    /// Task 228 (#1984, D-111): whether a Web API update body of a To Do CLOSES it: <c>statecode</c> Inactive, or a <c>statuscode</c> of
+    /// the Inactive state (Completed, Dismissed), which Dataverse applies with its state. The To Do of an open inquiry closes only by
+    /// recording the inquiry's disposition (<see cref="RecordDispositionAsync"/>); a write that closes it any other way is refused where it
+    /// enters the BFF (<c>ChildRecordEndpoints.UpdateAsync</c>, after <see cref="FindOpenInquiryOfTodoAsync"/>). No I/O.
+    /// </summary>
+    public static bool ClosesTodo(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object)
+            return false;
+
+        foreach (var property in body.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt64(out var value))
+                continue;
+            if (string.Equals(property.Name, "statecode", StringComparison.OrdinalIgnoreCase) && value == StateInactive)
+                return true;
+            if (string.Equals(property.Name, "statuscode", StringComparison.OrdinalIgnoreCase)
+                && value is TodoStatusCompleted or TodoStatusDismissed)
+                return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Records <paramref name="disposition"/> on the Inquiry <paramref name="serviceRequestId"/> because of the inbound
@@ -210,6 +243,13 @@ public sealed class InquiryDispositionService(
             {
                 var todoCompleted = await CompleteTodoAsync(serviceRequestId, ct).ConfigureAwait(false);
                 await ConfirmSuggestedAssociationAsync(replyCommunicationId, ReadLong(reply.Body, "sprk_associationstatus"), ct).ConfigureAwait(false);
+                if (todoCompleted)
+                {
+                    // Task 228 (#1991): the completed To Do's open Do-lane Signal closes now, not at the nightly run. Never throws: a false
+                    // is logged by the trigger, and the nightly run closes it.
+                    await signals.EnqueueAsync(
+                        SignalTriggerKind.InquiryDisposition, TodoTable, TodoIdFor(serviceRequestId), serviceRequestId, ct: ct).ConfigureAwait(false);
+                }
                 return new(InquiryResolutionOutcome.Resolved, serviceRequestId, TodoCompleted: todoCompleted);
             }
 

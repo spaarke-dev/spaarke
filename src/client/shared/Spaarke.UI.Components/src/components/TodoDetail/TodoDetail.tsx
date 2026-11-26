@@ -59,7 +59,8 @@ import {
   DismissRegular,
   AddCircleRegular,
 } from '@fluentui/react-icons';
-import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
+import type { ITodoRecord, ITodoFieldUpdates, IContactOption, ITodoSaveResult } from './types';
+import { INQUIRY_DISPOSITION_REQUIRED_REASON } from './types';
 import { computeTodoScoreBreakdown } from '../../utils/dateLocal';
 import { safeRegardingRecordUrl } from '../../utils/safeRegardingRecordUrl';
 
@@ -74,6 +75,27 @@ const STATECODE_INACTIVE = 1;
 const STATUSCODE_COMPLETED = 2;
 /** statuscode = Dismissed (Inactive). */
 const STATUSCODE_DISMISSED = 659490002;
+
+/**
+ * Ontology task 228 (#1984, D-111): shown when the server refuses to complete or dismiss the "Record the outcome" To Do
+ * of an open budget inquiry (409 `inquiry.disposition_required`). That To Do is completed by recording the outcome.
+ */
+export const INQUIRY_TODO_CLOSE_MESSAGE =
+  'This To Do is completed by recording how the budget inquiry turned out. Open it from the Worklist and record the outcome; that completes the To Do. Nothing was saved.';
+
+/** The `reasonCode` of a failed save: from the host's result, or from a thrown BFF write error (`ChildRecordWriteError`). */
+function reasonCodeOf(failure: unknown): string | undefined {
+  if (typeof failure !== 'object' || failure === null) return undefined;
+  const code = (failure as { reasonCode?: unknown }).reasonCode;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** Plain words for a failed complete or dismiss: the inquiry refusal in its own words, else the host's text, else `fallback`. */
+function closeFailureMessage(failure: unknown, fallback: string): string {
+  if (reasonCodeOf(failure) === INQUIRY_DISPOSITION_REQUIRED_REASON) return INQUIRY_TODO_CLOSE_MESSAGE;
+  const error = typeof failure === 'object' && failure !== null ? (failure as ITodoSaveResult).error : undefined;
+  return typeof error === 'string' && error ? error : fallback;
+}
 
 /**
  * Entity set the `sprk_todo.sprk_assignedto` lookup targets (`contact`, live metadata,
@@ -316,7 +338,7 @@ export interface ITodoDetailProps {
    * Save a subset of `sprk_todo` fields. Single Web API `updateRecord` call.
    * Host implements via injected Web API client (no hardcoded URLs).
    */
-  onSaveTodo: (todoId: string, fields: ITodoFieldUpdates) => Promise<{ success: boolean; error?: string }>;
+  onSaveTodo: (todoId: string, fields: ITodoFieldUpdates) => Promise<ITodoSaveResult>;
   /**
    * Dismiss the to-do (sets statuscode = 659490002 / Dismissed, statecode = 1 / Inactive).
    * Replaces the legacy "Remove from To Do" path that toggled `sprk_event.sprk_todoflag`.
@@ -325,7 +347,7 @@ export interface ITodoDetailProps {
    * `deleteRecord("sprk_todo", id)` instead — the component is agnostic to the
    * persistence semantics, it just invokes this callback when the user clicks "Dismiss".
    */
-  onDismissTodo?: (todoId: string) => Promise<{ success: boolean; error?: string }>;
+  onDismissTodo?: (todoId: string) => Promise<ITodoSaveResult>;
   /** Close the side pane. */
   onClose?: () => void;
   /**
@@ -660,11 +682,11 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       try {
         const result = await onDismissTodo(record.sprk_todoid);
         if (!result.success) {
-          setSaveError(result.error ?? 'Failed to dismiss');
+          setSaveError(closeFailureMessage(result, 'Failed to dismiss'));
           setIsDismissing(false);
         }
-      } catch {
-        setSaveError('Failed to dismiss — unexpected error');
+      } catch (err) {
+        setSaveError(closeFailureMessage({ reasonCode: reasonCodeOf(err) }, 'Failed to dismiss — unexpected error'));
         setIsDismissing(false);
       }
     }, [record, onDismissTodo]);
@@ -687,7 +709,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         };
         const result = await onSaveTodo(record.sprk_todoid, updates);
         if (!result.success) {
-          setSaveError(result.error ?? 'Failed to complete');
+          setSaveError(closeFailureMessage(result, 'Failed to complete'));
           setIsCompleting(false);
           return;
         }
@@ -700,8 +722,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           effort,
           assignedToId,
         };
-      } catch {
-        setSaveError('Failed to mark as completed — unexpected error');
+      } catch (err) {
+        setSaveError(
+          closeFailureMessage({ reasonCode: reasonCodeOf(err) }, 'Failed to mark as completed — unexpected error')
+        );
       } finally {
         setIsCompleting(false);
       }
