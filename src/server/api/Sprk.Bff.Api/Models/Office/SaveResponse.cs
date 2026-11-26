@@ -95,9 +95,10 @@ public enum EmailFilingOutcome
     /// <summary>The email's communication was unfiled and is now filed to the save's record.</summary>
     Filed,
 
-    /// <summary>The communication was already filed (to any record) and was not moved. Task 140: when the save's record is
-    /// its only regarding and it was not yet confirmed, the save confirmed it (Resolved); otherwise it was left as it
-    /// was.</summary>
+    /// <summary>The communication was already filed and was not moved. Task 140: when the save's record is its only regarding
+    /// and it was not yet confirmed, the save confirmed it (Resolved); otherwise — filed to other records only, or already
+    /// confirmed — it was left as it was. A row the save's record is on that could not be confirmed is
+    /// <see cref="FiledUnconfirmed"/>.</summary>
     AlreadyFiled,
 
     /// <summary>The caller may not change the communication, so it was left unfiled.</summary>
@@ -106,9 +107,10 @@ public enum EmailFilingOutcome
     /// <summary>The filing could not be completed; the communication was left as it was.</summary>
     Failed,
 
-    /// <summary>Task 140: the communication is filed to the save's record alone, unconfirmed, and the save could not confirm
-    /// it (the caller may not change it, or the confirmation failed); it was left as it was and still needs confirming in
-    /// Spaarke.</summary>
+    /// <summary>Task 140: the communication is filed to the save's record, unconfirmed, and the save could not confirm it (the
+    /// caller may not change it, the confirmation failed, or the row may not be confirmed by a save: another record is filed
+    /// beside it, it is Ambiguous, or its pair type does not name the record's table); it was left as it was and still needs
+    /// confirming in Spaarke.</summary>
     FiledUnconfirmed,
 }
 

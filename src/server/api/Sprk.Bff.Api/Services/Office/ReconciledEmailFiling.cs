@@ -19,7 +19,9 @@ public enum ReconciledFilingResult
     /// <summary>The communication was filed to the save's record.</summary>
     Filed,
 
-    /// <summary>The communication was already filed (to any record) and was left as it was.</summary>
+    /// <summary>The communication was already filed and was left as it was. Task 140: on the confirm path, only when the save's
+    /// record is not on it (filed to other records only) or it is already Resolved; a row the save's record IS on that cannot
+    /// be confirmed is <see cref="NotConfirmable"/>.</summary>
     AlreadyFiled,
 
     /// <summary>The caller may not change the communication; it was left unfiled.</summary>
@@ -39,6 +41,12 @@ public enum ReconciledFilingResult
     /// <summary>Task 140: as <see cref="Confirmed"/>, but the confirmation could not be completed (the check, a read or the
     /// write failed); left as it was (filed, unconfirmed).</summary>
     ConfirmFailed,
+
+    /// <summary>Task 140 (review pass 2): the save's record IS on the communication (a typed regarding lookup or the ADR-024
+    /// pair holds it) and the row is not Resolved, but the save may not confirm it — another record is filed beside it, it is
+    /// Ambiguous, or the pair or its type does not stand for the save's record alone. Left as it was (filed, unconfirmed): the
+    /// user is told it still needs confirming in Spaarke.</summary>
+    NotConfirmable,
 }
 
 /// <summary>
@@ -74,7 +82,13 @@ public enum ReconciledFilingResult
 /// alone. The generic Dataverse seam has no conditional update, so a filing that lands in the milliseconds between that
 /// re-read and the write is not detected (the engine's write is additive, so it would add the save's record beside it).
 /// Likewise a reviewer's Undo that lands between the re-read and the status write can leave an unfiled row Resolved (out of
-/// Needs Review); a proper fix needs an If-Match (row-version) update, which the generic seam lacks.</para>
+/// Needs Review). Two more windows of the same kind are accepted known limits (task 140 review pass 2): on the confirm path, a
+/// second regarding written between the re-read and the status write leaves the row Resolved with BOTH records, and later
+/// replies in the thread then AUTO-FILE to both records (<c>ThreadContinuityRung</c> inherits every regarding of a Resolved
+/// row at confidence 1.0), not merely surface for review; it needs a deliberate second filing within the same few
+/// milliseconds. On the unfiled path, a filing that lands between the re-read and the engine's additive write now also ends
+/// Resolved (the save's filing writes Resolved, <see cref="ConfirmedByTheSave"/>), with the save's record beside it. Each
+/// needs an If-Match (row-version) update, which the generic Dataverse seam lacks.</para>
 /// <para><b>The user's pick confirms (task 140, owner 2026-11-25, ISS-043 #3194).</b> Picking the record in the save is a
 /// human confirmation, as a send is (<c>CommunicationService.MarkFiledBySender</c>) and as the review panel's Confirm is
 /// (<c>advanceAssociationStatus</c>): both write <c>sprk_associationstatus</c> = Resolved and nothing else.</para>
@@ -85,11 +99,13 @@ public enum ReconciledFilingResult
 /// <list type="bullet">
 /// <item><b>Already filed, to the save's record.</b> Confirmed only when the typed regarding lookups hold exactly the save's
 /// record, in the lookup the capture's own rung-0 write uses for its type; the ADR-024 pair (<c>sprk_regardingrecordid</c>)
-/// names it; the pair's type (<c>sprk_regardingrecordtype</c>, a <c>sprk_recordtype_ref</c> row), when written, stands for
-/// that same table; and the status is neither Resolved nor Ambiguous. The save then asks the caller's Write on that
-/// communication (the same <see cref="CallerRecordAccessProbe"/> check as the filing, ADR-008 A1), reads the row again and
-/// applies the same conditions, and writes the status alone. A refusal or a fault leaves the row as it was and never fails
-/// the save. Anything else filed is neither moved nor confirmed (logged with the reason).</item>
+/// names it; the pair's type (<c>sprk_regardingrecordtype</c>, a <c>sprk_recordtype_ref</c> row) is written
+/// (<see cref="RequirePairType"/>) and stands for that same table; and the status is neither Resolved nor Ambiguous. The save
+/// then asks the caller's Write on that communication (the same <see cref="CallerRecordAccessProbe"/> check as the filing,
+/// ADR-008 A1), reads the row again and applies the same conditions, and writes the status alone. A refusal or a fault leaves
+/// the row as it was and never fails the save. Anything else filed is neither moved nor confirmed (logged with the reason):
+/// <see cref="ReconciledFilingResult.NotConfirmable"/> when the save's record is on it (the user is told it still needs
+/// confirming), <see cref="ReconciledFilingResult.AlreadyFiled"/> when it is not.</item>
 /// <item><b>Unfiled, filed by this save.</b> The capture's decision carries the save's record as rung 0 (caller-supplied,
 /// confidence 1.0), which the ladder makes Resolved whenever auto-file is on. With auto-file off it is Suggested; the save's
 /// filing writes it Resolved when the decision names no other regarding record (<see cref="ConfirmedByTheSave"/>). An
@@ -106,6 +122,14 @@ public sealed class ReconciledEmailFiling
     private const string PairTypeColumn = CoreAncestorResolver.RegardingRecordTypeColumn;
     private const string RecordTypeRefEntity = "sprk_recordtype_ref";
     private const string RecordTypeLogicalNameColumn = "sprk_recordlogicalname";
+
+    /// <summary>
+    /// Task 140 review pass 2 (authorization reviewer, option b): a row whose ADR-024 pair type (<c>sprk_regardingrecordtype</c>)
+    /// is NOT written is never confirmed by a save — the pair's record id alone does not say which table it stands for, so it
+    /// is <see cref="ReconciledFilingResult.NotConfirmable"/>. The one switch for that decision: <see langword="false"/> would
+    /// let the typed lookup's column stand for the type instead.
+    /// </summary>
+    internal const bool RequirePairType = true;
 
     /// <summary>Every column that says what a communication is filed under: the regarding family and the ADR-024 pair.</summary>
     internal static readonly string[] FilingColumns = RegardingFieldMap.AllRegardingFields.Append(PairColumn).ToArray();
@@ -271,8 +295,8 @@ public sealed class ReconciledEmailFiling
     /// <summary>
     /// Task 140: confirms a communication that is already filed to the save's record ALONE and is not Resolved or Ambiguous
     /// (<see cref="NotConfirmableAsync"/>) — the caller's Write on it first (ADR-008 A1, the filing's own check), then a fresh
-    /// read with the same conditions, then the status alone. Anything else filed is
-    /// <see cref="ReconciledFilingResult.AlreadyFiled"/>, untouched. Never throws (other than cancellation): a refusal or a
+    /// read with the same conditions, then the status alone. Anything else filed is untouched:
+    /// <see cref="NotConfirmedResult"/>. Never throws (other than cancellation): a refusal or a
     /// fault leaves the row as it was.
     /// </summary>
     /// <param name="narrowed">The capture's decision narrowed to the save's record: its rung-0 write says which typed lookup
@@ -292,7 +316,7 @@ public sealed class ReconciledEmailFiling
                 _logger.LogInformation(
                     "Office save to {EntityType} {EntityId} left communication {CommunicationId} as it was: {Reason} (task 140).",
                     target.EntityType, target.EntityId, communicationId, reason);
-                return ReconciledFilingResult.AlreadyFiled; // filed elsewhere or beside another record: never moved, never confirmed
+                return NotConfirmedResult(before, target.EntityId); // never moved, never confirmed
             }
 
             var rights = await _accessProbe
@@ -315,7 +339,8 @@ public sealed class ReconciledEmailFiling
                 _logger.LogInformation(
                     "Office save to {EntityType} {EntityId} left communication {CommunicationId} as it was on the re-read: " +
                     "{Reason} (task 140).", target.EntityType, target.EntityId, communicationId, since);
-                return ReconciledFilingResult.AlreadyFiled; // confirmed or changed by someone else since the first read
+                // Confirmed (Resolved) or changed by someone else since the first read.
+                return now.IsResolved ? ReconciledFilingResult.AlreadyFiled : NotConfirmedResult(now, target.EntityId);
             }
 
             // The review panel's Confirm (advanceAssociationStatus) and a send (MarkFiledBySender): the status, nothing else.
@@ -342,9 +367,9 @@ public sealed class ReconciledEmailFiling
     /// <summary>
     /// Why <paramref name="state"/> may NOT be confirmed by a save to <paramref name="recordId"/>, or <see langword="null"/>
     /// when it may. Confirmable only when it is not Ambiguous; the typed regarding lookups hold exactly that record, in the
-    /// column the capture's rung-0 write uses for it and as its table; the ADR-024 pair names it; and the pair's type, when
-    /// written, is a <c>sprk_recordtype_ref</c> row for that same table (with none written, the typed lookup's column stands
-    /// for the type). A type row that cannot be read throws (the caller's fault path: left as it was).
+    /// column the capture's rung-0 write uses for it and as its table; the ADR-024 pair names it; and the pair's type is
+    /// written and is a <c>sprk_recordtype_ref</c> row for that same table (<see cref="RequirePairType"/>; a row that is
+    /// missing stands for no table). A type row that cannot be read throws (the caller's fault path: left as it was).
     /// </summary>
     private async Task<string?> NotConfirmableAsync(
         FilingState state, AssociationDecision narrowed, Guid recordId, Dictionary<Guid, string?> pairTables,
@@ -364,7 +389,12 @@ public sealed class ReconciledEmailFiling
             || !string.Equals(held.LogicalName, pick.LogicalName, StringComparison.OrdinalIgnoreCase))
             return "the save's record is not held in its own typed regarding lookup";
 
-        if (state.PairType is { } typeRef)
+        if (state.PairType is not { } typeRef)
+        {
+            if (RequirePairType)
+                return "the ADR-024 pair's record type is not written, so the pair does not say which table it names";
+        }
+        else
         {
             if (!pairTables.TryGetValue(typeRef, out var table))
             {
@@ -381,6 +411,16 @@ public sealed class ReconciledEmailFiling
 
         return null;
     }
+
+    /// <summary>
+    /// Task 140 review pass 2: what a filed, unconfirmable row reports. The save's record on it — held in a typed regarding
+    /// lookup or named by the ADR-024 pair — is <see cref="ReconciledFilingResult.NotConfirmable"/> (the user is told it still
+    /// needs confirming); a row filed to other records only is <see cref="ReconciledFilingResult.AlreadyFiled"/>.
+    /// </summary>
+    private static ReconciledFilingResult NotConfirmedResult(FilingState state, Guid recordId) =>
+        state.Primary == recordId || state.FiledRecords.Contains(recordId)
+            ? ReconciledFilingResult.NotConfirmable
+            : ReconciledFilingResult.AlreadyFiled;
 
     private async Task<FilingState> ReadFilingAsync(Guid communicationId, CancellationToken ct)
     {

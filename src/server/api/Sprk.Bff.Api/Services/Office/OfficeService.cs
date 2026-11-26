@@ -1614,6 +1614,9 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         ReconciledFilingResult.Confirmed => EmailFilingOutcome.AlreadyFiled,
         ReconciledFilingResult.ConfirmNotPermitted => EmailFilingOutcome.FiledUnconfirmed,
         ReconciledFilingResult.ConfirmFailed => EmailFilingOutcome.FiledUnconfirmed,
+        // Review pass 2: the save's record is on the row but beside another record, Ambiguous, or without its own pair type —
+        // still filed there and still in Needs Review, so the pane says so rather than "Filed to …" alone.
+        ReconciledFilingResult.NotConfirmable => EmailFilingOutcome.FiledUnconfirmed,
         ReconciledFilingResult.NotPermitted => EmailFilingOutcome.NotPermitted,
         ReconciledFilingResult.Failed => EmailFilingOutcome.Failed,
         _ => null,

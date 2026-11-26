@@ -196,7 +196,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
     }
 
@@ -210,7 +210,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
         store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
     }
@@ -275,7 +275,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
         store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
         store.Probe.Verify(
@@ -294,7 +294,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
         store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
     }
@@ -321,7 +321,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
         store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
     }
@@ -337,7 +337,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
     }
 
@@ -352,7 +352,7 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
         store.Status(id).Should().Be(AssociationStatusCodes.Ambiguous);
     }
@@ -367,9 +367,92 @@ public class OfficeSaveConfirmsSuggestedFilingTests
 
         var (_, result) = await FileAsync(factory, EmailSave(MatterM));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "the save's record is on the row, so the user is told it still needs confirming");
         store.CommunicationWrites.Should().BeEmpty();
         store.Status(id).Should().Be(AssociationStatusCodes.Ambiguous);
+    }
+
+    // ── Review pass 2: a row the save's record is on but may not confirm says so; a row filed elsewhere does not ────────
+
+    [Theory]
+    [InlineData("beside another record", "FiledUnconfirmed")]
+    [InlineData("ambiguous", "FiledUnconfirmed")]
+    [InlineData("without its pair type", "FiledUnconfirmed")]
+    [InlineData("filed only elsewhere", "AlreadyFiled")]
+    [InlineData("already resolved", "AlreadyFiled")]
+    public async Task OverTheWire_AFiledRowTheSaveDoesNotConfirm_ReportsWhetherTheSavesRecordIsOnIt(string row, string expected)
+    {
+        var store = new CommunicationStore();
+        var id = row switch
+        {
+            "ambiguous" => store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Ambiguous),
+            "without its pair type" => store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Suggested, withoutPairType: true),
+            "filed only elsewhere" => store.SeedFiled(RfcId, MatterN, AssociationStatusCodes.Suggested),
+            "already resolved" => store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Resolved),
+            _ => store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Suggested),
+        };
+        if (row == "beside another record")
+            store.AddRegarding(id, "sprk_regardingorganization", new EntityReference("sprk_organization", OrganizationO));
+        var statusBefore = store.Status(id);
+        using var factory = Host(store);
+
+        var response = await PostAsync(factory, EmailSave(MatterM));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "a row left as it was never fails the save");
+        (await EmailFilingWireAsync(response)).Should().Be(expected,
+            "a row the save's record is on but cannot be confirmed still sits in Needs Review, and the pane must say so");
+        store.CommunicationWrites.Should().BeEmpty();
+        store.Status(id).Should().Be(statusBefore);
+    }
+
+    [Fact]
+    public async Task AnEmptyPairType_WithTheSolelyCorrectRegarding_IsNotConfirmed_AndNothingIsWritten()
+    {
+        // Authorization reviewer, option b: the save's record alone in its own typed lookup and the pair id naming it, but no
+        // sprk_regardingrecordtype written: the pair does not say which table it stands for, so the save does not confirm.
+        ReconciledEmailFiling.RequirePairType.Should().BeTrue("the reviewer's decision (task 140 review pass 2)");
+        var store = new CommunicationStore();
+        var id = store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Suggested, withoutPairType: true);
+        using var factory = Host(store);
+
+        var (_, result) = await FileAsync(factory, EmailSave(MatterM));
+
+        result.Should().Be(ReconciledFilingResult.NotConfirmable);
+        OfficeService.ToEmailFilingOutcome(result).Should().Be(EmailFilingOutcome.FiledUnconfirmed);
+        store.CommunicationWrites.Should().BeEmpty();
+        store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
+        store.Probe.Verify(
+            p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task APairTypeWhoseRowCannotBeRead_IsLeftUnconfirmed_AndReports_FiledUnconfirmed()
+    {
+        var store = new CommunicationStore();
+        var id = store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Suggested, pairType: store.UnreadableRecordType());
+        using var factory = Host(store);
+
+        var (_, result) = await FileAsync(factory, EmailSave(MatterM));
+
+        result.Should().Be(ReconciledFilingResult.ConfirmFailed, "a type that cannot be read is never taken as a match");
+        OfficeService.ToEmailFilingOutcome(result).Should().Be(EmailFilingOutcome.FiledUnconfirmed);
+        store.CommunicationWrites.Should().BeEmpty();
+        store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
+    }
+
+    [Fact]
+    public async Task APairTypeWithNoRowBehindIt_IsNotConfirmed()
+    {
+        var store = new CommunicationStore();
+        var id = store.SeedFiled(RfcId, MatterM, AssociationStatusCodes.Suggested, pairType: store.MissingRecordType());
+        using var factory = Host(store);
+
+        var (_, result) = await FileAsync(factory, EmailSave(MatterM));
+
+        result.Should().Be(ReconciledFilingResult.NotConfirmable, "a missing type row stands for no table");
+        store.CommunicationWrites.Should().BeEmpty();
+        store.Status(id).Should().Be(AssociationStatusCodes.Suggested);
     }
 
     // ── The unfiled-then-filed path (task 121) ends Resolved: the user picked the record ─────────────────────────────
@@ -692,10 +775,13 @@ public class OfficeSaveConfirmsSuggestedFilingTests
                 });
 
         /// <summary>An existing communication filed to <paramref name="matter"/> (typed lookup + ADR-024 pair, as the engine
-        /// writes it) with <paramref name="status"/>; the pair may name another record, and may carry its record type (a
-        /// <c>sprk_recordtype_ref</c> id from <see cref="RecordType"/>).</summary>
-        public Guid SeedFiled(string messageId, Guid matter, int status, Guid? pair = null, Guid? pairType = null)
+        /// writes it) with <paramref name="status"/>; the pair may name another record. The pair carries its record type (a
+        /// <c>sprk_recordtype_ref</c> id from <see cref="RecordType"/>): the matter's, unless <paramref name="pairType"/> names
+        /// another, or none at all with <paramref name="withoutPairType"/>.</summary>
+        public Guid SeedFiled(
+            string messageId, Guid matter, int status, Guid? pair = null, Guid? pairType = null, bool withoutPairType = false)
         {
+            var type = withoutPairType ? (Guid?)null : pairType ?? RecordType("sprk_matter");
             var id = SeedUnfiled(messageId);
             lock (_gate)
             {
@@ -704,8 +790,8 @@ public class OfficeSaveConfirmsSuggestedFilingTests
                 row["sprk_regardingrecordid"] = (pair ?? matter).ToString("D");
                 row["sprk_regardingrecordname"] = "Acme v Beta";
                 row["sprk_associationstatus"] = new OptionSetValue(status);
-                if (pairType is { } type)
-                    row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", type);
+                if (type is { } typeId)
+                    row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
             }
 
             return id;
@@ -718,6 +804,26 @@ public class OfficeSaveConfirmsSuggestedFilingTests
             Dataverse
                 .Setup(d => d.RetrieveAsync("sprk_recordtype_ref", typeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new DataverseEntity("sprk_recordtype_ref", typeId) { ["sprk_recordlogicalname"] = logicalName });
+            return typeId;
+        }
+
+        /// <summary>A <c>sprk_recordtype_ref</c> id whose row cannot be read (the read throws); returns its id.</summary>
+        public Guid UnreadableRecordType()
+        {
+            var typeId = Guid.NewGuid();
+            Dataverse
+                .Setup(d => d.RetrieveAsync("sprk_recordtype_ref", typeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new HttpRequestException("Test: the record type could not be read."));
+            return typeId;
+        }
+
+        /// <summary>A <c>sprk_recordtype_ref</c> id with no row behind it (the read returns nothing).</summary>
+        public Guid MissingRecordType()
+        {
+            var typeId = Guid.NewGuid();
+            Dataverse
+                .Setup(d => d.RetrieveAsync("sprk_recordtype_ref", typeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((DataverseEntity)null!);
             return typeId;
         }
 
