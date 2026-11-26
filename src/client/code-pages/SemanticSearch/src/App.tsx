@@ -749,7 +749,23 @@ export const App: React.FC<AppProps> = ({
         }
       }
 
-      // 2. `sprk_isdefault === true`
+      // 2. The domain the caller asked for (`domain` in the URL envelope, e.g. the Console's
+      //    search criteria with Matters chosen). Pick an index of that domain — the default row
+      //    when it is one, else the first in display order. Without this, step 3 replaced the
+      //    requested domain with the default index's domain once the list loaded (#3171).
+      //    With no index for that domain, fall through: the catalog decides what is searchable.
+      const requestedDomain = urlParams?.domain;
+      if (requestedDomain) {
+        const domainRows = rows.filter(r => deriveSearchDomain(buildSearchRequestFragment(r)) === requestedDomain);
+        if (domainRows.length > 0) {
+          const domainRow = domainRows.find(r => r.sprk_isdefault === true) ?? domainRows[0];
+          setSelectedSearchIndexId(domainRow.sprk_aisearchindexid);
+          setActiveDomain(requestedDomain);
+          return;
+        }
+      }
+
+      // 3. `sprk_isdefault === true`
       const defaultRow = rows.find(r => r.sprk_isdefault === true);
       if (defaultRow) {
         setSelectedSearchIndexId(defaultRow.sprk_aisearchindexid);
@@ -757,7 +773,7 @@ export const App: React.FC<AppProps> = ({
         return;
       }
 
-      // 3. First row in displayorder/displayname order (already sorted by
+      // 4. First row in displayorder/displayname order (already sorted by
       // the OData query).
       const firstRow = rows[0];
       setSelectedSearchIndexId(firstRow.sprk_aisearchindexid);
