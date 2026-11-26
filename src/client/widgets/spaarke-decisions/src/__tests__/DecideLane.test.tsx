@@ -652,7 +652,7 @@ describe('the wizard event carries the core record id only (review finding F4)',
 });
 
 describe('a billing row leads with the finding and names its link after the row (review finding F1, D-227)', () => {
-  it('shows the rule short name first, the subject second, and names the link after the subject', async () => {
+  it('shows the rule short name first, the subject second, and names the link after both', async () => {
     const rows = [
       row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }),
       row(2, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: guid('b', 2) } }),
@@ -669,9 +669,42 @@ describe('a billing row leads with the finding and names its link after the row 
     const text = within(first).getByTestId('billing-finding-text');
     const subject = within(first).getByTestId('billing-finding-subject');
     expect(text.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const firstLink = within(first).getByRole('link', { name: 'Open in Invoice Review: Subject 1' });
-    const secondLink = within(second).getByRole('link', { name: 'Open in Invoice Review: Subject 2' });
+    const firstLink = within(first).getByRole('link', { name: 'Open in Invoice Review: Rule 1, Subject 1' });
+    const secondLink = within(second).getByRole('link', { name: 'Open in Invoice Review: Rule 2, Subject 2' });
     expect(firstLink).not.toBe(secondLink);
+  });
+
+  it('puts the subject under the finding in one column, apart from the badge, timing and link (review finding F4)', async () => {
+    renderLane(
+      pagingHost([row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } })]).callTool
+    );
+    await ready();
+
+    const finding = within(lane()).getByTestId('billing-finding');
+    const lines = within(finding).getByTestId('billing-finding-lines');
+    const text = within(finding).getByTestId('billing-finding-text');
+    const subject = within(finding).getByTestId('billing-finding-subject');
+    // The two lines are siblings in one container, and nothing else is in it.
+    expect(text.parentElement).toBe(lines);
+    expect(subject.parentElement).toBe(lines);
+    expect(lines.children).toHaveLength(2);
+    expect(lines.parentElement).toBe(finding);
+    // That container is a column, so the subject sits under the finding, not beside it.
+    expect(window.getComputedStyle(lines).flexDirection).toBe('column');
+    // The badge, timing and link stay on the row, outside the column.
+    expect(lines).not.toContainElement(within(finding).getByTestId('billing-finding-label'));
+    expect(lines).not.toContainElement(within(finding).getByTestId('billing-finding-link'));
+  });
+
+  it('names two findings on one invoice apart by their finding (review finding K3b)', async () => {
+    const rows = [
+      row(1, { core: A, workType: 'approveOrRebudget', subjectName: 'INV-1', invoiceReview: { invoiceId: INVOICE } }),
+      row(2, { core: A, workType: 'approveOrRebudget', subjectName: 'INV-1', invoiceReview: { invoiceId: INVOICE } }),
+    ];
+    renderLane(pagingHost(rows).callTool);
+    await ready();
+    expect(within(lane()).getByRole('link', { name: 'Open in Invoice Review: Rule 1, INV-1' })).toBeInTheDocument();
+    expect(within(lane()).getByRole('link', { name: 'Open in Invoice Review: Rule 2, INV-1' })).toBeInTheDocument();
   });
 
   it('with no rule short name the subject is the finding, shown once', async () => {
@@ -681,6 +714,7 @@ describe('a billing row leads with the finding and names its link after the row 
     await ready();
     expect(within(lane()).getByTestId('billing-finding-text')).toHaveTextContent('Subject 1');
     expect(within(lane()).queryByTestId('billing-finding-subject')).not.toBeInTheDocument();
+    expect(within(lane()).getByRole('link', { name: 'Open in Invoice Review: Subject 1' })).toBeInTheDocument();
   });
 });
 
