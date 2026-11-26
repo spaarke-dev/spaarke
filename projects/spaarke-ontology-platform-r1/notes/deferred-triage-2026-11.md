@@ -19,7 +19,9 @@ All **169 open `ontology-deferred` issues**, sorted so they can be worked. Owner
 
 **Headline.** Pass 2 found **no must-fix-before-ship item**: no reachable security leak, lost decision or broken UAT path. 22 issues can be closed now, 15 are real defects worth fixing in the R1 close-out, and most of the rest are provisioning, other projects', R2 or hygiene work.
 
-## A. Close now: already fixed or superseded on master (verified in pass 2) (22)
+## A. Closed 2026-11-26: already fixed or superseded on master (verified in pass 2) (22)
+
+All 22 closed on GitHub 2026-11-26 on the owner's go, each with its evidence below as a comment (#1770 and #1960 as not planned, superseded).
 
 | # | Title | Evidence on master |
 |---|---|---|
