@@ -62,6 +62,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"](#g-23-a-narrowed-exchange-role-entry-refuses--erroraction--and-the-module-calls-it-a-server-side-error)
 - [G-24: A full test run on a shared machine reports load failures as defects](#g-24-a-full-test-run-on-a-shared-machine-reports-load-failures-as-defects)
 - [G-25: Sub-agent worktrees pile up in the main checkout and hang sessions opened there](#g-25-sub-agent-worktrees-pile-up-in-the-main-checkout-and-hang-sessions-opened-there)
+- [G-26: Tool-call children outlive their call and spin for days](#g-26-tool-call-children-outlive-their-call-and-spin-for-days)
 
 ---
 
@@ -1289,6 +1290,25 @@ Never call a run green or red from a loaded full run alone.
 - Call PowerShell scripts that take `[string[]]` with `-Command "& script -Path @('a','b')"` or in-process, never `pwsh -File script -Path a,b`: `-File` binds the one string `"a,b"`, and every path is refused as missing.
 
 **Enforced by:** `scripts/worktree/Clean-AgentWorktrees.ps1`, with controls in `tests/scripts/Clean-AgentWorktrees.Tests.ps1` (CI `agent-guard-tests`), run by `/devops-project-archive` Step 5.5. Prose for the VS Code exclusion, because `.vscode/settings.json` is per machine and not in git.
+
+---
+
+### G-26: Tool-call children outlive their call and spin for days
+
+> **Added 2026-11-26** after a machine-wide slowdown. **Class**: shared mutable state between parallel sessions (CPU).
+
+**What happens.** The Bash and PowerShell tools time out and move on, but a child the command started can keep running, often after its parent has exited. Nobody notices until every command on the machine is slow and test suites fail with mass `TaskCanceledException` HTTP timeouts (CPU starvation, not code; see G-24). Occurrences:
+- 2026-10-13: two `python -` processes spun a core each for 2–3 days (G-22).
+- 2026-11-26: `python -` stuck in three sessions plus an ontology script, about 410,000 CPU-seconds since 11/23. The same sweep found a `pwsh -Command` whose bash `$d` sat inside single quotes and never expanded (spun 4 h), an `until grep …; do sleep 5; done` poll on output that never matched (12 h), a `cat >` waiting on stdin (38 h), five orphaned dotnet-format BuildHosts, an Azurite emulator holding port 10002 (68 h) and `tail -f /dev/null` keep-alives (17–29 h). A full BFF run then took 3 h 41 m with 654 failures.
+
+Which process is safe to stop is not obvious: several sessions share the machine, a detached test shard of an active session looks exactly like a leftover, and the shared Roslyn build server (`VBCSCompiler`) legitimately uses several cores for hours.
+
+**Rule.**
+- Do not feed a program its script on stdin from Bash (`python - <<EOF`); write the file and run it. Bound every poll loop, or use Monitor. Do not put bash `$vars` inside a single-quoted `pwsh -Command`. Prefer the PowerShell tool on Windows.
+- When the machine is slow, run `python scripts/quality/runaway-processes.py`. It names each flagged process's session (via its `claude.exe --resume=<id>` ancestor, or a session path on a child's command line) or, for an orphan, the session or worktree its command lines point to. A process under a live session is at most `check`, because the session may be waiting on it; a session counts as active while its transcript, subagent transcripts or background-task output change. A tree holding a deploy, `git`, a build server, an MCP server or a `claude.exe` is never offered as stoppable.
+- Stop a process only on the user's yes, with `python scripts/quality/runaway-processes.py kill <pid>`. It scans again first, stops only a tree that is still safe-to-stop, likely-leaked or idle-leftover (`check` and `busy` need `--force`), names every PID it stops instead of using `taskkill /T`, and never stops a Claude session or the caller's own shell. Stop the build server with `dotnet build-server shutdown` when no build is running, never by PID.
+
+**Enforced by:** detection, not prevention: `scripts/quality/runaway-processes.py`, run at every session start by the `SessionStart` (`startup|resume`) hook, which shows the last scan and starts a new one in the background when the last is over 10 minutes old. Controls in `scripts/quality/tests/test_runaway_processes.py` (CI `agent-guard-tests`). The `python3` case is also refused up front by `guard-python3-stub.py` (G-22). The other leak shapes are prose for now: a PreToolUse guard for them is a follow-up.
 
 ---
 

@@ -7,6 +7,13 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-26 — Runaway-process scanner and SessionStart banner (FAILURE-MODES G-26)
+
+- **New `scripts/quality/runaway-processes.py`**: lists processes that Claude Code sessions left running, with the owning session (from the `claude.exe --resume=<id>` ancestor, or a session path on a child's command line) or, for orphans, the session or worktree their command lines point to; verdicts safe-to-stop / likely-leaked / check / busy (protected) / idle-leftover. A live session's processes are at most `check`. `kill <pid>` rescans, stops only a still-stoppable tree by explicit PIDs (`check`/`busy` need `--force`), and never stops a Claude session; nothing is stopped automatically. Controls: `scripts/quality/tests/test_runaway_processes.py`.
+- **`.claude/settings.json`**: `SessionStart` (`startup|resume`) also runs `runaway-processes.py banner` (cached report, background refresh after 10 minutes).
+- **`.claude/FAILURE-MODES.md`**: G-26.
+- **Root `CLAUDE.md` §16**: one sentence added to the existing `startup|resume` bullet. **Budget:** 219 lines (unchanged), 22,232 → 22,522 bytes (**+290 bytes**, LF), under the 30 KB ceiling.
+
 ###### 2026-11-25 — Root CLAUDE.md §17: Copilot surfaces pointer
 
 The §17 row "Wire a new AI capability …" now also covers exposing a capability to Copilot (tool, skill, agent) and points at the new `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (what Spaarke builds for each AI surface, why MCP, when to create an agent). The row was extended rather than added, so the line count is unchanged. **Budget:** 219 lines (unchanged), 22,340 → 22,451 bytes (**+111 bytes**), under the 30 KB ceiling. Owner request (2026-11-25: "yes we need to do this now").
