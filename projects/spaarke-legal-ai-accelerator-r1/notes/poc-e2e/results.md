@@ -766,3 +766,10 @@ skill I loaded earlier was instructions only." A model's self-report, so low aut
 point: Word Copilot runs **JavaScript against the open document** (Office.js). That is how W4's tracked changes and
 comments were written. It opens a route besides server-side tools: an instructions-only skill that carries fixed
 Office.js code for Word to run. Untested; a probe would show whether Word runs supplied code as written.
+
+**WP-5 run 1 (owner, Word desktop, 2026-11-26, probe v0.2, Spaarke MCP off):** reply
+`Spaarke JS probe · code not run · WPJ-1126-A`, and Copilot said: the code runner rejected the fixed code because
+it uses `toString`; it didn't change the code, so nothing ran, and no paragraph, change or comment was added.
+**Findings:** (1) Word desktop loaded the JS skill and followed it, keeping to "run exactly as written" instead of
+rewriting the code. (2) Word's code runner checks code before running it and refuses some identifiers;
+`toString` is one. Our code has to avoid them. Next: v0.3 without `toString` (or `padStart`).
