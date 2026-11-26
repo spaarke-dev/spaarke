@@ -4,7 +4,7 @@
     <title>Set the firm on a no-firm invoice: a Decision Record, renumber into the firm's sequence, then run the firm rules</title>
     <phase>3 Rules (follow-up to 095c; owner UAT 2026-11-03)</phase>
     <gate>owner decided 2026-11-03 (Decision Record; renumber if secure)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds an internal write route that changes an invoice's firm and its tracking number, plus a form command; tags include bff-api and auth.</rigor-reason>
     <model-tier>opus</model-tier>
