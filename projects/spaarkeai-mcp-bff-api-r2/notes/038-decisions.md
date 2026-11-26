@@ -41,3 +41,22 @@ said and leaves it out otherwise. No confirmation, no extra tool call, no widget
 ## CAPABILITY-INDEX
 
 Row 50 needs a one-line signature edit: `notes/capability-index-pending.md` "Task 038" (sub-agents cannot write `.claude/`).
+
+## Verification (2026-11-26)
+
+- Build: `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings, 0 errors.
+- Tests (`Sprk.Bff.Api.Tests`, filter Mcp|Playbook|DetachedPlaybook): 2040 passed, 3 skipped (widget-not-built skips, pre-existing), 0 failed.
+- ArchTests: filter Mcp|DetachedHttpContextGuard|RouteAuthorization 122/122; full run 2867/2867 passed.
+- Format: `bash scripts/quality/check-changed-cs-format.sh origin/master` all 171 changed files formatted (after the commit hook ran `dotnet format whitespace`).
+- Fail-before (copy-the-old-behaviour-back mutations; 67 tests in the 038 and caps filter):
+  - Mutation A (tool does not accept `instructions`, runner does not set `UserContext` = the old behaviour): 9 failed: runner user-context (text case), 2,000 and 2,001 length cases, absent-shape cases `null`/`empty`/`blank` (the call is refused as an unknown argument), the no-echo test, the engine-request test, the fingerprint-in-retry test. The `absent` shape and the negative refusal rows pass before and after by design (same as today).
+  - Mutation B (cap removed = `int.MaxValue`, fingerprint part dropped): 5 failed: length cap, auth caps row "2,001-char instructions", `Fingerprint_WithoutInstructions_IsUnchanged` (its `NotBe(before)` arm), schema/description, different-instructions retry.
+  - Final code restored; all green.
+- Publish size (BFF hygiene item 4; fresh worktrees `C:\wt038m` / `C:\wt038b`, `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included, 4 PDBs):
+  - task commit 574b443cd1: 43,303,991 bytes (41.298 MB), 186 files
+  - parent (work-branch tip cfc92e4b0e): 43,302,831 bytes (41.297 MB), 186 files. **Task 038 delta: +1,160 bytes (+0.001 MB).**
+  - fresh origin/master 51ce01a116: 43,661,130 bytes (41.638 MB), 194 files. The 8 extra files are the Microsoft.Agents.* / AdaptiveCards assemblies the work branch removed with the retired `/api/agent` gateway (not this task); the branch is -0.340 MB against master, of which task 038 is +0.001 MB.
+  - Neither fresh worktree has the built widget bundles (conditional EmbeddedResource), the same on both sides.
+- CVE: no package added or changed, so no new `dotnet list package --vulnerable` finding is possible from this task (not re-run).
+- Out-of-scope defects found: none.
+- rework: none task 038
