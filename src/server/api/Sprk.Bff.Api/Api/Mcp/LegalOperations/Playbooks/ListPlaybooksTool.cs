@@ -181,10 +181,16 @@ internal sealed class ListPlaybooksTool : McpToolDefinition
             return Error(shared, http);
         }
 
-        // The union, de-duplicated by id: owned first, then the public rows not already listed (the legacy agent's order).
+        // The union, de-duplicated by id: owned first, then the public rows not already listed (the legacy agent's order). A public row the
+        // caller owns is dropped from the public rows: the two lists page independently, so it can fall on page 1 of the public list and on
+        // page 2 of the owned one, and it would otherwise appear as "public" on one page and "owned" on another.
+        var callerOwnerId = owned.OwnerSystemUserId;
         var seen = new HashSet<Guid>();
         var rows = owned.Items.Where(p => seen.Add(p.Id)).Select(p => Row(p.Id, p.Name, p.Description, Owned))
-            .Concat(shared.Items.Where(p => seen.Add(p.Id)).Select(p => Row(p.Id, p.Name, p.Description, Public)))
+            .Concat(shared.Items
+                .Where(p => callerOwnerId is null || p.OwnerId != callerOwnerId.Value)
+                .Where(p => seen.Add(p.Id))
+                .Select(p => Row(p.Id, p.Name, p.Description, Public)))
             .ToList();
 
         var kept = new List<PlaybookRow>(rows.Count);
@@ -192,7 +198,7 @@ internal sealed class ListPlaybooksTool : McpToolDefinition
         var used = 0;
         foreach (var row in rows)
         {
-            var line = $"- {row.Name} ({row.OwnerKind}), id {row.Id:D}\n";
+            var line = $"- {TextSafe(row.Name)} ({row.OwnerKind}), id {row.Id:D}\n";
             var cost = JsonSerializer.SerializeToUtf8Bytes(row, Json).Length + JsonSerializer.SerializeToUtf8Bytes(line, Json).Length;
             if (used + cost > RowBudgetBytes)
             {
@@ -224,10 +230,29 @@ internal sealed class ListPlaybooksTool : McpToolDefinition
     private static string? Clip(string? value, int max) =>
         value is null || value.Length <= max ? value : string.Concat(value.AsSpan(0, max - 1), "…");
 
+    /// <summary>
+    /// A name for a line of the text content: every control character (CR, LF, tab, NEL, ...) and Unicode line or paragraph separator
+    /// becomes a space, so a user-authored name cannot start a line of its own and pass for another row (K2). The structured rows keep
+    /// the name as it is.
+    /// </summary>
+    private static string TextSafe(string value) =>
+        value.Any(IsLineBreaking)
+            ? string.Create(value.Length, value, static (span, v) =>
+            {
+                for (var i = 0; i < v.Length; i++)
+                {
+                    span[i] = IsLineBreaking(v[i]) ? ' ' : v[i];
+                }
+            })
+            : value;
+
+    private static bool IsLineBreaking(char c) =>
+        char.IsControl(c) || char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
+
     private static CallToolResult Error(PlaybookListResult result, HttpContext? http)
     {
         var message = result.ReasonCode == DataverseUserClientErrorCodes.UserContextRequired
-            ? "Sign in to Spaarke with a licensed Spaarke user account, then ask again."
+            ? "Spaarke could not confirm your Spaarke user account. If you are signed in with a licensed Spaarke account, try again shortly."
             : "The JPS playbook list could not be read. Try again shortly.";
         return McpToolResults.FromError(new McpToolError(result.ReasonCode!, message, result.Status), http?.TraceIdentifier);
     }

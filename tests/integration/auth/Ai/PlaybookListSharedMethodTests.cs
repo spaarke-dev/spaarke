@@ -69,6 +69,8 @@ public sealed class PlaybookListSharedMethodTests
         direct.Outcome.Should().Be(PlaybookListOutcome.Listed);
         direct.Status.Should().Be(StatusCodes.Status200OK);
         direct.ReasonCode.Should().BeNull();
+        direct.OwnerSystemUserId.Should().Be(scope == PlaybookListScope.Owned ? host.Probe.SystemUserId : null,
+            "an owned list carries the caller's resolved systemuserid (for a host that merges it with the public list); a public list has none");
         direct.Items.Select(i => i.Id).Should().Equal(page.Items.Select(i => i.Id));
         status.Should().Be((HttpStatusCode)direct.Status);
         JsonNode.DeepEquals(body, JsonSerializer.SerializeToNode(direct.Page, Web)).Should().BeTrue("the route's body is the method's page");

@@ -10,6 +10,10 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Xunit;
@@ -161,6 +165,125 @@ public sealed class PlaybookListRoutesFrozenBytesTests
         body.Should().Be(
             "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"Internal Server Error\",\"status\":500,"
             + "\"detail\":\"Failed to list public playbooks\"}");
+    }
+
+    // ── cancellation (task 024 verifier finding: the routes now pass RequestAborted to the service) ────────────────
+
+    [Theory]
+    [InlineData("/api/ai/playbooks")]
+    [InlineData("/api/ai/playbooks/public")]
+    public async Task List_TheClientAbortsTheRequest_Is499_LoggedAtDebugWithoutAStack_NeverA500OrAnErrorLog(string path)
+    {
+        var logs = new RecordingLogs();
+        var outcome = new ResponseOutcome();
+        await using var host = await PlaybookAuthHost.StartAsync(services => Observe(services, logs, outcome));
+        host.Probe.SystemUserId = SystemUserId;
+        using var abort = new CancellationTokenSource();
+        // The service parks until the request is aborted; the client aborts as soon as the service has been asked.
+        host.Playbooks.Setup(p => p.ListUserPlaybooksAsync(It.IsAny<Guid>(), It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, PlaybookQueryParameters _, CancellationToken ct) => ParkUntilAborted(abort, ct));
+        host.Playbooks.Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
+            .Returns((PlaybookQueryParameters _, CancellationToken ct) => ParkUntilAborted(abort, ct));
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "caller-token");
+        request.Headers.Add(PlaybookAuthzTestAuthHandler.CallerHeader, CallerOid);
+        var send = () => host.SendAsync(request, HttpCompletionOption.ResponseContentRead, abort.Token);
+        await send.Should().ThrowAsync<OperationCanceledException>("the client that aborted never sees the answer");
+
+        await outcome.Completed.WaitAsync(TimeSpan.FromSeconds(10));
+        outcome.Status.Should().Be(499, "an abandoned request is not a fault");
+        logs.Entries.Should().NotContain(e => e.Level >= LogLevel.Error, "an abort is not logged as an error");
+        logs.Entries.Should().ContainSingle(e => e.Level == LogLevel.Debug && e.Message.Contains("abandoned by the client", StringComparison.Ordinal))
+            .Which.Exception.Should().BeNull("no stack for an abandoned request");
+    }
+
+    [Theory]
+    [InlineData("/api/ai/playbooks", "Failed to list playbooks")]
+    [InlineData("/api/ai/playbooks/public", "Failed to list public playbooks")]
+    public async Task List_ACancellationTheRequestDidNotCause_StaysTheRoutes500_AndIsLoggedAsAnError(string path, string detail)
+    {
+        var logs = new RecordingLogs();
+        await using var host = await PlaybookAuthHost.StartAsync(services => Observe(services, logs, new ResponseOutcome()));
+        host.Probe.SystemUserId = SystemUserId;
+        // A timeout inside the service (HttpClient.Timeout): a TaskCanceledException while the request is still alive.
+        host.Playbooks.Setup(p => p.ListUserPlaybooksAsync(It.IsAny<Guid>(), It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+        host.Playbooks.Setup(p => p.ListPublicPlaybooksAsync(It.IsAny<PlaybookQueryParameters>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+
+        var (status, type, body) = await SendAsync(host, path);
+
+        status.Should().Be(HttpStatusCode.InternalServerError);
+        type.Should().Be("application/problem+json");
+        body.Should().Be(
+            "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"Internal Server Error\",\"status\":500,"
+            + $"\"detail\":\"{detail}\"}}");
+        logs.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Exception is TaskCanceledException);
+    }
+
+    private static async Task<PlaybookListResponse> ParkUntilAborted(CancellationTokenSource clientAbort, CancellationToken requestAborted)
+    {
+        await clientAbort.CancelAsync();
+        await Task.Delay(Timeout.InfiniteTimeSpan, requestAborted);
+        return Page(1, 20);
+    }
+
+    private static void Observe(IServiceCollection services, RecordingLogs logs, ResponseOutcome outcome)
+    {
+        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Debug));
+        services.AddSingleton<ILoggerProvider>(logs);
+        services.AddSingleton<IStartupFilter>(outcome);
+    }
+
+    /// <summary>The status the server wrote, seen by a middleware in front of the whole pipeline (the aborted client cannot see it).</summary>
+    private sealed class ResponseOutcome : IStartupFilter
+    {
+        private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Status { get; private set; }
+
+        public Task Completed => _completed.Task;
+
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use(async (context, pipeline) =>
+            {
+                try
+                {
+                    await pipeline();
+                }
+                finally
+                {
+                    Status = context.Response.StatusCode;
+                    _completed.TrySetResult();
+                }
+            });
+            next(app);
+        };
+    }
+
+    private sealed class RecordingLogs : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(LogLevel Level, string Message, Exception? Exception)> _entries = new();
+
+        public IReadOnlyList<(LogLevel Level, string Message, Exception? Exception)> Entries => _entries.ToArray();
+
+        public ILogger CreateLogger(string categoryName) => new Logger(_entries);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Logger(System.Collections.Concurrent.ConcurrentQueue<(LogLevel, string, Exception?)> sink) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                sink.Enqueue((logLevel, formatter(state, exception), exception));
+        }
     }
 
     /// <summary>Status, Content-Type and the body bytes, with a ProblemDetails' per-request <c>traceId</c> removed.</summary>

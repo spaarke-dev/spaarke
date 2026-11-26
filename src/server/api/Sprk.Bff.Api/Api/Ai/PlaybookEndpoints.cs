@@ -533,7 +533,7 @@ public static class PlaybookEndpoints
 
             var owned = await playbookService.ListUserPlaybooksAsync(ownerSystemUserId.Value, query, cancellationToken);
             logger.LogDebug("Listed {Count} playbooks for user {UserId}", owned.Items.Length, userId);
-            return PlaybookListResult.Listed(owned);
+            return PlaybookListResult.Listed(owned, ownerSystemUserId.Value);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -556,8 +556,8 @@ public static class PlaybookEndpoints
 
     /// <summary>
     /// One list route: <see cref="ListPlaybooksForCallerAsync"/> with the request's <c>RequestAborted</c>, mapped to the responses the two
-    /// handlers always gave (200 with the page, 401 "User identity not found", 500 with the route's own detail). A cancelled request is
-    /// the same 500 the handlers' catch-all gave it before task 024.
+    /// handlers always gave (200 with the page, 401 "User identity not found", 500 with the route's own detail). A request the client
+    /// aborted is 499, logged at Debug; a cancellation the request did not cause keeps the handlers' 500.
     /// </summary>
     private static async Task<IResult> ListForRouteAsync(
         HttpContext httpContext,
@@ -577,8 +577,17 @@ public static class PlaybookEndpoints
             result = await ListPlaybooksForCallerAsync(
                 httpContext, scope, page, pageSize, nameFilter, outputTypeId, sortBy, sortDescending, httpContext.RequestAborted);
         }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            // The client went away (the method is given RequestAborted and lets that cancellation propagate): not a fault. 499 (client
+            // closed request), logged at Debug without a stack, as ChatDocumentEndpoints and VisualizationEndpoints answer an abandoned request.
+            httpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("PlaybookEndpoints")
+                .LogDebug("Listing playbooks abandoned by the client; answered 499. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.StatusCode(499);
+        }
         catch (OperationCanceledException ex)
         {
+            // A cancellation the request did not cause (for example an HttpClient timeout): a fault, the 500 the handlers always gave it.
             httpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("PlaybookEndpoints")
                 .LogError(ex, "Listing playbooks was cancelled");
             return ListFailed(failedDetail);
@@ -965,12 +974,14 @@ public sealed record PlaybookListResult
     /// <summary>A list failure's <c>reasonCode</c>. The route's 500 body carries no code; this one is new with task 024 (ADR-019).</summary>
     public const string ListFailedReasonCode = "playbook.list-failed";
 
-    private PlaybookListResult(PlaybookListOutcome outcome, int status, string? reasonCode, PlaybookListResponse? page)
+    private PlaybookListResult(
+        PlaybookListOutcome outcome, int status, string? reasonCode, PlaybookListResponse? page, Guid? ownerSystemUserId = null)
     {
         Outcome = outcome;
         Status = status;
         ReasonCode = reasonCode;
         Page = page;
+        OwnerSystemUserId = ownerSystemUserId;
     }
 
     /// <summary>No request context or no signed-in caller (ADR-028 A10): <see cref="DataverseUserClientErrorCodes.UserContextRequired"/>, 401.</summary>
@@ -992,11 +1003,18 @@ public sealed record PlaybookListResult
     /// <summary>The page the route returns (status 200): the service's, or the empty page of <see cref="PlaybookListOutcome.OwnerUnresolved"/>.</summary>
     public PlaybookListResponse? Page { get; }
 
+    /// <summary>
+    /// The caller's resolved Dataverse <c>systemuserid</c>: set only on a <see cref="PlaybookListOutcome.Listed"/> OWNED list, <c>null</c>
+    /// otherwise. A host that merges the owned and public lists uses it to tell which public rows the caller owns. REST serializes only
+    /// <see cref="Page"/>, so the routes' bytes do not carry it.
+    /// </summary>
+    public Guid? OwnerSystemUserId { get; }
+
     /// <summary>The page's rows; empty when there is no page.</summary>
     public IReadOnlyList<PlaybookSummary> Items => Page?.Items ?? [];
 
-    internal static PlaybookListResult Listed(PlaybookListResponse page) =>
-        new(PlaybookListOutcome.Listed, StatusCodes.Status200OK, null, page);
+    internal static PlaybookListResult Listed(PlaybookListResponse page, Guid? ownerSystemUserId = null) =>
+        new(PlaybookListOutcome.Listed, StatusCodes.Status200OK, null, page, ownerSystemUserId);
 
     internal static PlaybookListResult OwnerUnresolved(PlaybookListResponse emptyPage) =>
         new(PlaybookListOutcome.OwnerUnresolved, StatusCodes.Status200OK, null, emptyPage);
