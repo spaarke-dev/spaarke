@@ -453,9 +453,14 @@ export function isFirmFirst(f: ApiFailure): boolean {
   return f.status === 409 && f.errorCode === CODE_LINE_DECISION_FIRM_MISSING;
 }
 
-/** Set firm: no answer at all (status 0) is one fixed sentence; any other failure is the shared write-failure sentence (the server's detail first). */
+/**
+ * Set firm: no answer at all (status 0) is one fixed sentence that does not claim nothing changed (the server may have committed before the
+ * answer was lost; the page re-reads the review, and sending the same firm again is safe: `alreadyAssigned`). A 403 without a detail is about
+ * the chosen firm. Any other failure is the shared write-failure sentence (the server's detail first).
+ */
 export function setFirmFailureMessage(f: ApiFailure): string {
-  if (f.status === 0 && !f.signInFailed) return 'The firm could not be set. Nothing was changed. Try again.';
+  if (f.status === 0 && !f.signInFailed) return 'The firm could not be confirmed. Check the invoice header; if no firm is shown, try again.';
+  if (f.status === 403 && !f.detail && !f.signInFailed) return 'You do not have permission to use this firm. Choose another firm.';
   return writeFailureMessage(f);
 }
 

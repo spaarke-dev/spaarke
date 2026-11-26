@@ -449,6 +449,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const lines = React.useMemo(() => (review ? [...review.lines].sort((a, b) => a.sequence - b.sequence) : []), [review]);
   const access = review ? reviewAccess(review, refused403) : { canWrite: false, reason: null };
   const canWrite = access.canWrite;
+  // 095d-3: the firm is a field only while the invoice has none, the approval state needs it and the caller can write. An invoice that has a
+  // firm is never editable (the server refuses a change: ebilling.assign_firm.firm_already_set).
+  const firmEditable = review !== null && canWrite && firmNeeded && review.header.firm == null;
+  // A refusal shown beside the field goes when the field does (a 409 re-read that finds the firm set): no red bar beside a set firm.
+  React.useEffect(() => {
+    if (!firmEditable && firmFault !== null) setFirmFault(null);
+  }, [firmEditable, firmFault]);
   const resolvedFilter = resolveFilterKey(lines, filter);
   const shown = React.useMemo(() => filterLines(lines, resolvedFilter), [lines, resolvedFilter]);
   const selectedLine = lines.find(l => l.id === selectedLineId) ?? null;
@@ -519,8 +526,9 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         /** The sentence for a refusal (default: the shared write-failure sentence). */
         failureText?: (f: ApiFailure) => string;
         /**
-         * Set firm (095d-3): an ordinary refusal is shown beside its field, with this sentence, not as the page notice. A 409 re-reads the review
-         * first (another user may have set the firm). A 403, a 503 incomplete and a Repeat keep the page's own handling.
+         * Set firm (095d-3): a refusal is shown beside its field, with this sentence, not as the page notice. A 409 or no answer re-reads the
+         * review first. A 403 is shown there too and does NOT make the page read-only (it is about the chosen firm). A 503 incomplete and a
+         * Repeat keep the page's own handling.
          */
         inField?: (text: string) => void;
         /** A refusal that also stays in the dialog (default: only the firm-first 409), for forms whose 409s are fixed by editing the form. */
@@ -580,14 +588,16 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         setNoteFault({ where: opts.noteField, message: noteRefusalMessage(f), lineId: opts.noteLine });
         return false;
       }
-      if (f.status === 403) setRefused403(true);
+      // A 403 turns the page read-only, except for a write that answers it in its field (Set firm: the 403 is about the CHOSEN firm, not the invoice).
+      if (f.status === 403 && !opts.inField) setRefused403(true);
       const ordinaryText = (opts.failureText ?? writeFailureMessage)(f);
       const text = opts.isRepeat ? repeatFailureMessage(f, ordinaryText) : ordinaryText;
       const incomplete = isIncomplete(f);
       const repeatAgain = opts.isRepeat === true && isRetryableRepeatFailure(f);
       // 503 incomplete: part of the change was saved. Show the server's state (the page still shows the old one) before offering Repeat.
-      const inField = opts.inField && !opts.isRepeat && !incomplete && f.status !== 403 ? opts.inField : null;
-      if (incomplete || (inField && f.status === 409)) await reload();
+      const inField = opts.inField && !opts.isRepeat && !incomplete ? opts.inField : null;
+      // A 409 (another user may have set the firm) and no answer at all (the write may have landed) re-read the review, so what is true shows.
+      if (incomplete || (inField && (f.status === 409 || f.status === 0))) await reload();
       if (!alive.current) return false;
       setBusy(false);
       if (inField) {
@@ -903,9 +913,6 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const status = invoiceStatusView(h);
   const slotCtx: ReviewSlotContext = { review, canWrite, reload };
   const core = h.coreRecord;
-  // 095d-3: the firm is a field only while the invoice has none, the approval state needs it and the caller can write. An invoice that has a
-  // firm is never editable (the server refuses a change: ebilling.assign_firm.firm_already_set).
-  const firmEditable = canWrite && firmNeeded && h.firm == null;
   const totals = review.totals;
   const activeTab = tab === 'review' || paneTabs.some(t => t.value === tab) ? tab : 'review';
 

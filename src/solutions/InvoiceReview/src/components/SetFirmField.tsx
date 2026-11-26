@@ -93,6 +93,16 @@ export function SetFirmField({ api, core, busy, onSet, onChoose }: SetFirmFieldP
     );
   }
 
+  if (core === null) {
+    return (
+      <div className={s.root} data-testid="set-firm" data-state="no-core">
+        <MessageBar intent="warning" data-testid="set-firm-empty">
+          <MessageBarBody>This invoice has no matter, project or work assignment, so no firm can be listed.</MessageBarBody>
+        </MessageBar>
+      </div>
+    );
+  }
+
   if (list.firms.length === 0) {
     return (
       <div className={s.root} data-testid="set-firm" data-state="empty">

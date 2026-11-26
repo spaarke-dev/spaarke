@@ -210,7 +210,8 @@ describe('Set firm and the linked firms (095d-3)', () => {
     expect(down.ok).toBe(false);
     if (!down.ok) {
       expect(down.failure.status).toBe(0);
-      expect(setFirmFailureMessage(down.failure)).toBe('The firm could not be set. Nothing was changed. Try again.');
+      expect(setFirmFailureMessage(down.failure)).toBe('The firm could not be confirmed. Check the invoice header; if no firm is shown, try again.');
+      expect(setFirmFailureMessage(down.failure)).not.toMatch(/Nothing was changed/);
     }
     // A sign-in failure keeps the sign-in sentence, not the nothing-was-changed one.
     expect(setFirmFailureMessage(toFailure(new AuthError('no token')))).toMatch(/Sign-in/);

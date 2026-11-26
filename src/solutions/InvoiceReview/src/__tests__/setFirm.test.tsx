@@ -240,7 +240,7 @@ describe('InvoiceReviewPage: Set firm field (095d-3) - saving', () => {
     await waitFor(() => expect(screen.queryByTestId('set-firm-fault')).not.toBeInTheDocument());
   });
 
-  it('a 409 that finds the firm already set re-reads the review: the field is gone and the server words stay on the page', async () => {
+  it('a 409 that finds the firm already set re-reads the review: the field is gone and no red bar is left beside the set firm', async () => {
     const api = mockApi([noFirm(), withFirm()]);
     api.listFirms.mockResolvedValue(ok([FIRM_B]));
     api.setFirm.mockResolvedValue(failed(problem(409, 'ebilling.assign_firm.firm_already_set', { detail: 'This invoice already has a firm.' })));
@@ -249,12 +249,13 @@ describe('InvoiceReviewPage: Set firm field (095d-3) - saving', () => {
     await chooseFirm(FIRM_B.name);
     fireEvent.click(setFirmButton());
 
-    expect(await screen.findByTestId('set-firm-fault')).toHaveTextContent('This invoice already has a firm.');
+    await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByTestId('set-firm')).not.toBeInTheDocument());
     expect(screen.getByTestId('review-title')).toHaveTextContent('Alpha Law LLP');
+    expect(screen.queryByTestId('set-firm-fault')).not.toBeInTheDocument();
   });
 
-  it('a 400 or 5xx without a detail falls back to the shared sentence; a network failure says nothing was changed and keeps the choice', async () => {
+  it('a 400 or 5xx without a detail falls back to the shared sentence; a network failure does not claim nothing changed, keeps the choice and re-reads the review', async () => {
     const api = mockApi(noFirm());
     api.listFirms.mockResolvedValue(ok([FIRM_A]));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined); // toFailure logs the raw transport text for the console
@@ -265,10 +266,12 @@ describe('InvoiceReviewPage: Set firm field (095d-3) - saving', () => {
     await chooseFirm(FIRM_A.name);
     fireEvent.click(setFirmButton());
 
-    expect(await screen.findByTestId('set-firm-fault')).toHaveTextContent('The firm could not be set. Nothing was changed. Try again.');
+    expect(await screen.findByTestId('set-firm-fault')).toHaveTextContent('The firm could not be confirmed. Check the invoice header; if no firm is shown, try again.');
     expect(screen.getByRole('combobox', { name: 'Billing firm' })).toHaveTextContent(FIRM_A.name);
-    // A network failure is not a 409: the review is not re-read.
-    expect(api.getReview).toHaveBeenCalledTimes(1);
+    // No answer: the firm may have landed, so the review is re-read (a firm that did land then shows).
+    expect(screen.getByRole('combobox', { name: 'Billing firm' })).toHaveTextContent(FIRM_A.name);
+    await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Nothing was changed', { exact: false })).not.toBeInTheDocument();
 
     api.setFirm.mockResolvedValueOnce(failed(problem(500, null)));
     fireEvent.click(setFirmButton());
@@ -287,14 +290,55 @@ describe('InvoiceReviewPage: Set firm field (095d-3) - saving', () => {
     expect(screen.queryByTestId('set-firm-fault')).not.toBeInTheDocument();
   });
 
-  it('a 403 turns the page read-only (the page-level path), and the field goes with it', async () => {
+  it('must-fire: a 403 on Set firm is about the chosen firm - the detail shows in the field, the field and the choice stay, the page is NOT read-only, and another firm can be sent', async () => {
     const api = mockApi(noFirm());
-    api.listFirms.mockResolvedValue(ok([FIRM_A]));
-    api.setFirm.mockResolvedValue(failed(problem(403, null, { detail: 'You cannot set the firm.' })));
+    api.listFirms.mockResolvedValue(ok([FIRM_A, FIRM_B]));
+    api.setFirm.mockResolvedValueOnce(failed(problem(403, null, { detail: 'You cannot set the firm.' })));
     renderPage(api);
     await chooseFirm(FIRM_A.name);
     fireEvent.click(setFirmButton());
-    expect(await screen.findByTestId('notice')).toHaveTextContent('You cannot set the firm.');
-    await waitFor(() => expect(screen.queryByTestId('set-firm')).not.toBeInTheDocument());
+
+    expect(await screen.findByTestId('set-firm-fault')).toHaveTextContent('You cannot set the firm.');
+    expect(screen.queryByTestId('notice')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
+    expect(screen.getByTestId('set-firm')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Billing firm' })).toHaveTextContent(FIRM_A.name);
+    expect(screen.getByRole('combobox', { name: 'Billing firm' })).toBeEnabled();
+    // The caller can still write: the correction button of the header is still offered (disabled only because the firm is needed).
+    expect(screen.getByTestId('correct-header')).toBeInTheDocument();
+
+    await chooseFirm(FIRM_B.name);
+    expect(screen.queryByTestId('set-firm-fault')).not.toBeInTheDocument();
+    fireEvent.click(setFirmButton());
+    await waitFor(() => expect(api.setFirm).toHaveBeenCalledTimes(2));
+    expect(api.setFirm).toHaveBeenLastCalledWith(INVOICE_ID, FIRM_B.firmId);
+  });
+
+  it('a 403 on Set firm without a detail says the firm is the problem, not the invoice', async () => {
+    const api = mockApi(noFirm());
+    api.listFirms.mockResolvedValue(ok([FIRM_A]));
+    api.setFirm.mockResolvedValueOnce(failed(problem(403, null)));
+    renderPage(api);
+    await chooseFirm(FIRM_A.name);
+    fireEvent.click(setFirmButton());
+    expect(await screen.findByTestId('set-firm-fault')).toHaveTextContent('You do not have permission to use this firm. Choose another firm.');
+  });
+
+  it('must-not-fire: a 403 from another write still makes the page read-only', async () => {
+    const api = mockApi(review(lines())); // firm present, no firm needed
+    api.acceptClean.mockResolvedValue(failed(problem(403, null, { detail: 'No write access.' })));
+    renderPage(api, { firmNeeded: false });
+    fireEvent.click(await screen.findByTestId('accept-clean'));
+    expect(await screen.findByTestId('notice')).toHaveTextContent('No write access.');
+    expect(await screen.findByTestId('readonly-notice')).toBeInTheDocument();
+    expect(screen.queryByTestId('accept-clean')).not.toBeInTheDocument();
+  });
+
+  it('an invoice with no core record says no firm can be listed, and asks for nothing', async () => {
+    const base = noFirm();
+    const api = mockApi({ ...base, header: { ...base.header, coreRecord: null } });
+    renderPage(api);
+    expect(await screen.findByTestId('set-firm-empty')).toHaveTextContent('This invoice has no matter, project or work assignment, so no firm can be listed.');
+    expect(api.listFirms).not.toHaveBeenCalled();
   });
 });
