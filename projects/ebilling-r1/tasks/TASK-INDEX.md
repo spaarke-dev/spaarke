@@ -274,6 +274,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 192 | ✅ [done; on work 25778a59b7] | Optional `filedUnder` on the from-email 409 `document_core_record_mismatch`: the record the email is filed under, only when the caller can Read it, never for a secure record | FULL | sonnet / high | none | 191 |
 | 193 | ✅ [done 2026-11-23: merged c21bde55a2; Opus pass, 2 fix rounds, scoped re-check; uac-r2 APPROVED 46a89e55f8; dev -Apply on owner's go, -Verify PASS] | Retire sprk_ratecard core-record lookups (matter, project, work assignment): solution source, schema script, docs, guarded dev delete | FULL | sonnet / high | none (p-safe false, SpaarkeMaster) | 085 |
 | 194 | ✅ [done 2026-11-23: merged 96bcf65dbb; dev -Apply + -Verify PASS; ISS-045 #2997] | Take the retired extraction fields off the invoice main and quick-create forms; drop PB-013 from the seed and verify script | FULL | sonnet / high | none | 050b |
+| 195 | 🔲 [in progress 2026-11-26; owner "Yes, both together"] | Invoice Review opens in-app on the shared modal shell (SprkModal, ADR-050) with "N of M" browse; compact one-row count cards | FULL | sonnet / high | none | 175, 095d |
 
 ## Parallel Execution Plan
 
