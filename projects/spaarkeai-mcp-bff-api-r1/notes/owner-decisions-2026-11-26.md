@@ -50,10 +50,11 @@ Each item says what it is, why it needs you, and my recommendation. Tick one ans
 - `C:\wtux`: #3199 is merged, nothing is left there. **Recommend: remove.**
 - `C:\wt3184`: remove after #3193 merges.
 - `C:\wt3184c` (Part C): keep.
-- [ ] Remove `C:\wtux` now  [ ] Remove `C:\wt3184` after #3193 merges
+- `C:\wt2623` (ISS-003 check, no commits; the issue is closed as not a defect): **Recommend: remove.** Delete its empty local branch `fix/iss-2623-precedent-projection-scope` too.
+- [ ] Remove `C:\wtux` and `C:\wt2623` now  [ ] Remove `C:\wt3184` after #3193 merges
 
 ## Already handled without you (for information)
-- ISS-001 (#2575, unused April Copilot agent code): mcp-r2's task 001 already removed it on their branch. I've offered them the issue so it closes when their branch merges.
+- ISS-001 (#2575, unused April Copilot agent code): mcp-r2's task 001 already removed it on their branch. **Handed off:** r2 accepted it, the label is swapped, and their merge PR will close it.
+- ISS-003 (#2623): **closed as not a defect.** Everything the background task touches is a singleton or holds nothing that can be disposed. The evidence is on the issue, and the optional hardening is noted for the Precedents owners.
+- ISS-010 D1: **design draft written** (`notes/iss-010-part-d1-design.md`), about 14–33 fewer reads per save (1.3–3 s). Sent to uac-r2 (access questions) and field-mapping-r1 (their files). It's built after #3193 merges.
 - ISS-002 (#2620, Compose request-context bug, PR #2622): no review for 18 days. An agent is bringing the PR up to date with master and re-proving its test. The Compose owners review it; I'll ask them once it's current.
-- ISS-003 (#2623, precedent background task may use disposed services): an agent is writing a test to confirm or rule it out, with a draft fix only if confirmed. The Precedents owners choose the final fix.
-- ISS-010 D1 (caching business-unit and team settings within a save): a read-only scoping run is mapping the exact calls and separating plain settings (cacheable) from access answers (never cached, ADR-009). The design then goes to uac-r2 and field-mapping-r1.
