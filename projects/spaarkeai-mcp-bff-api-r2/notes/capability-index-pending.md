@@ -79,7 +79,7 @@ copies it into the index (next free `#`) and marks it applied.
 |---|---|---|---|---|---|---|
 | (next) | Show document / record search hits in Copilot Chat / Cowork (an MCP App widget over the Console's `SearchResultsWidget`, props only) | search results widget, ui://spaarke/search-results.html, search hits widget, SearchResultsWidget widget | `src/client/widgets/spaarke-search-results/` (+ `Api/Mcp/LegalOperations/Search/SearchResultsWidgetResource.cs`) | `ui://spaarke/search-results.html`; `parseSearchResult`, `toResultItems`, `nextCallArguments`, `noticesFor` (`src/search/searchResults.ts`) | `.claude/adr/ADR-012-shared-components.md` (component reused unchanged), `.claude/adr/ADR-021-fluent-v9.md` (host theme, semantic tokens) | A widget over a props-only Console component copies this folder's shape (no shims needed when the component imports only Fluent). Read the opening call's arguments with `useMcpHost().toolInput` (new, optional); route every link through the host's `openLink` (delegated click handler); continue a list only with the tool's `nextOffset`. |
 
-## Task 030 — start or read a JPS playbook run as the signed-in caller; the one detached-run helper (status: pending)
+## Task 030 — start or read a JPS playbook run as the signed-in caller; the one detached-run helper (status: applied as rows 50 and 51, 2026-11-26)
 
 | # | Capability | Synonyms | Canonical component | Symbol | Governing ADR | Extension point |
 |---|---|---|---|---|---|---|

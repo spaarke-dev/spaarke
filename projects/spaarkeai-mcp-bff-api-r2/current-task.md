@@ -1,15 +1,15 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (checkpoint at 85%: 030 built, reviewed (2 opus + uac-r2), fixes merged 258579bddb; closing the cap race next)
-> **Phase**: Phase 0 and Phase 1 code complete. Phase 2: 031, 034, 035 done; 030 stopped (owner Q14), 032 waits on 030; 033 and 036 blocked on owner decisions.
+> **Last Updated**: 2026-11-26 (030 done: cap race fixed, uac-r2 re-check clean, CAPABILITY-INDEX rows 50-51)
+> **Phase**: Phase 0 and Phase 1 code complete. Phase 2: 031, 034, 035 done; 030 done (amendment awaits owner sign-off), 032 next; 033 and 036 blocked on owner decisions.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **State** | 030 merged c005cdb47d; review fixes merged 258579bddb (per-caller cap 3, guard setter + Authorization-header scans, Graph TTL min(exp-5,55), test clocks, retry-key order, missing StartedOn). Master merged 80ac987a4e (DEF-001 #3247; RecordSearchService BuildCacheId conflict resolved = JSON identity + MatterTypes; show_decisions ledger prose updated). ADR-052 amendment PROPOSED (55db14d39c, 3a6cf8cd35, cdbc56445e), uac-r2 reviewed (no blocking). |
-| **Next (exact)** | (1) Close the cap race in DetachedPlaybookRunner.StartAsCallerAsync (:118-122): concurrent starts pass the RunningCount check before any is accepted. Add an atomic per-oid pending reservation (ConcurrentDictionary<Guid,int> + lock or AddOrUpdate) taken before authorizing, released when the start ends (accepted -> counted by _runs; refused/failed -> released). Test with 4 concurrent starts. (2) Check bs3nw126i output (pins + affected tests on 80ac987a4e). (3) Re-run 030 tests + filtered ArchTests on the merged tree; push. (4) Send uac-r2 the fix diff c005cdb47d..HEAD for re-check. (5) Mark 030 done (TASK-INDEX + POML), apply its 2 CAPABILITY-INDEX rows from notes/capability-index-pending.md, board sync (Tasks Completed 21). (6) Owner: amendment security sign-off; Q17/Q18 new. Then 032 (needs 012 go for dev only; code can proceed). |
-| **Uncommitted** | This checkpoint edit only. Unpushed: merges 80ac987a4e, 258579bddb and commits since cdbc56445e. |
+| **State** | 030 ✅ done 2026-11-26. Built c005cdb47d; review fixes 258579bddb; cap race fixed 203de60ce1 (starts in flight reserve a place under a lock; fail-before proven). uac-r2 re-check of c005cdb47d..203de60ce1: no blocking; its nit (state the cap of 3 in the amendment) applied to both ADR-052 files. CAPABILITY-INDEX rows 50 (detached playbook run) and 51 (Console link) applied. Master merged 80ac987a4e (pins + affected tests 289/289, ArchTests 117/117). ADR-052 amendment still PROPOSED until the owner's security sign-off. |
+| **Next (exact)** | (1) Owner: security sign-off on the ADR-052 amendment text (docs/adr/ADR-052-workload-placement.md "AMENDMENT 2026-11-26"); Q17/Q18. (2) Task 032 (matter summary; follows 030): code can proceed, only its dev check needs the 012 go. (3) When mcp-r1 asks, review ISS-007 #3242 before it merges. (4) When #3213 merges, fold CAPABILITY-INDEX row 35. |
+| **Uncommitted** | None after the 030 close-out commit. |
 | **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
 
 ## Status (TASK-INDEX is authoritative)
@@ -20,7 +20,7 @@
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
 - ✅ **Phase 2 done:** 031, 034, 035 (publish about 42 MB; 035 adds +0.23 MB).
-- 🔄 **030:** built and reviewed; fixes merged; cap race fix + uac-r2 re-check + mark done remain.
+- ✅ **030:** done 2026-11-26 (amendment awaits the owner's security sign-off).
 - 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions

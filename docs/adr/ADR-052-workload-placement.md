@@ -92,7 +92,7 @@ so every read is still limited to what the user may see. Every one of these cond
 - In production code, a detached `HttpContext` may be built only in the shared helper and the baseline files above.
 - The caller's `Authorization` header may be read only in the token-acquisition (OBO) files and the shared helper. The
   existing readers are a ratchet baseline.
-- A per-user cap on detached runs in progress is enforced in the helper and tested there.
+- At most **3 detached runs in progress per user** (`PlaybookRunLimits.MaxConcurrentRunsPerCaller`, per BFF instance; starts still being accepted count towards it). Enforced in the helper and tested there.
 
 ---
 

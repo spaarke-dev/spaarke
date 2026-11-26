@@ -58,7 +58,7 @@ provisioning + CI/CD); Flex cost and limits.
   - **One helper:** only through the shared detached-run helper. A detached `HttpContext` is built nowhere else (ArchTest; ratchet baseline `ComposeProfileDispatcher`, `DecisionRouteCores`, `AssignTaskNotifier`).
   - **Memory only:** never stored, logged, queued or handed to another host.
   - **No leak back:** `ExecutionContext` flow is suppressed, so the original request's accessor is untouched.
-  - **Bounded:** a **50-minute cap**, which bounds the run (the token may have only minutes left at start). Downstream tokens are taken at start. A token that can't be renewed, or any auth failure mid-run, fails the run closed (`auth_expired`), never app-only. There is a small per-user cap on detached runs in progress.
+  - **Bounded:** a **50-minute cap**, which bounds the run (the token may have only minutes left at start). Downstream tokens are taken at start. A token that can't be renewed, or any auth failure mid-run, fails the run closed (`auth_expired`), never app-only. At most **3 detached runs in progress per user** (per instance).
   - **Guards:** ArchTests check that a detached `HttpContext` is built only in the helper and that the `Authorization` header is read only in the OBO files and the helper, each with a ratchet baseline.
   - **Known limits:** access is checked once at start, so reads on the BFF's app-only SPE broker paths don't see access removed mid-run for up to the cap. Runs are keyed on oid alone because MCP accepts only Spaarke-tenant tokens; they must be keyed on (tid, oid) if that changes.
   - **Authorized first:** authorization happens inside the request.

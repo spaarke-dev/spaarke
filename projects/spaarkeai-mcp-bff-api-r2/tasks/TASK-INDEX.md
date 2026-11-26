@@ -31,7 +31,7 @@
 | 026 | `spaarke_get_portfolio` | 1 | ✅ [done] | 020 | Group F | sonnet / high | FULL |
 | 027 | Search result authorization into shared methods (prerequisite for 022; added 2026-11-25) | 1 | ✅ [done] | 009, 020 | Group F | opus / high | FULL |
 | 029 | Deploy Phase 1 to dev; routing-eval run A | 1 | 🔲 [open] | 019, 020–026 | Group G (alone) | sonnet / high | STANDARD |
-| 030 | Playbook run tools: `spaarke_run_playbook`, `spaarke_get_playbook_run` | 2 | 🔲 [open] | 005, 007, 020, 024 | Group H | opus / high | FULL |
+| 030 | Playbook run tools: `spaarke_run_playbook`, `spaarke_get_playbook_run` | 2 | ✅ [done] | 005, 007, 020, 024 | Group H | opus / high | FULL |
 | 031 | Analysis tools: `spaarke_start_analysis`, `spaarke_get_analysis` | 2 | ✅ [done] | 020 | Group H | opus / high | FULL |
 | 033 | `spaarke_get_matter_finance` | 2 | 🔲 [open] | 008, 020 | Group H | sonnet / high | FULL |
 | 034 | `spaarke_get_briefing` + Daily Briefing widget | 2 | ✅ [done] | 010, 020, 021 | Group H | sonnet / xhigh | FULL |
