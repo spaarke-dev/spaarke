@@ -270,7 +270,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 
 ## D-034-7 — `BriefingNavigationHandler.openUrl` is not called by `DailyBriefingApp`
 - **Status**: noted (task 010's seam declares it for the widget; the widget maps it to the host's open-link, but no component action uses it yet, so external links in a briefing are plain text). Wire it when a link affordance is added.
-## D-031-1 — the retry-key lock is get-then-set, so two same-key calls can both create (spaarke_start_analysis; IdempotencyFilter has the same window)
+## D-031-1 — the retry-key lock is get-then-set, so two same-key calls can both create (spaarke_start_analysis; IdempotencyFilter has the same window) → #3231
 - **Status**: deferred (draft issue for the main session to file). Found while writing task 031.
 - **Title**: `Idempotency in-flight lock is not atomic (ITenantCache has no set-if-absent): concurrent same-key requests can both run`
 - **Body**:
