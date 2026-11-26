@@ -239,11 +239,22 @@ internal sealed class GetMatterFinanceTool : McpToolDefinition
     internal static string BuildText(FinanceSummaryDto s)
     {
         var inv = CultureInfo.InvariantCulture;
-        var lines = new List<string>
+        var lines = new List<string>();
+
+        // FinanceSummaryService reports a matter with no budget record as Budget 0 and BudgetVariance 0, so that pair is "no budget", not
+        // "under budget". structuredContent keeps the raw figures (REST parity) and carries no label.
+        if (s.Budget == 0m && s.BudgetVariance == 0m)
         {
-            $"Current spend: {s.CurrentSpend.ToString("N2", inv)} of budget {s.Budget.ToString("N2", inv)}",
-            $"Budget variance: {s.BudgetVariance.ToString("N2", inv)} ({(s.BudgetVariance >= 0 ? "under" : "over")} budget)",
-        };
+            lines.Add($"Current spend: {s.CurrentSpend.ToString("N2", inv)}");
+            lines.Add("No budget is recorded for this matter.");
+        }
+        else
+        {
+            var position = s.BudgetVariance > 0m ? "under" : s.BudgetVariance < 0m ? "over" : "on";
+            lines.Add($"Current spend: {s.CurrentSpend.ToString("N2", inv)} of budget {s.Budget.ToString("N2", inv)}");
+            lines.Add($"Budget variance: {s.BudgetVariance.ToString("N2", inv)} ({position} budget)");
+        }
+
         if (s.VelocityPct is { } velocity)
         {
             lines.Add($"Spend velocity: {velocity.ToString("0.##", inv)}% month over month");

@@ -110,6 +110,93 @@ public sealed class GetMatterFinanceToolContractTests : IClassFixture<FinancePro
         tool.GetProperty("content").EnumerateArray().Single().GetProperty("text").GetString().Should().Contain("81,250.50").And.Contain("100,000.00");
     }
 
+    // ---- review F1: the budget sentence says what the figures say -----------------------------------------------------------------------
+
+    // The service reports a matter with no budget record as Budget 0 and BudgetVariance 0 (FinanceSummaryService), so a variance of 0 beside a
+    // budget of 0 is "no budget", never "under budget". Spend and budget are strings because a decimal is not an attribute argument.
+    [Theory]
+    [InlineData("5000", "0", "0", "No budget is recorded for this matter.", "Budget variance")]
+    [InlineData("120000", "100000", "-20000", "Budget variance: -20,000.00 (over budget)", "under budget")]
+    [InlineData("100000", "100000", "0", "Budget variance: 0.00 (on budget)", "under budget")]
+    [InlineData("81250.50", "100000", "18749.50", "Budget variance: 18,749.50 (under budget)", "over budget")]
+    public async Task GetMatterFinance_BudgetSentence_FollowsTheFigures_AndStructuredContentStaysRaw(
+        string spend, string budget, string variance, string expectedLine, string forbiddenText)
+    {
+        using var client = _factory.CreateClient();
+        var token = McpProgramHostFactory.MintToken(Oid);
+        var matterId = Guid.NewGuid();
+        _factory.Arrange(StepZeroCallerKind.FlagFalse);
+        _factory.Access.Grant(FinanceAuthorizationFilter.MatterEntitySet, matterId, AccessRights.Read);
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        _factory.Summary.Setup(s => s.GetSummaryAsync(matterId, It.IsAny<CancellationToken>())).ReturnsAsync(new FinanceSummaryDto
+        {
+            MatterId = matterId,
+            CurrentSpend = decimal.Parse(spend, inv),
+            Budget = decimal.Parse(budget, inv),
+            BudgetVariance = decimal.Parse(variance, inv),
+        });
+
+        var tool = await McpCall.CallAsync(client, GetMatterFinanceTool.ToolName, new { matterId }, token);
+        using var rest = await client.SendAsync(Rest(matterId, token));
+        var restBody = JsonDocument.Parse(await rest.Content.ReadAsStringAsync()).RootElement;
+
+        var text = tool.GetProperty("content").EnumerateArray().Single().GetProperty("text").GetString()!;
+        text.Should().Contain(expectedLine);
+        text.Should().NotContainEquivalentOf(forbiddenText);
+        var structured = tool.GetProperty("structuredContent");
+        foreach (var figure in new[] { "currentSpend", "budget", "budgetVariance" })
+        {
+            structured.GetProperty(figure).GetRawText().Should().Be(restBody.GetProperty(figure).GetRawText(), $"'{figure}' stays the route's raw figure");
+        }
+
+        structured.GetRawText().Should().NotContainEquivalentOf("under budget").And.NotContainEquivalentOf("over budget").And.NotContainEquivalentOf("on budget",
+            "the label is words for the text, not a field of the data");
+    }
+
+    // ---- review F2: signal type, severity and time are the route's, per signal ------------------------------------------------------------
+
+    [Fact]
+    public async Task GetMatterFinance_ActiveSignals_CarryTheRoutesTypeSeverityAndTime_PerSignal()
+    {
+        using var client = _factory.CreateClient();
+        var token = McpProgramHostFactory.MintToken(Oid);
+        var matterId = Guid.NewGuid();
+        _factory.Arrange(StepZeroCallerKind.FlagFalse);
+        _factory.Access.Grant(FinanceAuthorizationFilter.MatterEntitySet, matterId, AccessRights.Read);
+        _factory.Summary.Setup(s => s.GetSummaryAsync(matterId, It.IsAny<CancellationToken>())).ReturnsAsync(new FinanceSummaryDto
+        {
+            MatterId = matterId,
+            CurrentSpend = 10m,
+            Budget = 100m,
+            BudgetVariance = 90m,
+            ActiveSignals =
+            [
+                new SpendSignalDto { SignalType = "BudgetWarning", Severity = "Warning", Message = "SECRET one", GeneratedAt = new DateTime(2026, 11, 19, 0, 0, 0, DateTimeKind.Utc) },
+                new SpendSignalDto { SignalType = "VelocitySpike", Severity = "Critical", Message = "SECRET two", GeneratedAt = new DateTime(2026, 11, 18, 13, 45, 10, DateTimeKind.Utc) },
+            ],
+        });
+
+        var tool = await McpCall.CallAsync(client, GetMatterFinanceTool.ToolName, new { matterId }, token);
+        using var rest = await client.SendAsync(Rest(matterId, token));
+        var restBody = JsonDocument.Parse(await rest.Content.ReadAsStringAsync()).RootElement;
+
+        var toolSignals = tool.GetProperty("structuredContent").GetProperty("activeSignals").EnumerateArray().ToList();
+        var restSignals = restBody.GetProperty("activeSignals").EnumerateArray().ToList();
+        toolSignals.Should().HaveCount(2).And.HaveCount(restSignals.Count);
+        for (var i = 0; i < restSignals.Count; i++)
+        {
+            foreach (var field in new[] { "signalType", "severity", "generatedAt" })
+            {
+                toolSignals[i].GetProperty(field).GetRawText().Should().Be(restSignals[i].GetProperty(field).GetRawText(), $"signal {i}: '{field}' is the route's");
+            }
+        }
+
+        toolSignals[0].GetProperty("severity").GetString().Should().Be("Warning");
+        toolSignals[1].GetProperty("severity").GetString().Should().Be("Critical");
+        toolSignals[1].GetProperty("signalType").GetString().Should().Be("VelocitySpike");
+        tool.GetRawText().Should().NotContain("SECRET");
+    }
+
     // ---- refused: the tool's reasonCode is the route's, on the wire ---------------------------------------------------------------------
 
     [Theory]
@@ -148,6 +235,8 @@ public sealed class GetMatterFinanceToolContractTests : IClassFixture<FinancePro
 
     [Theory]
     [InlineData("scope-missing")]
+    // "copilot-audience": the 401 comes from JwtBearer token validation (the audience is not one this host accepts), not from the A10 check; the
+    // case proves the same outcome (401, nothing looked up or read), not that the A10 rule fired. "scope-missing" and "app-only" are the A10 rule's.
     [InlineData("copilot-audience")]
     [InlineData("app-only")]
     public async Task AnA10RefusedToken_IsRefused401_BeforeTheTool_SoNothingIsLookedUpOrRead(string kind)
