@@ -83,6 +83,26 @@ describe('buildResolveReview — written regarding (task 142)', () => {
     expect(model.primary?.targetId).toBe(REQUEST_ID);
   });
 
+  it('buildResolveReview_PairNamesNoFiledSlot_StaysRequiresReviewNotTheFirstSlot', () => {
+    const model = reduce(review({ ...enrichedRow(), sprk_regardingrecordid: REQUEST_ID }));
+
+    expect(model.state).toBe('requires-review');
+    expect(model.primary?.targetId).not.toBe(MATTER_ID);
+  });
+
+  it('buildResolveReview_ResolvedRow_ConfirmedPrimaryIsTheTypedLookup', () => {
+    const model = reduce(review({ ...enrichedRow(), sprk_associationstatus: ASSOCIATION_STATUS_RESOLVED_VALUE }));
+
+    expect(model.state).toBe('confirmed');
+    expect(model.primary).toMatchObject({ entity: 'sprk_matter', targetId: MATTER_ID });
+  });
+
+  it('buildResolveReview_BracedUppercaseLookup_NormalisedId', () => {
+    const row = { ...gridRow(), _sprk_regardingmatter_value: `{${MATTER_ID.toUpperCase()}}` };
+
+    expect(review(row).filedAssociations?.[0]?.recordId).toBe(MATTER_ID);
+  });
+
   it('buildResolveReview_LookupWithoutFormattedValue_NameFallsBackToTheId', () => {
     const row = { ...gridRow(), _sprk_regardingmatter_value: MATTER_ID };
 
