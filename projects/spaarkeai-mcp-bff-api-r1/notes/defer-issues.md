@@ -291,7 +291,7 @@ Owner and ontology choose: (1) amend the spec text (the stamp sets the review st
 
 | Field | Value |
 |---|---|
-| **Status** | Open (found in passing; not confirmed) |
+| **Status** | Closed 2026-11-26, not a defect: every dependency the task reaches is a singleton or has no disposable state (evidence in the #2623 comment). Optional hardening (fresh scope) left to the Precedents/Insights owners. |
 | **Urgency** | soon |
 | **Filed** | 2026-11-07 |
 | **Source** | Sibling scan for ISS-002 (#2620 / PR #2622) |
