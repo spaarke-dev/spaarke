@@ -4,6 +4,7 @@ Python 3 standard library + lxml only. Produces the INTERNAL redline: never send
 
 Usage:
   python summary_table.py PLAN.json REDLINE.docx [--out INTERNAL.docx] [--intro summary-intro.md]
+         [--refused REPORT.json]
 
 Reads from the plan:
   agreement {title, parties[]}, provenance (the standards + skill line, shown under the subtitle),
@@ -23,7 +24,13 @@ navy header row repeated on each page, 8.5 pt body, alternate rows F2F2F2, horiz
 A6A6A6, cell margins 30/70 twips, Section cell hyperlinked to its bookmark, contrast-safe
 priority colours; italic "no change" note; page break. Everything is wrapped in the bookmark
 "Sprk_Summary" so check_outputs.py can find (and ignore) it.
-Exit codes: 0 ok, 2 bad input, 3 plan inconsistent with the document.
+
+--refused REPORT.json (written by ooxml_redline.py --skip-unplaceable): each refused edit that has a summary row
+keeps its row, its Proposed Revision starting "Not applied – make this change by hand"; every refused edit also
+gets a row in a "Changes to make by hand" table (# | Where | Change to make | Why not applied). A row whose
+bookmark was refused shows its Section as plain text instead of a link.
+Exit codes: 0 ok, 2 bad input (including a report that does not match the plan), 3 plan inconsistent with the
+document.
 """
 import argparse
 import json
@@ -37,7 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from lxml import etree
     import safe_docx
-    from ooxml_redline import RATING_FILLS
+    from ooxml_redline import EDIT_REFUSAL_CODES, RATING_FILLS, read_refusals
 except ImportError as _ex:
     print(json.dumps({"error": f"cannot load lxml/safe_docx: {_ex}"}), file=sys.stderr)
     sys.exit(2)
@@ -50,6 +57,10 @@ GRID = [400, 1900, 2600, 3100, 880]
 HEADERS = ["#", "Section", "Issue", "Proposed Revision", "Priority"]
 RATINGS_GRID = [400, 2900, 1700, 3880]  # same total width as GRID
 RATINGS_HEADERS = ["#", "Topic", "Rating", "Recommended action"]
+MANUAL_GRID = [400, 2400, 4280, 1800]  # same total width as GRID
+MANUAL_HEADERS = ["#", "Where", "Change to make", "Why not applied"]
+MANUAL_HEADING = "Changes to make by hand"
+NOT_APPLIED = "Not applied – make this change by hand: "
 SUMMARY_BOOKMARK = "Sprk_Summary"
 DEFAULT_RATINGS_INTRO = ("This page is an internal review aid. It rates each playbook topic against {{review_basis}}; "
                          "the colour of the Rating cell follows the rating. Draft for attorney review; not legal "
@@ -131,9 +142,12 @@ def build_table(rows):
         fill = ALT if i % 2 else None
         tr = el("tr", children=[el("trPr", children=[el("cantSplit")])])
         tr.append(cell(GRID[0], [run(str(r["n"]))], fill))
-        link = el("hyperlink", {"anchor": r["bookmark"], "history": 1},
-                  children=[run(r["section"], colour=LINK, underline=True)])
-        tr.append(cell(GRID[1], [link], fill))
+        if r.get("link", True):
+            section = el("hyperlink", {"anchor": r["bookmark"], "history": 1},
+                         children=[run(r["section"], colour=LINK, underline=True)])
+        else:  # its bookmark was refused (skip mode): plain text, never a broken link
+            section = run(r["section"])
+        tr.append(cell(GRID[1], [section], fill))
         tr.append(cell(GRID[2], [run(r["issue"])], fill))
         tr.append(cell(GRID[3], [run(r["revision"])], fill))
         tr.append(cell(GRID[4], [run(r["priority"], bold=True, colour=PRIORITY_COLOURS[r["priority"]])], fill))
@@ -170,8 +184,63 @@ def build_ratings_table(ratings):
     return tbl
 
 
-def collect_rows(plan, bookmark_names):
-    rows = [dict(e["summary"]) for e in plan.get("edits", []) if e.get("summary")]
+def quoted(text, limit=160):
+    text = " ".join(text.split())
+    return "“" + (text if len(text) <= limit else text[:limit - 1] + "…") + "”"
+
+
+def describe_change(e):
+    """The change an attorney makes by hand, in words, from one plan edit."""
+    if "after" in e:
+        change = f"Insert {quoted(e['insert'], 400)} after {quoted(e['after'])}"
+    elif "replace" not in e:
+        change = f"Add a comment at {quoted(e['find'])}"
+    elif e["find"] == "*":
+        change = f"Replace the clause text with {quoted(e['replace'], 400)}" if e["replace"] \
+            else "Delete the clause text after its number and heading"
+    else:
+        old = e.get("old", e["find"])
+        where = f" in {quoted(e['find'])}" if "old" in e else ""
+        change = f"Replace {quoted(old)}{where} with {quoted(e['replace'], 400)}" if e["replace"] \
+            else f"Delete {quoted(old)}{where}"
+    if e.get("comment"):
+        change += f". Comment: {e['comment']}"
+    return change
+
+
+def build_manual_table(plan, refused_edits):
+    """Changes to make by hand: one row per refused edit, in plan order."""
+    tbl = table_shell(MANUAL_GRID)
+    head = el("tr", children=[el("trPr", children=[el("tblHeader"), el("cantSplit")])])
+    for w, h in zip(MANUAL_GRID, MANUAL_HEADERS):
+        head.append(cell(w, [run(h, bold=True, colour="FFFFFF")], fill=NAVY))
+    tbl.append(head)
+    edits = plan.get("edits", [])
+    for n, i in enumerate(sorted(refused_edits), 1):
+        e = edits[i]
+        where = e["summary"]["section"] if e.get("summary") else " ".join(e["para"].split())[:80]
+        fill = ALT if (n - 1) % 2 else None
+        tr = el("tr", children=[el("trPr", children=[el("cantSplit")])])
+        tr.append(cell(MANUAL_GRID[0], [run(str(n))], fill))
+        tr.append(cell(MANUAL_GRID[1], [run(where)], fill))
+        tr.append(cell(MANUAL_GRID[2], [run(describe_change(e))], fill))
+        tr.append(cell(MANUAL_GRID[3], [run(EDIT_REFUSAL_CODES[refused_edits[i]].capitalize())], fill))
+        tbl.append(tr)
+    return tbl
+
+
+def collect_rows(plan, bookmark_names, refused_edits=None, refused_marks=None):
+    refused_edits, refused_marks = refused_edits or {}, refused_marks or {}
+    rows = []
+    for i, e in enumerate(plan.get("edits", [])):
+        if not e.get("summary"):
+            continue
+        r = dict(e["summary"])
+        if i in refused_edits and r.get("revision"):
+            r["revision"] = NOT_APPLIED + r["revision"]
+        if r.get("bookmark") in refused_marks:
+            r["link"] = False
+        rows.append(r)
     errors = []
     for r in rows:
         for k in ("n", "section", "bookmark", "issue", "revision", "priority"):
@@ -179,7 +248,7 @@ def collect_rows(plan, bookmark_names):
                 errors.append(f"summary row {r.get('n')!r} is missing {k!r}")
         if r.get("priority") not in PRIORITY_COLOURS:
             errors.append(f"summary row {r.get('n')!r} priority {r.get('priority')!r} is not High/Medium/Low")
-        if r.get("bookmark") and r["bookmark"] not in bookmark_names:
+        if r.get("link", True) and r.get("bookmark") and r["bookmark"] not in bookmark_names:
             errors.append(f"summary row {r.get('n')!r} links to bookmark {r.get('bookmark')!r}, which the document lacks")
     ns = [r.get("n") for r in rows]
     if ns != list(range(1, len(rows) + 1)):
@@ -202,12 +271,14 @@ def fill_intro(template, plan, count):
     return template.strip()
 
 
-def insert_summary(doc, plan, intro):
+def insert_summary(doc, plan, intro, refusals=None):
+    """refusals: (refused edits, refused bookmarks) from ooxml_redline.read_refusals, or None."""
     body = doc.find(q("body"))
     names = {b.get(q("name")) for b in doc.iter(q("bookmarkStart"))}
     if SUMMARY_BOOKMARK in names:
         raise ValueError("document already has a summary page")
-    rows, errors = collect_rows(plan, names)
+    refused_edits, refused_marks = refusals or ({}, {})
+    rows, errors = collect_rows(plan, names, refused_edits, refused_marks)
     if errors:
         raise PlanMismatch(errors)
     ag = plan.get("agreement", {})
@@ -230,6 +301,9 @@ def insert_summary(doc, plan, intro):
                               keep_next=True))
     if rows or not ratings:
         block.append(build_table(rows))
+    if refused_edits:  # the heading paragraph also keeps Word from merging this table with the one above
+        block.append(para([run(MANUAL_HEADING, size_half_pts=22, bold=True, colour=NAVY)], after=60, keep_next=True))
+        block.append(build_manual_table(plan, refused_edits))
     unchanged = plan.get("unchanged") or []
     if unchanged:
         block.append(para([run("Reviewed with no change: " + "; ".join(unchanged) + ".", size_half_pts=16,
@@ -252,6 +326,7 @@ def main(argv=None):
     ap.add_argument("redline")
     ap.add_argument("--out", help="write here instead of updating REDLINE in place")
     ap.add_argument("--intro", help="intro template (assets/summary-intro.md)")
+    ap.add_argument("--refused", metavar="REPORT", help="refusal report from ooxml_redline.py --skip-unplaceable")
     a = ap.parse_args(argv)
     try:
         with open(a.plan, encoding="utf-8") as f:
@@ -260,9 +335,13 @@ def main(argv=None):
         if a.intro:
             with open(a.intro, encoding="utf-8") as f:
                 intro = f.read()
+        refusals = None
+        if a.refused:
+            with open(a.refused, encoding="utf-8") as f:
+                refusals = read_refusals(json.load(f), plan)
         parts = safe_docx.read_parts(a.redline)
         doc = safe_docx.parse(parts["word/document.xml"])
-        count = insert_summary(doc, plan, intro)
+        count = insert_summary(doc, plan, intro, refusals)
     except PlanMismatch as ex:
         print(json.dumps({"error": "plan does not fit the document", "details": ex.args[0]}), file=sys.stderr)
         return 3
@@ -273,9 +352,7 @@ def main(argv=None):
     target = a.out or a.redline
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
         tmp_path = tmp.name
-    with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zo:
-        for n in sorted(parts, key=lambda n: n != "[Content_Types].xml"):
-            zo.writestr(n, parts[n])
+    safe_docx.write_parts(tmp_path, parts)  # reproducible: same input, same bytes, on any machine
     shutil.move(tmp_path, target)
     print(json.dumps({"rows": count, "out": target}))
     return 0

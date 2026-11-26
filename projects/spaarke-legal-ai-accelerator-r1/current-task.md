@@ -2,10 +2,12 @@
 
 > **Last Updated**: 2026-11-26 (Claude Desktop session `acclerator-r1`). **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
 
-## 2026-11-26: PR #3237 OPEN — redline engine skip-and-report mode (for intake-pipeline-r1)
+## 2026-11-26: PR #3237 MERGED (squash `244171569a`) — redline engine skip-and-report mode (for intake-pipeline-r1)
 
-- Branch `work/accelerator-redline-skip-unplaceable`, worktree `C:\code_files\spaarke-wt-accelerator-redline-skip` (remove only with `Remove-WorktreeSafe.ps1`). Head `a3c93d54d2`: `--skip-unplaceable REPORT.json` (closed code set, agreed with intake), `--refused` on summary_table/check_outputs, reproducible .docx (`safe_docx.write_parts`), exit-3 stderr carries `code`/`edit`. 82 engine + 63 build tests pass; default-mode outputs per-part identical to master on nda-01/02/03. One adversarial review done, all findings fixed.
-- intake-pipeline-r1 is reviewing it (task 009, read-only); merge is the owner's call. After merge: merge master into this project branch.
+- `--skip-unplaceable REPORT.json` (closed code set agreed with intake; they message us before changing it), `--refused` on summary_table/check_outputs, reproducible .docx (`safe_docx.write_parts`), exit-3 stderr carries `code`/`edit`. Default mode unchanged for our skills.
+- The five engine files were copied from master into this branch (`git checkout origin/master -- src/accelerators/core/engines`), so `src/accelerators` here == master again. No full master merge (this branch is far behind master).
+- Leftover branches/worktrees to remove on the owner's OK, only with `Remove-WorktreeSafe.ps1`: `work/accelerator-redline-skip-unplaceable` (`C:\code_files\spaarke-wt-accelerator-redline-skip`) and `work/legal-ai-accelerator-src-to-master` (`C:\code_files\spaarke-wt-accelerator-src-to-master`).
+- The package in OneDrive still carries the pre-#3237 engines inside the skills; no rebuild needed for interactive use (default mode unchanged).
 
 ## 2026-11-26: PR #3163 MERGED (squash `4c80b81ed4`, 12:07 UTC)
 
