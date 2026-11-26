@@ -11,7 +11,7 @@ copies it into the index (next free `#`) and marks it applied.
 
 ## Task 005 — durable run status (applied as row 35, 2026-11-25; source notes/005-schema.md §5)
 
-## Task 021 — shared widget MCP transport (status: pending)
+## Task 021 — shared widget MCP transport (status: applied as row 38)
 
 | # | Capability | Synonyms | Canonical component | Symbol | Governing ADR | Extension point |
 |---|---|---|---|---|---|---|
