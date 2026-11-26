@@ -329,6 +329,8 @@ public sealed class McpCallerPathTests
             ["spaarke_search_documents"] = ["entityId", "entityType", "limit", "offset", "query"], // r2 task 022
             ["spaarke_find_records"] = ["limit", "offset", "query", "recordTypes"], // r2 task 022
             ["spaarke_get_briefing"] = ["dueWithinDays", "recencyHours"], // r2 task 034
+            ["spaarke_start_analysis"] = ["documentId", "idempotencyKey", "name", "playbookId"], // r2 task 031
+            ["spaarke_get_analysis"] = ["analysisId"], // r2 task 031
         }, options => options.WithStrictOrdering());
     }
 

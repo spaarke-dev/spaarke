@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
@@ -55,6 +56,12 @@ public static class McpToolAuthorization
         "",
         "SystemAdmin",
     };
+
+    /// <summary>
+    /// The argument a model-callable write must require (spaarkeai-mcp-bff-api-r2 NFR-06): the caller's retry key. A retry with the
+    /// same key and the same caller returns the first result instead of writing again.
+    /// </summary>
+    public const string IdempotencyKeyArgument = "idempotencyKey";
 
     // The full name of the ASP.NET Core anonymity metadata interface. Matched by name because the anonymity guard
     // (RouteAuthorizationGuardTests.AnonymityIsDeclaredOnlyOnAScannedChain) bans any identifier containing it from BFF source.
@@ -161,7 +168,7 @@ public static class McpToolAuthorization
     /// Throws <see cref="InvalidOperationException"/> when <paramref name="tool"/> (built by <paramref name="definition"/>) breaks
     /// the per-tool rule: no <c>[Authorize]</c> on the tool class; enforced <c>[Authorize]</c> metadata that differs from the
     /// class's own; anonymity metadata; a policy outside <see cref="AllowedToolPolicies"/>; an authentication scheme named on the
-    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only and is not app-only (O-14). Called by <see cref="McpToolCatalog"/> for every tool at startup.
+    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only, not app-only and not a declared reversible write (O-14 narrowed by r2 NFR-06). Called by <see cref="McpToolCatalog"/> for every tool at startup.
     /// </summary>
     public static void ValidateTool(McpServerTool tool, Type definition)
     {
@@ -219,14 +226,31 @@ public static class McpToolAuthorization
             throw new InvalidOperationException($"{where} has no title (FR-03).");
         }
 
-        // O-14: no model-callable write tool in v1. A tool that is not read-only must be app-only: _meta.ui.visibility is exactly
-        // ["app"]. A missing, empty or wider list (a tool with no visibility is model-visible by default) refuses startup.
-        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta))
+        // O-14, narrowed by r2 NFR-06 (owner 2026-11-25): a tool that is not read-only must be app-only (_meta.ui.visibility exactly
+        // ["app"]; a missing, empty or wider list is model-visible by default) UNLESS it declares itself a reversible write: explicitly
+        // not destructive, explicitly idempotent, and requiring the idempotencyKey string argument. Anything else refuses startup.
+        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta) && !IsReversibleWrite(tool.ProtocolTool))
         {
             throw new InvalidOperationException(
-                $"{where} is not read-only, so it must be app-only: set _meta.ui.visibility to exactly [\"app\"] (O-14: no model-callable write tool).");
+                $"{where} is not read-only, so it must be app-only (set _meta.ui.visibility to exactly [\"app\"]) or a reversible write "
+                + $"(Destructive = false, Idempotent = true and a required '{IdempotencyKeyArgument}' string argument) (O-14, NFR-06).");
         }
     }
+
+    // NFR-06: what a model-callable write declares. The declaration is checked here; each such tool's tests prove it honours the key.
+    private static bool IsReversibleWrite(ModelContextProtocol.Protocol.Tool tool) =>
+        tool.Annotations is { DestructiveHint: false, IdempotentHint: true }
+        && tool.InputSchema.ValueKind == JsonValueKind.Object
+        && tool.InputSchema.TryGetProperty("required", out var required)
+        && required.ValueKind == JsonValueKind.Array
+        && required.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == IdempotencyKeyArgument)
+        && tool.InputSchema.TryGetProperty("properties", out var properties)
+        && properties.ValueKind == JsonValueKind.Object
+        && properties.TryGetProperty(IdempotencyKeyArgument, out var key)
+        && key.ValueKind == JsonValueKind.Object
+        && key.TryGetProperty("type", out var type)
+        && type.ValueKind == JsonValueKind.String
+        && type.GetString() == "string";
 
     private static bool IsAppOnly(JsonObject? meta) =>
         meta?["ui"] is JsonObject ui

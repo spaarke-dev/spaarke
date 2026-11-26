@@ -659,6 +659,34 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     }
 
     /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 031: THIS filter's decision (<see cref="DecideAsync"/>, in the <see cref="FinanceDenial.Forbidden"/>
+    /// mode, without step 0) over checks another filter declared — <see cref="AnalysisAuthorizationFilter"/>'s create mode — so that
+    /// route and its MCP tool (<c>spaarke_start_analysis</c>) are answered by one evaluation and render the same 403. Returns <c>null</c>
+    /// when every check allows, otherwise the <c>reasonCode</c> the route's 403 carries. <paramref name="userId"/> is the caller's
+    /// resolved Entra oid (the caller has already been identified). The analysis declaration never carries a rejection; one here
+    /// would be a new code path, so it is refused as <see cref="SystemFailureReasonCode"/>, never allowed. Step 0 is not run: no
+    /// analysis route carries <see cref="FinanceInternalCallersOnly"/> (the filter would have read it from the endpoint), and the MCP
+    /// route does not either.
+    /// </summary>
+    internal static async Task<string?> DecideDeclaredChecksAsync(
+        AuthorizationService authorizationService, HttpContext httpContext, string userId, FinanceAuthorizationTargets targets,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(authorizationService);
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(targets);
+
+        var services = httpContext.RequestServices;
+        var filter = new FinanceAuthorizationFilter(
+            authorizationService, static _ => FinanceAuthorizationTargets.Authorize(), FinanceDenial.Forbidden,
+            services?.GetService<CallerRecordAccessProbe>());
+        var decision = await filter.DecideAsync(
+            httpContext, userId, stepZero: false, () => targets, services?.GetService<ILogger<FinanceAuthorizationFilter>>(), ct);
+
+        return decision.Rejection is not null ? SystemFailureReasonCode : decision.DenyReason;
+    }
+
+    /// <summary>
     /// Step 0 over the one definition (<see cref="CallerExternality.IsExternalCallerAsync"/>). Returns <c>null</c> when the
     /// caller is internal (<c>sprk_isexternal</c> false or blank), otherwise the deny reason. Fails closed: a missing
     /// resolver, a lookup fault or a flag-read fault is <see cref="SystemFailureReasonCode"/>, never internal.

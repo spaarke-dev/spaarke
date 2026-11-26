@@ -270,3 +270,14 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 
 ## D-034-7 — `BriefingNavigationHandler.openUrl` is not called by `DailyBriefingApp`
 - **Status**: noted (task 010's seam declares it for the widget; the widget maps it to the host's open-link, but no component action uses it yet, so external links in a briefing are plain text). Wire it when a link affordance is added.
+## D-031-1 — the retry-key lock is get-then-set, so two same-key calls can both create (spaarke_start_analysis; IdempotencyFilter has the same window)
+- **Status**: deferred (draft issue for the main session to file). Found while writing task 031.
+- **Title**: `Idempotency in-flight lock is not atomic (ITenantCache has no set-if-absent): concurrent same-key requests can both run`
+- **Body**:
+  `StartAnalysisTool.TryLockAsync` (task 031) and `IdempotencyFilter.TryAcquireLockAsync` both read the lock key and then write it.
+  Two requests with the same key that arrive within one round-trip both see no lock, and both run. For `spaarke_start_analysis`
+  this creates two `sprk_analysis` rows. For an `IdempotencyFilter` route it runs the handler twice. Failure scenario: a host
+  retries a tool call on a short timeout while the first call is still in flight. Fix: add an atomic set-if-absent to
+  `ITenantCache` (Redis `SET NX PX`, plus the in-memory test-cache equivalent) and use it in both places. That is new surface on a
+  shared abstraction (§11), so it is out of 031's scope.
+- **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
