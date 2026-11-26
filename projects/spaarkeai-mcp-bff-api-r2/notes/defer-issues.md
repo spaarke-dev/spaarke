@@ -148,7 +148,7 @@
 
 ### D-023-3: DocumentEntity.MatterName / ProjectName are never filled in production (pre-existing; the document tools withhold names until it is fixed)
 
-- **GitHub issue**: not filed
+- **GitHub issue**: #3215
 - **Title**: `DataverseServiceClientImpl.MapToDocumentEntityWithLookups sets MatterId/ProjectId but never MatterName/ProjectName, and three outputs depend on the null`
 - **Body**:
   `MapToDocumentEntityWithLookups` (`src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs`, ~:1461-1483) copies the lookup ids
