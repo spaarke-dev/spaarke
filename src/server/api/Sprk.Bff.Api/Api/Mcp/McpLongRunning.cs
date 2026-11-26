@@ -37,10 +37,10 @@ public enum McpRunState
 /// <para><b>Only result shapes.</b> The helper builds two <see cref="CallToolResult"/>s. It starts nothing, polls nothing, stores nothing
 /// and schedules nothing (ADR-052): the run belongs to the service the tool calls as the caller, and its status to that service's run
 /// record (FR-13). The model or the widget polls by calling the status tool again.</para>
-/// <para><b>The console link.</b> <c>consoleLink</c> is a link the tool's seam built with an existing deep-link builder
-/// (<c>HandoffUrlBuilder</c> in <c>Services/Ai/Handoff</c>, or <c>IDeepLinkBuilder</c>), never a URL the tool writes by hand. A tool
-/// may not inject a type from <c>Services/Ai/**</c> outside <c>PublicContracts</c> (ADR-013; the MCP ledger guard fails it), so a tool
-/// over an AI run takes the link from its public-contract seam. The helper refuses anything but an absolute https URL with no user
+/// <para><b>The console link.</b> <c>consoleLink</c> is never a URL the tool writes by hand. A tool may not inject a type from
+/// <c>Services/Ai/**</c> outside <c>PublicContracts</c> (ADR-013; the MCP ledger guard fails it), so it cannot use
+/// <c>HandoffUrlBuilder</c> directly, and <c>IDeepLinkBuilder</c> builds only <c>sprk_todo</c> links. No public-contract member returns a
+/// run link yet: the first long-running tool task (030) adds one, and later tools reuse it. The helper refuses anything but an absolute https URL with no user
 /// information.</para>
 /// <para><b>Errors.</b> A refusal to start, or a status read the caller may not make, is not a run state: it goes through
 /// <see cref="McpToolResults.FromError(McpToolError, string?)"/> with the REST route's <c>reasonCode</c> (ADR-019). A run that

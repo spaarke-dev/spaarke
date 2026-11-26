@@ -4,7 +4,7 @@
     <title>Shared tool plumbing: general McpToolResults, start/status helper, per-area MCP ledger files</title>
     <phase>1 Read tools</phase>
     <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared MCP host code and the ArchTest ledger (tests/**); every later tool depends on it</rigor-reason>
     <model-tier>opus</model-tier>
