@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Sprk.Bff.Api.Api.Mcp;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Playbooks;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -105,6 +106,179 @@ public sealed class PlaybookRunToolsContractTests
         second.IsError.Should().BeTrue();
         Body(second).GetProperty("reasonCode").GetString().Should().Be(McpIdempotency.KeyReusedReasonCode);
         world.Engine.Verify(e => e.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    // ---- task 038: the optional `instructions` argument (owner decision Q18) ------------------------------------------------------
+
+    /// <summary>A marker inside the instructions: it must never reach a log, a cache entry, a tool result or a stored record (NFR-05, ADR-015).</summary>
+    private const string InstructionsSecret = "FOCUS-SECRET-038-indemnity";
+
+    private static string FocusText => "  Focus on indemnity and termination. " + InstructionsSecret + "  ";
+
+    [Fact(DisplayName = "038 instructions: the text (trimmed) reaches the engine's PlaybookRunRequest.UserContext; the rest of the request is unchanged")]
+    public async Task Start_WithInstructions_RunsWithThemAsUserContext()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+
+        var started = await world.RunToolAsync(
+            world.CallerContext(),
+            new { playbookId, documentIds = new[] { documentId }, instructions = FocusText, idempotencyKey = "focus-1" });
+
+        started.IsError.Should().NotBe(true, started.StructuredContent?.ToString());
+        var request = world.Calls.Single().Request;
+        request.UserContext.Should().Be("Focus on indemnity and termination. " + InstructionsSecret);
+        request.PlaybookId.Should().Be(playbookId);
+        request.DocumentIds.Should().Equal(documentId);
+        request.StartedBy.Should().Be(PlaybookRunStartedBy.Person);
+    }
+
+    [Theory(DisplayName = "038 instructions: absent, null, empty or blank leaves UserContext unset, exactly today's request")]
+    [InlineData("absent")]
+    [InlineData("null")]
+    [InlineData("empty")]
+    [InlineData("blank")]
+    public async Task Start_WithoutInstructions_LeavesUserContextUnset(string shape)
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        object arguments = shape switch
+        {
+            "absent" => new { playbookId, documentIds = new[] { documentId }, idempotencyKey = "no-focus" },
+            "null" => new { playbookId, documentIds = new[] { documentId }, instructions = (string?)null, idempotencyKey = "no-focus" },
+            "empty" => new { playbookId, documentIds = new[] { documentId }, instructions = string.Empty, idempotencyKey = "no-focus" },
+            _ => new { playbookId, documentIds = new[] { documentId }, instructions = " \t\r\n ", idempotencyKey = "no-focus" },
+        };
+
+        var started = await world.RunToolAsync(world.CallerContext(), arguments);
+
+        started.IsError.Should().NotBe(true, started.StructuredContent?.ToString());
+        var request = world.Calls.Single().Request;
+        request.UserContext.Should().BeNull();
+        request.Parameters.Should().BeNull();
+        request.DocumentIds.Should().Equal(documentId);
+    }
+
+    [Theory(DisplayName = "038 instructions: 2,000 characters are accepted; 2,001 and non-text are refused (mcp.invalid_argument), never cut; no run starts, and the refusal does not echo the text")]
+    [InlineData(2_000, true)]
+    [InlineData(2_001, false)]
+    public async Task Start_InstructionsLength_IsCappedNotCut(int length, bool accepted)
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var text = "q" + InstructionsSecret.PadRight(length - 1, 'x');
+
+        var result = await world.RunToolAsync(
+            world.CallerContext(), new { playbookId, documentIds = new[] { documentId }, instructions = text, idempotencyKey = $"len-{length}" });
+
+        if (accepted)
+        {
+            result.IsError.Should().NotBe(true, result.StructuredContent?.ToString());
+            world.Calls.Single().Request.UserContext.Should().Be(text, "the text reaches the engine whole, never cut");
+        }
+        else
+        {
+            result.IsError.Should().BeTrue();
+            Body(result).GetProperty("reasonCode").GetString().Should().Be(DocumentToolSupport.InvalidArgumentReasonCode);
+            Text(result).Should().Contain("2000").And.NotContain(InstructionsSecret);
+            Body(result).ToString().Should().NotContain(InstructionsSecret);
+            world.VerifyNothingStarted();
+        }
+    }
+
+    [Fact(DisplayName = "038 instructions: a non-text value is refused (mcp.invalid_argument); no run starts")]
+    public async Task Start_NonTextInstructions_AreRefused()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+
+        var result = await world.RunToolAsync(
+            world.CallerContext(), new { playbookId, documentIds = new[] { documentId }, instructions = new[] { "a" }, idempotencyKey = "non-text" });
+
+        result.IsError.Should().BeTrue();
+        Body(result).GetProperty("reasonCode").GetString().Should().Be(DocumentToolSupport.InvalidArgumentReasonCode);
+        world.VerifyNothingStarted();
+    }
+
+    [Fact(DisplayName = "038 retry: the same key with different instructions is refused (mcp.idempotency_key_reused) and starts nothing; the same instructions replay the run")]
+    public async Task Start_SameKey_InstructionsAreAPartOfTheFingerprint()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var documents = new[] { documentId };
+
+        var first = await world.RunToolAsync(world.CallerContext(), new { playbookId, documentIds = documents, instructions = "focus on indemnity", idempotencyKey = "same" });
+        var changed = await world.RunToolAsync(world.CallerContext(), new { playbookId, documentIds = documents, instructions = "focus on termination", idempotencyKey = "same" });
+        var dropped = await world.RunToolAsync(world.CallerContext(), new { playbookId, documentIds = documents, idempotencyKey = "same" });
+        var repeated = await world.RunToolAsync(world.CallerContext(), new { playbookId, documentIds = documents, instructions = "  focus on indemnity ", idempotencyKey = "same" });
+
+        first.IsError.Should().NotBe(true, first.StructuredContent?.ToString());
+        foreach (var refused in new[] { changed, dropped })
+        {
+            refused.IsError.Should().BeTrue();
+            Body(refused).GetProperty("reasonCode").GetString().Should().Be(McpIdempotency.KeyReusedReasonCode);
+        }
+
+        repeated.IsError.Should().NotBe(true, repeated.StructuredContent?.ToString());
+        RunIdOf(repeated).Should().Be(RunIdOf(first), "the same instructions (trimmed) are the same input");
+        world.Engine.Verify(e => e.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact(DisplayName = "038 retry: a call without instructions keeps the fingerprint it had before the argument existed (a retry across a deploy still replays)")]
+    public void Fingerprint_WithoutInstructions_IsUnchanged()
+    {
+        var playbookId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var parameters = new Dictionary<string, string> { ["b"] = "2", ["a"] = "1" };
+
+        var now = RunPlaybookTool.FingerprintOf(new RunPlaybookTool.RunInput(playbookId, [documentId], parameters, null, "k"));
+
+        // The fingerprint task 030 computed: the playbook, the documents and the parameters by name, nothing else.
+        var before = McpIdempotency.FingerprintOf(playbookId.ToString("D"), documentId.ToString("D"), "a=1\nb=2");
+        now.Should().Be(before);
+        RunPlaybookTool.FingerprintOf(new RunPlaybookTool.RunInput(playbookId, [documentId], parameters, "x", "k")).Should().NotBe(before);
+    }
+
+    [Fact(DisplayName = "038 no echo: the instructions text is in no log entry, tool result, retry-key entry or run status, over a start, a replay and a status read")]
+    public async Task Instructions_NeverReachALogAResultOrAStoredRecord()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var http = world.CallerContext();
+        var arguments = new { playbookId, documentIds = new[] { documentId }, instructions = FocusText, idempotencyKey = "echo" };
+
+        var started = await world.RunToolAsync(http, arguments);
+        var replayed = await world.RunToolAsync(world.CallerContext(), arguments);
+        var runId = RunIdOf(started);
+        world.Gate.SetResult();
+        await world.RunFinished();
+        var status = await world.GetToolAsync(http, runId);
+        var view = (await world.Runs.ReadAsCallerAsync(http, runId, CancellationToken.None))!;
+
+        world.Calls.Single().Request.UserContext.Should().Contain(InstructionsSecret, "the run itself did get the text");
+        foreach (var result in new[] { started, replayed, status })
+        {
+            Text(result).Should().NotContain(InstructionsSecret);
+            JsonSerializer.Serialize(result, McpJsonUtilities.DefaultOptions).Should().NotContain(InstructionsSecret);
+        }
+
+        JsonSerializer.Serialize(view).Should().NotContain(InstructionsSecret);
+        world.Logs.Entries.Should().NotBeEmpty().And.NotContain(e => e.Contains(InstructionsSecret, StringComparison.Ordinal));
+        world.Cache.Writes.Should().NotBeEmpty().And.NotContain(w => w.Contains(InstructionsSecret, StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "038 tools/list: the schema names the optional `instructions` text (max 2,000), not required; the description says to omit it when the user said nothing")]
+    public void Schema_AndDescription_NameInstructions()
+    {
+        var tool = new RunPlaybookTool().Create(new ServiceCollection().BuildServiceProvider()).ProtocolTool;
+
+        var instructions = tool.InputSchema.GetProperty("properties").GetProperty("instructions");
+        instructions.GetProperty("type").GetString().Should().Be("string");
+        instructions.GetProperty("maxLength").GetInt32().Should().Be(2_000).And.Be(RunPlaybookTool.MaxInstructionsLength);
+        instructions.GetProperty("description").GetString().Should().Be("Optional: what the user asked the run to focus on, in their words; omit if they said nothing.");
+        tool.InputSchema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().NotContain("instructions");
+        RunPlaybookTool.Description.Should().Contain("what the user asked the run to focus on").And.Contain("omit if they said nothing");
+        RunPlaybookTool.Description.Length.Should().BeLessThanOrEqualTo(1_024);
     }
 
     // ---- status: the durable record and the interrupted mapping ---------------------------------------------------------------
@@ -215,8 +389,8 @@ public sealed class PlaybookRunToolsContractTests
     private sealed class LinkThrows(IPlaybookRunAi inner) : IPlaybookRunAi
     {
         public Task<PlaybookRunStartResult> StartAsCallerAsync(
-            HttpContext http, Guid playbookId, Guid[] documentIds, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken) =>
-            inner.StartAsCallerAsync(http, playbookId, documentIds, parameters, cancellationToken);
+            HttpContext http, Guid playbookId, Guid[] documentIds, IReadOnlyDictionary<string, string>? parameters, string? userContext, CancellationToken cancellationToken) =>
+            inner.StartAsCallerAsync(http, playbookId, documentIds, parameters, userContext, cancellationToken);
 
         public Task<PlaybookRunView?> ReadAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken) =>
             inner.ReadAsCallerAsync(http, runId, cancellationToken);

@@ -167,12 +167,19 @@ public interface IPlaybookRunAi
     /// <param name="playbookId">The JPS playbook.</param>
     /// <param name="documentIds">The documents; this exact instance is authorized and handed to the run.</param>
     /// <param name="parameters">The run parameters; this exact instance is authorized and handed to the run.</param>
+    /// <param name="userContext">
+    /// What the caller asked the run to focus on, already trimmed and capped by the caller of this method (task 038); <c>null</c> when
+    /// there is none. Handed to the engine as <c>PlaybookRunRequest.UserContext</c>, the field the Console's run request fills. It is
+    /// user query text: it travels in the detached run's request object in memory only, and this contract never logs or stores it
+    /// (ADR-015, ADR-052).
+    /// </param>
     /// <param name="cancellationToken">The caller's token (the start, not the run).</param>
     Task<PlaybookRunStartResult> StartAsCallerAsync(
         HttpContext http,
         Guid playbookId,
         Guid[] documentIds,
         IReadOnlyDictionary<string, string>? parameters,
+        string? userContext,
         CancellationToken cancellationToken);
 
     /// <summary>The caller's run <paramref name="runId"/>, or <c>null</c> when it is unknown or another caller's.</summary>
