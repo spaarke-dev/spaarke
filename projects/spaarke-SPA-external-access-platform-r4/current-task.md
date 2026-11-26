@@ -8,9 +8,8 @@
 | Field | Value |
 |-------|-------|
 | **Active** | **Task 043 DONE** (FR-28 #2269), PR open — see In flight. Next task per TASK-INDEX after the owner's go. Full record: `notes/task-043-notes.md`. |
-| **UAC review** | **APPROVED** by uac-r2 (2026-11-26 ~18:35Z) for items 1-2 (resolver 503 + registration 503). Quote in notes + PR. Two non-blocking notes: (1) privilege-refused (`StoreWriteStatus.Forbidden`) bind on the sign-in path maps to `contact_bind_failed` → now retries; fix in 043 if cheap (registration bind already maps Forbidden → `DenyContactCreateUnavailable`, ContactIdentityBinder.cs ~:1139); else under #3264. (2) `ContactBindingDecision.DecideIntent` (~:1202) answers lookup_failed on `intent.ContactId != contactId` (inconsistent read) → make the log line name the mismatch; no status change. #3264/#3265 stay labelled R4 (we own them, uac reviews diffs). |
 | **In flight** | Task 043 PR (pushed; merge only on the owner's go). UAC APPROVED (uac-r2 2026-11-26); its note 1 fixed in 043 (sign-in Forbidden bind/create → 403 create_unavailable), note 2 = comment; #3264 narrowed to the resolver catch arms. After merge: BFF deploy via uac-r2 (owner go per SHA), then SPA deploy (owner's exact-SHA go). |
-| **Next action** | Owner: merge go for the 043 PR; then request the dev BFF deploy through uac-r2 and an SPA deploy SHA go. Remove `C:wt043m`/`C:wt043b` with `scripts/worktree/Remove-WorktreeSafe.ps1`. |
+| **Next action** | Owner: merge go for the 043 PR; then request the dev BFF deploy through uac-r2 and an SPA deploy SHA go. Remove `C:\wt043m` and `C:\wt043b` with `scripts/worktree/Remove-WorktreeSafe.ps1`. |
 
 ## Live on dev
 - **BFF:** `d307d67e36` LIVE since ~18:00Z (uac-r2, owner's go); 30-min gate PASSED 18:31Z. Rollback `140c01219a`. Task 042's BFF part live since `6a2a569ac9`. Task 043 NOT deployed (not merged).
