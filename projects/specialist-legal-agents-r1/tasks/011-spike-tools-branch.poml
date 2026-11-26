@@ -4,7 +4,7 @@
     <title>Spike branch: spike_get_profile and spike_review_nda (never merged)</title>
     <phase>2 Spike tools and dev deploy</phase>
     <gate>after 002, 006 and 010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs code; tags include bff-api and auth</rigor-reason>
     <model-tier>opus</model-tier>

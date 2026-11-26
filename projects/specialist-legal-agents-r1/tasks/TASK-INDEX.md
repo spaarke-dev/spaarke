@@ -17,7 +17,7 @@
 | 006 | Patent test content, drafting skill and patent kits | 1 | ✅ [done] | none | Group A | opus / high | STANDARD |
 | 007 | Desk items I-1 to I-4 with file:line evidence | 1 | ✅ [done] | none | Group B | opus / high | STANDARD |
 | 010 | Check the agreement-review Action row and its input schema in DEV | 2 | ✅ [done] | none | Group B | sonnet / high | STANDARD |
-| 011 | Spike branch: spike_get_profile and spike_review_nda (never merged) | 2 | 🔲 [open] | 002, 006, 010 | alone | opus / high | FULL |
+| 011 | Spike branch: spike_get_profile and spike_review_nda (never merged) | 2 | ✅ [done] | 002, 006, 010 | alone | opus / high | FULL |
 | 015 | Spike dev deploy through uac-r2 | 2 | 🔲 [open] | 011 | alone (owner go) | sonnet / high | STANDARD |
 | 020 | Test agent packages for G1, G5 and G2 | 3 | 🔲 [open] | 002, 004, 015 | alone (owner uploads) | sonnet / high | STANDARD |
 | 021 | G3 run: profile resolution, run key and agent identity | 3 | 🔲 [open] | 015, 020 | Group C | sonnet / high | STANDARD |

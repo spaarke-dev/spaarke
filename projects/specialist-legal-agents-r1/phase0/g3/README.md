@@ -10,7 +10,7 @@
 |---|---|
 | Branch | `spike/specialist-agents-phase0` (never merged; no PR) |
 | Cut from | `origin/master` at `6a2a569ac9` (2026-11-26) |
-| Spike commit | `ddccee88a6562db59b0268ef1b2263d2e04bbe50` (pushed to `origin/spike/specialist-agents-phase0`) |
+| Spike commit | `d307d67e36` (pushed to `origin/spike/specialist-agents-phase0`; first cut `ddccee88a6`, then master merged as `603e03e6ab` and the review fixes as `d307d67e36`). `origin/master` is an ancestor (checked 2026-11-26) |
 | Worktree | `C:\wt-sla-spike` |
 | Route | the existing `/mcp/legal-operations` (A10 connector token, `mcp` rate limit, kill switch); no new route, no package |
 
@@ -92,3 +92,14 @@ Per surface and caller kind. Query App Insights `traces` for `MCP spike tool` on
 ## Recommendation for Phase 1
 
 To be written after the DEV run.
+
+## Review (2026-11-26)
+
+- Two adversarial passes (opus) on `ddccee88a6`: no isolation or auth defect.
+- Fix round `d307d67e36`, verified by a scoped re-check: 50/50 spike tests pass.
+  - The review binds a neutral user context, so the tester's own profile and memory no longer reach it.
+  - The result reports `modelDeployment`, and the review fails with `MODEL_TIER_UNAVAILABLE` rather than falling back.
+  - New retryable codes `CALLER_LOOKUP_FAILED` and `AI_DISABLED`.
+  - The `REVIEW_FAILED` text carries its reference.
+  - The result reports `documentChars`.
+- Error codes testers may see: `NO_PROFILE`, `CALLER_UNRESOLVED`, `CALLER_LOOKUP_FAILED`, `AI_DISABLED`, `MODEL_TIER_UNAVAILABLE`, `REVIEW_FAILED`, `INVALID_ARGUMENT`.
