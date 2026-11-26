@@ -64,4 +64,16 @@ Rigor FULL, sonnet @ high, directional steps. Branch `fix/ontology-229-lane-coun
   (D-56), so today's Decide cards mostly keep "oldest N days". No defect: the card follows the data.
 - Known limit K2: "next due" uses the viewer's locale for the month name (same as the Do lines' "due 2 Oct").
 
-rework: none task 229
+## Fix round 1 (Opus review, F1)
+
+- F1: the Coming-due note took the earliest `dueDate` without comparing it with today, so an item awaiting the nightly move
+  (up to about a day past its date) read "next due 8 Oct" while its row said "1d overdue". Now "next" is the earliest date
+  that is today or later; when every dated item is past due the note is "N past due" (master's wording, true); mixed cards
+  keep "next due <day>" only (no "and N past due": the All card already carries the count); "next due -" only when no item has
+  a date. A passed-date-plus-undated card reads "N past due".
+- Test: `laneCountFilters.test.tsx` "never calls a date that has passed the next due" (item due 8 Oct, today 9 Oct). Fails at
+  e92968ee9b (1 failed / 38 passed in that file), passes now; Worklist folder 14 suites / 313 tests.
+- K1 known limit: "today" is the viewer's local day, consistent with the existing Do-lane notes.
+- K4 known limit: a Decide card can say "N overdue" while its rows show only age (the row shows the age for Decide lines).
+
+rework: fix-round-1 task 229

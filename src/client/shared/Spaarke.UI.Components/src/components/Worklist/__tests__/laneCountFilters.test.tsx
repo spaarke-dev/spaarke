@@ -172,6 +172,40 @@ describe('buildLaneCountCards', () => {
     expect(cards.find(c => c.label === 'Finish or reschedule')!.note).toBe('1 past due');
   });
 
+  it('Coming due never calls a date that has passed the "next due" (an item awaits the nightly move for up to a day) (#1688 review F1)', () => {
+    const DAY_8_OCT = new Date(2026, 9, 8).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const comingDue = (items: WorklistItem[]) => build('Do', items).cards.find(c => c.label === 'Coming due')!;
+    // Only past-due dated items: the truthful note is the past-due count, as on master.
+    const stale = comingDue([item('Do', 'comingDue', { dueDate: '2026-10-08' })]);
+    expect(stale.note).toBe('1 past due');
+    expect(stale.note).not.toContain(DAY_8_OCT);
+    expect(stale.ariaLabel).toBe('Coming due, 1 Do item, 1 past due');
+    expect(
+      comingDue([
+        item('Do', 'comingDue', { dueDate: '2026-10-07' }),
+        item('Do', 'comingDue', { dueDate: '2026-10-08' }),
+      ]).note
+    ).toBe('2 past due');
+    // Mixed: "next" skips the passed date and names the earliest one that is today or later.
+    const mixed = comingDue([
+      item('Do', 'comingDue', { dueDate: '2026-10-08' }),
+      item('Do', 'comingDue', { dueDate: '2026-10-15' }),
+      item('Do', 'comingDue', { dueDate: '2026-10-12' }),
+    ]);
+    expect(mixed.note).toBe(`next due ${DAY_12_OCT}`);
+    // Due today is still upcoming.
+    expect(
+      comingDue([
+        item('Do', 'comingDue', { dueDate: '2026-10-09' }),
+        item('Do', 'comingDue', { dueDate: '2026-10-08' }),
+      ]).note
+    ).toBe(`next due ${new Date(2026, 9, 9).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`);
+    // A passed date plus an undated item: nothing upcoming to name, so the past-due count.
+    expect(comingDue([item('Do', 'comingDue', { dueDate: '2026-10-08' }), item('Do', 'comingDue')]).note).toBe(
+      '1 past due'
+    );
+  });
+
   it('Coming due: with no due date on any item the note says so; an empty card has no note', () => {
     const { cards } = build('Do', [
       item('Do', 'comingDue'),

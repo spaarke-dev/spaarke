@@ -113,7 +113,8 @@ function countPastDue(items: readonly WorklistItem[], today: Date): number {
 /**
  * The card's one-line note, as the approved prototype words it (HANDOFF @ ae1cc9f, W-7):
  *  - Decide: "2 overdue" when any item is past its due date, else "oldest 4 days" (calendar days since the oldest `raisedOn`).
- *  - Do, Coming due: "next due 2 Oct" (the earliest due date of the card's items; "next due —" when none carries one).
+ *  - Do, Coming due: "next due 2 Oct" (the earliest due date of the card's items that is today or later; "N past due" when every
+ *    dated item is already past due, as such an item awaits the nightly re-evaluation; "next due —" when none carries a date).
  *  - Do, other cards: "3 past due", or no note.
  * An empty card has no note.
  */
@@ -134,12 +135,19 @@ function noteFor(bucket: LaneCountBucket, lane: WorklistLane, today: Date): stri
     return oldest === 1 ? 'oldest 1 day' : `oldest ${oldest} days`;
   }
   if (bucket.key === 'comingDue') {
+    // An item stays here until the nightly re-evaluation moves it, so one may already be past due: "next" is the earliest date
+    // that is today or later, never a date that has gone (the row says "1d overdue"; the card must not say "next due" for it).
     let next: Date | null = null;
+    let dated = 0;
     for (const item of bucket.items) {
       const due = parseDueDate(item.dueDate);
-      if (due && (next === null || due.getTime() < next.getTime())) next = due;
+      if (!due) continue;
+      dated += 1;
+      if (daysBetweenLocalMidnight(today, due) >= 0 && (next === null || due.getTime() < next.getTime())) next = due;
     }
-    return `next due ${next ? formatDueDay(next) : '—'}`;
+    if (next) return `next due ${formatDueDay(next)}`;
+    if (dated === 0) return 'next due —';
+    return `${countPastDue(bucket.items, today)} past due`;
   }
   const pastDue = countPastDue(bucket.items, today);
   return pastDue > 0 ? `${pastDue} past due` : undefined;
