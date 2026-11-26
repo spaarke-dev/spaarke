@@ -2,11 +2,14 @@
 
 Each guard has a must-fire case (a seeded defect is caught) and a must-not-fire case.
 """
+import contextlib
+import io
 import json
 import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -633,6 +636,235 @@ class SegmentAndProbeTests(Base):
         bad = probe.probe(["lxml"], self.orig)  # a file, not a directory: the write test fails
         self.assertFalse(bad["ok"])
         self.assertIn("writable:" + self.orig, bad["missing_required"])
+
+
+SKIP_PLAN = dict(PLAN, bookmarks={"7. Term.": "NDA_Sec7", "5. Anonymized Data.": "NDA_Sec5", "Agreement": "NDA_Sec9"},
+                 edits=[PLAN["edits"][0], PLAN["edits"][1],
+                        dict(PLAN["edits"][2], find="Recipient may not use any data."),  # 2: not in the document
+                        PLAN["edits"][3],  # applies, but its summary row links to the refused bookmark NDA_Sec9
+                        PLAN["edits"][4],
+                        {"para": "7. Term.", "find": "e", "replace": "y"},  # 5: ambiguous
+                        {"para": "nowhere at all", "find": "x", "replace": "y"}])  # 6: no such clause
+SKIP_REPORT = {"engine": "ooxml_redline", "report_version": 1, "edits_total": 7, "edits_applied": 4,
+               "refused": [{"edit": 2, "code": "not_found"}, {"edit": 5, "code": "not_unique"},
+                           {"edit": 6, "code": "para_not_found"}],
+               "bookmarks_refused": [{"bookmark": "NDA_Sec9", "code": "para_not_unique"}]}
+
+
+class SkipUnplaceableTests(Base):
+    """--skip-unplaceable: apply what fits, report the rest by code, never lose or half-apply an edit."""
+
+    def skip_run(self, plan=SKIP_PLAN, original=None, extra=()):
+        original = original or self.orig
+        red, ext, cln, rep = (self.path(n) for n in ("redline.docx", "external.docx", "clean.docx", "report.json"))
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = ooxml_redline.main([self.write_plan(plan), original, red, "--external", ext, "--clean", cln,
+                                     "--skip-unplaceable", rep, *extra])
+        report = None
+        if os.path.exists(rep):
+            with open(rep, encoding="utf-8") as f:
+                report = json.load(f)
+        return rc, report, out.getvalue(), err.getvalue()
+
+    def skip_package(self):
+        rc, report, out, err = self.skip_run()
+        self.assertEqual(rc, 0, err)
+        internal = self.path("internal.docx")
+        rc = summary_table.main([self.write_plan(SKIP_PLAN), self.path("redline.docx"), "--out", internal,
+                                 "--refused", self.path("report.json")])
+        self.assertEqual(rc, 0)
+        return report, out, err, internal
+
+    def test_applies_what_fits_and_reports_the_rest_by_code_only(self):
+        report, out, err, internal = self.skip_package()
+        self.assertEqual(report, SKIP_REPORT)
+        self.assertEqual(json.loads(out)["refused"], 3)
+        self.assertEqual(err, "")  # refusals print nothing: stderr may quote clause text
+        dumped = json.dumps(report)
+        for e in SKIP_PLAN["edits"]:  # no clause or plan text in the report
+            for k in ("para", "find", "replace"):
+                if len(e.get(k, "")) > 1:
+                    self.assertNotIn(e[k], dumped)
+        accepted = texts(internal, "accept")
+        self.assertIn("last five (5) years", accepted[2])
+        self.assertIn("Recipient may use anonymized data", accepted[4])  # refused edit 2 left the clause alone
+        self.assertIn("conflict-of-laws rules", accepted[5])
+
+    def test_skip_package_passes_every_check_with_the_report(self):
+        report, _, _, internal = self.skip_package()
+        res = check_outputs.check(SKIP_PLAN, internal, self.path("clean.docx"), self.orig, self.path("external.docx"),
+                                  report)
+        self.assertEqual(failed(res), {})
+        self.assertIn("refusals", {r["name"] for r in res})
+        rc = check_outputs.main([self.write_plan(SKIP_PLAN), internal, self.path("clean.docx"), "--original",
+                                 self.orig, "--external", self.path("external.docx"), "--refused",
+                                 self.path("report.json")])
+        self.assertEqual(rc, 0)
+
+    def test_summary_lists_the_changes_to_make_by_hand(self):
+        _, _, _, internal = self.skip_package()
+        rev, _, manual = check_outputs.summary_tables(fx.document_root(internal))
+        rows = [check_outputs.cell_texts(r) for r in manual.findall(fx.q("tr"))[1:]]
+        self.assertEqual([r[1] for r in rows], ["§5 Anonymized Data", "7. Term.", "nowhere at all"])
+        self.assertIn("Replace “Recipient may not use any data.” with “Intentionally Omitted.”", rows[0][2])
+        self.assertIn("Comment: Derived-data use removed.", rows[0][2])
+        self.assertEqual(rows[0][3], "The text to change could not be found in the clause")
+        self.assertEqual(rows[2][3], "The clause could not be found")
+        summary = [check_outputs.cell_texts(r) for r in rev.findall(fx.q("tr"))[1:]]
+        self.assertTrue(summary[1][3].startswith(summary_table.NOT_APPLIED))
+        self.assertFalse(summary[0][3].startswith(summary_table.NOT_APPLIED))
+        # the row whose bookmark was refused shows its section as text, not a link to a missing bookmark
+        anchors = [h.get(fx.q("anchor")) for h in rev.iter(fx.q("hyperlink"))]
+        self.assertEqual(anchors, ["NDA_Sec7", "NDA_Sec5"])
+
+    def test_a_refused_edit_leaves_its_paragraph_exactly_as_it_was(self):
+        # The first run carries a counterparty formatting revision. Placing the edit splits that run (the copy gets
+        # a fresh revision id, and such runs are never merged back) before the span is found to cross the deletion.
+        fmt = ('<w:rPr><w:b/><w:rPrChange w:id="7" w:author="Opposing Counsel" w:date="2026-09-01T00:00:00Z">'
+               '<w:rPr/></w:rPrChange></w:rPr>')
+        src = fx.build_raw(self.path("fmt.docx"), fx.P(fx.R("4. Fees. Pay within ", fmt), fx.DEL("sixty ", 2),
+                                                      fx.R("thirty days of invoice.")) + fx.P(fx.R("9. Law. New York.")))
+        before = etree.tostring(fx.document_root(src).find(".//" + fx.q("p")), method="c14n")
+        rc, report, _, _ = self.skip_run(dict(MIN, edits=[{"para": "4. Fees.", "find": "within thirty", "replace": "x"},
+                                                          LAW]), src)
+        self.assertEqual(rc, 0)
+        self.assertEqual(report["refused"], [{"edit": 0, "code": "crosses_markup"}])
+        after = etree.tostring(fx.document_root(self.path("redline.docx")).find(".//" + fx.q("p")), method="c14n")
+        self.assertEqual(before, after)  # the split made before the refusal is gone too
+        self.assertEqual(failed(check_outputs.check(dict(MIN, edits=[{"para": "4. Fees.", "find": "within thirty",
+                                                                      "replace": "x"}, LAW]),
+                                                    self.path("redline.docx"), self.path("clean.docx"), src, None,
+                                                    report)).keys() - {"summary"}, set())
+
+    def test_each_placement_failure_has_its_code(self):
+        mid = fx.build_raw(self.path("mid.docx"), fx.P(fx.R("4. Fees. Pay within "), fx.INS("sixty ", 1),
+                                                       fx.R("days of invoice.")))
+        gone = fx.build_raw(self.path("del.docx"), fx.P(fx.R("4. Fees. Pay within "), fx.DEL("sixty ", 2),
+                                                        fx.R("thirty days of invoice.")))
+        word = fx.build_raw(self.path("word.docx"), fx.P(fx.R("2. Scope. All these obligations survive.")))
+        cap = fx.build_raw(self.path("cap.docx"), fx.P(fx.R("4. Cap. Capped at 10 (ten) times fees, or 10 days.")))
+        fld = fx.build_raw(self.path("fld.docx"), fx.P(fx.R("3. Notice. See "), FIELD % fx.R("Section 9"),
+                                                      fx.R(" for notice addresses.")))
+        bare = fx.build_raw(self.path("bare.docx"), fx.P(fx.R("12. Severability. ")))
+        cases = [
+            (mid, {"para": "4. Fees.", "find": "within sixty days", "replace": "x"}, "in_existing_markup"),
+            (gone, {"para": "4. Fees.", "find": "within thirty", "replace": "x"}, "crosses_markup"),
+            (word, {"para": "2. Scope.", "find": "the", "replace": "such"}, "word_boundary"),
+            (word, {"para": "2. Scope.", "find": "absent", "replace": "x"}, "not_found"),
+            (word, {"para": "No such clause", "find": "x", "replace": "y"}, "para_not_found"),
+            (cap, {"para": "4. Cap.", "find": "10 (ten) times fees, or 10", "old": "10", "replace": "30"},
+             "old_not_in_find"),
+            (fld, {"para": "3. Notice.", "find": "Section 9", "replace": "x"}, "in_field_result"),
+            (fld, {"para": "3. Notice.", "after": "Section 9", "insert": " (x)"}, "in_field_result"),
+            (fld, {"para": "3. Notice.", "find": "See Section 9 for", "replace": "x"}, "crosses_field_or_drawing"),
+            (bare, {"para": "12. Severability.", "find": "*", "replace": "x"}, "nothing_after_heading"),
+        ]
+        for src, edit, code in cases:
+            res = ooxml_redline.run(dict(MIN, edits=[edit]), src, self.path("r.docx"), dry_run=True,
+                                    skip_unplaceable=True)
+            self.assertEqual(res["report"]["refused"], [{"edit": 0, "code": code}], msg=edit)
+            with self.assertRaises(ooxml_redline.PlanError, msg=edit) as ctx:  # default mode still refuses the plan
+                ooxml_redline.run(dict(MIN, edits=[edit]), src, self.path("r.docx"), dry_run=True)
+            self.assertEqual(ctx.exception.code, code)
+        self.assertEqual({c for *_, c in cases} - set(ooxml_redline.EDIT_REFUSAL_CODES), set())
+
+    def test_existing_bookmark_name_is_refused_with_its_code(self):
+        bm = '<w:bookmarkStart w:id="5" w:name="NDA_Sec9"/>'
+        src = fx.build_raw(self.path("bm.docx"), fx.P(bm, fx.R("1. Definitions. Stuff."), '<w:bookmarkEnd w:id="5"/>')
+                           + fx.P(fx.R("9. Law. New York.")))
+        res = ooxml_redline.run(dict(MIN, bookmarks={"9. Law.": "NDA_Sec9"}, edits=[LAW]), src, self.path("r.docx"),
+                                dry_run=True, skip_unplaceable=True)
+        self.assertEqual(res["report"]["bookmarks_refused"], [{"bookmark": "NDA_Sec9", "code": "bookmark_exists"}])
+        self.assertEqual(res["report"]["refused"], [])
+
+    def test_a_contract_break_still_exits_3_and_writes_no_report(self):
+        typo = dict(SKIP_PLAN, edits=SKIP_PLAN["edits"] + [{"para": "x", "find": "y", "replacment": "z"}])
+        rc, report, out, err = self.skip_run(typo)
+        self.assertEqual(rc, 3)
+        self.assertIsNone(report)
+        self.assertFalse(os.path.exists(self.path("redline.docx")))
+
+    def test_dry_run_writes_only_the_report(self):
+        rc, report, _, _ = self.skip_run(extra=("--dry-run",))
+        self.assertEqual(rc, 0)
+        self.assertEqual(report, SKIP_REPORT)
+        self.assertFalse(os.path.exists(self.path("redline.docx")))
+
+    def test_without_the_flag_nothing_changes_but_exit_3_carries_the_code(self):
+        def exit_3_line(plan):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(ooxml_redline.main([self.write_plan(plan), self.orig, self.path("r.docx")]), 3)
+            self.assertFalse(os.path.exists(self.path("r.docx")))
+            return json.loads(err.getvalue())
+        line = exit_3_line(SKIP_PLAN)  # bookmarks are placed first, so the refused bookmark stops the run
+        self.assertEqual((line["code"], line["bookmark"]), ("para_not_unique", "NDA_Sec9"))
+        self.assertNotIn("edit", line)
+        line = exit_3_line(dict(PLAN, edits=PLAN["edits"] + [{"para": "7. Term.", "find": "e", "replace": "y"}]))
+        self.assertEqual((line["code"], line["edit"]), ("not_unique", 5))
+        line = exit_3_line(dict(PLAN, edits=[{"para": "x", "find": "y", "replacment": "z"}]))
+        self.assertNotIn("code", line)  # a contract break has no placement code
+        self.assertNotIn("refused", ooxml_redline.run(PLAN, self.orig, self.path("r.docx"), dry_run=True))
+
+    def test_outputs_are_byte_identical_across_runs_and_clocks(self):
+        def build(tag):
+            red, internal = self.path(f"red-{tag}.docx"), self.path(f"int-{tag}.docx")
+            ooxml_redline.run(PLAN, self.orig, red)
+            self.assertEqual(summary_table.main([self.write_plan(PLAN), red, "--out", internal]), 0)
+            with open(red, "rb") as a, open(internal, "rb") as b:
+                return a.read(), b.read()
+        first = build("a")
+        time.sleep(2.1)  # zip times have 2-second resolution; a clock-stamped entry would now differ
+        self.assertEqual(first, build("b"))
+        with zipfile.ZipFile(self.path("int-b.docx")) as z:
+            infos = z.infolist()
+        self.assertEqual(infos[0].filename, "[Content_Types].xml")
+        self.assertEqual({i.date_time for i in infos}, {(1980, 1, 1, 0, 0, 0)})
+        self.assertEqual([i.filename for i in infos[1:]], sorted(i.filename for i in infos[1:]))
+
+    # ---- check_outputs must fire ----
+    def test_skip_outputs_checked_without_the_report_fail(self):
+        _, _, _, internal = self.skip_package()
+        res = failed(check_outputs.check(SKIP_PLAN, internal, self.path("clean.docx"), self.orig,
+                                         self.path("external.docx")))
+        self.assertIn("revision_text", res)
+        self.assertIn("by hand", res["summary"])
+
+    def test_a_report_claiming_an_applied_edit_was_refused_fails(self):
+        _, internal, ext, cln = self.package()
+        lie = {"engine": "ooxml_redline", "report_version": 1, "edits_total": 5, "edits_applied": 4,
+               "refused": [{"edit": 1, "code": "not_unique"}], "bookmarks_refused": []}
+        res = failed(check_outputs.check(PLAN, internal, cln, self.orig, ext, lie))
+        self.assertIn("revision_text", res)
+        self.assertIn("comments", res)
+        self.assertIn("by hand", res["summary"])
+
+    def test_a_report_that_does_not_match_the_plan_is_refused(self):
+        self.skip_package()
+        bad_reports = [
+            dict(SKIP_REPORT, edits_total=6),
+            dict(SKIP_REPORT, edits_applied=5),
+            dict(SKIP_REPORT, refused=[{"edit": 9, "code": "not_found"}], edits_applied=6),
+            dict(SKIP_REPORT, refused=[{"edit": 2, "code": "not_found"}, {"edit": 2, "code": "not_found"}],
+                 edits_applied=5),
+            dict(SKIP_REPORT, refused=[{"edit": 2, "code": "too_hard"}], edits_applied=6),
+            dict(SKIP_REPORT, refused=[{"edit": True, "code": "not_found"}], edits_applied=6),
+            dict(SKIP_REPORT, bookmarks_refused=[{"bookmark": "NDA_Other", "code": "para_not_found"}]),
+            dict(SKIP_REPORT, bookmarks_refused=[{"bookmark": "NDA_Sec9", "code": "not_found"}]),
+            dict(SKIP_REPORT, extra=1),
+            dict(SKIP_REPORT, engine="other"),
+        ]
+        for bad in bad_reports:
+            with self.assertRaises(ValueError, msg=bad):
+                ooxml_redline.read_refusals(bad, SKIP_PLAN)
+            res = failed(check_outputs.check(SKIP_PLAN, self.path("internal.docx"), self.path("clean.docx"),
+                                             self.orig, None, bad))
+            self.assertIn("refusals", res, msg=bad)
+        with open(self.path("bad.json"), "w", encoding="utf-8") as f:
+            json.dump(bad_reports[0], f)
+        self.assertEqual(summary_table.main([self.write_plan(SKIP_PLAN), self.path("redline.docx"), "--out",
+                                             self.path("i2.docx"), "--refused", self.path("bad.json")]), 2)
 
 
 def fx_texts(path):
