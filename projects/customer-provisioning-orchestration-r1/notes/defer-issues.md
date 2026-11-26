@@ -48,7 +48,7 @@ look them up by name; resolve the playbook by code / alternate key and rebuild t
 
 | Field | Value |
 |---|---|
-| **Status** | Fix PR #3187 open (2026-11-25; Pester 91/0, live ACME check OWNED ×4) |
+| **Status** | Fixed — PR #3187 merged `178fa6d08d` (2026-11-26; issue closed; Pester 91/0, live ACME check OWNED ×4) |
 | **Urgency** | next-round (every upgrade run from a Windows operator machine) |
 | **Filed** | 2026-11-25 |
 | **Source** | ACME upgrade run `85561c4a` prechecks (Step 1e-ter), 2026-11-25 |
