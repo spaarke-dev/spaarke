@@ -462,3 +462,23 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing, another project's code (#3110, demo dataset v2). `scripts/demo-data/DemoDataLib.ps1:100` and `reference-names.json:6` name `sprk_eventstatus`; `statuscode` is authoritative (D-28). The guard test fails 1 of 13. |
 | **Need** | Seed event status through `statuscode`/`statecode`; the guard then passes. |
 | **Status** | Filed and reported. Not fixed here (not this project's files). |
+
+## DI-048 — CommunicationConnections New uses platform quick create and fails silently when it is off (found in the 051 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 051 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3248 |
+| **Class** | Pre-existing; affects matter today and project after 051 turns its quick create off. `handleCreateType` logs the failure only. |
+| **Need** | Route the control's New to the table's wizard launcher; show a message when there is none; test both. |
+| **Status** | Filed. Outside 051's ribbon scope. |
+
+## DI-049 — Shared DataGrid default New opens the native form (found in the 051 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 051 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3249 |
+| **Class** | Pre-existing. `DataGrid/commandBar/defaults.ts:139` opens the native form for any table; the repair pass is the backstop. |
+| **Need** | Call the table's wizard launcher where one exists, or hide New by config; tests per path. |
+| **Status** | Filed. Outside 051's ribbon scope. |
