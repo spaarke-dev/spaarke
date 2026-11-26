@@ -10,7 +10,7 @@
 |-------|-------|
 | **Task** | T186-style live run, no POML. **ACME UPGRADE run `85561c4a-0c28-41a8-ad35-66f0aede9ce9` COMPLETED 2026-11-25 23:52:02Z** (SpaarkeMaster managed 1.3.2.1 → **1.3.3.0**, BFF pinned `2026.10.16-2`; 22 handlers, 0 retries, 23 gates Verified; 1 h 20 min). Handoff `runs/85561c4a-0c28-41a8-ad35-66f0aede9ce9.md` (written, NOT yet committed). Run from temp worktree `C:\code_files\wtcp2` at master `af4cfb4527` (this worktree is ~1030 commits behind master; use master's skill/schema). Intake `runs/acme-intake.json` (gitignored, PII) now has `buildId` + `mcpDisconnectPolicy: proceedWithFallback`. |
 | **Post-run done** | Run docs committed `8141d07853` (handoff, lessons L01–L04, INDEX, run-log §7). Registry Ready (Web API; MCP disconnected), `sprk_solutionversion` 1.3.3.0, `sprk_bffversion` 2026.10.16-2. `Test-RolePrivilegeExpectations.ps1` 1.3.3.0: all 8 roles OK. H12b seeded 37 reference rows + 87 legal-standard rows + Communication record type. Step 6e read-only items 1, 2, 3, 3b, 4, 5, 5b, 10 PASS; 9 = `SecureBuRoleDepthAssertionTests` in `tests/unit/Sprk.Bff.Api.Tests` exit 0 (111 tests; live case not confirmed un-skipped). Prod BFF `/healthz` 200; **staging slot 503/timeout** while the S1 plan ran 80–99 % CPU after the 23:49 swap (same as U-L08) → evidence for plan sizing (owner item). |
-| **Next Action** | 1) Demo dataset LOADED on ACME 2026-11-26 (123 rows, idempotent re-check OK); staging slot healthy again. 2) Merge #3187 when every check is green. 3) Ask owner: Step 6e probe items 2b/6/7/8/13 (write test records). 4) Remove temp worktree `wt041` (merged) with Remove-WorktreeSafe. |
+| **Next Action** | 1) Demo dataset LOADED on ACME 2026-11-26 (123 rows, idempotent re-check OK); staging slot healthy again. 2) Merge #3187 when every check is green. 3) Step 6e probes DONE 2026-11-26: 2b (40/40), 6, 7, 8, 13 PASS — secure-record ready on 1.3.3.0. 4) Remove temp worktree `wt041` (merged) with Remove-WorktreeSafe. |
 | **PRs** | **#3188 ISS-041 MERGED `c3a42ad85a`** (guard widened; issue #3090 closed). **#3187 ISS-044 open** (owner "Yes merge"): one advisory job `api-office` failed on a Git LFS checkout error (no test ran) — rerun failed jobs once run 45721579035 finishes, merge when EVERY check is green (`--match-head-commit 723c9a6cbf`). |
 | **Filed today** | ISS-044 #3183 (PR #3187), ISS-045 #3189 (stamps lack 17 grid configs / 2 layouts / 1 playbook hard-coded by dev id; after #3188). |
 | **Peer: ebilling-r1** | Owner approved: `Set-BffDecisionRecordReaderRole.ps1 -Verify` tolerates the 9 S29 platform-added privileges (their branch `e714592cb2`, not on master). When it merges (they will message): reword `SecureRecordSetupProcedure.cs:1541` and `SecureRecordSetupRejectionCodes.cs:314`. Until then never run that script's `-Apply` on ACME. |
@@ -22,8 +22,7 @@
 2. #3173: remove the retired Copilot agent's Bicep param + registry column, or keep dormant.
 3. ISS-038 #3018 decisions (`notes/iss038-upgrade-mode-design.md`: approve, Cosmos failover, CI hot path).
 4. ACME BFF upgrade blocked on A9 home sign-in; guest Console sign-in; stamp plan sizing (S1 saturates after every swap).
-5. Step 6e probe items on ACME (write test records).
-6. From before: `version-compat-matrix.json` stale v1 cell; #2443/#2532 go-live gates; L56 AI content for ACME; demo accounts; dev BFF secrets rotation; ISS-026; D3, D5, D8.
+5. From before: `version-compat-matrix.json` stale v1 cell; #2443/#2532 go-live gates; L56 AI content for ACME; demo accounts; dev BFF secrets rotation; ISS-026; D3, D5, D8.
 
 ## Ordering rules (live)
 
