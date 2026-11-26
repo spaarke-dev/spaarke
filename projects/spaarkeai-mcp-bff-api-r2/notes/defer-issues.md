@@ -96,3 +96,21 @@
 - **Body**:
   `Services/Ai/ToolFrameworkExtensions.cs` `AddHandoffUrlBuilder` (:97-104, moved unchanged from the legacy agent module by r2 task 001) builds `HandoffUrlBuilder` from `Dataverse:EnvironmentUrl`, then `DataverseServiceClient:Url`, then the literal `https://spaarkedev1.crm.dynamics.com`. In a customer environment where both settings are missing or misnamed, every server-composed deep link (chat create-record refusal links today; MCP long-running `consoleLink`s from tasks 030/032/034 if they take links from it) silently points at the Spaarke dev tenant instead of failing at startup. Failure scenario: a customer BFF deployed with the URL under another key sends its users links into `spaarkedev1`. It violates the no-hard-coded-values portability rule. Fix options: drop the literal and fail at startup (options validation) when neither key is set, or reuse the validated `Dataverse:EnvironmentUrl` options the rest of the BFF reads. r1's `DecisionsTextSummary` already avoids this builder for this reason. Not fixed in 020: the file is outside 020's scope (task 001's move kept behaviour unchanged on purpose).
 - **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## From task 027 (2026-11-25)
+
+### D-027-1: POST /api/ai/search and /api/ai/search/count return the raw exception message as the 500 `detail` (pre-existing, found in passing)
+
+- **GitHub issue**: not filed by task 027 (sub-agent; the brief limits it to recording here). The main session files it with
+  `/project-defer-issue-tracking` (project rule: notes AND issue).
+- **Title**: `Semantic search 500s echo ex.Message in ProblemDetails.detail (Search Failed / Count Failed)`
+- **Body**:
+  `src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs` `Search` (catch-all, `title: "Search Failed", detail: ex.Message`)
+  and `Count` (`"Count Failed"`, same) return the exception text of any non-`SdapProblemException` failure to the caller. Failure
+  scenario: an Azure AI Search or Dataverse enrichment failure whose message names the search endpoint, index name, a filter
+  fragment or a Dataverse URL is shown to the signed-in user, and an MCP tool that maps a REST-equivalent 500 would hand it to the
+  model. ADR-019 MUST NOT leak; the sibling `RecordSearchEndpoints` already fixed this (fixed text plus
+  `code = RECORD_SEARCH_FAILED`, exception logged). Fix: the same fixed text and a stable code for both routes. Not fixed in 027:
+  the task's constraint freezes the REST bytes of these routes, and the catch is not an access decision. Task 022 must not
+  surface search exceptions' messages in tool results.
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
