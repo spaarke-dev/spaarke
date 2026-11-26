@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-11-25 late (housekeeping: G8 open tests closed out, coordination + accelerator told; design v0.8)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
-> **Phase**: pre-`/design-to-spec`. No POML tasks. Do NOT run `/design-to-spec` until the owner says so.
+> **Phase**: Phase 0 spec written 2026-11-25 (`spec.md`); no POML tasks yet. Run `/project-pipeline` only on the owner's go.
 >
 > **2026-11-25 (owner):** OD-2 amended (patent attorney first; NDA stays a function, intake harness in `spaarke-intake-pipeline-r1` #3128); OD-4 Cowork + area agent for drafting; OD-5 Dataverse profile + Code Page (§3.14); OD-6 MCP shape and `docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md` (PR #3147); MCP parity is `spaarkeai-mcp-bff-api-r2` (#3150). D-A8 decided (no supervision in Phase 1; chaining designed for, §3.15). Fable reuse review (`notes/profile-reuse-review-2026-11-25.md`): profile anchors on the existing `sprk_userprofile`; only new surface is a server-written `sprk_agentprofile`/`-version` pair; owner questions are D-A18. The Spaarke AI agent is removed now (mcp-r2 §4.5; tenant steps E1/E2 are the owner's). Phase 1 child slug now `specialist-legal-agents-patents-r1`.
 
@@ -17,7 +17,7 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | None running. Housekeeping done 2026-11-25 late (owner: "Housekeeping first"). Next big step is the **Phase 0 spec** (`/design-to-spec` from design §7–§8), **only on the owner's go** |
+| **Active work** | **Phase 0 spec WRITTEN** (`spec.md`, commit a84c2762b5; reuse scan `notes/reuse-scan.md`). Owner go 2026-11-25. Interview: G1 = NDA then patents (both); spike tools on a never-merged branch (`IActionRunner` over `agreement-review`; Phase 1 uses playbook orchestration); scope G1/G2-rest/G3/G5/G6/patent spike/I-1..I-4, OUT G4 Outlook/G10/G11; staged small test runs. **Next:** owner reviews spec.md, then `/project-pipeline` only on the owner's go. Board #3002 Status Reason = In progress |
 | **Step** | G8 work is closed: G8-P2 ✅, V1 ⚠️ (BR-3), V2 ✅ (BR-5 dynamic discovery default). V1a DROPPED, V3 DEFERRED to provisioning D3, G11 optional/not planned, V5 dropped (Spaarke AI removed). Coordination [0afb62] told the V2 result and test status; accelerator-r1 [d8204a] told D-A11/Q7/D-A16 + OD-2 (both 2026-11-25 late, no reply yet) |
 | **Design version** | design.md v0.8 (`325edca96c`, D-A18 (1) `d93babf97e`) |
 | **Uncommitted** | none after the housekeeping commit |
