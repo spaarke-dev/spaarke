@@ -685,7 +685,7 @@ Failure mode: a licensed user flagged external gets internal-only email content 
 
 | Field | Value |
 |---|---|
-| **Status** | Open (R4 backlog) |
+| **Status** | Done (R4 task 042, PR https://github.com/spaarke-dev/spaarke/pull/3203, merged 2026-11-26 as `d86c1ebeda`) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-20 |
 | **Source** | Owner live check on dev (Dewey Cheatham test user Tracy Cheatham, no Email in Entra) |
@@ -808,7 +808,7 @@ The CSV export uses the raw value, not `@formattedValues`. A Money cell is expor
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done (R4 task 042, PR https://github.com/spaarke-dev/spaarke/pull/3203, merged 2026-11-26 as `d86c1ebeda`) |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-29 |
 | **Source** | R3 task 074 probe 5 (Tony Howe, a Dewey Cheatham member with no email attribute) |
