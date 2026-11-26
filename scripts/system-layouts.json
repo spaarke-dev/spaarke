@@ -1,9 +1,10 @@
 {
-  "$comment": "System workspace layout seed definitions for sprk_workspacelayout (isSystem=true). The single list of system workspaces: embedded in the L2 control plane and seeded on every customer stamp by H12b (DataverseWebApiWorkspaceLayoutSeeder), and read by Deploy-SystemWorkspaceLayouts.ps1. A system workspace that is only seeded by a standalone scripts/seed-*-workspace-layout.ps1 never reaches a customer stamp, so every such script's layout MUST also be listed here (enforced by DataverseWebApiWorkspaceLayoutSeederTests). Section factory IDs MUST match src/solutions/LegalWorkspace/src/sectionRegistry.ts. Layout template IDs MUST match src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/layoutTemplates.ts.",
+  "$comment": "System workspace layout seed definitions for sprk_workspacelayout (isSystem=true). The single list of system workspaces: embedded in the L2 control plane and seeded on every customer stamp by H12b (DataverseWebApiWorkspaceLayoutSeeder), and read by Deploy-SystemWorkspaceLayouts.ps1. A system workspace that is only seeded by a standalone scripts/seed-*-workspace-layout.ps1 never reaches a customer stamp, so every such script's layout MUST also be listed here (enforced by DataverseWebApiWorkspaceLayoutSeederTests). A layout may declare a fixed \"id\" (its sprk_workspacelayoutid): H12b creates the row with it, so product code that opens the layout by id (surfaceLaunchRegistry.ts) works on every stamp; an existing row keeps its own id. Section factory IDs MUST match src/solutions/LegalWorkspace/src/sectionRegistry.ts. Layout template IDs MUST match src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/layoutTemplates.ts.",
   "schemaVersion": 1,
   "layouts": [
     {
       "name": "Daily Briefing",
+      "id": "6d41d537-fe55-f111-a824-3833c5ed9c11",
       "sectionId": "daily-briefing",
       "layoutTemplateId": "single-column",
       "sortOrder": 0,
@@ -12,6 +13,7 @@
     },
     {
       "name": "Smart To Do List",
+      "id": "a49f9e3a-fe55-f111-a824-7ced8dd899c3",
       "sectionId": "todo",
       "layoutTemplateId": "single-column",
       "sortOrder": 1,

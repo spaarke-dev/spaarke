@@ -356,29 +356,8 @@ public class CallerPrincipalResolverTests
         body.Should().NotContain("new.hire@customer.example");
     }
 
-    [Fact]
-    public async Task WorkforceStrategy_ALookupFailure_StaysA403_LikeEveryOtherSignInDeny()
-    {
-        // Must-not-fire: only the owner-unconfigured code is a 500; the lookup-failed code keeps the plane's 403.
-        var resolver = new Mock<IWorkforcePrincipalResolver>();
-        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
-                WorkforceDenyReason.PrincipalNotResolved, ContactBindingDecision.DenyContactLookupFailed));
-        var strategy = new WorkforcePrincipalStrategy(
-            resolver.Object, new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
-            Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
-        var http = new DefaultHttpContext
-        {
-            User = Principal(("oid", Guid.NewGuid().ToString()), ("acct", "0")),
-            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
-        };
-        http.Response.Body = new MemoryStream();
-
-        var body = await DenyBodyAsync(await strategy.ResolveAsync(http, CancellationToken.None), http);
-
-        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
-        body.Should().Contain(ContactBindingDecision.DenyContactLookupFailed);
-    }
+    // R4 task 043 (FR-28): a lookup failure is no longer a 403. It answers a retryable 503 on both planes; the status per
+    // deny code is pinned in tests/integration/auth/ExternalAccess/BinderFaultStatusTests.cs.
 
     // ── Workforce strategy: Tier-2 record scope = accessible set (NFR-08) ────────────────────────
 
@@ -714,14 +693,14 @@ public class CallerPrincipalResolverTests
 
     /// <summary>
     /// Task 141 acceptance: <see cref="CiamContactPrincipalStrategy"/> returns the decision's DISTINCT deny code
-    /// — not one <c>contact_not_found</c> for everything — so ambiguity, collision, an unreadable binding and an
-    /// inactive contact are distinguishable in the audit trail.
+    /// — not one <c>contact_not_found</c> for everything — so ambiguity, collision and an inactive contact are
+    /// distinguishable in the audit trail (an unreadable binding is a 503 now: BinderFaultStatusTests).
     /// </summary>
     [Theory]
     [InlineData("not-found", "sdap.access.deny.contact_not_found")]
     [InlineData("email-ambiguous", "sdap.access.deny.contact_email_ambiguous")]
     [InlineData("collision", "sdap.access.deny.contact_bound_to_different_oid")]
-    [InlineData("unreadable", "sdap.access.deny.contact_lookup_failed")]
+    // "unreadable" (contact_lookup_failed) left this 403 table in R4 task 043: it is a 503 now (BinderFaultStatusTests).
     [InlineData("inactive", "sdap.access.deny.contact_inactive")]
     [InlineData("key-conflict", "sdap.access.deny.contact_key_conflict")]
     [InlineData("not-invited", "sdap.access.deny.contact_not_invited")] // task 184
@@ -738,9 +717,6 @@ public class CallerPrincipalResolverTests
                 break;
             case "collision":
                 store.AddContact(Guid.NewGuid(), email: "x@firm.example", oid: Guid.NewGuid().ToString("D"));
-                break;
-            case "unreadable":
-                store.OidLookupStatus = LookupStatus.Failed;
                 break;
             case "inactive":
                 store.AddContact(Guid.NewGuid(), oid: oid.ToString("D"), plane: IdentityPlaneMarker.External, stateCode: 1);

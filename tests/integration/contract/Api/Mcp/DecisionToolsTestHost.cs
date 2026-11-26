@@ -209,6 +209,8 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     private int _laneReads;
     private int _pageReads;
     private int _rowReads;
+    private int _closedTodayReads;
+    private int _otherSetReads;
 
     public DecideLaneDouble(DecideLaneSeed seed)
     {
@@ -243,12 +245,57 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     /// <summary>Single Work Item reads (<see cref="GetWorkItemAsync"/>), the plan tool's row read.</summary>
     public int RowReads => Volatile.Read(ref _rowReads);
 
+    /// <summary>
+    /// What the caller's <see cref="WorklistSet.ClosedToday"/> set holds in the Decide lane (DEF-001, FR-13): the capability's own answer,
+    /// which already applies "today" and the caller's scope (<see cref="SignalReadService"/>, tested in SignalReadRouteTests), so the double
+    /// is only given the result. Ignored when <see cref="ClosedTodayFor"/> is set.
+    /// </summary>
+    public List<WorklistGroup> ClosedTodayGroups { get; } = [];
+
+    /// <summary>What <see cref="WorklistSet.ClosedEarlier"/> holds (items closed before today): a read of that set returns these, so a tool that
+    /// asked for the wrong set would count them.</summary>
+    public List<WorklistGroup> ClosedEarlierGroups { get; } = [];
+
+    /// <summary>When set, the closed-today set is chosen by the principal the read was handed (a second user has a different set).</summary>
+    public Func<ClaimsPrincipal?, IReadOnlyList<WorklistGroup>>? ClosedTodayFor { get; set; }
+
+    /// <summary>When set, a <see cref="WorklistSet.ClosedToday"/> read answers it.</summary>
+    public SignalReadResult? ClosedTodayFailure { get; set; }
+
+    /// <summary>When set, a <see cref="WorklistSet.ClosedToday"/> read faults with it (an exception, not an outcome).</summary>
+    public Exception? ClosedTodayThrows { get; set; }
+
+    /// <summary>Reads of <see cref="WorklistSet.ClosedToday"/>.</summary>
+    public int ClosedTodayReads => Volatile.Read(ref _closedTodayReads);
+
+    /// <summary>Reads of any set but <see cref="WorklistSet.Lanes"/> and <see cref="WorklistSet.ClosedToday"/>.</summary>
+    public int OtherSetReads => Volatile.Read(ref _otherSetReads);
+
     public Task<SignalReadResult> ListDecideAsync(ClaimsPrincipal? user, CancellationToken ct, WorklistSet set = WorklistSet.Lanes)
     {
-        Interlocked.Increment(ref _laneReads);
         Users.Enqueue(user);
-        return Task.FromResult(LaneFailure ?? new SignalReadResult(SignalReadOutcome.Ok, LanesResponse()));
+        switch (set)
+        {
+            case WorklistSet.ClosedToday:
+                Interlocked.Increment(ref _closedTodayReads);
+                if (ClosedTodayThrows is { } thrown)
+                {
+                    return Task.FromException<SignalReadResult>(thrown);
+                }
+
+                return Task.FromResult(
+                    ClosedTodayFailure ?? new SignalReadResult(SignalReadOutcome.Ok, ClosedResponse("closedToday", ClosedTodayFor?.Invoke(user) ?? ClosedTodayGroups)));
+            case WorklistSet.Lanes:
+                Interlocked.Increment(ref _laneReads);
+                return Task.FromResult(LaneFailure ?? new SignalReadResult(SignalReadOutcome.Ok, LanesResponse()));
+            default:
+                Interlocked.Increment(ref _otherSetReads);
+                return Task.FromResult(new SignalReadResult(SignalReadOutcome.Ok, ClosedResponse("closedEarlier", ClosedEarlierGroups)));
+        }
     }
+
+    private static WorklistResponse ClosedResponse(string set, IReadOnlyList<WorklistGroup> decide) =>
+        new(set, [new WorklistLaneGroups("Decide", decide), new WorklistLaneGroups("Do", [])]);
 
     /// <summary>The lanes response narrowed to <paramref name="signalId"/>, as <c>DecisionCapability</c> reads it: that one row when the
     /// lane holds it, else none. <see cref="LaneFailure"/> answers it too (the same read's outcomes).</summary>

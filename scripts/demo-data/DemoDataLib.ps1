@@ -235,20 +235,55 @@ function Get-DemoOptionMap {
     return $map
 }
 
+function ConvertFrom-DemoDateOffset {
+    <# The one parser of a dataset date offset ("-3d", "+14d", "14d", "-3d 14:30"): Days, HasTime, Hour, Minute. Throws on any other shape. #>
+    param([Parameter(Mandatory)][string]$Offset)
+    if ($Offset -notmatch '^(?<days>[+-]?\d{1,4})d(?: (?<h>[01]\d|2[0-3]):(?<m>[0-5]\d))?$') {
+        throw "Date offset '$Offset' is not '<n>d' or '<n>d HH:mm' (for example '-3d' or '+14d 09:30')."
+    }
+    $hasTime = [bool]$Matches['h']
+    return [pscustomobject]@{
+        Days    = [int]$Matches['days']
+        HasTime = $hasTime
+        Hour    = $(if ($hasTime) { [int]$Matches['h'] } else { 0 })
+        Minute  = $(if ($hasTime) { [int]$Matches['m'] } else { 0 })
+    }
+}
+
 function ConvertTo-DemoDateValue {
     <#
       "-3d" / "+14d" / "14d" -> 'yyyy-MM-dd'; "-3d 14:30" -> 'yyyy-MM-ddTHH:mm:00Z' (UTC). Offsets are from -Today, so a
       dataset loaded in a year still looks current. Throws on any other shape.
     #>
     param([Parameter(Mandatory)][string]$Offset, [Parameter(Mandatory)][datetime]$Today)
-    if ($Offset -notmatch '^(?<days>[+-]?\d{1,4})d(?: (?<h>[01]\d|2[0-3]):(?<m>[0-5]\d))?$') {
-        throw "Date offset '$Offset' is not '<n>d' or '<n>d HH:mm' (for example '-3d' or '+14d 09:30')."
-    }
-    $day = $Today.Date.AddDays([int]$Matches['days'])
-    if ($Matches['h']) {
-        return $day.AddHours([int]$Matches['h']).AddMinutes([int]$Matches['m']).ToString("yyyy-MM-dd'T'HH:mm:00'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+    $o = ConvertFrom-DemoDateOffset -Offset $Offset
+    $day = $Today.Date.AddDays($o.Days)
+    if ($o.HasTime) {
+        return $day.AddHours($o.Hour).AddMinutes($o.Minute).ToString("yyyy-MM-dd'T'HH:mm:00'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
     }
     return $day.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertFrom-DemoDateColumnValue {
+    <#
+      A date column as Dataverse returns it: 'yyyy-MM-dd' (date-only column), 'yyyy-MM-ddTHH:mm:ssZ' (date-time column), or,
+      because Invoke-RestMethod converts ISO strings, a [datetime] / [datetimeoffset]. Returns Date (UTC day, midnight),
+      TimeOfDay (UTC) and DateOnly (true when the column came back without a time). Throws on a value it cannot read.
+    #>
+    param([Parameter(Mandatory)]$Value)
+    $ci = [System.Globalization.CultureInfo]::InvariantCulture
+    if ($Value -is [datetimeoffset]) { $utc = $Value.UtcDateTime; return [pscustomobject]@{ Date = $utc.Date; TimeOfDay = $utc.TimeOfDay; DateOnly = $false } }
+    if ($Value -is [datetime]) {
+        # Unspecified = a date-only value some PowerShell versions convert; Local = a Z value converted to the machine's zone.
+        $utc = if ($Value.Kind -eq [System.DateTimeKind]::Local) { $Value.ToUniversalTime() } else { $Value }
+        return [pscustomobject]@{ Date = $utc.Date; TimeOfDay = $utc.TimeOfDay; DateOnly = ($Value.Kind -eq [System.DateTimeKind]::Unspecified -and $Value.TimeOfDay -eq [timespan]::Zero) }
+    }
+    $s = "$Value".Trim()
+    if ($s -match '^\d{4}-\d{2}-\d{2}$') { return [pscustomobject]@{ Date = [datetime]::ParseExact($s, 'yyyy-MM-dd', $ci); TimeOfDay = [timespan]::Zero; DateOnly = $true } }
+    $dto = [datetimeoffset]::MinValue
+    $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal
+    if (-not [datetimeoffset]::TryParse($s, $ci, $styles, [ref]$dto)) { throw "'$s' is not a date Dataverse would return." }
+    return [pscustomobject]@{ Date = $dto.UtcDateTime.Date; TimeOfDay = $dto.UtcDateTime.TimeOfDay; DateOnly = $false }
 }
 
 function Get-DemoRowProperty {
@@ -745,10 +780,14 @@ function Get-DemoTaggedFilter {
 }
 
 function Get-DemoTaggedRows {
-    <# The tagged rows of one table as @{ Id; Name } (Name = the natural key). -Get takes a Web API path and returns every row (paged). A read error throws. #>
-    param([Parameter(Mandatory)][scriptblock]$Get, [Parameter(Mandatory)][hashtable]$Spec)
-    $path = ConvertTo-DemoQuery -Set $Spec.EntitySet -Select "$($Spec.IdColumn),$($Spec.NaturalKey)" -Filter (Get-DemoTaggedFilter)
-    return @(@(& $Get $path) | ForEach-Object { [pscustomobject]@{ Id = "$($_.($Spec.IdColumn))"; Name = "$($_.($Spec.NaturalKey))" } })
+    <#
+      The tagged rows of one table as @{ Id; Name; Raw } (Name = the natural key, Raw = the row as read). -Get takes a Web API
+      path and returns every row (paged). A read error throws. -ExtraColumns are selected as well (the redate reads the date columns).
+    #>
+    param([Parameter(Mandatory)][scriptblock]$Get, [Parameter(Mandatory)][hashtable]$Spec, [string[]]$ExtraColumns = @())
+    $select = (@($Spec.IdColumn, $Spec.NaturalKey) + @($ExtraColumns) | Select-Object -Unique) -join ','
+    $path = ConvertTo-DemoQuery -Set $Spec.EntitySet -Select $select -Filter (Get-DemoTaggedFilter)
+    return @(@(& $Get $path) | ForEach-Object { [pscustomobject]@{ Id = "$($_.($Spec.IdColumn))"; Name = "$($_.($Spec.NaturalKey))"; Raw = $_ } })
 }
 
 function Get-DemoBlockingReferences {
@@ -942,5 +981,130 @@ function Invoke-DemoResetSection {
         }
     }
     return [pscustomobject]@{ Counts = $counts; Kept = $keptReport.ToArray() }
+}
+
+# --- Redate (-Redate): keep the loaded dates current ---------------------------------------------------------------------
+#
+# A load writes every date as an offset from the load day ("-3d", "+14d 09:30"). A demo that sits for weeks then shows
+# deadlines in the past. -Redate moves each tagged row's loader-written date columns forward by whole days so they read
+# the way a load run today would write them.
+#
+# No stored state, on purpose. The load day of a row is recoverable from the row itself: a column the loader wrote as
+# offset N from day D now holds D+N (plus any earlier shifts), so  anchor = current date - N  is the day those dates
+# are currently "from", and  shift = today - anchor.  That makes the shift
+#   * idempotent by construction (after a shift the anchor is today, the next run finds a shift of 0 and writes nothing),
+#   * correct for data loaded before this mode existed (nothing was recorded then, and nothing needs to be),
+#   * per row (a row loaded on a later day by a re-run keeps its own anchor).
+# A row is only touched when all its date columns agree on one anchor, and the anchor is not in the future; otherwise a
+# person edited it and it is skipped and reported (a row with a single date column cannot be told apart from an unedited one).
+# Only columns the dataset row sets under "dates" (so only columns the loader wrote) are read or written, and only on
+# rows carrying the tag.
+
+function Get-DemoRedateRowPlan {
+    <#
+      Pure. Decides what -Redate does to ONE tagged row. -DatasetRow is the dataset row that created it (its "dates" give the
+      offsets), -Current the row as read from Dataverse (the date columns by logical name). Returns:
+        Status   'Shift' (Changes is not empty), 'Current' (already today's dates, nothing to write) or 'Skip' (Reason says why)
+        Days     the whole-day shift (today - anchor), Anchor the inferred day the dates are currently counted from
+        Changes  @{ Column; From; To } per column; To keeps the time of day, and stays date-only when the column came back date-only
+        Cleared  columns the dataset sets that are empty on the row (a person cleared them): never written
+    #>
+    param(
+        [Parameter(Mandatory)][hashtable]$Spec,
+        [Parameter(Mandatory)]$DatasetRow,
+        [Parameter(Mandatory)]$Current,
+        [Parameter(Mandatory)][datetime]$Today
+    )
+    $ci = [System.Globalization.CultureInfo]::InvariantCulture
+    $skip = { param($Reason) [pscustomobject]@{ Status = 'Skip'; Reason = $Reason; Days = 0; Anchor = $null; Changes = @(); Cleared = @() } }
+    $parsed = [ordered]@{}
+    $anchors = [ordered]@{}
+    $cleared = New-Object System.Collections.Generic.List[string]
+    foreach ($kv in (Get-DemoRowProperty $DatasetRow 'dates').GetEnumerator()) {
+        $col = "$($kv.Key)"
+        if ($col -notin $Spec.Dates) { throw "$($Spec.Section): '$col' is not a date column the loader writes on $($Spec.Logical)." }
+        $raw = $Current.$col
+        if ($null -eq $raw -or "$raw" -eq '') { $cleared.Add($col); continue }
+        try { $p = ConvertFrom-DemoDateColumnValue -Value $raw }
+        catch { return (& $skip "$col is unreadable ($_)") }
+        $parsed[$col] = $p
+        $anchors[$col] = $p.Date.AddDays(-(ConvertFrom-DemoDateOffset -Offset "$($kv.Value)").Days)
+    }
+    if ($parsed.Count -eq 0) { return (& $skip 'every date column the loader wrote is empty') }
+
+    $distinct = @($anchors.Values | ForEach-Object { $_.ToString('yyyy-MM-dd', $ci) } | Select-Object -Unique)
+    if ($distinct.Count -gt 1) { return (& $skip "its date columns do not move together ($(($anchors.GetEnumerator() | ForEach-Object { "$($_.Key) counts from $($_.Value.ToString('yyyy-MM-dd', $ci))" }) -join '; ')): edited by hand?") }
+    $anchor = @($anchors.Values)[0]
+    $days = [int]($Today.Date - $anchor.Date).TotalDays
+    if ($days -lt 0) { return (& $skip "its dates are $(-$days) day(s) later than a load today would write (edited by hand, or loaded with a clock ahead of today); a redate only moves dates forward") }
+
+    $changes = New-Object System.Collections.Generic.List[object]
+    if ($days -gt 0) {
+        foreach ($col in $parsed.Keys) {
+            $p = $parsed[$col]
+            $format = { param($Day) if ($p.DateOnly) { $Day.ToString('yyyy-MM-dd', $ci) } else { ($Day + $p.TimeOfDay).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", $ci) } }
+            $changes.Add([pscustomobject]@{ Column = $col; From = (& $format $p.Date); To = (& $format $p.Date.AddDays($days)) })
+        }
+    }
+    return [pscustomobject]@{ Status = $(if ($days -gt 0) { 'Shift' } else { 'Current' }); Reason = $null; Days = $days; Anchor = $anchor; Changes = $changes.ToArray(); Cleared = $cleared.ToArray() }
+}
+
+function Invoke-DemoRedateSection {
+    <#
+      Redates ONE table: reads its tagged rows (by the tag filter only), matches each to the dataset row that created it by
+      natural key, plans the shift (Get-DemoRedateRowPlan) and PATCHes the changed date columns of each row in one call.
+      Injectable so the tests run it without Dataverse:
+        -Get     path -> every row.              -Patch   { param($Spec, $Row, $Body) } performs one PATCH.
+        -Approve { param($Target, $Action) } returns $false when nothing may be written (dry run): counted WouldShift, no -Patch.
+        -Say     { param($Text, $Color) } progress output.
+      Returns Counts (Shifted / WouldShift / Current / Skipped / Errors) and Plans (Section, Name, Days, Columns) of the rows to shift.
+    #>
+    param(
+        [Parameter(Mandatory)][hashtable]$Spec,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$DatasetRows,
+        [Parameter(Mandatory)][scriptblock]$Get,
+        [Parameter(Mandatory)][scriptblock]$Patch,
+        [Parameter(Mandatory)][scriptblock]$Approve,
+        [Parameter(Mandatory)][datetime]$Today,
+        [scriptblock]$Say = { }
+    )
+    $counts = [ordered]@{ Shifted = 0; WouldShift = 0; Current = 0; Skipped = 0; Errors = 0 }
+    $plans = New-Object System.Collections.Generic.List[object]
+    if ($Spec.Dates.Count -eq 0) { return [pscustomobject]@{ Counts = $counts; Plans = @() } }
+
+    $withDates = @{}
+    $known = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($r in $DatasetRows) {
+        $k = (Get-DemoNaturalKeyValue -Spec $Spec -Row $r).ToLowerInvariant()
+        $null = $known.Add($k)
+        if ((Get-DemoRowProperty $r 'dates').Count -gt 0) { $withDates[$k] = $r }
+    }
+    try { $rows = @(Get-DemoTaggedRows -Get $Get -Spec $Spec -ExtraColumns $Spec.Dates) }
+    catch { & $Say "  Could not read the tagged rows ($_)" 'Red'; $counts.Errors++; return [pscustomobject]@{ Counts = $counts; Plans = @() } }
+    if ($rows.Count -eq 0) { & $Say '  nothing tagged' 'Gray' }
+
+    foreach ($row in $rows) {
+        $k = $row.Name.ToLowerInvariant()
+        if (-not $withDates.ContainsKey($k)) {
+            # A dataset row with no dates has nothing to shift. A tagged row no dataset row names (renamed since, or dropped from the dataset) cannot be dated.
+            if (-not $known.Contains($k)) { $counts.Skipped++; & $Say "  SKIPPED  '$($row.Name)': no dataset row has this key, so its date offsets are unknown" 'Yellow' }
+            continue
+        }
+        $plan = Get-DemoRedateRowPlan -Spec $Spec -DatasetRow $withDates[$k] -Current $row.Raw -Today $Today
+        if ($plan.Status -eq 'Skip') { $counts.Skipped++; & $Say "  SKIPPED  '$($row.Name)': $($plan.Reason)" 'Yellow'; continue }
+        if ($plan.Status -eq 'Current') { $counts.Current++; & $Say "  CURRENT  '$($row.Name)'" 'DarkGray'; continue }
+
+        $detail = (@($plan.Changes) | ForEach-Object { "$($_.Column) $($_.From) -> $($_.To)" }) -join '; '
+        & $Say "  SHIFT    '$($row.Name)' +$($plan.Days)d: $detail" 'Cyan'
+        $plans.Add([pscustomobject]@{ Section = $Spec.Section; Name = $row.Name; Days = $plan.Days; Columns = @($plan.Changes).Count })
+        if ([bool](& $Approve "$($Spec.Logical) '$($row.Name)' ($($row.Id))" "Shift $(@($plan.Changes).Count) date column(s) by +$($plan.Days) day(s) on a tagged demo row (importsequencenumber = $(Get-DemoImportSequenceNumber))")) {
+            $body = [ordered]@{}
+            foreach ($c in $plan.Changes) { $body[$c.Column] = $c.To }
+            try { & $Patch $Spec $row $body; $counts.Shifted++ }
+            catch { $counts.Errors++; & $Say "  ERROR    '$($row.Name)': $_" 'Red' }
+        }
+        else { $counts.WouldShift++ }
+    }
+    return [pscustomobject]@{ Counts = $counts; Plans = $plans.ToArray() }
 }
 

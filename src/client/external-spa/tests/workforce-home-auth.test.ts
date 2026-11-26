@@ -1477,6 +1477,56 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(await g.screen.findByTestId('workspace')).toBeTruthy();
   });
 
+  // R4 FR-28 (#2269): a binder fault answers 503 with one of three codes; the gate retries it 3x (1 s, 2 s, 4 s).
+  describe('a /me binder fault (503)', () => {
+    const BIND_FAULT = problem(503, 'sdap.access.deny.contact_bind_failed');
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('is retried behind the spinner: fault, fault, then the workspace shows', async () => {
+      h.script = { [ME]: [BIND_FAULT, problem(503, 'sdap.access.deny.contact_lookup_failed'), ME_OK] };
+      // Fake timers BEFORE the gate renders, so the first retry wait is always on the fake clock; shouldAdvanceTime
+      // keeps anything else that waits on a timer moving.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const g = await renderGate();
+      await g.act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      vi.useRealTimers();
+      expect(await g.screen.findByTestId('workspace')).toBeTruthy();
+      expect(calls()).toEqual([ME, ME, ME]);
+      expect(g.screen.queryByText(/couldn't finish signing you in/i)).toBeNull();
+    });
+
+    it('retries used up: the message with a Retry (never the workspace, never the generic error); Retry runs it again', async () => {
+      h.script = { [ME]: [BIND_FAULT, BIND_FAULT, BIND_FAULT, BIND_FAULT, ME_OK] };
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const g = await renderGate();
+      await g.act(async () => {
+        for (const ms of [1000, 2000, 4000]) await vi.advanceTimersByTimeAsync(ms);
+      });
+      vi.useRealTimers();
+      expect(await g.screen.findByText("We couldn't finish signing you in. Try again")).toBeTruthy();
+      expect(calls()).toEqual([ME, ME, ME, ME]);
+      expect(g.screen.queryByTestId('workspace')).toBeNull();
+      expect(g.screen.queryByText(/something went wrong/i)).toBeNull();
+      expect(g.onReady).not.toHaveBeenCalledWith(true);
+
+      g.fireEvent.click(g.screen.getByRole('button', { name: 'Retry' }));
+      expect(await g.screen.findByTestId('workspace')).toBeTruthy();
+      expect(calls()).toEqual([ME, ME, ME, ME, ME]);
+    });
+
+    it('a 403 is never retried: one /me, the denied state', async () => {
+      h.script = { [ME]: [problem(403, 'sdap.access.deny.not_invited'), ME_OK] };
+      const g = await renderGate();
+      expect(await g.screen.findByTestId('bff-access-denied')).toBeTruthy();
+      expect(calls()).toEqual([ME]);
+    });
+  });
+
   it('a /me 403 that is not registration_required is the denied state (no form, no link)', async () => {
     h.script = { [ME]: [problem(403, 'sdap.access.principal_not_resolved')] };
     const g = await renderGate();
