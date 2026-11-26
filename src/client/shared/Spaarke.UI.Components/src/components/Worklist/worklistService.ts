@@ -57,6 +57,8 @@ export interface WorklistDecision {
   reason: string | null;
   steps: WorklistDecisionStep[] | null;
   followOns: WorklistDecisionFollowOn[];
+  /** The record's own name (task 226, D-231), for example `Judgement: Send the reply`; the headline of a record with no item. */
+  summary?: string | null;
 }
 
 /** One Signal as the route returns it: the row's display columns plus the columns the wizard and the disclosures read. */
@@ -86,6 +88,11 @@ export interface WorklistRouteItem extends WorklistItem {
 export interface WorklistGroupData {
   core: WorklistCore | null;
   items: WorklistRouteItem[];
+  /**
+   * Decided set only (task 226, D-231): the Decision Records in this group that resolved no item the caller sees (an email-gate
+   * record). They have no item, so nothing opens them. Absent in every other set.
+   */
+  records?: WorklistDecision[];
 }
 
 /** An answer: both lanes, each a list of groups in the route's order. */
@@ -224,6 +231,7 @@ function parseDecision(raw: unknown): WorklistDecision | null {
     decidedByName: text(raw.decidedByName),
     reason: text(raw.reason),
     steps: parseDecisionSteps(raw.steps),
+    summary: text(raw.summary),
     followOns: Array.isArray(raw.followOns)
       ? raw.followOns.filter(isObject).flatMap(f => {
           const code = text(f.code);
@@ -292,9 +300,13 @@ function parseGroups(raw: unknown, lane: WorklistLane): WorklistGroupData[] {
   for (const g of raw) {
     if (!isObject(g) || !Array.isArray(g.items)) continue;
     const items = g.items.map(i => parseItem(i, lane)).filter((i): i is WorklistRouteItem => i !== null);
-    if (items.length === 0) continue;
+    const records = Array.isArray(g.records)
+      ? g.records.map(parseDecision).filter((r): r is WorklistDecision => r !== null)
+      : [];
+    if (items.length === 0 && records.length === 0) continue;
     // A group the route marks Not filed (or one with an unreadable core) is the null-core group: it is never dropped.
-    groups.push({ core: g.notFiled === true ? null : parseCore(g.core), items });
+    const core = g.notFiled === true ? null : parseCore(g.core);
+    groups.push(records.length > 0 ? { core, items, records } : { core, items });
   }
   return groups;
 }

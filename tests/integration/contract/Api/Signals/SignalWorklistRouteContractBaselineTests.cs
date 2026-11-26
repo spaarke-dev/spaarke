@@ -85,6 +85,26 @@ public sealed partial class SignalReadRouteTests
     public async Task ContractBaseline_Worklist_200_DecidedAndEmpty() =>
         VerifyWorklist("worklist.200.decided-empty", await ObserveAsync(await GetAsync(new World(), Alice, "?set=decided")), 200);
 
+    /// <summary>Task 226 (#2015, D-231): the Decided set read record-first. A Signal reviewed twice (an inquiry, then the decision) is
+    /// two items, each with its own record; an email-gate record on the same matter is in the group's <c>records</c> with its summary;
+    /// a gate record with no core record whose communication the caller reads is a Not filed group with only <c>records</c>.</summary>
+    [Fact]
+    public async Task ContractBaseline_Worklist_200_Decided()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice], name: "Acme v Widget", number: "MAT-0042");
+        var inquiry = world.Decision(readers: [Alice], number: "DR-00010", decidedOn: "2026-10-01T09:00:00Z", steps: StepsEnvelope);
+        var decision = world.Decision(readers: [Alice], number: "DR-00011", decidedOn: "2026-10-12T09:00:00Z");
+        var s = world.Signal(Decide, core: (MatterType, m), shortName: "Budget gap", title: "Fee change without a budget revision",
+            firstDetected: "2026-09-30T09:00:00Z", sets: ["closedEarlier", "decided"], resolvedOn: world.Now.AddDays(-2), decisionRecord: decision);
+        world.Resolves(inquiry, s);
+        world.GateDecision(readers: [Alice], core: (MatterType, m), number: "DR-00900", decidedOn: "2026-10-14T09:30:00Z");
+        world.GateDecision(readers: [Alice], communication: world.Record("sprk_communication", [Alice]), number: "DR-00901",
+            name: "Judgement: denied (recipient outside the matter)", decidedOn: "2026-10-13T09:30:00Z");
+
+        VerifyWorklist("worklist.200.decided", await ObserveAsync(await GetAsync(world, Alice, "?set=decided")), 200);
+    }
+
     [Fact]
     public async Task ContractBaseline_Worklist_400_UnknownSet() =>
         VerifyWorklist("worklist.400.unknown-set", await ObserveAsync(await GetAsync(new World(), Alice, "?set=everything")), 400);
