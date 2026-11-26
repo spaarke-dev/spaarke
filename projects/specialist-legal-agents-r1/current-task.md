@@ -23,6 +23,11 @@
 | **Uncommitted** | none after the housekeeping commit |
 
 ## Next action (exact)
+0. **Run path reviewed (Fable, 2026-11-25, `notes/run-path-review-2026-11-25.md`):** Phase 1 uses the **action-based model** (Action via `IActionResolver` + `IActionRunner` behind a `PublicContracts` facade; `ICodedWorkflow` for multi-step), NOT playbook orchestration. The node engine is frozen by ADR-039, and ADR-013 was amended 2026-07-05. The spec is corrected. **Stale in design.md** (owner's doc, not edited yet):
+   - §3.14/§12 D-A18 (7) (lookups on `sprk_playbookrun`, which requires a playbook);
+   - §3.15 (`PriorOutputReference` is documentation only, not chaining).
+
+   **Owner decision open:** where Action runs are recorded (new capability-run table / relax `sprk_playbookrun` / ledger + Decision Record); agree it with mcp-r2 (its FR-13 persists playbook runs only). Then `/project-pipeline` on the owner's go.
 1. **Owner, by 2026-11-30 (admin center):** remove G8-a agent + 2 skills, G8-p2 `802fd9cc`, G8-p2-sl `d38f8df8`, G8-p2-org-learn `0421c980`, G8-p2-dd `cb5afd1c`. When confirmed, tell COPILOT-PLATFORM-COORDINATION so it closes the inventory rows.
 2. **Owner:** Spaarke AI tenant removal (coordination runbook E1/E2); mcp-r2 Phase 0 removal deploy waits on E1.
 3. **NDA owner questions** (`notes/nda-current-state-2026-11-24.md` §7): **SUPERSEDED by OD-2 (owner, 2026-11-25)**: NDA is a function; the harness is in intake-pipeline-r1. They no longer block the Phase 0 spec.

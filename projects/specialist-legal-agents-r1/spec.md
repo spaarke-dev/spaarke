@@ -81,6 +81,10 @@ The deliverable is evidence and a go/no-go record. No product code is merged.
    - Add the following tools. All are read-only (`readOnlyHint: true`), model-visible, on `/mcp/legal-operations`, and built by copying `ShowDecisionsTool`:
      - `spike_get_profile`: resolves the caller with `ICallerSystemUserResolver`. It returns that caller's **test profile**, a static JSON file on the branch keyed by `systemuserid`, rendered as a data-guarded instruction block in the `userFragment` style. It also returns a `profileVersion` string.
      - `spike_review_nda`: takes the document reference and runs the `agreement-review` Action with `IActionRunner`, with the caller's test-profile positions bound as inputs. It returns the structured review and `profileVersion`.
+       - Use the `BoundInputs` overload, and **declare** the profile positions in the Action's input schema. Undeclared arguments are dropped (ADR-043).
+       - If the deployed `agreement-review` row declares no profile input, the spike uses a DEV-only copy of the row (`agreement-review-spike`) with the input declared. It is removed at clean-up (FR-14), and the production row is never edited.
+       - Apply the test profile's model tier explicitly (`action with { ModelTier = … }`), because the linear path ignores Binding tier overrides (#1934).
+       - Record each call's latency: whether the Reasoning tier finishes within 30 s is unverified.
      - The patent profile set for G1-PAT is added the same way, as files.
    - Deploy through uac-r2's session, with the owner's go for each SHA.
    - Acceptance:
@@ -172,7 +176,7 @@ The deliverable is evidence and a go/no-go record. No product code is merged.
 12. **FR-12: Desk items I-1 to I-4.**
     - **I-1:** which tool surface a profile governs: the MCP catalogue, `IAnalysisToolHandler` or `IAiToolHandler`. And whether the chat confirmation gate (`SideEffectGateAIFunction`) also applies on the MCP path.
     - **I-2:** whether `RequiresConfirmation` can take a policy input (the ratchet) without forking the one gate (ADR-039).
-    - **I-3:** the durable run record: `sprk_playbookrun` (mcp-r2 FR-13) plus the Decision Record, against the ADR-040 session ledger (T-3).
+    - **I-3:** the durable run record for **Action-path** runs. The action path has none today (`LinearRunContext` carries no run id), and `sprk_playbookrun` requires a playbook (`sprk_playbookid` required). So I-3 compares the options in `notes/run-path-review-2026-11-25.md` (a new capability-run table, a relaxed `sprk_playbookrun`, or the ledger plus the Decision Record) against the ADR-040 session ledger (T-3), and agrees one design with mcp-r2 before either project adds columns.
     - **I-4:** per-user knowledge trimming that UAC provides today.
     - Acceptance: each item gets a section in `notes/phase0-desk-items.md` with `file:line` evidence on master and a one-line Phase 1 implication.
 13. **FR-13: The go/no-go record.**
@@ -180,10 +184,14 @@ The deliverable is evidence and a go/no-go record. No product code is merged.
       - the G1-NDA and G1-PAT results;
       - G3, G5, G6 and G2;
       - a recommendation for each of D-A7 (where the profile is applied), D-A12 (delivery shape) and D-A13 (compose or recommend);
-      - the Phase 1 inputs (the spike's `IActionRunner` is replaced by playbook orchestration).
+      - the Phase 1 inputs. The run path is the **action-based model**, not playbook orchestration (`notes/run-path-review-2026-11-25.md`):
+        - single functions are a `prompted` Action via `IActionResolver` + `IActionRunner`, behind a `PublicContracts` facade (the `InvoiceAi.RunCapabilityAsync` pattern);
+        - multi-step functions (patent sections) are an `ICodedWorkflow` (ADR-039);
+        - the profile's model tier is applied explicitly (#1934);
+        - the facade calls the one confirmation gate explicitly.
     - Acceptance: the owner records a decision on D-A7 in design §12 (the owner decides; this record recommends).
 14. **FR-14: Clean-up.**
-    - Every test agent and package has a removal date. The spike branch's tools are gone from dev, because a later deploy from master replaces them.
+    - Every test agent and package has a removal date. Any DEV-only Action copy (`agreement-review-spike`) is deleted. The spike branch's tools are gone from dev, because a later deploy from master replaces them.
     - When the owner confirms removal, the coordination inventory rows are closed.
     - Acceptance: `phase0/README.md` lists every artifact with its removal status; there is no orphan in the tenant inventory.
 
@@ -214,7 +222,9 @@ The deliverable is evidence and a go/no-go record. No product code is merged.
 - **ADR-028 (A10, connector plane):** test agents use the existing dedicated connector client and OAuth registration. Callers are `systemuser` only, with OBO as the caller. Never change the production OAuth registration A1.
 - **ADR-039:** one dispatch protocol and closed catalogues. Profiles may only narrow the catalogue (design T-4).
 - **ADR-040:** the session ledger is Tier 3 and erasable. It is not the durable run record (design T-3, I-3).
-- **ADR-013:** AI extends the BFF; playbook orchestration is the canonical run path (Phase 1 note in FR-13).
+- **ADR-013 (amended 2026-07-05):** capability invocation (`invoke(bindingId, args)`, Action + Binding) is the canonical verb. New consumers go through `PublicContracts` facades, not the playbook facade.
+- **ADR-039:** MUST NOT land new capability on the frozen node-graph engine (`PlaybookOrchestrationService`); new composite capabilities are `coded` workflows.
+- **ADR-043 (Proposed):** the capability execution spine. Declared inputs render into `## Input`, and undeclared arguments are dropped, so the profile positions must be declared in the Action's `sprk_inputschema`.
 - **ADR-008:** endpoint-filter authorization, inherited by the spike tools through the existing `/mcp/{area}` chain.
 - **ADR-052:** no background work in Phase 0.
 - **ADR-038:** spike tool tests live on the spike branch only; nothing is added to master's test suites.
@@ -259,7 +269,7 @@ No new components are merged to master; this is test content and documentation o
 | New component | Existing overlap (`notes/reuse-scan.md`) | Can extend instead? | Cost-of-doing-nothing (concrete failure) |
 |---|---|---|---|
 | `spike_get_profile` (spike branch) | `ICallerSystemUserResolver` (`CallerSystemUserResolver.cs:46`), `IStatedProfileReader` (`StatedProfileReader.cs:39`), `ContextBinder.ResolveUserFragmentAsync` (`:645`) | Yes: it wraps them. The only new part is a static test-profile lookup, because the profile tables are Phase 1 | Without it, G1 variants (a) and (b) and G3 cannot be run, and the D-A7 go/no-go has no evidence |
-| `spike_review_nda` (spike branch) | `IActionRunner` (`IActionRunner.cs:25`) over `agreement-review`; `IPlaybookOrchestrationService` (owner chose `IActionRunner` for the spike) | Yes: it wraps `IActionRunner` | Without it, G1 variant (c), the expected winner given T7, cannot be measured |
+| `spike_review_nda` (spike branch) | `IActionRunner` (`IActionRunner.cs:25`, `BoundInputs` overload) over `agreement-review`. `IPlaybookOrchestrationService` was rejected: it is the frozen node engine (ADR-039; `notes/run-path-review-2026-11-25.md`) | Yes: it wraps `IActionRunner` | Without it, G1 variant (c), the expected winner given T7, cannot be measured |
 
 ## ADR Tensions (per CLAUDE.md §6.5)
 
@@ -267,7 +277,7 @@ No new components are merged to master; this is test content and documentation o
 |---|---|---|---|---|
 | ADR-039 | "The LLM never invokes an unlisted tool"; closed catalogues | Copilot's orchestrator chooses among our MCP tools, and the test agents route by instruction | C | The spike tools are cataloged on the existing route, and a profile only narrows them. This is design T-4 as it applies to Phase 0 |
 | ADR-028 A10 | Connector clients: a federated connector, a plugin package or a declarative agent, using the dedicated client | The test agents are coded declarative agents with their own MCP action | C | A10 names declarative agents explicitly. They use the same dedicated client and OAuth registration (design T-7(a)) |
-| ADR-040 | The session ledger is Tier 3, GDPR-erasable | Run attribution needs a durable record | C (Phase 0 decides nothing) | Phase 0 only investigates (I-3). Phase 1 writes the durable record to `sprk_playbookrun` plus the Decision Record (design T-3) |
+| ADR-040 | The session ledger is Tier 3, GDPR-erasable | Run attribution needs a durable record | C (Phase 0 decides nothing) | Phase 0 only investigates (I-3). Phase 1 writes the durable record to a run store chosen at I-3 (`sprk_playbookrun` cannot hold Action runs as it stands), plus the Decision Record (design T-3) |
 
 No other ADR tensions surfaced for Phase 0. T-1, T-2, T-6 and T-8 apply to later phases, or to dropped items (G11).
 
@@ -308,7 +318,7 @@ No other ADR tensions surfaced for Phase 0. T-1, T-2, T-6 and T-8 apply to later
 | G1 test tools | Spike branch, or production code on master? | **Spike branch, never merged** | FR-02; no Phase 0 BFF merge; no overlap with mcp-r2's `Api/Mcp/` |
 | Phase 0 scope | Which partly answered items stay? | G2 remainder and G3 stay. G4 Outlook, G10 and G11 are out ("do not invest in Copilot Studio or SPFx") | FR-03, FR-08; Out of Scope |
 | Test effort | How much manual prompt-running? | **Staged, small** | Pilots of 10, early stop below 90%, about 40 runs per surface for survivors |
-| Reuse: server-side review | `IActionRunner` or playbook orchestration? The owner asked which is more robust | Playbook orchestration is more robust for production (canonical, durable runs, longer than 30 s); `IActionRunner` is right for the throwaway spike | FR-02 uses `IActionRunner`; FR-13 carries playbook orchestration into Phase 1 |
+| Reuse: server-side review | `IActionRunner` or playbook orchestration? The owner asked which is more robust, then asked for a Fable code-level review (2026-11-25) | **The action-based model, for both the spike and Phase 1.** The playbook node engine is frozen (ADR-039 MUST NOT; ADR-013 amendment 2026-07-05), has open defects (PB-02, PB-08; #919), and has no tier resolver. `notes/run-path-review-2026-11-25.md` | FR-02 uses `IActionRunner` (production-shaped, not a stand-in); FR-13 carries the action model plus `ICodedWorkflow` into Phase 1; the run record is an open owner question |
 
 ## Assumptions
 
@@ -321,6 +331,7 @@ No other ADR tensions surfaced for Phase 0. T-1, T-2, T-6 and T-8 apply to later
 
 - [ ] Whether the `agreement-review` Action row is deployed in DEV Dataverse. Blocks: FR-02 `spike_review_nda`. The spike task checks it first and reports it if it is missing.
 - [ ] When mcp-r2's Phase 0 merges land on master, which sets the spike branch's base. Blocks: the FR-02 dev deploy. It does not block writing the kits (FR-01, FR-09) or the desk items (FR-12).
+- [ ] **Run record for Action-path runs (D-A18 (7) revised).** `sprk_playbookrun` requires a playbook, and the action path has no run record. The options are (1) a new capability-run table, (2) relaxing `sprk_playbookid` and adding an action lookup, or (3) the ledger plus the Decision Record. Blocks: Phase 1 run attribution, and mcp-r2's FR-13 column choices (agree one design with mcp-r2). It does not block Phase 0. Owner decision.
 - [ ] Who reviews the patent golden set from Phase 1. Blocks: nothing in Phase 0; it is recorded so Phase 1 can line someone up early.
 
 ---
