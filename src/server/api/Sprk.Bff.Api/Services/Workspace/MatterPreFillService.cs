@@ -335,7 +335,7 @@ public sealed class MatterPreFillService
     /// the AI prompt and JSON schema — no hardcoded prompts in this code.
     ///
     /// Extracted text is passed via DocumentContext.ExtractedText (required by AiAnalysisNodeExecutor)
-    /// and also in UserContext. Files haven't been registered as sprk_document records yet
+    /// (not repeated in UserContext, which is the run's user focus). Files haven't been registered as sprk_document records yet
     /// (pre-fill happens before matter creation), so DocumentId uses the requestId.
     /// </summary>
     private async Task<PreFillResponse> ExtractFieldsViaPlaybookAsync(
@@ -413,7 +413,8 @@ public sealed class MatterPreFillService
             {
                 PlaybookId = playbookId,
                 DocumentIds = [],
-                UserContext = documentText,
+                // UserContext (#3268) is the run's user focus and now reaches the prompt: the extracted text is already the document
+                // (Document.ExtractedText below), so it is not repeated there.
                 Document = new DocumentContext
                 {
                     DocumentId = requestId,

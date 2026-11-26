@@ -232,7 +232,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 }
 
                 // Synthesize final summary from chunk summaries
-                var synthesisResult = await SynthesizeSummaryAsync(chunkSummaries, chunkConfidences, config, cancellationToken);
+                var synthesisResult = await SynthesizeSummaryAsync(chunkSummaries, chunkConfidences, config, cancellationToken, context.UserContext);
                 summaryText = synthesisResult.Summary;
                 confidence = synthesisResult.Confidence;
                 totalInputTokens += synthesisResult.InputTokens;
@@ -353,7 +353,8 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 templateParameters,
                 context.DownstreamNodes,
                 context.AdditionalKnowledge,
-                context.AdditionalSkills
+                context.AdditionalSkills,
+                userFocus: context.UserContext
             );
 
             var prompt = rendered.PromptText;
@@ -546,8 +547,15 @@ public sealed class SummaryHandler : IAnalysisToolHandler
         List<string> chunkSummaries,
         List<double> chunkConfidences,
         SummaryConfig config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? userFocus = null)
     {
+        // #3268: the run's user focus belongs on the step that writes the final summary (the chunk summaries are
+        // intermediate), placed before the output-format section. Empty (and the prompt unchanged) when there is none.
+        var focusSection = string.IsNullOrWhiteSpace(userFocus)
+            ? string.Empty
+            : PromptContextHelper.BuildUserFocusBlock(userFocus).TrimStart('\n') + "\n\n";
+
         var combinedSummaries = string.Join("\n\n---\n\n", chunkSummaries.Select((s, i) => $"Section {i + 1}:\n{s}"));
 
         var formatInstructions = GetFormatInstructions(config);
@@ -568,7 +576,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             Section summaries:
             {{combinedSummaries}}
 
-            Return ONLY valid JSON in this format:
+            {{focusSection}}Return ONLY valid JSON in this format:
             {
               "summary": "Your synthesized summary with all requested sections...",
               "confidence": 0.85
