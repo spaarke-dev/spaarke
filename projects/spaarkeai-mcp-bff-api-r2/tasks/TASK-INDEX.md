@@ -24,11 +24,12 @@
 | 019 | Deploy Phase 0 to dev (runbook E1 + per-SHA go) | 0 | 🔲 [open] | 001, 002, 005, 006, 007, 008, 009 | Group D (alone) | sonnet / high | STANDARD |
 | 020 | Shared tool plumbing: general `McpToolResults`, start/status helper, per-area ledger files | 1 | 🔄 [wip] | 001 + r1 gate | Group E | opus / high | FULL |
 | 021 | Shared widget MCP transport; Decisions widget moved onto it | 1 | 🔄 [wip] | 011 + r1 gate | Group E | opus / high | FULL |
-| 022 | Search tools: `spaarke_search_documents`, `spaarke_find_records` | 1 | 🔄 [wip] | 009, 020 | Group F | sonnet / high | FULL |
+| 022 | Search tools: `spaarke_search_documents`, `spaarke_find_records` | 1 | 🔲 [open] | 009, 020, 027 | Group F | sonnet / high | FULL |
 | 023 | Document tools: `spaarke_list_documents`, `spaarke_get_document` | 1 | 🔄 [wip] | 020 | Group F | sonnet / high | FULL |
 | 024 | `spaarke_list_playbooks` | 1 | 🔲 [open] | 020 | Group F | sonnet / high | FULL |
 | 025 | Task read tools: `spaarke_list_tasks`, `spaarke_get_task` | 1 | 🔲 [open] | 006, 020 | Group F | sonnet / high | FULL |
 | 026 | `spaarke_get_portfolio` | 1 | 🔲 [open] | 020 | Group F | sonnet / high | FULL |
+| 027 | Search result authorization into shared methods (prerequisite for 022; added 2026-11-25) | 1 | 🔄 [wip] | 009, 020 | Group F | opus / high | FULL |
 | 029 | Deploy Phase 1 to dev; routing-eval run A | 1 | 🔲 [open] | 019, 020–026 | Group G (alone) | sonnet / high | STANDARD |
 | 030 | Playbook run tools: `spaarke_run_playbook`, `spaarke_get_playbook_run` | 2 | 🔲 [open] | 005, 007, 020, 024 | Group H | opus / high | FULL |
 | 031 | Analysis tools: `spaarke_start_analysis`, `spaarke_get_analysis` | 2 | 🔲 [open] | 020 | Group H | opus / high | FULL |
@@ -90,7 +91,7 @@ Phase 0 (startable now; touches no r1 file):
 Phase 1 (BLOCKED on the r1 gate):
   Wave 4 (parallel, 2 agents): 020, 021 — prereq: r1 gate + 001 (020) / 011 (021)
       — goal-eligible: NO (2-task wave; 020 restructures an auth guard ledger)
-  Wave 5 (parallel, 5 agents): 022, 023, 024, 026 under one goal + 025 as a separate agent — prereq: 020 (+ 009 for 022, 006 for 025)
+  Wave 5 (parallel): 023, 024, 026 + 025 and 027 as separate agents; 022 after 027 — prereq: 020 (+ 009, 027 for 022; 006 for 025)
       — goal-eligible: YES for 022, 023, 024, 026 (see goal-condition below); 025 NO (tenant-isolation: two verifier passes + uac-r2 review outside the goal)
   Wave 6 (sequential, GATED): 029 — prereq: 019, 020–026 + owner per-SHA go; then the owner runs routing-eval A (041)
       — goal-eligible: NO (deploy)

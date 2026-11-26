@@ -50,3 +50,13 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
   4. Deploys stay separate, each with the owner's per-SHA go via uac-r2.
   5. 042 closes on its own timeline.
 - **Rejected:** waiting for 042 to close. It protects nothing and could take days.
+
+## D-run-record-hold — task 005 schema and task 030 held for one run-record design (2026-11-25)
+- **Source:** specialist-legal-agents-r1's run-path review, `notes/run-path-review-2026-11-25.md` on `work/specialist-legal-agents-r1` @ 7cf4ea0cfe.
+  - FR-13's `sprk_playbookrun` persistence covers only `PlaybookOrchestrationService` (the node engine), so Action-path runs are not recorded.
+  - `sprk_playbookrun.sprk_playbookid` is required, so an Action run can't be stored as is.
+  - The node engine is frozen under ADR-039.
+- **Effect here:**
+  - 005's code is merged on this branch only (not master), and its dev schema script has not run. It stays unrun until the owner picks the run-record design: a new capability-run table, a relaxed `sprk_playbookid` plus an action lookup, or the ledger plus the Decision Record. 005 then adapts to that design.
+  - 030 waits for the same decision plus an ADR-039 check (constraint added to its POML).
+  - 019 must not deploy 005's code before its columns exist (unchanged).

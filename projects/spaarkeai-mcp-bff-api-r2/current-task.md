@@ -32,7 +32,7 @@
 - **034:** check the Daily Briefing widget bundle for module side effects (`@spaarke/auth` and the ui-components barrel).
 
 ## Open owner questions
-1. **005:** go to run the run-columns script on dev? Also, accept criterion 3 as "identical except the documented differences" (`notes/005-schema.md` §4)?
+1. **005:** HELD (D-run-record-hold): owner to pick the run-record design first (with specialist-legal-agents-r1); then the go to run the schema script on dev? Also, accept criterion 3 as "identical except the documented differences" (`notes/005-schema.md` §4)?
 2. **012:** go to run the registry-key PATCH on dev?
 3. **008:** 🔔 ADR-028 A10 conflict. Path A (a spec exception; FR-11 parity wins) is recommended over Path C.
 4. **#3181 (DEF-006-01, security):** choose fix (a) or (b) before tasks 025/036.
