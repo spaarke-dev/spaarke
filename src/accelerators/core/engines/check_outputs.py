@@ -4,7 +4,7 @@ Python 3 standard library + lxml only. Imports ooxml_redline.py and safe_docx.py
 
 Usage:
   python check_outputs.py PLAN.json INTERNAL.docx CLEAN.docx --original ORIGINAL.docx
-         [--external EXTERNAL.docx]
+         [--external EXTERNAL.docx] [--refused REPORT.json]
 
 Checks (each reported as {"name", "ok", "detail"}):
   plan               the plan passes the closed-set contract (no unknown or misspelt keys)
@@ -22,6 +22,11 @@ Checks (each reported as {"name", "ok", "detail"}):
                      tracking off; no summary
   external           (if given) no summary; none of our comments; comments intact; same revisions
   residue            no {{placeholders}} beyond those already in the original
+  refusals           (with --refused, the report from ooxml_redline.py --skip-unplaceable) the report matches
+                     the plan; revision_text and comments then expect the applied edits only; summary expects
+                     one "Changes to make by hand" row per refused edit, "Not applied" on each refused edit's
+                     summary row, and no refused bookmark in the document. Without --refused, a by-hand table
+                     fails the summary check.
 Exit codes: 0 all checks pass, 1 a check failed, 2 bad input.
 """
 import argparse
@@ -38,7 +43,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from lxml import etree
     import safe_docx
-    from ooxml_redline import PlanError, RATING_FILLS, STORY_PART, q, strip_drawings, validate_plan, W
+    from ooxml_redline import PlanError, RATING_FILLS, STORY_PART, q, read_refusals, strip_drawings, validate_plan, W
+    from summary_table import MANUAL_HEADERS, NOT_APPLIED
 except ImportError as ex:
     print(json.dumps({"error": f"cannot import dependencies: {ex}"}), file=sys.stderr)
     sys.exit(2)
@@ -213,24 +219,31 @@ def comment_integrity(pkg):
 
 
 def summary_tables(doc):
-    """(revisions table, ratings table) of the summary page; None where absent. A ratings table is the one whose
-    third header cell reads "Rating"; the revisions table is the other one (header "Section")."""
+    """(revisions table, ratings table, by-hand table) of the summary page; None where absent. A ratings table's
+    third header cell reads "Rating"; the by-hand table's headers are MANUAL_HEADERS; the revisions table is the
+    other one (header "Section")."""
     body = doc.find(q("body"))
     start = next(b for b in doc.iter(q("bookmarkStart")) if b.get(q("name")) == SUMMARY_BOOKMARK)
     end_id = start.get(q("id"))
     while start.getparent() is not body:
         start = start.getparent()
-    revisions_tbl = ratings_tbl = None
+    revisions_tbl = ratings_tbl = manual_tbl = None
     for e in start.itersiblings():
         if e.tag == q("tbl"):
             head = ["".join(t.text or "" for t in c.iter(q("t"))) for c in e.find(q("tr")).findall(q("tc"))]
             if len(head) > 2 and head[2] == "Rating":
                 ratings_tbl = e
+            elif head == MANUAL_HEADERS:
+                manual_tbl = e
             elif revisions_tbl is None:
                 revisions_tbl = e
         if any(b.get(q("id")) == end_id for b in e.iter(q("bookmarkEnd"))):
             break
-    return revisions_tbl, ratings_tbl
+    return revisions_tbl, ratings_tbl, manual_tbl
+
+
+def cell_texts(row):
+    return ["".join(t.text or "" for t in c.iter(q("t"))) for c in row.findall(q("tc"))]
 
 
 def ratings_problems(want, tbl):
@@ -256,7 +269,8 @@ def ratings_problems(want, tbl):
     return problems
 
 
-def check(plan, internal, clean, original, external=None):
+def check(plan, internal, clean, original, external=None, refused=None):
+    """refused: the parsed REPORT.json of a skip-mode run, or None for a normal run."""
     results = []
 
     def add(name, ok, detail=""):
@@ -267,6 +281,18 @@ def check(plan, internal, clean, original, external=None):
         add("plan", True, "plan matches the contract")
     except PlanError as ex:
         add("plan", False, str(ex))
+
+    refused_edits, refused_marks = {}, {}
+    if refused is not None:
+        try:
+            refused_edits, refused_marks = read_refusals(refused, plan)
+            add("refusals", True, f"{len(refused_edits)} edit(s) and {len(refused_marks)} bookmark(s) refused; "
+                                  "the edits are listed for the attorney")
+        except ValueError as ex:
+            add("refusals", False, str(ex))
+            return results
+    # what the redline must carry: the applied edits only
+    applied = dict(plan, edits=[e for i, e in enumerate(plan.get("edits", [])) if i not in refused_edits])
 
     pk = {"internal": internal, "clean": clean, "original": original}
     if external:
@@ -312,7 +338,7 @@ def check(plan, internal, clean, original, external=None):
     for k, v in ours.items():
         if k[0] == "del":
             got_del[re.sub(r"[\t\n]", "", k[3])] += v
-    want_ins, want_del, wild = expected_text(plan)
+    want_ins, want_del, wild = expected_text(applied)
     other = [k for k in ours if k[0] not in ("ins", "del")]
     extra_del = got_del - want_del
     rt_ok = got_ins == want_ins and not (want_del - got_del) and sum(extra_del.values()) == wild and not other
@@ -322,7 +348,7 @@ def check(plan, internal, clean, original, external=None):
         f"missing deletions {sorted((want_del - got_del).elements())[:3]}; other new revisions {other[:3]}")
 
     new_ids = red.comment_ids() - org.comment_ids()
-    want_c = Counter(e["comment"] for e in plan.get("edits", []) if e.get("comment"))
+    want_c = Counter(e["comment"] for e in applied["edits"] if e.get("comment"))
     got_c = red.comment_texts(new_ids)
     dangling, unanchored = comment_integrity(red)
     add("comments", got_c == want_c and not dangling and not unanchored,
@@ -337,11 +363,21 @@ def check(plan, internal, clean, original, external=None):
     if SUMMARY_BOOKMARK not in names:
         s_problems.append("internal redline has no summary page")
     else:
-        summary_tbl, ratings_tbl = summary_tables(red.doc)
-        body_rows = len(summary_tbl.findall(q("tr"))) - 1 if summary_tbl is not None else 0
-        want_rows = sum(1 for e in plan.get("edits", []) if e.get("summary"))
-        if body_rows != want_rows:
-            s_problems.append(f"summary rows {body_rows}/{want_rows}")
+        summary_tbl, ratings_tbl, manual_tbl = summary_tables(red.doc)
+        body_rows = summary_tbl.findall(q("tr"))[1:] if summary_tbl is not None else []
+        summarised = [i for i, e in enumerate(plan.get("edits", [])) if e.get("summary")]
+        if len(body_rows) != len(summarised):
+            s_problems.append(f"summary rows {len(body_rows)}/{len(summarised)}")
+        else:
+            for row, i in zip(body_rows, summarised):
+                marked = cell_texts(row)[3].startswith(NOT_APPLIED)
+                if marked != (i in refused_edits):
+                    s_problems.append(f"summary row for edit {i}: " + ("says not applied, but the edit was applied"
+                                                                       if marked else "refused edit is not marked "
+                                                                       "'Not applied'"))
+        manual_rows = len(manual_tbl.findall(q("tr"))) - 1 if manual_tbl is not None else 0
+        if manual_rows != len(refused_edits):
+            s_problems.append(f"'Changes to make by hand' rows {manual_rows}/{len(refused_edits)}")
         s_problems += ratings_problems(plan.get("ratings"), ratings_tbl)
         if summary_tbl is not None:
             for r in summary_tbl.iter(q("r")):
@@ -356,6 +392,12 @@ def check(plan, internal, clean, original, external=None):
         a = h.get(q("anchor"))
         if a and a not in names:
             s_problems.append(f"link to missing bookmark {a}")
+    # a refused bookmark must not have been added: absent, or (bookmark_exists) only the original's own copies
+    org_names = [b.get(q("name")) for b in org.doc.iter(q("bookmarkStart"))]
+    placed = sorted(n for n, code in refused_marks.items()
+                    if names.count(n) != (org_names.count(n) if code == "bookmark_exists" else 0))
+    if placed:
+        s_problems.append(f"bookmarks reported as refused are in the document: {placed}")
     add("summary", not s_problems, "; ".join(sorted(set(s_problems))) or "summary present, linked and legible")
 
     c_problems = []
@@ -413,14 +455,19 @@ def main(argv=None):
     ap.add_argument("clean")
     ap.add_argument("--original", required=True)
     ap.add_argument("--external")
+    ap.add_argument("--refused", metavar="REPORT", help="refusal report from ooxml_redline.py --skip-unplaceable")
     a = ap.parse_args(argv)
     try:
         with open(a.plan, encoding="utf-8") as f:
             plan = json.load(f)
+        refused = None
+        if a.refused:
+            with open(a.refused, encoding="utf-8") as f:
+                refused = json.load(f)
     except (OSError, ValueError) as ex:
-        print(json.dumps({"error": f"cannot read plan: {ex}"}), file=sys.stderr)
+        print(json.dumps({"error": f"cannot read plan or report: {ex}"}), file=sys.stderr)
         return 2
-    results = check(plan, a.internal, a.clean, a.original, a.external)
+    results = check(plan, a.internal, a.clean, a.original, a.external, refused)
     ok = all(r["ok"] for r in results)
     sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps({"ok": ok, "checks": results}, ensure_ascii=False, indent=1))
