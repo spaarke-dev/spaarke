@@ -10,6 +10,40 @@
 
 ## Open (in priority order)
 
+### ISS-046 — Provisioning does not yet deploy the intake engine that customer.bicep can now create
+
+| Field | Value |
+|---|---|
+| **Status** | Open, accepted from spaarke-intake-pipeline-r1 2026-11-26. Starts after its Phase 0/1 Bicep is on master |
+| **Urgency** | next-round (no stamp can use the intake pipeline until it lands) |
+| **Filed** | 2026-11-26 (by spaarke-intake-pipeline-r1; handed to this project) |
+| **Source** | intake-pipeline-r1 message 2026-11-26; `infrastructure/bicep/modules/intake-engine-job.bicep` on `work/spaarke-intake-pipeline-r1` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3210 |
+
+**Description**
+
+`customer.bicep` gains an opt-in `deployIntakeEngine`: a Container Apps environment and a Service Bus-triggered Job that
+runs as its own identity (`mi-spaarke-{customerId}-{env}-intake-engine`). That identity has only queue, staging-blob and
+AcrPull grants. Provisioning forwards none of the inputs, carries none of the outputs, and sets no BFF setting, so the
+BFF's completion consumer never starts on a stamp.
+
+**Entry-points**
+
+- H2a `Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs` `BuildParametersPayload` (forward only when on) and `MapOutputs`. The new outputs stay out of `RequiredOutputNames`.
+- `IntakeParameterCatalog` + `scripts/provisioning-prereqs/intake.schema.json`: a new boolean switch (working name `intakeEngineEnabled`). The image and the registry login server come from L2-owned options, never from the run.
+- H4b `Handlers/BulkAppSettings/PerEnvSourceCatalog.cs` + per-env manifest: `ServiceBus__IntakeEngineCompletionQueueName`, `required: false`, both slots.
+- `Handlers/SubscriptionReadiness/SubscriptionReadinessOptions.cs`: add `Microsoft.App`.
+- H13: prove the engine identity holds exactly its four grants; keyless check with the engine on; T229 cost envelope.
+- AcrPull for the engine identity on the platform ACR. L2 has no rights there today (Owner on customer subscriptions only). This needs a constrained grant to L2, which is a live change that needs the owner's OK, and it must follow H2a's own deployment.
+
+**Suggested fix**: as above. Model 2 (registry import into the stamp) is out of scope for r1 (plan D3).
+
+**Estimated effort**: 2–3 days, plus the owner decision on the L2 ACR grant
+**Blockers**: intake-pipeline-r1 Phase 0/1 merged; confirmation that Job creation does not pull the image at create time
+**Related**: spaarke-intake-pipeline-r1; ADR-028 (zero-secret); T228; T229
+
+---
+
 ### ISS-045 — Stamps lack the grid configurations, workspace layouts and playbook that product code hard-codes by dev id
 
 | Field | Value |
