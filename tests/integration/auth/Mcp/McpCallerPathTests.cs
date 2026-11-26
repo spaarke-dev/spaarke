@@ -325,6 +325,7 @@ public sealed class McpCallerPathTests
             ["spike_review_nda"] = ["documentText"],
             ["spike_review_agreement"] = ["documentText"],
             ["spike_review_legal_hold"] = ["documentText"],
+            ["SpaarkeMCP_spike_return_file"] = ["size", "variant"], // THROWAWAY SPIKE (#3257), branch spike/spe-file-probe only
         }, options => options.WithStrictOrdering());
     }
 
