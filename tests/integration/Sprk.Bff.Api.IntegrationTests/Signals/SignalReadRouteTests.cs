@@ -3048,10 +3048,13 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 // like / not-like (a null never matches either), a not-null / null lookup, and an INNER link to sprk_communication, which
                 // Dataverse trims by the caller's read of the linked row.
                 var conditions = drFetch.Root!.Element("entity")!.Elements("filter").Descendants("condition")
-                    .Where(c => (string?)c.Attribute("attribute") is "sprk_steps" or "sprk_regardingcommunication" or "sprk_confirmedby")
+                    .Where(c => (string?)c.Attribute("attribute") is "sprk_steps" or "sprk_regardingcommunication" or "sprk_confirmedby" or "sprk_policyversion")
                     .Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string?)c.Attribute("value"))).ToList();
                 var emailJoined = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "sprk_communication"
                     && (string?)l.Attribute("to") == "sprk_regardingcommunication" && (string?)l.Attribute("link-type") == "inner");
+                // Fix round 2: a caller with no Read on sprk_communication is refused the query that inner-joins it, as Dataverse refuses it.
+                if (emailJoined && TableDenied.TryGetValue(me2, out var joinDenied) && joinDenied.Contains("sprk_communication"))
+                    return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
                 bool Matches(Dictionary<string, object?> row) => conditions.All(c => c switch
                 {
                     ("sprk_steps", "like", var p) => row.GetValueOrDefault("sprk_steps") is string s && SqlLike(s, p!),

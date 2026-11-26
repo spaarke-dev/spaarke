@@ -97,14 +97,14 @@ gave **2 failed, 16 passed**: the reviewed-twice test and the gate-row test.
   Signal filter ran. The gate writes a record for every assessed email (authorize and deny), and a Console User has Deep read on
   `sprk_decisionrecord` (D-144), so a busy business unit would pass the bound within 90 days. The read is now two queries, run at the
   same time, each with its own `MaxPages` bound and both keeping `WriterCreatedRecord` and the 90-day `sprk_decidedon` window:
-  - `DecidedRecordsFetch`: records that resolved Signals (`sprk_steps not-like '%"resolvedSignalIds":[[]]%'`), with the same columns as
+  - `DecidedRecordsFetch`: records that resolved Signals (`sprk_steps not-like '%"resolvedSignalIds":_]%'` since fix round 2), with the same columns as
     before. This bounds about what the Signal-first read bounded.
   - `GateRecordsFetch`: the gate's records, found the way the writer finds one (`FindGateRecordAsync`): filed under a communication,
     `sprk_confirmedby` null, and no Signal resolved. The query has an **inner** link to `sprk_communication`, so only records whose email
     the caller can read come back and count. It selects only what the tab shows: no `sprk_steps`, `sprk_followons` or confirmer link.
   - **Deviation from the review's wording.** The review asked to identify gate records by `sprk_deciderrole`. No such column exists: the
     decider role is stored only inside `sprk_factsnapshot`. The columns used above are the writer's own identification of a gate
-    record. The LIKE needs `[[]` because `[` opens a character class in a Dataverse LIKE.
+    record. (Round 1 escaped the bracket as `[[]`; round 2 replaced that with a pattern that needs no escape.)
   - The separate caller read of communications (`ReadReadableIdsAsync`) is gone, because the join replaces it. Its test
     (`DecidedSet_ACommunicationReadFault_Is503_NotAShorterList`) was removed: there is no such read left to fault.
 - **F2:** the Shape comment now says the Decide lane can have a Not filed group of records (a gate record with no core record).
@@ -121,6 +121,23 @@ gave **2 failed, 16 passed**: the reviewed-twice test and the gate-row test.
 - **Fake changes:** `GateDecision` now files each record under a communication its readers can read, by default (`withoutCommunication`
   opts out). The fake evaluates LIKE / not-like on `sprk_steps`, null / not-null lookups and the inner communication join. A reviewed
   record carries `_sprk_confirmedby_value`.
+
+## Fix round 2 (second review of PR #3277)
+
+- **K4: no LIKE escape.** The pattern is now `%"resolvedSignalIds":_]%`. The `_` matches the one `[`, and a lone `]` is literal in a
+  Dataverse LIKE. Only the empty array has a single character between the key's colon and a `]`, because a listed id starts with a quote
+  and is followed by 36 characters. The same pattern serves the like (gate read) and the not-like (record read). The fake needed no
+  change: it already evaluates `_` and a literal `]`. The writer pin tests stay.
+  - A test asserts the pattern contains no `[` and that both fetches carry it.
+  - The same JSON-string reasoning as before applies: a quote inside a stored value is escaped (`\"`), so user text cannot form
+    `"resolvedSignalIds":` followed by one character and `]`.
+- **F2: a 403 on the gate read alone.** The fake now refuses, with a 403, a record fetch that inner-joins `sprk_communication` when the
+  caller has no Read on that table. A test expects 200, the Signal-backed row, and no gate record.
+- **K3: an automated record filed under an email that resolved a Signal.** It has no confirmer and no policy version, and it is listed
+  only under its Signal, never also in `records`. A mutation check confirmed the test: removing the gate query's LIKE condition makes it
+  fail, and only it.
+- **Optional guard added:** `sprk_policyversion` null on the gate read. The gate writes none, and a review always carries one. The fake
+  evaluates it as a null lookup; the fake's records carry no policy version, so this guard is not proved by the fake.
 
 ## Known limits (K-class)
 
@@ -139,12 +156,15 @@ gave **2 failed, 16 passed**: the reviewed-twice test and the gate-row test.
 - A gate record on a core record the caller can read, filed under a communication the caller cannot read, is not listed. The inner join
   comes first, so that is stricter than the core rule alone. A caller with no Read on `sprk_communication` gets an empty gate read: the
   query answers 403, which is treated as "the records are omitted".
-- The two Decided queries split the writer's records by a LIKE on the stored envelope's compact `"resolvedSignalIds":[]`. The gate
+- The two Decided queries split the writer's records by a LIKE (`%"resolvedSignalIds":_]%`) on the stored envelope's compact
+  `"resolvedSignalIds":[]`. The gate
   writer's tests pin that text (`DecisionRecordWriterTests.GateDecision`, both outcomes). A record with no `sprk_steps` is in neither
   query; it was unclassifiable before as well.
 
 ## Found, not fixed
 
-- None open. The `rowTitle` order (D-227) was fixed in fix round 1 at the main session's request.
+- Billing, Record Procedure and assign-firm records with no Signal are not listed (the main session is filing this as DI-180; the owner
+  decides).
+- A gate record whose communication lookup was cleared is in neither Decided query, so it is not listed (K2, fails closed).
 
 rework: none task 226

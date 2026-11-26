@@ -13,6 +13,8 @@
 // Fix round 1 (review F1, K2 scope): the gate records are their own read, joined to the communication so only those whose email the caller
 // reads come back and count toward its bound; the records that resolved Signals are a read of their own, bounded as before. A writer record
 // that resolved no Signal and is not a gate record (billing, Record Procedure, assign-firm) is neither listed nor counted.
+// Fix round 2: the no-Signal LIKE needs no escape; a 403 on the gate read alone; a record that resolved a Signal under an email is not a
+// gate record.
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
@@ -324,6 +326,50 @@ public sealed partial class SignalReadRouteTests
         DecidedRows(body).Should().Equal([(s, "DR-00040")]);
         AllRecords(body).Should().BeEmpty();
         body.ToString().Should().NotContain("DR-0300").And.NotContain("DR-03999");
+    }
+
+    [Fact]
+    public async Task DecidedSet_ACallerRefusedTheGateRead_StillGetsTheRecordsThatResolvedSignals_AndNoGateRecord()
+    {
+        // Fix round 2 (F2): no Read on sprk_communication refuses only the query that inner-joins it (403 on page 1: omitted, not a fault).
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Decide, core: (MatterType, m), sets: ["decided"], resolvedOn: world.Now.AddDays(-1),
+            decisionRecord: world.Decision(readers: [Alice], number: "DR-00050"));
+        world.GateDecision(readers: [Alice], core: (MatterType, m), number: "DR-00950");
+        world.TableDenied[Alice] = ["sprk_communication"];
+
+        var body = await OkAsync(world, Alice, "?set=decided");
+
+        DecidedRows(body).Should().Equal([(s, "DR-00050")]);
+        AllRecords(body).Should().BeEmpty();
+        body.ToString().Should().NotContain("DR-00950");
+    }
+
+    [Fact]
+    public async Task DecidedSet_ARecordThatResolvedASignal_FiledUnderAnEmail_WithNoConfirmer_IsListedOnlyUnderItsSignal()
+    {
+        // Fix round 2 (K3): an automated record filed under a communication that DID resolve a Signal (a nightly condition-cleared close of a
+        // communication-subject Signal) is never a gate record: the gate read's "no Signal resolved" condition keeps it out of records.
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var cleared = world.Decision(readers: [Alice], number: "DR-00060", by: null, communication: world.Record("sprk_communication", [Alice]),
+            steps: "{\"reviewId\":\"0b7a9b5e-4444-4c2e-9a54-000000000226\",\"resolvedSignalIds\":[],\"steps\":[]}");
+        var s = world.Signal(Decide, core: (MatterType, m), sets: ["decided"], resolvedOn: world.Now.AddDays(-1), decisionRecord: cleared);
+
+        var body = await OkAsync(world, Alice, "?set=decided");
+
+        DecidedRows(body).Should().Equal([(s, "DR-00060")]);
+        AllRecords(body).Should().BeEmpty("it resolved a Signal, so it is that Signal's row, never also a record with no Open");
+    }
+
+    [Fact]
+    public void TheNoSignalPattern_NeedsNoEscape_AndMatchesOnlyTheEmptyList()
+    {
+        // Fix round 2: `[` is a wildcard set in a Dataverse LIKE; the pattern uses none, so it means the same on Dataverse as here.
+        SignalReadService.NoResolvedSignalsLike.Should().NotContain("[");
+        SignalReadService.GateRecordsFetch(WriterUser).Should().Contain("resolvedSignalIds&quot;:_]%");
+        SignalReadService.DecidedRecordsFetch(WriterUser).Should().Contain("operator=\"not-like\" value=\"%&quot;resolvedSignalIds&quot;:_]%\"");
     }
 
     [Fact]

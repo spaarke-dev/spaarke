@@ -1654,10 +1654,12 @@ public sealed class SignalReadService
 
     /// <summary>
     /// The <c>sprk_steps</c> LIKE pattern of a record that resolved no Signal: the envelope the writer serializes compactly
-    /// (<c>"resolvedSignalIds":[]</c>, pinned by the gate writer's tests). <c>[</c> opens a character class in a Dataverse LIKE, so the
-    /// literal bracket is written <c>[[]</c>. The record query asks for its negation (a record that resolved Signals), the gate query for it.
+    /// (<c>"resolvedSignalIds":[]</c>, pinned by the gate writer's tests). The pattern needs no escape (fix round 2): <c>_</c> is the one
+    /// <c>[</c>, and a lone <c>]</c> is literal in a Dataverse LIKE. Only the empty array has a single character between the key's colon
+    /// and a <c>]</c> (a listed id starts with a quote, then 36 characters). The record query asks for its negation (a record that resolved
+    /// Signals), the gate query for it.
     /// </summary>
-    internal const string NoResolvedSignalsLike = "%\"resolvedSignalIds\":[[]]%";
+    internal const string NoResolvedSignalsLike = "%\"resolvedSignalIds\":_]%";
 
     /// <summary>The literal text <see cref="NoResolvedSignalsLike"/> matches in a stored envelope.</summary>
     internal const string NoResolvedSignalsText = "\"resolvedSignalIds\":[]";
@@ -1714,7 +1716,7 @@ public sealed class SignalReadService
     /// <summary>
     /// The Decided set's gate record query (task 226, D-231; fix round 1, F1): the ontology writer's email-gate records (D-139) decided in the
     /// window, as the writer itself finds one (<c>DecisionRecordWriter.FindGateRecordAsync</c>): filed under a communication, no confirming
-    /// user, and no Signal resolved. The communication is an INNER join, so Dataverse returns only the records whose email the CALLER can
+    /// user, no policy version, and no Signal resolved. A gate record whose communication lookup was cleared is in neither query (fails closed). The communication is an INNER join, so Dataverse returns only the records whose email the CALLER can
     /// read (its owner, a person it is shared with, or a member of its core record's family): the bound counts only what the caller could be
     /// shown, never the business unit's every assessed email. Only the columns the tab shows (<see cref="GateRecordColumns"/>).
     /// </summary>
@@ -1728,6 +1730,8 @@ public sealed class SignalReadService
                     DecidedRecordConditions(writerUserId),
                     new XElement("condition", new XAttribute("attribute", "sprk_regardingcommunication"), new XAttribute("operator", "not-null")),
                     new XElement("condition", new XAttribute("attribute", "sprk_confirmedby"), new XAttribute("operator", "null")),
+                    // The gate writes no policy version; a person's review always carries one (fix round 2: one more guard).
+                    new XElement("condition", new XAttribute("attribute", "sprk_policyversion"), new XAttribute("operator", "null")),
                     new XElement("condition", new XAttribute("attribute", "sprk_steps"), new XAttribute("operator", "like"),
                         new XAttribute("value", NoResolvedSignalsLike))),
                 DecidedRecordOrder()))
