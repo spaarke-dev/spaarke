@@ -539,7 +539,7 @@ Owner: "For SharePoint fail it should be reported where the user can address it 
 
 ### D-227 follow-ups (2026-11-25)
 - The heading change is PR **#3199** (`ux/decision-finding-first`, head `6a0d7cc6e0`). ontology-r1's Opus review is running; auto-merge is off.
-- ontology-r1 rules that the widget's DecideLane invoice-review (billing) rows also lead with the finding ("ALL surfaces"). That is mcp-r2's file, so it is raised with r2 as r2's change, and ontology reviews it.
+- ontology-r1 rules that the widget's DecideLane invoice-review (billing) rows also lead with the finding ("ALL surfaces"). ~~That is mcp-r2's file, so it is raised with r2.~~ Corrected: mcp-r2 says the handover gave r2 only the widget's transport and build files, not its UI, so DecideLane stays with r1. The change is on #3199 (commit `4491eab395`). mcp-r2 was told before it lands; ontology reviews it with #3199.
 - Deploys after merge:
   - the Console redeploys from master automatically (deploy-spaarke-ai.yml watches Spaarke.UI.Components);
   - LegalWorkspace needs its own code-page deploy;
