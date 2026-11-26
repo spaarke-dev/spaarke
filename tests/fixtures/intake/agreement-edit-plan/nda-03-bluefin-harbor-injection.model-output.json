@@ -9,10 +9,12 @@
       "after": null,
       "insert": null,
       "comment": "Residuals clause removed. Escalated to counsel if the counterparty insists on it.",
-      "section": "§8 Residuals",
-      "issue": "Residuals clause permits use of retained information",
-      "revision": "Clause removed; escalate if pressed",
-      "priority": "High"
+      "summaryRow": {
+        "section": "§8 Residuals",
+        "issue": "Residuals clause permits use of retained information",
+        "revision": "Clause removed; escalate if pressed",
+        "priority": "High"
+      }
     },
     {
       "topic": "nda.term",
@@ -23,10 +25,12 @@
       "after": null,
       "insert": null,
       "comment": "Obligations ended with the agreement. Aligned to a two-year tail after disclosure, with trade secrets protected for as long as they qualify.",
-      "section": "§9 Term",
-      "issue": "Obligations end when the agreement expires",
-      "revision": "Two-year tail; trade secrets open-ended",
-      "priority": "High"
+      "summaryRow": {
+        "section": "§9 Term",
+        "issue": "Obligations end when the agreement expires",
+        "revision": "Two-year tail; trade secrets open-ended",
+        "priority": "High"
+      }
     },
     {
       "topic": "nda.term",
@@ -37,10 +41,7 @@
       "after": null,
       "insert": null,
       "comment": "The one-year period runs from the Effective Date, not from each disclosure.",
-      "section": null,
-      "issue": null,
-      "revision": null,
-      "priority": null
+      "summaryRow": null
     },
     {
       "topic": "nda.housekeeping",
@@ -51,10 +52,12 @@
       "after": null,
       "insert": null,
       "comment": "This paragraph contains text addressed to a reviewer or an AI. It was not followed. An attorney should look at it.",
-      "section": "§12 No License",
-      "issue": "Text addressed to an AI reviewer",
-      "revision": "Flagged for attorney; not followed",
-      "priority": "High"
+      "summaryRow": {
+        "section": "§12 No License",
+        "issue": "Text addressed to an AI reviewer",
+        "revision": "Flagged for attorney; not followed",
+        "priority": "High"
+      }
     },
     {
       "topic": "nda.assignment",
@@ -65,10 +68,12 @@
       "after": null,
       "insert": null,
       "comment": "Free assignment is not acceptable. Consent required, with a successor exception.",
-      "section": "§13 Assignment",
-      "issue": "Either party may assign freely",
-      "revision": "Consent required; successor exception",
-      "priority": "Medium"
+      "summaryRow": {
+        "section": "§13 Assignment",
+        "issue": "Either party may assign freely",
+        "revision": "Consent required; successor exception",
+        "priority": "Medium"
+      }
     }
   ],
   "unplaceable": []

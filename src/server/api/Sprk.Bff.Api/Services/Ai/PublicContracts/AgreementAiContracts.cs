@@ -124,7 +124,10 @@ public sealed record AgreementEditPlan
     /// <summary>How many edits the plan holds (refused edits are not counted). Zero is valid for an NDA that already meets the standard.</summary>
     public required int EditCount { get; init; }
 
-    /// <summary>Edits the exact-match anchor pre-check refused, in the model's order. Never repaired, never sent to the engine.</summary>
+    /// <summary>
+    /// Edits refused one by one (by the exact-match anchor pre-check, or as malformed), in the model's order. Never repaired, never sent
+    /// to the engine; one refused edit never costs the others.
+    /// </summary>
     public required IReadOnlyList<AgreementRefusedEdit> RefusedEdits { get; init; }
 
     /// <summary>
@@ -134,32 +137,52 @@ public sealed record AgreementEditPlan
     public required IReadOnlyList<AgreementUnplaceableFinding> UnplaceableFindings { get; init; }
 }
 
-/// <summary>An edit the anchor pre-check refused: its 0-based index in the model's <c>edits</c> array, why, and its (pinned) topic id.</summary>
+/// <summary>
+/// An edit the BFF refused: its 0-based index in the model's <c>edits</c> array, why (<see cref="AgreementRefusalCodes"/>), and its
+/// pinned topic id (empty when the edit named no topic of the pinned standard: model text is never carried here).
+/// </summary>
 public sealed record AgreementRefusedEdit(int Index, string Code, string TopicId);
 
 /// <summary>A finding on a section that cannot be edited (its <c>para_key</c> is null), with the model's comment for an attorney.</summary>
 public sealed record AgreementUnplaceableFinding(string TopicId, int SectionIndex, string Comment);
 
 /// <summary>
-/// The closed set of reasons the anchor pre-check refuses an edit. The codes are the ones the intake harness switches on to ask for a
-/// rewrite; none of them is ever followed by a fuzzy or approximate retry.
+/// The closed set of reasons the BFF refuses one edit of a plan. The codes are the ones the intake harness switches on to ask for a
+/// rewrite; none of them is ever followed by a fuzzy or approximate retry. Every code but <see cref="EditInvalid"/> is the redline
+/// engine's own code for the same refusal (<c>ooxml_redline.py</c> <c>EDIT_REFUSAL_CODES</c>), produced by the same rule on the same text.
 /// </summary>
 public static class AgreementRefusalCodes
 {
     /// <summary><c>para</c> is not one of the supplied <c>para_key</c> values.</summary>
     public const string ParaNotFound = "para_not_found";
 
-    /// <summary><c>find</c> or <c>after</c> does not occur in the section's text (a paraphrase, a misquote).</summary>
+    /// <summary><c>find</c> or <c>after</c> does not occur in the clause's visible text (a paraphrase, a misquote, or words an earlier edit of the plan changed).</summary>
     public const string NotFound = "not_found";
 
-    /// <summary><c>find</c> or <c>after</c> occurs more than once in the section's text.</summary>
+    /// <summary><c>find</c> or <c>after</c> occurs more than once in the clause's visible text.</summary>
     public const string NotUnique = "not_unique";
+
+    /// <summary>The quote is visible but not once in the clause's own runs: it touches an earlier reviewer's revision, a hyperlink or a content control.</summary>
+    public const string InExistingMarkup = "in_existing_markup";
 
     /// <summary>The quote starts or ends inside a word.</summary>
     public const string WordBoundary = "word_boundary";
 
     /// <summary><c>old</c> does not occur exactly once inside <c>find</c>.</summary>
     public const string OldNotInFind = "old_not_in_find";
+
+    /// <summary>The changed span would cross a tracked change an earlier edit of the plan made.</summary>
+    public const string CrossesMarkup = "crosses_markup";
+
+    /// <summary><c>find "*"</c> on a clause with no text after its number and heading.</summary>
+    public const string NothingAfterHeading = "nothing_after_heading";
+
+    /// <summary>
+    /// BFF only, never an engine code: the edit itself is malformed (for example both <c>find</c> and <c>after</c>, an insertion with no
+    /// text, a comment-only edit with no comment, a blank quote, a summary row with an empty cell, or a topic outside the pinned standard).
+    /// The engine would reject the whole plan for it, so it is refused here on its own and the rest of the plan is kept.
+    /// </summary>
+    public const string EditInvalid = "edit_invalid";
 }
 
 /// <summary>
@@ -179,8 +202,9 @@ public sealed class AgreementAiException : Exception
     public const string OutputInvalid = "ai.agreement.output_invalid";
 
     /// <summary>
-    /// The edit plan assembled from the model's edits is refused: an edit names a topic the pinned standard does not
-    /// have, or the plan does not validate against <c>edit-plan.schema.json</c>. No partial plan is ever returned.
+    /// The edit plan as a whole is refused: an <c>unplaceable</c> finding names a topic the pinned standard does not have, or the
+    /// assembled plan does not validate against <c>edit-plan.schema.json</c> (unreachable when every edit passed its own checks). A
+    /// fault in ONE edit never raises this: that edit is refused (<see cref="AgreementEditPlan.RefusedEdits"/>) and the rest are kept.
     /// </summary>
     public const string PlanInvalid = "ai.agreement.plan_invalid";
 

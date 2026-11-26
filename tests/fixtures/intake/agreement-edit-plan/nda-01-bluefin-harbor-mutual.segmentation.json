@@ -11,7 +11,11 @@
       "heading": null,
       "para_key": "MUTUAL NONDISCLOSURE",
       "auto_numbered": false,
-      "text": "MUTUAL NONDISCLOSURE AGREEMENT"
+      "text": "MUTUAL NONDISCLOSURE AGREEMENT",
+      "anchor_text": {
+        "visible": "MUTUAL NONDISCLOSURE AGREEMENT",
+        "editable": "MUTUAL NONDISCLOSURE AGREEMENT"
+      }
     },
     {
       "index": 1,
@@ -19,7 +23,11 @@
       "heading": null,
       "para_key": "This Mutual Nondisclosure",
       "auto_numbered": false,
-      "text": "This Mutual Nondisclosure Agreement (the “Agreement”) is entered into as of July 9, 2017 (the “Effective Date”) by and between Bluefin Robotics, Inc., a Delaware corporation with offices in Pittsburgh, Pennsylvania, and Harbor Analytics LLC, an Ohio limited liability company with offices in Columbus, Ohio. Each party may disclose Confidential Information to the other in connection with the Purpose."
+      "text": "This Mutual Nondisclosure Agreement (the “Agreement”) is entered into as of July 9, 2017 (the “Effective Date”) by and between Bluefin Robotics, Inc., a Delaware corporation with offices in Pittsburgh, Pennsylvania, and Harbor Analytics LLC, an Ohio limited liability company with offices in Columbus, Ohio. Each party may disclose Confidential Information to the other in connection with the Purpose.",
+      "anchor_text": {
+        "visible": "This Mutual Nondisclosure Agreement (the “Agreement”) is entered into as of July 9, 2017 (the “Effective Date”) by and between Bluefin Robotics, Inc., a Delaware corporation with offices in Pittsburgh, Pennsylvania, and Harbor Analytics LLC, an Ohio limited liability company with offices in Columbus, Ohio. Each party may disclose Confidential Information to the other in connection with the Purpose.",
+        "editable": "This Mutual Nondisclosure Agreement (the “Agreement”) is entered into as of July 9, 2017 (the “Effective Date”) by and between Bluefin Robotics, Inc., a Delaware corporation with offices in Pittsburgh, Pennsylvania, and Harbor Analytics LLC, an Ohio limited liability company with offices in Columbus, Ohio. Each party may disclose Confidential Information to the other in connection with the Purpose."
+      }
     },
     {
       "index": 2,
@@ -27,7 +35,11 @@
       "heading": "Confidential Information",
       "para_key": "1. Confidential",
       "auto_numbered": false,
-      "text": "1.\tConfidential Information. “Confidential Information” means all non-public business, technical and financial information disclosed by one party (the “Disclosing Party”) to the other (the “Recipient”) that is marked “Confidential” at the time of disclosure. Information disclosed orally shall not be Confidential Information unless reduced to writing and delivered to the Recipient within ten (10) days."
+      "text": "1.\tConfidential Information. “Confidential Information” means all non-public business, technical and financial information disclosed by one party (the “Disclosing Party”) to the other (the “Recipient”) that is marked “Confidential” at the time of disclosure. Information disclosed orally shall not be Confidential Information unless reduced to writing and delivered to the Recipient within ten (10) days.",
+      "anchor_text": {
+        "visible": "1.\tConfidential Information. “Confidential Information” means all non-public business, technical and financial information disclosed by one party (the “Disclosing Party”) to the other (the “Recipient”) that is marked “Confidential” at the time of disclosure. Information disclosed orally shall not be Confidential Information unless reduced to writing and delivered to the Recipient within ten (10) days.",
+        "editable": "1.\tConfidential Information. “Confidential Information” means all non-public business, technical and financial information disclosed by one party (the “Disclosing Party”) to the other (the “Recipient”) that is marked “Confidential” at the time of disclosure. Information disclosed orally shall not be Confidential Information unless reduced to writing and delivered to the Recipient within ten (10) days."
+      }
     },
     {
       "index": 3,
@@ -35,7 +47,11 @@
       "heading": "Exclusions",
       "para_key": "2. Exclusions.",
       "auto_numbered": false,
-      "text": "2.\tExclusions. Confidential Information does not include information that (a) is or becomes publicly available through no fault of the Recipient; (b) is already in the possession of the Recipient; (c) is independently developed by the Recipient; or (d) is received from a third party without breach known to the Recipient."
+      "text": "2.\tExclusions. Confidential Information does not include information that (a) is or becomes publicly available through no fault of the Recipient; (b) is already in the possession of the Recipient; (c) is independently developed by the Recipient; or (d) is received from a third party without breach known to the Recipient.",
+      "anchor_text": {
+        "visible": "2.\tExclusions. Confidential Information does not include information that (a) is or becomes publicly available through no fault of the Recipient; (b) is already in the possession of the Recipient; (c) is independently developed by the Recipient; or (d) is received from a third party without breach known to the Recipient.",
+        "editable": "2.\tExclusions. Confidential Information does not include information that (a) is or becomes publicly available through no fault of the Recipient; (b) is already in the possession of the Recipient; (c) is independently developed by the Recipient; or (d) is received from a third party without breach known to the Recipient."
+      }
     },
     {
       "index": 4,
@@ -43,7 +59,11 @@
       "heading": "Use and Protection",
       "para_key": "3. Use and Protection.",
       "auto_numbered": false,
-      "text": "3.\tUse and Protection. The Recipient shall use Confidential Information solely for the purpose of evaluating a potential supply relationship between the parties (the “Purpose”) and shall protect it with at least reasonable care."
+      "text": "3.\tUse and Protection. The Recipient shall use Confidential Information solely for the purpose of evaluating a potential supply relationship between the parties (the “Purpose”) and shall protect it with at least reasonable care.",
+      "anchor_text": {
+        "visible": "3.\tUse and Protection. The Recipient shall use Confidential Information solely for the purpose of evaluating a potential supply relationship between the parties (the “Purpose”) and shall protect it with at least reasonable care.",
+        "editable": "3.\tUse and Protection. The Recipient shall use Confidential Information solely for the purpose of evaluating a potential supply relationship between the parties (the “Purpose”) and shall protect it with at least reasonable care."
+      }
     },
     {
       "index": 5,
@@ -51,7 +71,11 @@
       "heading": "Representatives",
       "para_key": "4. Representatives.",
       "auto_numbered": false,
-      "text": "4.\tRepresentatives. The Recipient may disclose Confidential Information to its employees, officers and professional advisors who have a need to know it for the Purpose (“Representatives”)."
+      "text": "4.\tRepresentatives. The Recipient may disclose Confidential Information to its employees, officers and professional advisors who have a need to know it for the Purpose (“Representatives”).",
+      "anchor_text": {
+        "visible": "4.\tRepresentatives. The Recipient may disclose Confidential Information to its employees, officers and professional advisors who have a need to know it for the Purpose (“Representatives”).",
+        "editable": "4.\tRepresentatives. The Recipient may disclose Confidential Information to its employees, officers and professional advisors who have a need to know it for the Purpose (“Representatives”)."
+      }
     },
     {
       "index": 6,
@@ -59,7 +83,11 @@
       "heading": "Anonymized Data",
       "para_key": "5. Anonymized",
       "auto_numbered": false,
-      "text": "5.\tAnonymized Data. The Recipient may use anonymized or aggregated data derived from Confidential Information to improve its products and services."
+      "text": "5.\tAnonymized Data. The Recipient may use anonymized or aggregated data derived from Confidential Information to improve its products and services.",
+      "anchor_text": {
+        "visible": "5.\tAnonymized Data. The Recipient may use anonymized or aggregated data derived from Confidential Information to improve its products and services.",
+        "editable": "5.\tAnonymized Data. The Recipient may use anonymized or aggregated data derived from Confidential Information to improve its products and services."
+      }
     },
     {
       "index": 7,
@@ -67,7 +95,11 @@
       "heading": "Compelled Disclosure",
       "para_key": "6. Compelled",
       "auto_numbered": false,
-      "text": "6.\tCompelled Disclosure. The Recipient may disclose Confidential Information to the extent required by law, regulation or court order."
+      "text": "6.\tCompelled Disclosure. The Recipient may disclose Confidential Information to the extent required by law, regulation or court order.",
+      "anchor_text": {
+        "visible": "6.\tCompelled Disclosure. The Recipient may disclose Confidential Information to the extent required by law, regulation or court order.",
+        "editable": "6.\tCompelled Disclosure. The Recipient may disclose Confidential Information to the extent required by law, regulation or court order."
+      }
     },
     {
       "index": 8,
@@ -75,7 +107,11 @@
       "heading": "Return of Information",
       "para_key": "7. Return of",
       "auto_numbered": false,
-      "text": "7.\tReturn of Information. Upon the Disclosing Party’s request, the Recipient shall return or destroy all Confidential Information in its possession."
+      "text": "7.\tReturn of Information. Upon the Disclosing Party’s request, the Recipient shall return or destroy all Confidential Information in its possession.",
+      "anchor_text": {
+        "visible": "7.\tReturn of Information. Upon the Disclosing Party’s request, the Recipient shall return or destroy all Confidential Information in its possession.",
+        "editable": "7.\tReturn of Information. Upon the Disclosing Party’s request, the Recipient shall return or destroy all Confidential Information in its possession."
+      }
     },
     {
       "index": 9,
@@ -83,7 +119,11 @@
       "heading": "Residuals",
       "para_key": "8. Residuals.",
       "auto_numbered": false,
-      "text": "8.\tResiduals. Nothing in this Agreement restricts either party from using any ideas, concepts or know-how retained in the unaided memory of its personnel."
+      "text": "8.\tResiduals. Nothing in this Agreement restricts either party from using any ideas, concepts or know-how retained in the unaided memory of its personnel.",
+      "anchor_text": {
+        "visible": "8.\tResiduals. Nothing in this Agreement restricts either party from using any ideas, concepts or know-how retained in the unaided memory of its personnel.",
+        "editable": "8.\tResiduals. Nothing in this Agreement restricts either party from using any ideas, concepts or know-how retained in the unaided memory of its personnel."
+      }
     },
     {
       "index": 10,
@@ -91,7 +131,11 @@
       "heading": "Term",
       "para_key": "9. Term. This",
       "auto_numbered": false,
-      "text": "9.\tTerm. This Agreement shall remain in effect for one (1) year from the Effective Date, and the Recipient’s obligations shall terminate upon expiration of this Agreement."
+      "text": "9.\tTerm. This Agreement shall remain in effect for one (1) year from the Effective Date, and the Recipient’s obligations shall terminate upon expiration of this Agreement.",
+      "anchor_text": {
+        "visible": "9.\tTerm. This Agreement shall remain in effect for one (1) year from the Effective Date, and the Recipient’s obligations shall terminate upon expiration of this Agreement.",
+        "editable": "9.\tTerm. This Agreement shall remain in effect for one (1) year from the Effective Date, and the Recipient’s obligations shall terminate upon expiration of this Agreement."
+      }
     },
     {
       "index": 11,
@@ -99,7 +143,11 @@
       "heading": "Non-Solicitation",
       "para_key": "10. Non-Solicitation.",
       "auto_numbered": false,
-      "text": "10.\tNon-Solicitation. For eighteen (18) months after the Effective Date, neither party shall solicit for employment any employee of the other party."
+      "text": "10.\tNon-Solicitation. For eighteen (18) months after the Effective Date, neither party shall solicit for employment any employee of the other party.",
+      "anchor_text": {
+        "visible": "10.\tNon-Solicitation. For eighteen (18) months after the Effective Date, neither party shall solicit for employment any employee of the other party.",
+        "editable": "10.\tNon-Solicitation. For eighteen (18) months after the Effective Date, neither party shall solicit for employment any employee of the other party."
+      }
     },
     {
       "index": 12,
@@ -107,7 +155,11 @@
       "heading": "Remedies",
       "para_key": "11. Remedies.",
       "auto_numbered": false,
-      "text": "11.\tRemedies. Each party acknowledges that a breach may cause irreparable harm, and the Disclosing Party may seek injunctive relief in addition to any other remedy."
+      "text": "11.\tRemedies. Each party acknowledges that a breach may cause irreparable harm, and the Disclosing Party may seek injunctive relief in addition to any other remedy.",
+      "anchor_text": {
+        "visible": "11.\tRemedies. Each party acknowledges that a breach may cause irreparable harm, and the Disclosing Party may seek injunctive relief in addition to any other remedy.",
+        "editable": "11.\tRemedies. Each party acknowledges that a breach may cause irreparable harm, and the Disclosing Party may seek injunctive relief in addition to any other remedy."
+      }
     },
     {
       "index": 13,
@@ -115,7 +167,11 @@
       "heading": "No License; As Is",
       "para_key": "12. No License;",
       "auto_numbered": false,
-      "text": "12.\tNo License; As Is. No license is granted under this Agreement except to use Confidential Information for the Purpose. All Confidential Information is provided “as is”."
+      "text": "12.\tNo License; As Is. No license is granted under this Agreement except to use Confidential Information for the Purpose. All Confidential Information is provided “as is”.",
+      "anchor_text": {
+        "visible": "12.\tNo License; As Is. No license is granted under this Agreement except to use Confidential Information for the Purpose. All Confidential Information is provided “as is”.",
+        "editable": "12.\tNo License; As Is. No license is granted under this Agreement except to use Confidential Information for the Purpose. All Confidential Information is provided “as is”."
+      }
     },
     {
       "index": 14,
@@ -123,7 +179,11 @@
       "heading": "Assignment",
       "para_key": "13. Assignment.",
       "auto_numbered": false,
-      "text": "13.\tAssignment. Either party may assign this Agreement without the consent of the other party."
+      "text": "13.\tAssignment. Either party may assign this Agreement without the consent of the other party.",
+      "anchor_text": {
+        "visible": "13.\tAssignment. Either party may assign this Agreement without the consent of the other party.",
+        "editable": "13.\tAssignment. Either party may assign this Agreement without the consent of the other party."
+      }
     },
     {
       "index": 15,
@@ -131,7 +191,11 @@
       "heading": "Governing Law and Venue",
       "para_key": "14. Governing",
       "auto_numbered": false,
-      "text": "14.\tGoverning Law and Venue. This Agreement is governed by the laws of the State of Texas. The courts of Travis County, Texas shall have exclusive jurisdiction over any dispute arising under this Agreement."
+      "text": "14.\tGoverning Law and Venue. This Agreement is governed by the laws of the State of Texas. The courts of Travis County, Texas shall have exclusive jurisdiction over any dispute arising under this Agreement.",
+      "anchor_text": {
+        "visible": "14.\tGoverning Law and Venue. This Agreement is governed by the laws of the State of Texas. The courts of Travis County, Texas shall have exclusive jurisdiction over any dispute arising under this Agreement.",
+        "editable": "14.\tGoverning Law and Venue. This Agreement is governed by the laws of the State of Texas. The courts of Travis County, Texas shall have exclusive jurisdiction over any dispute arising under this Agreement."
+      }
     },
     {
       "index": 16,
@@ -139,7 +203,11 @@
       "heading": null,
       "para_key": "IN WITNESS WHEREOF,",
       "auto_numbered": false,
-      "text": "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date."
+      "text": "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+      "anchor_text": {
+        "visible": "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+        "editable": "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date."
+      }
     },
     {
       "index": 17,
@@ -147,7 +215,11 @@
       "heading": "Bluefin Robotics, Inc",
       "para_key": "Bluefin Robotics, Inc. By:",
       "auto_numbered": false,
-      "text": "Bluefin Robotics, Inc.\tBy: ____________________\tName:\tTitle:"
+      "text": "Bluefin Robotics, Inc.\tBy: ____________________\tName:\tTitle:",
+      "anchor_text": {
+        "visible": "Bluefin Robotics, Inc.\tBy: ____________________\tName:\tTitle:",
+        "editable": "Bluefin Robotics, Inc.\tBy: ____________________\tName:\tTitle:"
+      }
     },
     {
       "index": 18,
@@ -155,7 +227,11 @@
       "heading": "Harbor Analytics LLC\tBy",
       "para_key": "Harbor Analytics LLC By:",
       "auto_numbered": false,
-      "text": "Harbor Analytics LLC\tBy: ____________________\tName:\tTitle:"
+      "text": "Harbor Analytics LLC\tBy: ____________________\tName:\tTitle:",
+      "anchor_text": {
+        "visible": "Harbor Analytics LLC\tBy: ____________________\tName:\tTitle:",
+        "editable": "Harbor Analytics LLC\tBy: ____________________\tName:\tTitle:"
+      }
     }
   ]
 }

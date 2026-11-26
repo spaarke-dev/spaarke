@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://spaarke.com/schemas/analysisaction/agreement-edit-plan.schema.json",
   "title": "Agreement Edit Plan (AGREEMENT-EDIT-PLAN@v1) - Output Schema (agreement-edit-plan)",
-  "description": "Output schema for sprk_analysisaction sprk_actioncode='agreement-edit-plan' (spaarke-intake-pipeline-r1 task 004, FR-02, ADR-039). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/agreement-edit-plan.action.json. It MUST stay in step with AgreementEditPlanAssembler (Services/Ai/PublicContracts) which parses it; tests/integration/contract/Catalog/AgreementEditPlanActionContractTests.cs pins the two together. The model anchors only on the para_key values of the supplied segmentation; AgreementSegmentation.CheckAnchors refuses any edit whose para or quotes do not match exactly (no fuzzy matching anywhere). This is the Azure OpenAI Structured Outputs (strict) SUBSET of the accelerator's edit-plan.schema.json: every member is required, optional members are nullable, additionalProperties is false, and there is no oneOf, format, pattern or length bound. Everything the subset cannot say (the topic id pattern, find XOR after, the date, the bookmark and summary rules) is enforced in code by validating the assembled plan against the full edit-plan.schema.json and the pinned standard's topic ids.",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='agreement-edit-plan' (spaarke-intake-pipeline-r1 task 004, FR-02, ADR-039). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/agreement-edit-plan.action.json. It MUST stay in step with AgreementEditPlanAssembler (Services/Ai/PublicContracts) which parses it; tests/integration/contract/Catalog/AgreementEditPlanActionContractTests.cs pins the two together. The model anchors only on the para_key values of the supplied segmentation; AgreementSegmentation.CheckAnchors refuses any edit whose para or quotes do not match exactly (no fuzzy matching anywhere). This is the Azure OpenAI Structured Outputs (strict) SUBSET of the accelerator's edit-plan.schema.json: every member is required, optional members are nullable, additionalProperties is false, and there is no oneOf, anyOf, format, pattern or length bound. The summary-table row is ONE nullable object (summaryRow, all four members required inside), so the model can write a whole row or none, never half of one (live run 2026-11-26, D1); topic is an enum of the pinned standard's ids. Everything the subset cannot say (the topic id pattern, find XOR after, the date, the bookmark and summary rules) is enforced in code by validating the assembled plan against the full edit-plan.schema.json and the pinned standard's topic ids.",
   "type": "object",
   "additionalProperties": false,
   "required": ["edits", "unplaceable"],
@@ -14,24 +14,37 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "topic",
-          "para",
-          "find",
-          "old",
-          "replace",
-          "after",
-          "insert",
-          "comment",
-          "section",
-          "issue",
-          "revision",
-          "priority"
-        ],
+        "required": ["topic", "para", "find", "old", "replace", "after", "insert", "comment", "summaryRow"],
         "properties": {
           "topic": {
             "type": "string",
-            "description": "A topic id copied exactly from the standard (for example nda.term)."
+            "enum": [
+              "nda.definition-unmarked",
+              "nda.oral-disclosure",
+              "nda.exclusion-prior-possession",
+              "nda.exclusion-independent-development",
+              "nda.exclusion-third-party",
+              "nda.one-sided-carveouts",
+              "nda.purpose-limited-use",
+              "nda.representatives",
+              "nda.compelled-disclosure",
+              "nda.reverse-engineering",
+              "nda.copying-and-breach-notice",
+              "nda.data-use-licence-back",
+              "nda.no-licence-no-warranty",
+              "nda.return-destruction",
+              "nda.residuals",
+              "nda.term",
+              "nda.non-solicit",
+              "nda.remedies",
+              "nda.whistleblower-dtsa",
+              "nda.trade-secret-preservation",
+              "nda.assignment",
+              "nda.governing-law-venue",
+              "nda.confidentiality-of-agreement",
+              "nda.housekeeping"
+            ],
+            "description": "A topic id copied exactly from the standard (for example nda.term). The enum is the pinned standard's topic list (contract-tested against PinnedNdaStandard.TopicIds)."
           },
           "para": {
             "type": "string",
@@ -61,22 +74,30 @@
             "type": ["string", "null"],
             "description": "One or two plain sentences for the reviewing attorney. Null when the edit needs no comment."
           },
-          "section": {
-            "type": ["string", "null"],
-            "description": "Summary-table row, first cell: the clause's number and a short name. Null with issue, revision and priority when the edit carries no summary row."
-          },
-          "issue": {
-            "type": ["string", "null"],
-            "description": "Summary-table row: what is wrong, under twelve words."
-          },
-          "revision": {
-            "type": ["string", "null"],
-            "description": "Summary-table row: what the edit does, under twelve words."
-          },
-          "priority": {
-            "type": ["string", "null"],
-            "enum": ["High", "Medium", "Low", null],
-            "description": "Summary-table row priority."
+          "summaryRow": {
+            "type": ["object", "null"],
+            "description": "The edit's row in the review's summary table: all four words, or null when the edit carries no row (a further edit for an issue already summarised). One nullable object, so a row can never be half filled.",
+            "additionalProperties": false,
+            "required": ["section", "issue", "revision", "priority"],
+            "properties": {
+              "section": {
+                "type": "string",
+                "description": "The clause's number and a short name (for example '§9 Term')."
+              },
+              "issue": {
+                "type": "string",
+                "description": "What is wrong, under twelve words."
+              },
+              "revision": {
+                "type": "string",
+                "description": "What the edit does, under twelve words."
+              },
+              "priority": {
+                "type": "string",
+                "enum": ["High", "Medium", "Low"],
+                "description": "The topic's Priority, raised to High for any Prohibited / escalate position."
+              }
+            }
           }
         }
       }
@@ -91,6 +112,32 @@
         "properties": {
           "topic": {
             "type": "string",
+            "enum": [
+              "nda.definition-unmarked",
+              "nda.oral-disclosure",
+              "nda.exclusion-prior-possession",
+              "nda.exclusion-independent-development",
+              "nda.exclusion-third-party",
+              "nda.one-sided-carveouts",
+              "nda.purpose-limited-use",
+              "nda.representatives",
+              "nda.compelled-disclosure",
+              "nda.reverse-engineering",
+              "nda.copying-and-breach-notice",
+              "nda.data-use-licence-back",
+              "nda.no-licence-no-warranty",
+              "nda.return-destruction",
+              "nda.residuals",
+              "nda.term",
+              "nda.non-solicit",
+              "nda.remedies",
+              "nda.whistleblower-dtsa",
+              "nda.trade-secret-preservation",
+              "nda.assignment",
+              "nda.governing-law-venue",
+              "nda.confidentiality-of-agreement",
+              "nda.housekeeping"
+            ],
             "description": "A topic id copied exactly from the standard."
           },
           "section_index": {

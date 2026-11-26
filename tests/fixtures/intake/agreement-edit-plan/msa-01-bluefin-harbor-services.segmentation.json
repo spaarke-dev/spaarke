@@ -11,7 +11,11 @@
       "heading": null,
       "para_key": "MASTER SERVICES",
       "auto_numbered": false,
-      "text": "MASTER SERVICES AGREEMENT"
+      "text": "MASTER SERVICES AGREEMENT",
+      "anchor_text": {
+        "visible": "MASTER SERVICES AGREEMENT",
+        "editable": "MASTER SERVICES AGREEMENT"
+      }
     },
     {
       "index": 1,
@@ -19,7 +23,11 @@
       "heading": null,
       "para_key": "This Master Services",
       "auto_numbered": false,
-      "text": "This Master Services Agreement is entered into by Bluefin Robotics, Inc. (“Customer”) and Harbor Analytics LLC (“Provider”) as of November 1, 2026."
+      "text": "This Master Services Agreement is entered into by Bluefin Robotics, Inc. (“Customer”) and Harbor Analytics LLC (“Provider”) as of November 1, 2026.",
+      "anchor_text": {
+        "visible": "This Master Services Agreement is entered into by Bluefin Robotics, Inc. (“Customer”) and Harbor Analytics LLC (“Provider”) as of November 1, 2026.",
+        "editable": "This Master Services Agreement is entered into by Bluefin Robotics, Inc. (“Customer”) and Harbor Analytics LLC (“Provider”) as of November 1, 2026."
+      }
     },
     {
       "index": 2,
@@ -27,7 +35,11 @@
       "heading": "Services",
       "para_key": "1. Services.",
       "auto_numbered": false,
-      "text": "1.\tServices. Provider shall perform the services described in each Statement of Work."
+      "text": "1.\tServices. Provider shall perform the services described in each Statement of Work.",
+      "anchor_text": {
+        "visible": "1.\tServices. Provider shall perform the services described in each Statement of Work.",
+        "editable": "1.\tServices. Provider shall perform the services described in each Statement of Work."
+      }
     },
     {
       "index": 3,
@@ -35,7 +47,11 @@
       "heading": "Fees",
       "para_key": "2. Fees. Customer",
       "auto_numbered": false,
-      "text": "2.\tFees. Customer shall pay the fees set out in each Statement of Work within thirty (30) days of invoice."
+      "text": "2.\tFees. Customer shall pay the fees set out in each Statement of Work within thirty (30) days of invoice.",
+      "anchor_text": {
+        "visible": "2.\tFees. Customer shall pay the fees set out in each Statement of Work within thirty (30) days of invoice.",
+        "editable": "2.\tFees. Customer shall pay the fees set out in each Statement of Work within thirty (30) days of invoice."
+      }
     },
     {
       "index": 4,
@@ -43,7 +59,11 @@
       "heading": "Confidentiality",
       "para_key": "3. Confidentiality.",
       "auto_numbered": false,
-      "text": "3.\tConfidentiality. Each party shall keep the other party's confidential information confidential and use it only to perform this Agreement."
+      "text": "3.\tConfidentiality. Each party shall keep the other party's confidential information confidential and use it only to perform this Agreement.",
+      "anchor_text": {
+        "visible": "3.\tConfidentiality. Each party shall keep the other party's confidential information confidential and use it only to perform this Agreement.",
+        "editable": "3.\tConfidentiality. Each party shall keep the other party's confidential information confidential and use it only to perform this Agreement."
+      }
     },
     {
       "index": 5,
@@ -51,7 +71,11 @@
       "heading": "Limitation of Liability",
       "para_key": "4. Limitation",
       "auto_numbered": false,
-      "text": "4.\tLimitation of Liability. Neither party's liability shall exceed the fees paid in the twelve (12) months preceding the claim."
+      "text": "4.\tLimitation of Liability. Neither party's liability shall exceed the fees paid in the twelve (12) months preceding the claim.",
+      "anchor_text": {
+        "visible": "4.\tLimitation of Liability. Neither party's liability shall exceed the fees paid in the twelve (12) months preceding the claim.",
+        "editable": "4.\tLimitation of Liability. Neither party's liability shall exceed the fees paid in the twelve (12) months preceding the claim."
+      }
     },
     {
       "index": 6,
@@ -59,7 +83,11 @@
       "heading": "Term",
       "para_key": "5. Term. This",
       "auto_numbered": false,
-      "text": "5.\tTerm. This Agreement continues for three (3) years unless terminated earlier."
+      "text": "5.\tTerm. This Agreement continues for three (3) years unless terminated earlier.",
+      "anchor_text": {
+        "visible": "5.\tTerm. This Agreement continues for three (3) years unless terminated earlier.",
+        "editable": "5.\tTerm. This Agreement continues for three (3) years unless terminated earlier."
+      }
     }
   ]
 }
