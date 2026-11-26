@@ -1,6 +1,10 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <CustomActions />
+  <CustomActions>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoicesubmission.Assign.Hide" Location="Mscrm.Form.sprk_invoicesubmission.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_invoicesubmission.Assign.Hide" Location="Mscrm.HomepageGrid.sprk_invoicesubmission.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_invoicesubmission.Assign.Hide" Location="Mscrm.SubGrid.sprk_invoicesubmission.Assign" />
+  </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>

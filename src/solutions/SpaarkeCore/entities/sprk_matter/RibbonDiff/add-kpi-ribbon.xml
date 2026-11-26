@@ -52,7 +52,17 @@
       <DisplayRules>
         <DisplayRule Id="sprk.CreatePrivilege.sprk_kpiassessment.DisplayRule" />
       </DisplayRules>
+      <!--
+        field-mapping-server-write-path-r1 task 051 (FR-24): the script no longer opens a quick create; it creates the KPI
+        assessment through the BFF and opens it (Spaarke.SecureChild.Ribbon.newChild). The three helper libraries load first,
+        in order, the established ribbon idiom (the leading two as FunctionName="isNaN"): bff_auth.js, assignedaccess_postsave.js,
+        secure_child_ribbon.js. The native-New rule above now closes this button on a core-record host (the subgrid's BFF
+        "New KPI Assessment" is the one create there).
+      -->
       <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="isNaN" />
         <JavaScriptFunction Library="$webresource:sprk_/scripts/kpi_ribbon_actions.js"
                             FunctionName="Spaarke.KpiRibbon.openQuickCreate">
           <CrmParameter Value="PrimaryControl" />
