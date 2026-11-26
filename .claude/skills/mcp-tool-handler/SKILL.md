@@ -2,7 +2,7 @@
 description: Implement or modify an MCP tool handler for the Spaarke MCP server
 tags: [mcp, ai, tool-handler, api]
 techStack: [aspnet-core, csharp, mcp]
-appliesTo: ["**/Api/Mcp/**/*.cs", "**/Infrastructure/DI/McpModule.cs", "**/RouteAuthorizationGuardTests.Mcp.cs", "**/McpTool*.cs"]
+appliesTo: ["**/Api/Mcp/**/*.cs", "**/Infrastructure/DI/McpModule.cs", "**/RouteAuthorizationGuardTests.Mcp.cs", "**/RouteAuthorizationGuardTests.Mcp.*.cs", "**/McpTool*.cs"]
 alwaysApply: false
 ---
 
@@ -47,8 +47,8 @@ Architecture: `docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md`. Step-by-st
 
 1. **Placement.** Confirm the tool belongs in an existing area; a new area follows `docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md` "Add an area". Answer root CLAUDE.md §11's three questions for the new surface.
 2. **Service first.** Find or extend the service the REST route uses. If none exists, the logic goes in a service, not the tool.
-3. **Write the tool class** by copying the nearest existing one: read-only and model-visible → `ShowDecisionsTool.cs`; app-only read → `ListDecisionPageTool.cs` / `GetDecisionPlanTool.cs` / `SearchDecisionLookupTool.cs`; app-only write → `CompleteDecisionTool.cs`. Shared argument parsing: `DecisionToolCall.cs`.
-4. **Add the ledger entry** in `RouteAuthorizationGuardTests.Mcp.cs` `McpTools` (policy, caller seam, reason). The ArchTest fails on any tagged tool missing from it.
+3. **Write the tool class** by copying the nearest existing one: read-only and model-visible → `ShowDecisionsTool.cs`; app-only read → `ListDecisionPageTool.cs` / `GetDecisionPlanTool.cs` / `SearchDecisionLookupTool.cs`; app-only write → `CompleteDecisionTool.cs`. Shared argument parsing: `DecisionToolCall.cs`. Errors: `McpToolResults.FromError(new McpToolError(reasonCode, message, status, partial?), http?.TraceIdentifier)` with the REST route's `reasonCode`. Work that can take over 30 s (`McpLongRunning.Budget`): return `McpLongRunning.Started(...)` and add a status tool that returns `McpLongRunning.Status(...)` (FR-14).
+4. **Add the ledger entry** in your area's partial, `RouteAuthorizationGuardTests.Mcp.{Area}.cs` (`McpTools{Area}`: policy, caller seam, reason), never in `RouteAuthorizationGuardTests.Mcp.cs` (it concatenates the partials). The ArchTest fails on any tagged tool missing from every partial or listed twice.
 5. **Tests** (all required):
    - auth: `tests/integration/auth/Mcp/` (unauthenticated → 401; refused token types; caller path);
    - contract: `tests/integration/contract/Api/Mcp/` (`tools/list` entry: name, title, hints, visibility, schema; happy path; `isError` mapping);

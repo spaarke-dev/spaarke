@@ -1,6 +1,6 @@
 # Spaarke MCP Server Architecture
 
-> **Last Updated**: 2026-11-24
+> **Last Updated**: 2026-11-25
 > **Purpose**: How the BFF hosts Spaarke's MCP server (`/mcp/{area}`), who may call it, and how the Decide lane and Decision wizard reach Microsoft 365 Copilot Chat and Cowork through it.
 
 ---
@@ -32,7 +32,8 @@ The server accepts only ADR-028 Amendment A10 tokens: a delegated `user_imperson
 | Widget source | `src/client/widgets/spaarke-decisions/` | The single-file React widget (lane and wizard) |
 | Rate limit | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs` | The `mcp` policy |
 | Plugin package | `src/solutions/CopilotPlugins/spaarke/` | Skills only; carries the `spaarke-decisions` skill |
-| Route and tool guard | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs` | The `McpRoutes` and `McpTools` ledgers |
+| Route and tool guard | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs`, tool rows in `RouteAuthorizationGuardTests.Mcp.{Area}.cs` | The `McpRoutes` ledger and the rules; `McpTools` is the concatenation of one partial per area |
+| Long-running results | `src/server/api/Sprk.Bff.Api/Api/Mcp/McpLongRunning.cs` | FR-14 start `{ runId, status, consoleLink }` and status `{ runId, status, progress?, result? }` builders; the 30 s budget |
 
 ## The route and area model
 
@@ -91,7 +92,7 @@ A token that passes but resolves to no Dataverse `systemuser` reaches the tool, 
 - **`IDecisionCapability`** is the decision slice's host-neutral seam. The tools call `ListDecideAsync` (the whole lane, for counts), `ListDecidePageAsync` (one page, cursor-continued), `GetPlanAsync`, `GetSuppressionAsync` and `CommitAsync`. The REST Signals routes call the same capability, so the two hosts share one rule set.
 - **`IDecisionLookupSearch.SearchAsync`** finds the person, budget or firm for a plan parameter, read as the caller. The decision plan, not the caller, names the table and scope. At most 25 candidates (`DecisionLookupSearch.MaxResults`).
 - **`DecisionResultMapper`** is the one mapping from a decision result to a `DecisionToolError` (reason code, fix-the-call message, HTTP status, and for a failed commit the `partial` facts). The vocabulary equals the REST route's `reasonCode`. Messages never carry record text (ADR-015).
-- **`McpToolResults.FromError`** wraps it as an `isError: true` tool result, with `structuredContent` `{ reasonCode, message, status, correlationId?, partial? }`. A domain failure is a successful JSON-RPC answer carrying a failed tool result (ADR-019), so Copilot reads it and can correct the call.
+- **`McpToolResults.FromError`** wraps it (or any tool's `McpToolError`, the general record a `DecisionToolError` maps onto field for field) as an `isError: true` tool result, with `structuredContent` `{ reasonCode, message, status, correlationId?, partial? }`. A domain failure is a successful JSON-RPC answer carrying a failed tool result (ADR-019), so Copilot reads it and can correct the call.
 - **`DecideLaneCategories`** is the server-side partition of the lane into the Console's category cards. It mirrors `laneCountFilters.ts`; both are asserted against one shared corpus, `tests/fixtures/decide-lane-category-parity/cases.json`, so they cannot drift.
 
 ## The five tools

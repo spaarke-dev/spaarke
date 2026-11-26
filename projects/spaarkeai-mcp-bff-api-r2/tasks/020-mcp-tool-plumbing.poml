@@ -120,7 +120,17 @@
     <criterion testable="true">Build 0 warnings; publish-size delta recorded; no new HIGH CVE.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-14, Tools. uac-r2 reviews the ledger restructure. Later tool tasks each own one ledger partial.</notes>
+  <notes>Spec FR-14, Tools. uac-r2 reviews the ledger restructure. Later tool tasks each own one ledger partial.
+
+Completion (2026-11-25):
+- McpToolResults: general McpToolError(ReasonCode, Message, Status, object? Partial); the DecisionToolError overload maps onto it. Decision bytes frozen as literals in McpToolResultsGeneralTests (passed on r1's code before the change, pass after).
+- McpLongRunning: Started(runId, Queued|Running, consoleLink, summary) -> { runId, status, consoleLink }; Status(runId, state, progress?, result?, summary?) -> { runId, status, progress?, result? }; Budget = 30 s. Results only, no DI, no background work. Started refuses a finished state and any link that is not absolute https without user info.
+- Ledger: McpTools = Lazy concatenation of 11 area partials (Decisions moved verbatim, diff-verified; 10 empty). Must-fire theory removes each r1 tool on the real source (text + reflection fire); must-not-fire passes all five; duplicate-row check with fixture controls. Lazy so cross-file static-initializer order cannot matter.
+- Deviations: (1) consoleLink is passed in (POML signature), not built inside the helper: HandoffUrlBuilder is Services/Ai/** so a tool cannot inject it (ADR-013 guard); the test builds the link with the real HandoffUrlBuilder and the guide tells tools to take it from their public-contract seam. (2) Step 1 merged work/spaarkeai-mcp-bff-api-r2 (already carries origin/master) per the wave brief, not origin/master directly. (3) Step 6 TASK-INDEX and drift check, and Step 7 notes/decisions.md, are the main session's (wave rules). (4) SPAARKE-MCP-SERVER-ARCHITECTURE.md got the two matching rows (code wins, docs follow).
+- Publish (dotnet publish -c Release, framework-dependent linux-x64, Compress-Archive Optimal, PDBs included): fresh master d148580e15 41.612 MB; work-branch base 92cf9ae76c 41.167 MB; this task 41.170 MB. Task delta +0.003 MB; branch vs master -0.442 MB (task 001's agent removal). No vulnerable packages.
+- Found in passing: D-020-1 (HandoffUrlBuilder hard-coded dev-host fallback), notes/defer-issues.md, not filed.
+- Pending .claude edits: notes/capability-index-pending.md "Task 020".
+rework: fix-round-1 task 020</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

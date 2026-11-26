@@ -86,3 +86,13 @@
 
 ### D-021-2: CI filters miss the ui-components Worklist/DecisionWizard source the decisions widget bundles (pre-existing)
 - **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3196
+
+## From task 020 (2026-11-25)
+
+### D-020-1: HandoffUrlBuilder falls back to a hard-coded dev Dataverse host when the environment URL is missing (found in passing)
+
+- **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3198 (must land before task 030 returns console links)
+- **Title**: `HandoffUrlBuilder registration falls back to https://spaarkedev1.crm.dynamics.com when Dataverse:EnvironmentUrl is unset`
+- **Body**:
+  `Services/Ai/ToolFrameworkExtensions.cs` `AddHandoffUrlBuilder` (:97-104, moved unchanged from the legacy agent module by r2 task 001) builds `HandoffUrlBuilder` from `Dataverse:EnvironmentUrl`, then `DataverseServiceClient:Url`, then the literal `https://spaarkedev1.crm.dynamics.com`. In a customer environment where both settings are missing or misnamed, every server-composed deep link (chat create-record refusal links today; MCP long-running `consoleLink`s from tasks 030/032/034 if they take links from it) silently points at the Spaarke dev tenant instead of failing at startup. Failure scenario: a customer BFF deployed with the URL under another key sends its users links into `spaarkedev1`. It violates the no-hard-coded-values portability rule. Fix options: drop the literal and fail at startup (options validation) when neither key is set, or reuse the validated `Dataverse:EnvironmentUrl` options the rest of the BFF reads. r1's `DecisionsTextSummary` already avoids this builder for this reason. Not fixed in 020: the file is outside 020's scope (task 001's move kept behaviour unchanged on purpose).
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
