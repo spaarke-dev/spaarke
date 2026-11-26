@@ -60,11 +60,17 @@ const msalDouble = () => ({
   },
 });
 const strategyDir = path.resolve(__dirname, '../../../../shared/Spaarke.Auth/src/strategies');
-for (const resolved of new Set([
-  require.resolve('@azure/msal-browser'),
-  require.resolve('@azure/msal-browser', { paths: [strategyDir] }),
-])) {
-  jest.doMock(resolved, msalDouble);
+// Where the Spaarke.Auth package has no node_modules of its own (the CI job installs this package only), msal-browser
+// does not resolve from there: that copy cannot be loaded, so only this package's copy needs the double.
+const resolveFromStrategies = (): string | undefined => {
+  try {
+    return require.resolve('@azure/msal-browser', { paths: [strategyDir] });
+  } catch {
+    return undefined;
+  }
+};
+for (const resolved of new Set([require.resolve('@azure/msal-browser'), resolveFromStrategies()])) {
+  if (resolved) jest.doMock(resolved, msalDouble);
 }
 
 /* eslint-disable @typescript-eslint/no-var-requires */

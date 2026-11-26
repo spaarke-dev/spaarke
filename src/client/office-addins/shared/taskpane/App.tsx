@@ -69,7 +69,7 @@ import {
 import { fileNameFromWebUrl } from './services/quickSaveHelpers';
 import { canOpenSpaarkeRecords } from './services/openRecordLauncher';
 import { cleanGuid } from '@spaarke/ui-components/guid';
-import { describeFetchFailure } from './utils/errorMessages';
+import { describeFetchFailure, describeStartupFailure, type StartupFailure } from './utils/errorMessages';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 
 /**
@@ -190,6 +190,9 @@ const useStyles = makeStyles({
   signInBanner: {
     marginBottom: tokens.spacingVerticalS,
   },
+  startupFailure: {
+    padding: tokens.spacingVerticalM,
+  },
 });
 
 export interface AppProps {
@@ -261,6 +264,9 @@ export const App: React.FC<AppProps> = ({
   // State
   const [isInitializing, setIsInitializing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Task 139: why the pane could not start (host adapter failure, no email selected). Its own state — a start-up
+  // failure is not a sign-in failure, so it is never handed to the Sign in screen.
+  const [startupFailure, setStartupFailure] = useState<StartupFailure | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   // #1571 review F2/F1: the session ended mid-use. The sign-in prompt shows as a banner ABOVE the signed-in tabs,
   // which stay mounted, so a half-filled To Do (#2607) or Save survives the sign-in.
@@ -341,16 +347,33 @@ export const App: React.FC<AppProps> = ({
     try {
       setIsInitializing(true);
       setError(null);
+      setStartupFailure(null);
       setConnectionStatus('connecting');
+
+      // Task 139: the sign-in state does not depend on the item. Read it first, so a failure reading the item can
+      // never turn a signed-in user into the Sign in screen. It is applied below, at the point it always was.
+      const authenticated = authService.isAuthenticated();
 
       // Initialize host adapter (may already be initialized in index.tsx)
       if (!hostAdapter.isInitialized()) {
         await hostAdapter.initialize();
       }
 
-      // Build host context from new adapter methods
-      const itemId = await hostAdapter.getItemId();
-      const subject = await hostAdapter.getSubject();
+      // Build host context from new adapter methods. Task 139 (review F2): these reads only feed `hostContext`, so
+      // their failure is not a reason to refuse to start (a new unsaved compose draft has no item id; an older
+      // client has no getItemIdAsync). The one exception is NO_ITEM_SELECTED: with no email there is nothing to
+      // work on, and the pane says so with Retry.
+      let itemId = '';
+      let subject = '';
+      try {
+        itemId = await hostAdapter.getItemId();
+        subject = await hostAdapter.getSubject();
+      } catch (itemError) {
+        if ((itemError as { code?: unknown } | null | undefined)?.code === 'NO_ITEM_SELECTED') {
+          throw itemError;
+        }
+        console.warn('[Spaarke] Could not read the item id / subject at start-up; continuing', itemError);
+      }
       const itemType = hostAdapter.getItemType();
 
       const context: IHostContext = {
@@ -363,13 +386,20 @@ export const App: React.FC<AppProps> = ({
       };
       setHostContext(context);
 
-      // Check authentication status
-      setIsAuthenticated(authService.isAuthenticated());
+      // Authentication status (read before the item, above)
+      setIsAuthenticated(authenticated);
       setConnectionStatus('connected');
 
       setIsInitializing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to initialize');
+      // Task 139: keep the failure's own text (adapter errors are plain `{ code, message }` objects, not `Error`s)
+      // and keep the sign-in state true to the session, whatever failed. The failure view offers Retry.
+      setStartupFailure(describeStartupFailure(err));
+      try {
+        setIsAuthenticated(authService.isAuthenticated());
+      } catch {
+        /* sign-in state unknown: leave it as it was */
+      }
       setConnectionStatus('disconnected');
       setIsInitializing(false);
     }
@@ -528,8 +558,11 @@ export const App: React.FC<AppProps> = ({
 
   // Runs once per pane session, after authentication (the resolver call needs a token), so it also covers
   // the "sign in after pane load" path — "do not resolve on every render" (task 013 step 6).
+  // Task 139 (review F1): also only once the pane has STARTED. The adapter's capabilities depend on its item mode,
+  // which is unknown while start-up has failed (no item); after a successful Retry the mode is known, so the
+  // lookup must run then (`isInitializing` / `startupFailure` are dependencies for that reason).
   useEffect(() => {
-    if (!isAuthenticated || identityResolutionAttempted.current) {
+    if (!isAuthenticated || isInitializing || startupFailure || identityResolutionAttempted.current) {
       return;
     }
     const capabilities = hostAdapter.getCapabilities();
@@ -540,7 +573,14 @@ export const App: React.FC<AppProps> = ({
       identityResolutionAttempted.current = true;
       void resolveOpenEmailIdentity();
     }
-  }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity, resolveOpenEmailIdentity]);
+  }, [
+    isAuthenticated,
+    isInitializing,
+    startupFailure,
+    hostAdapter,
+    resolveOpenDocumentIdentity,
+    resolveOpenEmailIdentity,
+  ]);
 
   // Task 111: the Save tab filed the open document to a record. The identity (which the card and the green box read)
   // and the saved context (Create To Do's regarding) take the record at once — no reload, no re-resolve.
@@ -912,6 +952,42 @@ export const App: React.FC<AppProps> = ({
         <div className={styles.loadingContainer}>
           <Spinner label="Loading..." />
         </div>
+      </FluentProvider>
+    );
+  }
+
+  // Task 139: the pane could not start. Say why and offer Retry — never the Sign in screen, which is for a user who
+  // is not signed in. "No email selected" is information, not an add-in fault.
+  if (startupFailure) {
+    return (
+      <FluentProvider theme={theme}>
+        <TaskPaneShell
+          title={displayTitle}
+          hostType={hostType}
+          isAuthenticated={isAuthenticated}
+          {...(isAuthenticated ? { onSignOut: handleSignOut } : {})}
+          version={version}
+          {...(buildDate !== undefined ? { buildDate } : {})}
+          connectionStatus={connectionStatus}
+          showNavigation={false}
+          themePreference={preference}
+          onThemeChange={setPreference}
+          showErrorDetails={showErrorDetails}
+          onError={handleError}
+        >
+          <MessageBar
+            intent={startupFailure.noItemSelected ? 'info' : 'error'}
+            layout="multiline"
+            className={styles.startupFailure}
+          >
+            <MessageBarBody>{startupFailure.message}</MessageBarBody>
+            <MessageBarActions>
+              <Button appearance="primary" size="small" onClick={() => void initializeApp()}>
+                Retry
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        </TaskPaneShell>
       </FluentProvider>
     );
   }
