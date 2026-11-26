@@ -44,7 +44,11 @@ System Administrator (63 tables), Service Writer (60) and System Customizer (60)
 - **Q3 (ebilling-r1, answered 2026-11-26):** nothing to do. Master already omits Assign on `sprk_invoicecorrection`; it was a stale-branch reading.
 - **Q4 (ontology-r1, answered 2026-11-26):** the Ontology Service needs `sprk_Signal` Assign (keep). The Ontology Administrator's grant has no use. Removing it reverses owner decision D-160, so it goes to the owner. No human role holds Write, Delete or Assign on `sprk_decisionrecord`.
 
-## 6. How the change ships (when the owner agrees)
+## 6. Owner decision (2026-11-26, in the uac-r2 session)
+
+"Approve, keep D-160": every removal proposed in §3 is approved except the Ontology Administrator's Assign on `sprk_Signal`, which stays under D-160. So the change removes 38 grants from the role files: Core User's 25 (all but `sprk_Event`), Office Add In User's 9 and AI Analysis User's 4. The Workforce role has no role file, so its 8 inert grants are removed live on dev only, on the owner's go.
+
+## 7. How the change ships
 
 - One PR edits the role XML files in `src/dataverse/solutions/SpaarkeMaster/Roles/`, removing grants only. It's imported with `scripts/Import-SolutionScoped.ps1` after the owner's go.
 - **Enforcement (ladder):** list each removed grant under "removals" in `config/feature-role-privileges.json`, which `FeatureRolePrivilegeGuardTests` already enforces (ebilling uses it for `sprk_invoicecorrection`). Also consider a pinned allow-list of the Assign grants kept above. Any new `prvAssignsprk_*` in a Spaarke role file then fails the build unless it is added to the list with a reason. Must-fire control: add a grant and the test fails. Must-not-fire control: the current kept set passes.
