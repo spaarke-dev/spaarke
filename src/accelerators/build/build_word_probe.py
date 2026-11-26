@@ -30,7 +30,11 @@ import gates  # noqa: E402
 from build_accelerator import make_icons, write, zip_dir  # noqa: E402
 
 PACKAGE = "spaarke-word-probe"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
+# Word's code runner refuses code that uses these (WP-5 run 1, 2026-11-26: "rejected ... because it uses
+# toString"). The others are guesses at the same denylist; the probe avoids them all.
+JS_FORBIDDEN = ("toString", "padStart", "eval", "Function", "constructor", "prototype", "__proto__",
+                "fetch", "XMLHttpRequest", "import", "require")
 INSTRUCTION_CODE = "WPI-1112-A"
 SCRIPT_CODE = "WPS-1112-A"
 JS_CODE = "WPJ-1126-A"
@@ -67,7 +71,10 @@ JS_PROBE = f"""await Word.run(async (context) => {{
   const before = doc.changeTrackingMode;
   let h = 0x811c9dc5;
   for (const ch of "{JS_CODE} Spaarke") {{ h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }}
-  const marker = "{JS_CODE} " + h.toString(16).padStart(8, "0");
+  const digits = "0123456789abcdef";
+  let hex = "";
+  for (let i = 28; i >= 0; i -= 4) {{ hex += digits[(h >>> i) & 15]; }}
+  const marker = "{JS_CODE} " + hex;
   doc.changeTrackingMode = Word.ChangeTrackingMode.off;
   const p = doc.body.insertParagraph("Spaarke JavaScript probe: alpha bravo delta. " + marker, "End");
   await context.sync();
