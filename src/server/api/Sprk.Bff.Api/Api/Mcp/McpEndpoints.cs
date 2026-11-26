@@ -17,7 +17,9 @@ namespace Sprk.Bff.Api.Api.Mcp;
 /// <para><b>Chain, outermost first.</b> <c>.RequireAuthorization()</c> on the default workforce scheme (ADR-028); then
 /// <see cref="McpConnectorTokenFilter"/>, which refuses with 401 every token that is not an ADR-028 A10 caller (CIAM, A9 home
 /// directory, Copilot audience, app-only) before the transport runs (per-tool <c>[Authorize]</c> policies are checked inside the
-/// transport by the SDK's authorization filters, <see cref="McpToolAuthorization"/>); the <c>mcp</c> rate-limit policy per caller (ADR-016); a 256 KiB request-body limit (ADR-001;
+/// transport by the SDK's authorization filters, <see cref="McpToolAuthorization"/>); then <see cref="McpOriginCheckFilter"/>
+/// (ISS-007: Host/Origin validation per the MCP transport rules; <c>Mcp:OriginCheck:Mode</c> LogOnly or Enforce; after auth, so an
+/// unauthenticated caller still gets 401); the <c>mcp</c> rate-limit policy per caller (ADR-016); a 256 KiB request-body limit (ADR-001;
 /// a Decision review is a few KB); response buffering off (the transport may answer with an SSE stream; SDK 2.3.1 also does this
 /// itself, and the route does not rely on that); then <see cref="McpEnabledFilter"/> (ADR-032 kill switch, after authorization: a
 /// switched-off server still answers an anonymous caller 401).</para>
