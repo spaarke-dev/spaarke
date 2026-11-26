@@ -3,7 +3,7 @@
   <metadata>
     <title>Pane start-up: show the real reason, offer Retry instead of Sign in, and follow the selected email</title>
     <phase>Phase 7: fixes before close (owner dev check of 136–138, owner go 2026-11-25)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in both panes' start-up; tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -67,6 +67,6 @@ Neither the start-up block nor the adapter changed in tasks 136–138; this defe
     <cost-of-doing-nothing>A user who opens the pane while Outlook has no email ready sees "Failed to initialize" and a Sign in button that does not help; a pinned pane keeps the previous email's state when the user moves to another email.</cost-of-doing-nothing>
   </justification>
 
-  <notes></notes>
+  <notes>Done 2026-11-26. PR #3204 merged 03213a90fd. One adversarial review (opus): 4 defects + 3 test issues fixed (Retry skipped the identity lookup; a new draft could not start; a save could mix two emails after an item change, now ITEM_CHANGED; a failed item change left the old pane live). CI-only test fixes 57ad4d8a1a. The office-addins gate now lists all 149 suites. Add-in deploy 45750570047; owner live check in Outlook on the web PASS.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
