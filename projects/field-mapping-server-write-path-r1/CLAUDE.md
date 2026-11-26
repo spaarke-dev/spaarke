@@ -39,9 +39,18 @@ Evidence (file:line): `notes/design-review-2026-10-19.md`. Line numbers drift; r
   and never an existence leak (FR-04).
 - MUST run caller checks on the **merged** payload:
   - a caller-supplied value that fails → refuse (uniform 404/403);
-  - a **mapped** value that fails AppendTo or field security → dropped with a warning; the create proceeds;
-  - **except a mapped filing lookup** (`SecureChildLineage` / `FilingParentOf`) that fails AppendTo → **refuse**
-    (FR-08 amendment, owner 2026-10-20, UAC-r2 condition c).
+  - a **mapped** value from the record the caller's row is filed under (table and id both match) is written
+    **without** the caller's AppendTo or field-security check (owner 4b/4c, 2026-10-27, reconfirmed 2026-11-26;
+    task 064), **except**:
+    - a mapped **filing** lookup (`SecureChildLineage` / `FilingParentOf`) that fails AppendTo → **refuse**
+      (FR-08 amendment, owner 2026-10-20, UAC-r2 condition c);
+    - a BFF-owned invariant or access-conferring column (`IsCopyInvariantColumn`: owner, secure/access columns,
+      Assigned-To columns by prefix and registry, `sprk_regarding*`, `sprk_related*`, creator, file binding,
+      external flag, contact identity) keeps the caller's checks: a failure drops it with a warning;
+    - a value mapped from a source that is not the caller's filing parent, or an adapter default, keeps the
+      caller's checks (dropped with a warning on failure);
+  - a value from a field-secured SOURCE column is never copied (dropped with a warning), on create and push, until
+    a same-profile-set rule exists; an unknown security state maps nothing.
 
   (FR-08)
 - MUST resolve the owner record-first via `ResolveOwnerAsync` for roots and children. Never user- or app-owned except
@@ -83,7 +92,8 @@ All dated 2026-10-19 unless noted; rationale in design.md §7 and spec "Owner Cl
 - Path scope: all four bespoke groups (Office; Events + Analysis routes; invoice extraction; system creators) (Q10).
 - OOB Assign: hidden on standard-owned tables; the repair pass restores ownership; `prvAssign` removal is a UAC-r2
   follow-up after an audit (Q12).
-- A mapped value failing AppendTo or field security is skipped with a warning.
+- An ordinary mapped value from the filing parent is copied regardless of the caller's rights (4b/4c, owner
+  2026-10-27, reconfirmed 2026-11-26: "the mapping is a data consistency rule"); the exceptions are in §2 FR-08.
 - **No backfill**: forward-only.
 - Rollout: per-wizard cutover, Matter first. Rollback is redeploying the previous bundle; no runtime flag.
 - Matter number: platform autonumber (owner 2026-10-02, task 076). The wizard stops generating `{typeCode}-{random6}`.
