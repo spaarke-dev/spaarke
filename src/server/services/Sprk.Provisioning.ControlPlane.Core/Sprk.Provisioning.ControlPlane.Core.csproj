@@ -382,6 +382,13 @@
                        Link="Handlers\AppConfigSeed\ReferenceData\sprk_triagecategory.json">
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ReferenceData.sprk_triagecategory.json</LogicalName>
     </EmbeddedResource>
+    <!-- ISS-045: the 17 sprk_gridconfiguration rows product code hard-codes by dev row id
+         (External Access widgets and the BFF external-grant allow-list, workspace/assistant widgets, Events,
+         Calendar, KPI, Invoices, Communications and Analysis Hub pages). Same pipeline as the three tables above. -->
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\reference\sprk_gridconfiguration.json"
+                       Link="Handlers\AppConfigSeed\ReferenceData\sprk_gridconfiguration.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ReferenceData.sprk_gridconfiguration.json</LogicalName>
+    </EmbeddedResource>
 
     <!-- Data-setup plan D4: the `legal-standard` starter taxonomy pack (matter, matter
          subtype, practice-area, project, document, contact and organization types).

@@ -312,6 +312,77 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         task.GetProperty("sprk_eventtypecode").GetString().Should().Be("TASK");
     }
 
+    // ---- ISS-045: the 17 grid configurations product code hard-codes by dev row id -------------------------------------
+
+    /// <summary>The ids External Access widgets, the BFF external-grant allow-list, the workspace widgets and the pages hard-code.</summary>
+    private static readonly string[] HardCodedGridConfigurationIds =
+    [
+        "113ad380-9e63-f111-ab0c-70a8a53ec687", "1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6", "3019a06e-9b5e-f111-ab0c-7c1e521545d7",
+        "3af4102c-1092-f111-b8dc-7ced8ddc4a05", "3ff4102c-1092-f111-b8dc-7ced8ddc4a05", "403e5d37-cb94-f111-b8db-00224835447a",
+        "42f4102c-1092-f111-b8dc-7ced8ddc4a05", "5294c28a-f078-f111-ab0e-7ced8ddc4a05", "583a2a33-1092-f111-b8dc-7ced8ddc4a05",
+        "61711823-1092-f111-b8dc-7ced8ddc4a05", "97ee98e7-7a63-f111-ab0c-70a8a53ec687", "9c5b0ee7-7a63-f111-ab0c-000d3a4d8152",
+        "ac05e4f1-8d85-f111-8075-7c1e5268570d", "d021827b-9b5e-f111-ab0c-7c1e521545d7", "e15c2b93-a05f-f111-a825-70a8a59455f4",
+        "e1826c4c-9575-f111-ab0e-7ced8ddc4a05", "e7c8126a-968b-f111-8077-7ced8ddc4a05",
+    ];
+
+    [Fact]
+    public void ISS045_EmbeddedGridConfigurations_AreExactlyTheHardCodedIds_EachWithAUsableConfig()
+    {
+        var grid = ReferenceDataSet.Tables.Single(t => t.Table == "sprk_gridconfiguration");
+
+        grid.PrimaryKey.Should().Be("sprk_gridconfigurationid");
+        grid.EntitySet.Should().Be("sprk_gridconfigurations");
+        grid.Rows.Select(r => r.Id).Should().BeEquivalentTo(HardCodedGridConfigurationIds.Select(Guid.Parse));
+        grid.Columns.Should().Contain(["sprk_name", "sprk_entitylogicalname", "sprk_configjson"]);
+        grid.Columns.Should().NotContain(c => c.StartsWith("created", StringComparison.Ordinal) || c.StartsWith("modified", StringComparison.Ordinal)
+                                              || c.Contains("owner", StringComparison.Ordinal) || c == "versionnumber",
+            "no audit or ownership column travels to a stamp");
+
+        foreach (var row in grid.Rows)
+        {
+            // sprk_configjson is the shared <DataGrid configId=...> document: it must parse and name its source.
+            using var config = JsonDocument.Parse(row.Values["sprk_configjson"].GetString()!);
+            config.RootElement.TryGetProperty("source", out _).Should().BeTrue($"'{row.DisplayName}' carries a grid source");
+            row.Values["sprk_entitylogicalname"].GetString().Should().StartWith("sprk_");
+        }
+    }
+
+    [Fact]
+    public async Task ISS045_GridConfigurations_SeededIntoAnEmptyEnvironment_AreCreatedByTheirFixedIds()
+    {
+        var fake = new FakeDataverseHandler();
+        var seeder = BuildSeeder(fake, ReferenceDataSet.Tables);
+
+        var result = await seeder.SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        var posted = fake.Posts.Where(p => p.Uri.AbsolutePath == "/api/data/v9.2/sprk_gridconfigurations")
+            .Select(p => JsonDocument.Parse(p.Body).RootElement)
+            .ToList();
+        posted.Select(e => e.GetProperty("sprk_gridconfigurationid").GetString())
+            .Should().BeEquivalentTo(HardCodedGridConfigurationIds, "product code opens each row by this id, so the row is created with it");
+        posted.Select(e => e.GetProperty("sprk_configjson").GetString()).Should().OnlyContain(json => !string.IsNullOrEmpty(json));
+    }
+
+    [Fact]
+    public async Task ISS045_GridConfigurations_AlreadyPresentUnderTheirIds_AreNotWritten()
+    {
+        var grid = ReferenceDataSet.Tables.Single(t => t.Table == "sprk_gridconfiguration");
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_gridconfigurations"] = grid.Rows.Select(r =>
+        {
+            var row = r.Values.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
+            row[grid.PrimaryKey] = r.Id.ToString("D");
+            return JsonSerializer.Serialize(row);
+        }).ToArray();
+
+        var result = await BuildSeeder(fake, [grid]).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("0 created").And.Contain("17 unchanged");
+        fake.Posts.Should().BeEmpty();
+    }
+
     [Fact]
     public void ISS039_ReferenceDataSeeder_IsRegisteredInTheH12bSeederSet()
     {
