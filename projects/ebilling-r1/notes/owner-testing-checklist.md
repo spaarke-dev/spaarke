@@ -238,9 +238,9 @@ Your review points: (2) UTBMS code without its description, (3) the highlight co
 - [ ] **Pages still open after the shared-code move (#2965), only if convenient:** AP Export, Invoice Files and the Rule Review page still open and load normally. Those three pages were not redeployed this time, so this check waits for our next page deploy.
 - Nothing else in batch 5 is visible: DEF-046 is a deploy-script fix, DEF-064 is a build check.
 
-## Z. Billing firm field in Invoice Review (#3211, merged 2026-11-26 04:37:54Z at 1459a14916): WAITS for the page deploy
+## Z. Billing firm field in Invoice Review (#3211, merged 2026-11-26 04:37:54Z at 1459a14916): READY since 2026-11-26 12:15:10Z (page from 1459a14916, uac-r2's deploy; dev BFF unchanged 1e64e94168)
 
-uac-r2 deploys `sprk_invoicereviewpage` from 1459a14916 once you name that SHA in uac-r2's session. No BFF deploy is needed (dev BFF 1e64e94168 already has both routes).
+Deployed by uac-r2 on your go in its session: `sprk_invoicereviewpage` live 12:15:10Z, sha256 e124c6d2…1306 (read-back equals the build). Rollback 49a8243a…9502.
 
 - [ ] **Set the firm from the header (095d-3):** open an invoice that has no firm. The header's firm value is a dropdown listing the firms linked to its matter; the note under the lines says to set the firm in the header. Pick a firm and save: the field shows the firm, and once the rules re-run finishes the lines, By-rule suggestions, corrections and Add line unlock without a reload. Needs a dev invoice with no firm; dev had none on 2026-11-26, so skip this if there still is none.
 - [ ] **Read-only otherwise:** on an invoice that already has a firm, or as a user who can't edit the invoice, the firm is plain text, not a dropdown.

@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-26 ~04:45Z (#3211 merged; page deploy waits for the owner's SHA go in uac-r2)
+> **Last Updated:** 2026-11-26 ~12:20Z (Invoice Review page from #3211 live on dev)
 > History: `notes/handoff-history/current-task-2026-11-26a.md` (the previous state, verbatim), plus `-2026-11-24a`, `-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -12,8 +12,8 @@
 
 - **No task running.** Work tip is pushed; branch `work/ebilling-r1`.
 - **#3211 MERGED** 2026-11-26 04:37:54Z at 1459a14916 (merge commit; owner "Yes, merge when green", auto-merge). Carried 095d-3 (Billing firm field in the Invoice Review header, client only) and the reader-role script accepting the 9 platform-added privileges, plus a CI fix (d60656689f: the Ontology script tests job's sparse checkout now includes the S29 folder; uac-r2 found the failure). provisioning-r1 told (it now rewords the S29 refusal text and the rejection-code doc); uac-r2 told.
-- **Page deploy pending:** the owner said "deploy the page". uac-r2 deploys `sprk_invoicereviewpage` only after the owner names 1459a14916 in uac-r2's own session (its rule; a go relayed from here does not count). No BFF deploy. Record uac-r2's BEFORE/AFTER (SHA, sha256, times) in checklist Z when they arrive.
-- **Dev:** BFF 1e64e94168 live since 2026-11-26 01:56:50Z (uac-r2, owner go; carries batch 5; rollback aa933c09e6). Invoice Review page from the same SHA since 01:59:31Z (sha256 49a8243a…9502; rollback 70c9d772…8960). uac-r2's 30-minute gate PASSED 02:27Z (146 requests, 0 5xx). `sprk_apexport`, `sprk_invoicefiles` and `sprk_rulereviewpage` are not redeployed (refactor-only, our next page deploy). `sprk_recordprocedures` has never been on dev: its first rollout is task 112.
+- **Page deployed:** `sprk_invoicereviewpage` live on dev since 2026-11-26 12:15:10Z from 1459a14916 (uac-r2, owner go in its session; 2,010,333 B, sha256 e124c6d25e83c9f27d21e775e46b9069324db4625592079f474934dcb2701306, read-back equals the build; web resource d1f2a11a-59e8-f111-84ea-7ced8dda31f8; rollback 49a8243a…9502). No BFF change. Owner checks it via checklist Z.
+- **Dev:** BFF 1e64e94168 live since 2026-11-26 01:56:50Z (uac-r2, owner go; carries batch 5; rollback aa933c09e6). Invoice Review page was from the same SHA 01:59:31Z (sha256 49a8243a…9502), replaced 12:15:10Z by 1459a14916. uac-r2's 30-minute gate PASSED 02:27Z (146 requests, 0 5xx). `sprk_apexport`, `sprk_invoicefiles` and `sprk_rulereviewpage` are not redeployed (refactor-only, our next page deploy). `sprk_recordprocedures` has never been on dev: its first rollout is task 112.
 - **SpaarkeMaster 1.3.3.0 published** 2026-11-25 (run 45708424019, buildId 2026.11.25-350; rollback = copy `dataverse-solutions-latest.previous.json` over latest). Dev unmanaged SpaarkeMaster is 1.3.3.0. provisioning-r1 owns the ACME upgrade. Before the NEXT export, remove `sprk_DocumentDelete.js` from the dev solution (runbook).
 - **Dev reader-role finding:** sent to uac-r2 privately; owner: leave it. Dev `-Verify` on the Decision Record Reader role exits 1 because of it, which is expected.
 
