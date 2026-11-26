@@ -3,7 +3,7 @@
 Python 3 standard library + lxml only.
 
 Usage:
-  python segment_clauses.py ORIGINAL.docx [--min-key 12] > clauses.json
+  python segment_clauses.py ORIGINAL.docx [--min-key 12] [--anchor-text] > clauses.json
 
 Output (JSON on stdout):
   {"paragraphs": N, "has_tracked_changes": bool (any revision, incl. moves and formatting, in the body,
@@ -15,6 +15,14 @@ Output (JSON on stdout):
 `para_key` is the shortest leading text (at least --min-key characters, extended a word at
 a time) that occurs in exactly one paragraph, so it can be used as an edit plan's "para".
 Paragraphs whose key cannot be made unique get "para_key": null and a stderr warning.
+
+--anchor-text adds to every section "anchor_text": {"visible": ..., "editable": ...}: the two strings
+ooxml_redline.py locates "find"/"after" in, raw (not stripped, whitespace not collapsed), computed by the
+redliner's own code: "visible" is Redliner.visible_text (what the reader sees: not deleted or moved away),
+"editable" is Redliner.text (the paragraph's direct-child runs, outside any existing revision, hyperlink or
+content control). A caller that checks a plan before the engine runs (unattended intake) needs both: "text"
+above is stripped and does not say which words sit inside earlier reviewers' markup. Without the flag the
+output is unchanged.
 Exit codes: 0 ok, 2 bad input.
 """
 import argparse
@@ -103,7 +111,14 @@ def unique_key(i, texts, min_len):
     return None
 
 
-def segment(path, min_key=12):
+def anchor_text(p):
+    """The texts ooxml_redline.Redliner._locate searches, from the redliner's own functions (no second copy)."""
+    from ooxml_redline import Redliner  # imported here: without --anchor-text this module needs nothing from it
+    editable = "".join(Redliner._run_char(c) for r in p.findall(q("r")) for c in r if c.tag != q("rPr"))
+    return {"visible": Redliner.visible_text(p), "editable": editable}
+
+
+def segment(path, min_key=12, with_anchor_text=False):
     doc, has_comments, revised_parts = load(path)
     body = doc.find(q("body"))
     paras = list(body.iter(q("p")))  # same set the redliner searches, so keys are unique there too
@@ -144,6 +159,8 @@ def segment(path, min_key=12):
         hidden = hidden_text(p)
         if hidden.strip():
             sec["hidden_text"] = hidden  # invisible in Word: treat as suspect, tell the user
+        if with_anchor_text:
+            sec["anchor_text"] = anchor_text(p)
         sections.append(sec)
     return {"paragraphs": len(paras), "has_tracked_changes": bool(revised_parts), "revised_parts": revised_parts,
             "has_comments": has_comments, "has_hidden_text": any("hidden_text" in s for s in sections),
@@ -154,9 +171,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Map a .docx into sections with unique paragraph keys.")
     ap.add_argument("docx")
     ap.add_argument("--min-key", type=int, default=12)
+    ap.add_argument("--anchor-text", action="store_true",
+                    help="add each section's raw visible and editable text, as ooxml_redline.py searches them")
     a = ap.parse_args(argv)
     try:
-        result = segment(a.docx, a.min_key)
+        result = segment(a.docx, a.min_key, a.anchor_text)
     except (OSError, ValueError, zipfile.BadZipFile, etree.XMLSyntaxError) as ex:
         print(json.dumps({"error": str(ex)}), file=sys.stderr)
         return 2
