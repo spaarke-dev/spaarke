@@ -69,7 +69,7 @@
 ## From task 021 (2026-11-25)
 
 ### D-021-1: CI path filters miss the shared widget transport, so a change to it does not rebuild, retest or republish the Decisions widget
-- **GitHub issue**: not filed yet (main session files it).
+- **GitHub issue**: none — fixed in scope by the main session in 13c7770195 (`src/client/widgets/shared/**` added to both path filters).
 - **Title**: `ci: add src/client/widgets/shared/** to the decisions-widget path filters (tier-1 MCP surface, publish-bff-artifact)`
 - **Body**:
   Task 021 (spaarkeai-mcp-bff-api-r2) moved the Decisions widget's MCP transport into `src/client/widgets/shared/mcp/`, which the
