@@ -566,6 +566,9 @@ export function isConnectionConfirmed(conn: Connection, confirmedFields: Readonl
 // resolver AND the collapsible-section status dot derive connections identically.
 export const ASSOCIATION_STATUS_RESOLVED_VALUE = 100000000;
 
+/** `sprk_associationstatus` = Ambiguous (the engine refused to pick among conflicting high-confidence matches). */
+const ASSOCIATION_STATUS_AMBIGUOUS_VALUE = 100000004;
+
 /** An empty provenance doc so `deriveConnections` still has a shape to walk when every association was filed manually (no engine trail). */
 function emptyProvenanceDoc(): ProvenanceDoc {
   return {
@@ -847,6 +850,29 @@ export function derivePrimaryReview(
   if (autoMatched && top) {
     const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
     return { state: 'needs-confirmation', candidates, allCandidates, primary };
+  }
+
+  // 🟡 Needs confirmation — a regarding is WRITTEN (a filed typed lookup, or the denorm primary) but no human confirmed it
+  // (word-add-in-r1 task 140, ISS-043): the engine filed a suggestion, or its provenance trail carries no candidates. The
+  // written record is what the row is filed under, so it is the primary — never "No confident match". An Ambiguous conflict
+  // stays 🔴 (the reviewer still has to choose).
+  const ambiguous = hasConflict || associationStatus === ASSOCIATION_STATUS_AMBIGUOUS_VALUE;
+  const written = !ambiguous && (filedList.length > 0 || !!denorm?.recordName);
+  if (written) {
+    const primary = resolveConfirmedPrimary(ranked, filedList, denorm);
+    if (primary) {
+      // The primary is shown as the card it is confirmed from: a written record with an id that no candidate carries
+      // (an empty trail) leads the candidate list. A denorm-only primary has no id to confirm, so it is the primary alone.
+      const inList = (list: PrimaryCandidate[]): boolean =>
+        list.some(c => primaryKey(c.entity, c.targetId) === primaryKey(primary.entity, primary.targetId));
+      const lead = primary.targetId ? [primary] : [];
+      return {
+        state: 'needs-confirmation',
+        candidates: inList(candidates) ? candidates : [...lead, ...candidates].slice(0, PRIMARY_CANDIDATE_SLOTS),
+        allCandidates: inList(allCandidates) ? allCandidates : [...lead, ...allCandidates],
+        primary,
+      };
+    }
   }
 
   // 🔴 Requires review — the reviewer picks from candidates (or links another record).
