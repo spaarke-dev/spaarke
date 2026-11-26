@@ -937,9 +937,14 @@ public partial class RouteAuthorizationGuardTests
         }
 
         // MUST NOT FIRE: the real McpModule (WithHttpTransport, AddAuthorizationFilters, ConfigureSessionOptions, ToolCollection, and
-        // task 030's ResourceCollection of the real DecisionsWidgetResource and, since r2 task 034, BriefingWidgetResource), the catalog, the endpoints and
+        // task 030's ResourceCollection of the real DecisionsWidgetResource and, since r2 task 034, BriefingWidgetResource and, since task 035, SearchResultsWidgetResource), the catalog, the endpoints and
         // the widget classes themselves.
-        var widgetUnits = new[] { "Api/Mcp/LegalOperations/DecisionsWidgetResource.cs", "Api/Mcp/LegalOperations/Briefing/BriefingWidgetResource.cs" }
+        var widgetUnits = new[]
+        {
+            "Api/Mcp/LegalOperations/DecisionsWidgetResource.cs",
+            "Api/Mcp/LegalOperations/Briefing/BriefingWidgetResource.cs",
+            "Api/Mcp/LegalOperations/Search/SearchResultsWidgetResource.cs",
+        }
             .Select(p => new SourceUnit(p, ReadRepoFile("src/server/api/Sprk.Bff.Api/" + p)!))
             .ToArray();
         foreach (var path in new[] { "Infrastructure/DI/McpModule.cs", "Api/Mcp/McpToolCatalog.cs", "Api/Mcp/McpEndpoints.cs", "Api/Mcp/McpToolAuthorization.cs" })
@@ -949,7 +954,7 @@ public partial class RouteAuthorizationGuardTests
         }
 
         Assert.Contains("ConfigureSessionOptions", ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
-        Assert.Matches(@"ResourceCollection = new McpServerResourceCollection\s*\{\s*DecisionsWidgetResource\.Instance,\s*BriefingWidgetResource\.Instance,?\s*\}",
+        Assert.Matches(@"ResourceCollection = new McpServerResourceCollection\s*\{\s*DecisionsWidgetResource\.Instance,\s*BriefingWidgetResource\.Instance,\s*SearchResultsWidgetResource\.Instance,?\s*\}",
             ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!);
 
         // Task 030 widget exception (2026-11-14). Sanctioned: McpModule, a static Api/Mcp class, one Create(Read, ...), Read().

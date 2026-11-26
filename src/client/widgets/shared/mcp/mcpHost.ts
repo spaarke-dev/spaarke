@@ -23,6 +23,7 @@ export { McpHostContext, useMcpHost, type McpHostConnection } from './mcpHostCon
 export function McpHostProvider({ name, children }: { name: string; children: ReactNode }) {
   const [hostContext, setHostContext] = useState<HostContext | undefined>(undefined);
   const [toolResult, setToolResult] = useState<unknown>(null);
+  const [toolInput, setToolInput] = useState<Record<string, unknown> | undefined>(undefined);
 
   const { app, isConnected, error } = useApp({
     appInfo: { name, version: '1.0.0' },
@@ -31,6 +32,16 @@ export function McpHostProvider({ name, children }: { name: string; children: Re
     onAppCreated: (created: App) => {
       created.ontoolresult = result => {
         if (result?.structuredContent !== undefined) setToolResult(result.structuredContent);
+      };
+      // The arguments of the tool call that opened the widget (the host sends them before the result). A widget that must repeat or continue
+      // that call (the search results widget, task 035) reads them; one that does not ignores them.
+      created.ontoolinput = params => {
+        const args = params?.arguments;
+        setToolInput(
+          typeof args === 'object' && args !== null && !Array.isArray(args)
+            ? (args as Record<string, unknown>)
+            : undefined
+        );
       };
       // A change carries only the fields that changed: merge, never replace.
       created.onhostcontextchanged = changed => setHostContext(previous => ({ ...previous, ...changed }));
@@ -73,8 +84,8 @@ export function McpHostProvider({ name, children }: { name: string; children: Re
   }, []);
 
   const value = useMemo<McpHostConnection>(
-    () => ({ isConnected, error, hostContext, toolResult, callTool, openLink, requestDisplayMode }),
-    [isConnected, error, hostContext, toolResult, callTool, openLink, requestDisplayMode]
+    () => ({ isConnected, error, hostContext, toolResult, toolInput, callTool, openLink, requestDisplayMode }),
+    [isConnected, error, hostContext, toolResult, toolInput, callTool, openLink, requestDisplayMode]
   );
 
   return createElement(McpHostContext.Provider, { value }, children);

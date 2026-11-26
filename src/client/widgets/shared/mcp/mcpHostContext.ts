@@ -21,6 +21,11 @@ export interface McpHostConnection {
   hostContext: HostContext | undefined;
   /** `structuredContent` of the latest result the host delivered for the tool call that opened the widget; `null` until one arrives. */
   toolResult: unknown;
+  /**
+   * The arguments the model or user sent in the tool call that opened the widget (`ui/notifications/tool-input`); `undefined` until the host sends them,
+   * and for a host that never does. Optional so a connection built without it (a test double, `DISCONNECTED`) stays valid.
+   */
+  toolInput?: Record<string, unknown>;
   /** Calls a server tool through the host. Rejects when the host is not connected. */
   callTool: CallServerTool;
   /** Asks the host to open a link in the user's browser (the widget declares no network origins and never navigates itself). */

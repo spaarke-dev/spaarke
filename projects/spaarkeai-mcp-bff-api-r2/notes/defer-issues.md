@@ -302,3 +302,23 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   `status`, `completedOn` and `documentName` in the tool. The precondition test
   `AnalysisToolsContractTests.Precondition_TheRestLoaderFabricatesCompleted_ForANeverRunRow` pins today's behaviour and is deleted with the fix.
 - **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## D-035-1 — `SearchResultsWidget` requires a score and always draws a relevance badge; the MCP search tools expose none
+- **Status**: deferred (draft issue for the main session to file). Found while writing task 035; the widget hides the badge with a CSS rule on the component's `className` (D-035-score) instead of editing the shared component (ADR-012; the brief forbids it).
+- **Title**: `SearchResultsWidget: make score optional so hosts without a relevance score do not need a hidden badge`
+- **Body**:
+  `src/client/shared/Spaarke.AI.Widgets/src/outputs/output-widgets/SearchResultsWidget.tsx` types `SearchResultItem.score` as a required `number` and always renders
+  a `Badge` with `Math.round(score * 100)%`. The MCP tools `spaarke_search_documents` / `spaarke_find_records` (ADR-015) return no score, so the Copilot widget
+  (`src/client/widgets/spaarke-search-results/`) passes `0` and hides the badge's slot (`& .fui-CardHeader__action`), which couples it to a Fluent class name.
+  Failure scenario: a Fluent upgrade renames that slot class and every Copilot search hit shows a red "0%" badge. Fix: make `score` optional and render the badge
+  only when it is a finite number; then drop the widget's `noScore` rule. Edits `Spaarke.AI.Widgets` and the Console's own `SearchResultsWidget` tests (add a case; the
+  existing ones stay). Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
+
+## D-035-2 — do Copilot Chat and Cowork send the tool call's arguments (`ui/notifications/tool-input`) to the widget? (verify at deploy 039 / E2E 043)
+- **Status**: deferred (a check, not a defect). The widget's heading ("Search results for <query>") and "Load more" need `McpHostConnection.toolInput`.
+- **Title**: `Verify Copilot hosts deliver tool-input to the search results widget`
+- **Body**:
+  Task 035 reads the arguments of the call that opened the widget through the SDK's `ontoolinput` (shared `mcpHost.ts`). It is in the MCP Apps spec, but no host was
+  run against it in this task (no deploy). If a host does not send it, the heading reads "your search" and the widget shows no Load more (it says "Ask for the next page
+  in the chat"). At deploy 039 ask "Find Spaarke documents about indemnification" in Chat and in Cowork and confirm the heading shows the query and Load more appears on
+  a full page inside one matter. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.

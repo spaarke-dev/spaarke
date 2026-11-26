@@ -290,6 +290,16 @@
                       Condition="Exists('../../../client/widgets/spaarke-briefing/dist/index.html')" />
   </ItemGroup>
 
+  <!-- spaarkeai-mcp-bff-api-r2 task 035 (FR-16, NFR-03): the Spaarke search results MCP App widget, ONE self-contained html file built
+       by src/client/widgets/spaarke-search-results (npm run build), served by SearchResultsWidgetResource as
+       ui://spaarke/search-results.html. Same Condition=Exists contract as the widgets above. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../../client/widgets/spaarke-search-results/dist/index.html"
+                      LogicalName="Sprk.Bff.Api.Widgets.search-results.html"
+                      Link="Api/Mcp/LegalOperations/Search/search-results-widget.html"
+                      Condition="Exists('../../../client/widgets/spaarke-search-results/dist/index.html')" />
+  </ItemGroup>
+
   <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at
        config/secure-record-owner-role.json — LINKED (not copied) so the NFR-05 census (scheduled job + manual gate)
        reads the same bytes as scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and the setup guide. -->

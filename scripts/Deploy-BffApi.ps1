@@ -205,7 +205,7 @@ function Test-HealthCheck {
 }
 
 function Test-WidgetEmbedded {
-    # $Name is the widget's short name: "decisions" or "briefing" (the manifest name is Sprk.Bff.Api.Widgets.<name>.html).
+    # $Name is the widget's short name: "decisions", "briefing" or "search-results" (the manifest name is Sprk.Bff.Api.Widgets.<name>.html).
     param([string]$PublishDir, [string]$Name)
 
     $dll = Join-Path $PublishDir "Sprk.Bff.Api.dll"
@@ -231,7 +231,8 @@ if (-not $SkipBuild) {
     # error for resources/read of ui://spaarke/decisions.html. `npm run build` type-checks, builds, and runs scripts/check-bundle-size.mjs
     # (fails above 3 MB, or when the page is not self-contained). Same steps as publish-bff-artifact.yml.
     # spaarkeai-mcp-bff-api-r2 task 034 added the Daily Briefing widget (ui://spaarke/briefing.html), built and embedded the same way.
-    foreach ($WidgetName in @("decisions", "briefing")) {
+    # Task 035 added the search results widget (ui://spaarke/search-results.html), built and embedded the same way.
+    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
         $WidgetDir = "$RepoRoot\src\client\widgets\spaarke-$WidgetName"
         Push-Location $WidgetDir
         try {
@@ -279,7 +280,7 @@ if (-not $SkipBuild) {
     # The csproj embeds the widget only when dist/index.html exists (Condition=Exists), so a skipped or failed-open widget build would
     # publish a BFF that serves an error for ui://spaarke/decisions.html. Fail here instead. The logical name is stored as UTF-8 in the
     # assembly's manifest-resource table, so a byte search of the published dll finds it (same check as publish-bff-artifact.yml).
-    foreach ($WidgetName in @("decisions", "briefing")) {
+    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
         if (-not (Test-WidgetEmbedded -PublishDir $PublishPath -Name $WidgetName)) {
             throw "The published Sprk.Bff.Api.dll does not embed the $WidgetName widget (Sprk.Bff.Api.Widgets.$WidgetName.html). The widget build did not produce src\client\widgets\spaarke-$WidgetName\dist\index.html."
         }
@@ -291,7 +292,7 @@ if (-not $SkipBuild) {
         throw "Publish folder not found at '$PublishPath'. Run without -SkipBuild first."
     }
     # -SkipBuild keeps its meaning (deploy what is there), so a publish made before the widget existed is a warning, not a failure.
-    foreach ($WidgetName in @("decisions", "briefing")) {
+    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
         if (-not (Test-WidgetEmbedded -PublishDir $PublishPath -Name $WidgetName)) {
             Write-Host "  WARNING: the existing publish does not embed the $WidgetName widget; resources/read for ui://spaarke/$WidgetName.html will answer an error. Re-run without -SkipBuild to build it." -ForegroundColor Yellow
         }

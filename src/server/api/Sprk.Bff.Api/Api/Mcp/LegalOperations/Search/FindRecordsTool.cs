@@ -52,6 +52,9 @@ internal sealed class FindRecordsTool : McpToolDefinition
 {
     internal const string ToolName = "spaarke_find_records";
 
+    /// <summary>The widget the tool's descriptor points at (<c>_meta.ui.resourceUri</c>).</summary>
+    public const string WidgetUri = SearchResultsWidgetResource.Uri;
+
     internal const string RecordTypesArgument = "recordTypes";
 
     /// <summary>The names a user gives the record types, and the route's type each stands for. The order is the default order.</summary>
@@ -126,6 +129,11 @@ internal sealed class FindRecordsTool : McpToolDefinition
                 Idempotent = true,
                 Destructive = false,
                 OpenWorld = false,
+                // MCP Apps (task 035): the search results widget renders the result. Only the descriptor changes; the text and structuredContent are 022's.
+                Meta = new JsonObject
+                {
+                    ["ui"] = new JsonObject { ["resourceUri"] = WidgetUri },
+                },
             });
 
         // The input schema is stated, not inferred; the handler reads the raw arguments against the same closed set.
