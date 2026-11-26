@@ -28,7 +28,7 @@
 - **ontology-r1 PR #3270 (task 225, DR inline share):** APPROVED 2026-11-26 (~20:05Z). Notes they accepted: keep the share after `accessWindow.Close()` whichever of #3270/Part C lands second; resumed/replay paths rely on the reconcile (one line in the PR). They merge after their Opus reviews + CI.
 - **field-mapping-r1:** 051 is live on dev (verified). **Combined 064 (064+b+c+d, `3e0268349a..fd8172ea32`): APPROVED 2026-11-26 ~20:30Z.** Pre-deploy condition MET: all 18 create tables on dev return a boolean IsSecured (task-064-notes §11; repeat per environment before a deploy carrying 064). Target-side field-security skip = owner-decided known limit. Nit filed as DI-052 #3280. Next: their one PR for 051/063/064 → merge → deploy only on the owner's SHA go here.
 - **mcp-r2 030 + ADR-052 amendment:** 030 closed; amendment PROPOSED until the owner's security sign-off.
-- **word-add-in-r1 #3214 (task 140):** gate passed.
+- **word-add-in-r1 #3214 (task 140):** gate passed. **Task 141 (`fix/word-addin-141` 2a66132dc0, no PR yet): APPROVED 2026-11-26 ~20:45Z**. The named-.eml attachments add requires Write on the named .eml (version-save filter) plus EntityAccessFilter, IsFiledTo, the NotThisEmail check and the container guard. resolve-email-identity's savedAttachmentNames checks Read on each child via InternalPlaneDocumentNarrowing (ADR-008 A1). Nits accepted: replay confirmed per caller (IdempotencyFilter keys on userId); child id will be logged; batch or cap comes in their next fix round. Deploy through me on the owner's SHA go.
 
 ## Waiting on the owner
 - ADR-052 amendment security sign-off (mcp-r2).
