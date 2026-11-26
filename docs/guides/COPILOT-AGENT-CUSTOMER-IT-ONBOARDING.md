@@ -1,5 +1,7 @@
 # Spaarke AI for Microsoft Copilot — Onboarding Note for Your IT Team
 
+> **Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2); Copilot reaches Spaarke through the Spaarke MCP connector** ([SPAARKE-MCP-SERVER-ARCHITECTURE.md](../architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md)). The "Spaarke AI" declarative agent described below no longer exists; this page is kept for history only.
+
 > **Audience**: the customer's Microsoft 365 administrators.
 > **Sent with**: your organization's package `spaarke-copilot-{your id}-{version}.zip`.
 > **Last Updated**: 2026-10-09 (customer-provisioning-orchestration-r1 T257).

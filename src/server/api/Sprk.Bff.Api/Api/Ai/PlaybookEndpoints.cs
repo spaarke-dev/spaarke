@@ -1,6 +1,8 @@
 using System.Security.Claims;
+using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Caching;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -412,30 +414,84 @@ public static class PlaybookEndpoints
     }
 
     /// <summary>
-    /// List playbooks owned by the current user.
+    /// List playbooks owned by the current user. The rules are <see cref="ListPlaybooksForCallerAsync"/>'s (spaarkeai-mcp-bff-api-r2
+    /// task 024); this handler only maps its answer to the route's responses, which did not change.
     /// </summary>
-    private static async Task<IResult> ListUserPlaybooks(
-        IPlaybookService playbookService,
+    private static Task<IResult> ListUserPlaybooks(
         HttpContext httpContext,
-        ILoggerFactory loggerFactory,
         int page = 1,
         int pageSize = 20,
         string? nameFilter = null,
         Guid? outputTypeId = null,
         string sortBy = "modifiedon",
-        bool sortDescending = true)
-    {
-        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+        bool sortDescending = true) =>
+        ListForRouteAsync(httpContext, PlaybookListScope.Owned, page, pageSize, nameFilter, outputTypeId, sortBy, sortDescending);
 
-        // Get user ID from claims
-        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+    /// <summary>
+    /// List public playbooks shared by all users. The rules are <see cref="ListPlaybooksForCallerAsync"/>'s (spaarkeai-mcp-bff-api-r2
+    /// task 024); this handler only maps its answer to the route's responses, which did not change.
+    /// </summary>
+    private static Task<IResult> ListPublicPlaybooks(
+        HttpContext httpContext,
+        int page = 1,
+        int pageSize = 20,
+        string? nameFilter = null,
+        Guid? outputTypeId = null,
+        string sortBy = "modifiedon",
+        bool sortDescending = true) =>
+        ListForRouteAsync(httpContext, PlaybookListScope.Public, page, pageSize, nameFilter, outputTypeId, sortBy, sortDescending);
+
+    /// <summary>
+    /// The playbook lists of <c>GET /api/ai/playbooks</c> (<see cref="PlaybookListScope.Owned"/>) and <c>GET /api/ai/playbooks/public</c>
+    /// (<see cref="PlaybookListScope.Public"/>): THE rules of both routes, for the routes and for a host that is not them (the MCP tool
+    /// <c>spaarke_list_playbooks</c>, spaarkeai-mcp-bff-api-r2 task 024, spec FR-04, decision D-024-extract). It reads the caller from
+    /// <paramref name="httpContext"/> itself; a caller never passes an identity or a token.
+    /// <list type="bullet">
+    /// <item><b>No caller.</b> A null context, a principal with no authenticated identity, or no request services is
+    /// <see cref="PlaybookListOutcome.UserContextRequired"/> (401) before anything is read. For <see cref="PlaybookListScope.Owned"/> an Entra
+    /// <c>oid</c> that is missing or not a GUID is the same refusal (the owned route's 401 "User identity not found"); the public list
+    /// never read the <c>oid</c> and still does not.</item>
+    /// <item><b>Owned.</b> The owner filter is the caller's Dataverse <c>systemuserid</c>
+    /// (<see cref="PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync"/>, WhoAmI on the caller's OBO token), never the Entra
+    /// <c>oid</c>. When it cannot be resolved the answer is <see cref="PlaybookListOutcome.OwnerUnresolved"/> with an EMPTY page and no
+    /// query (fail closed: no other owner's rows are listed in its place; the route answers that page with 200).</item>
+    /// <item><b>Public.</b> <see cref="PlaybookQueryParameters.PublicOnly"/>.</item>
+    /// <item><b>Paging and sort.</b> Exactly the route's query (<see cref="PlaybookQueryParameters"/>; the service clamps the page size to
+    /// 1-100).</item>
+    /// <item><b>A fault</b> in the lookup or the service is <see cref="PlaybookListOutcome.Failed"/> (500), logged as the routes always
+    /// logged it. Only a cancellation of <paramref name="cancellationToken"/> propagates.</item>
+    /// </list>
+    /// <para>Pass the request's own context (<c>IHttpContextAccessor.HttpContext</c>) only: the principal and the bearer token in its
+    /// <c>Authorization</c> header are read separately and must come from the same validated token. Never falls back to app-only.</para>
+    /// </summary>
+    public static async Task<PlaybookListResult> ListPlaybooksForCallerAsync(
+        HttpContext? httpContext,
+        PlaybookListScope scope,
+        int page = 1,
+        int pageSize = 20,
+        string? nameFilter = null,
+        Guid? outputTypeId = null,
+        string sortBy = "modifiedon",
+        bool sortDescending = true,
+        CancellationToken cancellationToken = default)
+    {
+        if (httpContext?.User is not { } user || !user.Identities.Any(i => i.IsAuthenticated) || httpContext.RequestServices is not { } services)
         {
-            return Results.Problem(
-                statusCode: 401,
-                title: "Unauthorized",
-                detail: "User identity not found");
+            return PlaybookListResult.UserContextRequired;
         }
+
+        var userId = Guid.Empty;
+        if (scope == PlaybookListScope.Owned)
+        {
+            // Get user ID from claims (the owned route's identity test, unchanged).
+            var userIdClaim = CallerResolution.ResolveObjectId(user);
+            if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out userId))
+            {
+                return PlaybookListResult.UserContextRequired;
+            }
+        }
+
+        var logger = (services.GetService<ILoggerFactory>() ?? NullLoggerFactory.Instance).CreateLogger("PlaybookEndpoints");
 
         var query = new PlaybookQueryParameters
         {
@@ -443,21 +499,30 @@ public static class PlaybookEndpoints
             PageSize = pageSize,
             NameFilter = nameFilter,
             OutputTypeId = outputTypeId,
+            PublicOnly = scope == PlaybookListScope.Public,
             SortBy = sortBy,
             SortDescending = sortDescending
         };
 
         try
         {
+            var playbookService = services.GetRequiredService<IPlaybookService>();
+
+            if (scope == PlaybookListScope.Public)
+            {
+                var publicPage = await playbookService.ListPublicPlaybooksAsync(query, cancellationToken);
+                logger.LogDebug("Listed {Count} public playbooks", publicPage.Items.Length);
+                return PlaybookListResult.Listed(publicPage);
+            }
+
             // Owner round 12 item 6 (task 164): _ownerid_value holds a Dataverse systemuserid, never the Entra
             // oid, so the filter is the CALLER's systemuserid (WhoAmI over OBO). Unresolvable → an empty page
             // (fail closed: no other owner's rows can be listed in its place).
-            var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
-                httpContext, httpContext.RequestAborted);
+            var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, cancellationToken);
             if (ownerSystemUserId is null)
             {
                 logger.LogWarning("Listing owned playbooks for user {UserId}: the caller's systemuserid is unresolvable; returning an empty page", userId);
-                return Results.Ok(new PlaybookListResponse
+                return PlaybookListResult.OwnerUnresolved(new PlaybookListResponse
                 {
                     Items = [],
                     TotalCount = 0,
@@ -466,61 +531,85 @@ public static class PlaybookEndpoints
                 });
             }
 
-            var result = await playbookService.ListUserPlaybooksAsync(ownerSystemUserId.Value, query);
-            logger.LogDebug("Listed {Count} playbooks for user {UserId}", result.Items.Length, userId);
-            return Results.Ok(result);
+            var owned = await playbookService.ListUserPlaybooksAsync(ownerSystemUserId.Value, query, cancellationToken);
+            logger.LogDebug("Listed {Count} playbooks for user {UserId}", owned.Items.Length, userId);
+            return PlaybookListResult.Listed(owned, ownerSystemUserId.Value);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to list playbooks for user {UserId}", userId);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to list playbooks");
+            if (scope == PlaybookListScope.Public)
+            {
+                logger.LogError(ex, "Failed to list public playbooks");
+            }
+            else
+            {
+                logger.LogError(ex, "Failed to list playbooks for user {UserId}", userId);
+            }
+
+            return PlaybookListResult.Failed;
         }
     }
 
     /// <summary>
-    /// List public playbooks shared by all users.
+    /// One list route: <see cref="ListPlaybooksForCallerAsync"/> with the request's <c>RequestAborted</c>, mapped to the responses the two
+    /// handlers always gave (200 with the page, 401 "User identity not found", 500 with the route's own detail). A request the client
+    /// aborted is 499, logged at Debug; a cancellation the request did not cause keeps the handlers' 500.
     /// </summary>
-    private static async Task<IResult> ListPublicPlaybooks(
-        IPlaybookService playbookService,
-        ILoggerFactory loggerFactory,
-        int page = 1,
-        int pageSize = 20,
-        string? nameFilter = null,
-        Guid? outputTypeId = null,
-        string sortBy = "modifiedon",
-        bool sortDescending = true)
+    private static async Task<IResult> ListForRouteAsync(
+        HttpContext httpContext,
+        PlaybookListScope scope,
+        int page,
+        int pageSize,
+        string? nameFilter,
+        Guid? outputTypeId,
+        string sortBy,
+        bool sortDescending)
     {
-        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+        var failedDetail = scope == PlaybookListScope.Public ? "Failed to list public playbooks" : "Failed to list playbooks";
 
-        var query = new PlaybookQueryParameters
-        {
-            Page = page,
-            PageSize = pageSize,
-            NameFilter = nameFilter,
-            OutputTypeId = outputTypeId,
-            PublicOnly = true,
-            SortBy = sortBy,
-            SortDescending = sortDescending
-        };
-
+        PlaybookListResult result;
         try
         {
-            var result = await playbookService.ListPublicPlaybooksAsync(query);
-            logger.LogDebug("Listed {Count} public playbooks", result.Items.Length);
-            return Results.Ok(result);
+            result = await ListPlaybooksForCallerAsync(
+                httpContext, scope, page, pageSize, nameFilter, outputTypeId, sortBy, sortDescending, httpContext.RequestAborted);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
         {
-            logger.LogError(ex, "Failed to list public playbooks");
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to list public playbooks");
+            // The client went away (the method is given RequestAborted and lets that cancellation propagate): not a fault. 499 (client
+            // closed request), logged at Debug without a stack, as ChatDocumentEndpoints and VisualizationEndpoints answer an abandoned request.
+            httpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("PlaybookEndpoints")
+                .LogDebug("Listing playbooks abandoned by the client; answered 499. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.StatusCode(499);
         }
+        catch (OperationCanceledException ex)
+        {
+            // A cancellation the request did not cause (for example an HttpClient timeout): a fault, the 500 the handlers always gave it.
+            httpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("PlaybookEndpoints")
+                .LogError(ex, "Listing playbooks was cancelled");
+            return ListFailed(failedDetail);
+        }
+
+        return result.Outcome switch
+        {
+            PlaybookListOutcome.Listed or PlaybookListOutcome.OwnerUnresolved => Results.Ok(result.Page),
+            PlaybookListOutcome.Failed => ListFailed(failedDetail),
+            // UserContextRequired. Only the owned route can reach it (RequireAuthorization admits only a signed-in caller); its 401.
+            _ => Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found"),
+        };
     }
+
+    private static IResult ListFailed(string detail) =>
+        Results.Problem(
+            statusCode: 500,
+            title: "Internal Server Error",
+            detail: detail);
 
     /// <summary>
     /// Share a playbook with teams or organization.
@@ -845,4 +934,88 @@ public static class PlaybookEndpoints
             statusCode: 403,
             title: "Forbidden",
             detail: "Your Dataverse user could not be resolved, so the playbook cannot be created for you");
+}
+
+/// <summary>Which list <see cref="PlaybookEndpoints.ListPlaybooksForCallerAsync"/> reads.</summary>
+public enum PlaybookListScope
+{
+    /// <summary>The caller's own playbooks: <c>GET /api/ai/playbooks</c>.</summary>
+    Owned = 0,
+
+    /// <summary>Public playbooks: <c>GET /api/ai/playbooks/public</c>.</summary>
+    Public = 1,
+}
+
+/// <summary>What <see cref="PlaybookEndpoints.ListPlaybooksForCallerAsync"/> answered.</summary>
+/// <remarks><see cref="UserContextRequired"/> is the zero value, so <c>default</c> is never a list.</remarks>
+public enum PlaybookListOutcome
+{
+    /// <summary>No request context or no signed-in caller; for the owned list, no Entra <c>oid</c> GUID. Nothing was read (REST: 401).</summary>
+    UserContextRequired = 0,
+
+    /// <summary>The service's page (REST: 200 with it).</summary>
+    Listed = 1,
+
+    /// <summary>Owned list only: the caller's <c>systemuserid</c> could not be resolved; an empty page, nothing queried (REST: 200 with it).</summary>
+    OwnerUnresolved = 2,
+
+    /// <summary>The lookup or the service faulted (REST: 500).</summary>
+    Failed = 3,
+}
+
+/// <summary>
+/// The answer of <see cref="PlaybookEndpoints.ListPlaybooksForCallerAsync"/>: an outcome, the HTTP status the route answers for it, the
+/// machine-readable <c>reasonCode</c> of a refusal and, when listed, the page. It carries no <see cref="IResult"/> and no ProblemDetails,
+/// so a non-HTTP host (the MCP tool <c>spaarke_list_playbooks</c>, spaarkeai-mcp-bff-api-r2 task 024) renders it in its own error shape
+/// (ADR-019). The page is the route's own body type (<c>Models/Ai</c>, not an AI-internal type; ADR-013).
+/// </summary>
+public sealed record PlaybookListResult
+{
+    /// <summary>A list failure's <c>reasonCode</c>. The route's 500 body carries no code; this one is new with task 024 (ADR-019).</summary>
+    public const string ListFailedReasonCode = "playbook.list-failed";
+
+    private PlaybookListResult(
+        PlaybookListOutcome outcome, int status, string? reasonCode, PlaybookListResponse? page, Guid? ownerSystemUserId = null)
+    {
+        Outcome = outcome;
+        Status = status;
+        ReasonCode = reasonCode;
+        Page = page;
+        OwnerSystemUserId = ownerSystemUserId;
+    }
+
+    /// <summary>No request context or no signed-in caller (ADR-028 A10): <see cref="DataverseUserClientErrorCodes.UserContextRequired"/>, 401.</summary>
+    public static readonly PlaybookListResult UserContextRequired =
+        new(PlaybookListOutcome.UserContextRequired, StatusCodes.Status401Unauthorized, DataverseUserClientErrorCodes.UserContextRequired, null);
+
+    /// <summary>A fault: <see cref="ListFailedReasonCode"/>, 500.</summary>
+    public static readonly PlaybookListResult Failed =
+        new(PlaybookListOutcome.Failed, StatusCodes.Status500InternalServerError, ListFailedReasonCode, null);
+
+    public PlaybookListOutcome Outcome { get; }
+
+    /// <summary>The HTTP status the route answers for this outcome: 200, 401 or 500.</summary>
+    public int Status { get; }
+
+    /// <summary><c>null</c> when a page was returned; otherwise the refusal's or failure's code.</summary>
+    public string? ReasonCode { get; }
+
+    /// <summary>The page the route returns (status 200): the service's, or the empty page of <see cref="PlaybookListOutcome.OwnerUnresolved"/>.</summary>
+    public PlaybookListResponse? Page { get; }
+
+    /// <summary>
+    /// The caller's resolved Dataverse <c>systemuserid</c>: set only on a <see cref="PlaybookListOutcome.Listed"/> OWNED list, <c>null</c>
+    /// otherwise. A host that merges the owned and public lists uses it to tell which public rows the caller owns. REST serializes only
+    /// <see cref="Page"/>, so the routes' bytes do not carry it.
+    /// </summary>
+    public Guid? OwnerSystemUserId { get; }
+
+    /// <summary>The page's rows; empty when there is no page.</summary>
+    public IReadOnlyList<PlaybookSummary> Items => Page?.Items ?? [];
+
+    internal static PlaybookListResult Listed(PlaybookListResponse page, Guid? ownerSystemUserId = null) =>
+        new(PlaybookListOutcome.Listed, StatusCodes.Status200OK, null, page, ownerSystemUserId);
+
+    internal static PlaybookListResult OwnerUnresolved(PlaybookListResponse emptyPage) =>
+        new(PlaybookListOutcome.OwnerUnresolved, StatusCodes.Status200OK, null, emptyPage);
 }

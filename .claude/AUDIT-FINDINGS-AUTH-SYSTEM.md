@@ -361,7 +361,7 @@ Auth touches many surfaces beyond AI/SprkChat. The target architecture must acco
 
 **Specific invariants to maintain for future flexibility**:
 - All env-specific values stay in Dataverse env vars (client) + App Service config + Key Vault (server). No hardcoded tenant IDs, audiences, or URLs in code.
-- All caching keys (Redis, Cosmos) include `tenantId` prefix. Currently true for `AgentTokenService` ([source](../src/server/api/Sprk.Bff.Api/Api/Agent/AgentTokenService.cs)); verify for other caches.
+- All caching keys (Redis, Cosmos) include `tenantId` prefix. Verify for every cache (the former example, `AgentTokenService`, was Retired 2026-11-25 with the legacy agent).
 - Background jobs scope by tenant. Verify `ServiceBusJobProcessor` carries tenant context through job payloads.
 
 ### C. External users (B2B guests + B2C anonymous + Power Pages portal)

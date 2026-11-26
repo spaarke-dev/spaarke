@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Dev E2E as the test user in Copilot Chat and Cowork</title>
+    <phase>3 Email, evaluation and E2E</phase>
+    <gate>After 049; the owner runs the Copilot steps (tenant sign-in)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Manual/browser E2E verification with recorded evidence</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted checklist execution and evidence recording</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Live checks and notes only; runs beside 042</parallel-reason>
+    <deps>049</deps>
+    <tags>e2e-test, testing, frontend</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the end-to-end checklist on dev as the licensed, non-admin test user in Copilot Chat and in Cowork: one scenario per FR (search, documents, playbook list/run/status, analysis start, tasks list/create/complete, portfolio, briefing widget, matter summary, matter finance, email compose and send, Decisions still works), each widget in light and dark, and the kill switch; record evidence and file any defect.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Copilot Chat/Cowork with MCP connectors.</role>
+  <goal>notes/e2e-dev.md has a pass/fail row per scenario per host with evidence; every failure is fixed or filed.</goal>
+
+  <context>
+    <background>Spec FR-02..FR-12, FR-16 ("each renders in Chat and Cowork in light and dark themes"), NFR-09, NFR-10. Connector: the existing "Spaarke MCP" connector (r1 task 042 runbooks). Test user: licensed, non-admin (r1 notes). The owner signs in; this task prepares the checklist and records results.</background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r2/notes/e2e-dev.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/tasks/042-connector-runbooks-live-e2e.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="049" status="pending">All tools on dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Dev only; test matters and test data; email only to owner-approved test recipients. The owner performs tenant sign-in; no credentials are typed by the agent.</constraint>
+    <constraint source="project">The kill-switch check (Mcp:Enabled=false) changes an App Service setting, so it runs only with an explicit owner go and is restored immediately; otherwise it is recorded as covered by the automated ADR-032 tests.</constraint>
+    <constraint source="project">Failures are fixed in scope (this project's code) or filed with /project-defer-issue-tracking; nothing is left only in the note.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write the checklist in notes/e2e-dev.md (scenario, prompt, expected, Chat result, Cowork result, theme).</step>
+    <step order="2">With the owner, run every scenario in Chat and Cowork; record results and screenshots' locations.</step>
+    <step order="3">Fix or file each failure.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <justification>
+    <existing>r1 task 042's connector runbook and live E2E method.</existing>
+    <extension>Reused; only a project note is new.</extension>
+    <cost-of-doing-nothing>FR-16's "renders in Chat and Cowork in light and dark" and the FR acceptance items that require dev evidence have none.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="All widgets in Chat and Cowork">
+      <steps>
+        <step>Trigger the briefing, search-results, email-compose and Decisions widgets in Copilot Chat</step>
+        <step>Repeat in Cowork</step>
+        <step>Operate each widget with the keyboard only</step>
+        <step>Check each widget's console for errors</step>
+      </steps>
+      <expected>All four render and operate; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host to dark theme</step>
+        <step>Re-open each widget</step>
+      </steps>
+      <expected>Every widget follows the host theme with semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">Copilot Chat and Cowork (owner signed in)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/e2e-dev.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/e2e-dev.md has one row per scenario with Chat and Cowork results, theme, date and SHA.</criterion>
+    <criterion testable="true">Every FR-02..FR-12 scenario passes in at least Chat, and every widget passes in Chat and Cowork in light and dark — or the failure links to a fix commit or a filed issue.</criterion>
+    <criterion testable="true">Negative: the model cannot send email without the user's Send in the widget (recorded).</criterion>
+    <criterion testable="true">Negative: without the owner's go, no App Service setting was changed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02..FR-12, FR-16, NFR-09, NFR-10.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

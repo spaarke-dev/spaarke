@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 ///
 /// <para>
 /// <b>What it formalizes</b>. R1 already shipped the two hard primitives of a side-effect
-/// outcome: (1) a SERVER-composed record/deep link (<c>Api/Agent/HandoffUrlBuilder.cs</c> and the
+/// outcome: (1) a SERVER-composed record/deep link (<c>Services/Ai/Handoff/HandoffUrlBuilder.cs</c> and the
 /// gate-resume <c>{orgUrl}/main.aspx?pagetype=entityrecord…</c> composer) — never a model-invented
 /// URL; and (2) an AUDIENCE-SPLIT summary on <c>ToolResult</c> — the user-facing sentence
 /// (<c>ToolResultMetadataKeys.UserSummary</c>, ToolResult.cs:326) vs. the model-facing
