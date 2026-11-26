@@ -34,12 +34,14 @@ BFF's completion consumer never starts on a stamp.
 - H4b `Handlers/BulkAppSettings/PerEnvSourceCatalog.cs` + per-env manifest: `ServiceBus__IntakeEngineCompletionQueueName`, `required: false`, both slots.
 - `Handlers/SubscriptionReadiness/SubscriptionReadinessOptions.cs`: add `Microsoft.App`.
 - H13: prove the engine identity holds exactly its four grants; keyless check with the engine on; T229 cost envelope.
-- AcrPull for the engine identity on the platform ACR. L2 has no rights there today (Owner on customer subscriptions only). This needs a constrained grant to L2, which is a live change that needs the owner's OK, and it must follow H2a's own deployment.
+- AcrPull for the engine identity on the platform ACR. L2 has no rights there today (Owner on customer subscriptions only). Agreed with intake-pipeline-r1 2026-11-26: L2 gets **Role Based Access Control Administrator on the platform ACR, conditioned to AcrPull assignments only**. Per-stamp `acr import` was rejected (it needs a grant on the source registry too, plus a registry per stamp). The grant is a live change that needs the owner's OK; not requested yet.
+- Three-step flow (Container Apps validates the image pull whenever the image is set, Job create included): (1) H2a with `deployIntakeEngine=true` and no image creates the identity, queues, Container Apps environment, staging and RBAC; (2) L2 grants AcrPull on the platform ACR to output `intakeEngineIdentityObjectId`; (3) deploy again with `intakeEngineImage` set, which creates the Job (and output `intakeEngineJobName`). Step 3 is an H2a re-run or a separate step (our choice).
+- Image source: `build-intake-engine-image.yml` publishes like `publish-bff-artifact.yml` to `provisioning-artifacts`: `intake-engine/latest.json` (+ versioned and `latest.previous.json`), shape `{schemaVersion:1, image:"{loginServer}/sprk-intake-engine@sha256:{digest}", digest, repository, buildId, tags, sha}`. Pass the digest-pinned `image`, never a tag; reuse `ArtifactManifestVerifier` with the new blob name. Not yet run for real (Dockerfile lands with their task 001).
 
-**Suggested fix**: as above. Model 2 (registry import into the stamp) is out of scope for r1 (plan D3).
+**Suggested fix**: as above. Model 2 (registry import into the stamp) is out of scope for r1 (plan D3), agreed with the peer.
 
 **Estimated effort**: 2–3 days, plus the owner decision on the L2 ACR grant
-**Blockers**: intake-pipeline-r1 Phase 0/1 merged; confirmation that Job creation does not pull the image at create time
+**Blockers**: intake-pipeline-r1 Phase 0/1 merged (their branch `099241d2a2` has the optional-image change); the owner's OK for the constrained L2 grant on the platform ACR
 **Related**: spaarke-intake-pipeline-r1; ADR-028 (zero-secret); T228; T229
 
 ---
