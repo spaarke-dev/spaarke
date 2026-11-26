@@ -1426,9 +1426,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
                 if (rest.StartsWith("/Attributes", StringComparison.Ordinal))
                 {
-                    // Only the columns the question names — as Dataverse answers the $filter.
+                    // Only the columns the question names — as Dataverse answers the $filter: each with its IsSecured stated, as the
+                    // live catalog does (task 064c: a column whose security is not stated counts as secured).
                     var asked = AttributeNamed().Matches(rest).Select(m => m.Groups["c"].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    return Ok(new { value = SecuredColumns.Where(asked.Contains).Select(c => new { LogicalName = c, IsSecured = true }) });
+                    return Ok(new { value = asked.Select(c => new { LogicalName = c, IsSecured = SecuredColumns.Contains(c) }) });
                 }
                 if (rest.Contains("Privileges", StringComparison.Ordinal))
                 {

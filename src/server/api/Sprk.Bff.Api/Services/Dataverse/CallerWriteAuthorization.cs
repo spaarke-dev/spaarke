@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using static Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
@@ -840,7 +841,11 @@ internal static class CallerWriteAuthorization
         return null;
     }
 
-    /// <summary>The first attribute marked <c>IsSecured</c> in an <c>Attributes</c> collection body, if any.</summary>
+    /// <summary>
+    /// The first attribute in an <c>Attributes</c> collection body that counts as field-secured, if any. Task 064c: anything but
+    /// an explicit <c>IsSecured == false</c> counts (a missing, null or non-boolean answer is secured: fail closed), the one
+    /// predicate field mapping also asks (<see cref="FieldSecuredSourceRule.CountsAsSecured"/>).
+    /// </summary>
     private static string? SecuredColumnIn(JsonElement? body)
     {
         if (body is not { } root
@@ -852,7 +857,8 @@ internal static class CallerWriteAuthorization
 
         foreach (var attribute in attributes.EnumerateArray())
         {
-            if (attribute.TryGetProperty("IsSecured", out var secured) && secured.ValueKind == JsonValueKind.True
+            if (FieldSecuredSourceRule.CountsAsSecured(
+                    attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var secured) ? secured : null)
                 && attribute.TryGetProperty("LogicalName", out var name))
             {
                 return name.GetString();
