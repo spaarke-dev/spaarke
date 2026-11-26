@@ -81,7 +81,8 @@ public sealed class AnalysisCreateContractBaselineTests
         response.Headers.Location!.ToString().Should().Be($"/api/ai/analysis/{createdId:D}");
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/json");
         (await response.Content.ReadAsStringAsync()).Should().Be($$"""{"analysisId":"{{createdId:D}}"}""");
-        RowOf(fields, createdId).Should().Be(FrozenRow);
+        // The literal is compared with LF line ends whatever the checkout wrote (core.autocrlf).
+        RowOf(fields, createdId).Should().Be(FrozenRow.Replace("\r\n", "\n", StringComparison.Ordinal));
     }
 
     /// <summary>The row the route writes for the 201 case (recorded on the unchanged code, 2026-11-26).</summary>
