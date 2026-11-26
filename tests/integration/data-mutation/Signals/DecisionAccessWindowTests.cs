@@ -432,6 +432,68 @@ public sealed class DecisionAccessWindowTests
         _wire.Count(path).Should().Be(3, "the throw and the transport failure are asked again; only the success is kept");
     }
 
+    public static TheoryData<HttpStatusCode, string> RefusalsAndKeptPaths
+    {
+        get
+        {
+            var data = new TheoryData<HttpStatusCode, string>();
+            foreach (var status in new[] { HttpStatusCode.BadRequest, HttpStatusCode.Forbidden })
+                foreach (var path in new[] { RightsPath, PrivilegesPath, CatalogPath })
+                    data.Add(status, path);
+            return data;
+        }
+    }
+
+    /// <summary>Must-fire, on the wire: a 400 or 403 on a path the window keeps is never replayed as a success; every repeat is
+    /// asked again and answers the failure. (The kept answer is rebuilt by <c>Answer</c> as a success.)</summary>
+    [Theory]
+    [MemberData(nameof(RefusalsAndKeptPaths))]
+    public async Task ARefusedRead_IsNeverServedFromTheWindowAsASuccess(HttpStatusCode status, string path)
+    {
+        _wire.Fault = asked => asked == path ? status : null;
+        var http = Request(CallerA);
+        using var window = DecisionAccessWindow.Open(http, CallerA);
+        var client = window.CallerClient(_rig.NewClient(_wire));
+
+        for (var i = 0; i < 3; i++)
+            (await client.GetAsync(path, default)).IsSuccess.Should().BeFalse("a refusal is not an allow, on any ask");
+
+        _wire.Count(path).Should().Be(3, "nothing was kept");
+    }
+
+    public static TheoryData<int, string> StatusesOutsideTwoXx => new()
+    {
+        { 400, RightsPath },
+        { 403, RightsPath },
+        { 400, PrivilegesPath },
+        { 403, CatalogPath },
+        { 0, RightsPath },
+    };
+
+    /// <summary>Must-fire for the store's own guard, independent of the caller's <c>IsSuccess</c> check: even an inner client that
+    /// reports a 4xx status with a success flag (the case where that check is lost or wrong) is never kept, so the window cannot
+    /// replay it as an allow.</summary>
+    [Theory]
+    [MemberData(nameof(StatusesOutsideTwoXx))]
+    public async Task AStatusOutsideTwoXx_IsNeverKept_EvenWhenFlaggedASuccess(int status, string path)
+    {
+        var asks = 0;
+        var inner = new Mock<IDataverseUserClient>();
+        inner.Setup(c => c.GetAsync(path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                asks++;
+                return new DataverseUserResponse { StatusCode = status, IsSuccess = true };
+            });
+        var http = Request(CallerA);
+        using var window = DecisionAccessWindow.Open(http, CallerA);
+
+        for (var i = 0; i < 3; i++)
+            (await window.RouteGetAsync(inner.Object, path, default)).StatusCode.Should().Be(status);
+
+        asks.Should().Be(3, "a non-2xx answer is never kept, so it is never replayed as a success");
+    }
+
     // ── Run 3: scope ──────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>

@@ -242,7 +242,7 @@ internal sealed class DecisionAccessWindow : IDisposable
 
         var response = await inner.GetAsync(relativePath, ct).ConfigureAwait(false);
         if (response.IsSuccess && IsServing)
-            store[key] = (response.StatusCode, response.Body?.GetRawText());
+            Keep(store, key, response);
         return response;
     }
 
@@ -255,6 +255,22 @@ internal sealed class DecisionAccessWindow : IDisposable
             || relativePath.TrimStart('/').StartsWith(RecordTypeCatalogRead, StringComparison.Ordinal))
             return _routeCommitLong;
         return null;
+    }
+
+    /// <summary>
+    /// Keeps <paramref name="response"/> only when its own status is 2xx. A second, independent guard beside the caller's
+    /// <c>IsSuccess</c> check: <see cref="Answer"/> replays a kept entry as a success, so a stored 400 or 403 would read back as an
+    /// allow if that check were ever lost.
+    /// </summary>
+    private static void Keep(
+        ConcurrentDictionary<(Guid Caller, string Path), (int StatusCode, string? RawJson)> store,
+        (Guid Caller, string Path) key,
+        DataverseUserResponse response)
+    {
+        if (response.StatusCode is < 200 or > 299)
+            return;
+
+        store[key] = (response.StatusCode, response.Body?.GetRawText());
     }
 
     private static DataverseUserResponse Answer((int StatusCode, string? RawJson) known)
