@@ -334,8 +334,10 @@ public static class FileAccessEndpoints
         /// ADR-008 Amendment A1: the children are found by this lookup (the request names only the email's keys), so each one is
         /// checked here, as the caller, with the check the route's filter makes on the parent: <c>read</c> through
         /// <see cref="InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync"/> (the root grants, then the external document
-        /// narrowing). A child the caller may not read is left out. Only the lookup runs before the check; no child content is
-        /// read at all. Fail closed: a read that throws, or a child whose check answers the system-failure deny
+        /// narrowing). Task 141 review: one call over all the children first, which allows only when every child is allowed;
+        /// only when it denies is each child checked on its own. A child the caller may not read is left out. Only the lookup
+        /// runs before the check; no child content is read at all. Fail closed: a read that throws, or a check (of all the
+        /// children, or of one) that answers the system-failure deny
         /// (<see cref="Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode"/> — the authorization service answers a
         /// fault that way and does not throw), omits the whole field, so the pane never claims an attachment is unsaved on a
         /// guess and keeps today's behaviour.
@@ -356,36 +358,54 @@ public static class FileAccessEndpoints
                     return null;
                 }
 
-                var children = (await documents.GetDocumentsByParentAsync(emlDocumentId, ct)).ToList();
+                var children = (await documents.GetDocumentsByParentAsync(emlDocumentId, ct))
+                    .Select(child => (Child: child, Id: Guid.TryParse(child.Id, out var id) ? id : Guid.Empty))
+                    .Where(c => c.Id != Guid.Empty)
+                    .ToList();
                 var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context);
-                var names = new List<string>();
-                foreach (var child in children)
-                {
-                    if (!Guid.TryParse(child.Id, out var childId))
-                    {
-                        continue;
-                    }
 
+                // Task 141 review (F6): ONE check over every child first. AuthorizeDocumentsAsync allows a list only when it
+                // allows every id in it (the root grants per id, then one narrowing call over all), so an allow names them all.
+                // Only a deny is checked again one child at a time, to leave out exactly the ones the caller may not read.
+                var all = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                    context, authorizationService, userId, children.Select(c => c.Id).ToList(), "read", token,
+                    "email-identity:saved-attachments", logger, ct);
+                if (all.IsAllowed)
+                {
+                    return NamesOf(children.Select(c => c.Child));
+                }
+
+                if (IsSystemFailure(all))
+                {
+                    logger.LogWarning(
+                        "Email identity: the access check of the saved attachments of document {DocumentId} faulted; the field is omitted.",
+                        emlDocumentId);
+                    return null;
+                }
+
+                var readable = new List<DocumentEntity>();
+                foreach (var (child, childId) in children)
+                {
                     var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
                         context, authorizationService, userId, new[] { childId }, "read", token,
                         "email-identity:saved-attachments", logger, ct);
                     if (decision.IsAllowed)
                     {
-                        names.AddRange(Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf(child));
+                        readable.Add(child);
                     }
-                    else if (string.Equals(
-                        decision.ReasonCode, Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode, StringComparison.Ordinal))
+                    else if (IsSystemFailure(decision))
                     {
                         // The check did not decide: the service answers a fault as a deny with this reason code, never a
                         // throw. Dropping the child would make the pane show it as unsaved on a guess, so say nothing.
                         logger.LogWarning(
-                            "Email identity: a saved attachment's access check of document {DocumentId} faulted; the field is omitted.",
-                            emlDocumentId);
+                            "Email identity: the access check of saved attachment {ChildDocumentId} of document {DocumentId} faulted; "
+                            + "the field is omitted.",
+                            childId, emlDocumentId);
                         return null;
                     }
                 }
 
-                return names.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                return NamesOf(readable);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
@@ -394,6 +414,16 @@ public static class FileAccessEndpoints
                     emlDocumentId);
                 return null;
             }
+
+            static IReadOnlyList<string> NamesOf(IEnumerable<DocumentEntity> readableChildren) =>
+                readableChildren
+                    .SelectMany(Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            static bool IsSystemFailure(Spaarke.Core.Auth.AuthorizationResult decision) =>
+                string.Equals(
+                    decision.ReasonCode, Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode, StringComparison.Ordinal);
         }
 
         /// <summary>
