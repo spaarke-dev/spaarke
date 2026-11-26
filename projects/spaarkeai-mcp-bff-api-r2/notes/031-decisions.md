@@ -56,4 +56,26 @@ Date: 2026-11-26. Branch: agent worktree (wave 7, to be merged into `work/spaark
 
 ## Verification
 
-(See the gates section, filled in at the end of the task.)
+- **Baseline:** 8 of 8 pass before the extraction (commit `9ea528887c`) and after it.
+- **New tests:** 46 pass. That count covers the 8 contract and 10 auth tests for the tools, 25 `ValidateTool` shapes, and both tool-set pins.
+- **Wider filter:** `Mcp | Api.Ai.Analysis | AnalysisCreateContractBaseline | AnalysisAuthorization | SecureChildOwnership` gives 1,591 passed, 1 skipped, 0 failed.
+- **ArchTests:** 2,859 of 2,859 pass.
+- **Fails without the change:**
+  - The pre-031 O-14 rule, restored with only the constant added: 4 tests fail. Those are the two reversible-write accept shapes and both real-host pins, which fail because the host refuses to start.
+  - The retry read skipped: 2 tests fail (the retry and key-reuse tests).
+  - Both files were restored, and the suites were re-run green.
+- **Conformance:** `bash tests/integration/Mcp.Conformance.Host/run-conformance.sh` with the widget built exits 0: 92 checks passed, 38 failed, all in the baseline ("Baseline check passed: all failures are expected").
+- **Build:** the BFF builds with `-warnaserror`: 0 warnings, 0 errors.
+- **Format:** `check-changed-cs-format.sh origin/master` reports all 147 files formatted.
+- **CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` finds no vulnerable packages. This task adds no package.
+- **Publish size** (ADR-029): `dotnet publish -c Release src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -o deploy/api-publish`, zipped with `Compress-Archive -CompressionLevel Optimal`. Each tree came from `git archive` into a fresh short path, all measured the same day.
+
+  | Build | Compressed | Folder | Files |
+  |---|---|---|---|
+  | master `152397ab11` | 43,635,704 bytes (41.61 MB) | 144,609,263 | 194 |
+  | base `35e0f1529b` | 43,228,409 bytes (41.23 MB) | 143,580,939 | 186 |
+  | this task `44ad7a9bd4` | 43,244,775 bytes (41.24 MB) | 143,640,339 | 186 |
+
+  - The task's delta against its base is **+16,366 bytes compressed**, all of it in `Sprk.Bff.Api.dll` (+51,200 bytes uncompressed).
+  - Against master the total is 390,929 bytes smaller. That gap is master's newer content that the project branch has not merged yet; it is not this task.
+  - The total is far under the 55 MB review line.
