@@ -10,6 +10,40 @@
 
 ## Open (in priority order)
 
+### ISS-049 — BFF unit-test shard api-insights-integration stalls and is cancelled at 40 min
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-26 |
+| **Source** | Demo W1/W2/W4 PRs #3244 (twice), #3251, #3252 and branch `work/spaarke-intake-pipeline-r1`: the Tier 2 shard was cancelled at its 40-minute limit; master passed the same shard at 15:15Z in about 27 min |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3255 |
+
+**Description**
+
+`Full Unit Tests (Debug) / api-insights-integration` stops logging inside `Sprk.Bff.Api.Tests`. In job 140004277263 the last
+output is at 15:33:29Z (two skipped `Integration.CommunicationIntegrationTests`), and nothing more appears until the
+cancellation at 16:07:03Z. None of these PRs changes BFF code. Concrete failure: a cancelled check is not green, so it
+blocks the "every check terminal and green" merge rule, and each rerun costs another 40 minutes.
+
+**Entry-points**
+
+- `.github/workflows/ci-tier2-advisory.yml` ~L270-L285 (shard filter, `timeout-minutes: 40`)
+- `tests/unit/Sprk.Bff.Api.Tests/Integration/`
+- `gh api repos/spaarke-dev/spaarke/actions/jobs/140004277263/logs`
+
+**Suggested fix**
+
+Run the shard with `--blame-hang --blame-hang-timeout 10m` to name the test that hangs, then add a timeout to it or
+fix the starvation.
+
+**Estimated effort**: unknown; needs a spike
+**Blockers**: none
+**Related**: the BFF test project belongs to no single project; hand this off once an owner accepts it
+
+---
+
 ### ISS-048 — H13 fails a run on one Cost Management 429 instead of retrying
 
 | Field | Value |
