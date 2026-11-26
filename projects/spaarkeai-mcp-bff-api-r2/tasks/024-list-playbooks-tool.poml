@@ -99,7 +99,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-04, D-209.</notes>
+  <notes>Spec FR-04, D-209. 2026-11-25: includes a shared-method extraction in Api/Ai/PlaybookEndpoints.cs (D-024-extract); two verifier passes.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

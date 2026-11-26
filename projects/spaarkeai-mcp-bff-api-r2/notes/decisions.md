@@ -60,3 +60,15 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
   - 005's code is merged on this branch only (not master), and its dev schema script has not run. It stays unrun until the owner picks the run-record design: a new capability-run table, a relaxed `sprk_playbookid` plus an action lookup, or the ledger plus the Decision Record. 005 then adapts to that design.
   - 030 waits for the same decision plus an ADR-039 check (constraint added to its POML).
   - 019 must not deploy 005's code before its columns exist (unchanged).
+
+## D-024-extract — task 024 does its own small shared-method extraction (2026-11-25)
+- **Trigger:** task 024 fired its STOP trigger. The playbook list rules live in the private `ListUserPlaybooks` / `ListPublicPlaybooks` handlers in `Api/Ai/PlaybookEndpoints.cs`:
+  - owner resolution through `ResolveCallerSystemUserIdAsync`;
+  - an empty page when the owner can't be resolved (fail closed);
+  - `PublicOnly`, paging and sort.
+
+  The tool also can't inject `IPlaybookService` (ADR-013 boundary plus the MCP ledger ArchTest).
+- **Decision:** 024 adds one public static method in `Api/Ai/PlaybookEndpoints.cs` (grandfathered by ADR013_AiBoundaryTests), following 007's pattern. It takes `HttpContext?` plus paging and returns a typed result. The two REST handlers call it with byte-identical responses, proven by a parity test, and the tool calls it.
+- **Why not a separate task:** it is small, it touches no file another running task touches (023, 026 and 027 don't name `PlaybookEndpoints`), and the pattern is settled.
+- **Why not a new PublicContracts facade:** it would be a new interface plus a DI registration (root CLAUDE.md §11) for no gain.
+- **Verification:** two verifier passes, because it touches caller resolution.
