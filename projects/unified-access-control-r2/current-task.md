@@ -23,7 +23,7 @@
 - Kept by owner: AI Analysis Admin (rounds 124/127), Ontology Service (DecisionRecord/BudgetRevision/Signal), Ontology Administrator Signal (D-160).
 
 ## Open peer reviews (uac-r2 as access gate)
-- **mcp-r1 ISS-010 Part C (#3184, `C:\wt3184c`, a5ee45c15d):** APPROVED 2026-11-26 with conditions. Item 3 must be fixed before merge: the kill switch should treat a value that isn't true/false as off and log a Warning. Item 1: their two extra exemptions are approved; each gets a one-line reason. Item 2: record a K-class known limit (privilege answers live for the whole commit; the scan doesn't follow non-child executors). Item 4 is an optional nit. **NEXT: re-check only their fix diff + text.** Part D1 is ready to build after this; review its diff when built.
+- **mcp-r1 ISS-010 Part C: PR #3272** (head 18be14d973; the kill-switch fix was re-checked and approved; the PR quotes both approval lines). mcp-r1 merges it. Part E #3260 is MERGED to master as 4d69bf527e and NOT deployed. **NEXT: review the Part D1 diff when it is built.**
 - **spa-r4 task 043 (PR #3267):** approved; both notes resolved (370390781e). Merge on owner's go in their session; dev deploy then on the owner's SHA go here.
 - **ontology-r1 PR #3270 (task 225, DR inline share):** APPROVED 2026-11-26 (~20:05Z). Notes they accepted: keep the share after `accessWindow.Close()` whichever of #3270/Part C lands second; resumed/replay paths rely on the reconcile (one line in the PR). They merge after their Opus reviews + CI.
 - **field-mapping-r1:** 051 live on dev (verified). 064b merged on their branch; 064c running → they send the combined 064 diff; I agreed with the fail-closed CallerWriteAuthorization change.
@@ -32,7 +32,7 @@
 
 ## Waiting on the owner
 - ADR-052 amendment security sign-off (mcp-r2).
-- Next dev BFF deploy: exact-SHA go here. Candidates after merges: #3267 (spa-r4), #3184 Part C (mcp-r1), #3269 needs no BFF deploy (roles only).
+- Next dev BFF deploy: exact-SHA go here. Candidates: #3260 Part E (merged), #3267 (spa-r4), #3272 Part C (mcp-r1), #3270 (ontology). A master deploy REMOVES the specialist spike tools now live: tell specialist-legal-agents-r1 first, #3269 needs no BFF deploy (roles only).
 - Dev hand checks: `notes/owner-test-checklist-2026-11-13.md`; ebilling W/X checklist; word-add-in 136-138.
 - Quality alerts #1906, #2067, #2866: mention only. Open: #3111, #2158, #3125, #3175, #3241, #1506, #3264/#3265 (R4's).
 
