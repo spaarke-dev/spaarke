@@ -299,6 +299,8 @@ class WordProbeTests(unittest.TestCase):
             self.assertIn(wp.JS_PROBE, body)
             used = [w for w in wp.JS_FORBIDDEN if re.search(rf"\b{re.escape(w)}\b", wp.JS_PROBE)]
             self.assertEqual(used, [], "Word's code runner refuses code using these (WP-5 run 1: toString)")
+            self.assertIsNone(re.match(r"\s*await\b", wp.JS_PROBE),
+                              "Word's code runner refuses a top-level await (WP-5 run 2)")
             digest = wp.js_marker().split()[-1]
             self.assertFalse(any(digest in z.read(n).decode("utf-8", "ignore") for n in names),
                              "the marker hash must be computed by the code, never stored in the plugin")

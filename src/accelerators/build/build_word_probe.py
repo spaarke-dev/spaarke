@@ -30,7 +30,7 @@ import gates  # noqa: E402
 from build_accelerator import make_icons, write, zip_dir  # noqa: E402
 
 PACKAGE = "spaarke-word-probe"
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 # Word's code runner refuses code that uses these (WP-5 run 1, 2026-11-26: "rejected ... because it uses
 # toString"). The others are guesses at the same denylist; the probe avoids them all.
 JS_FORBIDDEN = ("toString", "padStart", "eval", "Function", "constructor", "prototype", "__proto__",
@@ -64,7 +64,7 @@ def js_marker():
 # Office.js (Word API 1.4+): add a plain paragraph, then with tracking on replace one word and comment on it,
 # then put the tracking mode back. The paragraph is added with tracking OFF so the replacement is an ordinary
 # tracked deletion + insertion of existing text, the way a redline edits an agreement.
-JS_PROBE = f"""await Word.run(async (context) => {{
+JS_PROBE = f"""Word.run(async (context) => {{
   const doc = context.document;
   doc.load("changeTrackingMode");
   await context.sync();
@@ -145,8 +145,12 @@ This is not legal advice. Guardrails: `references/guardrails.md`.
 
 When the user asks to run the Spaarke JavaScript probe:
 1. Run the code below on the open document **exactly as written**: do not change, shorten, reformat or rewrite
-   any part of it, and do not run any other code before or after it.
-2. Reply with the line the code returns, exactly, in a code block. If you changed anything in the code, say what.
+   any part of it, and do not run any other code before or after it. One exception: if your code runner needs
+   a different outer form (for example it already provides `context`, wants a function body, or needs
+   `await`/`return` in front), you may change **only the first line and the last line** to fit it. Everything
+   between them stays exactly as written. Then quote both changed lines exactly.
+2. Reply with the line the code returns, exactly, in a code block. If nothing is returned, quote the last
+   paragraph of the document instead. Say whether you changed anything in the code, and what.
 3. If you cannot run JavaScript here, reply with exactly `Spaarke JS probe · code not run · {JS_CODE}` and say
    why. Never write the returned line yourself, and never add the paragraph, change or comment any other way:
    either fails the test.
