@@ -8,17 +8,29 @@ namespace Sprk.Bff.Api.Models.Ai.RecordSearch;
 /// </summary>
 public sealed record RecordSearchOptions
 {
+    /// <summary>Smallest accepted page size. Single source for the <c>[Range]</c> and the endpoint's bounds check.</summary>
+    public const int MinLimit = 1;
+
+    /// <summary>Largest accepted page size. Single source for the <c>[Range]</c> and the endpoint's bounds check.</summary>
+    public const int MaxLimit = 50;
+
+    /// <summary>Smallest accepted offset. Single source for the <c>[Range]</c> and the endpoint's bounds check.</summary>
+    public const int MinOffset = 0;
+
+    /// <summary>Largest accepted offset. Single source for the <c>[Range]</c> and the endpoint's bounds check.</summary>
+    public const int MaxOffset = 1000;
+
     /// <summary>
     /// Maximum number of results to return. Range: 1-50, default: 20.
     /// </summary>
-    [Range(1, 50, ErrorMessage = "Limit must be between 1 and 50")]
+    [Range(MinLimit, MaxLimit, ErrorMessage = "Limit must be between 1 and 50")]
     [JsonPropertyName("limit")]
     public int Limit { get; init; } = 20;
 
     /// <summary>
     /// Number of results to skip for pagination. Range: 0-1000, default: 0.
     /// </summary>
-    [Range(0, 1000, ErrorMessage = "Offset must be between 0 and 1000")]
+    [Range(MinOffset, MaxOffset, ErrorMessage = "Offset must be between 0 and 1000")]
     [JsonPropertyName("offset")]
     public int Offset { get; init; } = 0;
 

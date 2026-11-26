@@ -61,12 +61,6 @@ public class SessionOwnershipGuardTests
                 + "unchecked parent would hand the caller a child session owned by someone else. "
                 + "Denies with the same answer as not-found.",
 
-            ["Api/Agent/AgentEndpoints.cs"] =
-                "POST /api/agent/message takes ConversationReference (a session id) in the body. A "
-                + "reference the caller does not own is treated exactly like a stale one: mint a new "
-                + "session rather than resume. Note ExtractUserId() there returns the literal "
-                + "\"unknown\" when the oid is absent — correct for a log line, never for ownership.",
-
             // unified-access-control-r2 task 166 (route-authorization sweep finding S-64).
             ["Api/ComposeMountEndpoints.cs"] =
                 "POST /api/compose/upload takes sessionId (and the uploaded documentId) in the BODY and returns "

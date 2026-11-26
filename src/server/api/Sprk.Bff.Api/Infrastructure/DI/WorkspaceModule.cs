@@ -113,6 +113,12 @@ public static class WorkspaceModule
         // Concrete registration per ADR-010 (no interface seam needed for single implementation).
         services.AddScoped<ProjectPreFillService>();
 
+        // IEventsCapability (spaarkeai-mcp-bff-api-r2 task 006, spec FR-07 part 1): the ONE owner of the event list, get, create
+        // and complete rules and their authorization, which the REST routes (EventEndpoints) and the MCP tools (tasks 025, 036)
+        // share. Scoped: it takes the request's HttpContext per call. Interface seam per ADR-010: the MCP tools are tested
+        // against it (the IDecisionCapability precedent, SignalsModule).
+        services.AddScoped<Sprk.Bff.Api.Services.Events.IEventsCapability, Sprk.Bff.Api.Services.Events.EventsCapability>();
+
         // TodoGenerationOptions: bind from "TodoGeneration" appsettings section.
         // Defaults apply when the section is absent (IntervalHours=24, StartHourUtc=2).
         if (configuration != null)

@@ -504,54 +504,10 @@ public static class FileAccessEndpoints
                 );
             }
 
-            // 3. Validate SPE pointers (driveId, itemId)
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
-
-            logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
-                document.GraphDriveId, document.GraphItemId);
-
-            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
-            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
-            // get for free from SPE's own container ACL.
-            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
-
-            // 4-5. Call Graph API (via the SpeFileStore app-only facade) to get preview URL.
-            // Request chromeless preview (no SharePoint header/toolbar). Per CICD-088b,
-            // the Graph SDK request/response types stay inside Infrastructure.Graph.
-            var rawPreviewUrl = await speFileStore.GetEmbedPreviewUrlAsync(
-                document.GraphDriveId!,
-                document.GraphItemId!,
-                additionalData: new Dictionary<string, object>
-                {
-                    { "chromeless", true },  // Hide SharePoint preview header
-                    { "viewer", "onedrive" }  // Use OneDrive viewer
-                },
-                ct: ct);
-
-            if (string.IsNullOrEmpty(rawPreviewUrl))
-            {
-                throw new SdapProblemException(
-                    "preview_not_available",
-                    "Preview Not Available",
-                    $"Graph API did not return a preview URL for document {documentId}",
-                    500
-                );
-            }
-
-            logger.LogInformation("Preview URL retrieved successfully | TraceId: {TraceId}",
-                context.TraceIdentifier);
-
-            // 6. Modify preview URL to hide SharePoint banner/header
-            // Use Microsoft-documented 'nb=true' parameter (no banner)
-            // Reference: https://learn.microsoft.com/en-us/sharepoint/dev/
-            var previewUrl = rawPreviewUrl;
-            {
-                var separator = previewUrl.Contains('?') ? '&' : '?';
-                // nb=true hides the top banner/header in SharePoint embed.aspx
-                previewUrl = $"{previewUrl}{separator}nb=true";
-                logger.LogInformation("Modified preview URL with nb=true (no banner) | TraceId: {TraceId}",
-                    context.TraceIdentifier);
-            }
+            // 3-6. Validate the pointers, verify the container, mint the preview URL (extracted by spaarkeai-mcp-bff-api-r2
+            // task 023 so the MCP tool spaarke_get_document calls the same code; the steps, order, logs and errors are unchanged).
+            var previewUrl = await MintPreviewUrlAsync(
+                document, docGuid, documentId, speFileStore, containerResolver, logger, context.TraceIdentifier, ct);
 
             // 7. Extract file extension from filename
             string? fileExtension = null;
@@ -871,101 +827,19 @@ public static class FileAccessEndpoints
                 );
             }
 
-            // 3. Validate SPE pointers (driveId, itemId)
-            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
-
-            logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
-                document.GraphDriveId, document.GraphItemId);
-
-            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
-            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
-            // get for free from SPE's own container ACL.
-            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
-
-            // 4-5. Get DriveItem metadata app-only (SpeFileStore facade per CICD-088b). webUrl / webDavUrl are POINTERS.
-            var driveItem = await speFileStore.GetDriveItemAsync(
-                document.GraphDriveId!, document.GraphItemId!,
-                selectFields: new[] { "id", "name", "webUrl", "webDavUrl", "file", "parentReference" }, ct: ct);
-
-            if (driveItem == null)
-            {
-                throw new SdapProblemException(
-                    "item_not_found",
-                    "Drive Item Not Found",
-                    $"Graph API did not return drive item for document {documentId}",
-                    404
-                );
-            }
-
-            if (string.IsNullOrEmpty(driveItem.WebUrl))
-            {
-                throw new SdapProblemException(
-                    "web_url_not_available",
-                    "Web URL Not Available",
-                    $"Graph API did not return a webUrl for document {documentId}",
-                    500
-                );
-            }
-
-            // 6. Extract MIME type from file facet
-            var mimeType = driveItem.MimeType ?? document.MimeType ?? "application/octet-stream";
-            var fileName = string.IsNullOrEmpty(driveItem.Name) ? (document.FileName ?? "Unknown") : driveItem.Name;
-
-            // 7. Construct direct file URL for desktop protocol
-            // The webUrl returns Doc.aspx (Office Online URL) which doesn't work well with ms-word: protocol
-            // We need to construct a direct file URL from the parent path + filename
-            string? directFileUrl = null;
-
-            // Prefer webDavUrl if available (direct file URL)
-            if (!string.IsNullOrEmpty(driveItem.WebDavUrl))
-            {
-                directFileUrl = driveItem.WebDavUrl;
-            }
-            // Otherwise construct from parent path
-            else if (driveItem.ParentReferencePath != null && !string.IsNullOrEmpty(fileName))
-            {
-                // ParentReference.Path format: /drives/{driveId}/root:/folder/path
-                // Extract the path after "root:" and construct URL
-                var pathParts = driveItem.ParentReferencePath.Split("root:");
-                if (pathParts.Length > 1)
-                {
-                    var folderPath = pathParts[1].TrimStart('/');
-                    // Get base SharePoint URL from webUrl (before /_layouts/)
-                    var webUrlParts = driveItem.WebUrl!.Split("/_layouts/");
-                    if (webUrlParts.Length > 0)
-                    {
-                        var baseUrl = webUrlParts[0];
-                        directFileUrl = $"{baseUrl}/{folderPath}/{Uri.EscapeDataString(fileName)}";
-                    }
-                }
-            }
-
-            // Fall back to webUrl if we couldn't construct a direct URL
-            var urlForDesktop = directFileUrl ?? driveItem.WebUrl;
-
-            logger.LogInformation(
-                "OpenLinks URL selection | HasWebDavUrl: {HasWebDavUrl} | UsingDirectFileUrl: {UsingDirect}",
-                !string.IsNullOrEmpty(driveItem.WebDavUrl), directFileUrl is not null);
-
-            // 8. Generate desktop protocol URL using DesktopUrlBuilder
-            var desktopUrl = DesktopUrlBuilder.FromMime(urlForDesktop, mimeType);
-
-            logger.LogInformation(
-                "OpenLinks generated | FileName: {FileName} | MimeType: {MimeType} | HasDesktopUrl: {HasDesktopUrl} | TraceId: {TraceId}",
-                fileName, mimeType, desktopUrl != null, context.TraceIdentifier);
+            // 3-8. Validate the pointers, verify the container, read the drive item, build the links (extracted by
+            // spaarkeai-mcp-bff-api-r2 task 023 so the MCP tool spaarke_get_document calls the same code; steps, order, logs and
+            // errors are unchanged).
+            var links = await ResolveOpenLinksAsync(
+                document, docGuid, documentId, speFileStore, containerResolver, logger, context.TraceIdentifier, ct);
 
             // 9. Edit access (owner round 70): just-in-time writer role on a SECURE container for a caller with Write on
             //    the secure record. A caller without Write gets the same pointers and no grant — SharePoint refuses
-            //    them, and the in-app preview (broker) is their view path.
+            //    them, and the in-app preview (broker) is their view path. (The MCP tool is read-only and never asks for it.)
             await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct, describeSharedContainer: false, itemId: document.GraphItemId);
 
             // 10. Return response
-            return TypedResults.Ok(new OpenLinksResponse(
-                DesktopUrl: desktopUrl,
-                WebUrl: driveItem.WebUrl,
-                MimeType: mimeType,
-                FileName: fileName
-            ));
+            return TypedResults.Ok(links);
         }
 
         /// <summary>
@@ -1325,6 +1199,181 @@ public static class FileAccessEndpoints
             httpContext.Response.Headers.CacheControl = CacheControlValue;
             await httpContext.Response.WriteAsync(_html, System.Text.Encoding.UTF8, httpContext.RequestAborted);
         }
+    }
+
+    /// <summary>
+    /// Steps 3-6 of <c>GET /api/documents/{documentId}/preview-url</c>, extracted unchanged by spaarkeai-mcp-bff-api-r2 task 023 so the
+    /// MCP tool <c>spaarke_get_document</c> mints the link with the same code (no copy): validate the row's SPE pointers, verify the
+    /// pointer's container (the read is app-only, uac-r2 task 171), mint the chromeless preview URL and add <c>nb=true</c>. The CALLER
+    /// MUST have been authorized on the document first (the route's <see cref="DocumentAuthorizationFilter"/>; the tool's
+    /// <c>InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync</c>). Throws <see cref="SdapProblemException"/> exactly as the route did.
+    /// </summary>
+    internal static async Task<string> MintPreviewUrlAsync(
+        DocumentEntity document,
+        Guid docGuid,
+        string documentId,
+        SpeFileStore speFileStore,
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        // 3. Validate SPE pointers (driveId, itemId)
+        ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+
+        logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
+            document.GraphDriveId, document.GraphItemId);
+
+        // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+        // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+        // get for free from SPE's own container ACL.
+        await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+        // 4-5. Call Graph API (via the SpeFileStore app-only facade) to get preview URL.
+        // Request chromeless preview (no SharePoint header/toolbar). Per CICD-088b,
+        // the Graph SDK request/response types stay inside Infrastructure.Graph.
+        var rawPreviewUrl = await speFileStore.GetEmbedPreviewUrlAsync(
+            document.GraphDriveId!,
+            document.GraphItemId!,
+            additionalData: new Dictionary<string, object>
+            {
+                { "chromeless", true },  // Hide SharePoint preview header
+                { "viewer", "onedrive" }  // Use OneDrive viewer
+            },
+            ct: ct);
+
+        if (string.IsNullOrEmpty(rawPreviewUrl))
+        {
+            throw new SdapProblemException(
+                "preview_not_available",
+                "Preview Not Available",
+                $"Graph API did not return a preview URL for document {documentId}",
+                500
+            );
+        }
+
+        logger.LogInformation("Preview URL retrieved successfully | TraceId: {TraceId}", traceId);
+
+        // 6. Modify preview URL to hide SharePoint banner/header
+        // Use Microsoft-documented 'nb=true' parameter (no banner)
+        // Reference: https://learn.microsoft.com/en-us/sharepoint/dev/
+        var previewUrl = rawPreviewUrl;
+        {
+            var separator = previewUrl.Contains('?') ? '&' : '?';
+            // nb=true hides the top banner/header in SharePoint embed.aspx
+            previewUrl = $"{previewUrl}{separator}nb=true";
+            logger.LogInformation("Modified preview URL with nb=true (no banner) | TraceId: {TraceId}", traceId);
+        }
+
+        return previewUrl;
+    }
+
+    /// <summary>
+    /// Steps 3-8 of <c>GET /api/documents/{documentId}/open-links</c>, extracted unchanged by spaarkeai-mcp-bff-api-r2 task 023 so the
+    /// MCP tool <c>spaarke_get_document</c> builds the links with the same code (no copy): validate the row's SPE pointers, verify the
+    /// pointer's container, read the drive item app-only and build the desktop and web links. It does NOT do the route's step 9
+    /// (<c>OfficeEditAccessService.PrepareAsync</c>, a just-in-time writer-role grant): a read-only tool must not grant anything. The
+    /// CALLER MUST have been authorized on the document first. Throws <see cref="SdapProblemException"/> exactly as the route did.
+    /// </summary>
+    internal static async Task<OpenLinksResponse> ResolveOpenLinksAsync(
+        DocumentEntity document,
+        Guid docGuid,
+        string documentId,
+        SpeFileStore speFileStore,
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        // 3. Validate SPE pointers (driveId, itemId)
+        ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+
+        logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
+            document.GraphDriveId, document.GraphItemId);
+
+        // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+        // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+        // get for free from SPE's own container ACL.
+        await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+        // 4-5. Get DriveItem metadata app-only (SpeFileStore facade per CICD-088b). webUrl / webDavUrl are POINTERS.
+        var driveItem = await speFileStore.GetDriveItemAsync(
+            document.GraphDriveId!, document.GraphItemId!,
+            selectFields: new[] { "id", "name", "webUrl", "webDavUrl", "file", "parentReference" }, ct: ct);
+
+        if (driveItem == null)
+        {
+            throw new SdapProblemException(
+                "item_not_found",
+                "Drive Item Not Found",
+                $"Graph API did not return drive item for document {documentId}",
+                404
+            );
+        }
+
+        if (string.IsNullOrEmpty(driveItem.WebUrl))
+        {
+            throw new SdapProblemException(
+                "web_url_not_available",
+                "Web URL Not Available",
+                $"Graph API did not return a webUrl for document {documentId}",
+                500
+            );
+        }
+
+        // 6. Extract MIME type from file facet
+        var mimeType = driveItem.MimeType ?? document.MimeType ?? "application/octet-stream";
+        var fileName = string.IsNullOrEmpty(driveItem.Name) ? (document.FileName ?? "Unknown") : driveItem.Name;
+
+        // 7. Construct direct file URL for desktop protocol
+        // The webUrl returns Doc.aspx (Office Online URL) which doesn't work well with ms-word: protocol
+        // We need to construct a direct file URL from the parent path + filename
+        string? directFileUrl = null;
+
+        // Prefer webDavUrl if available (direct file URL)
+        if (!string.IsNullOrEmpty(driveItem.WebDavUrl))
+        {
+            directFileUrl = driveItem.WebDavUrl;
+        }
+        // Otherwise construct from parent path
+        else if (driveItem.ParentReferencePath != null && !string.IsNullOrEmpty(fileName))
+        {
+            // ParentReference.Path format: /drives/{driveId}/root:/folder/path
+            // Extract the path after "root:" and construct URL
+            var pathParts = driveItem.ParentReferencePath.Split("root:");
+            if (pathParts.Length > 1)
+            {
+                var folderPath = pathParts[1].TrimStart('/');
+                // Get base SharePoint URL from webUrl (before /_layouts/)
+                var webUrlParts = driveItem.WebUrl!.Split("/_layouts/");
+                if (webUrlParts.Length > 0)
+                {
+                    var baseUrl = webUrlParts[0];
+                    directFileUrl = $"{baseUrl}/{folderPath}/{Uri.EscapeDataString(fileName)}";
+                }
+            }
+        }
+
+        // Fall back to webUrl if we couldn't construct a direct URL
+        var urlForDesktop = directFileUrl ?? driveItem.WebUrl;
+
+        logger.LogInformation(
+            "OpenLinks URL selection | HasWebDavUrl: {HasWebDavUrl} | UsingDirectFileUrl: {UsingDirect}",
+            !string.IsNullOrEmpty(driveItem.WebDavUrl), directFileUrl is not null);
+
+        // 8. Generate desktop protocol URL using DesktopUrlBuilder
+        var desktopUrl = DesktopUrlBuilder.FromMime(urlForDesktop, mimeType);
+
+        logger.LogInformation(
+            "OpenLinks generated | FileName: {FileName} | MimeType: {MimeType} | HasDesktopUrl: {HasDesktopUrl} | TraceId: {TraceId}",
+            fileName, mimeType, desktopUrl != null, traceId);
+
+        return new OpenLinksResponse(
+            DesktopUrl: desktopUrl,
+            WebUrl: driveItem.WebUrl,
+            MimeType: mimeType,
+            FileName: fileName
+        );
     }
 
     /// <summary>
