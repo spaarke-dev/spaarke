@@ -4,7 +4,7 @@
     <title>FR-04: Review and merge ADR-004 Amendment A2 (queue consumers outside the BFF) to master — main session only</title>
     <phase>0 Foundations and cleanup</phase>
     <gate>startable (main session only)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>ADR amendment (Path B, root CLAUDE.md §6.5) with explicit ADR constraints; documentation only, no code.</rigor-reason>
     <model-tier>opus</model-tier>

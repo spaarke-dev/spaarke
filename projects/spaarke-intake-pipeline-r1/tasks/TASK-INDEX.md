@@ -9,11 +9,11 @@
 |----|-------|-------|--------|--------------|----------|---------------|
 | 001 | Engine container image + ADR-004 A2 consumer entrypoint + golden-fixture test (FR-01) | 0 | 🔲 [open] | 007, 002, ext #3163 | P0-B | opus / high |
 | 002 | Bicep: Container Apps env + engine Job (KEDA, UAMI, RBAC), staging container + 7-day lifecycle, engine queue (FR-01) | 0 | 🔲 [open] | none | P0-A | sonnet / high |
-| 003 | CI: engine image build → Trivy → ACR push (FR-01) | 0 | 🔲 [open] | none | P0-A | sonnet / high |
+| 003 | CI: engine image build → Trivy → ACR push (FR-01) | 0 | ✅ [done] | none | P0-A | sonnet / high |
 | 004 | App-only agreement classify + edit-plan Action behind IAgreementAi facade (FR-02) | 0 | 🔲 [open] | 005, ext #3163 | P0-A2 | sonnet / high |
 | 005 | Cleanup PR part 1: §10.1 items 1b, 2, 4, 5a (+ regression test), 6 (FR-03) | 0 | 🔲 [open] | none | P0-A | sonnet / high |
 | 006 | Cleanup PR part 2: item 7 threaded reply (createReply) + item 8 docs (FR-03) | 0 | 🔲 [open] | 005 | P0-A2 | sonnet / high |
-| 007 | Review and merge ADR-004 Amendment A2 (FR-04) — **main session only** (`.claude/`) | 0 | 🔲 [open] | none | SERIAL | opus / high |
+| 007 | Review and merge ADR-004 Amendment A2 (FR-04) — **main session only** (`.claude/`) | 0 | ✅ [done] | none | SERIAL | opus / high |
 | 008 | Phase 0 dev deploy + engine-hosting spike report (latency, golden, Clean-copy finding) | 0 | 🔲 [open] | 001–006 | P0-C | sonnet / high |
 | 010 | `sprk_servicerequest` intake columns (FR-05) | 1 | 🔲 [open] | none (coordinate ontology first) | P1-A | sonnet / high |
 | 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | 🔲 [open] | none | P1-A | sonnet / high |
