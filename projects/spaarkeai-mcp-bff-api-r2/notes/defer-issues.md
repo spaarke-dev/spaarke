@@ -209,3 +209,46 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 ## D-022-2 — SemanticSearchEndpoints logs full exceptions; client abort → 500 → #3221
 - **Status**: deferred (pre-existing REST route, outside 022's diff). Log the exception type only; return 499 at Debug on `RequestAborted`, as 024 did for playbook lists.
 - **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## D-034-1 — measure whether real Daily Briefings exceed the tool's 27 s budget (FR-14 start/status not used)
+- **Status**: deferred (needs a dev deploy: tasks 039/043).
+- **Draft issue** — title: `spaarke_get_briefing: measure briefing generation time; add FR-14 start/status if it exceeds 27 s`.
+  Body: the tool enforces `McpLongRunning.Budget - 3 s` and answers `briefing.timeout` (504). The render is one synchronous composite call with no
+  run record to poll, so FR-14's start/status pair was not built. At the dev deploy, record p50/p95 of `/render` for real users; if p95 is near
+  27 s, either add a run-record-backed start/status or cache the last briefing. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
+
+## D-034-2 — the first view of the widget uses the BFF default windows (5 d / 120 h); the Console's default preference is 7 d (168 h)
+- **Status**: deferred (owner's call; known limit K2 in `notes/034-decisions.md`).
+- **Draft issue** — title: `Align the Daily Briefing default recency window (BFF 120 h vs Console preference 168 h)`.
+  Body: `DailyBriefingCollector.DefaultRecencyHours = 120`, `DEFAULT_DAILY_DIGEST_PREFERENCES.timeWindow = '7d'`. A no-argument tool call (what Copilot makes) and
+  the widget's later Refresh therefore cover different windows. Options: raise the BFF default to 168, or have the tool descriptor tell the model to pass
+  `recencyHours`. Labels: spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## D-034-3 — one factory for the widget resources, and the Decisions widget adopting the shared `hostTheme`
+- **Status**: deferred (the third and fourth copies land in tasks 035 and 040; r1's Decisions files were not touched).
+- **Draft issue** — title: `Extract a widget-resource factory (DecisionsWidgetResource, BriefingWidgetResource, ...) and move the Decisions widget to shared/mcp/hostTheme`.
+  Body: `BriefingWidgetResource` is a copy of `DecisionsWidgetResource` with different constants; `McpEndpoints.WarnIfWidgetMissing` already takes the widget as
+  arguments. `src/client/widgets/spaarke-decisions/src/theme/hostTheme.ts` is identical to `src/client/widgets/shared/mcp/hostTheme.ts`. Do both once the r2
+  widgets have all landed. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
+
+## D-034-4 — the per-widget build/embed steps are repeated in five places
+- **Status**: deferred (task 034 added the briefing to each; tasks 035 and 040 will add two more).
+- **Draft issue** — title: `Build and verify every MCP widget from one list (publish, deploy, ci-tier1, run-conformance.sh, Deploy-BffApi.ps1)`.
+  Body: `publish-bff-artifact.yml`, `deploy-bff-api.yml`, `ci-tier1-blocking.yml`, `run-conformance.sh` and `Deploy-BffApi.ps1` each list the widgets by hand, and the
+  built-widget gate in publish names the test classes. A new widget that is added to the csproj but forgotten in one of them ships an artifact that serves an
+  error for its resource (the startup warning is the only signal). Use one matrix or one script that reads the widget folders. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
+
+## D-034-5 — the briefing widget is 1.13 MB (aim 1 MB)
+- **Status**: deferred (under the 3 MB ceiling; `check-bundle-size.mjs` warns).
+- **Draft issue** — title: `Briefing widget bundle: 1.13 MB against the 1 MB aim`.
+  Body: most of the page is Fluent UI v9. Stubbing the email composer and document preview took it from 1.56 MB to 1.13 MB. Next candidates: import Fluent
+  by deep path instead of the `@fluentui/react-components` barrel, and check which Console components the briefing renders that pull icons. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
+
+## D-034-6 — POST /api/ai/daily-briefing/render's 503 for an unconfigured dispatch echoes `ex.Message` as the ProblemDetails detail (pre-existing, found in passing)
+- **Status**: deferred (REST bytes are frozen by task 034's constraint; the tool does not copy it).
+- **Draft issue** — title: `Daily briefing render 503 (dispatch unconfigured) returns the exception message in ProblemDetails.detail`.
+  Body: `DailyBriefingEndpoints.RenderCoreAsync` (the `DailyBriefingDispatchUnconfiguredException` catch) returns `Results.Problem(statusCode: 503, detail: ex.Message)`. The
+  message can name a Binding row or a configuration key. ADR-019: fixed text, exception logged. The `/email` leg has the same shape. Fix: fixed detail text with a stable code. Labels: spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## D-034-7 — `BriefingNavigationHandler.openUrl` is not called by `DailyBriefingApp`
+- **Status**: noted (task 010's seam declares it for the widget; the widget maps it to the host's open-link, but no component action uses it yet, so external links in a briefing are plain text). Wire it when a link affordance is added.
