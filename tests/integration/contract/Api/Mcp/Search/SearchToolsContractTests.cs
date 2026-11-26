@@ -170,7 +170,7 @@ public sealed class SearchToolsContractTests
         item.GetProperty("openLink").GetString().Should().Be(
             $"{SearchToolsHost.EnvironmentUrl}/main.aspx?pagetype=entityrecord&etn=sprk_document&id={documentId:D}");
         tool.GetProperty("structuredContent").EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            ["items", "limit", "offset", "hasMore", "truncated"]);
+            ["items", "limit", "offset", "hasMore", "truncated", "nextOffset"]);
         tool.GetRawText().Should().NotContain("SECRET-").And.NotContain("b!").And.NotContain("combinedScore", "no pointer, score, author or summary reaches the model");
         Text(tool).Should().Contain("Master services agreement.docx").And.Contain(documentId.ToString("D")).And.Contain("Open: ");
     }
@@ -402,31 +402,35 @@ public sealed class SearchToolsContractTests
         host.RecordIndex.Requests.Should().ContainSingle().Which.Options.Should().BeEquivalentTo(new RecordSearchOptions { Limit = 50, Offset = 1000 });
     }
 
+    private const string InvalidArgument = "mcp.invalid_argument";
+
+    // A missing, non-text or blank query and one past the bound carry the REST routes' codes (task 022 verifier fix F4); every other
+    // unreadable argument is the MCP invalid-argument code.
     public static IEnumerable<object[]> BadDocumentArguments() =>
     [
-        [new { }],
-        [new { query = "" }],
-        [new { query = "   " }],
-        [new { query = 5 }],
-        [new { query = new string('x', 1001) }],
-        [new { query = "q", extra = "x" }],
-        [new { query = "q", entityType = "matter" }],
-        [new { query = "q", entityId = "23000000-0000-4000-8000-0000000000a1" }],
-        [new { query = "q", entityType = "account", entityId = "23000000-0000-4000-8000-0000000000a1" }],
-        [new { query = "q", entityType = "matter", entityId = "not-a-guid" }],
-        [new { query = "q", entityType = "matter", entityId = "00000000-0000-0000-0000-000000000000" }],
+        [new { }, SearchErrorCodes.QueryRequired],
+        [new { query = "" }, SearchErrorCodes.QueryRequired],
+        [new { query = "   " }, SearchErrorCodes.QueryRequired],
+        [new { query = 5 }, SearchErrorCodes.QueryRequired],
+        [new { query = new string('x', 1001) }, SearchErrorCodes.QueryTooLong],
+        [new { query = "q", extra = "x" }, InvalidArgument],
+        [new { query = "q", entityType = "matter" }, InvalidArgument],
+        [new { query = "q", entityId = "23000000-0000-4000-8000-0000000000a1" }, InvalidArgument],
+        [new { query = "q", entityType = "account", entityId = "23000000-0000-4000-8000-0000000000a1" }, InvalidArgument],
+        [new { query = "q", entityType = "matter", entityId = "not-a-guid" }, InvalidArgument],
+        [new { query = "q", entityType = "matter", entityId = "00000000-0000-0000-0000-000000000000" }, InvalidArgument],
     ];
 
     [Theory]
     [MemberData(nameof(BadDocumentArguments))]
-    public async Task SearchDocuments_RefusesAnArgumentSetItCannotRead_WithTheFix_AndSearchesNothing(object arguments)
+    public async Task SearchDocuments_RefusesAnArgumentSetItCannotRead_WithTheFix_AndSearchesNothing(object arguments, string code)
     {
         await using var host = await SearchToolsHost.StartAsync();
 
         var result = JsonOf(await SearchDocumentsTool.RunAsync(Args(arguments), host.DirectContext(), SearchToolsHost.EnvironmentUrl, NullLogger.Instance, default));
 
         IsError(result).Should().BeTrue(result.GetRawText());
-        Code(result).Should().Be("mcp.invalid_argument");
+        Code(result).Should().Be(code);
         Status(result).Should().Be(400);
         host.DocumentIndex.Requests.Should().BeEmpty();
         host.Access.Calls.Should().BeEmpty();
@@ -434,26 +438,28 @@ public sealed class SearchToolsContractTests
 
     public static IEnumerable<object[]> BadRecordArguments() =>
     [
-        [new { }],
-        [new { query = "" }],
-        [new { query = "q", extra = "x" }],
-        [new { query = "q", recordTypes = new string[0] }],
-        [new { query = "q", recordTypes = new[] { "contract" } }],
-        [new { query = "q", recordTypes = new[] { "sprk_matter" } }],
-        [new { query = "q", recordTypes = "matter" }],
-        [new { query = "q", recordTypes = new[] { "matter", "project", "invoice", "matter" } }],
+        [new { }, SearchErrorCodes.QueryRequired],
+        [new { query = "" }, SearchErrorCodes.QueryRequired],
+        [new { query = new string('x', 1001) }, SearchErrorCodes.QueryTooLong],
+        [new { query = "q", extra = "x" }, InvalidArgument],
+        [new { query = "q", recordTypes = new string[0] }, InvalidArgument],
+        [new { query = "q", recordTypes = new[] { "contract" } }, InvalidArgument],
+        [new { query = "q", recordTypes = new[] { "sprk_matter" } }, InvalidArgument],
+        [new { query = "q", recordTypes = "matter" }, InvalidArgument],
+        [new { query = "q", recordTypes = new[] { "matter", "project", "invoice", "matter" } }, InvalidArgument],
     ];
 
     [Theory]
     [MemberData(nameof(BadRecordArguments))]
-    public async Task FindRecords_RefusesAnArgumentSetItCannotRead_WithTheFix_AndSearchesNothing(object arguments)
+    public async Task FindRecords_RefusesAnArgumentSetItCannotRead_WithTheFix_AndSearchesNothing(object arguments, string code)
     {
         await using var host = await SearchToolsHost.StartAsync();
 
         var result = JsonOf(await FindRecordsTool.RunAsync(Args(arguments), host.DirectContext(), SearchToolsHost.EnvironmentUrl, NullLogger.Instance, default));
 
         IsError(result).Should().BeTrue(result.GetRawText());
-        Code(result).Should().Be("mcp.invalid_argument");
+        Code(result).Should().Be(code);
+        Status(result).Should().Be(400);
         host.RecordIndex.Requests.Should().BeEmpty();
         host.Access.Calls.Should().BeEmpty();
     }
@@ -546,7 +552,7 @@ public sealed class SearchToolsContractTests
             },
         };
 
-        var result = JsonOf(SearchDocumentsTool.ResultOf(response, limit: 20, offset: 0, consoleBaseUrl: null));
+        var result = JsonOf(SearchDocumentsTool.ResultOf(response, limit: 20, offset: 0, consoleBaseUrl: null, offsetContinues: true));
 
         result.GetProperty("structuredContent").GetProperty("warnings").EnumerateArray().Select(w => w.GetString()).Should().Equal(SearchWarningCode.PartialResults);
         result.GetRawText().Should().NotContain("SECRET").And.NotContain("4242");

@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
+using Sprk.Bff.Api.Services.Ai.RecordSearch;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -291,6 +292,26 @@ public sealed class RecordSearchAuthorizationFilter : IEndpointFilter
             (ILogger?)logger ?? NullLogger.Instance,
             cancellationToken);
     }
+
+    /// <summary>
+    /// <see cref="SearchRecordsAsCallerAsync(HttpContext?, RecordSearchRequest?, Func{RecordSearchRequest, CancellationToken, Task{RecordSearchResponse}}, CancellationToken)"/>
+    /// over the record index (<see cref="IRecordSearchService"/>) the REST route's own handler uses, for a host that is not that
+    /// route (the MCP record search tool, spaarkeai-mcp-bff-api-r2 task 022). This filter is API-layer code beside the REST
+    /// endpoint that already resolves the service, so the MCP tool names no AI-internal type (ADR-013, Path C).
+    /// <para>The service is resolved from <c>httpContext.RequestServices</c> only inside the search delegate, which the shared
+    /// method calls once and only after the request phase allows the search: a null context, no authenticated identity or any
+    /// refusal resolves nothing.</para>
+    /// </summary>
+    public static Task<RecordSearchAccess> SearchRecordsAsCallerAsync(
+        HttpContext? httpContext,
+        RecordSearchRequest? request,
+        CancellationToken cancellationToken) =>
+        SearchRecordsAsCallerAsync(
+            httpContext,
+            request,
+            (narrowed, ct) =>
+                httpContext!.RequestServices.GetRequiredService<IRecordSearchService>().SearchAsync(narrowed, ct), // Allowed implies a non-null context.
+            cancellationToken);
 
     /// <summary>
     /// The request-level decision — the ONE implementation, behind both this filter and

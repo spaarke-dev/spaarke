@@ -123,6 +123,7 @@ internal sealed class SearchToolsHost : IAsyncDisposable
         app.MapMcpEndpoints();
         app.MapSemanticSearchEndpoints();
         app.MapRecordSearchEndpoints();
+        world.RecordIndex.Accessor = app.Services.GetRequiredService<IHttpContextAccessor>();
         await app.StartAsync();
 
         var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
@@ -229,20 +230,27 @@ internal sealed class StubDocumentIndex : ISemanticSearchService
 
     public List<SemanticSearchRequest> Requests { get; } = [];
 
+    /// <summary>The tenant id each search was sent with (task 022 verifier fix F4: the tenant pin).</summary>
+    public List<string> TenantIds { get; } = [];
+
     public void Returns(params SearchResult[] rows) => _rows = rows;
 
     public Task<SemanticSearchResponse> SearchAsync(SemanticSearchRequest request, string tenantId, CancellationToken cancellationToken = default)
     {
         Requests.Add(request);
+        TenantIds.Add(tenantId);
         if (Fault is { } fault)
         {
             throw fault;
         }
 
+        // Honours the offset and the limit as the real index does: rows are skipped from the front of the ranked list, then at most `limit`
+        // are read (for scope=all the filter has already widened the limit to its candidate pool).
+        var page = _rows.Skip(Math.Max(request.Options?.Offset ?? 0, 0)).Take(request.Options?.Limit ?? int.MaxValue).ToArray();
         return Task.FromResult(new SemanticSearchResponse
         {
-            Results = _rows,
-            Metadata = new SearchMetadata { TotalResults = ReportedTotal, ReturnedResults = _rows.Length, ExecutedMode = "rrf" },
+            Results = page,
+            Metadata = new SearchMetadata { TotalResults = ReportedTotal, ReturnedResults = page.Length, ExecutedMode = "rrf" },
         });
     }
 
@@ -323,19 +331,33 @@ internal sealed class StubRecordIndex : IRecordSearchService
 
     public List<RecordSearchRequest> Requests { get; } = [];
 
+    /// <summary>
+    /// What the production record index would read as its tenant: the <c>tid</c> claim of the request the search runs in
+    /// (<c>IHttpContextAccessor</c>; <c>RecordSearchService</c> derives its tenant filter from it). Null when no request context is set.
+    /// Task 022 verifier fix F4: the tenant pin.
+    /// </summary>
+    public List<string?> TenantIds { get; } = [];
+
+    /// <summary>Set by the host; reads the request the search runs in.</summary>
+    public IHttpContextAccessor? Accessor { get; set; }
+
     public void Returns(params RecordSearchResult[] rows) => _rows = rows;
 
     public Task<RecordSearchResponse> SearchAsync(RecordSearchRequest request, CancellationToken cancellationToken = default)
     {
         Requests.Add(request);
+        var user = Accessor?.HttpContext?.User;
+        TenantIds.Add((user?.FindFirst("tid") ?? user?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid"))?.Value);
         if (Fault is { } fault)
         {
             throw fault;
         }
 
+        // Honours the offset and the limit as the real index does.
+        var page = _rows.Skip(Math.Max(request.Options?.Offset ?? 0, 0)).Take(request.Options?.Limit ?? int.MaxValue).ToArray();
         return Task.FromResult(new RecordSearchResponse
         {
-            Results = _rows,
+            Results = page,
             Metadata = new RecordSearchMetadata { TotalCount = ReportedTotal, SearchTime = 1, HybridMode = RecordHybridSearchMode.Rrf },
         });
     }

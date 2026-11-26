@@ -6,8 +6,6 @@ using Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
-using Sprk.Bff.Api.Services.Ai.RecordSearch;
-using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using ModelContextProtocol.Protocol;
 
 namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
@@ -17,8 +15,8 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 //     telemetry), DecisionsTextSummary.ConsoleBaseUrl (the open-link base), McpText.SingleLine (control characters in a line of text),
 //     SemanticSearchAuthorizationFilter / RecordSearchAuthorizationFilter (the access decisions, task 027).
 //   Extension: this class calls all of them. It adds only what no one has: the argument set the two search tools share (query, limit,
-//     offset), the refusal-to-error mapping for the two typed access outcomes, the lazily resolved index delegates (the tool classes may
-//     not name a Services/Ai type, so the delegates are made here), the slim hit projection and the size budget.
+//     offset), the refusal-to-error mapping for the two typed access outcomes, the paging text, the slim hit projection and the size
+//     budget. No Services/Ai type appears in Api/Mcp: the two filters resolve the search index themselves (ADR-013, Path C).
 //   Cost of doing nothing: the two search tools would each carry a copy of the argument bounds, the outcome table and the row budget, and
 //     the two could drift (one clamping a limit the other refuses; one leaking an outcome's text the other hides).
 
@@ -89,22 +87,6 @@ internal static partial class SearchToolSupport
     /// <summary>The Dataverse table of a document, for its open link.</summary>
     internal const string DocumentTable = "sprk_document";
 
-    // ---- the index delegates -------------------------------------------------------------------------------------------------------
-
-    /// <summary>
-    /// The document index for <see cref="SemanticSearchAuthorizationFilter.SearchDocumentsAsCallerAsync"/>: resolved from the request's own
-    /// services only when the shared method has allowed the search (it never calls the delegate for a refused or caller-less request).
-    /// It lives here because a tool class may not name a <c>Services/Ai</c> type (ADR-013; the MCP tool rule).
-    /// </summary>
-    internal static Func<SemanticSearchRequest, string, CancellationToken, Task<SemanticSearchResponse>> DocumentIndex(HttpContext? http) =>
-        (request, tenantId, cancellationToken) =>
-            http!.RequestServices.GetRequiredService<ISemanticSearchService>().SearchAsync(request, tenantId, cancellationToken);
-
-    /// <summary>The record index for <see cref="RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync"/>; see <see cref="DocumentIndex"/>.</summary>
-    internal static Func<RecordSearchRequest, CancellationToken, Task<RecordSearchResponse>> RecordIndex(HttpContext? http) =>
-        (request, cancellationToken) =>
-            http!.RequestServices.GetRequiredService<IRecordSearchService>().SearchAsync(request, cancellationToken);
-
     // ---- arguments -------------------------------------------------------------------------------------------------------------------
 
     /// <summary>
@@ -130,13 +112,28 @@ internal static partial class SearchToolSupport
             return false;
         }
 
+        // The REST routes' own codes: QUERY_REQUIRED for a missing, non-text or blank query, QUERY_TOO_LONG for one past the bound.
         if (!arguments.TryGetValue(QueryArgument, out var queryElement)
             || queryElement.ValueKind != JsonValueKind.String
-            || string.IsNullOrWhiteSpace(queryElement.GetString())
-            || queryElement.GetString()!.Trim().Length > MaxQueryLength)
+            || string.IsNullOrWhiteSpace(queryElement.GetString()))
         {
-            error = DocumentToolSupport.InvalidArgument(
-                $"'{QueryArgument}' is required: the words to search for, as text of at most {MaxQueryLength} characters.", http);
+            error = DocumentToolSupport.Failure(
+                new McpToolError(
+                    SearchErrorCodes.QueryRequired,
+                    $"'{QueryArgument}' is required: the words to search for, as text of at most {MaxQueryLength} characters.",
+                    StatusCodes.Status400BadRequest),
+                http);
+            return false;
+        }
+
+        if (queryElement.GetString()!.Trim().Length > MaxQueryLength)
+        {
+            error = DocumentToolSupport.Failure(
+                new McpToolError(
+                    SearchErrorCodes.QueryTooLong,
+                    $"'{QueryArgument}' is too long: send at most {MaxQueryLength} characters.",
+                    StatusCodes.Status400BadRequest),
+                http);
             return false;
         }
 
@@ -351,6 +348,75 @@ internal static partial class SearchToolSupport
         && guid != Guid.Empty
             ? $"{baseUrl}/main.aspx?pagetype=entityrecord&etn={table}&id={guid:D}"
             : null;
+
+    // ---- paging ----------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The advice for a full page of a search whose <c>offset</c> does not continue the list (a document search over every record).</summary>
+    internal const string NarrowToOneRecordAdvice = "For more, search inside one matter, project or invoice (entityType + entityId).";
+
+    /// <summary>
+    /// What the paging facts of one result say: the lead sentence of the text, <c>hasMore</c> and <c>nextOffset</c>.
+    /// </summary>
+    /// <param name="Header">The first line of the text (before the hits).</param>
+    /// <param name="HasMore">The page came back full AND an offset would continue the list. Never "there is more": a short page can hide more, and a
+    /// full page of a list whose offset does not continue says <c>false</c> too. Nothing is counted (#1533).</param>
+    /// <param name="NextOffset">The offset the text advises, or null when it advises none.</param>
+    internal sealed record PageNote(string Header, bool HasMore, int? NextOffset);
+
+    /// <summary>
+    /// The lead sentence, <c>hasMore</c> and <c>nextOffset</c> for one page. Pure.
+    /// <list type="bullet">
+    /// <item>No rows at an offset past zero: "No more {noun}s after the first {offset}." (at offset 0: <paramref name="noMatchText"/>).</item>
+    /// <item>Rows: "Showing N {noun}(s), best match first." then, when the page came back <b>full</b> or the size bound <b>cut</b> it: the offset to send
+    /// (<c>offset + limit</c> for a full page, <c>offset + kept</c> after a cut, so no cut hit is skipped), or, when <paramref name="offsetContinues"/>
+    /// is false, <see cref="NarrowToOneRecordAdvice"/> and no offset. A page that came back short and whole gets the hedge "There may be more than this."
+    /// because rows are authorized after the index ranks them, so a short page does not mean the end of the list.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="noun">"document" or "record".</param>
+    /// <param name="noMatchText">The text of an empty first page.</param>
+    /// <param name="extra">Text that follows the "Showing" sentence (the index's "may be incomplete" note), or empty.</param>
+    /// <param name="returned">The rows the authorized response held, before the size cut.</param>
+    /// <param name="kept">The rows kept after the size cut.</param>
+    /// <param name="truncated">Whether the size cut dropped rows.</param>
+    /// <param name="offsetContinues">Whether <c>offset + limit</c> is the next page of THIS list. False for a document search over every record: the
+    /// shared method reads a wider candidate window from <c>offset</c> (3 times the limit) than it returns, so the next page would repeat hits.</param>
+    internal static PageNote DescribePage(
+        string noun, string noMatchText, string extra, int returned, int kept, bool truncated, int limit, int offset, bool offsetContinues)
+    {
+        if (returned == 0)
+        {
+            return new PageNote(offset > 0 ? $"No more {noun}s after the first {offset}." : noMatchText, HasMore: false, NextOffset: null);
+        }
+
+        var full = returned >= limit;
+        var text = new StringBuilder($"Showing {kept} {noun}(s), best match first.").Append(extra);
+        if (truncated)
+        {
+            text.Append(" The list was cut to fit.");
+        }
+
+        int? next = null;
+        if (full || truncated)
+        {
+            if (!offsetContinues)
+            {
+                text.Append(' ').Append(NarrowToOneRecordAdvice);
+            }
+            else if (kept > 0)
+            {
+                // kept == 0 cannot happen (one hit is far under the row budget); it would advise an offset that repeats this page.
+                next = truncated ? offset + kept : offset + limit;
+                text.Append(truncated ? $" Send offset {next} for the next page." : $" The page was full; send offset {next} for the next page.");
+            }
+        }
+        else
+        {
+            text.Append(" There may be more than this.");
+        }
+
+        return new PageNote(text.ToString(), HasMore: full && offsetContinues, next);
+    }
 
     // ---- result ----------------------------------------------------------------------------------------------------------------------
 

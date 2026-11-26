@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
@@ -19,7 +20,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 // PLACEMENT JUSTIFICATION (CLAUDE.md section 10; .claude/constraints/bff-extensions.md; spec "Placement & New Components"). A thin MCP
 // adapter inside the BFF over the record search route's own access decision (RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync,
 // task 027) on the /mcp/legal-operations host: no package, no DI registration (found by [McpArea]), no background work, no AI-internal
-// type (the index is resolved in SearchToolSupport, outside any tool class; ADR-013).
+// type (the filter resolves the index itself; ADR-013, Path C).
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
 //   Existing: POST /api/ai/search/records (RecordSearchEndpoints + RecordSearchAuthorizationFilter, whose decision task 027 made a shared
@@ -39,7 +40,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 /// returned record checked as the caller, with the route's 50-check budget), run by the one implementation. The tool copies no check.</para>
 /// <para><b>Record types</b> are named as a user does (<c>matter</c>, <c>project</c>, <c>invoice</c>; default: all three) and sent as the
 /// route's <c>sprk_*</c> types. <b>No counts</b> (D-022-counts): the tool returns no <c>totalCount</c> and no remainder; <c>hasMore</c> is
-/// only "the page was full". Hits carry id, name, type, an excerpt of at most 200 characters, up to three reference numbers and an open
+/// "the page came back full" (false is not the end of the list), and <c>nextOffset</c> is the offset the text advises (null when none). Hits carry id, name, type, an excerpt of at most 200 characters, up to three reference numbers and an open
 /// link; never the organizations, people or keywords the index extracted, and never a score.</para>
 /// <para><b>Faults.</b> An exception from the shared method or the index is an <c>isError</c> <c>RECORD_SEARCH_FAILED</c> (500) with fixed
 /// text; only the caller's own cancellation propagates. Logs never carry the query (NFR-05). Every user-authored value in a line of text
@@ -117,7 +118,8 @@ internal sealed class FindRecordsTool : McpToolDefinition
                     "Use for: finding Spaarke matters, projects or invoices by name, reference or invoice number, party or people involved, or "
                     + "topic. It returns the records the signed-in user may open, best match first, each with its id, name, type, a short "
                     + "description, reference numbers and a link to open it. recordTypes narrows to matter, project or invoice (default: all "
-                    + "three); use offset to continue a list. Not for: searching what documents say (use spaarke_search_documents); listing "
+                    + "three); use offset to continue a list, and hasMore means the page came back full (false is not the end of the list). "
+                    + "Not for: searching what documents say (use spaarke_search_documents); listing "
                     + "the documents of a matter (use spaarke_list_documents); tasks (use spaarke_list_tasks); totals, counts or reports "
                     + "across records.",
                 ReadOnly = true,
@@ -173,8 +175,7 @@ internal sealed class FindRecordsTool : McpToolDefinition
         RecordSearchAccess access;
         try
         {
-            access = await RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync(
-                http, searchRequest, SearchToolSupport.RecordIndex(http), cancellationToken);
+            access = await RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync(http, searchRequest, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -245,20 +246,19 @@ internal sealed class FindRecordsTool : McpToolDefinition
 
         var (kept, lines, truncated) = SearchToolSupport.Fit(hits, LineOf);
 
-        // "The page was full": the only paging fact shown. No totalCount and no remainder (D-022-counts).
-        var hasMore = response.Results.Count >= limit;
+        // The only paging facts: "the page came back full" (hasMore) and the offset the text advises (nextOffset). No totalCount and no
+        // remainder (D-022-counts). hasMore = false is NOT "the end of the list": rows are authorized after the index ranks them.
+        var page = SearchToolSupport.DescribePage(
+            "record", "No records you can open matched that search.", string.Empty,
+            response.Results.Count, kept.Count, truncated, limit, offset, offsetContinues: true);
 
         var text = new System.Text.StringBuilder()
-            .Append(kept.Count == 0
-                ? "No records you can open matched that search."
-                : $"{kept.Count} record(s) matched, best first.")
-            .Append(truncated ? " The list was cut to fit; narrow the search." : string.Empty)
-            .Append(hasMore ? $" The page was full; send offset {offset + limit} for the next page." : string.Empty)
+            .Append(page.Header)
             .Append('\n')
             .Append(lines)
             .ToString();
 
-        return DecisionToolCall.Success(text, new FindRecordsContent(kept, limit, offset, hasMore, truncated));
+        return DecisionToolCall.Success(text, new FindRecordsContent(kept, limit, offset, page.HasMore, truncated, page.NextOffset));
     }
 
     private static string TypeNameOf(string recordType) =>
@@ -303,8 +303,15 @@ internal sealed class FindRecordsTool : McpToolDefinition
         string Id, string Name, string Type, string? Snippet, IReadOnlyList<string>? ReferenceNumbers, string? OpenLink);
 
     /// <summary>
-    /// <c>structuredContent</c> of <c>spaarke_find_records</c>: the hits, the page asked for, whether that page was full and whether hits
-    /// were left out to keep the result inside the size bound. No total.
+    /// <c>structuredContent</c> of <c>spaarke_find_records</c>: the hits, the page asked for, whether that page came back full (<c>hasMore</c>:
+    /// not "the end of the list" when false), whether hits were left out to keep the result inside the size bound and the offset the text
+    /// advises (<c>nextOffset</c>, written as null when it advises none). No total.
     /// </summary>
-    internal sealed record FindRecordsContent(IReadOnlyList<RecordHit> Items, int Limit, int Offset, bool HasMore, bool Truncated);
+    internal sealed record FindRecordsContent(
+        IReadOnlyList<RecordHit> Items,
+        int Limit,
+        int Offset,
+        bool HasMore,
+        bool Truncated,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? NextOffset);
 }

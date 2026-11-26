@@ -547,6 +547,65 @@ public partial class RouteAuthorizationGuardTests
         return underAi && !underContracts;
     }
 
+    // ── ADR-013 across the WHOLE Api/Mcp tree (spaarkeai-mcp-bff-api-r2 task 022, verifier finding F2, 2026-11-26) ───────────────────
+    // The tool rule above reads only [McpArea] classes, so a helper class beside the tools (SearchToolSupport) could use the AI-internal
+    // ISemanticSearchService / IRecordSearchService and no rule saw it. Two scans close that, over EVERY .cs file and type under Api/Mcp:
+    //   1. text: any mention of the Sprk.Bff.Api.Services.Ai namespace other than ...Services.Ai.PublicContracts, in a using, a
+    //      `global using`, a `using static`, an alias (`using X = ...`), a relative `using Services.Ai...` or an inline qualified name;
+    //   2. reflection: no parameter, field, property or return type of any type there (nested and closure types included) is a Services.Ai
+    //      type outside PublicContracts (what text cannot see: a type reached through an alias or a global alias).
+    // Baseline: none. The scan found no existing hit in r1's decision files (Api/Mcp/**); the only hits were task 022's own helper, now clean.
+    // Enforced by: this scan (RealMcpToolViolations, which the MCP route credit depends on).
+
+    /// <summary>
+    /// The Services/Ai namespace, qualified from the BFF root (<c>Sprk.Bff.Api.Services.Ai</c>) or relative (<c>Services.Ai</c> inside
+    /// the BFF's own namespace tree), NOT followed by <c>.PublicContracts</c>. <c>Services.AiFoo</c> is not the namespace.
+    /// </summary>
+    private static readonly Regex McpAiNamespaceReference = new(
+        @"(?:(?<![\w.])Sprk\s*\.\s*Bff\s*\.\s*Api\s*\.\s*|(?<![\w.]))Services\s*\.\s*Ai\b(?!\s*\.\s*PublicContracts\b)",
+        RegexOptions.Compiled);
+
+    private static bool IsUnderMcpTree(string path) => path.StartsWith("Api/Mcp/", StringComparison.Ordinal);
+
+    /// <summary>Every mention of the Services/Ai namespace (PublicContracts excepted) in a file under <c>Api/Mcp/</c> (comments and string literals are blanked by the lexer).</summary>
+    private static List<string> McpAiNamespaceViolations(IEnumerable<SourceUnit> bffUnits)
+    {
+        var violations = new List<string>();
+        foreach (var unit in bffUnits.Where(u => IsUnderMcpTree(u.Path)))
+        {
+            foreach (Match m in McpAiNamespaceReference.Matches(unit.Code))
+            {
+                violations.Add($"{unit.Path}:{unit.LineOf(m.Index)}: names the AI-internal namespace Services/Ai ('{Regex.Replace(m.Value, @"\s+", string.Empty)}'); "
+                               + "nothing under Api/Mcp may, a helper class included: go through Services/Ai/PublicContracts, or have the REST-side filter resolve it (ADR-013).");
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>The types the widened reflection scan reads: every top-level type declared in <c>Sprk.Bff.Api.Api.Mcp</c> or below that is not itself a tool (tools have their own rule).</summary>
+    private static List<Type> McpHelperTypesOf(IEnumerable<Type> assemblyTypes) =>
+        assemblyTypes.Where(t => t.DeclaringType is null
+                                 && (t.Namespace == "Sprk.Bff.Api.Api.Mcp" || (t.Namespace ?? string.Empty).StartsWith("Sprk.Bff.Api.Api.Mcp.", StringComparison.Ordinal))
+                                 && t.GetCustomAttribute<McpAreaAttribute>(inherit: false) is null)
+            .OrderBy(t => t.FullName, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>Violations of "no AI-internal type in any member of <paramref name="helperTypes"/>" (see <see cref="McpHelperTypesOf"/>).</summary>
+    private static List<string> McpHelperReflectionViolations(IEnumerable<Type> helperTypes)
+    {
+        var violations = new List<string>();
+        foreach (var type in helperTypes)
+        {
+            foreach (var ai in McpToolMemberTypes(type).Where(IsAiInternal).Select(t => t.FullName).Distinct().OrderBy(n => n, StringComparer.Ordinal))
+            {
+                violations.Add($"{type.FullName} (reflection): uses {ai}, an AI-internal type (Services/Ai/**); nothing under Api/Mcp may (ADR-013).");
+            }
+        }
+
+        return violations;
+    }
+
     /// <summary>The live routes registered by <c>.MapMcp(</c> whose key <paramref name="ledger"/> does not list (none may sit under a waiver).</summary>
     private static List<string> UnlistedMapMcpRoutes(IEnumerable<Assessment> assessments, IReadOnlyList<McpRoute> ledger) =>
         assessments.Where(a => IsMapMcpRegistration(a.Route) && ledger.All(r => r.Route != a.Key))
@@ -613,6 +672,8 @@ public partial class RouteAuthorizationGuardTests
         var found = new HashSet<string>(StringComparer.Ordinal);
         var violations = McpToolViolations(Real.Set.Units, McpTools, AiInternalTypeNames(Real.Set.Units), found);
         violations.AddRange(McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), found, McpTools));
+        violations.AddRange(McpAiNamespaceViolations(Real.Set.Units));
+        violations.AddRange(McpHelperReflectionViolations(McpHelperTypesOf(typeof(McpToolDefinition).Assembly.GetTypes())));
         return violations;
     }, LazyThreadSafetyMode.ExecutionAndPublication);
 
@@ -960,6 +1021,17 @@ public partial class RouteAuthorizationGuardTests
         public override ModelContextProtocol.Server.McpServerTool Create(IServiceProvider services) => throw new NotSupportedException();
     }
 
+    // Helper classes (not tools) beside the tools, as SearchToolSupport is: what the widened ADR-013 reflection scan reads.
+    private static class McpReflectionAiInternalHelper
+    {
+        public static Func<string, Task<string>> Index(IEnumerable<Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager> chats) => _ => Task.FromResult("x");
+    }
+
+    private static class McpReflectionPublicContractsHelper
+    {
+        public static string Run(Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam seam) => "x";
+    }
+
     private static McpTool McpReflectionEntry(Type type, string policy = "") =>
         new(type.Name, policy, "IActionSeam", "Seeded by the MCP reflection controls: a compiled fixture tool in the ArchTests assembly only.");
 
@@ -997,6 +1069,97 @@ public partial class RouteAuthorizationGuardTests
 
         var anonymous = typeof(McpReflectionAnonymousTool);
         Fires(McpToolReflectionViolations(new[] { anonymous }, Seen(anonymous), new[] { McpReflectionEntry(anonymous) }), "carries anonymity metadata");
+    }
+
+    // ── ADR-013 across the whole Api/Mcp tree: controls (spaarkeai-mcp-bff-api-r2 task 022, verifier finding F2) ───────────────────────
+
+    private static List<string> McpAiNamespaceFixture(string path, string source) =>
+        McpAiNamespaceViolations(new[] { new SourceUnit(path, source) });
+
+    private const string McpHelperPath = "Api/Mcp/LegalOperations/Search/FakeSupport.cs";
+
+    private static string McpHelperSource(string usings, string body = "") =>
+        usings + "\nnamespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;\n\ninternal static class FakeSupport\n{\n" + body + "}\n";
+
+    [Fact(DisplayName = "r2 task 022 F2 must-fire: a helper class (not a tool) under Api/Mcp that names Services/Ai fires, in every using form and inline")]
+    public void McpAiNamespaceScan_MustFire_ForAHelperClass()
+    {
+        // The shape task 022's SearchToolSupport had: a plain helper class, no [McpArea], a Services.Ai using.
+        Fires(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using Sprk.Bff.Api.Services.Ai.SemanticSearch;")),
+            "names the AI-internal namespace Services/Ai ('Sprk.Bff.Api.Services.Ai')");
+        Assert.Contains(":1:", Assert.Single(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using Sprk.Bff.Api.Services.Ai.RecordSearch;"))));
+
+        // Every form of the directive and the inline name.
+        foreach (var source in new[]
+                 {
+                     McpHelperSource("global using Sprk.Bff.Api.Services.Ai.SemanticSearch;"),
+                     McpHelperSource("using static Sprk.Bff.Api.Services.Ai.SemanticSearch.SemanticSearchService;"),
+                     McpHelperSource("using Index = Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService;"),
+                     McpHelperSource("global using Index = Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService;"),
+                     McpHelperSource("using Services.Ai.RecordSearch;"),
+                     McpHelperSource("using Sprk . Bff . Api . Services . Ai . RecordSearch ;"),
+                     McpHelperSource(string.Empty, "    static object Index(IServiceProvider p) => p.GetService(typeof(Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService));\n"),
+                     McpHelperSource("using Sprk.Bff.Api.Services.Ai;"),
+                 })
+        {
+            Assert.NotEmpty(McpAiNamespaceFixture(McpHelperPath, source));
+        }
+
+        // Any file under Api/Mcp, at any depth, not only the tool folders.
+        Assert.NotEmpty(McpAiNamespaceFixture("Api/Mcp/McpText.cs", McpHelperSource("using Sprk.Bff.Api.Services.Ai.Chat;")));
+        Assert.NotEmpty(McpAiNamespaceFixture("Api/Mcp/LegalOperations/Decisions/Deep/Er/Helper.cs", McpHelperSource("using Sprk.Bff.Api.Services.Ai.Chat;")));
+    }
+
+    [Fact(DisplayName = "r2 task 022 F2 must-not-fire: PublicContracts, comments, strings, look-alike names and files outside Api/Mcp do not fire")]
+    public void McpAiNamespaceScan_MustNotFire_ForPublicContractsAndLookAlikes()
+    {
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using Sprk.Bff.Api.Services.Ai.PublicContracts;")));
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("global using Sprk.Bff.Api.Services.Ai.PublicContracts;")));
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using static Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam;")));
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using Seam = Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam;")));
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using Services.Ai.PublicContracts;")));
+
+        // A comment or a string literal that mentions the namespace is not a use of it.
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource(
+            "// the filter resolves Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService itself\n/* using Sprk.Bff.Api.Services.Ai.Chat; */",
+            "    const string Doc = \"Sprk.Bff.Api.Services.Ai.SemanticSearch\";\n")));
+
+        // Look-alikes: another namespace, a member access, a longer name.
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource("using Sprk.Bff.Api.Services.AiAssist;\nusing Sprk.Bff.Api.Models.Ai.SemanticSearch;\nusing Sprk.Bff.Api.Services.Signals;")));
+        Assert.Empty(McpAiNamespaceFixture(McpHelperPath, McpHelperSource(string.Empty, "    static object X(Foo options) => options.Services.Ai;\n")));
+
+        // The same text outside Api/Mcp is another rule's business (the REST filters name these services on purpose).
+        Assert.Empty(McpAiNamespaceFixture("Api/Filters/SemanticSearchAuthorizationFilter.cs", McpHelperSource("using Sprk.Bff.Api.Services.Ai.SemanticSearch;")));
+        Assert.Empty(McpAiNamespaceFixture("Infrastructure/DI/McpModule.cs", McpHelperSource("using Sprk.Bff.Api.Services.Ai.SemanticSearch;")));
+    }
+
+    [Fact(DisplayName = "r2 task 022 F2: the real Api/Mcp tree, text and reflection, names no AI-internal type (no baseline: no hit outside the task-022 helper, now clean)")]
+    public void McpAiNamespaceScan_RealTree_IsClean()
+    {
+        Assert.Empty(McpAiNamespaceViolations(Real.Set.Units));
+        Assert.Empty(McpHelperReflectionViolations(McpHelperTypesOf(typeof(McpToolDefinition).Assembly.GetTypes())));
+
+        // The scan really reads the helper classes and the tool files (a scan of nothing would pass).
+        Assert.Contains(Real.Set.Units, u => u.Path == "Api/Mcp/LegalOperations/Search/SearchToolSupport.cs");
+        Assert.True(Real.Set.Units.Count(u => IsUnderMcpTree(u.Path)) >= 20);
+        var helpers = McpHelperTypesOf(typeof(McpToolDefinition).Assembly.GetTypes()).Select(t => t.Name).ToList();
+        Assert.Contains("SearchToolSupport", helpers);
+        Assert.DoesNotContain("SearchDocumentsTool", helpers);
+    }
+
+    [Fact(DisplayName = "r2 task 022 F2 controls: the reflection scan of helper classes fires on an AI-internal member type and not on PublicContracts")]
+    public void McpHelperReflection_Controls()
+    {
+        Fires(McpHelperReflectionViolations(new[] { typeof(McpReflectionAiInternalHelper) }),
+            "uses Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager, an AI-internal type");
+        Assert.Empty(McpHelperReflectionViolations(new[] { typeof(McpReflectionPublicContractsHelper) }));
+
+        // The selector keeps helpers and drops tools and nested types.
+        var all = typeof(McpToolDefinition).Assembly.GetTypes();
+        var selected = McpHelperTypesOf(all);
+        Assert.All(selected, t => Assert.Null(t.DeclaringType));
+        Assert.All(selected, t => Assert.Null(t.GetCustomAttribute<McpAreaAttribute>(inherit: false)));
+        Assert.DoesNotContain(selected, t => t.Namespace?.StartsWith("Sprk.Bff.Api.Services", StringComparison.Ordinal) == true);
     }
 
     // ── the per-area ledger split (spaarkeai-mcp-bff-api-r2 task 020) ─────────────────────────────────────────────────────────────────
