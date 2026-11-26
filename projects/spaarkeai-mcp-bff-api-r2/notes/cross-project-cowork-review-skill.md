@@ -46,3 +46,20 @@ The owner asked whether the Cowork surface for "request a review" in this projec
 - **This project:** no action. The tools named above are already in its plan:
   - done: 022 search, 023 documents;
   - pending: FR-05 runs, FR-12 email.
+
+## Update 2026-11-26: gap 1 researched by accelerator-r1 (issue #3257)
+
+- **Result:** Cowork cannot read SharePoint Embedded file bytes natively.
+  - Its file picker documents only OneDrive, SharePoint and Teams.
+  - Its built-in Graph access got 403 on our container type (POC 2026-10-30).
+  - The SPE retrieval routes return text extracts, not files.
+- **Detail:** `projects/spaarke-legal-ai-accelerator-r1/notes/research/cowork-access-to-spe-files-2026-11.md` (acc3f63cdb on `work/spaarke-legal-ai-accelerator-r1`).
+- **Routes, ranked:**
+  1. The user downloads the file and attaches it. Works today.
+  2. The BFF stages a copy in the user's OneDrive. Needs an owner decision and an ADR-028 check.
+  3. A tool result that Cowork saves as a file. Unknown; a small tenant test is described in the note.
+  4. A signed URL. Undocumented; outbound network access is likely blocked.
+- **For this project's tools:**
+  - The documented base64 limits apply to tool **input**, so sandbox-to-Spaarke saves are the documented direction.
+  - No change to `spaarke_get_document`, which returns metadata and links only.
+  - Decisions stay with accelerator-r1 and the owner.
