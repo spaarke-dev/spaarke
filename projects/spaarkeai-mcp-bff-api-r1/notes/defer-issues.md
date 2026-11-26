@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | In Progress — built here (owner C, 2026-11-26), PR #3247 (b137e42afe) open, mcp-r2 reviews before merge; show p95 checked in 042 |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-14 |
 | **Source** | Task 031 adversarial review (F4); spec FR-13 (spec.md:232) |
