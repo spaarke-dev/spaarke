@@ -53,7 +53,8 @@ files and fails on real ones", and the only documented inline limit for a tool r
 
 **Who:** the demo user, or any user with **Spaarke MCP** connected (as in WP-3). **Needs:** the test tool
 `SpaarkeMCP_spike_return_file` on the dev server. **Status 2026-11-26:** built by spaarkeai-mcp-bff-api-r2 on
-`spike/spe-file-probe` (`e05c209fda`), bytes and hashes pinned by a test; **not deployed**, waiting on the owner's
+`spike/spe-file-probe-on-specialist` (`9e8f0ca8e0`, layered on dev's current `d307d67e36` so the specialist
+project's spike tools stay), bytes and hashes pinned by a test; **not deployed**, waiting on the owner's
 per-SHA go through uac-r2. This README will say when it's live. Both parameters are required; a bad value returns
 the error `spike.invalid_argument`. It returns one probe file in one of three shapes:
 
