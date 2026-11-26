@@ -740,3 +740,13 @@ reach Word only if WP-1 passes, or if the engines run on the server as MCP tools
 That is the *instructions* skill's line, not the script skill's: no `WPS-1112-A`. Either the instructions probe was
 asked for, or Word sent "script probe" to the wrong skill. **Inconclusive**; retry with the
 `spaarke-word-probe-script` chip picked from **+** (WP-1 b).
+
+**Confounder from 2026-11-25 ~18:00Z (copilot-platform-coordination, inventory row T1, `8faae9c518`).** The dev
+"Spaarke MCP" connector now also lists `spike_review_nda` and `spike_get_profile` (specialist-legal-agents Phase 0,
+dev BFF `d307d67e36`). With Spaarke MCP connected, an NDA-review prompt can be routed to that tool instead of our
+skill, the saved playbook or the agent. Both tools are read-only. The owner and demo@ have test profiles, so for them
+the tool returns a real result; for anyone else it returns `NO_PROFILE`. The tools go at the next master deploy of
+the dev BFF. Runs since then that had Spaarke MCP on and may have been routed there: Word desktop round 2
+"Generic (a)" (*review this NDA* with Spaarke MCP added, 2026-11-25 evening), and any 2026-11-26 Word run with
+Spaarke MCP on. Until the tools are gone, run NDA tests with **Spaarke MCP switched off** unless the test is about
+the MCP. A `NO_PROFILE` or spike result is this tool, not a probe failure.
