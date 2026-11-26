@@ -140,9 +140,11 @@ const useStyles = makeStyles({
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
-  headline: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  /** The finding over the subject, as on the shared row (IssueLine): one column that takes the free width, so neither
+   * line can squeeze the other to nothing; the badge, timing and link stay on the right. */
+  text: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' },
+  headline: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   reason: {
-    flexShrink: 1,
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -331,16 +333,22 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     if (!hasInvoiceReview(item)) return undefined;
     const href = buildBillingLinkOut(item.invoiceReview, consoleBaseUrl);
     const line = composeIssueLine(item, today);
+    const showSubject = line.headline !== line.finding;
+    // Two findings on one invoice share a subject, so the link is named after the finding and the subject.
+    const linkName = showSubject ? `${line.finding}, ${line.headline}` : line.finding;
     return (
       <div className={styles.finding} data-testid="billing-finding" data-signal-id={item.signalId}>
-        <Text className={styles.headline} size={300} title={line.headline}>
-          {line.headline}
-        </Text>
-        {line.ruleShortName && (
-          <Caption1 className={styles.reason} data-testid="billing-finding-reason">
-            {line.ruleShortName}
-          </Caption1>
-        )}
+        {/* D-227 (owner: "all surfaces"): the finding leads, the subject sits under it, as on the shared row (IssueLine). */}
+        <span className={styles.text} data-testid="billing-finding-lines">
+          <Text className={styles.headline} size={300} title={line.finding} data-testid="billing-finding-text">
+            {line.finding}
+          </Text>
+          {showSubject && (
+            <Caption1 className={styles.reason} title={line.headline} data-testid="billing-finding-subject">
+              {line.headline}
+            </Caption1>
+          )}
+        </span>
         <Badge appearance="tint" color="informative" size="small" data-testid="billing-finding-label">
           Finding
         </Badge>
@@ -350,7 +358,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
         {href ? (
           <Link
             href={href}
-            aria-label={`Open in Invoice Review: ${line.headline}`}
+            aria-label={`Open in Invoice Review: ${linkName}`}
             data-testid="billing-finding-link"
             onClick={event => {
               // The widget never navigates itself: the host opens the page.
