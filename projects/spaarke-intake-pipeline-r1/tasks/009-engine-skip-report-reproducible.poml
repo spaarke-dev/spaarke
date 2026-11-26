@@ -4,7 +4,7 @@
     <title>FR-01g / FR-09f: Engine changes in src/accelerators — skip-and-report mode, reproducible .docx output, closed reason codes on refusals</title>
     <phase>0 Engine hosting and cleanup</phase>
     <gate>after the accelerator PR from branch work/accelerator-redline-skip-unplaceable (commit 2759ef3a7d) merges to master, or earlier against that branch; this project changes the engines itself only for a gap that PR leaves (owner directive 2026-11-26)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes shared engine code that writes legal documents (OOXML tracked changes); a defect corrupts redlines for both this pipeline and the accelerator's interactive skills.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -103,7 +103,7 @@
     <criterion testable="true">No fuzzy or approximate matching is introduced (code review of the diff); dependencies remain stdlib + lxml.</criterion>
   </acceptance-criteria>
 
-  <notes>Created 2026-11-26 from the owner's directive that this project changes accelerator-owned code that does not meet its requirements. Contract proposed by the accelerator session and accepted; the accelerator session had already built it (2759ef3a7d, adversarial review running, PR to follow), so this task became verify-then-fix-gaps on 2026-11-26 and the duplicate implementation was stopped before it changed any file.</notes>
+  <notes>Created 2026-11-26 from the owner's directive that this project changes accelerator-owned code that does not meet its requirements. Contract proposed by the accelerator session and accepted; the accelerator session had already built it (2759ef3a7d, adversarial review running, PR to follow), so this task became verify-then-fix-gaps on 2026-11-26 and the duplicate implementation was stopped before it changed any file. Completed 2026-11-26: independent verification passed all six criteria on a3c93d54d2 (notes/009-engine-changes.md); the one K-class gap (skip-mode exit-3 stderr test) was closed by c310a882de; owner approved the merge and #3237 was squash-merged to master as 244171569a. Rework: none in this project's code.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
