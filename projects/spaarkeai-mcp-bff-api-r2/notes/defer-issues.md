@@ -83,3 +83,6 @@
   by deep path (worklist, Decision wizard). Fix: add `'src/client/widgets/shared/**'` to both filters (and consider the deep-imported
   ui-components folders). Task 021 could not edit `.github/workflows/**` (outside its file list; ci-workflows hot path).
 - **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Task.
+
+### D-021-2: CI filters miss the ui-components Worklist/DecisionWizard source the decisions widget bundles (pre-existing)
+- **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3196
