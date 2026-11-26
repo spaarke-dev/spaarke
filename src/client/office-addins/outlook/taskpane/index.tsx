@@ -122,6 +122,93 @@ function installMockAuth(): void {
 let reactRoot: Root | null = null;
 
 /**
+ * Task 139: the pane follows the selected email. `<App>` is mounted under a key that changes on every item change, so a
+ * change remounts it and every per-email state (save state, document identity, saved context, To Do seed) starts over
+ * exactly as on a fresh open. Sign-in lives in the `authService` singleton, which a remount does not touch.
+ */
+let appKey = 0;
+/** The host type captured at Stage 1; the adapter for a newly selected email is created the same way as the first. */
+let adapterHostType: 'outlook' | undefined;
+/** Bumped on every item change; a slower earlier change must not overwrite a later one. */
+let itemChangeSequence = 0;
+let itemChangedRegistered = false;
+
+/**
+ * Render `<App>` for a host adapter. The URL deep-link action and the browser-harness demo context belong to the
+ * pane's first open only; an item change starts the pane without them.
+ */
+function renderApp(hostAdapter: IHostAdapter, firstOpen: boolean) {
+  if (!reactRoot) return;
+  const initialAction = firstOpen ? readInitialActionFromUrl() : undefined;
+  const initialSavedContext = firstOpen ? buildDemoSavedContext() : undefined;
+  reactRoot.render(
+    <React.StrictMode>
+      <App
+        key={appKey}
+        hostAdapter={hostAdapter}
+        title="Spaarke for Outlook"
+        version={APP_VERSION}
+        buildDate={BUILD_DATE}
+        {...(initialAction ? { initialAction } : {})}
+        {...(initialSavedContext ? { initialSavedContext } : {})}
+      />
+    </React.StrictMode>
+  );
+}
+
+/**
+ * The selected email changed (the manifest sets SupportsPinning, so a pinned pane stays open while the user moves
+ * between emails). Start the pane fresh on the new item.
+ *
+ * The adapter caches the item's read/compose mode at `initialize()`, so a NEW adapter is created through the factory
+ * for the new item rather than reusing the old one. `mailbox.item` may be null (nothing selected, or several emails
+ * selected): the adapter still initializes, and the pane then says to select an email (NO_ITEM_SELECTED) with Retry.
+ * No auth call is made here: sign-in state is the `authService` singleton's.
+ */
+async function handleItemChanged(): Promise<void> {
+  const sequence = ++itemChangeSequence;
+  let hostAdapter: IHostAdapter;
+  try {
+    hostAdapter = await HostAdapterFactory.createAndInitialize(adapterHostType);
+  } catch (error) {
+    console.error('[Spaarke] Could not start the pane on the newly selected item:', error);
+    return;
+  }
+  if (sequence !== itemChangeSequence) return;
+  appKey += 1;
+  renderApp(hostAdapter, false);
+}
+
+/**
+ * Register the ItemChanged handler, once. If Office cannot register it, say so and carry on: the pane then works as it
+ * did before it followed the selection.
+ */
+function registerItemChangedHandler(): void {
+  if (itemChangedRegistered) return;
+  itemChangedRegistered = true;
+  try {
+    const mailbox = Office.context.mailbox;
+    if (typeof mailbox?.addHandlerAsync !== 'function') {
+      console.warn(
+        '[Spaarke] ItemChanged is not available in this Outlook; the pane will not follow the selected email.'
+      );
+      return;
+    }
+    mailbox.addHandlerAsync(
+      Office.EventType.ItemChanged,
+      () => void handleItemChanged(),
+      result => {
+        if (result?.status === Office.AsyncResultStatus.Failed) {
+          console.warn('[Spaarke] Could not register the ItemChanged handler:', result.error);
+        }
+      }
+    );
+  } catch (error) {
+    console.warn('[Spaarke] Could not register the ItemChanged handler:', error);
+  }
+}
+
+/**
  * Render an error message in the taskpane when initialization fails.
  */
 function renderError(error: Error | string, stage: string) {
@@ -262,9 +349,8 @@ async function init() {
     // `Office.context.host`, which is unpopulated in some Outlook desktop builds. If Office.onReady
     // reported no host, detectHostType() still runs and a real failure still surfaces as a typed
     // INVALID_HOST rendered by the catch below.
-    hostAdapter = await HostAdapterFactory.createAndInitialize(
-      readyHost === Office.HostType.Outlook ? 'outlook' : undefined
-    );
+    adapterHostType = readyHost === Office.HostType.Outlook ? 'outlook' : undefined;
+    hostAdapter = await HostAdapterFactory.createAndInitialize(adapterHostType);
     console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
@@ -282,25 +368,16 @@ async function init() {
 
   try {
     reactRoot = createRoot(container);
-    const initialAction = readInitialActionFromUrl();
-    const initialSavedContext = buildDemoSavedContext();
-    reactRoot.render(
-      <React.StrictMode>
-        <App
-          hostAdapter={hostAdapter}
-          title="Spaarke for Outlook"
-          version={APP_VERSION}
-          buildDate={BUILD_DATE}
-          {...(initialAction ? { initialAction } : {})}
-          {...(initialSavedContext ? { initialSavedContext } : {})}
-        />
-      </React.StrictMode>
-    );
+    renderApp(hostAdapter, true);
     console.log('[Spaarke] React app rendered successfully');
   } catch (error) {
     renderError(error as Error, 'React rendering');
     throw error;
   }
+
+  // Stage 6: follow the selected email (task 139). After the first render, so a handler can never run before there is
+  // a root to render into.
+  registerItemChangedHandler();
 }
 
 // Start initialization

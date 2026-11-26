@@ -173,6 +173,14 @@ export class OutlookAdapter implements IHostAdapter {
       throw createHostAdapterError('NO_ITEM_SELECTED', 'No email item is currently selected or available.');
     }
 
+    // Task 139: the mode is read once, at initialize(). A pane that opened with no item (nothing selected, or several
+    // emails selected) cached 'unknown', and would keep refusing the item that is there when the user retries. Read the
+    // mode again now that there is one. A known mode is never re-derived here (a pinned pane that follows the selected
+    // email gets a NEW adapter, see outlook/taskpane/index.tsx).
+    if (this._currentMode === 'unknown') {
+      this._currentMode = this.determineMode(item);
+    }
+
     return item;
   }
 
