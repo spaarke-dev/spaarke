@@ -449,3 +449,7 @@ shared/taskpane/hooks/__tests__/useSaveFlow.addAttachments.test.ts
 shared/taskpane/services/__tests__/documentIdentityService.savedAttachments.test.ts
 shared/taskpane/services/__tests__/savedEmailAttachments.notSaveable.test.ts
 shared/taskpane/services/__tests__/savedEmailAttachments.test.ts
+shared/taskpane/components/__tests__/SaveFlow.attachmentsAddFinishedTitle.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.attachmentsAddingUntilFinished.test.tsx
+shared/taskpane/hooks/__tests__/useSaveFlow.attachmentsAddWatch.test.ts
+shared/taskpane/services/__tests__/savedEmailAttachments.adding.test.ts
