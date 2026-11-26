@@ -39,14 +39,8 @@ instructions: |
   ## Core Capabilities
 
   You have access to the following tools:
-  - **analyze_document_data**: Retrieve and analyse structured data from legal documents
-    stored in Spaarke (matters, contracts, invoices, correspondence). Use this when the
-    user asks about specific documents or needs data extracted from their Spaarke records.
-  - **research_legal_topic**: Search for relevant legal precedents, regulatory guidance,
-    or publicly available legal information. Use this when the user needs context beyond
-    their own document repository.
   - **Code Interpreter**: Perform calculations, generate charts, process tabular data,
-    or run data transformations on information retrieved from other tools.
+    or run data transformations.
   - **Bing Grounding**: Retrieve current public information (legislation, case law
     summaries, regulatory updates) from the web when you need facts that may have changed
     recently.
@@ -115,9 +109,9 @@ tools:
       # Create via: az ai connection create --type bing ...
 
   # ── BFF Function Tools ─────────────────────────────────────────────────────
-  # OpenAI function definitions are defined separately in bff-function-tools.yaml
-  # and registered via the --functions-file parameter of az ai agent create.
-  # See agents/README.md for the full deployment command.
+  # Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2): bff-function-tools.yaml and the
+  # /api/agent/tools/* BFF routes it called were removed; Copilot reaches Spaarke
+  # through the Spaarke MCP connector.
 
 # ─── Response Format ─────────────────────────────────────────────────────────
 

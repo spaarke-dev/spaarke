@@ -12,11 +12,14 @@ namespace Sprk.Bff.Api.Models.Ai.RecordSearch;
 /// </remarks>
 public sealed record RecordSearchRequest
 {
+    /// <summary>Longest accepted query. Single source for the <c>[StringLength]</c> and the endpoint's bounds check.</summary>
+    public const int MaxQueryLength = 1000;
+
     /// <summary>
     /// Search query text. Max 1000 characters.
     /// </summary>
     [Required(ErrorMessage = "Query is required")]
-    [StringLength(1000, ErrorMessage = "Query must not exceed 1000 characters")]
+    [StringLength(MaxQueryLength, ErrorMessage = "Query must not exceed 1000 characters")]
     [JsonPropertyName("query")]
     public required string Query { get; init; }
 

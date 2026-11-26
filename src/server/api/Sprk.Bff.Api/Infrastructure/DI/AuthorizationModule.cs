@@ -23,8 +23,8 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// <para><b>Outbound</b> — the credential the BFF presents when authenticating AS ITSELF to Entra:
 /// <c>IClientAssertionProvider</c> (ADR-028 Amendment A4, added by auth-v4 task 020). Kept in this
 /// module because it answers the same question as everything else here — how the BFF authenticates —
-/// and because it serves Graph, Dataverse and the Copilot agent alike rather than belonging to any one
-/// of them.</para>
+/// and because it serves Graph, Dataverse and the other outbound callers alike rather than belonging to any
+/// one of them.</para>
 /// </summary>
 public static class AuthorizationModule
 {
@@ -110,8 +110,10 @@ public static class AuthorizationModule
                     options.IdentityName = "rag-api-key";
                 });
 
-        // Accept tokens from M365 Copilot API Plugin (uses a different audience URI
-        // issued via the Teams Developer Portal Entra SSO registration).
+        // Legacy merge of AgentToken:CopilotAudience into the default scheme's valid audiences. No surviving surface
+        // presents this audience since the legacy M365 Copilot agent / API plugin was removed (spaarkeai-mcp-bff-api-r2,
+        // 2026-11-25); the MCP connector refuses it (ADR-028 A10, Api/Mcp/McpToolAuthorization.cs). Do not set it.
+        // Removal of this merge is tracked separately.
         // PostConfigure runs AFTER AddMicrosoftIdentityWebApi's own configuration,
         // ensuring our audience list isn't overwritten by the library.
         services.PostConfigure<JwtBearerOptions>(
@@ -333,8 +335,9 @@ public static class AuthorizationModule
         // authenticates as ITSELF to Entra (OBO exchanges and app-only confidential clients).
         //
         // Placed here rather than in SpaarkeCore because the provider is not a Dataverse concern —
-        // task 022 wires it into GraphClientFactory, DataverseAccessDataSource, DataverseUserClient
-        // and AgentTokenService alike. This module is where a reader looks for "how does the BFF
+        // task 022 wires it into GraphClientFactory, DataverseAccessDataSource and DataverseUserClient
+        // alike (and into the legacy agent's token service, which spaarkeai-mcp-bff-api-r2 task 001
+        // later removed). This module is where a reader looks for "how does the BFF
         // authenticate", and that question now has both an inbound and an outbound answer.
         //
         // NOT registered inline in Program.cs: ADR-010 forbids inline registrations, and the
@@ -1029,7 +1032,8 @@ public static class AuthorizationModule
         services.AddSingleton<IValidateOptions<CredentialSelectionOptions>, IdentityConfigurationValidator>();
 
         // SINGLETON, and it owns the ONE confidential-client cache. Task 022 collapses the three
-        // per-class CCA caches (DataverseAccessDataSource, DataverseUserClient, AgentTokenService) onto
+        // per-class CCA caches (DataverseAccessDataSource, DataverseUserClient and the since-removed legacy
+        // agent token service) onto
         // it — which is what CLOSES task 011's time-boxed A4 exception. If this cache is not authored
         // here, that exception becomes permanent.
         //
