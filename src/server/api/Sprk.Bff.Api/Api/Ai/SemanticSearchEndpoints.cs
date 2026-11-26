@@ -166,8 +166,14 @@ public static class SemanticSearchEndpoints
             logger.LogError(ex, "Semantic search failed for tenant {TenantId}", tenantId);
             return Results.Problem(
                 title: "Search Failed",
-                detail: ex.Message,
-                statusCode: 500);
+                // Fixed text, never ex.Message (issue #3212): exception text can carry endpoints, index names and
+                // query fragments. The exception is logged above.
+                detail: "The search could not be completed. Try again, and contact support if it persists.",
+                statusCode: 500,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = SearchErrorCodes.SemanticSearchFailed
+                });
         }
     }
 
@@ -263,8 +269,13 @@ public static class SemanticSearchEndpoints
             logger.LogError(ex, "Semantic search count failed for tenant {TenantId}", tenantId);
             return Results.Problem(
                 title: "Count Failed",
-                detail: ex.Message,
-                statusCode: 500);
+                // Fixed text, never ex.Message (issue #3212); see Search.
+                detail: "The count could not be completed. Try again, and contact support if it persists.",
+                statusCode: 500,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = SearchErrorCodes.SemanticSearchCountFailed
+                });
         }
     }
 
