@@ -12,7 +12,7 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Notifications;
 
 /// <summary>
-/// appnotification option values (D-98 item 9, PB-03b/03c/04): the constants match the checked-in live-metadata snapshot, and
+/// appnotification option values (D-98 item 9, PB-03b/03c/04): the constants match the checked-in snapshot (a hand-kept copy; the opt-in live test compares it with the environment), and
 /// every direct writer refuses a value Dataverse would reject instead of failing at first fire.
 /// </summary>
 public class AppNotificationOptionsTests
@@ -30,15 +30,15 @@ public class AppNotificationOptionsTests
         holder.GetFields().Where(f => f.IsLiteral).ToDictionary(f => f.Name, f => (int)f.GetRawConstantValue()!);
 
     [Fact]
-    public void Priority_MatchesTheLiveSnapshot() =>
+    public void Priority_MatchesTheSnapshot() =>
         Constants(typeof(AppNotificationOptions.Priority)).Should().BeEquivalentTo(Section("priority"));
 
     [Fact]
-    public void ToastType_MatchesTheLiveSnapshot() =>
+    public void ToastType_MatchesTheSnapshot() =>
         Constants(typeof(AppNotificationOptions.ToastType)).Should().BeEquivalentTo(Section("toasttype"));
 
     [Fact]
-    public void IconType_MatchesTheLiveSnapshot() =>
+    public void IconType_MatchesTheSnapshot() =>
         Constants(typeof(AppNotificationOptions.IconType)).Should().BeEquivalentTo(Section("icontype"));
 
     [Theory]

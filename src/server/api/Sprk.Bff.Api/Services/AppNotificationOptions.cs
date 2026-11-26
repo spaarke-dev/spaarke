@@ -2,9 +2,11 @@ namespace Sprk.Bff.Api.Services;
 
 /// <summary>
 /// The ONE set of <c>appnotification</c> option-set values every writer in the BFF may send. Dataverse rejects any other
-/// value, so a writer that sends one fails the first time it fires. Verified against the live table metadata; the checked-in
-/// snapshot <c>tests/unit/Sprk.Bff.Api.Tests/Services/Fixtures/appnotification-options.snapshot.json</c> is compared with
-/// these constants by a unit test, so a drift in either direction fails the build.
+/// value, so a writer that sends one fails the first time it fires. The values match Microsoft's published table reference and
+/// the live table-metadata read recorded in PR #1494 (2026-10-09). The checked-in snapshot
+/// <c>tests/unit/Sprk.Bff.Api.Tests/Services/Fixtures/appnotification-options.snapshot.json</c> is compared with these
+/// constants by a unit test (a hand-kept copy, so it catches drift between the two files, not a change by Microsoft), and
+/// the opt-in read-only <c>AppNotificationOptionsLiveTests</c> compares the snapshot with the environment's metadata.
 /// </summary>
 /// <remarks>
 /// <c>priority</c>: Normal 200000000, High 200000001 (there is no Critical, and 100000000 / 300000000 do not exist).

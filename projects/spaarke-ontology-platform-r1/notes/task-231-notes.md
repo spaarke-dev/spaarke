@@ -52,6 +52,22 @@ Hidden constant is changed in the core, which is a correctness fix for every cal
 ## Not done on purpose (D-106)
 
 - `CreateNotificationNodeExecutor` (retired path, D-100): its XML comments and the `priority` / `toastType` field
-  descriptions still list 100000000 / 300000000 values. Not touched.
+  descriptions still list 100000000 / 300000000 values (`CreateNotificationNodeExecutor.cs:31,115,121,756,763`). Not
+  touched. Tracking item: open PR #1507 (D-104b), which deletes the retired executor.
 - `CommunicationArrivedProducer.ToastTypeTimed` and `CommunicationRiActionService` priority literal: already valid
   values (200000000); swapping them for the constants was cosmetic.
+
+## Live check (review round 1)
+
+The unit test compares the constants with a hand-kept snapshot, so it catches drift between two files, not a change by
+Microsoft. `tests/integration/Sprk.Bff.Api.IntegrationTests/Notifications/AppNotificationOptionsLiveTests.cs` reads the
+`priority`, `toasttype` and `icontype` option sets from Dataverse metadata (GET only) and compares them with the
+snapshot and the constants. It is skipped unless `SPAARKE_LIVE_PLAYBOOKS_DATAVERSE_URL` is set (the gate of
+`NotificationPlaybookFetchXmlLiveTests`) and needs an `az login` session. The gate was not set on this machine, so the
+live test has been built and shown as skipped but not run against Dataverse.
+
+## Known limits
+
+- K4: `GrantExpiryReminderJob.IsTransient` now treats an `ArgumentException`, including one wrapped in another exception
+  (the loop walks `InnerException`), as permanent. The reminder is then not retried in the run; the failure is logged and
+  counted as before.

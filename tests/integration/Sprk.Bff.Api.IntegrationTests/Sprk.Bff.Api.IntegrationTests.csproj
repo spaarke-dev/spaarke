@@ -56,6 +56,14 @@
     <Compile Include="..\regression\Signals\DecideLanePagingTests.cs" LinkBase="RegressionTests" />
   </ItemGroup>
 
+  <!-- appnotification option-set snapshot, linked from the unit project so there is ONE copy; read by the opt-in live test
+       Notifications/AppNotificationOptionsLiveTests. -->
+  <ItemGroup>
+    <Content Include="..\..\unit\Sprk.Bff.Api.Tests\Services\Fixtures\appnotification-options.snapshot.json" Link="Notifications\appnotification-options.snapshot.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <!-- Shared test helpers (TestSessionOwner, TestHttpContexts, TestTokenCredential).
        Linked rather than copied so every test project sees ONE definition; a second copy is how
        two projects drift into disagreeing about what a test callers oid is. -->
