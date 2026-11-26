@@ -1,0 +1,18 @@
+{
+  "table": "sprk_aitooltype",
+  "entitySet": "sprk_aitooltypes",
+  "primaryKey": "sprk_aitooltypeid",
+  "nameColumn": "sprk_name",
+  "match": "naturalKey",
+  "matchKeys": [["sprk_name"]],
+  "columns": [
+    "sprk_name"
+  ],
+  "lookups": [],
+  "rows": [
+    {
+      "sprk_aitooltypeid": "16960089-7c16-f111-8343-7c1e520aa4df",
+      "sprk_name": "Document Summarization"
+    }
+  ]
+}

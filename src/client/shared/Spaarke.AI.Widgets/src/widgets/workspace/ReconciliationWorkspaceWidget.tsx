@@ -23,8 +23,8 @@
  *     inside SpaarkeAi's `AiSessionProvider` tree); threads BFF queue-feed /
  *     apply / dismiss / `.eml` render calls (ADR-028).
  *   - `resolveReview` / `resolveRegarding` — the row → picker-props and row →
- *     confirmed-regarding adapters; `resolveRegarding` reuses the shipped pure
- *     `derivePrimaryReview` reducer (NFR-10 gate), no bespoke fetch.
+ *     confirmed-regarding adapters: the SHARED `buildResolveReview` /
+ *     `resolveRegarding` every mount uses (NFR-10 gate), no bespoke fetch.
  *
  * `configId` is NOT passed — `ReconciliationGrid` defaults to its
  * `NEEDS_REVIEW_CONFIG_ID` placeholder (task 059 seeds + sets the real record).
@@ -37,9 +37,8 @@ import { makeStyles } from '@fluentui/react-components';
 import {
   ReconciliationWorkspace,
   bffRefile,
-  derivePrimaryReview,
-  type EmailConnectionsReviewProps,
-  type ReconcileRegarding,
+  buildResolveReview,
+  resolveRegarding,
   type EmailWorkspaceWebApi,
   type CreatedRecordRef,
   type EmlSource,
@@ -49,7 +48,6 @@ import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { CreateRecordChooserModal, type ChooserFileArgs } from '@spaarke/ui-components';
 
-const COMMUNICATION_ENTITY = 'sprk_communication';
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
 
 // Bounded-height host for the DIRECT widget mount — same full-height-widget
@@ -76,39 +74,11 @@ function str(record: Record<string, unknown>, field: string): string | null {
   return typeof v === 'string' ? v : v == null ? null : String(v);
 }
 
-/** Read a numeric field off an untyped grid row (option-set value). */
-function num(record: Record<string, unknown>, field: string): number | null {
-  const v = record[field];
-  if (typeof v === 'number') return v;
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isNaN(n) ? null : n;
-}
-
-/**
- * Row → CONFIRMED `ReconcileRegarding | null` (NFR-10 gate). Reuses the shipped
- * pure `derivePrimaryReview` reducer — the SAME logic the resolver body uses to
- * decide the single confirmed primary. Only a green (Resolved) primary with a
- * resolvable typed entity + id enables the Fields/Tasks tabs.
- */
-function resolveRegarding(record: Record<string, unknown>): ReconcileRegarding | null {
-  const model = derivePrimaryReview(
-    str(record, 'sprk_associationprovenance'),
-    num(record, 'sprk_associationstatus'),
-    undefined,
-    {
-      recordName: str(record, 'sprk_regardingrecordname'),
-      recordNumber: str(record, 'sprk_regardingrecordnumber'),
-      entityType: null,
-      recordTypeLabel: str(record, 'sprk_regardingrecordtypename'),
-    }
-  );
-  const primary = model.state === 'confirmed' ? model.primary : undefined;
-  if (primary && primary.entity && primary.targetId) {
-    return { entityType: primary.entity, recordId: primary.targetId };
-  }
-  return null;
-}
+// Row → review props and row → confirmed regarding come from the SHARED `buildResolveReview` / `resolveRegarding`
+// (`logic/connections/reconciliationResolvers.ts`), the same copies the standalone code page and the LegalWorkspace
+// section use. word-add-in-r1 task 142 (ISS-043, #3194): this widget kept its own inline copies, which never passed the
+// written regarding (`filedAssociations`, `regardingRecordId`), so the Console showed "No confident match" for a filed
+// Suggested email, and its gate (filed lookups `undefined`) could never open Fields/Tasks for a typed regarding.
 
 /**
  * Direct workspace widget wrapper for `<ReconciliationWorkspace />`.
@@ -220,29 +190,14 @@ export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () 
   // `IPolymorphicPickerWebApi` (= `EmailWorkspaceWebApi`).
   const webApi = React.useMemo(() => getXrm()?.WebApi as EmailWorkspaceWebApi | undefined, []);
 
-  const resolveReview = React.useMemo(() => {
-    if (!webApi) return undefined;
-    return (record: Record<string, unknown>): EmailConnectionsReviewProps => {
-      const id = str(record, PRIMARY_ID_FIELD) ?? '';
-      return {
-        communicationId: id,
-        associationStatus: num(record, 'sprk_associationstatus'),
-        associationProvenanceJson: str(record, 'sprk_associationprovenance'),
-        regardingRecordName: str(record, 'sprk_regardingrecordname'),
-        regardingRecordNumber: str(record, 'sprk_regardingrecordnumber'),
-        regardingRecordType: str(record, 'sprk_regardingrecordtypename'),
-        writeContext: {
-          webApi,
-          hostEntity: COMMUNICATION_ENTITY,
-          hostRecordId: id,
-          // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
-          refileThroughBff: bffRefile(authenticatedFetch, bffBaseUrl ?? ''),
-        },
-        pickerWebApi: webApi,
-        onAssociationsChanged: handleAssociationsChanged,
-      };
-    };
-  }, [webApi, handleAssociationsChanged]);
+  const resolveReview = React.useMemo(
+    () =>
+      webApi
+        ? // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
+          buildResolveReview(webApi, handleAssociationsChanged, bffRefile(authenticatedFetch, bffBaseUrl ?? ''))
+        : undefined,
+    [webApi, handleAssociationsChanged, authenticatedFetch, bffBaseUrl]
+  );
 
   if (!webApi) {
     // No Dataverse host available (e.g. a non-MDA dev shell). The reconciliation

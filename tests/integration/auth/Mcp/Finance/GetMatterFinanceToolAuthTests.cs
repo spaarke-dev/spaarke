@@ -313,29 +313,127 @@ public sealed class GetMatterFinanceToolAuthTests
 
     // ---- EB-D-194 ---------------------------------------------------------------------------------------------------------------------
 
-    [Fact(DisplayName = "EB-D-194: no source file of the Finance MCP folder references invoice review, confirm, reject, approval or search")]
-    public void TheFinanceFolder_OffersNoInvoiceWorkflow()
+    // An ALLOWLIST, not a list of banned words: the Finance MCP folder may name three types of Services.Finance (the summary service, its
+    // DTO and its signal row), so every other Services.Finance type, and any Invoice* name, fails, however the invoice workflow is spelled.
+    // Comments are not scanned: a remark that names a type is not a reference to it.
+
+    private static readonly string[] AllowedFinanceServiceTypes = ["IFinanceSummaryService", "FinanceSummaryDto", "SpendSignalDto"];
+
+    [Fact(DisplayName = "EB-D-194: each source file of the Finance MCP folder references only the summary service, its DTO and its signal row from Services.Finance")]
+    public void TheFinanceFolder_ReferencesOnlyTheAllowedFinanceTypes()
     {
         var folder = Path.Combine(RepoRoot(), "src", "server", "api", "Sprk.Bff.Api", "Api", "Mcp", "LegalOperations", "Finance");
         var files = Directory.GetFiles(folder, "*.cs", SearchOption.AllDirectories);
-        files.Should().NotBeEmpty("the scan must see the tool, or it proves nothing (must-fire control)");
+        files.Should().NotBeEmpty("the scan must see the tool");
+        var financeTypes = FinanceServiceTypes();
+        financeTypes.Should().Contain(["InvoiceLineDecisionService", "InvoiceRejectReturnService", "InvoiceApproveRecord", "IFinanceSummaryService"],
+            "the list of Services.Finance types is read from the folder and must include the types the invoice workflow lives in");
 
-        var forbidden = new[]
-        {
-            "IInvoiceReviewService", "InvoiceReview", "invoice-review", "ConfirmInvoice", "RejectInvoice", "InvoiceApproval",
-            "IInvoiceSearchService", "InvoiceSearch", "invoices/search", "ApproveInvoice",
-        };
         foreach (var file in files)
         {
-            var text = File.ReadAllText(file);
-            foreach (var token in forbidden)
+            FinanceFolderViolations(File.ReadAllText(file), financeTypes)
+                .Should().BeEmpty($"EB-D-194: {Path.GetFileName(file)} may reference only {string.Join(", ", AllowedFinanceServiceTypes)} from Services.Finance");
+        }
+    }
+
+    [Theory(DisplayName = "EB-D-194 must-fire control: the matcher catches an invoice-workflow type in a seeded source")]
+    [InlineData("InvoiceLineDecisionService")]
+    [InlineData("InvoiceRejectReturnService")]
+    [InlineData("InvoiceDecisionOutcome")]
+    [InlineData("InvoiceApproveRecord")]
+    [InlineData("InvoiceCorrectionService")]
+    [InlineData("InvoiceAdjustmentService")]
+    [InlineData("IInvoiceReviewService")]
+    [InlineData("InvoiceNotInTheFolderYet")] // an Invoice* name is refused even when no such type exists today
+    public void TheMatcher_CatchesAnInvoiceWorkflowType(string typeName)
+    {
+        var seeded = $"using Sprk.Bff.Api.Services.Finance;\ninternal sealed class T {{ private readonly {typeName} _x; }}";
+
+        FinanceFolderViolations(seeded, FinanceServiceTypes()).Should().Contain(typeName);
+    }
+
+    [Theory(DisplayName = "EB-D-194 must-fire control: any other Services.Finance type, qualified or not, and a sub-namespace import are caught")]
+    [InlineData("internal sealed class T { private readonly FinanceSummaryService _x; }", "FinanceSummaryService")]
+    [InlineData("internal sealed class T { private readonly Sprk.Bff.Api.Services.Finance.BillingDecisionRecorder _x; }", "BillingDecisionRecorder")]
+    [InlineData("using Sprk.Bff.Api.Services.Finance.Procedures;", "Services.Finance.Procedures")]
+    public void TheMatcher_CatchesAnyOtherFinanceServiceReference(string seeded, string expected) =>
+        FinanceFolderViolations(seeded, FinanceServiceTypes()).Should().Contain(expected);
+
+    [Fact(DisplayName = "EB-D-194 must-not-fire control: the allowed types, and a comment that names a forbidden one, are not caught")]
+    public void TheMatcher_DoesNotCatchTheAllowedTypes_OrAComment()
+    {
+        var seeded = """
+            using Sprk.Bff.Api.Services.Finance;
+            // InvoiceLineDecisionService is not used here.
+            /// <summary>Not <c>InvoiceRejectReturnService</c>.</summary>
+            internal sealed class T
             {
-                text.Should().NotContain(token, $"EB-D-194: {Path.GetFileName(file)} must not reference an invoice workflow ('{token}')");
+                private readonly IFinanceSummaryService _service;
+                private FinanceSummaryDto? _dto;
+                private SpendSignalDto? _signal;
+                private readonly string _s = "ok";
+            }
+            """;
+
+        FinanceFolderViolations(seeded, FinanceServiceTypes()).Should().BeEmpty();
+        // A "//" inside a string literal is not a comment: what follows it is still source text.
+        FinanceFolderViolations("var s = \"// InvoiceApproveRecord\";", FinanceServiceTypes()).Should().Equal("InvoiceApproveRecord");
+    }
+
+    /// <summary>Every top-level type declared in <c>Services/Finance</c> (file-scoped namespaces put them at column 0), by name.</summary>
+    private static HashSet<string> FinanceServiceTypes()
+    {
+        var folder = Path.Combine(RepoRoot(), "src", "server", "api", "Sprk.Bff.Api", "Services", "Finance");
+        var declaration = new System.Text.RegularExpressions.Regex(
+            @"^(?:(?:public|internal|sealed|static|abstract|partial|readonly|file)\s+)*(?:class|record(?:\s+struct)?|interface|enum|struct)\s+([A-Za-z_]\w*)",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in Directory.GetFiles(folder, "*.cs", SearchOption.AllDirectories))
+        {
+            foreach (System.Text.RegularExpressions.Match m in declaration.Matches(File.ReadAllText(file)))
+            {
+                names.Add(m.Groups[1].Value);
             }
         }
 
-        // Must-fire control: the scan does read a known token where it is present.
-        File.ReadAllText(files.Single(f => f.EndsWith("GetMatterFinanceTool.cs", StringComparison.Ordinal))).Should().Contain("IFinanceSummaryService");
+        return names;
+    }
+
+    /// <summary>
+    /// The names in <paramref name="source"/> (comments removed) that the Finance MCP folder may not use: an <c>Invoice*</c> name, a
+    /// <c>Services.Finance</c> sub-namespace, or a top-level type of <c>Services/Finance</c> other than <see cref="AllowedFinanceServiceTypes"/>.
+    /// </summary>
+    private static List<string> FinanceFolderViolations(string source, HashSet<string> financeServiceTypes)
+    {
+        // A string literal is kept whole (so a "//" inside it is not a comment); a comment is dropped.
+        var code = System.Text.RegularExpressions.Regex.Replace(
+            source, @"""(?:[^""\\\r\n]|\\.)*""|//[^\r\n]*|/\*.*?\*/",
+            m => m.Value.StartsWith('"') ? m.Value : " ", System.Text.RegularExpressions.RegexOptions.Singleline);
+        var found = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(code, @"\b[A-Za-z_]\w*\b"))
+        {
+            var id = m.Value;
+            if (AllowedFinanceServiceTypes.Contains(id, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            if (financeServiceTypes.Contains(id) || System.Text.RegularExpressions.Regex.IsMatch(id, "^I?Invoice"))
+            {
+                found.Add(id);
+            }
+        }
+
+        // A sub-namespace import ("Services.Finance.Procedures"); a qualified type name is already reported as the type above.
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(code, @"Services\.Finance\.([A-Za-z_]\w*)"))
+        {
+            if (!financeServiceTypes.Contains(m.Groups[1].Value))
+            {
+                found.Add(m.Value);
+            }
+        }
+
+        return found.ToList();
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------------------------------------
