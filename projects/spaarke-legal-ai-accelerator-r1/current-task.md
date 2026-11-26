@@ -6,6 +6,8 @@
 
 Pairing `nda-review` with the Spaarke MCP tools: (1) how a Spaarke (SPE) document gets into the Cowork sandbox (connector reach to SPE unverified → researcher check); (2) matter email via `spaarke_compose_email` instead of the Outlook send card. Detail in `notes/copilot-app-components.md` "Still open". Gap 1 researched (`notes/research/cowork-access-to-spe-files-2026-11.md`): no native route; download-and-attach works today; OneDrive staging or a tool-result file need an owner decision / a tenant test. design.md §10 `spaarke_get_document` line corrected. Gap 2 not started; owner to decide.
 
+**Gap 1 tenant test set up (owner said "Yes, set it up"):** `notes/poc-e2e/spe-file-probe/README.md` (probe .docx small/large, code `FDP-1126-A`, hashes `2c05271788b4` / `6d7939541ab0`; generator `make_probe_docx.py`, byte-identical). Part A (script egress, `urlopen` to learn.microsoft.com and dev BFF `/healthz`) can run now. Part B (B1–B6) waits on mcp-r2 adding `SpaarkeMCP_spike_return_file` (variants a base64 text / b embedded resource / c resource_link + `resources/read`) to the dev server; requested 2026-11-26, they decide. When they say it's live (or rename it), update the README; after results, record in `results.md` + `copilot-app-components.md` and tell mcp-r2 to remove the tool. No tenant upload involved.
+
 ## 2026-11-26: PR #3237 MERGED (squash `244171569a`) — redline engine skip-and-report mode (for intake-pipeline-r1)
 
 - `--skip-unplaceable REPORT.json` (closed code set agreed with intake; they message us before changing it), `--refused` on summary_table/check_outputs, reproducible .docx (`safe_docx.write_parts`), exit-3 stderr carries `code`/`edit`. Default mode unchanged for our skills.
