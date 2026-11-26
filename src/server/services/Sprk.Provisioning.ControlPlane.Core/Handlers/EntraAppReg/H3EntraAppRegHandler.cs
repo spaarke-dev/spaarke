@@ -388,9 +388,15 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 preAuthorizedClientAppIds = [.. preAuthorizedClientAppIds.Union(demoClientAppIds, StringComparer.Ordinal)];
             }
             _logger.LogInformation(
-                "H3 run {RunId} customer {CustomerId}: registry row {EnvironmentId} type={EnvironmentType} active={IsActive} " +
+                "H3 run {RunId} customer {CustomerId}: registry row {EnvironmentId} found={RowFound} customerMatch={CustomerMatch} " +
+                "tenantMatch={TenantMatch} spaarkeTenant={IsSpaarkeTenant} type={EnvironmentType} active={IsActive} " +
                 "-> Demo-only clients {Decision} ({Count})",
-                run.RunId, envelope.CustomerId, run.EnvironmentId, registryRow?.EnvironmentType, registryRow?.IsActive,
+                run.RunId, envelope.CustomerId, run.EnvironmentId, registryRow is not null,
+                registryRow is not null && string.Equals(registryRow.CustomerId, envelope.CustomerId, StringComparison.OrdinalIgnoreCase),
+                registryRow is not null && string.Equals(registryRow.TenantId, tenantId, StringComparison.OrdinalIgnoreCase),
+                !string.IsNullOrWhiteSpace(_options.SpaarkeTenantId)
+                    && string.Equals(tenantId, _options.SpaarkeTenantId, StringComparison.OrdinalIgnoreCase),
+                registryRow?.EnvironmentType, registryRow?.IsActive,
                 isDemo ? "pre-authorized" : "left out", demoClientAppIds.Count);
         }
 

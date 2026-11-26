@@ -819,6 +819,22 @@ public sealed class H3EntraAppRegHandlerTests
     }
 
     [Fact]
+    public async Task Demo_10b_SpaarkeTenantIdNotConfigured_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-10b"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true)), spaarkeTenantId: "");
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty(
+            "without a configured Spaarke tenant H3 cannot prove the stamp is a Spaarke-tenant one");
+    }
+
+    [Fact]
     public async Task Demo_11_RegistryRowOfAnotherTenant_LeavesTheDemoClientOut()
     {
         var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));

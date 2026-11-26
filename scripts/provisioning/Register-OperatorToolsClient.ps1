@@ -124,17 +124,19 @@ else {
     $otherOwners = @($owners | Where-Object { $_.id -ne $me.id })
     if ($otherOwners.Count -gt 0) { $refusals += "$($otherOwners.Count) owner(s) other than the signed-in operator" }
     if ($owners.Count -eq 0 -and -not ("$($app.notes)".Contains($NotesMarker))) { $refusals += 'no owner and no marker showing this script created it' }
-    $existingSp = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals?`$filter=appId eq '$($app.appId)'&`$select=id") | Select-Object -First 1
+    $existingSp = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals?`$filter=appId eq '$($app.appId)'&`$select=id,passwordCredentials,keyCredentials") | Select-Object -First 1
     if ($existingSp) {
         $spOwners = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals/$($existingSp.id)/owners?`$select=id" | Where-Object { $_.id -ne $me.id })
         if ($spOwners.Count -gt 0) { $refusals += "$($spOwners.Count) service-principal owner(s) other than the signed-in operator" }
+        $spCreds = @(@($existingSp.passwordCredentials) + @($existingSp.keyCredentials) | Where-Object { $_ })
+        if ($spCreds.Count -gt 0) { $refusals += "$($spCreds.Count) service-principal secret/certificate credential(s)" }
     }
     $creds = @(@($app.passwordCredentials) + @($app.keyCredentials) | Where-Object { $_ })
     if ($creds.Count -gt 0) { $refusals += "$($creds.Count) secret/certificate credential(s)" }
     $fics = @(Get-OperatorToolsGraphCollection -Path "applications/$($app.id)/federatedIdentityCredentials")
     if ($fics.Count -gt 0) { $refusals += "$($fics.Count) federated identity credential(s)" }
-    if (@($app.web.redirectUris).Count -gt 0) { $refusals += 'web redirect URI(s)' }
-    if (@($app.spa.redirectUris).Count -gt 0) { $refusals += 'SPA redirect URI(s)' }
+    if (@($app.web.redirectUris | Where-Object { $_ }).Count -gt 0) { $refusals += 'web redirect URI(s)' }
+    if (@($app.spa.redirectUris | Where-Object { $_ }).Count -gt 0) { $refusals += 'SPA redirect URI(s)' }
     if ($refusals) {
         Write-Host "[app] REFUSED: the existing '$DisplayName' has $($refusals -join '; '). This client must have none of these. Check who changed it and correct it by hand (this script never deletes credentials, owners or redirects); nothing was changed."
         exit 1
