@@ -502,3 +502,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | A follow-on to 064 in this project's code, assigned to us by UAC-r2 on 2026-11-26. A dev check on 2026-11-26 found that none of the 57 rules reads a field-secured source column. |
 | **Need** | Push skips a rule whose source column is field-secured, with a warning, and maps nothing when the column's security state is unknown. Use one predicate shared with create, plus must-fire and must-not-fire tests. |
 | **Status** | Fixing in scope (task 064 follow-on). |
+
+## DI-052 — A missing source column is reported with the field-secured warning text
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, review of the combined task 064 change (nit). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3280 |
+| **Class** | Wording only. A rule whose source column does not exist maps nothing (fail closed), but the warning names it as field-secured. |
+| **Need** | A separate "source column not found" reason from `SecuredColumnsAsync` to the step-3 warning; one test per reason. |
+| **Status** | Filed. Not needed for 064. |

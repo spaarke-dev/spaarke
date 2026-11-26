@@ -106,7 +106,7 @@
 | 061 | [Census and client guards](061-census-and-client-guards.poml) | FR-27 | sonnet / high | FULL | W6 | 035, 036 | 🔲 |
 | 062 | [Docs rewrite + root CLAUDE.md + CHANGELOG (main session)](062-docs-rewrite-and-root-claude-md.poml) | FR-28 | sonnet / high | MINIMAL | none | 040, 053, 060 | 🔲 |
 | 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | ✅ 2026-11-26: adapter + dead event builder deleted; issues updated (#1318 closed, #3245 filed); DI-045..047 |
-| 064 | [Copy ordinary mapped values regardless of caller rights (owner 4b/4c)](064-copy-mapped-values-regardless-of-caller-rights.poml) | FR-08 amendment (owner 2026-10-27, reconfirmed 2026-11-26) | opus / high | FULL | W6 | none (UAC-r2 diff review) | 🔲 |
+| 064 | [Copy ordinary mapped values regardless of caller rights (owner 4b/4c)](064-copy-mapped-values-regardless-of-caller-rights.poml) | FR-08 amendment (owner 2026-10-27, reconfirmed 2026-11-26) | opus / high | FULL | W6 | none (UAC-r2 diff review) | ✅ |
 
 ## Phase 7 — W7 Record family service and Family tool (spec amendment 2026-10-27; design.md §12)
 

@@ -4,7 +4,7 @@
     <title>Copy ordinary mapped lookups and values regardless of the caller's AppendTo or field security (owner 4b/4c, 2026-10-27, reconfirmed 2026-11-26)</title>
     <phase>6 W6 Standard, guards, docs, retirement</phase>
     <gate>none</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the caller-check step of the BFF create (and push) path; security-adjacent (AppendTo, field security); bff-api.</rigor-reason>
     <model-tier>opus</model-tier>

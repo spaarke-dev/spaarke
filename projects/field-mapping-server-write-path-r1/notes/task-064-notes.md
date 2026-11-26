@@ -360,3 +360,14 @@ A scoped re-check of `e35a400a00..1ccf73a503` found no defect on a real path. It
   - No dev rule has a mixed-case or padded column name.
 - **Gates.** Build 0 warnings. Filtered tests (`RecordCreationServiceMappingSeamTests`, `FieldSecuredSource`, `CallerWriteAuthorization`, `MappedCopyRights`) 372/372. ArchTests 2855/2855. Format clean. Publish delta for 064 as a whole, against 3e0268349a: +5,482 bytes, 194 files on both sides, 41.64 MB, no vulnerable packages.
 - **Kept as is.** The target-side check in `CallerWriteAuthorization` is unchanged.
+
+## 11. Gate and pre-deploy check
+
+- **UAC-r2 gate, 2026-11-26: APPROVE** on `3e0268349a..fd8172ea32`.
+  - Target-side field security is not applied to an ordinary copied value. That is the owner's 2026-11-26 rule, and the copied value comes from an unsecured column the caller can read, so it discloses nothing. Recorded as an accepted known limit.
+  - Nit filed as DI-052 (#3280): a missing source column is reported with the field-secured warning text.
+- **Pre-deploy check (UAC-r2's condition), dev, read-only, 2026-11-26.** `CallerWriteAuthorization` counts a target column with no boolean `IsSecured` as secured, so the check is that every column the unified create can write returns a boolean. Result: every column on all 18 tables returns a boolean `IsSecured` (no exceptions):
+  - `sprk_document`, `sprk_communication`, `sprk_todo`, `sprk_workassignment`, `sprk_invoice`, `sprk_project`;
+  - `sprk_analysis`, `sprk_memo`, `sprk_matter`, `sprk_event`, `sprk_reportcard`, `sprk_budget`;
+  - `sprk_kpiassessment`, `sprk_billingevent`, `sprk_communicationattachment`, `sprk_analysisoutput`, `contact`, `account`.
+  So no create is refused by this rule on dev. Repeat the check on each environment before a BFF deploy that carries 064.
