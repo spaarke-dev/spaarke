@@ -439,7 +439,7 @@ describe('InvoiceReviewPage: decisions (task 100)', () => {
 });
 
 describe('InvoiceReviewPage: the invoice needs its firm first (095d-0, EB-D-185 / EB-D-197)', () => {
-  const FIRM_SENTENCE = 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.';
+  const FIRM_SENTENCE = 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). If it has no firm, set the firm in the invoice header above, then decide.';
   const SERVER_SENTENCE = 'This invoice has no firm. A reviewer must add the firm before its lines can be decided.';
 
   it('must-fire: disables Confirm (Accept, Reduce, Disallow), the ticked-row actions, Accept all clean, the By-rule suggestions and the corrections, and says why', async () => {
