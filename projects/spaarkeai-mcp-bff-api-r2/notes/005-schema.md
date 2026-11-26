@@ -55,9 +55,33 @@ Read with the Dataverse Web API `EntityDefinitions` endpoint (az CLI token, `htt
 
 **Regarding record — pair, not polymorphic lookup.** A polymorphic lookup needs one relationship per target table and a schema change for every new subject; the run's subject comes from `PlaybookParameterPolicy.RecordIdentityParameters` (`matterId` → `sprk_matter`, `projectId` → `sprk_project`, `invoiceId` → `sprk_invoice`), which grows by code. The pair holds any of them with no further schema change. Cost: no referential integrity or cascade; acceptable for an audit-style run record.
 
-**Owner go: PENDING.** The script is written and was reviewed but has NOT been run against any environment (POML escalation trigger 1; wave instruction). Result on dev: not run.
+### 2.1 Run-record columns (D-run-record-decided, 2026-11-25)
 
-What the owner approves: running `pwsh scripts/dataverse/Add-PlaybookRunColumns.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (adds the 9 columns above to `SpaarkeCore`, then publishes the two tables). It is additive and idempotent; it deletes nothing. `-WhatIf` prints the plan without writing.
+The owner decided `sprk_playbookrun` ("AI Run") is the one AI-run record for engine, prompted-Action and coded-workflow runs (`notes/decisions.md`). The same script therefore also carries the shared columns below. A profile-version lookup and a gate-decision reference are **not** here: specialist-legal-agents-r1 Phase 1 owns them.
+
+| Table | Column | Change | Type / target | Required level | Choice made |
+|---|---|---|---|---|---|
+| `sprk_playbookrun` | `sprk_playbookid` | make optional (metadata update of the existing lookup; skipped if already `None`) | Lookup → `sprk_analysisplaybook` | ApplicationRequired → **None** | A prompted or coded run has no playbook. Done by GET of the lookup attribute, `RequiredLevel.Value = "None"`, PUT with `MSCRM.MergeLabels` (the repo's `Add-CustomerIdColumn.ps1` pattern) |
+| `sprk_playbookrun` | `sprk_runkind` | add | Choice, **local** option set: Engine `100000000`, Prompted `100000001`, Coded `100000002` | None (form default Engine) | Spaarke's 100000000+ value convention; local, not a global set, because only this column uses it (the pattern of `Add-AnalysisToolAvailableInContexts.ps1`). Engine is the default so a row written without it reads as an engine run |
+| `sprk_playbookrun` | `sprk_analysisactionid` | add | Lookup → `sprk_analysisaction` | None | Created through its 1:N relationship (a lookup cannot be created on the Attributes endpoint, per the skill) |
+| `sprk_playbookrun` | `sprk_playbookconsumerid` | add | Lookup → `sprk_playbookconsumer`, display name "Binding" | None | same |
+| `sprk_playbookrun` | `sprk_parentrunid` | add | Lookup → `sprk_playbookrun` (self) | None | Self-relationship, like `sprk_parentpersonaid` (`Create-AiPersonaEntity.ps1`) |
+| `sprk_playbooknoderun` | `sprk_playbooknodeid` | make optional | Lookup → `sprk_playbooknode` | ApplicationRequired → **None** | An Action run's row has no node |
+| `sprk_playbooknoderun` | `sprk_analysisactionid` | add | Lookup → `sprk_analysisaction` | None | same relationship pattern |
+
+Plus the 9 columns in the table above (5 on `sprk_playbookrun`, 4 on `sprk_playbooknoderun`).
+
+Relationship naming: `sprk_{referenced}_{referencing}_{lookup}` with the `sprk_` prefix dropped from the table names, as `scripts/Create-AiChatContextMapEntity.ps1` does (the skill's formula would double the prefix: `sprk_sprk_analysisaction_…`). Names: `sprk_analysisaction_playbookrun_analysisactionid`, `sprk_playbookconsumer_playbookrun_playbookconsumerid`, `sprk_playbookrun_playbookrun_parentrunid`, `sprk_analysisaction_playbooknoderun_analysisactionid`. Delete behaviour is **RemoveLink** on all four: a run record is an audit row and must outlive the Action, Binding or parent run it points at.
+
+Idempotency: a missing column or lookup is added; an existing one is skipped when its type matches (Picklist / Lookup) and stops the script when it does not; the two required-level updates are skipped when the lookup is already `None`. `-WhatIf` reports every one of the 5 new columns/lookups and 2 updates without writing. The script's end-of-run verification re-reads all columns, lookups and the two required levels.
+
+Code that goes with it (`PlaybookRunRecordStore`): the run write is an upsert that now also writes `sprk_runkind` always (Engine from `PlaybookOrchestrationService`), and `sprk_playbookid` / `sprk_analysisactionid` / `sprk_playbookconsumerid` / `sprk_parentrunid` only when the record carries them (the engine path sets only the playbook id). The node write skips a missing `sprk_playbooknodeid` and writes `sprk_analysisactionid` when given.
+
+**Reading a row with no playbook id.** `GetOwnedRunAsync` (behind `GetRunStatusAsync` / `GetRunDetailAsync`) returns `null` for a stored row with no playbook id: it is a prompted or coded run, `PlaybookRunStatus` carries a playbook id, and a status with an empty `playbookId` would mislead. The run routes answer it like an unknown run id (404). It never throws, and the check runs before the owner lookup and node query. The read still names no new column (it keys off the existing `sprk_playbookid`), so the "no new column before the schema is applied → null → 404" property in §3 is kept. A reader for the other kinds is a later addition to the same store, built with its first caller. Tests: `PlaybookRunPersistenceTests` (`GetRunStatusAndDetail_StoredRunWithNoPlaybookId_ReturnNullWithoutThrowing`, `Store_PromptedRun_WritesKindAndActionBindingParent_…`, and the engine row carrying kind Engine and none of the new lookups).
+
+**Owner go: NOT given.** The script is written, parse-checked and reviewed but has NOT been run against any environment, including no Web API write and no `-WhatIf` run (a `-WhatIf` run reads metadata with a token; none was made). POML escalation trigger 1; wave instruction. Result on dev: not run.
+
+What the owner approves: running `pwsh scripts/dataverse/Add-PlaybookRunColumns.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (adds the 9 gap columns of §2 and the run-kind column plus 4 lookups of §2.1 to `SpaarkeCore`, makes the two existing lookups optional, then publishes the two tables). It is additive and idempotent; it deletes nothing (the two required-level changes loosen a constraint). `-WhatIf` prints the plan without writing.
 
 ## 3. Decisions (task 005)
 
@@ -93,7 +117,9 @@ Acceptance criterion 3 ("serialise identically") cannot hold byte for byte; item
 
 | Capability | Canonical component | Notes |
 |---|---|---|
-| Durable playbook run status (`sprk_playbookrun` / `sprk_playbooknoderun`) | `Services/Ai/PlaybookRuns/PlaybookRunRecordStore.cs`, written and read only by `PlaybookOrchestrationService` | Read run status through `IPlaybookOrchestrationService.GetRunStatusAsync` / `GetRunDetailAsync` (owner-scoped), never the store directly (ADR-013). FR-13, task 005 |
+| AI run record (`sprk_playbookrun` "AI Run" / `sprk_playbooknoderun`) | `Services/Ai/PlaybookRuns/PlaybookRunRecordStore.cs`: **the one AI-run record writer for every run kind** (engine / prompted / coded; `PlaybookRunKind`, `sprk_runkind`) | Engine runs are written by `PlaybookOrchestrationService`; prompted and coded runs are written by their own callers (specialist-legal-agents-r1 Phase 1) through the same store and `PlaybookRunRecord`, never a second writer (ADR-002). Read engine run status through `IPlaybookOrchestrationService.GetRunStatusAsync` / `GetRunDetailAsync` (owner-scoped), never the store directly (ADR-013). D-run-record-decided, FR-13, task 005 |
+
+**Extension point: write mode.** `PlaybookRunRecord` (and `PlaybookNodeRunRecord`) are request objects with init-only members, not positional parameter lists. Today every write is fail-safe: the store throws on failure and the caller logs `playbook_run_persist_failed`, bounds the call at 5 s and carries on. A later "required" write mode (fail closed for a gated side-effect run: the run does not proceed when its record cannot be written) is one more member with a fail-safe default on the same request object, read by the write path, so no existing caller changes. It is NOT built now. When it is added, the bounding and swallow logic now in `PlaybookOrchestrationService` (`BoundedAsync`, the catch in `PersistRunAsync`) should move into the store beside the mode, so a second caller does not copy it.
 
 ## 6. Ledger text (uac-r2 to review)
 
