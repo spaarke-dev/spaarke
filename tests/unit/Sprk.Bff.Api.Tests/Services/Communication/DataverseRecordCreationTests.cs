@@ -156,8 +156,22 @@ public class DataverseRecordCreationTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            // Task 006 (§10.1 item 7): an email reply (InReplyToMessageId) is now sent as createReply on its parent, so the mailbox
+            // must answer the parent lookup and the createReply with an id. These tests are about the Dataverse record the send
+            // writes, not about Graph, so the parent always exists. Everything else is answered as before.
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && path.EndsWith("/createReply", StringComparison.Ordinal))
+                return Task.FromResult(Json(HttpStatusCode.Created, """{"id":"DRAFT"}"""));
+            if (request.Method == HttpMethod.Get && path.Contains("/messages", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains("sentitems", StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(Json(HttpStatusCode.OK,
+                    path.EndsWith("/messages", StringComparison.Ordinal) ? """{"value":[{"id":"PARENT"}]}""" : """{"id":"PARENT"}"""));
+
             return Task.FromResult(new HttpResponseMessage(_statusCode));
         }
+
+        private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
+            new(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
     }
 
     #endregion

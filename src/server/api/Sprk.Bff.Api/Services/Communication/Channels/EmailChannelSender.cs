@@ -49,8 +49,34 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
 
     public CommunicationType SupportedType => CommunicationType.Email;
 
+    /// <summary>
+    /// Spaarke-intake-pipeline-r1 task 006 (design §10.1 item 7): the problem code (404) of a send that carries
+    /// <c>InReplyToMessageId</c> whose parent message is not in the sending mailbox. Nothing is created or sent: a reply that cannot
+    /// be threaded is never sent as a new, unthreaded message.
+    /// </summary>
+    public const string ReplyParentNotFoundCode = "sdap.communication.reply_parent_not_found";
+
+    /// <summary>The problem code (413) of a threaded reply with an attachment above <see cref="MaxReplyAttachmentBytes"/>. Nothing is created or sent.</summary>
+    public const string ReplyAttachmentTooLargeCode = "sdap.communication.reply_attachment_too_large";
+
+    /// <summary>The problem code (400) of a system-mail send that is also a reply: a draft's <c>send</c> always saves to Sent Items, so the no-copy rule of system mail cannot hold. Nothing is created or sent.</summary>
+    public const string ReplySystemMailUnsupportedCode = "sdap.communication.reply_system_mail_unsupported";
+
+    /// <summary>
+    /// Graph adds a file to a draft with a single request only below 3 MB (larger files need an upload session, which the reply
+    /// branch does not use). A larger attachment fails the reply up front with <see cref="ReplyAttachmentTooLargeCode"/>.
+    /// </summary>
+    internal const int MaxReplyAttachmentBytes = 3 * 1024 * 1024;
+
     public async Task<ChannelSendResult> SendAsync(ChannelSendRequest request, CancellationToken cancellationToken = default)
     {
+        // Task 006 (§10.1 item 7): a send that names its parent message goes out as a threaded reply (createReply on the parent, so
+        // Exchange sets In-Reply-To and References). Every other send takes the path below, unchanged.
+        if (!string.IsNullOrWhiteSpace(request.Communication.InReplyToMessageId))
+        {
+            return await SendReplyAsync(request, cancellationToken);
+        }
+
         var message = BuildGraphMessage(request);
 
         if (request.Attachments is { Count: > 0 })
@@ -126,22 +152,8 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                 request.UserMode,
                 outcome);
 
-            var extensions = new Dictionary<string, object>
-            {
-                ["correlationId"] = request.CorrelationId,
-                ["graphErrorCode"] = ex.Error?.Code ?? "unknown",
-                [SendOutcomeExtension] = outcome
-            };
-            if (request.UserMode) extensions["sendMode"] = "User";
+            throw MapGraphFailure(request, ex, outcome);
 
-            throw new SdapProblemException(
-                code: "GRAPH_SEND_FAILED",
-                title: "Email Send Failed",
-                detail: request.UserMode
-                    ? $"Graph API error (OBO): {ex.Error?.Message ?? ex.Message}"
-                    : $"Graph API error: {ex.Error?.Message ?? ex.Message}",
-                statusCode: ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502,
-                extensions: extensions);
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
@@ -153,21 +165,8 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                 request.UserMode,
                 outcome);
 
-            var extensions = new Dictionary<string, object>
-            {
-                ["correlationId"] = request.CorrelationId,
-                [SendOutcomeExtension] = outcome
-            };
-            if (request.UserMode) extensions["sendMode"] = "User";
+            throw MapGraphFailure(request, ex, outcome);
 
-            throw new SdapProblemException(
-                code: "GRAPH_SEND_FAILED",
-                title: "Email Send Failed",
-                detail: request.UserMode
-                    ? $"Unexpected error (OBO): {ex.Message}"
-                    : $"Unexpected error: {ex.Message}",
-                statusCode: 500,
-                extensions: extensions);
         }
 
         // Best-effort capture of the just-sent message's real RFC-2822 Internet-Message-Id (FR-06 —
@@ -198,7 +197,332 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
             ? SendOutcomeUnknown
             : SendOutcomeNotSent;
 
-    private static Message BuildGraphMessage(ChannelSendRequest request)
+    /// <summary>
+    /// Task 006 (§10.1 item 7): the threaded-reply send. Graph rejects a custom <c>internetMessageHeaders</c> entry that does not
+    /// start with <c>x-</c>, so <c>In-Reply-To</c> and <c>References</c> cannot be set on a new message; Exchange sets them when the
+    /// message is created as a reply. The sequence: find the parent in the sending mailbox, <c>createReply</c> on it (a draft), set the
+    /// draft's subject, body, recipients and sender to the request's values and add its attachments, then <c>send</c> the draft.
+    /// <list type="bullet">
+    /// <item>The parent is looked up by its RFC-2822 Internet-Message-Id (the value of <c>InReplyToMessageId</c> for email); a value
+    /// that is not in angle brackets is read as a Graph message id. A parent that is not found fails the send with
+    /// <see cref="ReplyParentNotFoundCode"/>; it is never sent as a new, unthreaded message.</item>
+    /// <item>The server-send marker is a custom header, and Graph does not list <c>internetMessageHeaders</c> among a draft's
+    /// updatable properties, so the marker rides on the <c>createReply</c> request's <c>message</c> parameter instead.</item>
+    /// <item>Every step before <c>send</c> leaves nothing sent, so a failure there is <see cref="SendOutcomeNotSent"/> and the draft
+    /// is deleted (best-effort). A failure of the <c>send</c> itself is classified like <c>sendMail</c>'s, and its draft is kept
+    /// when the outcome is <see cref="SendOutcomeUnknown"/>.</item>
+    /// </list>
+    /// A draft's <c>send</c> always saves the message to Sent Items, which is also where the Internet-Message-Id read-back looks.
+    /// </summary>
+    private async Task<ChannelSendResult> SendReplyAsync(ChannelSendRequest request, CancellationToken cancellationToken)
+    {
+        var parentReference = request.Communication.InReplyToMessageId!.Trim();
+
+        if (request.Communication.SystemMail is not null)
+        {
+            throw new SdapProblemException(
+                code: ReplySystemMailUnsupportedCode,
+                title: "Reply Not Supported For System Mail",
+                detail: "A system-mail send keeps no copy in Sent Items, and a threaded reply is always saved there.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = request.CorrelationId });
+        }
+
+        // Validate before anything is created in the mailbox.
+        if (request.Attachments?.FirstOrDefault(a => a.Content.Length > MaxReplyAttachmentBytes) is { } tooLarge)
+        {
+            throw new SdapProblemException(
+                code: ReplyAttachmentTooLargeCode,
+                title: "Reply Attachment Too Large",
+                detail: $"A threaded reply carries attachments up to {MaxReplyAttachmentBytes / (1024 * 1024)} MB each; '{tooLarge.Name}' is larger.",
+                statusCode: 413,
+                extensions: new Dictionary<string, object> { ["correlationId"] = request.CorrelationId });
+        }
+
+        var sendOption = new NoTransientRetryOption();
+        var sendStartedUtc = DateTimeOffset.UtcNow;
+        var sendAttempted = false;
+        ReplyMailbox? mailbox = null;
+        string? draftId = null;
+        GraphServiceClient graphClient;
+
+        try
+        {
+            if (request.UserMode)
+            {
+                graphClient = await _graphClientFactory.ForUserAsync(request.HttpContext!, cancellationToken);
+                mailbox = new MeReplyMailbox(graphClient);
+            }
+            else
+            {
+                graphClient = _graphClientFactory.ForApp();
+                mailbox = new UserReplyMailbox(graphClient, request.FromAddress);
+            }
+
+            var parentId = await mailbox.FindMessageIdAsync(parentReference, cancellationToken);
+            if (parentId is null)
+            {
+                _logger.LogWarning(
+                    "Reply parent message not found in the sending mailbox; nothing sent | CorrelationId: {CorrelationId}, From: {From}, UserMode: {UserMode}",
+                    request.CorrelationId, request.FromAddress, request.UserMode);
+                throw new SdapProblemException(
+                    code: ReplyParentNotFoundCode,
+                    title: "Reply Parent Not Found",
+                    detail: "The message this email replies to was not found in the sending mailbox, so the reply cannot be threaded. Nothing was sent.",
+                    statusCode: 404,
+                    extensions: new Dictionary<string, object> { ["correlationId"] = request.CorrelationId });
+            }
+
+            // The update carries everything BuildGraphMessage sets except the marker (not patchable; see the summary). The property is
+            // left unset, not set to null: an explicit null would be sent as "internetMessageHeaders": null.
+            var update = BuildGraphMessage(request, carryServerSendMarker: false);
+            var markerHeaders = request.ServerSendMarker is { Length: > 0 } marker
+                ? new List<InternetMessageHeader> { new() { Name = ServerSendMarker.HeaderName, Value = marker } }
+                : null;
+
+            draftId = await mailbox.CreateReplyAsync(parentId, markerHeaders, cancellationToken);
+            await mailbox.UpdateDraftAsync(draftId, update, cancellationToken);
+
+            foreach (var attachment in request.Attachments ?? [])
+            {
+                await mailbox.AddAttachmentAsync(
+                    draftId,
+                    new FileAttachment
+                    {
+                        OdataType = "#microsoft.graph.fileAttachment",
+                        Name = attachment.Name,
+                        ContentType = attachment.ContentType,
+                        ContentBytes = attachment.Content
+                    },
+                    cancellationToken);
+            }
+
+            sendAttempted = true;
+            await mailbox.SendDraftAsync(draftId, sendOption, cancellationToken);
+
+            _logger.LogInformation(
+                "Communication reply sent successfully | CorrelationId: {CorrelationId}, From: {From}, To: {RecipientCount}, UserMode: {UserMode}, ParentMessageId: {ParentMessageId}, DraftId: {DraftId}",
+                request.CorrelationId,
+                request.FromAddress,
+                request.Communication.To.Length,
+                request.UserMode,
+                parentId,
+                draftId);
+        }
+        catch (SdapProblemException)
+        {
+            await TryDeleteReplyDraftAsync(mailbox, draftId, request.CorrelationId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A failure before the send attempt left nothing sent; the send's own failure is classified like sendMail's.
+            var outcome = sendAttempted ? OutcomeOf(sendOption, ex) : SendOutcomeNotSent;
+            if (outcome == SendOutcomeNotSent)
+            {
+                await TryDeleteReplyDraftAsync(mailbox, draftId, request.CorrelationId);
+            }
+
+            _logger.LogError(
+                ex,
+                "Graph reply send failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}, UserMode: {UserMode}, SendOutcome: {SendOutcome}",
+                request.CorrelationId,
+                (ex as ApiException)?.ResponseStatusCode,
+                (ex as ODataError)?.Error?.Code,
+                request.UserMode,
+                outcome);
+            throw MapGraphFailure(request, ex, outcome);
+        }
+
+        var internetMessageId = await TryCaptureInternetMessageIdAsync(
+            graphClient, request.UserMode, request.FromAddress, request.Communication.Subject,
+            sendStartedUtc, request.CorrelationId, cancellationToken);
+
+        return new ChannelSendResult
+        {
+            FromAddress = request.FromAddress,
+            ProviderMessageId = internetMessageId
+        };
+    }
+
+    /// <summary>Best-effort removal of a reply draft that will never be sent; a failure is logged and swallowed.</summary>
+    private async Task TryDeleteReplyDraftAsync(ReplyMailbox? mailbox, string? draftId, string correlationId)
+    {
+        if (mailbox is null || draftId is null)
+            return;
+
+        try
+        {
+            await mailbox.DeleteDraftAsync(draftId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Reply draft cleanup failed (non-fatal); the unsent draft remains in Drafts | CorrelationId: {CorrelationId}, DraftId: {DraftId}",
+                correlationId, draftId);
+        }
+    }
+
+    /// <summary>The <c>GRAPH_SEND_FAILED</c> problem for a Graph or unexpected failure of a send, with its <c>sendOutcome</c>.</summary>
+    private static SdapProblemException MapGraphFailure(ChannelSendRequest request, Exception ex, string outcome)
+    {
+        var extensions = new Dictionary<string, object>
+        {
+            ["correlationId"] = request.CorrelationId,
+            [SendOutcomeExtension] = outcome
+        };
+        if (request.UserMode) extensions["sendMode"] = "User";
+
+        if (ex is ODataError odata)
+        {
+            extensions["graphErrorCode"] = odata.Error?.Code ?? "unknown";
+            return new SdapProblemException(
+                code: "GRAPH_SEND_FAILED",
+                title: "Email Send Failed",
+                detail: request.UserMode
+                    ? $"Graph API error (OBO): {odata.Error?.Message ?? odata.Message}"
+                    : $"Graph API error: {odata.Error?.Message ?? odata.Message}",
+                statusCode: odata.ResponseStatusCode > 0 ? odata.ResponseStatusCode : 502,
+                extensions: extensions);
+        }
+
+        return new SdapProblemException(
+            code: "GRAPH_SEND_FAILED",
+            title: "Email Send Failed",
+            detail: request.UserMode
+                ? $"Unexpected error (OBO): {ex.Message}"
+                : $"Unexpected error: {ex.Message}",
+            statusCode: 500,
+            extensions: extensions);
+    }
+
+    /// <summary>
+    /// The Graph calls of the reply branch against one mailbox: the signed-in user's (<c>/me</c>, OBO) or a named one
+    /// (<c>/users/{address}</c>, app-only). Kiota gives the two their own request-builder types, so each call is written twice here
+    /// and nowhere else.
+    /// </summary>
+    private abstract class ReplyMailbox
+    {
+        /// <summary>The Graph id of the message a reply is to, or null when it is not in the mailbox.</summary>
+        internal abstract Task<string?> FindMessageIdAsync(string parentReference, CancellationToken ct);
+
+        /// <summary>Creates the reply draft and returns its id. <paramref name="headers"/> go in the <c>message</c> parameter (null: no body).</summary>
+        internal abstract Task<string> CreateReplyAsync(string parentId, List<InternetMessageHeader>? headers, CancellationToken ct);
+
+        internal abstract Task UpdateDraftAsync(string draftId, Message update, CancellationToken ct);
+        internal abstract Task AddAttachmentAsync(string draftId, FileAttachment attachment, CancellationToken ct);
+        internal abstract Task SendDraftAsync(string draftId, NoTransientRetryOption option, CancellationToken ct);
+        internal abstract Task DeleteDraftAsync(string draftId, CancellationToken ct);
+
+        /// <summary>An RFC-2822 Internet-Message-Id is in angle brackets; anything else is read as a Graph message id.</summary>
+        protected static bool IsInternetMessageId(string parentReference) => parentReference.StartsWith('<');
+
+        /// <summary>The <c>$filter</c> for an Internet-Message-Id (the quote is doubled, OData escaping).</summary>
+        protected static string InternetMessageIdFilter(string parentReference) =>
+            $"internetMessageId eq '{parentReference.Replace("'", "''")}'";
+
+        protected static string DraftIdOf(Message? draft) =>
+            string.IsNullOrWhiteSpace(draft?.Id)
+                ? throw new InvalidOperationException("Graph createReply returned no draft id.")
+                : draft.Id;
+
+        /// <summary>The <c>message</c> parameter of createReply: only the marker header, or none (an empty body).</summary>
+        protected static Message? MessageWith(List<InternetMessageHeader>? headers) =>
+            headers is { Count: > 0 } ? new Message { InternetMessageHeaders = headers } : null;
+
+        protected static bool IsNotFound(ODataError ex) => ex.ResponseStatusCode == 404;
+    }
+
+    private sealed class MeReplyMailbox(GraphServiceClient client) : ReplyMailbox
+    {
+        internal override async Task<string?> FindMessageIdAsync(string parentReference, CancellationToken ct)
+        {
+            if (IsInternetMessageId(parentReference))
+            {
+                var page = await client.Me.Messages.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = InternetMessageIdFilter(parentReference);
+                    rc.QueryParameters.Select = new[] { "id" };
+                    rc.QueryParameters.Top = 1;
+                }, ct);
+                return page?.Value?.FirstOrDefault()?.Id;
+            }
+
+            try
+            {
+                return (await client.Me.Messages[parentReference].GetAsync(rc => rc.QueryParameters.Select = new[] { "id" }, ct))?.Id;
+            }
+            catch (ODataError ex) when (IsNotFound(ex))
+            {
+                return null;
+            }
+        }
+
+        internal override async Task<string> CreateReplyAsync(string parentId, List<InternetMessageHeader>? headers, CancellationToken ct)
+        {
+            var body = new Microsoft.Graph.Me.Messages.Item.CreateReply.CreateReplyPostRequestBody { Message = MessageWith(headers) };
+            return DraftIdOf(await client.Me.Messages[parentId].CreateReply.PostAsync(body, cancellationToken: ct));
+        }
+
+        internal override Task UpdateDraftAsync(string draftId, Message update, CancellationToken ct) =>
+            client.Me.Messages[draftId].PatchAsync(update, cancellationToken: ct);
+
+        internal override Task AddAttachmentAsync(string draftId, FileAttachment attachment, CancellationToken ct) =>
+            client.Me.Messages[draftId].Attachments.PostAsync(attachment, cancellationToken: ct);
+
+        internal override Task SendDraftAsync(string draftId, NoTransientRetryOption option, CancellationToken ct) =>
+            client.Me.Messages[draftId].Send.PostAsync(rc => rc.Options.Add(option), ct);
+
+        internal override Task DeleteDraftAsync(string draftId, CancellationToken ct) =>
+            client.Me.Messages[draftId].DeleteAsync(cancellationToken: ct);
+    }
+
+    private sealed class UserReplyMailbox(GraphServiceClient client, string address) : ReplyMailbox
+    {
+        internal override async Task<string?> FindMessageIdAsync(string parentReference, CancellationToken ct)
+        {
+            if (IsInternetMessageId(parentReference))
+            {
+                var page = await client.Users[address].Messages.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = InternetMessageIdFilter(parentReference);
+                    rc.QueryParameters.Select = new[] { "id" };
+                    rc.QueryParameters.Top = 1;
+                }, ct);
+                return page?.Value?.FirstOrDefault()?.Id;
+            }
+
+            try
+            {
+                return (await client.Users[address].Messages[parentReference].GetAsync(rc => rc.QueryParameters.Select = new[] { "id" }, ct))?.Id;
+            }
+            catch (ODataError ex) when (IsNotFound(ex))
+            {
+                return null;
+            }
+        }
+
+        internal override async Task<string> CreateReplyAsync(string parentId, List<InternetMessageHeader>? headers, CancellationToken ct)
+        {
+            var body = new Microsoft.Graph.Users.Item.Messages.Item.CreateReply.CreateReplyPostRequestBody { Message = MessageWith(headers) };
+            return DraftIdOf(await client.Users[address].Messages[parentId].CreateReply.PostAsync(body, cancellationToken: ct));
+        }
+
+        internal override Task UpdateDraftAsync(string draftId, Message update, CancellationToken ct) =>
+            client.Users[address].Messages[draftId].PatchAsync(update, cancellationToken: ct);
+
+        internal override Task AddAttachmentAsync(string draftId, FileAttachment attachment, CancellationToken ct) =>
+            client.Users[address].Messages[draftId].Attachments.PostAsync(attachment, cancellationToken: ct);
+
+        internal override Task SendDraftAsync(string draftId, NoTransientRetryOption option, CancellationToken ct) =>
+            client.Users[address].Messages[draftId].Send.PostAsync(rc => rc.Options.Add(option), ct);
+
+        internal override Task DeleteDraftAsync(string draftId, CancellationToken ct) =>
+            client.Users[address].Messages[draftId].DeleteAsync(cancellationToken: ct);
+    }
+
+    private static Message BuildGraphMessage(ChannelSendRequest request, bool carryServerSendMarker = true)
     {
         var req = request.Communication;
         var message = new Message
@@ -224,7 +548,7 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
         };
 
         // Ebilling-r1 task 151c-1a: a server-only send carries its signed marker, so the inbound path does not file its attachments again.
-        if (request.ServerSendMarker is { Length: > 0 } marker)
+        if (carryServerSendMarker && request.ServerSendMarker is { Length: > 0 } marker)
         {
             message.InternetMessageHeaders =
             [
