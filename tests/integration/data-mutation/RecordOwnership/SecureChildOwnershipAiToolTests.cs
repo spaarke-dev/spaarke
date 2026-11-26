@@ -1043,7 +1043,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
                 // Field mapping task 031: the typed event route's analysis regarding and event type (live navigation properties:
-                // Spaarke.Dataverse.Models GetEventNavigationProperty, DataverseWebApiService.BuildCreateEventPayload).
+                // Spaarke.Dataverse.Models GetEventNavigationProperty).
                 ("sprk_regardinganalysis", "sprk_analysis", "sprk_RegardingAnalysis"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),

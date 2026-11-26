@@ -11,6 +11,7 @@ using FluentAssertions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
 using Xunit;
+using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 using ApiEventStatusCode = Spaarke.Dataverse.EventStatusCode;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
@@ -20,13 +21,6 @@ public class EventRegardingPayloadTests
     private static readonly Guid TargetId = Guid.Parse("A1B2C3D4-0000-4000-8000-000000000159");
     private static readonly Guid RecordTypeRef = Guid.Parse("e8547bb4-8600-f111-8407-7c1e520aa4df");
     private static readonly Guid MatterStamp = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
-
-    /// <summary>
-    /// The owner team task 146 resolves upstream; the builder refuses a create without one (sweep integration: these
-    /// shape tests carry it so they exercise the regarding write set, not the owner precondition).
-    /// </summary>
-    private static readonly Guid OwningTeam = Guid.Parse("0f0f0f0f-0159-4159-8159-000000000146");
-
     // ── Live-metadata pins ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The 0-7 API types → (typed lookup, its live navigation property, its live entity set).</summary>
@@ -91,66 +85,75 @@ public class EventRegardingPayloadTests
             "Dataverse refuses a statuscode written with a statecode it does not belong to (Completed is ACTIVE live)");
     }
 
-    // ── Write shape: create ──────────────────────────────────────────────────────────────────────────────────
+    // ── Write shape: create (EventEndpoints.BuildCreatePayload — the payload RecordCreationService receives) ────
 
     [Theory]
     [MemberData(nameof(RegardingTypes))]
-    public void CreatePayload_BindsTheTypedLookupByNavigationPropertyAndLiveSet_AndTheRecordTypeAsALookup(
+    public void CreatePayload_BindsTheTypedLookupByTableAndId_AndTheRecordTypeAsALookup(
         int type, string lookup, string navigation, string entitySet)
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(CreateRequest(type, entitySet, RecordTypeRef));
+        var payload = Create(type, RecordTypeRef);
 
-        payload[$"{navigation}@odata.bind"].Should().Be($"/{entitySet}({TargetId:D})");
-        payload["sprk_RegardingRecordType@odata.bind"].Should().Be($"/sprk_recordtype_refs({RecordTypeRef:D})");
+        payload[lookup].Should().BeEquivalentTo(Lookup(LogicalNameOf(type), TargetId));
+        payload["sprk_regardingrecordtype"].Should().BeEquivalentTo(Lookup("sprk_recordtype_ref", RecordTypeRef));
         payload["sprk_regardingrecordid"].Should().Be(TargetId.ToString("D").ToLowerInvariant());
         payload["sprk_regardingrecordname"].Should().Be("Target");
         payload["sprk_regardingrecordurl"].Should().Be("/main.aspx?pagetype=entityrecord&etn=x&id=y");
-        AssertNoNumericRecordTypeAndNoValueKeys(payload);
-        payload.Keys.Should().NotContain($"{lookup}@odata.bind", "a logical name is not a navigation property");
+        AssertNoNumericRecordTypeAndNoBindOrValueKeys(payload);
+        payload.Keys.Should().NotContain($"{navigation}@odata.bind", "a navigation property is the service's to resolve");
+        payload.Values.OfType<string>().Should().NotContain(v => v.Contains($"/{entitySet}(", StringComparison.Ordinal),
+            "no entity-set path is built by the route");
     }
 
     [Fact]
     public void CreatePayload_NoRecordTypeRow_LeavesTheRecordTypeLookupOut()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(CreateRequest(1, "sprk_matters", recordTypeRef: null));
+        var payload = Create(1, recordTypeRef: null);
 
-        payload.Keys.Should().NotContain(k => k.StartsWith("sprk_RegardingRecordType", StringComparison.OrdinalIgnoreCase));
-        payload["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({TargetId:D})");
+        payload.Keys.Should().NotContain("sprk_regardingrecordtype");
+        payload["sprk_regardingmatter"].Should().BeEquivalentTo(Lookup("sprk_matter", TargetId));
     }
 
     [Fact]
-    public void CreatePayload_AnalysisBindsItsLiveSet_NeverTheLogicalNamePlusS()
+    public void CreatePayload_AnalysisNamesItsLogicalTable_NeverTheLogicalNamePlusS()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(CreateRequest(3, "sprk_analysises", RecordTypeRef));
+        var payload = Create(3, RecordTypeRef);
 
-        payload["sprk_RegardingAnalysis@odata.bind"].Should().Be($"/sprk_analysises({TargetId:D})");
-        payload.Values.OfType<string>().Should().NotContain(v => v.StartsWith("/sprk_analysiss(", StringComparison.Ordinal));
+        payload["sprk_regardinganalysis"].Should().BeEquivalentTo(Lookup("sprk_analysis", TargetId));
+        payload.Values.OfType<Dictionary<string, object?>>()
+            .Should().NotContain(d => d["relatedTable"] as string == "sprk_analysiss" || d["relatedTable"] as string == "sprk_analysises");
     }
 
     [Fact]
-    public void CreatePayload_BindsEachCoreStampByItsNavigationProperty()
+    public void CreatePayload_WritesOnlyTheTargetsOwnTypedLookup_TheCoreStampsAreTheServices()
     {
-        var request = CreateRequest(3, "sprk_analysises", RecordTypeRef);
-        request.RegardingCoreStamps = [("sprk_regardingmatter", "sprk_matters", MatterStamp)];
+        var payload = Create(3, RecordTypeRef);
 
-        var payload = DataverseWebApiService.BuildCreateEventPayload(request);
-
-        payload["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({MatterStamp:D})");
-        payload["sprk_RegardingAnalysis@odata.bind"].Should().Be($"/sprk_analysises({TargetId:D})");
+        payload.Keys.Where(k => k.StartsWith("sprk_regarding", StringComparison.Ordinal) && !k.StartsWith("sprk_regardingrecord", StringComparison.Ordinal))
+            .Should().Equal("sprk_regardinganalysis");
+        payload.Keys.Should().NotContain("sprk_regardingmatter", "the I-1 core stamps are derived by RecordCreationService, not the route");
     }
 
     [Fact]
-    public void CreatePayload_RegardingWithoutItsResolvedEntitySet_IsRefused()
+    public void CreatePayload_AnUnknownRegardingType_IsRefused()
     {
-        var act = () => DataverseWebApiService.BuildCreateEventPayload(CreateRequest(3, entitySet: null, RecordTypeRef));
+        var act = () => Create(99, RecordTypeRef);
 
-        act.Should().Throw<ArgumentException>("the builder never derives a set name — no logical name + \"s\"");
+        act.Should().Throw<InvalidOperationException>("no table is known for the type, and the route never guesses one");
+    }
+
+    [Fact]
+    public void CreatePayload_NoRegarding_WritesNoRegardingColumns()
+    {
+        var payload = EventEndpoints.BuildCreatePayload(new ApiCreateEventRequest("x"), regarding: null, assignedToContactId: null);
+
+        payload.Keys.Should().NotContain(k => k.StartsWith("sprk_regarding", StringComparison.Ordinal));
     }
 
     [Fact]
     public void CreatePayload_DefaultStatusIsTheLiveOpenWithItsStatecode()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(new CreateEventRequest { Name = "x", OwningTeamId = OwningTeam });
+        var payload = EventEndpoints.BuildCreatePayload(new ApiCreateEventRequest("x"), regarding: null, assignedToContactId: null);
 
         payload["statuscode"].Should().Be(659490001);
         payload["statecode"].Should().Be(0);
@@ -266,21 +269,39 @@ public class EventRegardingPayloadTests
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static CreateEventRequest CreateRequest(int type, string? entitySet, Guid? recordTypeRef) => new()
+    private static Dictionary<string, object?> Create(int type, Guid? recordTypeRef) =>
+        EventEndpoints.BuildCreatePayload(
+            new ApiCreateEventRequest("Hearing"),
+            new EventEndpoints.RegardingFields(
+                type, TargetId, recordTypeRef, "Target", "/main.aspx?pagetype=entityrecord&etn=x&id=y", Number: null),
+            assignedToContactId: null);
+
+    /// <summary>The live table each 0-7 regarding type names (pinned here, not read back from the code under test).</summary>
+    private static string LogicalNameOf(int type) => type switch
     {
-        Name = "Hearing",
-        OwningTeamId = OwningTeam,
-        RegardingRecordType = type,
-        RegardingRecordId = TargetId,
-        RegardingRecordName = "Target",
-        RegardingEntitySetName = entitySet,
-        RegardingRecordTypeRefId = recordTypeRef,
-        RegardingRecordUrl = "/main.aspx?pagetype=entityrecord&etn=x&id=y",
+        0 => "sprk_project",
+        1 => "sprk_matter",
+        2 => "sprk_invoice",
+        3 => "sprk_analysis",
+        4 => "account",
+        5 => "contact",
+        6 => "sprk_workassignment",
+        7 => "sprk_budget",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 
-    private static void AssertNoNumericRecordTypeAndNoValueKeys(Dictionary<string, object?> payload)
+    /// <summary>A lookup in the service's Web API payload: the target table and the record, no entity set or bind key.</summary>
+    private static Dictionary<string, object?> Lookup(string relatedTable, Guid recordId) => new()
     {
-        payload.Keys.Should().NotContain("sprk_regardingrecordtype", "the record type is a lookup, never a number");
+        ["relatedTable"] = relatedTable,
+        ["recordId"] = recordId.ToString("D"),
+    };
+
+    private static void AssertNoNumericRecordTypeAndNoBindOrValueKeys(Dictionary<string, object?> payload)
+    {
+        payload["sprk_regardingrecordtype"].Should().BeOfType<Dictionary<string, object?>>("the record type is a lookup, never a number");
+        payload.Keys.Should().NotContain(k => k.EndsWith("@odata.bind", StringComparison.Ordinal),
+            "the service resolves a lookup's navigation property and set itself; the route never names them");
         payload.Keys.Should().NotContain(k => k.StartsWith('_') && k.EndsWith("_value", StringComparison.Ordinal),
             "the Web API does not accept _x_value keys as a write");
     }
