@@ -177,7 +177,7 @@ describe('collapsible card list', () => {
     expect(within(region('Do')).getByTestId('worklist-aggregate-row')).toBeVisible();
 
     // A filter shows "Showing n of m" in the region (and hides the aggregate row); closing the lane hides the line, opening restores it.
-    const card = within(lane('Do')).getByRole('button', { name: /^Coming due/ });
+    const card = within(lane('Do')).getByRole('button', { name: /^Coming due,/ });
     await userEvent.click(card);
     expect(within(region('Do')).getByTestId('lane-showing-Do')).toBeVisible();
     await userEvent.click(toggle('Do'));
