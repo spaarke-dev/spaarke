@@ -125,6 +125,17 @@ param requireSecretFreeIdentity = true
 param copilotAgentClientAppId = '3a36eac4-10c5-4b90-9a83-913138a466af'
 
 // ============================================================================
+// DEMO-ONLY CLIENTS (demo environment plan decision 1)
+// ============================================================================
+
+// "Spaarke Operator Tools (Demo)" (public, interactive browser sign-in only, no secret, assignment required; created
+// 2026-11-26 with owner OK by scripts/provisioning/Register-OperatorToolsClient.ps1). H3 pre-authorizes it ONLY on a
+// customer BFF app whose registry row is Environment Type = Demo and active; never add it to preAuthorizedClientAppIds.
+param demoPreAuthorizedClientAppIds = [
+  'ec3c52c1-3f6f-41ac-b50e-2a251096fdb7'
+]
+
+// ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================
 // Points the Worker sitecontainer at the platform ACR image built by

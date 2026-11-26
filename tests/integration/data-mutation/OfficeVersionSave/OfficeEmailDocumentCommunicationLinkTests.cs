@@ -564,6 +564,10 @@ public class OfficeEmailDocumentCommunicationLinkTests
     [InlineData(ReconciledFilingResult.AlreadyFiled, EmailFilingOutcome.AlreadyFiled)]
     [InlineData(ReconciledFilingResult.NotPermitted, EmailFilingOutcome.NotPermitted)]
     [InlineData(ReconciledFilingResult.Failed, EmailFilingOutcome.Failed)]
+    [InlineData(ReconciledFilingResult.Confirmed, EmailFilingOutcome.AlreadyFiled)]
+    [InlineData(ReconciledFilingResult.ConfirmNotPermitted, EmailFilingOutcome.FiledUnconfirmed)]
+    [InlineData(ReconciledFilingResult.ConfirmFailed, EmailFilingOutcome.FiledUnconfirmed)]
+    [InlineData(ReconciledFilingResult.NotConfirmable, EmailFilingOutcome.FiledUnconfirmed)]
     public void EveryFilingResult_MapsToItsWireOutcome_AndNotApplicableToNone(ReconciledFilingResult result, EmailFilingOutcome? expected) =>
         OfficeService.ToEmailFilingOutcome(result).Should().Be(expected);
 

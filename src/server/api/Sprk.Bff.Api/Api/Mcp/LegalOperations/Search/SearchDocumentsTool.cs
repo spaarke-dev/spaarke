@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
@@ -18,7 +19,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 // PLACEMENT JUSTIFICATION (CLAUDE.md section 10; .claude/constraints/bff-extensions.md; spec "Placement & New Components"). A thin MCP
 // adapter inside the BFF over the document search route's own access decision (SemanticSearchAuthorizationFilter.
 // SearchDocumentsAsCallerAsync, task 027) on the /mcp/legal-operations host: no package, no DI registration (found by [McpArea]), no
-// background work, no AI-internal type (the index is resolved in SearchToolSupport, outside any tool class; ADR-013).
+// background work, no AI-internal type (the filter resolves the index itself; ADR-013, Path C).
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
 //   Existing: POST /api/ai/search (SemanticSearchEndpoints + SemanticSearchAuthorizationFilter, whose decision task 027 made a shared method).
@@ -39,7 +40,8 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 /// <para><b>Scope.</b> Without <c>entityType</c> and <c>entityId</c> the scope is <c>all</c>; with both it is <c>entity</c>: one matter,
 /// project or invoice. Both or neither; the tool does not offer <c>documentIds</c>.</para>
 /// <para><b>No counts.</b> The tool returns no total and no "N more" (D-022-counts): the entity scope's total still counts documents the
-/// caller cannot open inside a readable parent (#1533). <c>hasMore</c> is only "the page was full".</para>
+/// caller cannot open inside a readable parent (#1533). <c>hasMore</c> is "the page came back full" and only inside one record (over every
+/// record <c>offset</c> does not continue a list, so no offset is advised and <c>hasMore</c> is false); false is not the end of the list.</para>
 /// <para><b>Model-visible output (ADR-015, NFR-02).</b> A hit is id, name, file type, document type, the parent record's type and name, an
 /// excerpt of at most 200 characters and an open link; never a storage pointer, a score, an author or a summary beyond the excerpt. Hits
 /// are kept only while the result stays inside <see cref="SearchToolSupport.RowBudgetBytes"/>, so the result is under 64 KiB at 50 hits whatever
@@ -95,7 +97,8 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
                 ["type"] = "integer",
                 ["minimum"] = SearchToolSupport.MinOffset,
                 ["maximum"] = SearchToolSupport.MaxOffset,
-                ["description"] = "Optional. How many documents to skip, to continue a list. Default: 0.",
+                ["description"] = "Optional. How many documents to skip, to continue a list. It continues a list only inside one record "
+                    + "(entityType + entityId); without them each page is a fresh search and a later offset can repeat hits. Default: 0.",
             },
         },
         ["required"] = new JsonArray(SearchToolSupport.QueryArgument),
@@ -114,8 +117,9 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
                 Description =
                     "Use for: finding Spaarke documents by what they say: a topic, clause, party or phrase. It returns the documents the signed-in "
                     + "user may open, best match first, each with its id, name, file type, the matter or project it is filed under, a short "
-                    + "excerpt and a link to open it. Set entityType and entityId to search inside one matter, project or invoice; use offset to "
-                    + "continue a list. Not for: finding a matter, project or invoice itself by name or number (use spaarke_find_records); "
+                    + "excerpt and a link to open it. Set entityType and entityId to search inside one matter, project or invoice; only there does "
+                    + "offset continue a list, and hasMore means the page came back full (false is not the end of the list). "
+                    + "Not for: finding a matter, project or invoice itself by name or number (use spaarke_find_records); "
                     + "listing the documents of a matter (use spaarke_list_documents); opening one document (use spaarke_get_document); "
                     + "summarising or analysing a document.",
                 ReadOnly = true,
@@ -173,8 +177,7 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
         SemanticSearchAccess access;
         try
         {
-            access = await SemanticSearchAuthorizationFilter.SearchDocumentsAsCallerAsync(
-                http, searchRequest, SearchToolSupport.DocumentIndex(http), cancellationToken);
+            access = await SemanticSearchAuthorizationFilter.SearchDocumentsAsCallerAsync(http, searchRequest, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -186,7 +189,7 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
             return DocumentToolSupport.Failure(SearchToolSupport.ErrorOf(access), http);
         }
 
-        return ResultOf(response, limit, offset, DecisionsTextSummary.ConsoleBaseUrl(environmentUrl));
+        return ResultOf(response, limit, offset, DecisionsTextSummary.ConsoleBaseUrl(environmentUrl), offsetContinues: entityType is not null);
     }
 
     /// <summary>Both <c>entityType</c> and <c>entityId</c> (a known type and a GUID in canonical form), or neither.</summary>
@@ -233,8 +236,12 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
         return true;
     }
 
-    /// <summary>The success result for the shared method's authorized response: slim hits, their lines of text, the paging facts. Pure.</summary>
-    internal static CallToolResult ResultOf(SemanticSearchResponse response, int limit, int offset, string? consoleBaseUrl)
+    /// <summary>
+    /// The success result for the shared method's authorized response: slim hits, their lines of text, the paging facts. Pure.
+    /// <paramref name="offsetContinues"/> is true only inside one record (<c>scope=entity</c>): over every record the shared method reads a wider
+    /// window of the index (3 times the limit) from <c>offset</c> than it returns, so "offset + limit" would repeat hits and is never advised.
+    /// </summary>
+    internal static CallToolResult ResultOf(SemanticSearchResponse response, int limit, int offset, string? consoleBaseUrl, bool offsetContinues)
     {
         var hits = response.Results
             .Select(r => new DocumentHit(
@@ -250,23 +257,25 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
 
         var (kept, lines, truncated) = SearchToolSupport.Fit(hits, LineOf);
 
-        // "The page was full": the only paging fact shown. No total and no remainder (D-022-counts, #1533).
-        var hasMore = response.Results.Count >= limit;
+        // The only paging facts: "the page came back full" (hasMore, true only where an offset continues the list) and the offset the text
+        // advises (nextOffset). No total and no remainder (D-022-counts, #1533). hasMore = false is NOT "the end of the list".
         var warnings = response.Metadata.Warnings?.Select(w => w.Code).Distinct(StringComparer.Ordinal).ToList();
         var partial = warnings?.Contains(SearchWarningCode.PartialResults) == true;
 
+        var page = SearchToolSupport.DescribePage(
+            "document",
+            "No documents you can open matched that search.",
+            partial ? " The results may be incomplete." : string.Empty,
+            response.Results.Count, kept.Count, truncated, limit, offset, offsetContinues);
+
         var text = new System.Text.StringBuilder()
-            .Append(kept.Count == 0
-                ? "No documents you can open matched that search."
-                : $"{kept.Count} document(s) matched, best first.")
-            .Append(partial ? " The results may be incomplete." : string.Empty)
-            .Append(truncated ? " The list was cut to fit; narrow the search." : string.Empty)
-            .Append(hasMore ? $" The page was full; send offset {offset + limit} for the next page." : string.Empty)
+            .Append(page.Header)
             .Append('\n')
             .Append(lines)
             .ToString();
 
-        return DecisionToolCall.Success(text, new SearchDocumentsContent(kept, limit, offset, hasMore, truncated, warnings is { Count: > 0 } ? warnings : null));
+        return DecisionToolCall.Success(
+            text, new SearchDocumentsContent(kept, limit, offset, page.HasMore, truncated, page.NextOffset, warnings is { Count: > 0 } ? warnings : null));
     }
 
     private static string LineOf(DocumentHit hit)
@@ -304,9 +313,16 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
         string Id, string Name, string? FileType, string? DocumentType, string? ParentType, string? ParentName, string? Snippet, string? OpenLink);
 
     /// <summary>
-    /// <c>structuredContent</c> of <c>spaarke_search_documents</c>: the hits, the page asked for, whether that page was full, whether hits were
-    /// left out to keep the result inside the size bound, and the index's warning codes (codes only). No total.
+    /// <c>structuredContent</c> of <c>spaarke_search_documents</c>: the hits, the page asked for, whether that page came back full inside one
+    /// record (<c>hasMore</c>: not "the end of the list" when false), whether hits were left out to keep the result inside the size bound, the
+    /// offset the text advises (<c>nextOffset</c>, written as null when it advises none) and the index's warning codes (codes only). No total.
     /// </summary>
     internal sealed record SearchDocumentsContent(
-        IReadOnlyList<DocumentHit> Items, int Limit, int Offset, bool HasMore, bool Truncated, IReadOnlyList<string>? Warnings);
+        IReadOnlyList<DocumentHit> Items,
+        int Limit,
+        int Offset,
+        bool HasMore,
+        bool Truncated,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? NextOffset,
+        IReadOnlyList<string>? Warnings);
 }

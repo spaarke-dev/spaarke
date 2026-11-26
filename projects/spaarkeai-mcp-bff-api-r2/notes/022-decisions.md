@@ -14,7 +14,7 @@ Date: 2026-11-25. Branch: agent worktree (wave 5). Built on task 027 (the shared
 | #3212 fix + two stable codes | `Api/Ai/SemanticSearchEndpoints.cs`, `Models/Ai/SemanticSearch/SearchErrorCodes.cs` |
 | Ledger rows (two) | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Search.cs` |
 | Tool-set pins (both) | `tests/integration/contract/Api/Mcp/McpHostContractTests.cs`, `tests/integration/auth/Mcp/McpCallerPathTests.cs` (Test5 dictionary) |
-| Tests | `tests/integration/contract/Api/Mcp/Search/`, `tests/integration/auth/Mcp/Search/`, `tests/integration/regression/Issue3212_SemanticSearchFailureDetailTests.cs` |
+| Tests | `tests/integration/contract/Api/Mcp/Search/`, `tests/integration/auth/Mcp/Search/`, `tests/integration/regression/Issue3212_SemanticSearchFailureDetailTests.cs`; verifier fixes: `.../contract/Api/Mcp/Search/SearchToolsPagingTests.cs`, `tests/integration/tenant/Ai/SearchToolsTenantPinTests.cs` |
 
 Both tools call ONLY 027's public methods (`SemanticSearchAuthorizationFilter.SearchDocumentsAsCallerAsync`,
 `RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync`). No access check is copied; `SearchAndAuthorizeResultsAsync`,
@@ -28,7 +28,7 @@ caller and query the hit ids and their order are the REST routes' (proved agains
 
 The entity-scope total (`SemanticSearchMetadata.TotalResults`) counts documents the caller may not read (#1533), so neither tool
 exposes `TotalResults`, a count, or anything derived from one. `hasMore` is true when the page came back full
-(`response.Results.Count >= limit`). The hit rows are the whole answer. Test: the stub index reports a total of 4242 and the
+(`response.Results.Count >= limit`) AND an offset continues that list (see "Verifier fixes", F1: never over every record for documents). The hit rows are the whole answer. Test: the stub index reports a total of 4242 and the
 tests assert 4242 never appears in `content` or `structuredContent`, and that `hasMore` follows page fullness. Revisit when #1533
 is fixed.
 
@@ -39,12 +39,32 @@ is fixed.
 whole number: a 400 tool error with the REST code (`INVALID_LIMIT` / `INVALID_OFFSET`), never a silent clamp. This is the REST
 behaviour, so parity holds. The argument set is closed: an unknown name is `mcp.invalid_argument`.
 
-### D-022-delegates — the index delegates live in `SearchToolSupport`
+### D-022-delegates — Path C (comply): the filters resolve the index; `Api/Mcp/**` names no AI-internal type
 
-The MCP-tool ArchTest forbids `Services/Ai/**` type tokens in a tool class (ADR-013). The two index delegates need
-`ISemanticSearchService` / `IRecordSearchService`, so `SearchToolSupport.DocumentIndex(HttpContext?)` and `RecordIndex(...)` resolve
-them lazily from `http.RequestServices` and return the `Func<...>` the shared methods take. The tool classes name no AI type.
-The caller check runs first, so nothing is resolved without a signed-in caller.
+*Replaces the first version of this decision (the delegates lived in `SearchToolSupport`), which the verifier found to be a hole in
+ADR-013 (finding F2): `SearchToolSupport` is a plain helper class, so the MCP-tool ArchTest, which read only `[McpArea]` classes, never
+saw its `using Sprk.Bff.Api.Services.Ai.SemanticSearch` / `...RecordSearch`, and the rule it was moved there to satisfy was satisfied by
+moving the violation out of the checked file.*
+
+ADR-013 conflict resolved by CLAUDE.md §6.5 **Path C**: a compliant approach meets the need as well. The two 027 filters,
+`SemanticSearchAuthorizationFilter` and `RecordSearchAuthorizationFilter`, are API-layer code beside the REST endpoints
+(`SemanticSearchEndpoints`, `RecordSearchEndpoints`) that already resolve `ISemanticSearchService` / `IRecordSearchService`. They gain
+two overloads: `SearchDocumentsAsCallerAsync(HttpContext?, SemanticSearchRequest?, CancellationToken)` and
+`SearchRecordsAsCallerAsync(HttpContext?, RecordSearchRequest?, CancellationToken)`. Each calls the existing delegate-taking method with a
+delegate that resolves the service from `httpContext.RequestServices`. The shared method calls that delegate once, only after the request
+phase allows the search, so a null context, a principal without an authenticated identity and every refusal resolve nothing
+(ADR-028 A10: `UserContextRequired`, no service touched). The delegate-taking methods, the REST adapters and every REST byte are unchanged
+(`SearchRefusalGoldenBytesContractTests` stays green). The tools call the overloads; `SearchToolSupport.DocumentIndex` / `RecordIndex`
+are deleted, and no file under `Api/Mcp/**` has a `Services.Ai` using other than `Services.Ai.PublicContracts`.
+
+The rule that would have caught it is widened (`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs`): a text scan of EVERY `.cs`
+file under `Api/Mcp/**` for the `Sprk.Bff.Api.Services.Ai` namespace other than `PublicContracts` (using, `global using`, `using static`,
+alias, relative `using Services.Ai...`, inline qualified name), and a reflection scan of every top-level type in `Sprk.Bff.Api.Api.Mcp.**`
+that is not a tool. Must-fire and must-not-fire controls are in the same file. Baseline: none; the wider scan found no existing hit in r1's
+decision files (the only hits were `SearchToolSupport`'s two usings). Limit, stated: the reflection scan reads member signatures, not
+method bodies, so a `GetRequiredService<ISemanticSearchService>()` call inside a helper is seen by the text scan (the using or the qualified
+name) and not by reflection. Proven: with the old delegates put back in `SearchToolSupport`, the real-tree test fails (text), and passes
+again with the file as committed.
 
 ### D-022-faults — fixed text, stable code, never `ex.Message`
 
@@ -130,10 +150,35 @@ no new DI registration beyond the two `McpToolDefinition` classes the module sca
 ## Inline code-review and adr-check
 
 ADR-001/004 (one Minimal API host, no background work), ADR-008 (the shared methods own the access decision), ADR-013 (no
-`Services/Ai/**` type in a tool class; the delegates are in the support class), ADR-015 (slim rows, no counts, nothing about the
+`Services/Ai/**` type anywhere under `Api/Mcp/**`; the filters resolve the index: Path C, D-022-delegates), ADR-015 (slim rows, no counts, nothing about the
 caller in logs), ADR-019 (fixed text plus stable code; #3212 fixed), ADR-028 A10 (no caller means `UserContextRequired`, no
 app-only fallback; the caller check precedes any resolution), ADR-029 (placement, publish delta above), ADR-038 (every test on a
 KEEP path: contract, auth, regression; no mocked `HttpMessageHandler`; substitution only at module boundaries). Findings: none open.
+
+## Verifier fixes (two review passes, 2026-11-26)
+
+| # | Finding | Fix | Test (fails before, passes after) |
+|---|---|---|---|
+| 1 | F2 ADR-013: `SearchToolSupport` (a helper, not a tool) used `Services.Ai` types the tool rule never read | Path C (see D-022-delegates): two overloads on the 027 filters resolve the index after the request phase; `DocumentIndex` / `RecordIndex` deleted; no `Services.Ai` using under `Api/Mcp/**` but `PublicContracts`. ArchTest widened: text scan of every `Api/Mcp/**` file (using, `global using`, `using static`, alias, relative, inline) and a reflection scan of every helper type. Baseline: none | `RouteAuthorizationGuardTests.Mcp.cs`: must-fire (a helper class's using, every form), must-not-fire (PublicContracts, comments, strings, look-alikes, files outside `Api/Mcp`), reflection controls, real-tree test. Proven: with the old delegate put back in `SearchToolSupport` the real-tree test fails; passes with the file as committed. `SearchAuthorizationPhaseCallerGuardTests` needed no change (the overloads name no phase method). REST bytes unchanged (`SearchRefusalGoldenBytesContractTests` green) |
+| 2 | F1: over every record (no `entityType`/`entityId`) the shared method reads 3 times the limit from `offset`, so "send offset {offset+limit}" repeats hits | On that scope no offset is ever advised and `hasMore` is false; a full page says "For more, search inside one matter, project or invoice (entityType + entityId)."; the offset description and the tool description say `offset` continues a list only inside one record. The test host's index stubs honour `Offset` and `Limit` | `SearchToolsPagingTests`: full page advises nothing; page two on that scope is shown to start inside page one (hits `A3` repeat) |
+| 3 | F1: "N matched" overstated; a short page read as the end | Text: "Showing N document(s)/record(s), best match first."; a short non-empty page adds "There may be more than this."; `hasMore` is "the page came back full" (tool descriptions say so; false is not the end of the list) | `SearchToolsPagingTests` (wording, hedge, full page in one record and for records) |
+| 4 | F1: a page past the end gave the "no match" text | `offset > 0` and no rows: "No more documents after the first {offset}." / "No more records after the first {offset}."; offset 0 keeps "No documents you can open matched that search." / "No records ...". | `SearchToolsPagingTests` (both tools, both cases) |
+| 5 | F1: after a size cut the advice was `offset + limit`, skipping the cut hits | Advice is `offset + kept` ("Send offset N for the next page."); `structuredContent.nextOffset` (always written, null when no continuation is advised); over every record a cut page advises nothing | `SearchToolsPagingTests` with the maximum-size fixtures (documents, records, documents over every record) |
+| 6 | F4: a missing, non-text or blank query answered `mcp.invalid_argument` | `QUERY_REQUIRED` / `QUERY_TOO_LONG`, the REST codes (400) | `SearchToolsContractTests` bad-argument theories (both tools) |
+| 7 | F4: nothing pinned the tenant the tools search | The document stub records the `tenantId` it receives, the record stub the `tid` of the request it runs in (the production record service derives its filter from it) | `tests/integration/tenant/Ai/SearchToolsTenantPinTests.cs` (4): both tools pass the token's `tid`; the document tool passes whichever `tid` the caller carries; no `tid`, no search. Seed-break: hard-coding another tenant in the filter overload's delegate failed the two document tests; restored. The record test is a pin: the record index takes no tenant argument, so no delegate-path seed exists for it |
+
+Counts: the focused run (`SearchTools|McpHostContract|McpCallerPath|Issue3212|Tenant`, 823 tests) is green; before the fixes, with the old three tool files put back (a one-constant shim for the new test helper), the new and changed tests failed 20 of 71 (all 11 paging tests, 8 query-code cases, the slim-row shape) and the tenant pin passed, as a pin does.
+
+### Known limits left
+
+- **PARTIAL_RESULTS is one bit.** The index's warning says the page may be incomplete (candidate pool, check budget); the tool relays the code and one sentence, not which cause or how much.
+- **A forged link inside one line.** `McpText.SingleLine` makes every user-authored value one line, but a title can still carry text that reads as a link ("Open: https://...") inside its own row; the real `openLink` is only ever built from the environment URL, table and GUID.
+- **`SdapProblemException` becomes a 500.** Any exception from the shared method or the index (an `SdapProblemException` included) is `SEMANTIC_SEARCH_FAILED` / `RECORD_SEARCH_FAILED` with fixed text; a 4xx the index could have explained is not told to the model.
+- **No `appid` in the links.** The open link is the Dataverse record form (`main.aspx?pagetype=entityrecord`) without an app id, so it opens in the user's default app.
+
+### Note for task 035 (the search results widget)
+
+`hasMore = false` is **not** "end of list". It is false for a short page (rows are authorized after the index ranks them, so a short page can hide more: the text says "There may be more than this"), and it is always false for a document search over every record, where no offset continues a list. Read `nextOffset` for "send this offset next" (null means none is advised), and show a "more" control only when it is non-null.
 
 ## Process note
 

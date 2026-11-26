@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -419,6 +420,26 @@ public sealed class SemanticSearchAuthorizationFilter : IEndpointFilter
             (ILogger?)logger ?? NullLogger.Instance,
             cancellationToken);
     }
+
+    /// <summary>
+    /// <see cref="SearchDocumentsAsCallerAsync(HttpContext?, SemanticSearchRequest?, Func{SemanticSearchRequest, string, CancellationToken, Task{SemanticSearchResponse}}, CancellationToken)"/>
+    /// over the document index (<see cref="ISemanticSearchService"/>) the REST route's own handler uses, for a host that is not that
+    /// route (the MCP document search tool, spaarkeai-mcp-bff-api-r2 task 022). This filter is API-layer code beside the REST
+    /// endpoint that already resolves the service, so the MCP tool names no AI-internal type (ADR-013, Path C).
+    /// <para>The service is resolved from <c>httpContext.RequestServices</c> only inside the search delegate, which the shared
+    /// method calls once and only after the request phase allows the search: a null context, no authenticated identity or any
+    /// refusal resolves nothing.</para>
+    /// </summary>
+    public static Task<SemanticSearchAccess> SearchDocumentsAsCallerAsync(
+        HttpContext? httpContext,
+        SemanticSearchRequest? request,
+        CancellationToken cancellationToken) =>
+        SearchDocumentsAsCallerAsync(
+            httpContext,
+            request,
+            (narrowed, tenantId, ct) =>
+                httpContext!.RequestServices.GetRequiredService<ISemanticSearchService>().SearchAsync(narrowed, tenantId, ct), // Allowed implies a non-null context.
+            cancellationToken);
 
     /// <summary>
     /// The request-level decision — the ONE implementation, behind both this filter and
