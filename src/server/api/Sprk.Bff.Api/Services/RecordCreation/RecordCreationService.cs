@@ -530,6 +530,9 @@ internal sealed partial class RecordCreationService
         // Task 022 fix round 3: the columns step 3 mapped, as step 3 left them. A copied default whose source is one of these
         // is a value from the mapping source, whatever step 5 later keeps of its source.
         IReadOnlySet<string> stepThreeMappedColumns = NoDefaultColumns;
+
+        // Task 064: the mapped values came from the record the caller's row is filed under (step 5 may copy an ordinary one).
+        var mappedFromFilingParent = false;
         if (rule.MappingExclusion is { } exclusion)
         {
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Skipped, $"not mapped ({exclusion.Name})");
@@ -567,6 +570,7 @@ internal sealed partial class RecordCreationService
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
             stepThreeMappedColumns = mapped.Values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            mappedFromFilingParent = mapped.Values.Count > 0 && mapped.FromFilingParent;
             // A mapped value with no gate read is checked as "not told" (fail closed), never skipped. Task 022b (review K2): its
             // source is unknown, never taken to be the target table.
             mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(null, null) : null;
@@ -745,7 +749,7 @@ internal sealed partial class RecordCreationService
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
                     table, checking, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
-                    mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
+                    mappingWarnings, ct, defaultColumns, mappedFromFilingParent).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
 
