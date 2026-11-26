@@ -524,3 +524,15 @@ Terms:
 5. 042 closes on its own timeline.
 
 Status: **AGREED by mcp-r2 (2026-11-25), terms 1-5 as written.** r2 Phase 1 edits none of the ISS-010 files: task 031 only calls `RecordCreationService.CreateAsync`, and task 030 only reads `CallerRecordAccessProbe`. r2 is confirming the release with its starting session (its brief said "Phase 1 waits for 042"). It was sent the owner's words verbatim. **r2 Phase 1 STARTED 2026-11-25** (its D-r1-gate committed, master merged, build 0/0; wave 4 = 020 tool plumbing + ledger split, 021 widget transport). r2 tells us before any PR touching spaarke-decisions opens and when it merges.
+
+## 2026-11-25 — Owner: where a SharePoint filing failure is reported (ISS-010 part E)
+Owner: "For SharePoint fail it should be reported where the user can address it - whichever step that is most useful."
+
+**Resolution.** The archive leaves the request and becomes a queued, idempotent job, retried automatically (one Document per communication). On FINAL failure, the job sends the decider a bell that links to the `sprk_communication` record.
+
+**Why there.** That record is where the user can fix it: its form carries the CommunicationActions PCF "Save to SharePoint" action, which posts to `POST /api/communications/{id}/archive` (`CommunicationEndpoints.cs:346`) and calls `CommunicationService.ArchiveExistingAsync`, the idempotent on-demand archive. A warning in the commit response is less useful: the wizard has no retry for the archive, and the warning is gone once the wizard closes.
+
+**What changes**
+- This replaces D-216's in-response "sent, but .eml not archived" warning for the budget inquiry, and likewise for the Assign Task email.
+- One bell per communication, not one per retry.
+- D-217's Messages entry appears after a short lag; the PR says so.
