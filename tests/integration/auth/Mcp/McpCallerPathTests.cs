@@ -294,7 +294,7 @@ public sealed class McpCallerPathTests
 
         // The production assembly scan over the production DI: a caller-path parameter (IHttpContextAccessor, IDecisionCapability, ...)
         // that the real host did not register would be published as a tool ARGUMENT, so the caller path would not be the request's.
-        // This only holds for tools whose input schema the SDK INFERS from the handler's parameters (the three below); the two other
+        // This only holds for tools whose input schema the SDK INFERS from the handler's parameters (the three below); the other
         // legal-operations tools state a static schema (see the pin test next to this one), which says nothing about DI binding.
         var arguments = RealHostToolArguments(factory);
 
@@ -320,6 +320,8 @@ public sealed class McpCallerPathTests
         {
             ["spaarke_show_decisions"] = ["category"],
             ["spaarke_list_decision_page"] = ["cursor"],
+            // spaarkeai-mcp-bff-api-r2 task 024 (static schema: the two optional list arguments).
+            ["spaarke_list_playbooks"] = ["nameFilter", "page"],
         }, options => options.WithStrictOrdering());
     }
 
