@@ -1,16 +1,16 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (checkpoint: Phase 1 code complete; Phase 2 Wave 7 launching)
-> **Phase**: Phase 0 and Phase 1 code complete (owner-gated items below). Phase 2 Wave 7: 030, 031, 034 launching; 033 and 036 blocked on owner decisions.
+> **Last Updated**: 2026-11-26 (checkpoint at 85% context: Wave 7 merged; 031 and 034 waiting only on a merged-tree full ArchTests + publish delta)
+> **Phase**: Phase 0 and Phase 1 code complete. Phase 2 Wave 7: 031 and 034 merged with verifier fixes; 030 stopped (owner Q14); 033 and 036 blocked on owner decisions.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 Wave 7. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **Running now** | Wave 7 implementers: 031 (analysis tools), 034 (briefing tool and widget). 030 stopped before code: owner question 14 (run-detach). |
-| **Next** | On each completion: merge, run two reviews, fix, re-check, mark done. Then Wave 8: 032 (after 030; its dev data needs the 012 go, code does not) and 035 (after 034). 033 waits on the 008 owner decision; 036 waits on the #3181 owner choice. Deploys (019, 029, 039) wait on owner gates. Then devops-project-sync and the shared notes status file. |
-| **Uncommitted** | None. HEAD 71f7c02e46 is pushed. |
-| **Branch state** | Master merged at 3b5c87fbe1 + agent-worktree master pickups (#3203, #3204, InvoiceReview/Office PRs). Build clean; full ArchTests 2858; Search/Mcp/Tenant/Regression unit tests 2593 passed. |
+| **State** | 031 (analysis tools) and 034 (briefing tool and widget) are merged with both review passes' fixes. Merges: 034 3a93364b9d, fixes 6895d4525b; 031 ef89428a89, fixes 6a566dafcd. Scoped re-checks done. CAPABILITY-INDEX rows 45–48 are applied. Issues filed: #3226–#3233. |
+| **Next (exact)** | (1) Stop background job b9ons80af (it stalled: `C:\tmp\pubh` was never created). Remove `C:\tmp\pubm` with `scripts/worktree/Remove-WorktreeSafe.ps1`. (2) On HEAD, run the full ArchTests and the `Mcp|Analysis|Briefing` unit tests (background). (3) Measure the publish delta properly: build the widgets on both sides, then `dotnet publish` master vs HEAD. Compress with PowerShell from a .ps1 file, not inline bash quoting. (4) If all green, mark 031 and 034 ✅ in TASK-INDEX and the POMLs (drift check), commit, push. (5) Shared notes status file + devops-project-sync (Tasks Completed). (6) Wave 8: 035 (search results widget; deps 021, 022, 034) is unblocked. 032 waits on 030 (Q14). |
+| **Uncommitted** | None. HEAD 705887229f. Not pushed since 75ffafceaf. |
+| **Branch state** | Agent worktrees brought in newer master PRs. The agent gates were green: 031 branch full ArchTests 2859; 034 fixes, filtered ArchTests 117, widget jest 130. The merged tree has not had a full ArchTests run yet. |
 
 ## Status (TASK-INDEX is authoritative)
 - ✅ **Phase 0:** 001, 002, 003, 004, 006, 007, 009, 010, 011.
@@ -19,7 +19,9 @@
   - 005: code and widened script merged; the dev schema go is not given;
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
-- 🔲 **Blocked on owner:** 033 (008), 036 (#3181).
+- 🔄 **Phase 2 merged, final gates pending:** 031, 034.
+- 🛑 **030:** stopped before code (owner Q14). 032 waits on it.
+- 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 035 is ready (Wave 8).
 
 ## Open owner questions
 1. **005:** the go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev. Also the earlier §4 acceptance-criterion-3 question in notes/005-schema.md.
