@@ -43,7 +43,7 @@ Owner decides: (a) `closedToday` per category on `spaarke_show_decisions` (Servi
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Handed off → spaarkeai-mcp-bff-api-r2 (accepted 2026-11-26; their task 001 commit `8a92da8751` removes it all; closes with their merge PR) |
 | **Urgency** | someday |
 | **Filed** | 2026-11-05 |
 | **Source** | design.md §3 and §8 B-9 (BFF component-model review, 2026-11-05); owner approved filing (Q-11) |
