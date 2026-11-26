@@ -171,3 +171,12 @@ Moved SDK calls (code-mapper estimates): archive 13-16, thread 8-11, enrichment 
   - create-task and assessment-event (~268) are NOT verified. Add an existing-row lookup by communication id if either can create a second row; don't trust the cache marker.
 - **Q1, Q5:** ours and ontology's.
 - **#3193 fix:** field-mapping will check that CallerMetadataReadMemo stays per caller AND per request.
+
+## Owner and ontology decisions (2026-11-26)
+- **Q0: Path A approved by the owner** ("A2- yes accept"). Recorded in spec.md ADR Tensions.
+- **Q1: yes** (ontology-r1). send-email and send-reminder also take `DeferPostSend`, on three conditions:
+  - (a) the send and the `sprk_communication` create with its correlation id stay inline;
+  - (b) they use the same idempotent job, keyed the same way;
+  - (c) the response may say "sent", never "archived", before the job runs.
+- **Q5: one bell per communication** (ontology-r1, matching D-216 as amended, d7300b6e72). The bell goes to the decider or sender (Assigned To Internal, D-129, never the owning team) and links to that `sprk_communication` form ("Save to SharePoint" → `ArchiveExistingAsync`). Retries never add a second bell, because the bell is keyed on the communication.
+- **Review order:** field-mapping-r1 first (the CommunicationService hunks), then ontology-r1.
