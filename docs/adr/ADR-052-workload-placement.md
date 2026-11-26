@@ -68,8 +68,9 @@ so every read is still limited to what the user may see. Every one of these cond
      refused with a clear reason. This limits how much exposure one user or one stolen token can build up.
 6. **Authorized first.** The run's authorization completes inside the original request, before the run starts
    (ADR-028). The run acts only on the inputs that were authorized.
-7. **Visible.** The run's state is recorded on the run record, which the user can read. A run lost to a restart reads
-   as interrupted, not as running.
+7. **Visible.** The run's state is recorded on the run record, which the user can read. A run ended by the cap or by a
+   graceful shutdown is recorded as cancelled at once. A run lost to a crash, which leaves no final write, reads as
+   interrupted once the cap plus a margin has passed (about 60 minutes after it started); until then it reads as running.
 
 **Known limits (accepted):**
 - **Access is checked once, at start.** Access changes made during the run don't stop it: a removed share, a new No
