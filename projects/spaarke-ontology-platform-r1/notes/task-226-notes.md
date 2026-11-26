@@ -82,8 +82,10 @@ gave **2 failed, 16 passed**: the reviewed-twice test and the gate-row test.
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
 - IntegrationTests `--filter FullyQualifiedName~Signals`: 216 passed, 2 skipped (live), 0 failed. This includes 15 new regression
   tests and 1 new contract baseline; the other 10 contract baselines are unchanged.
-- Unit tests `Sprk.Bff.Api.Tests --filter FullyQualifiedName~Signals`: 5551 passed, 6 skipped, 0 failed.
-- ArchTests (full): see the PR body.
+- Unit tests `Sprk.Bff.Api.Tests --filter FullyQualifiedName~Signals`: 5554 passed, 6 skipped, 0 failed (after the rebase on c438119bca; IntegrationTests unchanged at 216).
+- ArchTests (full): 2845 passed, 0 failed.
+- Publish size (`dotnet publish -c Release`, fresh `origin/master` c438119bca via `git archive` vs this branch rebased on it, same Python zip):
+  194 vs 194 files; raw +34,180 bytes; zip 40.64 MB -> 40.66 MB (+18,699 bytes). No package change.
 - Jest (`Spaarke.UI.Components`, DecisionRecords and Worklist): 15 suites, 322 tests passed.
 - `tsc --noEmit` on the package: 9 errors, all pre-existing and none in changed files (`@spaarke/auth` not built, and `err` unknown
   in 3 unrelated files). eslint on the changed files: clean. `client-lint check --package ui-components`: ok.
