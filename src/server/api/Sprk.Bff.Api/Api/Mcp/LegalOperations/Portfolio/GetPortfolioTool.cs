@@ -59,7 +59,7 @@ internal sealed class GetPortfolioTool : McpToolDefinition
     public const string Description =
         "Use for: a summary of the signed-in user's matter portfolio in Spaarke: total spend, total budget, budget utilization percent, "
         + "how many active matters there are, how many are at risk (an overdue open task, or spend above 85 percent of budget) and how many "
-        + "tasks are overdue across them. Covers only the matters the user can open. Takes no arguments. "
+        + "tasks are overdue across them. Covers the matters the user created, owns or is assigned to (of those, only the ones they can open), not every matter they can open. Takes no arguments. "
         + "Not for: the details of one matter, its invoices or its budget lines; listing or searching matters; the Decide lane (use "
         + "spaarke_show_decisions); changing anything.";
 

@@ -110,13 +110,13 @@
 
 ### D-026-1: PortfolioService caches an EMPTY portfolio for 5 minutes when the Dataverse read fails or the caller cannot be resolved (pre-existing, found in passing)
 
-- **GitHub issue**: not filed yet (task 026 sub-agent records only; the main session files it with `/project-defer-issue-tracking`).
+- **GitHub issue**: #3205
 - **Title**: `PortfolioService: a failed matter read is aggregated as zero matters and cached for 5 minutes (REST /api/workspace/portfolio and spaarke_get_portfolio)`
 - **Body**:
   `Services/Workspace/PortfolioService.cs` `QueryMattersFromDataverseAsync` answers `Array.Empty<MatterRecord>()` when the oid does not resolve to a systemuser or when `ReadMattersForSystemUserAsync` reports `Unavailable` (a failed people-targeting read, an over-ceiling set, or any failed caller-context chunk). `GetPortfolioSummaryAsync` then aggregates that into an all-zero `PortfolioSummaryResponse` and writes it to the `workspace:{userId}:portfolio` cache entry for 5 minutes (also reused by `GetHealthMetricsAsync` and the briefing). Failure scenario: Dataverse throttles one chunk for a user with 200 matters; the Console portfolio card shows 0 active matters, 0 spend, 0 at risk for 5 minutes, and through the new MCP tool (FR-08) Copilot tells the user "you have no active matters" with no error. Not a safe empty state: it is a wrong answer presented as fact. Fix options: return an unavailable result (REST 503 / tool isError `workspace.portfolio.unavailable`) and do not cache it; or cache only a successful read. Not fixed in 026: the file is outside its scope and REST parity (FR-08 acceptance) means the tool must not diverge from REST; the fix changes both hosts together. The "graceful empty state" is documented in the service as a pre-existing endpoint constraint (task 152), so the owner should decide whether the REST contract may change.
 - **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
 
-### D-026-2: two real-host tests pin the exact tool set and fail for any new tool (follow-up for the main session, not a defect)
+### D-026-2: two real-host tests pin the exact tool set and fail for any new tool (follow-up for the main session, not a defect) — DONE in merge 25212daaf3 (both pins updated)
 
 - `tests/integration/contract/Api/Mcp/McpHostContractTests.cs` `RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyTheFiveV1Tools` (the names list and `HaveCount(5)`) and `tests/integration/auth/Mcp/McpCallerPathTests.cs` `Test5_TheRealBffHost_TheTwoStaticSchemaTools_PublishExactlyTheirPinnedArguments_ASchemaPinNotAnInjectionProof` (the static-schema dictionary; `spaarke_get_portfolio` is a static-schema tool with no arguments: add `["spaarke_get_portfolio"] = []`, or add it to `InferredSchemaTools`) fail as soon as the first r2 tool lands. Tasks 023/024/026/027 run in parallel, so none edits them; update once after the wave merges.
 
@@ -124,7 +124,7 @@
 
 ### D-023-1: GetDocumentsByLookupAsync returns at most 50 rows with no ordering, so the matter document list can silently miss documents
 
-- **GitHub issue**: not filed by the wave agent (wave rule); the main session files it.
+- **GitHub issue**: #3206
 - **Title**: `IDocumentDataverseService.GetDocumentsByMatterAsync: TopCount 50 and no OrderBy; matters with more documents are cut arbitrarily`
 - **Body**:
   `DataverseServiceClientImpl.GetDocumentsByLookupAsync` (the query behind `GetDocumentsByMatterAsync` / `GetDocumentsByProjectAsync`) sets
@@ -137,7 +137,7 @@
 
 ### D-023-2: GET /api/v1/documents?containerId= has no caller and carries a known type-bug (found in passing)
 
-- **GitHub issue**: not filed by the wave agent (wave rule); the main session files it.
+- **GitHub issue**: #3207
 - **Title**: `DataverseDocumentsEndpoints.ListDocumentsAsync: a route with zero callers, kept behind two authorization gates`
 - **Body**:
   The container-keyed list route (`DataverseDocumentsEndpoints.ListDocumentsAsync`) has no caller in the repository (searched src/ and

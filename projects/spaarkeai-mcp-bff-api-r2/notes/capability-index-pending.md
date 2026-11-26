@@ -31,7 +31,7 @@ copies it into the index (next free `#`) and marks it applied.
 2. Workflow step 4, replace with: `4. **Add the ledger entry** in your area's partial, `RouteAuthorizationGuardTests.Mcp.{Area}.cs` (`McpTools{Area}`: policy, caller seam, reason), never in `RouteAuthorizationGuardTests.Mcp.cs` (it concatenates the partials). The ArchTest fails on any tagged tool missing from every partial or listed twice.`
 3. Workflow step 3, append: `Errors: `McpToolResults.FromError(new McpToolError(reasonCode, message, status, partial?), http?.TraceIdentifier)` with the REST route's `reasonCode`. Work that can take over 30 s (`McpLongRunning.Budget`): return `McpLongRunning.Started(...)` and add a status tool that returns `McpLongRunning.Status(...)` (FR-14).`
 
-## Task 023 - MCP document tools (status: pending main-session edit)
+## Task 023 - MCP document tools (status: applied as row 40)
 
 ### CAPABILITY-INDEX row
 
