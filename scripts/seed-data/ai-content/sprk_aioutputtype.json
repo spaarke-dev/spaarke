@@ -5,7 +5,10 @@
   "nameColumn": "sprk_name",
   "match": "naturalKey",
   "matchKeys": [["sprk_name"]],
-  "columns": ["sprk_name", "sprk_outputtypecode"],
+  "columns": [
+    "sprk_name",
+    "sprk_outputtypecode"
+  ],
   "lookups": [],
   "rows": [
     {

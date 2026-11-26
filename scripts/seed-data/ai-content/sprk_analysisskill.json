@@ -15,7 +15,9 @@
     "sprk_skillid",
     "sprk_tags"
   ],
-  "lookups": [{ "column": "sprk_skilltypeid", "navigationProperty": "sprk_SkillTypeId", "target": "sprk_aiskilltype" }],
+  "lookups": [
+    { "column": "sprk_skilltypeid", "navigationProperty": "sprk_SkillTypeId", "target": "sprk_aiskilltype" }
+  ],
   "rows": [
     {
       "sprk_analysisskillid": "052ce5ab-70d9-f011-8406-7ced8d1dc988",

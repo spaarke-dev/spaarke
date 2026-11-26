@@ -5,7 +5,9 @@
   "nameColumn": "sprk_name",
   "match": "naturalKey",
   "matchKeys": [["sprk_name"]],
-  "columns": ["sprk_name"],
+  "columns": [
+    "sprk_name"
+  ],
   "lookups": [],
   "rows": [
     {

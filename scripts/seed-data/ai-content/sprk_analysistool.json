@@ -23,7 +23,9 @@
     "sprk_toolcode",
     "sprk_toolid"
   ],
-  "lookups": [{ "column": "sprk_tooltypeid", "navigationProperty": "sprk_ToolTypeId", "target": "sprk_aitooltype" }],
+  "lookups": [
+    { "column": "sprk_tooltypeid", "navigationProperty": "sprk_ToolTypeId", "target": "sprk_aitooltype" }
+  ],
   "rows": [
     {
       "sprk_analysistoolid": "0250f350-4863-f111-ab0c-000d3a4d8152",
