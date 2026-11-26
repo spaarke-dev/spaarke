@@ -27,6 +27,18 @@ public enum ReconciledFilingResult
 
     /// <summary>The filing could not be completed (a read, the owner decision or the write failed); left as it was.</summary>
     Failed,
+
+    /// <summary>Task 140: the communication was already filed with the save's record as its primary regarding, not yet
+    /// confirmed; the save confirmed it (<c>sprk_associationstatus</c> = Resolved).</summary>
+    Confirmed,
+
+    /// <summary>Task 140: as <see cref="Confirmed"/>, but the caller may not change the communication; it was left as it was
+    /// (filed, unconfirmed).</summary>
+    ConfirmNotPermitted,
+
+    /// <summary>Task 140: as <see cref="Confirmed"/>, but the confirmation could not be completed (the check, a read or the
+    /// write failed); left as it was (filed, unconfirmed).</summary>
+    ConfirmFailed,
 }
 
 /// <summary>
@@ -61,6 +73,20 @@ public enum ReconciledFilingResult
 /// <para><b>Concurrency.</b> The filing is read again immediately before the write; a communication filed in between is left
 /// alone. The generic Dataverse seam has no conditional update, so a filing that lands in the milliseconds between that
 /// re-read and the write is not detected (the engine's write is additive, so it would add the save's record beside it).</para>
+/// <para><b>The user's pick confirms (task 140, owner 2026-11-25, ISS-043 #3194).</b> Picking the record in the save is a
+/// human confirmation, as a send is (<c>CommunicationService.MarkFiledBySender</c>) and as the review panel's Confirm is
+/// (<c>advanceAssociationStatus</c>): both write <c>sprk_associationstatus</c> = Resolved and nothing else.
+/// <list type="bullet">
+/// <item><b>Already filed, to the save's record.</b> When the communication's primary regarding (the ADR-024 pair, with the
+/// typed lookup holding the same record) IS the save's record and it is not Resolved, the save asks the caller's Write on that
+/// communication (the same <see cref="CallerRecordAccessProbe"/> check as the filing, ADR-008 A1), reads the row again, and
+/// writes the status alone. A refusal or a fault leaves the row as it was and never fails the save. A communication filed to
+/// another record is neither moved nor confirmed; a Resolved one gets no write.</item>
+/// <item><b>Unfiled, filed by this save.</b> The capture's decision carries the save's record as rung 0 (caller-supplied,
+/// confidence 1.0), which the ladder makes Resolved whenever auto-file is on. With auto-file off it is Suggested; the save's
+/// filing writes it Resolved, because the user picked the record (<see cref="ConfirmedByTheSave"/>). An Ambiguous decision (a
+/// conflict on another field) is written as it is: that conflict is still the reviewer's.</item>
+/// </list></para>
 /// </remarks>
 public sealed class ReconciledEmailFiling
 {
@@ -68,6 +94,7 @@ public sealed class ReconciledEmailFiling
     internal const string CommunicationEntitySet = "sprk_communications";
     private const string PairColumn = "sprk_regardingrecordid";
     private const string OwningTeamColumn = "owningteam";
+    private const string StatusColumn = "sprk_associationstatus";
 
     /// <summary>Every column that says what a communication is filed under: the regarding family and the ADR-024 pair.</summary>
     internal static readonly string[] FilingColumns = RegardingFieldMap.AllRegardingFields.Append(PairColumn).ToArray();
@@ -102,7 +129,8 @@ public sealed class ReconciledEmailFiling
 
     /// <summary>
     /// Files the communication <paramref name="capture"/> reconciled to under the save's record, when it is filed to
-    /// nothing and the caller may change it. Never throws (other than cancellation).
+    /// nothing and the caller may change it; confirms it when it is already filed with the save's record as its primary
+    /// regarding and not yet Resolved (task 140). Never throws (other than cancellation).
     /// </summary>
     public async Task<ReconciledFilingResult> FileIfUnfiledAsync(
         SaveRequest request, EmailCaptureOutcome? capture, string? callerBearerToken, CancellationToken ct)
@@ -120,7 +148,11 @@ public sealed class ReconciledEmailFiling
         {
             var before = await ReadFilingAsync(communicationId, ct).ConfigureAwait(false);
             if (before.Filed)
-                return ReconciledFilingResult.AlreadyFiled;
+            {
+                // Never moved (task 121). Task 140: confirmed when it is filed to the save's own record and not yet Resolved.
+                return await ConfirmIfFiledToTheSavesRecordAsync(
+                    before, communicationId, target, callerBearerToken, ct).ConfigureAwait(false);
+            }
 
             var rights = await _accessProbe
                 .GetCallerRightsAsync(callerBearerToken, CommunicationEntitySet, communicationId, ct)
@@ -139,7 +171,7 @@ public sealed class ReconciledEmailFiling
             // #2143 round 8 (F1-B): the person who saved — the reparent asks F3 for them, and the thread move after it acts for them.
             var caller = SecureRemovalCaller.ForBearerToken(_accessProbe, callerBearerToken);
             await _associationResolver
-                .ApplyToExistingRecordAsync(communicationId, capture.Decision, target.EntityId, caller, ct)
+                .ApplyToExistingRecordAsync(communicationId, ConfirmedByTheSave(capture.Decision), target.EntityId, caller, ct)
                 .ConfigureAwait(false);
 
             // Ontology task 144: the rows filed under the communication (to-dos, events, Signals, Decision Records) copy its
@@ -201,10 +233,72 @@ public sealed class ReconciledEmailFiling
         }
     }
 
-    private async Task<(bool Filed, Guid? OwningTeam)> ReadFilingAsync(Guid communicationId, CancellationToken ct)
+    /// <summary>
+    /// Task 140: the decision the save's filing writes. The save's record is the caller's own pick (rung 0, caller-supplied), so
+    /// a Suggested decision — auto-file off — is written Resolved: the user confirmed it by picking it. Only the status column
+    /// changes; the provenance keeps the engine's own verdict, as the review panel's Confirm leaves it. Resolved and Ambiguous
+    /// (a conflict on another field, still the reviewer's) are written as they are.
+    /// </summary>
+    internal static AssociationDecision ConfirmedByTheSave(AssociationDecision decision) =>
+        decision.Status == AssociationStatusCodes.Suggested
+            ? decision with { Status = AssociationStatusCodes.Resolved }
+            : decision;
+
+    /// <summary>
+    /// Task 140: confirms a communication that is already filed with the save's record as its primary regarding and is not
+    /// Resolved — the caller's Write on it first (ADR-008 A1, the filing's own check), then a fresh read, then the status alone.
+    /// Anything else filed is <see cref="ReconciledFilingResult.AlreadyFiled"/>, untouched. Never throws (other than
+    /// cancellation): a refusal or a fault leaves the row as it was.
+    /// </summary>
+    private async Task<ReconciledFilingResult> ConfirmIfFiledToTheSavesRecordAsync(
+        FilingState before, Guid communicationId, SaveEntityReference target, string? callerBearerToken, CancellationToken ct)
+    {
+        if (before.IsResolved || !before.IsPrimary(target.EntityId))
+            return ReconciledFilingResult.AlreadyFiled; // filed elsewhere (never moved, never confirmed), or nothing to confirm
+
+        try
+        {
+            var rights = await _accessProbe
+                .GetCallerRightsAsync(callerBearerToken, CommunicationEntitySet, communicationId, ct)
+                .ConfigureAwait(false);
+            if ((rights & AccessRights.Write) != AccessRights.Write)
+            {
+                _logger.LogInformation(
+                    "Office save to the record communication {CommunicationId} is filed to; the caller may not change it, so it " +
+                    "was left unconfirmed (task 140).", communicationId);
+                return ReconciledFilingResult.ConfirmNotPermitted;
+            }
+
+            var now = await ReadFilingAsync(communicationId, ct).ConfigureAwait(false);
+            if (now.IsResolved || !now.IsPrimary(target.EntityId))
+                return ReconciledFilingResult.AlreadyFiled; // confirmed or re-filed by someone else since the first read
+
+            // The review panel's Confirm (advanceAssociationStatus) and a send (MarkFiledBySender): the status, nothing else.
+            await _dataverse.UpdateAsync(
+                CommunicationEntity, communicationId,
+                new Dictionary<string, object> { [StatusColumn] = new OptionSetValue(AssociationStatusCodes.Resolved) },
+                ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Office save confirmed communication {CommunicationId}, already filed to {EntityType} {EntityId} as a suggestion " +
+                "(task 140).", communicationId, target.EntityType, target.EntityId);
+            return ReconciledFilingResult.Confirmed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "Office save could not confirm communication {CommunicationId}, filed to the save's record; it was left as it was " +
+                "and the save proceeds (task 140).", communicationId);
+            return ReconciledFilingResult.ConfirmFailed;
+        }
+    }
+
+    private async Task<FilingState> ReadFilingAsync(Guid communicationId, CancellationToken ct)
     {
         var row = await _dataverse
-            .RetrieveAsync(CommunicationEntity, communicationId, FilingColumns.Append(OwningTeamColumn).ToArray(), ct)
+            .RetrieveAsync(
+                CommunicationEntity, communicationId, FilingColumns.Append(OwningTeamColumn).Append(StatusColumn).ToArray(), ct)
             .ConfigureAwait(false);
         if (row is null)
             throw new InvalidOperationException($"Communication {communicationId} could not be read.");
@@ -216,6 +310,24 @@ public sealed class ReconciledEmailFiling
             _ => true,
         });
         var owningTeam = row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
-        return (filed, owningTeam);
+        var status = row.GetAttributeValue<OptionSetValue>(StatusColumn)?.Value;
+        Guid? primary = Guid.TryParse(row.GetAttributeValue<string>(PairColumn), out var pair) ? pair : null;
+        var filedRecords = RegardingFieldMap.AllRegardingFields
+            .Select(column => row.GetAttributeValue<EntityReference>(column)?.Id)
+            .OfType<Guid>()
+            .ToHashSet();
+        return new FilingState(filed, owningTeam, status, primary, filedRecords);
+    }
+
+    /// <summary>What the communication is filed under, as read.</summary>
+    /// <param name="Filed">Any regarding column or the ADR-024 pair is set.</param>
+    /// <param name="Primary">The record the ADR-024 pair (<c>sprk_regardingrecordid</c>) names, when it holds a GUID.</param>
+    /// <param name="FiledRecords">The records the typed regarding lookups hold.</param>
+    private sealed record FilingState(bool Filed, Guid? OwningTeam, int? Status, Guid? Primary, IReadOnlySet<Guid> FiledRecords)
+    {
+        public bool IsResolved => Status == AssociationStatusCodes.Resolved;
+
+        /// <summary>The primary regarding IS <paramref name="recordId"/>: the pair names it and a typed lookup holds it.</summary>
+        public bool IsPrimary(Guid recordId) => Primary == recordId && FiledRecords.Contains(recordId);
     }
 }

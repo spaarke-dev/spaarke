@@ -94,7 +94,9 @@ public enum EmailFilingOutcome
     /// <summary>The email's communication was unfiled and is now filed to the save's record.</summary>
     Filed,
 
-    /// <summary>The communication was already filed (to any record) and was left as it was.</summary>
+    /// <summary>The communication was already filed (to any record) and was not moved. Task 140: when its primary regarding is
+    /// the save's own record and it was not yet confirmed, the save confirmed it where the caller may change it (Resolved);
+    /// otherwise it was left as it was.</summary>
     AlreadyFiled,
 
     /// <summary>The caller may not change the communication, so it was left unfiled.</summary>

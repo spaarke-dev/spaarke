@@ -1607,6 +1607,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     {
         ReconciledFilingResult.Filed => EmailFilingOutcome.Filed,
         ReconciledFilingResult.AlreadyFiled => EmailFilingOutcome.AlreadyFiled,
+        // Task 140: a communication already filed to the save's record, confirmed or not, is "already filed" on the wire. The
+        // pane says nothing extra for it either way; NotPermitted / Failed would tell the user the email is not in the record's
+        // communications, which is false here (it is filed there, only unconfirmed).
+        ReconciledFilingResult.Confirmed => EmailFilingOutcome.AlreadyFiled,
+        ReconciledFilingResult.ConfirmNotPermitted => EmailFilingOutcome.AlreadyFiled,
+        ReconciledFilingResult.ConfirmFailed => EmailFilingOutcome.AlreadyFiled,
         ReconciledFilingResult.NotPermitted => EmailFilingOutcome.NotPermitted,
         ReconciledFilingResult.Failed => EmailFilingOutcome.Failed,
         _ => null,
