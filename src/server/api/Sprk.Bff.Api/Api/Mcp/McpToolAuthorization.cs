@@ -63,6 +63,18 @@ public static class McpToolAuthorization
     /// </summary>
     public const string IdempotencyKeyArgument = "idempotencyKey";
 
+    /// <summary>
+    /// The CLOSED list of model-callable writes (spaarkeai-mcp-bff-api-r2 NFR-06, verifier fix F2): the only tools that may be not
+    /// read-only, not app-only and a declared reversible write. <see cref="ValidateTool"/> refuses a reversible-write tool whose name is not
+    /// here, so a tool does not become model-callable for a write because it declared the right hints. Add a name here with the task that
+    /// adds the tool (task 030 <c>spaarke_run_playbook</c>, task 036 its task writes); the tool's tests must prove it honours its key
+    /// (<see cref="McpIdempotency"/>). An allow-list, not a pattern: <c>McpAuthTests</c> pins the shape and the list.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ModelCallableWrites = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "spaarke_start_analysis",
+    };
+
     // The full name of the ASP.NET Core anonymity metadata interface. Matched by name because the anonymity guard
     // (RouteAuthorizationGuardTests.AnonymityIsDeclaredOnlyOnAScannedChain) bans any identifier containing it from BFF source.
     private const string AnonymityMetadataInterface = "Microsoft.AspNetCore.Authorization.IAllowAnonymous";
@@ -168,7 +180,7 @@ public static class McpToolAuthorization
     /// Throws <see cref="InvalidOperationException"/> when <paramref name="tool"/> (built by <paramref name="definition"/>) breaks
     /// the per-tool rule: no <c>[Authorize]</c> on the tool class; enforced <c>[Authorize]</c> metadata that differs from the
     /// class's own; anonymity metadata; a policy outside <see cref="AllowedToolPolicies"/>; an authentication scheme named on the
-    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only, not app-only and not a declared reversible write (O-14 narrowed by r2 NFR-06). Called by <see cref="McpToolCatalog"/> for every tool at startup.
+    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only, not app-only and not a declared reversible write named in <see cref="ModelCallableWrites"/> (O-14 narrowed by r2 NFR-06). Called by <see cref="McpToolCatalog"/> for every tool at startup.
     /// </summary>
     public static void ValidateTool(McpServerTool tool, Type definition)
     {
@@ -234,6 +246,15 @@ public static class McpToolAuthorization
             throw new InvalidOperationException(
                 $"{where} is not read-only, so it must be app-only (set _meta.ui.visibility to exactly [\"app\"]) or a reversible write "
                 + $"(Destructive = false, Idempotent = true and a required '{IdempotencyKeyArgument}' string argument) (O-14, NFR-06).");
+        }
+
+        // NFR-06, closed: a reversible write that is model-visible must also be NAMED in ModelCallableWrites, so a new write tool
+        // is a reviewed addition to one list, never a tool that passed because its hints were right.
+        if (tool.ProtocolTool.Annotations?.ReadOnlyHint == false && !IsAppOnly(tool.ProtocolTool.Meta) && !ModelCallableWrites.Contains(name))
+        {
+            throw new InvalidOperationException(
+                $"{where} is a model-callable write that is not in McpToolAuthorization.ModelCallableWrites. Add it there (with its task) or make it "
+                + "app-only (set _meta.ui.visibility to exactly [\"app\"]) (NFR-06).");
         }
     }
 
