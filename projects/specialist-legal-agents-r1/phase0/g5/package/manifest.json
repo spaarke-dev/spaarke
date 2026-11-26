@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "version": "1.0.0",
+  "id": "f7af4143-02b0-4912-b3ee-e73b0e202422",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "spaarke-legal-g5-area-test",
+    "full": "Spaarke legal G5 area agent test (Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 routing test. Not for real work.",
+    "full": "Phase 0 test G5: one practice-area agent with three functions (NDA review, agreement review, legal hold review). Does each request reach the right function, and do out-of-scope requests reach none? Synthetic text only. Throwaway; installed for the owner and the test user only and removed at the Phase 0 clean-up (task 031)."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "spaarkeMcpG5Agent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["spaarke-bff-dev.azurewebsites.net"]
+}

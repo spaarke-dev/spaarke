@@ -41,6 +41,19 @@ Fill in the table above at the end. Each question has its own method and evidenc
 3. The skill is synthetic and self-identifying: its body says "When asked for the G2 marker, reply with the exact text G2-SKILL-OK and call no tool". Name it so that it cannot be confused with a function (for example `g2-marker`).
 4. Zip the package files at the zip root.
 
+**Built (task 020, 2026-11-26; not uploaded).** The package is `package/` (the task's output path; the setup step above says `package-q1/`), zip `spaarke-legal-g2-q1-1.0.0.zip` beside this file (gitignored).
+
+| Item | Value |
+|---|---|
+| App id | `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, version 1.0.0, short name `spaarke-legal-g2-q1-test`, namespace `spaarkeg2q1` |
+| Built from | the G5 package (`../g5/package/`): same MCP URL, A1 `reference_id`, dynamic discovery, agent v1.6, plugin v2.4, no query string |
+| Manifest | **1.30**, not 1.25: `agentSkills` exists only from 1.30 (checked against the published 1.25 and 1.30 schemas). The manifest holds both `copilotAgents.declarativeAgents` (one agent) and `agentSkills` (`skills/spaarke-g2-marker`). That is the one structural difference from the G5 package besides the instructions |
+| Skill | `skills/spaarke-g2-marker/SKILL.md`, name `spaarke-g2-marker` (the `spaarke-` prefix follows mcp-r1's naming gate; the kit's `g2-marker` was an example). Path and layout copied from mcp-r1's plugin package (`src/solutions/CopilotPlugins/spaarke/`: `agentSkills: [{ "folder": "skills/<name>" }]`, one `SKILL.md` per folder). Body: "When asked for the G2 marker, reply with the exact text G2-SKILL-OK and call no tool." |
+| Instructions | 1,893 characters: the G5 text plus two packaging-test sentences, "If the user asks for the G2 marker, use the skill spaarke-g2-marker and call no tool" and "If the user asks you to call the first read tool the server lists, call that one tool once and show its result". Without them the G5 line "call no tool for anything else" would make Q1-2 and Q1-3 fail for the wrong reason |
+| Tools it will see | the same as the G5 agent: today `spike_get_profile`, `spike_review_nda`, `spaarke_show_decisions`. "The first read tool" is whichever the server lists first; Q1-2 passes on any single `tools/call` |
+| Forbidden-pattern check | 0 hits in the folder and in the zip |
+| Upload | The owner's, per `../g1-nda/packages/UPLOAD.md` row 5, after the R4 row is sent |
+
 **Test script (Chat; each prompt in a new chat)**
 
 | # | Prompt | Where | What it shows |
@@ -102,6 +115,8 @@ Also record (design G7, optional here): whether the skill appears in Cowork, and
 | Q2-4 | | Chat | | | | |
 | Q2-5 | | Chat | | | | |
 
+**Desk finding (task 020, 2026-11-26): the schema check is done; task 023 confirms it into the table.** The published Teams app manifest schema `https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json` (the latest version published; v1.31, v1.32 and devPreview do not resolve) defines `copilotAgents.declarativeAgents` as an array with `minItems: 1` and `maxItems: 1`, and its description reads "Currently, only one declarative agent per application is supported." So one package cannot hold two agents at the manifest version we use: Q2 is **no**, by the schema, and no upload is needed. Task 020 therefore built **no** Q2 package (row G2-q2 below: DROPPED, never uploaded, proposed; task 023 confirms).
+
 ## Q3: can a practice plugin depend on the core plugin?
 
 **Why it matters.** It decides whether the "core plus practice plugins" shape (design §3.12) can ship the shared pieces once, or has to repeat them in every practice package.
@@ -125,6 +140,8 @@ Also record (design G7, optional here): whether the skill appears in Cowork, and
 - **No:** no mechanism exists and practice cannot reach core's content.
 - **Untestable:** only some of the steps can run (state which).
 
+**Desk lead (task 020, not a verdict).** In the v1.30 manifest schema the only dependency mechanism is `elementRelationshipSet` (`oneWayDependencies`, `mutualDependencies`), whose `elementReference` can name only `bots`, `staticTabs`, `composeExtensions` or `configurableTabs` inside the same manifest. A key search found no field that names another app, plugin or package. That points to **no** declared dependency across packages, with sequential install as the only workaround. Task 023 completes the check against the plugin schema and Learn before answering.
+
 **Evidence sheet**
 
 | Step | Time (UTC) | Surface | Observed | Pass / fail | Evidence ref (schema URL, screenshot, query) |
@@ -138,11 +155,19 @@ Also record (design G7, optional here): whether the skill appears in Cowork, and
 
 | # | Artifact | Kind | Owner project | Purpose | Scope | Removal | Sent (date, link) |
 |---|---|---|---|---|---|---|---|
-| G2-q1 | `spaarke-legal-g2-q1-test` (app id minted at build) | Package: one agent with the G5 action plus one marker `SKILL.md` | specialist-legal-agents-r1 | G2 Q1 | Owner + test user only, org catalog (R7) | Owner removes it when G2 is recorded | |
-| G2-q2 | `spaarke-legal-g2-q2-test` (app id minted at build) | Package with two declarative agents, each with an action (built only if the schema allows) | specialist-legal-agents-r1 | G2 Q2 | As above | As above | |
+| G2-q1 | `spaarke-legal-g2-q1-test` (app id `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, v1.0.0, built 2026-11-26) | Package: one agent with the G5 action plus one marker `SKILL.md` | specialist-legal-agents-r1 | G2 Q1 | Owner + test user only, org catalog (R7) | Owner removes it when G2 is recorded | not yet (see "R4 row (to send)") |
+| G2-q2 | `spaarke-legal-g2-q2-test` | **Not built.** The v1.30 schema allows one declarative agent per package (desk finding above) | specialist-legal-agents-r1 | G2 Q2 | n/a | n/a | **DROPPED (never uploaded)**, proposed; task 023 confirms |
 | G2-q3a / q3b | `spaarke-legal-g2-q3-core-test`, `spaarke-legal-g2-q3-practice-test` (app ids minted at build) | Two small packages; practice declares a dependency on core if a mechanism exists | specialist-legal-agents-r1 | G2 Q3 | As above | As above | |
 
 Rows for a package that is not built (for example Q2 stopped by the schema) are marked **DROPPED (never uploaded)**.
+
+### R4 row (to send)
+
+For the one G2 package task 020 built. Sent by the main session to COPILOT-PLATFORM-COORDINATION (Issue #3006) before upload; **not yet sent** (date and message link: ______).
+
+| Artifact | Kind | Owner project | Scope | Removal plan | Removal date |
+|---|---|---|---|---|---|
+| `spaarke-legal-g2-q1-test` (app id `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, v1.0.0) | App package, manifest 1.30: one declarative agent (v1.6) with one MCP action on `/mcp/legal-operations` (A1 `reference_id`, dynamic discovery) plus one marker skill `spaarke-g2-marker` | specialist-legal-agents-r1 | Owner + `demo@`, org catalog, never All users (R7) | Owner removes it in the admin center at the Phase 0 clean-up; coordination row closed after | at task 031 |
 
 ## Result
 

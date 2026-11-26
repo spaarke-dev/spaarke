@@ -1,0 +1,22 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
+  "name_for_human": "Spaarke MCP G1c",
+  "namespace": "spaarkeg1c",
+  "description_for_human": "Phase 0 NDA test action on the Spaarke MCP server, tools found at runtime.",
+  "description_for_model": "Spaarke legal operations tools. Use them only for the NDA review described in the agent instructions.",
+  "functions": [],
+  "runtimes": [
+    {
+      "type": "RemoteMCPServer",
+      "auth": {
+        "type": "OAuthPluginVault",
+        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
+      },
+      "spec": {
+        "url": "https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations"
+      },
+      "run_for_functions": ["*"]
+    }
+  ]
+}

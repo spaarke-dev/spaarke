@@ -35,9 +35,30 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 
 | Function | Expected tool name (from `tools/list`) |
 |---|---|
-| NDA review | |
-| Agreement review | |
-| Legal hold review | |
+| NDA review | `spike_review_nda` (task 011; confirm against `tools/list` or the smoke prompt) |
+| Agreement review | **none on dev yet** (see "Status of the function tools") |
+| Legal hold review | **none on dev yet** (see "Status of the function tools") |
+
+#### Status of the function tools (task 020, 2026-11-26): a gap that blocks the run
+
+- The dev BFF (spike `d307d67e36`) exposes two spike tools to the model: `spike_get_profile` and `spike_review_nda`, besides `spaarke_show_decisions`. Only `spike_review_nda` is a G5 function tool (NDA review). `spike_get_profile` is a profile fetch, not a function; it must never count as one, and it never answers a G5 prompt correctly.
+- **Agreement review and legal hold review have no tool.** Task 011 built only the two NDA spike tools, so the server cannot log a correct `tools/call` for A-01 to A-12 or H-01 to H-12. Without them the routing score cannot be computed (BR-7: the BFF row is the evidence).
+- **What is needed before task 023 (not done here; it is a spike-branch and deploy change):** two more read-only, model-visible spike tools on `/mcp/legal-operations`, for example `spike_review_agreement` and `spike_review_legal_hold`. Each takes the document text and may return a fixed, synthetic stub result, because G5 scores routing, not review quality. They need the owner's go, a spike-branch commit (never merged) and a dev deploy through uac-r2 for that SHA.
+- **The package needs no change when they arrive.** It uses dynamic discovery (BR-5), and its instructions describe the three functions by purpose, not by tool name. If a function's tool is missing, the agent says so and uses no other tool, so a missing tool never reads as a wrong route. Record the tool names in the table above from `tools/list`, then run the smoke prompt.
+- Until the tools exist, run only what is meaningful: NDA prompts (N-01 to N-12) and the controls (C-01 to C-12). Do not score the agreement and legal hold prompts as misses; record "no tool on dev".
+- `spike_review_nda` returns no instruction block, so the FR-05 column is "n.a." for G5 unless the new tools return one.
+
+#### The package (task 020)
+
+| Item | Value |
+|---|---|
+| Folder | `package/` (source), zip `spaarke-legal-g5-area-1.0.0.zip` beside this file (gitignored) |
+| App id | `f7af4143-02b0-4912-b3ee-e73b0e202422`, version 1.0.0, short name `spaarke-legal-g5-area-test`, namespace `spaarkeg5` |
+| Built from | `../g8/package-p2-v2-dd/`: same MCP URL, same A1 `reference_id`, dynamic discovery, no query string, manifest 1.25, agent v1.6, plugin v2.4 |
+| Instructions | 1,673 characters: the area and three functions in one sentence each, "exactly one function tool per request", "if a function's tool is not in your tool list, say so and use no other tool", "for anything else call no tool", review-only limits, and the spike error codes. No profile or position text |
+| Starters | Review an NDA; Review an agreement; Review a hold notice |
+| Forbidden-pattern check | 0 hits in the folder and in the zip (see `../g1-nda/README.md`, "FORBIDDEN_IN_PACKAGE check") |
+| Upload | The owner's, per `../g1-nda/packages/UPLOAD.md` row 4, after the R4 row is sent |
 
 ### Baseline: the existing *Spaarke Legal Review* agent
 
@@ -74,10 +95,16 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 
 | # | Artifact | Kind | Owner project | Purpose | Scope | Removal |
 |---|---|---|---|---|---|---|
-| G5-a | `spaarke-legal-g5-area-test` (app id: minted at build, recorded here) | App package, one declarative agent, one MCP action on `/mcp/legal-operations`, A1 `reference_id`, dynamic discovery | specialist-legal-agents-r1 | Phase 0 G5: three-function routing | Owner + test user only (R7), org catalog | Owner removes it in admin center when the G5 result is recorded; removal date set when the row is sent |
+| G5-a | `spaarke-legal-g5-area-test` (app id `f7af4143-02b0-4912-b3ee-e73b0e202422`, v1.0.0, built 2026-11-26 by task 020) | App package, one declarative agent, one MCP action on `/mcp/legal-operations`, A1 `reference_id`, dynamic discovery | specialist-legal-agents-r1 | Phase 0 G5: three-function routing | Owner + test user only (R7), org catalog | Owner removes it in admin center when the G5 result is recorded; removal date set when the row is sent |
 | G5-b | *Spaarke Legal Review* (existing) | **No change.** Read only: confirm instructions, send prompts | accelerator r1 (owner of the agent) | G5 baseline | Existing scope | None |
 
-R4 row sent: **not yet** (date and message link: ______). No upload before this is filled in.
+R4 row sent: **not yet, held** (2026-11-26). It waits on the owner decision about the two stub tools (see notes/decisions.md); no upload before it is sent.
+
+#### R4 row (to send)
+
+| Artifact | Kind | Owner project | Scope | Removal plan | Removal date |
+|---|---|---|---|---|---|
+| `spaarke-legal-g5-area-test` (app id `f7af4143-02b0-4912-b3ee-e73b0e202422`, v1.0.0) | App package: one declarative agent (v1.6), one MCP action on `/mcp/legal-operations`, A1 `reference_id`, dynamic discovery | specialist-legal-agents-r1 | Owner + `demo@`, org catalog, never All users (R7) | Owner removes it in the admin center at the Phase 0 clean-up; coordination row closed after | at task 031 |
 
 ## Prompt set
 
@@ -155,7 +182,7 @@ All prompts are typed into **Copilot Chat** with the agent selected, one per new
 
 ### Inline passages (synthetic, to be written for this test)
 
-The test user pastes these. Each is a short fictional clause set with invented parties, under about 120 words, so that no attachment or upload is needed. Write them once and save them next to this file as `passages.md`; until then, record the text actually used in the results sheet notes.
+The test user pastes these. Each is a short fictional clause set with invented parties, under about 120 words, so that no attachment or upload is needed. **Written by task 020 and saved next to this file as [`passages.md`](passages.md)** (P1 to P8, fictional only). Paste the passage text exactly as written there, and record any change in the results sheet notes.
 
 | Passage | Content to write |
 |---|---|

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "version": "1.0.0",
+  "id": "67f754d4-9327-4451-9c79-552047a17ed4",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "spaarke-legal-g1b-nda-test",
+    "full": "Spaarke legal G1 NDA test, variant B (Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 NDA profile test. Not for real work.",
+    "full": "Phase 0 test G1-NDA, variant B: archetype guidance in the instructions plus the profile it fetches. Synthetic test documents only. Read-only. Throwaway; installed for the owner and the test user only and removed at the Phase 0 clean-up (task 031)."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "spaarkeMcpG1bAgent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["spaarke-bff-dev.azurewebsites.net"]
+}

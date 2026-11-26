@@ -1,0 +1,30 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "1.0.0",
+  "id": "6940e661-d067-4154-adb4-06366648c697",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "spaarke-legal-g1b-cowork",
+    "full": "Spaarke legal G1 NDA test skill, variant B (Cowork, Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 NDA profile test skill. Not for real work.",
+    "full": "Phase 0 test G1-NDA, Cowork arm, variant B. One skill, no action: the Spaarke tools come from the tenant connector \"Spaarke MCP\". Synthetic test documents only. Throwaway; removed at the Phase 0 clean-up (task 031)."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "agentSkills": [
+    {
+      "folder": "skills/spaarke-g1-nda-review-b"
+    }
+  ]
+}
