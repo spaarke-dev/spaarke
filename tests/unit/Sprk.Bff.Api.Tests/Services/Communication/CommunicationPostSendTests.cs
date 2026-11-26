@@ -135,6 +135,9 @@ public class CommunicationPostSendTests
         var read = job.Payload.Deserialize<CommunicationPostSendPayload>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         read.Archive.Should().BeTrue("the row is filed to a record (D-217)");
         read.Enrich.Should().BeTrue();
+        read.SenderSystemUserId.Should().Be(
+            h.Communications.Single().Entity.GetAttributeValue<EntityReference>("sprk_sentby")?.Id,
+            "ontology-r1 condition (b): the systemuser the send resolved (none for a shared-mailbox send without a caller)");
     }
 
     // ── A failed send still fails, with nothing queued ─────────────────────────────────────────────────────────
@@ -359,6 +362,132 @@ public class CommunicationPostSendTests
         (await h.Handler().ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed);
 
         h.Bells.Should().BeEmpty("never the owning team");
+        // ontology-r1 condition (a): one stable, queryable Error naming the communication and the correlation id.
+        var id = h.Communications.Single().Id;
+        h.HandlerLog.At(LogLevel.Error).Should().ContainSingle(m => m.StartsWith("[COMM-POSTSEND] Archive bell not raised: no sender for communication"))
+            .Which.Should().Contain(id.ToString()).And.Contain("assign-task-corr");
+    }
+
+    [Fact]
+    public async Task TheJob_TheRowNamesNoSender_BellsTheSenderTheRequestResolved()
+    {
+        // ontology-r1 condition (b): the payload carries the systemuser the send resolved; the row's empty sprk_sentby falls back to it.
+        var h = Build();
+        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext())).CommunicationId!.Value;
+        var sender = h.Rows[id].GetAttributeValue<EntityReference>("sprk_sentby").Id;
+        h.Rows[id].Attributes.Remove("sprk_sentby");
+        var job = h.PostSendJobs.Single();
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        h.UploadFails = true;
+        var handler = h.Handler();
+
+        await handler.ProcessAsync(job, CancellationToken.None);
+        await handler.ProcessAsync(job, CancellationToken.None);
+
+        h.Bells.Should().ContainSingle().Which.Entity.GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", sender));
+        h.Probe.Asked.Should().ContainSingle().Which.Should().Be((sender, "sprk_communications", id), "the same D-123 rights check on the link");
+        h.HandlerLog.At(LogLevel.Error).Should().NotContain(m => m.Contains("Archive bell not raised"));
+    }
+
+    // ── Run 3 (review F1): a fault outside the archive on the final delivery keeps the one bell ──────────────
+
+    public static TheoryData<string> FaultsOutsideTheArchive => new() { "review-row query", "arrived emit", "row read" };
+
+    [Theory]
+    [MemberData(nameof(FaultsOutsideTheArchive))]
+    public async Task TheJob_FinalDelivery_TheArchiveFailed_ThenAnotherStepFaults_StillBellsOnce_AndLogsOneError(string fault)
+    {
+        var h = Build();
+        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext())).CommunicationId!.Value;
+        var sender = h.Rows[id].GetAttributeValue<EntityReference>("sprk_sentby").Id;
+        var job = h.PostSendJobs.Single();
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        h.UploadFails = true;
+        var handler = h.Handler();
+        var boom = new TimeoutException("dataverse");
+        switch (fault)
+        {
+            case "review-row query": h.ReviewQueryFault = boom; break;
+            case "arrived emit": handler.ArrivedFault = boom; break;
+            default: h.RowReadFault = boom; break; // the row is never read: the bell goes to the payload's sender
+        }
+
+        (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed);
+        var errors = h.HandlerLog.At(LogLevel.Error);
+        (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed, "a re-drive of the dead job");
+
+        h.Bells.Should().ContainSingle("the final delivery's bell is not lost, and a re-drive adds none")
+            .Which.Entity.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("systemuser", sender));
+        // The review-row and row-read faults: one Error (the archive's, or the final delivery's). The arrived fault: the archive's final
+        // Error, then the final delivery's for the step that faulted after it.
+        errors.Should().HaveCount(fault == "arrived emit" ? 2 : 1).And.OnlyContain(m => m.Contains(id.ToString()));
+        h.HandlerLog.At(LogLevel.Warning).Should().NotContain(m => m.Contains("it will be redelivered") && m.Contains("post-send work"),
+            "the final delivery is never redelivered");
+    }
+
+    [Fact]
+    public async Task TheJob_FinalDelivery_AFaultAfterASuccessfulArchive_LogsAnError_AndDoesNotBell()
+    {
+        var h = Build();
+        await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext());
+        var job = h.PostSendJobs.Single();
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        var handler = h.Handler();
+        handler.ArrivedFault = new TimeoutException("outbox");
+
+        (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed);
+
+        h.ArchivedEmls.Should().ContainSingle();
+        h.Bells.Should().BeEmpty("the email was saved");
+        h.HandlerLog.At(LogLevel.Error).Should().ContainSingle(m => m.Contains("failed on its final delivery") && m.Contains("assign-task-corr"));
+    }
+
+    // ── Run 3 (K2): a 409 archive_in_progress on the final delivery ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheJob_FinalDelivery_409ArchiveInProgress_ButTheOtherArchiveFinished_IsArchived_AndDoesNotBell()
+    {
+        var h = Build();
+        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext())).CommunicationId!.Value;
+        var job = h.PostSendJobs.Single();
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        var lockKey = CommunicationService.ArchiveLockKeyFor(id);
+        h.Idempotency.Hold(lockKey).Should().BeTrue("another archive (the on-demand route) holds the lock");
+        var otherDocument = Guid.NewGuid();
+        h.Idempotency.OnLockRefused = key =>
+        {
+            // The other archive creates its Document just after this job's lock is refused.
+            if (key == lockKey)
+                lock (h.Created)
+                    h.Created.Add((new Entity("sprk_document")
+                    {
+                        ["sprk_isemailarchive"] = true,
+                        ["sprk_sourcetype"] = new OptionSetValue(EmailArchiveSourceType),
+                        ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", id),
+                    }, otherDocument));
+        };
+
+        (await h.Handler().ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.Bells.Should().BeEmpty("the .eml is saved: no false \"not saved\"");
+        h.EnrichArchiveIds.Should().Equal(otherDocument);
+        h.ArchivedEmls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TheJob_FinalDelivery_409ArchiveInProgress_AndNoDocument_Bells()
+    {
+        var h = Build();
+        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext())).CommunicationId!.Value;
+        var job = h.PostSendJobs.Single();
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        h.Idempotency.Hold(CommunicationService.ArchiveLockKeyFor(id)).Should().BeTrue();
+
+        (await h.Handler().ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed);
+
+        h.Bells.Should().ContainSingle();
+        h.ArchivedEmls.Should().BeEmpty();
     }
 
     // ── Q3: one .eml archive at a time ─────────────────────────────────────────────────────────────────────────
@@ -467,6 +596,109 @@ public class CommunicationPostSendTests
         h.ThreadCalls.Should().ContainSingle();
     }
 
+    // ── Run 3 (review F1): the caller's token fires after the send, during the enqueue ────────────────────────────
+
+    public static TheoryData<string, SendMode> CancelDuringEnqueue => new()
+    {
+        { "queued", SendMode.User }, { "queued", SendMode.SharedMailbox },
+        { "slow queue", SendMode.User }, { "slow queue", SendMode.SharedMailbox },
+    };
+
+    [Theory]
+    [MemberData(nameof(CancelDuringEnqueue))]
+    public async Task Deferred_TheCallersTokenFiresDuringTheEnqueue_TheSentEmailIsNotAFailure_AndItsTailRuns(string queue, SendMode mode)
+    {
+        // AssignTaskNotifier sends under a 10 s linked token and falls back to a second (system-mailbox) email when SendAsync throws.
+        // The token firing AFTER Graph sent must not turn the delivered email into GRAPH_SEND_FAILED.
+        using var caller = new CancellationTokenSource();
+        var h = Build(postSendSubmit: async submitToken =>
+        {
+            caller.Cancel();
+            if (queue == "queued")
+                await Task.Delay(50, submitToken); // the queue answers: the submit is not bound to the caller's token
+            else
+                await Task.Delay(Timeout.Infinite, submitToken); // the queue does not answer within the 2 s bound
+        });
+
+        var response = await h.Sut.SendAsync(
+            AssignTaskShape(defer: true) with { SendMode = mode }, mode == SendMode.User ? UserContext() : null, caller.Token);
+
+        caller.IsCancellationRequested.Should().BeTrue("the precondition: the caller's token fired during the enqueue");
+        response.Status.Should().Be(CommunicationStatus.Send);
+        h.SendCalls.Should().Be(1);
+        var id = response.CommunicationId!.Value;
+        if (queue == "queued")
+        {
+            h.PostSendJobs.Should().ContainSingle().Which.SubjectId.Should().Be(id.ToString());
+        }
+        else
+        {
+            h.PostSendJobs.Should().BeEmpty();
+            h.EnrichCalls.Should().Be(1, "the inline fallback ran the tail");
+            (await h.Idempotency.IsEventProcessedAsync(CommunicationPostSendJobHandler.KeyFor(id))).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task Deferred_TheQueueFails_AndTheCallersTokenFires_TheInlineFallbackStillLeavesTheJobsMarkers()
+    {
+        using var caller = new CancellationTokenSource();
+        var h = Build(postSendSubmit: _ =>
+        {
+            caller.Cancel();
+            throw new ServiceBusException("queue down", ServiceBusFailureReason.ServiceCommunicationProblem);
+        });
+
+        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext(), caller.Token)).CommunicationId!.Value;
+
+        foreach (var marker in new[]
+                 {
+                     CommunicationPostSendJobHandler.KeyFor(id), CommunicationPostSendJobHandler.EnrichedKeyFor(id),
+                     CommunicationPostSendJobHandler.ArrivedKeyFor(id),
+                 })
+            (await h.Idempotency.IsEventProcessedAsync(marker)).Should().BeTrue(marker);
+        h.Idempotency.IsLocked(CommunicationPostSendJobHandler.KeyFor(id)).Should().BeFalse("the fallback released the job's lock");
+        h.SendCalls.Should().Be(1);
+    }
+
+    // ── K1: the REAL owner-based lock, with the job running while the inline fallback runs ────────────────────────
+
+    [Fact]
+    public async Task RealCache_TheLateJobRunsWhileTheInlineFallbackRuns_IsRefused_ThenANoOp_OneDocument()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var h = Build(postSendSubmit: _ => release.Task, realCache: true); // slower than 2 s, then it lands anyway
+        var uploading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishUpload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.UploadGate = async () =>
+        {
+            uploading.TrySetResult();
+            await finishUpload.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        };
+
+        // The fallback claims the job's lock and stops in the .eml upload.
+        var send = Task.Run(() => h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext()));
+        await uploading.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        release.SetResult();
+        await WaitUntilAsync(() => h.PostSendJobs.Count == 1);
+        var job = h.PostSendJobs.Single();
+        var handler = h.Handler();
+
+        var during = await handler.ProcessAsync(job, CancellationToken.None);
+        finishUpload.SetResult();
+        var response = await send;
+        var after = await handler.ProcessAsync(job, CancellationToken.None);
+
+        during.Status.Should().Be(JobStatus.Failed, "the fallback holds the lock (another owner)");
+        during.ErrorMessage.Should().Be(CommunicationPostSendJobHandler.LockRefusedError);
+        after.Status.Should().Be(JobStatus.Completed, "the fallback left the done marker and released its lock");
+        var eml = h.ArchivedEmls.Should().ContainSingle().Subject;
+        response.ArchivedDocumentId.Should().Be(eml.Id);
+        h.EnrichCalls.Should().Be(1);
+        h.ThreadCalls.Should().ContainSingle();
+        handler.Arrived.Should().Be(0, "the fallback emitted arrived");
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(10);
@@ -514,6 +746,9 @@ public class CommunicationPostSendTests
         public required List<JobContract> Jobs { get; init; }
         public required List<ThreadResolutionRequest> ThreadCalls { get; init; }
         public required InMemoryIdempotency Idempotency { get; init; }
+
+        /// <summary>The cache the send path and the job use: <see cref="Idempotency"/>, or the REAL <see cref="IdempotencyService"/>.</summary>
+        public required IIdempotencyService Cache { get; init; }
         public required Func<int> SendCount { get; init; }
         public required ListLogger<CommunicationService> Log { get; init; }
         public required ScriptedProbe Probe { get; init; }
@@ -524,6 +759,15 @@ public class CommunicationPostSendTests
 
         /// <summary>Awaited at the start of every SPE upload (null: none); the race tests hold uploads here.</summary>
         public Func<Task>? UploadGate { get; set; }
+
+        /// <summary>Thrown by the <c>sprk_emailreviewlog</c> query (enrichment's re-run guard) when set.</summary>
+        public Exception? ReviewQueryFault { get; set; }
+
+        /// <summary>Thrown by every <c>sprk_communication</c> read when set.</summary>
+        public Exception? RowReadFault { get; set; }
+
+        /// <summary>The job handler's log lines.</summary>
+        public ListLogger<CommunicationPostSendJobHandler> HandlerLog { get; } = new();
 
         public int SendCalls => SendCount();
         public List<(Entity Entity, Guid Id)> Bells { get { lock (Created) return Created.Where(c => c.Entity.LogicalName == "appnotification").ToList(); } }
@@ -551,8 +795,8 @@ public class CommunicationPostSendTests
         public List<string> Warnings => Log.At(LogLevel.Warning);
 
         public CountingHandler Handler() => new(
-            Sut, Entities.Object, Enrichment.Object, Idempotency,
-            new NotificationService(Entities.Object, NullLogger<NotificationService>.Instance), Probe);
+            Sut, Entities.Object, Enrichment.Object, Cache,
+            new NotificationService(Entities.Object, NullLogger<NotificationService>.Instance), Probe, HandlerLog);
     }
 
     /// <summary>The access probe, answering the rights a test scripts (null: Dataverse did not answer).</summary>
@@ -593,27 +837,34 @@ public class CommunicationPostSendTests
     /// <summary>The handler with its arrived emit counted.</summary>
     private sealed class CountingHandler(
         CommunicationService communication, IGenericEntityService entities, ICommunicationEnrichmentService enrichment, IIdempotencyService idempotency,
-        NotificationService notifications, CallerRecordAccessProbe probe)
-        : CommunicationPostSendJobHandler(
-            communication, entities, enrichment, idempotency, notifications, probe, NullLogger<CommunicationPostSendJobHandler>.Instance)
+        NotificationService notifications, CallerRecordAccessProbe probe, ILogger<CommunicationPostSendJobHandler> logger)
+        : CommunicationPostSendJobHandler(communication, entities, enrichment, idempotency, notifications, probe, logger)
     {
         public int Arrived { get; private set; }
 
+        /// <summary>Thrown by the arrived emit when set (a fault outside the archive).</summary>
+        public Exception? ArrivedFault { get; set; }
+
         internal override Task EmitArrivedAsync(Guid communicationId, CancellationToken ct)
         {
+            if (ArrivedFault is { } fault) return Task.FromException(fault);
             Arrived++;
             return Task.CompletedTask;
         }
     }
 
-    /// <summary>The ADR-004 idempotency cache, in memory; <see cref="Forget"/> empties it (the cache fails open, #984).</summary>
-    private sealed class InMemoryIdempotency : IIdempotencyService
+    /// <summary>The ADR-004 idempotency cache, in memory; <see cref="Forget"/> empties it (the cache fails open, #984). Ownerless: a
+    /// lock is held or not (the real cache's owner checks are not modelled).</summary>
+    internal sealed class InMemoryIdempotency : IIdempotencyService
     {
         private readonly HashSet<string> _processed = new(StringComparer.Ordinal);
         private readonly HashSet<string> _locks = new(StringComparer.Ordinal);
 
         /// <summary>True: every lock is granted (the cache failing open, #984).</summary>
         public bool LocksFailOpen { get; set; }
+
+        /// <summary>Called with the key of every refused lock (a test makes "the other archive" finish here).</summary>
+        public Action<string>? OnLockRefused { get; set; }
 
         public void Forget()
         {
@@ -644,7 +895,10 @@ public class CommunicationPostSendTests
         public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default)
         {
             if (LocksFailOpen) return Task.FromResult(true);
-            lock (_locks) return Task.FromResult(_locks.Add(eventId));
+            bool acquired;
+            lock (_locks) acquired = _locks.Add(eventId);
+            if (!acquired) OnLockRefused?.Invoke(eventId);
+            return Task.FromResult(acquired);
         }
 
         public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default)
@@ -669,7 +923,8 @@ public class CommunicationPostSendTests
     }
 
     /// <param name="postSendSubmit">How the queue answers a <c>CommunicationPostSend</c> submit (null: it accepts); the Q4 tests throw or hang.</param>
-    private static Harness Build(Exception? sendFault = null, Func<CancellationToken, Task>? postSendSubmit = null)
+    /// <param name="realCache">True: the REAL owner-based <see cref="IdempotencyService"/> over an in-memory distributed cache.</param>
+    private static Harness Build(Exception? sendFault = null, Func<CancellationToken, Task>? postSendSubmit = null, bool realCache = false)
     {
         var options = new CommunicationOptions
         {
@@ -680,12 +935,17 @@ public class CommunicationPostSendTests
 
         // The Dataverse writer, stateful: a created row answers its reads and its updates; an archive Document and a review row answer
         // the queries that look for them.
+        Harness? harness = null;
         var created = new List<(Entity Entity, Guid Id)>();
         var rows = new Dictionary<Guid, Entity>();
         var entities = new Mock<IGenericEntityService>();
         entities
             .Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => { lock (created) return rows.TryGetValue(id, out var row) ? row : null!; });
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
+            {
+                if (table == "sprk_communication" && harness?.RowReadFault is { } fault) throw fault;
+                lock (created) return rows.TryGetValue(id, out var row) ? row : null!;
+            });
         entities
             .Setup(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string _, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
@@ -698,6 +958,7 @@ public class CommunicationPostSendTests
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
             {
+                if (q.EntityName == "sprk_emailreviewlog" && harness?.ReviewQueryFault is { } fault) throw fault;
                 lock (created)
                 {
                     var match = q.EntityName switch
@@ -766,12 +1027,16 @@ public class CommunicationPostSendTests
 
         var uploadPaths = new List<string>();
         var uploadedBytes = new List<byte[]>();
-        Harness? harness = null;
         var spe = BuildSpeFileStore(
             uploadPaths, uploadedBytes,
             () => harness is null ? null : harness.UploadFails ? new HttpRequestException("SharePoint Embedded upload failed") : harness.UploadFault,
             () => harness?.UploadGate);
         var idempotency = new InMemoryIdempotency();
+        IIdempotencyService cache = realCache
+            ? new IdempotencyService(
+                new MemoryDistributedCache(Microsoft.Extensions.Options.Options.Create(new MemoryDistributedCacheOptions())),
+                NullLogger<IdempotencyService>.Instance)
+            : idempotency;
         var log = new ListLogger<CommunicationService>();
 
         var jobs = new List<JobContract>();
@@ -815,7 +1080,7 @@ public class CommunicationPostSendTests
             new RecordOwnershipResolverDouble(),
             log,
             threadResolver: threads.Object,
-            scopeFactory: ScopeFactory(spe.Object, idempotency),
+            scopeFactory: ScopeFactory(spe.Object, cache),
             participantIndexer: indexer);
 
         harness = new Harness
@@ -830,6 +1095,7 @@ public class CommunicationPostSendTests
             Jobs = jobs,
             ThreadCalls = threadCalls,
             Idempotency = idempotency,
+            Cache = cache,
             Log = log,
             Probe = new ScriptedProbe(),
             SendCount = () => sendCount,
@@ -878,7 +1144,7 @@ public class CommunicationPostSendTests
         return speMock;
     }
 
-    private static JobSubmissionService BuildJobQueue(List<JobContract> submitted, Func<CancellationToken, Task>? postSendSubmit)
+    internal static JobSubmissionService BuildJobQueue(List<JobContract> submitted, Func<CancellationToken, Task>? postSendSubmit)
     {
         var sbOptions = new Mock<IOptions<ServiceBusOptions>>();
         sbOptions.Setup(o => o.Value).Returns(new ServiceBusOptions

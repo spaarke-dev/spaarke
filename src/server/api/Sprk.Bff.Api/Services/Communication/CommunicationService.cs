@@ -514,9 +514,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// Returns the id of an existing email-archive <c>sprk_document</c> for the communication, or null.
-    /// Used for idempotent on-demand archival (task 044).
+    /// Used for idempotent on-demand archival (task 044), and by the CommunicationPostSend job after a 409 archive_in_progress
+    /// (ISS-010 part E run 3: the archive that held the lock may have finished).
     /// </summary>
-    private async Task<Guid?> FindExistingArchiveDocumentAsync(Guid communicationId, CancellationToken ct)
+    internal async Task<Guid?> FindExistingArchiveDocumentAsync(Guid communicationId, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_document")
         {
@@ -2712,7 +2713,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 deferred = await TryEnqueuePostSendAsync(
                     communicationId.Value, archive && archiveOutgoingOptIn, request,
-                    CallerResolution.ResolveObjectId(httpContext?.User), correlationId, cancellationToken);
+                    CallerResolution.ResolveObjectId(httpContext?.User), preparedRecord.GetAttributeValue<EntityReference>("sprk_sentby")?.Id,
+                    correlationId);
                 if (!deferred)
                 {
                     // The fallback takes the job's lock and leaves its markers, so a job whose submit landed late is a no-op.
@@ -3088,7 +3090,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             if (request.DeferPostSend && communicationId.HasValue)
             {
                 deferred = await TryEnqueuePostSendAsync(
-                    communicationId.Value, archive && archiveOutgoingOptIn, request, userObjectId, correlationId, ct);
+                    communicationId.Value, archive && archiveOutgoingOptIn, request, userObjectId, senderSystemUserId, correlationId);
                 if (!deferred)
                 {
                     // The fallback takes the job's lock and leaves its markers, so a job whose submit landed late is a no-op.
@@ -4647,10 +4649,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// (<see cref="SendCommunicationRequest.DeferPostSend"/>). True when it was queued. False when the queue faulted or did not answer
     /// within <see cref="PostSendEnqueueTimeout"/>: one Warning with the communication id, and the caller runs today's inline tail, so
     /// nothing is lost and the response does not change. The payload holds ids and flags only.
+    /// <para>It runs AFTER the email was sent, so it never throws and takes no caller token (run 3, review F1): a caller whose token
+    /// fires during the enqueue (<c>AssignTaskNotifier</c>'s send timeout) would otherwise turn a delivered email into a 500 and send it
+    /// again. The submit is bound only by <see cref="PostSendEnqueueTimeout"/>.</para>
     /// </summary>
+    /// <param name="senderSystemUserId">The sending systemuser resolved at send time (the row's <c>sprk_sentby</c>); the job bells it
+    /// when the row names no sender (ontology-r1 condition b).</param>
     private async Task<bool> TryEnqueuePostSendAsync(
-        Guid communicationId, bool archive, SendCommunicationRequest request, string? requestedByObjectId, string correlationId,
-        CancellationToken ct)
+        Guid communicationId, bool archive, SendCommunicationRequest request, string? requestedByObjectId, Guid? senderSystemUserId,
+        string correlationId)
     {
         var job = CommunicationPostSendJobHandler.CreateJob(
             new CommunicationPostSendPayload(
@@ -4658,20 +4665,20 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 Guid.TryParse(requestedByObjectId, out var oid) && oid != Guid.Empty ? oid : null,
                 Archive: archive,
                 Enrich: request.SystemMail is null && request.ServerSend is null,
-                CreateThreadPrivate: request.CreateThreadPrivate),
+                CreateThreadPrivate: request.CreateThreadPrivate,
+                SenderSystemUserId: senderSystemUserId is { } sender && sender != Guid.Empty ? sender : null),
             correlationId);
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(PostSendEnqueueTimeout);
+        using var timeout = new CancellationTokenSource(PostSendEnqueueTimeout);
         try
         {
-            await _jobSubmissionService.SubmitJobAsync(job, timeout.Token).WaitAsync(PostSendEnqueueTimeout, ct);
+            await _jobSubmissionService.SubmitJobAsync(job, timeout.Token).WaitAsync(PostSendEnqueueTimeout, CancellationToken.None);
             _logger.LogInformation(
                 "Post-send work queued (job {JobId}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                 job.JobId, communicationId, correlationId);
             return true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception ex)
         {
             _logger.LogWarning(
                 "Post-send work could not be queued ({ExceptionType}); running it inline | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",

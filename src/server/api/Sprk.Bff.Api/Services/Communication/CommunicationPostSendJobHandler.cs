@@ -21,8 +21,10 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <param name="Archive">True when the send decided to archive the .eml (D-217 or <c>ArchiveToSpe</c>, and the sender's opt-in).</param>
 /// <param name="Enrich">True when the send would have enriched the email inline.</param>
 /// <param name="CreateThreadPrivate">The one fact not on the row: a thread this email creates is created Private (task 176, D-216).</param>
+/// <param name="SenderSystemUserId">The sending systemuser the request resolved (the row's <c>sprk_sentby</c> as written). The archive
+/// bell goes to it when the row names no sender (ontology-r1 condition b). Null when the send resolved none.</param>
 public sealed record CommunicationPostSendPayload(
-    Guid CommunicationId, Guid? RequestedByObjectId, bool Archive, bool Enrich, bool CreateThreadPrivate);
+    Guid CommunicationId, Guid? RequestedByObjectId, bool Archive, bool Enrich, bool CreateThreadPrivate, Guid? SenderSystemUserId = null);
 
 /// <summary>Event ids of <see cref="CommunicationPostSendJobHandler"/>.</summary>
 public static class CommunicationPostSendEvents
@@ -45,6 +47,10 @@ public static class CommunicationPostSendEvents
     /// <summary>Error: the archive bell could not be created (no sender on the row, or the create faulted); the communication id is the
     /// discoverable state.</summary>
     public static readonly EventId ArchiveBellNotCreated = new(50425, nameof(ArchiveBellNotCreated));
+
+    /// <summary>Error: a step faulted on the job's final delivery; no retry will be made (the archive bell follows when the .eml was not
+    /// archived).</summary>
+    public static readonly EventId PostSendFailedFinal = new(50426, nameof(PostSendFailedFinal));
 }
 
 /// <summary>
@@ -189,15 +195,29 @@ public class CommunicationPostSendJobHandler : IJobHandler
             return JobOutcome.Failure(job.JobId, JobType, LockRefusedError, job.Attempt, stopwatch.Elapsed);
         }
 
+        var state = new RunState();
         try
         {
-            return await RunAsync(job, payload, stopwatch, ct).ConfigureAwait(false);
+            return await RunAsync(job, payload, state, stopwatch, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(CommunicationPostSendEvents.PostSendRetry,
-                "[COMM-POSTSEND] job {JobId}: the post-send work of communication {CommunicationId} failed ({ExceptionType}); it will be " +
-                "redelivered (attempt {Attempt}, delivery {Delivery}).", job.JobId, id, ex.GetType().Name, job.Attempt, job.DeliveryCount);
+            if (!job.IsFinalDelivery)
+            {
+                _logger.LogWarning(CommunicationPostSendEvents.PostSendRetry,
+                    "[COMM-POSTSEND] job {JobId}: the post-send work of communication {CommunicationId} failed ({ExceptionType}); it will be " +
+                    "redelivered (attempt {Attempt}, delivery {Delivery}).", job.JobId, id, ex.GetType().Name, job.Attempt, job.DeliveryCount);
+                return JobOutcome.Failure(job.JobId, JobType, ex.GetType().Name, job.Attempt, stopwatch.Elapsed);
+            }
+
+            // Run 3 (review F1): the final delivery is never redelivered. Say so at Error, and when the .eml was not archived, the sender
+            // still gets the one archive bell (a fault outside the archive must not lose it).
+            _logger.LogError(CommunicationPostSendEvents.PostSendFailedFinal,
+                "[COMM-POSTSEND] job {JobId}: the post-send work of communication {CommunicationId} failed on its final delivery and will not " +
+                "be retried ({ExceptionType}, archive completed {ArchiveCompleted}, correlation {CorrelationId}).",
+                job.JobId, id, ex.GetType().Name, state.ArchiveCompleted, job.CorrelationId);
+            if (payload.Archive && !state.ArchiveCompleted)
+                await BellArchiveFailedOnceAsync(job, payload, state.Row, ct).ConfigureAwait(false);
             return JobOutcome.Failure(job.JobId, JobType, ex.GetType().Name, job.Attempt, stopwatch.Elapsed);
         }
         finally
@@ -207,7 +227,18 @@ public class CommunicationPostSendJobHandler : IJobHandler
         }
     }
 
-    private async Task<JobOutcome> RunAsync(JobContract job, CommunicationPostSendPayload payload, Stopwatch stopwatch, CancellationToken ct)
+    /// <summary>What one delivery got done, read by <see cref="ProcessAsync"/> when a step faults (run 3, review F1).</summary>
+    private sealed class RunState
+    {
+        /// <summary>The communication row, once read.</summary>
+        public Entity? Row { get; set; }
+
+        /// <summary>True once the .eml is archived (archived now, or found already archived).</summary>
+        public bool ArchiveCompleted { get; set; }
+    }
+
+    private async Task<JobOutcome> RunAsync(
+        JobContract job, CommunicationPostSendPayload payload, RunState state, Stopwatch stopwatch, CancellationToken ct)
     {
         var id = payload.CommunicationId;
         var key = KeyFor(id);
@@ -221,6 +252,8 @@ public class CommunicationPostSendJobHandler : IJobHandler
         {
             row = null;
         }
+
+        state.Row = row;
 
         if (row is null)
         {
@@ -260,6 +293,7 @@ public class CommunicationPostSendJobHandler : IJobHandler
                     archiveLockOwner: job.JobId.ToString("N", CultureInfo.InvariantCulture)).ConfigureAwait(false);
                 archivedDocumentId = result.ArchiveDocumentId;
                 archiveStep = result.AlreadyArchived ? "already-archived" : "archived";
+                state.ArchiveCompleted = true;
             }
             catch (SdapProblemException ex) when ((ex.StatusCode == 409 && ex.Code != CommunicationService.ArchiveInProgressCode) || ex.Code == "ARCHIVE_NOT_CONFIGURED")
             {
@@ -269,19 +303,19 @@ public class CommunicationPostSendJobHandler : IJobHandler
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 var code = (ex as SdapProblemException)?.Code;
-                if (job.IsFinalDelivery)
+
+                // Run 3 (K2): another archive held the lock (409 archive_in_progress). When it finished meanwhile, the .eml is saved: not
+                // a failure (no retry, no bell). Otherwise the 409 is retried, and on the final delivery bells as any archive failure.
+                if (code == CommunicationService.ArchiveInProgressCode && await ArchivedMeanwhileAsync(id, ct).ConfigureAwait(false) is { } archivedMeanwhile)
                 {
-                    LogArchiveFailedFinal(job, id, ex.GetType().Name, code);
+                    archivedDocumentId = archivedMeanwhile;
+                    archiveStep = "already-archived";
+                    state.ArchiveCompleted = true;
                 }
                 else
                 {
-                    _logger.LogWarning(CommunicationPostSendEvents.PostSendRetry,
-                        "[COMM-POSTSEND] job {JobId}: the .eml of communication {CommunicationId} was not archived ({ExceptionType}, {ErrorCode}); " +
-                        "it will be redelivered (attempt {Attempt}, delivery {Delivery}).",
-                        job.JobId, id, ex.GetType().Name, code, job.Attempt, job.DeliveryCount);
+                    archiveFailure = ArchiveFailed(job, id, ex, code, stopwatch);
                 }
-
-                archiveFailure = JobOutcome.Failure(job.JobId, JobType, ex.GetType().Name, job.Attempt, stopwatch.Elapsed);
             }
         }
 
@@ -314,7 +348,7 @@ public class CommunicationPostSendJobHandler : IJobHandler
         {
             // 6. A final archive failure (the last delivery, or a fault no retry can fix): ONE bell to the sender (D-216 as amended).
             if (archiveFailure.Status == JobStatus.Poisoned || job.IsFinalDelivery)
-                await BellArchiveFailedOnceAsync(job, id, row, ct).ConfigureAwait(false);
+                await BellArchiveFailedOnceAsync(job, payload, row, ct).ConfigureAwait(false);
             return archiveFailure;
         }
 
@@ -323,6 +357,25 @@ public class CommunicationPostSendJobHandler : IJobHandler
             "[COMM-POSTSEND] job {JobId} done: communication {CommunicationId}: thread {ThreadStep}, archive {ArchiveStep}, enrichment " +
             "{EnrichStep}, arrived {ArrivedStep}.", job.JobId, id, threadStep, archiveStep, enrichStep, arrivedStep);
         return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+    }
+
+    /// <summary>An archive fault a retry may fix: a Warning before the final delivery, the <see cref="CommunicationPostSendEvents.ArchiveFailedFinal"/>
+    /// Error on it.</summary>
+    private JobOutcome ArchiveFailed(JobContract job, Guid id, Exception ex, string? code, Stopwatch stopwatch)
+    {
+        if (job.IsFinalDelivery)
+        {
+            LogArchiveFailedFinal(job, id, ex.GetType().Name, code);
+        }
+        else
+        {
+            _logger.LogWarning(CommunicationPostSendEvents.PostSendRetry,
+                "[COMM-POSTSEND] job {JobId}: the .eml of communication {CommunicationId} was not archived ({ExceptionType}, {ErrorCode}); " +
+                "it will be redelivered (attempt {Attempt}, delivery {Delivery}).",
+                job.JobId, id, ex.GetType().Name, code, job.Attempt, job.DeliveryCount);
+        }
+
+        return JobOutcome.Failure(job.JobId, JobType, ex.GetType().Name, job.Attempt, stopwatch.Elapsed);
     }
 
     /// <summary>Enrichment, at most once: skipped after its marker, and when a <c>sprk_emailreviewlog</c> row already names the
@@ -334,14 +387,15 @@ public class CommunicationPostSendJobHandler : IJobHandler
         if (await _idempotency.IsEventProcessedAsync(enrichedKey, ct).ConfigureAwait(false))
             return "already-enriched";
 
-        if (await HasReviewRowsAsync(id, ct).ConfigureAwait(false))
-        {
-            await _idempotency.MarkEventAsProcessedAsync(enrichedKey, MarkerRetention, CancellationToken.None).ConfigureAwait(false);
-            return "already-enriched";
-        }
-
         try
         {
+            // Run 3 (review F1): the review-row read is part of the best-effort enrichment; its fault never fails the job.
+            if (await HasReviewRowsAsync(id, ct).ConfigureAwait(false))
+            {
+                await _idempotency.MarkEventAsProcessedAsync(enrichedKey, MarkerRetention, CancellationToken.None).ConfigureAwait(false);
+                return "already-enriched";
+            }
+
             var (message, _) = await _communication.ReconstructEnvelopeAsync(id, ct).ConfigureAwait(false);
             await _enrichment.EnrichAsync(id, CommunicationDirection.Outgoing, message, archivedDocumentId, ct).ConfigureAwait(false);
         }
@@ -378,18 +432,26 @@ public class CommunicationPostSendJobHandler : IJobHandler
     /// answers that the recipient holds Read and AppendTo on it (the manual Save to SharePoint needs AppendTo); otherwise, or with no
     /// answer, it has no link and no regarding record (fail closed). Fixed text: no record name and no subject (D-123).
     /// </summary>
-    private async Task BellArchiveFailedOnceAsync(JobContract job, Guid id, Entity row, CancellationToken ct)
+    /// <remarks>Ontology-r1 conditions (run 3): when the row names no sender (or could not be read), the bell goes to the sending
+    /// systemuser the request resolved (<see cref="CommunicationPostSendPayload.SenderSystemUserId"/>), with the same rights check;
+    /// with neither, no bell and one Error naming the communication and correlation ids (known limit: the user is not told).</remarks>
+    private async Task BellArchiveFailedOnceAsync(JobContract job, CommunicationPostSendPayload payload, Entity? row, CancellationToken ct)
     {
+        var id = payload.CommunicationId;
         var bellKey = ArchiveBellKeyFor(id);
         try
         {
             if (await _idempotency.IsEventProcessedAsync(bellKey, ct).ConfigureAwait(false))
                 return;
 
-            if (row.GetAttributeValue<EntityReference>("sprk_sentby") is not { Id: var sentBy } || sentBy == Guid.Empty)
+            var sentBy = row?.GetAttributeValue<EntityReference>("sprk_sentby")?.Id is { } rowSender && rowSender != Guid.Empty
+                ? rowSender
+                : payload.SenderSystemUserId ?? Guid.Empty;
+            if (sentBy == Guid.Empty)
             {
                 _logger.LogError(CommunicationPostSendEvents.ArchiveBellNotCreated,
-                    "[COMM-POSTSEND] job {JobId}: communication {CommunicationId} names no sender, so no archive bell was raised.", job.JobId, id);
+                    "[COMM-POSTSEND] Archive bell not raised: no sender for communication {CommunicationId} (correlation {CorrelationId}, job {JobId}).",
+                    id, job.CorrelationId, job.JobId);
                 return;
             }
 
@@ -417,6 +479,20 @@ public class CommunicationPostSendJobHandler : IJobHandler
             _logger.LogError(CommunicationPostSendEvents.ArchiveBellNotCreated,
                 "[COMM-POSTSEND] job {JobId}: the archive bell for communication {CommunicationId} was not created ({ExceptionType}).",
                 job.JobId, id, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Run 3 (K2): after a 409 archive_in_progress, the archive Document another archive created meanwhile, or null (also when
+    /// the lookup faults: the 409 then stands).</summary>
+    private async Task<Guid?> ArchivedMeanwhileAsync(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            return await _communication.FindExistingArchiveDocumentAsync(id, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return null;
         }
     }
 
