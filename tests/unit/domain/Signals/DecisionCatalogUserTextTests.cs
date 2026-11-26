@@ -15,8 +15,8 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 public class DecisionCatalogUserTextTests
 {
     private static readonly Regex DeveloperWording = new(
-        @"\(D-\d|\bD-\d+\b|\bthe user\b|\bFR-\d|\bNFR-\d|\b[Tt]ask \d{2,3}\b",
-        RegexOptions.CultureInvariant);
+        @"\(D-\d|\bD-\d+\b|\bthe user\b|\bFR-\d|\bNFR-\d|\btask \d{2,3}\b|\bADR-\d|\bDI-\d",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     /// <summary>Every user-visible string of every catalog definition: labels, parameter labels, hints, option labels, effect lines.</summary>
     private static IEnumerable<(string Where, string Text)> UserVisibleStrings()
@@ -80,6 +80,9 @@ public class DecisionCatalogUserTextTests
     [InlineData("Pre-selected when the matter has one budget; the user picks one when it has several (D-18)")]
     [InlineData("Shown to the user (D-7)")]
     [InlineData("Per FR-49 the wizard asks")]
+    [InlineData("The user picks one when it has several")]
+    [InlineData("Allowed by ADR-039 for this lane")]
+    [InlineData("Deferred as DI-82")]
     public void TheScan_FiresOnDeveloperWording(string sample) => DeveloperWording.IsMatch(sample).Should().BeTrue();
 
     [Theory]
