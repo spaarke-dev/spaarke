@@ -6,6 +6,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -263,7 +265,8 @@ class WordProbeTests(unittest.TestCase):
             for skill in wp.SKILLS:
                 self.assertIn(f"skills/{skill}/SKILL.md", names)
             for skill, code in (("spaarke-word-probe", wp.INSTRUCTION_CODE),
-                                ("spaarke-word-probe-script", wp.SCRIPT_CODE)):
+                                ("spaarke-word-probe-script", wp.SCRIPT_CODE),
+                                ("spaarke-word-probe-js", wp.JS_CODE)):
                 text = z.read(f"skills/{skill}/SKILL.md").decode("utf-8")
                 front, body = text.split("\n---\n", 1)
                 self.assertNotIn(code, front, "a code in the description proves nothing: Word lists descriptions")
@@ -283,6 +286,54 @@ class WordProbeTests(unittest.TestCase):
             value = str(wp.probe_value())
             self.assertFalse(any(value in z.read(n).decode("utf-8", "ignore") for n in z.namelist()),
                              "the expected value must be computed, never stored in the plugin")
+
+    def test_js_probe_is_instructions_only_and_its_hash_is_computed_not_stored(self):
+        import build_word_probe as wp
+        self.assertEqual(wp.fnv1a32(""), "811c9dc5")   # FNV-1a 32-bit reference vectors
+        self.assertEqual(wp.fnv1a32("a"), "e40c292c")
+        with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(wp.build(tmp)) as z:
+            names = z.namelist()
+            self.assertFalse(any(n.startswith("skills/spaarke-word-probe-js/scripts/") for n in names),
+                             "Word desktop loads no skill that ships scripts (WP-1): the code goes in SKILL.md")
+            body = z.read("skills/spaarke-word-probe-js/SKILL.md").decode("utf-8")
+            self.assertIn(wp.JS_PROBE, body)
+            digest = wp.js_marker().split()[-1]
+            self.assertFalse(any(digest in z.read(n).decode("utf-8", "ignore") for n in names),
+                             "the marker hash must be computed by the code, never stored in the plugin")
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js to run the probe's JavaScript against a stub")
+    def test_js_probe_runs_against_a_word_stub_and_returns_the_python_marker(self):
+        import build_word_probe as wp
+        harness = """
+const calls = [];
+const rng = (label) => ({
+  insertText: (t, loc) => { calls.push(['insertText', label, t, loc]); return rng(t); },
+  insertComment: (t) => { calls.push(['insertComment', label, t]); },
+});
+const doc = { changeTrackingMode: 'Off', load: () => {},
+  body: { insertParagraph: (t, loc) => { calls.push(['insertParagraph', t, loc, doc.changeTrackingMode]);
+    return { search: (w, o) => { calls.push(['search', w, o.matchCase, o.matchWholeWord]);
+      return { load: () => {}, items: [rng(w)] }; } }; } } };
+const context = { document: doc, sync: async () => { calls.push(['sync', doc.changeTrackingMode]); } };
+globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' },
+  run: async (cb) => { const r = await cb(context); console.log(JSON.stringify({ r, calls, end: doc.changeTrackingMode })); } };
+(async () => { %s })();
+""" % wp.JS_PROBE
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "probe.js")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(harness)
+            out = subprocess.run(["node", path], capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        res = json.loads(out.stdout)
+        self.assertEqual(res["r"], f"Spaarke JS probe ran: {wp.js_marker()}")
+        calls = res["calls"]
+        para = next(c for c in calls if c[0] == "insertParagraph")
+        self.assertEqual(para[3], "Off", "the test paragraph is added untracked, so the replacement is the redline")
+        self.assertIn(["insertText", "bravo", "charlie", "Replace"], calls)
+        self.assertIn(["insertComment", "charlie", f"Spaarke JS probe comment {wp.js_marker()}"], calls)
+        self.assertIn(["sync", "TrackAll"], calls)
+        self.assertEqual(res["end"], "Off", "the user's tracking mode is put back")
 
 
 if __name__ == "__main__":
