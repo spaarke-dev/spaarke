@@ -1,15 +1,15 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (owner answers applied; 005, 008, 030 done; 037/038 added; 033 and 038 running; draft PR #3259)
+> **Last Updated**: 2026-11-26 (checkpoint at 85%: 038 F4 needs owner; 033 has 4 F to fix; file-probe rebuilt on dev SHA)
 > **Phase**: Phase 0 code complete except 012 live check. Phase 1 code complete. Phase 2: 030, 031, 034, 035 done; 033, 038 running; 037 next; 032 escalated; 036 waits on #3181.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **State** | Done today: 030, 005 (schema on dev), 008 (Path A; two opus passes plus uac-r2, ebilling-r1 and ontology-r1: no blocking; CAPABILITY-INDEX 52). 012's dev PATCH is applied; its live-run check moves to 039. ADR-052 amendment ACCEPTED (owner sign-off). New tasks 037 (run-results widget) and 038 (instructions argument). Draft PR #3259 is open for the consumer typecheck (CI pending). 032 stopped at its escalation (notes/032-decisions.md). Running in sub-agents: 038, 033. |
-| **Next (exact)** | (1) Merge and verify 038, then 033 (two passes each, uac-r2 re-check), when each agent reports. (2) Start 037 after 038 merges. (3) Read #3259's client-typecheck result. (4) Owner: #3181 (a or b), E1, NFR-05 wording, 032 option. (5) 036 waits on #3181; 039 waits on 019/029 and E1. |
-| **Uncommitted** | None after this commit. |
+| **State** | Done: 005, 008, 030 (board 23). Merged, not yet marked done: **038** (d6074501e7) and **033** (ac0ea5fe34). **038 review: F4.** The `instructions` reach PlaybookRunRequest.UserContext, but NO prompt builder reads UserContext (GenericAnalysisHandler and PromptContextHelper ignore it), so the feature does nothing. Fixing it needs an engine edit (ADR-039, owner): (a) approve one edit appending a "User focus" block in PromptContextHelper/GenericAnalysisHandler, or (b) withdraw the argument. Also a pre-existing F: chat "rerun with additional instructions" (AnalysisExecutionHandler.cs:268-278,376-378) claims instructions it ignores; file an issue. **033 review pass 1: no F** (K1 audience test refused by JwtBearer, not A10; K2 non-GUID 400 vs REST 404). **033 pass 2: 4 F**, all to fix: F1 "under budget" when no budget (GetMatterFinanceTool.cs:245); F4 FinanceSummaryService.cs:267-270 logs CurrentSpend (pre-existing, on the tool path: remove); F2 EB-D-194 scan misses InvoiceLineDecisionService etc. and its control proves nothing (switch to an allowlist plus a seeded must-fire); F2 no test of signal severity/time. File-probe spike: `spike/spe-file-probe` e05c209fda (master-based) and **`spike/spe-file-probe-on-specialist` 9e8f0ca8e0** (on dev's current SHA d307d67e36, keeps the specialist spike tools; 277/277 MCP tests). Worktree C:\tmp\wtprobe (remove with Remove-WorktreeSafe.ps1). Draft PR #3259 (CI). |
+| **Next (exact)** | (1) Launch an implementer to fix 033's 4 F findings on the work branch, then re-check. (2) Owner: 038 option (a) engine edit or (b) withdraw; file the rerun-instructions issue. (3) Owner: deploy go for file-probe 9e8f0ca8e0 through uac-r2 (tell uac-r2 it layers on d307d67e36). (4) 037 waits until 038 settles. (5) Still open: #3181 a/b, E1, NFR-05 wording, 032 option. |
+| **Uncommitted** | None. |
 | **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
 
 ## Status (TASK-INDEX is authoritative)
