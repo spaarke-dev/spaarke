@@ -306,7 +306,7 @@ Owner and ontology choose: (1) amend the spec text (the stamp sets the review st
 
 | Field | Value |
 |---|---|
-| **Status** | Fix in review: draft PR #2622 (`30b887c710`), defect CONFIRMED 2026-11-07 by a test that fails before the fix and passes after; awaiting Compose owners' review |
+| **Status** | Fix in review: PR #2622, updated from master 2026-11-26 (`605438d64f`, no conflicts, defect still on master, 5/5 regression tests pass and fail without the fix). No reviewer yet; owner checklist item H. |
 | **Urgency** | now |
 | **Filed** | 2026-11-07 |
 | **Source** | Read-only investigation for task 010 (option C analysis), 2026-11-06 |
