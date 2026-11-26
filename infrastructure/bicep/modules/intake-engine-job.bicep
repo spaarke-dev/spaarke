@@ -9,15 +9,22 @@
 //   The BFF run job stages the source .docx and edit plan in blob storage (intake-staging-storage.bicep) and
 //   sends an ids-only Job Contract envelope to `requestQueueName`. A KEDA `azure-servicebus` scale rule sees
 //   the message and starts one execution; the execution runs the engines, writes outputs to deterministic
-//   staging paths and sends a completion Job Contract to the BFF's EXISTING jobs queue (`jobsQueueName`,
-//   ServiceBusJobProcessor consumes one queue only; no completion queue is created here). Service Bus
-//   redelivery is the retry: replicaRetryLimit is 0 and the 10-minute replicaTimeout is a hard stop.
+//   staging paths and sends a completion Job Contract to its OWN completion queue (`completionQueueName`,
+//   created here). The BFF consumes that queue with a dedicated processor that accepts only
+//   `IntakeEngineCompleted` and dead-letters anything else (task 014, CommunicationJobProcessor pattern).
+//   The engine never sends to a BFF queue: Service Bus Data Sender is per queue, not per message type, and a
+//   message does not carry its sender's identity, so send rights on `sdap-jobs` would let a compromised engine
+//   enqueue ANY BFF job type. Service Bus redelivery is the retry: replicaRetryLimit is 0 and the 10-minute
+//   replicaTimeout is a hard stop.
 //
 // IDENTITY (ADR-028) -- NO KEYS ANYWHERE
-//   The Job runs as the stamp's EXISTING user-assigned managed identity (modules/uami.bicep, passed in; no
-//   identity is created here). The KEDA scaler authenticates with that identity (`identity` on the scale rule,
-//   so the scaler needs no secret or connection string), the registry pull uses it, and the containers
-//   reach Service Bus and blob storage with it (DefaultAzureCredential + AZURE_CLIENT_ID). No listKeys(),
+//   The Job runs as its OWN user-assigned managed identity (customer.bicep `uamiIntakeEngine`, passed in), never
+//   the stamp UAMI: that one is the BFF's identity (System Administrator in Dataverse, Graph roles, namespace-wide
+//   Service Bus, Key Vault, Search, OpenAI), and this Job parses untrusted .docx from any intake sender with
+//   lxml. A parser exploit must reach only what is listed under RBAC below. The KEDA scaler authenticates with
+//   the Job identity (`identity` on the scale rule, so the scaler needs no secret or connection string), the
+//   registry pull uses it, and the containers reach Service Bus and blob storage with it
+//   (DefaultAzureCredential + AZURE_CLIENT_ID). No listKeys(),
 //   no SAS, no connection string, no secret output (CustomerStampKeylessTemplateTests). The managed
 //   environment sends logs to Log Analytics through a diagnostic setting (destination azure-monitor), NOT the
 //   `customerId` + shared-key pair that appLogsConfiguration.logAnalyticsConfiguration takes -- that pair
@@ -27,17 +34,18 @@
 //   secret and read with secretRef, not placed in the plain configuration.
 //
 // RBAC -- exactly these, each at QUEUE (or registry) scope, nothing namespace-wide
+//   Job identity (the whole of its Azure access):
 //   - Azure Service Bus Data Receiver on the request queue      (consume)
 //   - Azure Service Bus Data Sender   on the request queue      (retry copy: a scheduled copy carrying
 //                                                                PriorDeliveryCount, like ServiceBusJobProcessor)
-//   - Azure Service Bus Data Sender   on the BFF jobs queue     (completion message only)
+//   - Azure Service Bus Data Sender   on the completion queue   (completion message)
 //   - AcrPull on the registry                                   (optional grant, see registry note below)
-//   Blob access is granted in intake-staging-storage.bicep (container scope).
-//   NOTE: the stamp UAMI ALSO holds namespace-wide Service Bus Sender + Receiver for the BFF
-//   (modules/bff-runtime-rbac.bicep), so on a stamp the queue-scoped grants here are a documented contract,
-//   not a narrowing; real least privilege needs a dedicated job identity, which this module accepts unchanged
-//   (it takes the identity as parameters). Task brief and design say "the stamp's managed identity", so the
-//   stamp UAMI is what customer.bicep passes.
+//   - Storage Blob Data Contributor on the staging container    (intake-staging-storage.bicep)
+//   BFF identity (`bffPrincipalId`, the stamp UAMI):
+//   - Azure Service Bus Data Sender   on the request queue      (dispatch)
+//   - Azure Service Bus Data Receiver on the completion queue   (consume completions)
+//   The stamp UAMI also holds namespace-wide Sender + Receiver (modules/bff-runtime-rbac.bicep); the two BFF
+//   grants here keep the engine pipeline's contract self-contained if that is ever narrowed.
 //
 // REGISTRY (escalation trigger 2 in the task): this module never CREATES a registry. `registryName` names an
 //   EXISTING registry in this resource group; with `grantAcrPull` true (default) the identity gets AcrPull on
@@ -45,9 +53,9 @@
 //   and grant the identity AcrPull there (controlplane-acr.bicep `controlPlaneUamiPrincipalId`). Which
 //   registry a stamp uses is owed by customer-provisioning-orchestration-r1 and the owner.
 //
-// QUEUE
+// QUEUES (request + completion)
 //   Created here (not in the shared stamp queue list) because service-bus.bicep gives every queue
-//   maxDeliveryCount 10 and no per-queue settings; the engine queue needs 5 (JobContract.MaxDeliveryCount).
+//   maxDeliveryCount 10 and no per-queue settings; both need 5 (JobContract.MaxDeliveryCount).
 //   Duplicate detection is OFF, like every BFF queue (JobQueueDuplicateDetectionOffGuardTests); idempotency is
 //   the engine's atomic blob marker (ADR-004 A2).
 //
@@ -72,19 +80,23 @@ param serviceBusNamespaceName string
 @description('Engine request queue created here. The engine pipeline contract: the BFF run job sends to it, the Job consumes it.')
 param requestQueueName string = 'intake-engine-requests'
 
-@description('The BFF jobs queue the completion message goes to (the one ServiceBusJobProcessor consumes). Existing; the identity gets Data Sender on it only.')
-param jobsQueueName string = 'sdap-jobs'
+@description('Engine completion queue created here. The Job sends completions to it; the BFF consumes it with a processor that accepts only IntakeEngineCompleted (task 014).')
+param completionQueueName string = 'intake-engine-completions'
 
-@description('Resource id of the stamp user-assigned managed identity (uami.outputs.id). The Job runs as it.')
+@description('Resource id of the Job\'s OWN user-assigned managed identity (customer.bicep uamiIntakeEngine). Never the stamp UAMI.')
 param identityResourceId string
 
-@description('Principal (object) id of the same identity (uami.outputs.principalId) for the RBAC grants.')
+@description('Principal (object) id of the Job identity, for its RBAC grants.')
 @minLength(36)
 param identityPrincipalId string
 
-@description('Client id of the same identity (uami.outputs.clientId), exposed to the container as AZURE_CLIENT_ID so DefaultAzureCredential picks the user-assigned identity.')
+@description('Client id of the Job identity, exposed to the container as AZURE_CLIENT_ID so DefaultAzureCredential picks it.')
 @minLength(36)
 param identityClientId string
+
+@description('Principal (object) id of the BFF identity (the stamp UAMI). Granted Sender on the request queue and Receiver on the completion queue.')
+@minLength(36)
+param bffPrincipalId string
 
 @description('Name of an EXISTING Azure Container Registry in this resource group that holds the engine image. Never created here.')
 @minLength(5)
@@ -147,11 +159,6 @@ resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview
   name: serviceBusNamespaceName
 }
 
-resource jobsQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' existing = {
-  parent: serviceBusNamespace
-  name: jobsQueueName
-}
-
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: registryName
 }
@@ -171,6 +178,22 @@ resource requestQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview
     defaultMessageTimeToLive: 'P14D'
     deadLetteringOnMessageExpiration: true
     // JobContract.MaxDeliveryCount (ADR-004): the 5th failed delivery dead-letters.
+    maxDeliveryCount: 5
+    enablePartitioning: false
+  }
+}
+
+// Same shape. The BFF completion processor finishes in seconds; the 5-minute lock matches the BFF queues.
+resource completionQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: serviceBusNamespace
+  name: completionQueueName
+  properties: {
+    lockDuration: 'PT5M'
+    maxSizeInMegabytes: 1024
+    requiresDuplicateDetection: false
+    requiresSession: false
+    defaultMessageTimeToLive: 'P14D'
+    deadLetteringOnMessageExpiration: true
     maxDeliveryCount: 5
     enablePartitioning: false
   }
@@ -202,14 +225,36 @@ resource senderOnRequestQueue 'Microsoft.Authorization/roleAssignments@2022-04-0
   }
 }
 
-resource senderOnJobsQueue 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: jobsQueue
-  name: guid(jobsQueue.id, identityPrincipalId, serviceBusDataSenderRoleId)
+resource senderOnCompletionQueue 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: completionQueue
+  name: guid(completionQueue.id, identityPrincipalId, serviceBusDataSenderRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusDataSenderRoleId)
     principalId: identityPrincipalId
     principalType: 'ServicePrincipal'
-    description: 'Intake engine Job sends the completion Job Contract to the BFF jobs queue only (task 002)'
+    description: 'Intake engine Job sends the completion Job Contract to its own completion queue (task 002)'
+  }
+}
+
+resource bffSenderOnRequestQueue 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: requestQueue
+  name: guid(requestQueue.id, bffPrincipalId, serviceBusDataSenderRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusDataSenderRoleId)
+    principalId: bffPrincipalId
+    principalType: 'ServicePrincipal'
+    description: 'BFF dispatches engine runs to the engine request queue (spaarke-intake-pipeline-r1 task 014)'
+  }
+}
+
+resource bffReceiverOnCompletionQueue 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: completionQueue
+  name: guid(completionQueue.id, bffPrincipalId, serviceBusDataReceiverRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', serviceBusDataReceiverRoleId)
+    principalId: bffPrincipalId
+    principalType: 'ServicePrincipal'
+    description: 'BFF consumes engine completions from the engine completion queue (spaarke-intake-pipeline-r1 task 014)'
   }
 }
 
@@ -334,11 +379,11 @@ resource engineJob 'Microsoft.App/jobs@2025-01-01' = {
             memory: memory
           }
           env: [
-            // DefaultAzureCredential selects the stamp UAMI.
+            // DefaultAzureCredential selects the Job's own identity.
             { name: 'AZURE_CLIENT_ID', value: identityClientId }
             { name: 'INTAKE_SERVICEBUS_FQDN', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
             { name: 'INTAKE_REQUEST_QUEUE', value: requestQueueName }
-            { name: 'INTAKE_COMPLETION_QUEUE', value: jobsQueueName }
+            { name: 'INTAKE_COMPLETION_QUEUE', value: completionQueueName }
             { name: 'INTAKE_STAGING_ACCOUNT_URL', value: 'https://${stagingStorageAccountName}.blob.${environment().suffixes.storage}' }
             { name: 'INTAKE_STAGING_CONTAINER', value: stagingContainerName }
             { name: 'INTAKE_MAX_DELIVERY_COUNT', value: '5' }
@@ -353,7 +398,7 @@ resource engineJob 'Microsoft.App/jobs@2025-01-01' = {
     // The registry pull and the scaler both use the identity: its grants must exist before the first execution.
     receiverOnRequestQueue
     senderOnRequestQueue
-    senderOnJobsQueue
+    senderOnCompletionQueue
     acrPull
   ]
 }
@@ -363,4 +408,4 @@ output environmentId string = managedEnvironment.id
 output jobName string = engineJob.name
 output jobId string = engineJob.id
 output requestQueueName string = requestQueue.name
-output completionQueueName string = jobsQueue.name
+output completionQueueName string = completionQueue.name

@@ -1,18 +1,19 @@
 # Current Task State — spaarke-intake-pipeline-r1
 
-> **Last Updated**: 2026-11-25 (Wave 0-1 closed)
-> **Phase**: Phase 0 executing. Wave 0-1 done (002, 003, 005, 007). Next: Wave 0-2.
+> **Last Updated**: 2026-11-25 (Wave 0-2 = 006 done; engine identity + completion queue reworked)
+> **Phase**: Phase 0 executing. Done: 002, 003, 005, 006, 007. Blocked on #3163: 001, 004.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
 | **Done** | 007 (ADR-004 A2, PR #3191 merged `d148580e15`), 003 (engine image CI, `554862fc68`), 002 (Bicep, `2aceaa97bb`, `deployIntakeEngine=false` by default), 005 (cleanup fixes, `534724704b` + `78783a5e36`; publish 41.608 MB, −0.006 MB). Stale handler references fixed in the same branch. BFF build 0/0; ArchTests 120/120; drift check clean |
-| **Open owner question** | Engine job identity: dedicated least-privilege UAMI (recommended — the job parses untrusted .docx from any intake sender with lxml; the stamp UAMI is the BFF identity with namespace-wide Service Bus rights and Graph/Dataverse/KV/OpenAI roles) vs the stamp UAMI as 002 built it. `intake-engine-job.bicep` takes the identity as parameters, so dedicated = new UAMI + its grants in `customer.bicep`. Ask before task 008 deploys |
-| **Next action** | Wave 0-2 = 004 (app-only edit plan; needs PR #3163 on master) + 006 (cleanup part 2: item 7 threaded reply + docs part of 8; same PR as 005). Check #3163 state first; if not merged, run 006 alone. Then 001 (engine container) after #3163 |
+| **Decided (owner, 2026-11-25)** | Engine job runs as its own identity `uamiIntakeEngine` (never the BFF/stamp UAMI); completions go to its own `intake-engine-completions` queue, consumed by a dedicated BFF `IntakeEngineCompletionProcessor` (task 014, `CommunicationJobProcessor` pattern) that treats completions as untrusted. Bicep reworked; customer.json regenerated; ArchTests 2831/2831, control-plane tests 3678 pass. Tasks 001/002/014/023 + spec/design/CLAUDE.md updated |
+| **Task 006** | Done (`5e22bb7a83`, `611f9afd72`): threaded reply via Graph createReply, 15 tests incl. seeded failure, publish −0.001 MB. **Pending owner:** the live test send (needs dev deploy OK, a named test recipient, the dev shared mailbox). Unproven: the server-send marker riding on the createReply message (Learn does not list `internetMessageHeaders` as PATCH-able on a draft); if Exchange drops it, server-send replies with attachments get re-filed by the inbound path. Not built (owner decision if wanted): reply-all; attachments > 3 MB (413 `reply_attachment_too_large`, no upload session). Notes: notes/006-threaded-reply.md |
+| **Next action** | The Phase 0 cleanup PR (005 + 006) can open once you OK it; the live 006 send follows a dev deploy. 001 and 004 wait on PR #3163 |
 | **Unresolved (spec)** | (1) Clean copy with prior markup → task 008 spike with the accelerator; (2) ADR-049 scope → `/adr-check` (090); (3) ontology columns on sprk_servicerequest → before 010 |
 | **External gates** | PR #3163 (engines on master) → 001, 004; eBilling UAT (ebilling-r1 task 163) → 050; ontology coordination → 010; Model 2 registry import (provisioning) → before any Model 2 rollout |
 | **Issues/PRs** | #3191 (A2, merged), #3162, #3200 (sidecar Trivy header, filed), #1920 (task 042), portfolio #3128 |
-| **Task 008 needs** | Registry choice is recorded (platform ACR, `intakeEngineGrantAcrPull=false` + AcrPull granted there); CI push leg needs the federated credential for the master subject + AcrPush (the workflow header lists them); first CI run is 003's acceptance criterion 5; tighten the 400 MB size ceiling after the first measured size |
+| **Task 008 needs** | AcrPull on the platform ACR for the engine identity (output `intakeEngineIdentityObjectId`, `intakeEngineGrantAcrPull=false`); the BFF app setting `ServiceBus__IntakeEngineCompletionQueueName=intake-engine-completions` on dev (the processor is off without it); registry choice is recorded (platform ACR); CI push leg needs the federated credential for the master subject + AcrPush (the workflow header lists them); first CI run is 003's acceptance criterion 5; tighten the 400 MB size ceiling after the first measured size |
 
 ## Decided 2026-11-25 (owner: "take the correct technical approach"; "ensure consistent with other components")
 - Engine wrapper uses hash-pinned azure-identity / azure-servicebus / azure-storage-blob (+ azure-monitor-opentelemetry). The engines stay stdlib + lxml.

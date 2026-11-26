@@ -199,7 +199,7 @@ The platform's C# engine (`ComposeShadowPatchEngine`) anchors by paragraph id, a
 **Conditions:**
 1. **A pure engine.** No BFF code, no AI, no secrets, no network beyond blob storage. It runs as the stamp's user-assigned managed identity, app-only, and never calls BFF endpoints (`ADR-052:66`).
 2. **The flow.** The BFF run job stages the source `.docx` and the edit plan in blob storage. A queue message carries ids only, never document content (ADR-004's payload rule, complied with as a claim check), and the job is triggered by a KEDA Service Bus scaler.
-   - **Staging storage** is the stamp's own storage account: a private container, readable only by the stamp's managed identity, with a lifecycle rule that deletes staged inputs and outputs after a short TTL (for example 7 days, past any retry or dead-letter window). The approved outputs are filed as `sprk_document`s, so the staged copies are never the record.
+   - **Staging storage** is the stamp's own storage account: a private container, readable only by the BFF identity and the engine job's own identity (owner 2026-11-25: the job never runs as the BFF identity), with a lifecycle rule that deletes staged inputs and outputs after a short TTL (for example 7 days, past any retry or dead-letter window). The approved outputs are filed as `sprk_document`s, so the staged copies are never the record.
    - **The job is an ADR-004 consumer outside the BFF** (ADR-004 A2). It accepts the Job Contract JSON envelope, takes an atomic marker (a conditional blob create keyed by `idempotencyKey`), writes outputs to deterministic paths, carries `correlationId`, and reports `Completed`/`Failed`/`Poisoned`. `MaxDeliveryCount` sends exhausted messages to a monitored dead-letter queue. The job runs `segment_clauses` / `ooxml_redline` / `summary_table` / `check_outputs` and writes the redline, external and clean `.docx` files plus the check report to blob storage. It then posts a completion message, and the BFF run job resumes at Persist. The engines' JSON-in/JSON-out CLI contract is the interface.
 3. **A Phase 0 spike proves the hosting:** start-up latency, a Python 3.11 + `lxml` image built from `src/accelerators/core/engines/` on master (after PR #3163; no copied engines), the managed-identity blob read and write, a CVE-clean image, and identical output to the accelerator's golden fixtures.
 4. **Coordinate with the accelerator.** Its design §6.3 plans "C# twins in the BFF". That changes to "the server hosts the same Python engines", and Cowork may later call this hosted engine through the connector.
@@ -310,7 +310,7 @@ Added 2026-11-25 at the start of execution. The canonical copy lives here; `spec
   - Exit path: ADR-052:79, behind an ADR-032 kill switch.
 - **Redline engines:** in a Container Apps Job, owner-approved 2026-11-25 (§5; ADR-052:76–77).
   - Why: heavy custom runtime (Python + `lxml`), isolation for untrusted `.docx` (F4), and no BFF code is needed.
-  - Guardrails: the stamp's managed identity, app-only, no BFF calls, per-stamp Bicep.
+  - Guardrails: its own least-privileged managed identity (not the BFF's; completions on its own queue), app-only, no BFF calls, per-stamp Bicep.
   - Dependencies: the engines use stdlib + `lxml`. Only the entrypoint layer uses the hash-pinned Azure SDKs, for lock renewal, explicit dead-lettering and conditional blob writes (decided 2026-11-25). No package is added to the BFF.
 - **Status emails and email return:** in the BFF, through the existing `CommunicationService`.
 - **MCP tools:** in the BFF's existing MCP server.

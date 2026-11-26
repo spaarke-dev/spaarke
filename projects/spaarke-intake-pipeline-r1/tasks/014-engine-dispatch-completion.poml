@@ -18,20 +18,24 @@
     <estimated-effort>6-8 hours</estimated-effort>
   </metadata>
 
-  <prompt>Connect the orchestrator to the engine job: stage the source `.docx` and the edit plan in the stamp-private staging container through `Infrastructure/Storage/BlobGateway.cs`, send an ids-only Job Contract to `intake-engine-requests`, handle the engine's completion Job Contract (arriving on the BFF jobs queue) to advance the run, and enforce a 10-minute hard timeout with a scheduled timeout message that fails the run with a reason if no completion arrived.</prompt>
+  <prompt>Connect the orchestrator to the engine job: stage the source `.docx` and the edit plan in the stamp-private staging container through `Infrastructure/Storage/BlobGateway.cs`, send an ids-only Job Contract to `intake-engine-requests`, consume the engine's completion Job Contract from its own queue `intake-engine-completions` with a dedicated processor that accepts only `IntakeEngineCompleted`, treat each completion as untrusted input, advance the run, and enforce a 10-minute hard timeout with a scheduled timeout message that fails the run with a reason if no completion arrived.</prompt>
   <role>SPAARKE platform developer. Expert in Service Bus (scheduled enqueue), Azure Blob with managed identity, ADR-004 jobs and claim-check staging. Follow ADRs strictly.</role>
-  <goal>`Services/Intake/Engine/IntakeEngineDispatcher.cs` (stage + dispatch, idempotent on run id), `IntakeEngineCompletionJobHandler.cs` (JobType `IntakeEngineCompleted`) and `IntakeEngineTimeoutJobHandler.cs` (JobType `IntakeEngineTimeout`), an engine-queue send and scheduled-enqueue method on `JobSubmissionService`, registered in `JobProcessingModule.cs`; deterministic staging paths `intake-staging/{runId}/in/…` and output paths `…/out/…` agreed with task 001; tests for dispatch, completion, duplicate completion, late completion after timeout, and timeout.</goal>
+  <goal>`Services/Intake/Engine/IntakeEngineDispatcher.cs` (stage + dispatch, idempotent on run id), `IntakeEngineCompletionJobHandler.cs` (JobType `IntakeEngineCompleted`), `IntakeEngineCompletionProcessor.cs` (hosted Service Bus consumer of `intake-engine-completions`, copied from `CommunicationJobProcessor`) and `IntakeEngineTimeoutJobHandler.cs` (JobType `IntakeEngineTimeout`), an engine-queue send and scheduled-enqueue method on `JobSubmissionService`, registered in `JobProcessingModule.cs`; deterministic staging paths `intake-staging/{runId}/in/…` and output paths `…/out/…` agreed with task 001; tests for dispatch, completion, duplicate completion, late completion after timeout, and timeout.</goal>
 
   <context>
-    <background>Spec FR-07, FR-09 (engine step), NFR-03 (claim check, no content in messages/logs, 7-day TTL), NFR-05 (hard timeout → held/failed with admin attention), NFR-06 (correlationId BFF → queue → job → completion); ADR-004 A2 §3. Task 002 creates `intake-engine-requests` and grants the job MI Sender on the BFF jobs queue: the engine's completion is a Job Contract on the BFF jobs queue, consumed by `ServiceBusJobProcessor` (single queue, `ServiceBusJobProcessor.cs:61,79`) — no new hosted processor. The envelope fields and output-path convention are defined by task 001's `entrypoint/envelope.py`. The NDA harness (015) calls the dispatcher from its Build stage; 013 owns the run state transitions this task's handlers trigger.</background>
+    <background>Spec FR-07, FR-09 (engine step), NFR-03 (claim check, no content in messages/logs, 7-day TTL), NFR-05 (hard timeout → held/failed with admin attention), NFR-06 (correlationId BFF → queue → job → completion); ADR-004 A2 §3. Task 002 creates `intake-engine-requests` and `intake-engine-completions` and runs the job as its OWN identity (never the stamp/BFF identity), with Sender on the completion queue and no right on any BFF queue (owner 2026-11-25: Service Bus Data Sender is per queue, not per message type, and a message does not carry its sender's identity, so send rights on `sdap-jobs` would let a compromised engine enqueue any BFF job type). The BFF consumes the completion queue with a dedicated processor, the per-domain pattern `CommunicationJobProcessor` already uses for `sdap-communication`: a closed `JobType` switch, anything else dead-lettered `WrongQueue`. The timeout message is the BFF's own and goes to the BFF jobs queue as before. The envelope fields and output-path convention are defined by task 001's `entrypoint/envelope.py`. The NDA harness (015) calls the dispatcher from its Build stage; 013 owns the run state transitions this task's handlers trigger.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineDispatcher.cs</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineCompletionJobHandler.cs</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineTimeoutJobHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineCompletionProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs (add `IntakeEngineCompletionQueueName`, default empty, beside `CommunicationQueueName` :58)</file>
       <file role="new">tests/integration/seam/Intake/IntakeEngineDispatchSeamTests.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs (engine-queue send + scheduled enqueue; :46, :84)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/IntakePipelineOptions.cs (engine queue name, staging container, timeout; from task 013)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationJobProcessor.cs (the processor to copy: dedicated queue, closed JobType switch :148-165, `WrongQueue` dead-letter, `JobMessageRetry.RetrySender` for retry copies, logical delivery count)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs:654 (hosted-processor registration)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Storage/BlobGateway.cs:148 (BlobGateway), :201 (AzureBlobGateway), :18 (BlobEndpointRules)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs:485 (managed-identity BlobGateway registration precedent)</file>
       <file role="canonical-reference">src/server/services/Sprk.Intake.EngineJob/entrypoint/envelope.py (task 001; envelope + path contract)</file>
@@ -47,7 +51,8 @@
     <constraint source="ADR-004">Scope: every message sent or consumed here. Job Contract envelopes with deterministic `idempotencyKey` (`IntakeEngine:{runId}:{dispatchAttempt}`, following the colon convention of `Communication:{messageId}:Process` and `DocAnalysis:{documentId}`), ids and blob paths only; the completion and timeout handlers implement `IJobHandler` and claim atomically, so a duplicate completion or a completion after timeout changes nothing.</constraint>
     <constraint source="ADR-015">Scope: logs, exceptions and messages. Run id, blob path ids, outcome codes and durations only; no document bytes, plan content or clause text.</constraint>
     <constraint source="ADR-028">Scope: blob and Service Bus access. Managed identity only via the existing BlobGateway and ServiceBusClient registrations; no SAS, keys or connection strings.</constraint>
-    <constraint source="ADR-052">Scope: timeout enforcement. A scheduled Service Bus message handled by an `IJobHandler`; no timer `BackgroundService`, no polling loop.</constraint>
+    <constraint source="ADR-052">Scope: timeout enforcement and the completion consumer. The timeout is a scheduled Service Bus message handled by an `IJobHandler`; no timer `BackgroundService`, no polling loop. The one hosted service added is `IntakeEngineCompletionProcessor`, a Service Bus queue consumer copied from `CommunicationJobProcessor` (same `ServiceBusClient`, same retry and dead-letter reason codes); it is registered only when `ServiceBus:IntakeEngineCompletionQueueName` is non-empty (default empty: the queue exists only on stamps with `deployIntakeEngine=true`), so no stamp starts a consumer for a missing queue.</constraint>
+    <constraint source="ADR-028">Scope: the completion handler. A completion is UNTRUSTED input (it comes from the container that parses untrusted documents). Accept only `runId`, `dispatchAttempt`, the outcome code and the check outcome from the message. The run must exist, be awaiting the engine, and its current dispatch attempt must equal the message's; otherwise log ids only and complete with no change. Never read or copy a blob path taken from the message: derive the output paths from `runId` with the 001 path contract, inside the staging container.</constraint>
     <constraint source="project">Scope: the orchestrator. Do not edit `Services/Intake/IntakeRunJobHandler.cs`; the completion handler resumes the run by enqueuing an `IntakeRun` continuation Job Contract (deterministic key) so 013's resume rules apply unchanged.</constraint>
     <constraint source="ADR-005">Scope: staging layout. Flat, deterministic paths under the staging container keyed by run id; outputs are copied into SPE by the harness (015), never served from staging.</constraint>
     <constraint source="bff-extensions">Scope: the PR. State the Placement Justification, measure the publish-size delta against a fresh master build, ≤ 60 MB total, no new package and no new HIGH CVE.</constraint>
@@ -94,14 +99,14 @@
   </steps>
 
   <escalation>
-    <trigger>If the engine completion cannot be delivered to the existing BFF jobs queue (RBAC, envelope, or processor constraints) and a dedicated consumer would be needed, STOP and escalate (new background work, ADR-052 / root CLAUDE.md §17).</trigger>
+    <trigger>If the completion processor cannot follow `CommunicationJobProcessor` as written (it needs a second `ServiceBusClient`, a new package, or changes to `ServiceBusJobProcessor`), STOP and escalate (ADR-052 / root CLAUDE.md §17).</trigger>
     <trigger>If task 001's envelope or path contract differs from what this task needs, STOP and reconcile with the 001 owner; do not fork the contract.</trigger>
   </escalation>
 
   <justification>
     <existing>reuse-scan.md row 6 (claim-check staging): `Infrastructure/Storage/BlobGateway.cs:148`, verdict "extend/use BlobGateway"; CAPABILITY-INDEX row 6 (queue work: `JobSubmissionService`, `IJobHandler`). No existing BFF code talks to an out-of-process engine.</existing>
-    <extension>Partly — BlobGateway and JobSubmissionService are reused/extended (one send method); the dispatcher and two handlers are new because no existing handler waits on an external consumer's completion.</extension>
-    <cost-of-doing-nothing>The NDA harness cannot hand the document and plan to the engine or learn the result, and a hung engine leaves a run waiting forever (FR-09, NFR-05 fail).</cost-of-doing-nothing>
+    <extension>Partly — BlobGateway and JobSubmissionService are reused/extended (one send method); the dispatcher and two handlers are new because no existing handler waits on an external consumer's completion. The completion processor copies `CommunicationJobProcessor`; `ServiceBusJobProcessor` cannot be reused because it serves `sdap-jobs`, which the engine identity must not be able to send to.</extension>
+    <cost-of-doing-nothing>The NDA harness cannot hand the document and plan to the engine or learn the result, and a hung engine leaves a run waiting forever (FR-09, NFR-05 fail). Without the dedicated completion queue the engine identity needs Sender on `sdap-jobs`, and a parser exploit could enqueue any BFF job.</cost-of-doing-nothing>
   </justification>
 
   <tools>
@@ -112,6 +117,8 @@
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineDispatcher.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineCompletionJobHandler.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineTimeoutJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineCompletionProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Configuration/IntakePipelineOptions.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</output>
@@ -124,12 +131,14 @@
     <criterion testable="true">Negative: a completion reporting a `check_outputs` failure holds the run with admin attention and nothing is sent for approval (FR-09c).</criterion>
     <criterion testable="true">Negative: with no completion within the timeout, the run is marked Failed with reason "engine timeout"; a completion arriving after that is a no-op (NFR-05).</criterion>
     <criterion testable="true">correlationId is identical on the run, the request envelope, the completion handling logs and the timeout message (NFR-06); no captured log or message contains document content (NFR-03).</criterion>
-    <criterion testable="true">No `BackgroundService` or polling loop is added; DiGraphValidationTests pass.</criterion>
+    <criterion testable="true">Negative: a message on the completion queue with any `JobType` other than `IntakeEngineCompleted` is dead-lettered `WrongQueue` and no handler runs.</criterion>
+    <criterion testable="true">Negative: a completion naming an unknown run, a run not awaiting the engine, or a stale `dispatchAttempt` changes nothing (ids-only log, message completed); a blob path in the message is ignored and the handler reads only the paths it derives from `runId`.</criterion>
+    <criterion testable="true">The only hosted service added is `IntakeEngineCompletionProcessor` (no timer or polling loop); with `ServiceBus:IntakeEngineCompletionQueueName` empty it is not registered; DiGraphValidationTests pass.</criterion>
     <criterion testable="true">PR states Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE).</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Effort xhigh: multi-file concurrency/race work (completion vs timeout) with a complete spec. Seeding proof requested for the late-completion-after-timeout guard (a regression would resurrect a failed run): remove the state check, confirm the test fails, restore.</notes>
+  <notes>Completion path revised 2026-11-25 (owner): dedicated engine identity + own completion queue + dedicated BFF processor; see notes/decisions.md. Effort xhigh: multi-file concurrency/race work (completion vs timeout) with a complete spec. Seeding proof requested for the late-completion-after-timeout guard (a regression would resurrect a failed run): remove the state check, confirm the test fails, restore.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

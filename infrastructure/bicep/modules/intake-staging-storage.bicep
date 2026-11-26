@@ -40,11 +40,11 @@ param containerName string = 'intake-staging'
 @maxValue(30)
 param deleteAfterDays int = 7
 
-@description('Principal (object) id of the engine job identity. Granted Storage Blob Data Contributor on this container only. On a stamp: the stamp UAMI (modules/uami.bicep).')
+@description('Principal (object) id of the engine job identity. Granted Storage Blob Data Contributor on this container only. On a stamp: the Job\'s own identity (customer.bicep uamiIntakeEngine), never the stamp UAMI.')
 @minLength(36)
 param jobPrincipalId string
 
-@description('Principal (object) id of the BFF identity that stages inputs and reads outputs. Granted Storage Blob Data Contributor on this container only. On a stamp this is the same UAMI as jobPrincipalId; the two are merged so one assignment is made, not two with the same name.')
+@description('Principal (object) id of the BFF identity that stages inputs and reads outputs. Granted Storage Blob Data Contributor on this container only. On a stamp: the stamp UAMI. The two ids are merged (union), so passing the same principal twice makes one assignment, not two with the same name.')
 @minLength(36)
 param bffPrincipalId string
 

@@ -11,13 +11,13 @@ For tasks 001 (engine entrypoint), 008 (dev spike / deployment) and 014 (complet
 | Thing | Name |
 |---|---|
 | Engine request queue | `intake-engine-requests` (created by the Job module; `maxDeliveryCount` 5, lock 5 min, DLQ on expiry, duplicate detection off) |
-| Completion queue | none: completion is a Job Contract sent to the BFF jobs queue `sdap-jobs` |
+| Completion queue | `intake-engine-completions` (maxDeliveryCount 5, duplicate detection off), consumed by the BFF completion processor (task 014). Rework 2026-11-25; was `sdap-jobs` |
 | Staging container | `intake-staging` (private; lifecycle deletes blobs under `intake-staging/` 7 days after creation) |
 | Environment / Job | `sprk-{customerId}-{env}-cae` / `sprk-{customerId}-{env}-intake-job` (Job name is 32 chars at the longest customerId and env) |
 | Container name | `intake-engine` |
 
 Environment variables set on the container (read these in the entrypoint):
-`AZURE_CLIENT_ID` (stamp UAMI), `INTAKE_SERVICEBUS_FQDN`, `INTAKE_REQUEST_QUEUE`, `INTAKE_COMPLETION_QUEUE` (= `sdap-jobs`), `INTAKE_STAGING_ACCOUNT_URL`, `INTAKE_STAGING_CONTAINER`, `INTAKE_MAX_DELIVERY_COUNT` (5), `INTAKE_JOB_TIMEOUT_SECONDS` (600), `APPLICATIONINSIGHTS_CONNECTION_STRING`.
+`AZURE_CLIENT_ID` (the job's own identity), `INTAKE_SERVICEBUS_FQDN`, `INTAKE_REQUEST_QUEUE`, `INTAKE_COMPLETION_QUEUE` (= `intake-engine-completions`), `INTAKE_STAGING_ACCOUNT_URL`, `INTAKE_STAGING_CONTAINER`, `INTAKE_MAX_DELIVERY_COUNT` (5), `INTAKE_JOB_TIMEOUT_SECONDS` (600), `APPLICATIONINSIGHTS_CONNECTION_STRING`.
 
 ## Identity and RBAC
 The Job runs as the existing stamp `uami` module (no new identity). Grants made by this task: Data Receiver and Data Sender on the request queue (Sender is for the scheduled retry copy carrying `PriorDeliveryCount`, as `ServiceBusJobProcessor` does), Data Sender on `sdap-jobs`, Blob Data Contributor on `intake-staging` (container scope; BFF and job are the same UAMI, so one assignment), AcrPull on the registry when `intakeEngineGrantAcrPull` is true. Nothing namespace- or account-wide is added.

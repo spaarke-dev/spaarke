@@ -140,7 +140,7 @@ param redisHighAvailability string = 'Enabled'
 
 // --- Intake engine (spaarke-intake-pipeline-r1 task 002, FR-01) ---
 
-@description('Deploy the intake engine: a Container Apps environment + event-triggered Job (KEDA Service Bus, stamp UAMI), the stamp-private `intake-staging` blob container with a 7-day lifecycle delete rule, and the `intake-engine-requests` queue. Default false: existing stamps are unchanged until provisioning opts in (customer-provisioning-orchestration-r1 owes the call).')
+@description('Deploy the intake engine: a Container Apps environment + event-triggered Job (KEDA Service Bus) running as its own least-privileged identity, the stamp-private `intake-staging` blob container with a 7-day lifecycle delete rule, and the `intake-engine-requests` and `intake-engine-completions` queues. Default false: existing stamps are unchanged until provisioning opts in (customer-provisioning-orchestration-r1 owes the call).')
 param deployIntakeEngine bool = false
 
 @description('Engine image reference ({registry}.azurecr.io/sprk-intake-engine:{tag}). Required when deployIntakeEngine is true; the tag comes from the image build workflow (task 003).')
@@ -149,7 +149,7 @@ param intakeEngineImage string = ''
 @description('Name of an EXISTING Azure Container Registry in the stamp resource group that holds the engine image. Required when deployIntakeEngine is true. Never created here: the registry choice belongs to the owner and customer-provisioning-orchestration-r1.')
 param intakeEngineRegistryName string = ''
 
-@description('Grant the stamp UAMI AcrPull on intakeEngineRegistryName. Set false when the registry is elsewhere and the grant is made there (controlplane-acr.bicep).')
+@description('Grant the intake engine identity AcrPull on intakeEngineRegistryName. Set false when the registry is elsewhere and the grant is made there (controlplane-acr.bicep).')
 param intakeEngineGrantAcrPull bool = true
 
 // --- Tags ---
@@ -286,6 +286,21 @@ module uamiOntologyWriter 'modules/uami.bicep' = {
   name: 'uami-ontology-writer-${baseName}'
   params: {
     name: 'mi-spaarke-${customerId}-${environmentName}-ontology-writer'
+    location: location
+    tags: tags
+  }
+}
+
+// Intake engine Job identity (spaarke-intake-pipeline-r1). A SEPARATE, least-privileged identity, never the stamp
+// UAMI above: the Job parses untrusted .docx from any intake sender, so a parser exploit must not inherit the BFF's
+// Dataverse, Graph, Key Vault or namespace-wide Service Bus rights. It holds only what intake-engine-job.bicep and
+// intake-staging-storage.bicep grant (its two queues, the staging container, AcrPull); no Graph role, no Dataverse
+// application user. Not attached to the BFF. Deployed only with the engine.
+module uamiIntakeEngine 'modules/uami.bicep' = if (deployIntakeEngine) {
+  scope: rg
+  name: 'uami-intake-engine-${baseName}'
+  params: {
+    name: 'mi-spaarke-${customerId}-${environmentName}-intake-engine'
     location: location
     tags: tags
   }
@@ -805,12 +820,13 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 
 // ============================================================================
 // INTAKE ENGINE (spaarke-intake-pipeline-r1 task 002, FR-01; ADR-052, ADR-004 A2)
-// The NDA redline engines run as an event-triggered Container Apps Job. The Job runs as the stamp UAMI
-// above (no new identity), is triggered by a KEDA Service Bus scaler on `intake-engine-requests` (created
-// by the module with maxDeliveryCount 5), reads and writes the stamp-private `intake-staging` container
-// (7-day lifecycle) and sends its completion Job Contract to the EXISTING `sdap-jobs` queue. Gated on
-// deployIntakeEngine (default false): nothing here deploys until it is true. The BFF identity is the same
-// UAMI, so the staging grant is made once for both.
+// The NDA redline engines run as an event-triggered Container Apps Job. The Job runs as its own identity
+// (uamiIntakeEngine above, never the stamp UAMI), is triggered by a KEDA Service Bus scaler on
+// `intake-engine-requests`, reads and writes the stamp-private `intake-staging` container (7-day lifecycle)
+// and sends its completion Job Contract to `intake-engine-completions` (both queues created by the module
+// with maxDeliveryCount 5). It has no send right on any BFF queue. The BFF (stamp UAMI) dispatches to the
+// request queue and consumes the completion queue. Gated on deployIntakeEngine (default false): nothing here
+// deploys until it is true.
 // ============================================================================
 
 module intakeStagingStorage 'modules/intake-staging-storage.bicep' = if (deployIntakeEngine) {
@@ -818,7 +834,7 @@ module intakeStagingStorage 'modules/intake-staging-storage.bicep' = if (deployI
   name: 'intake-staging-${baseName}'
   params: {
     storageAccountName: storage.outputs.storageAccountName
-    jobPrincipalId: uami.outputs.principalId
+    jobPrincipalId: uamiIntakeEngine!.outputs.principalId
     bffPrincipalId: uami.outputs.principalId
   }
 }
@@ -832,11 +848,10 @@ module intakeEngineJob 'modules/intake-engine-job.bicep' = if (deployIntakeEngin
     location: location
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsId
     serviceBusNamespaceName: serviceBus.outputs.serviceBusName
-    // The BFF jobs queue (the one ServiceBusJobProcessor consumes); service-bus.bicep creates it from serviceBusQueues.
-    jobsQueueName: 'sdap-jobs'
-    identityResourceId: uami.outputs.id
-    identityPrincipalId: uami.outputs.principalId
-    identityClientId: uami.outputs.clientId
+    identityResourceId: uamiIntakeEngine!.outputs.id
+    identityPrincipalId: uamiIntakeEngine!.outputs.principalId
+    identityClientId: uamiIntakeEngine!.outputs.clientId
+    bffPrincipalId: uami.outputs.principalId
     registryName: intakeEngineRegistryName
     grantAcrPull: intakeEngineGrantAcrPull
     image: intakeEngineImage
@@ -1019,4 +1034,8 @@ output intakeEngineDeployed bool = deployIntakeEngine
 output intakeEngineJobName string = intakeEngineJob.?outputs.jobName ?? ''
 output intakeEngineEnvironmentName string = intakeEngineJob.?outputs.environmentName ?? ''
 output intakeEngineRequestQueueName string = intakeEngineJob.?outputs.requestQueueName ?? ''
+output intakeEngineCompletionQueueName string = intakeEngineJob.?outputs.completionQueueName ?? ''
+// The platform-registry AcrPull grant (intakeEngineGrantAcrPull=false) is made on this principal.
+output intakeEngineIdentityObjectId string = uamiIntakeEngine.?outputs.principalId ?? ''
+output intakeEngineIdentityClientId string = uamiIntakeEngine.?outputs.clientId ?? ''
 output intakeStagingContainerName string = intakeStagingStorage.?outputs.containerName ?? ''
