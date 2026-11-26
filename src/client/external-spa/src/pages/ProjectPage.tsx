@@ -453,7 +453,9 @@ export const ProjectPage: React.FC = () => {
   // ---------------------------------------------------------------------------
 
   if (projectError) {
-    if (projectError.status === 403) {
+    // One "no access" path (R4 task 043): since ebilling-r1's task-130 batch a stale grant answers 403, not 404, and a
+    // 404 (a project removed or never shared) means the same thing to the caller, so both show the access message.
+    if (projectError.status === 403 || projectError.status === 404) {
       return (
         <PageContainer>
           <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Access Denied' }]} />
@@ -461,19 +463,6 @@ export const ProjectPage: React.FC = () => {
             <MessageBarBody>
               You do not have permission to view this project. If you believe this is an error, please contact the
               project team.
-            </MessageBarBody>
-          </MessageBar>
-        </PageContainer>
-      );
-    }
-
-    if (projectError.status === 404) {
-      return (
-        <PageContainer>
-          <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Project Not Found' }]} />
-          <MessageBar intent="error">
-            <MessageBarBody>
-              The project could not be found. It may have been closed or the link may be incorrect.
             </MessageBarBody>
           </MessageBar>
         </PageContainer>

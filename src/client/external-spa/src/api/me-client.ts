@@ -30,6 +30,10 @@
  *     (ISS-005, #1673): the workforce first sign-in was refused because the organization's customer business unit setting
  *     is missing and nothing was created. That is a configuration refusal, not an outage, so it REJECTS with
  *     `OwnerUnconfiguredError` and the workspace shows its fixed "not configured" message in the denied state.
+ *   - AND EXCEPT a 503 naming one of the three binder-fault codes (R4 FR-28, #2269): the BFF could not read, create or
+ *     bind the caller's contact right now. It is retried three times (1 s, 2 s, 4 s); after that it REJECTS with
+ *     `BinderFaultError` and the workspace shows "We couldn't finish signing you in. Try again" with a Retry. Never the
+ *     plane's default workspace: the caller has not been identified.
  *   - anything else REJECTS: a token-acquisition failure (TeamsWorkforceAuthError, BackendSelectionError, the
  *     redirect-in-progress Error), a network fault, or a 4xx other than 401/403. The caller was never answered by the
  *     BFF, so showing a default workspace would present modules for a caller the server has not seen. The workspace
@@ -62,13 +66,73 @@ export class OwnerUnconfiguredError extends Error {
   }
 }
 
-/** True when a 5xx ApiError's ProblemDetails body names the owner-unconfigured code in `reasonCode` or `errorCode`. */
-function isOwnerUnconfigured(err: ApiError): boolean {
+/** True when an ApiError's ProblemDetails body names one of `codes` in `reasonCode` or `errorCode`. */
+function problemCodeIn(err: ApiError, codes: readonly string[]): boolean {
   try {
     const body = JSON.parse(err.message) as { reasonCode?: unknown; errorCode?: unknown } | null;
-    return body?.reasonCode === REGISTRATION_OWNER_UNCONFIGURED || body?.errorCode === REGISTRATION_OWNER_UNCONFIGURED;
+    return (
+      (typeof body?.reasonCode === 'string' && codes.includes(body.reasonCode)) ||
+      (typeof body?.errorCode === 'string' && codes.includes(body.errorCode))
+    );
   } catch {
     return false; // not a ProblemDetails body: an ordinary server failure
+  }
+}
+
+/** True when a 5xx ApiError's ProblemDetails body names the owner-unconfigured code in `reasonCode` or `errorCode`. */
+function isOwnerUnconfigured(err: ApiError): boolean {
+  return problemCodeIn(err, [REGISTRATION_OWNER_UNCONFIGURED]);
+}
+
+/**
+ * The BFF's codes for a sign-in it could not finish because the caller's contact could not be read, created or bound
+ * right now (R4 FR-28, #2269). The BFF answers them with a retryable 503 (ADR-028: an indeterminate access result is
+ * never a 403). Keep in step with `ContactBindingDecision` in the BFF.
+ */
+export const BINDER_FAULT_CODES: readonly string[] = [
+  'sdap.access.deny.contact_lookup_failed',
+  'sdap.access.deny.contact_create_failed',
+  'sdap.access.deny.contact_bind_failed',
+];
+
+/** The fixed sentence shown once the automatic retries are used up. The server `detail` is not shown. */
+export const BINDER_FAULT_MESSAGE = "We couldn't finish signing you in. Try again";
+
+/** The waits before each automatic retry: three retries, 1 s, 2 s, then 4 s (owner, 2026-11-09). */
+export const BINDER_FAULT_RETRY_DELAYS_MS: readonly number[] = [1000, 2000, 4000];
+
+/** The sign-in could not be finished after the automatic retries. The caller shows {@link BINDER_FAULT_MESSAGE} with a Retry. */
+export class BinderFaultError extends Error {
+  constructor() {
+    super(BINDER_FAULT_MESSAGE);
+    this.name = 'BinderFaultError';
+  }
+}
+
+/** True for a 503 whose ProblemDetails names one of {@link BINDER_FAULT_CODES}. A plain 503 or any other status is false. */
+export function isBinderFault(err: unknown): boolean {
+  return err instanceof ApiError && err.statusCode === 503 && problemCodeIn(err, BINDER_FAULT_CODES);
+}
+
+const waitMs = (ms: number): Promise<void> => new Promise(resolve => window.setTimeout(resolve, ms));
+
+/**
+ * Run `call`; while it fails with a binder fault ({@link isBinderFault}), wait and run it again, up to three times
+ * ({@link BINDER_FAULT_RETRY_DELAYS_MS}). Still failing after that -> rejects with {@link BinderFaultError}. Any other
+ * failure (a 403, a plain 5xx, a network fault) rejects at once with the original error: only binder faults are retried.
+ */
+export async function withBinderFaultRetry<T>(
+  call: () => Promise<T>,
+  wait: (ms: number) => Promise<void> = waitMs
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (err) {
+      if (!isBinderFault(err)) throw err;
+      if (attempt >= BINDER_FAULT_RETRY_DELAYS_MS.length) throw new BinderFaultError();
+      await wait(BINDER_FAULT_RETRY_DELAYS_MS[attempt]);
+    }
   }
 }
 
@@ -157,8 +221,11 @@ export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitle
   // The real Tier-1 entitlement endpoint (task 072). bffApiCall attaches the Bearer token + retries once on 401;
   // the BFF resolves the plane from the token and returns this exact shape.
   try {
-    return await bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements');
+    // A binder fault (FR-28) is retried here; once the retries are used up it rejects with BinderFaultError.
+    return await withBinderFaultRetry(() => bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements'));
   } catch (err) {
+    // The sign-in could not be finished: never a default workspace, the caller shows the message with a Retry (FR-28).
+    if (err instanceof BinderFaultError) throw err;
     // Rollout fallback (NFR-06 — client is not the security boundary), for a SERVER failure only: the BFF answered
     // with a 5xx, so degrade to the plane's default modules rather than leave the workspace tab-less. The console
     // warning is the UAT tell that this fired.
