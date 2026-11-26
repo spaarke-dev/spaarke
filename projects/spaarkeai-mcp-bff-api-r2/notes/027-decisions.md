@@ -103,9 +103,14 @@ No new code string was invented: `CallerContextUnavailable` reuses the request p
 
 - **Two-phase shape behind one public method.** REST must split the decision across the filter (before the handler's own
   validation) and the handler (after the search), so the ONE implementation is two internal methods (`DecideRequestAsync`,
-  `SearchAndAuthorizeResultsAsync`), and the public method composes them around a search delegate. A tool therefore cannot run the
-  result phase with a decision it built itself (`SemanticSearchAuthorization` is a public record with public init setters; the
-  public method never accepts one).
+  `SearchAndAuthorizeResultsAsync`), and the public method composes them around a search delegate. The public method never
+  accepts a pre-built decision (`SemanticSearchAuthorization` is a public record with public init setters). The three result-phase
+  methods are `internal`, which alone does not stop a tool in the same assembly from calling one with a hand-built decision, so
+  that claim is enforced by `tests/Spaarke.ArchTests/SearchAuthorizationPhaseCallerGuardTests.cs` (verifier finding F2): only
+  `SemanticSearchEndpoints.cs`, `RecordSearchEndpoints.cs` and the two filter files may name `SearchAndAuthorizeResultsAsync`,
+  `SearchAndAuthorizeRowsAsync` or `SemanticSearchAuthorizationFilter.DecideCount` (source scan of `src/server/**`, with
+  must-fire and must-not-fire controls). Its limits are stated in the test (reflection by a built name and a delegate captured
+  inside an allowed file are not seen).
 - **The count route was included** (`DecideCount`), though the POML names only `POST /api/ai/search`: its `scope=all` refusal is a
   scope decision in an endpoint, which the "no scope check of its own" criterion forbids. REST body unchanged.
 - **Input validation is not in the shared methods**: the semantic handler's `ValidateScope` (a duplicate the filter answers first)
@@ -151,12 +156,43 @@ No new code string was invented: `CallerContextUnavailable` reuses the request p
   unauthorizable entity type, no readable document, unknown scope, no bearer token); record search with an unreadable record
   (removed, not counted); two record refusals (invalid record type with `invalidValues`, no bearer token); null context and
   unauthenticated principal for both methods (no Dataverse call, no search, no trim).
+- Added with the verifier fixes (now 16 cases): the empty-page count regression (D-027-2), and two budget cases that drive the
+  check budgets to exhaustion with MORE readable records/parents than the budget: record search (60 readable records, budget 50:
+  the first 50 returned, rows 51-60 absent, exactly 50 access questions per call) and document `scope=all` (40 readable parents,
+  budget 25: the first 25 returned, later parents absent, `PARTIAL_RESULTS` present, exactly 25 questions per call; the pool is
+  not saturated and the page is not full, so the warning can only come from the budget). Each also checks the route returns the
+  same body under the same budget. Seed-break: replacing the budget `break` with "keep the unchecked row" in both loops failed both
+  budget cases (10 and 15 extra rows served); restored.
 - Seeding proof: (1) mapping `EntityAccessDenied` to 404 in `ToProblem` and (2) dropping the identity test in the public method
   failed 2 cases; (3) discarding the trim's result failed the entity-scope case. Restored.
 - Existing suites unchanged and green, before and after: `Sprk.Bff.Api.Tests` filtered RecordSearch / SemanticSearch / Issue975 /
   SearchIndexName / DocumentWriteRouteNarrowing / AiDocumentNarrowing / PlaybookRunAuthorizationSharedMethod 372/372;
   `Spe.Integration.Tests` `SemanticSearch` namespace (SemanticSearchAuthorizationTests, SemanticSearchIntegrationTests,
   RecordSearchIntegrationTests) 90/90.
+
+## D-027-2: empty-page count leak fixed in scope
+
+Found by the adversarial verifier (F1, pre-existing on master, REST and method alike). `RecordSearchAuthorizationFilter.AuthorizeRowsAsync`
+returned the response untouched when `Results` was empty, so `Metadata.TotalCount` kept the index's UNFILTERED count. A non-admin
+POSTing `/api/ai/search/records` `{query:"Globex", recordTypes:["matter"], options:{offset:1000, limit:1}}` got an empty page whose
+`totalCount` was every matching matter in the tenant, readable or not (the very count the non-empty path exists to hide).
+
+- **Fix.** The empty-page path now sets `TotalCount = 0`. The non-empty path sets `TotalCount = permitted.Count` (the count of rows
+  in THIS response; it cannot know the caller's true readable total, since it authorizes one page, not the corpus). Zero rows kept
+  is therefore `0`, which is also what a non-empty page whose every row was dropped already reports, and what an index with no
+  match reports. One rule for every page: the count is the rows returned.
+- **Bytes, the one intended REST change** (stub index: 7 matches tenant-wide, offset 1000, limit 1; body is the whole response):
+  before (76 bytes) `{"results":[],"metadata":{"totalCount":7,"searchTime":1,"hybridMode":"rrf"}}`;
+  after (76 bytes, the digit is the same width) `{"results":[],"metadata":{"totalCount":0,"searchTime":1,"hybridMode":"rrf"}}`. Only the number changes, and only
+  when the index total was non-zero on an empty page. A page with rows and a genuine no-match search are byte-identical to before.
+  A client that read `totalCount` to page past the end now sees 0, the same as for a page whose rows were all unreadable.
+- **Document search does not have this early return.** `scope=all` goes through `AuthorizeRowsByParentAsync`, which sets
+  `TotalResults = sanitized.Count` with no empty-page shortcut (an empty page reports 0). `scope=entity` and `scope=documentIds`
+  go through `AuthorizeResults`, which subtracts what it dropped from `TotalResults`; that total deliberately stays the
+  authorized parent's (or named documents') total, because the parent was authorized before the search, so it discloses nothing
+  about records the caller cannot read. Unchanged.
+- **Test.** `SearchRecords_EmptyPagePastTheEnd_DoesNotLeakTheUnfilteredCount` (`tests/integration/auth/Ai/`): failed before the fix
+  (`totalCount` 7 on the method and on the route), passes after; asserts the method and the route agree.
 
 ## Review
 

@@ -267,6 +267,106 @@ public sealed class SearchAuthorizationSharedMethodTests
         host.Records.Requests.Should().BeEmpty("a refused request never reaches the index");
     }
 
+    [Fact(DisplayName = "D-027-2: an empty record page past the end carries no unfiltered tenant-wide count, by the method and by the route")]
+    public async Task SearchRecords_EmptyPagePastTheEnd_DoesNotLeakTheUnfilteredCount()
+    {
+        await using var host = await SearchAuthHost.StartAsync();
+
+        // The index holds 7 matching matters tenant-wide; the caller pages past the end (offset 1000, limit 1), so the
+        // page is empty but the index still reports the unfiltered total. None of the 7 is known to the caller.
+        host.Records.ReturnsEmptyPage(unfilteredTotal: 7);
+        var request = RecordRequest(RecordEntityType.Matter) with
+        {
+            Options = new RecordSearchOptions { Offset = 1000, Limit = 1 },
+        };
+
+        var (direct, rest) = await host.RecordsDirectThenRestAsync(request);
+
+        direct.Outcome.Should().Be(RecordSearchAccessOutcome.Allowed);
+        direct.Response!.Results.Should().BeEmpty();
+        direct.Response.Metadata.TotalCount.Should().Be(0, "an empty page reports the count of rows in the response, as a filtered page does");
+        rest.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await BodyAsync(rest);
+        body["results"]!.AsArray().Should().BeEmpty();
+        body["metadata"]!["totalCount"]!.GetValue<int>().Should().Be(0,
+            $"the route must not disclose how many matters match tenant-wide. body: {body.ToJsonString()}");
+        await host.AssertSameBodyAsync(rest, direct.Response);
+        host.Access.Calls.Should().BeEmpty("an empty page has no record to ask Dataverse about");
+    }
+
+    // ══ Check budgets ════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "Record budget: rows past the 50-check budget are dropped, never served unchecked, and exactly 50 Dataverse questions are asked")]
+    public async Task SearchRecords_MoreReadableRecordsThanTheBudget_DropsTheRowsPastIt()
+    {
+        await using var host = await SearchAuthHost.StartAsync();
+
+        // 60 distinct records, every one readable by the caller: only the budget (RecordSearchOptions.MaxLimit == 50, the value
+        // RecordSearchAuthorizationFilter.MaxRecordAuthorizationChecks is defined as) limits the page.
+        var ids = Enumerable.Range(0, 60).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var id in ids)
+        {
+            host.Access.Grant(Matters, id, AccessRights.Read);
+        }
+
+        host.Records.Returns(ids.Select(id => Record(id, "Matter " + id)).ToArray());
+
+        var direct = await RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync(
+            host.DirectContext(), RecordRequest(RecordEntityType.Matter), host.Records.SearchAsync, CancellationToken.None);
+
+        direct.Outcome.Should().Be(RecordSearchAccessOutcome.Allowed);
+        direct.Response!.Results.Select(r => r.RecordId).Should().Equal(ids.Take(50).Select(id => id.ToString()),
+            "the first 50 rows were checked and readable; rows past the budget are absent, not served unchecked");
+        direct.Response.Metadata.TotalCount.Should().Be(50);
+        host.Access.Calls.Should().HaveCount(50, "the budget caps the Dataverse questions asked");
+        host.Access.Calls.Select(c => c.Id).Distinct().Should().HaveCount(50);
+
+        // The route holds to the same budget and returns the same page.
+        var rest = await host.RestRecordsAsync(RecordRequest(RecordEntityType.Matter));
+        await host.AssertSameBodyAsync(rest, direct.Response);
+        host.Access.Calls.Should().HaveCount(100, "50 for the method and 50 for the route");
+    }
+
+    [Fact(DisplayName = "Document budget: parents past the 25-check budget are dropped with PARTIAL_RESULTS, and exactly 25 Dataverse questions are asked")]
+    public async Task SearchDocuments_MoreReadableParentsThanTheBudget_DropsTheRowsPastIt_AndWarns()
+    {
+        await using var host = await SearchAuthHost.StartAsync();
+
+        // 40 documents under 40 distinct, readable parents; limit 50 so the caller's page is never full, and a pool of 150 so it
+        // is never saturated by 40 rows: PARTIAL_RESULTS here can only come from the parent-check budget
+        // (SemanticSearchAuthorizationFilter.MaxParentAuthorizationChecks == 25).
+        var parents = Enumerable.Range(0, 40).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var parent in parents)
+        {
+            host.Access.Grant(Matters, parent, AccessRights.Read);
+        }
+
+        var rows = parents.Select(p => Doc(p)).ToArray();
+        host.Search.Returns(rows);
+        var request = new SemanticSearchRequest
+        {
+            Query = "indemnity",
+            Scope = SearchScope.All,
+            Options = new SearchOptions { Limit = 50 },
+        };
+
+        var before = host.Access.Calls.Count;
+        var direct = await SemanticSearchAuthorizationFilter.SearchDocumentsAsCallerAsync(
+            host.DirectContext(), request, host.Search.SearchAsync, CancellationToken.None);
+
+        direct.Outcome.Should().Be(SemanticSearchAccessOutcome.Allowed);
+        direct.Response!.Results.Select(r => r.ParentEntityId).Should().Equal(parents.Take(25).Select(p => p.ToString()),
+            "the first 25 parents were checked and readable; rows under later parents are absent, not served unchecked");
+        direct.Response.Metadata.TotalResults.Should().Be(25);
+        direct.Response.Metadata.Warnings.Should().ContainSingle().Which.Code.Should().Be(SearchWarningCode.PartialResults);
+        (host.Access.Calls.Count - before).Should().Be(25, "the budget caps the Dataverse questions asked");
+
+        // The route holds to the same budget and returns the same page.
+        var rest = await host.RestDocumentsAsync(request);
+        await host.AssertSameBodyAsync(rest, direct.Response);
+        (host.Access.Calls.Count - before).Should().Be(50, "25 for the method and 25 for the route");
+    }
+
     // ══ No caller (both methods) ═════════════════════════════════════════════════════════════════════════════════════
 
     public enum NoCaller
@@ -451,6 +551,12 @@ public sealed class SearchAuthorizationSharedMethodTests
             return (direct, rest);
         }
 
+        public Task<HttpResponseMessage> RestRecordsAsync(RecordSearchRequest request) =>
+            _client!.SendAsync(Post("/api/ai/search/records", request, withToken: true));
+
+        public Task<HttpResponseMessage> RestDocumentsAsync(SemanticSearchRequest request) =>
+            _client!.SendAsync(Post("/api/ai/search", request, withToken: true));
+
         /// <summary>The route's body equals the method's response, serialized with the host's own JSON options.</summary>
         public async Task AssertSameBodyAsync<T>(HttpResponseMessage rest, T directResponse)
         {
@@ -512,10 +618,18 @@ public sealed class SearchAuthorizationSharedMethodTests
     private sealed class StubRecordSearch : IRecordSearchService
     {
         private RecordSearchResult[] _rows = [];
+        private int? _unfilteredTotal;
 
         public List<RecordSearchRequest> Requests { get; } = [];
 
         public void Returns(params RecordSearchResult[] rows) => _rows = rows;
+
+        /// <summary>An empty page whose metadata still carries the index's unfiltered total (a page past the end).</summary>
+        public void ReturnsEmptyPage(int unfilteredTotal)
+        {
+            _rows = [];
+            _unfilteredTotal = unfilteredTotal;
+        }
 
         public Task<RecordSearchResponse> SearchAsync(RecordSearchRequest request, CancellationToken cancellationToken = default)
         {
@@ -525,7 +639,7 @@ public sealed class SearchAuthorizationSharedMethodTests
                 Results = _rows,
                 Metadata = new RecordSearchMetadata
                 {
-                    TotalCount = _rows.Length,
+                    TotalCount = _unfilteredTotal ?? _rows.Length,
                     SearchTime = 1,
                     HybridMode = RecordHybridSearchMode.Rrf,
                 },

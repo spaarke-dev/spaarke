@@ -197,6 +197,10 @@ jobs:
             xrm_guard:
               - 'src/client/**'
               - 'src/solutions/**'
+              # Added 2026-11-25 (task 035): the no-client-field-mapping guard scans every .ts/.tsx under src/,
+              # including the form scripts under src/dataverse/forms/.
+              - 'src/**/*.ts'
+              - 'src/**/*.tsx'
               - '.github/workflows/**'
             # Added 2026-11-15 by spaarkeai-mcp-bff-api-r1 task 025: runs mcp-conformance.
             # A change to anything the MCP route or the conformance host depends on, plus a
@@ -1062,6 +1066,13 @@ jobs:
       - name: Wizard lookup / email pattern guard (side-pane lookup and shared composer only)
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx jest --ci src/__tests__/wizardLookupPatternGuard.test.ts
+
+      # Added 2026-11-25 by field-mapping-server-write-path-r1 task 035 (FR-22). A source scan of every .ts/.tsx under src/
+      # (no build, no network): the client field-mapping engine stays deleted, because field mapping runs only on the server
+      # create path. It fails if it reads fewer than 500 files, so a wrong path cannot pass. Same install, same job.
+      - name: No client field-mapping engine guard (mapping is server-side only)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/__tests__/architecture/noClientFieldMapping.test.ts
 
   # ──────────────────────────────────────────────────────────────────────────
   # Job 7 — format-changed-cs (BLOCKING)

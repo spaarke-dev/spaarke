@@ -246,7 +246,7 @@ public class RecordSearchAuthorizationFilter : IEndpointFilter
     /// <c>POST /api/ai/search/records</c> for a host that is not that route (the MCP record search tool,
     /// spaarkeai-mcp-bff-api-r2 task 022, spec FR-02): the request-level decision this route's filter makes
     /// (<see cref="DecideRequest"/>: tenant, caller, token, record types), then the row-level authorization its handler
-    /// applies (<see cref="SearchAndAuthorizeRowsAsync"/>: every returned record checked as the caller, the count recomputed),
+    /// applies (<see cref="SearchAndAuthorizeRowsAsync"/>: every returned record checked as the caller, the count recomputed to the rows returned — 0 for an empty page),
     /// with the same Dataverse questions in the same order. <paramref name="search"/> runs the search itself; it is called at
     /// most once, and only after the request is authorized and the caller's identity and token are present.
     /// <para>Fails closed (ADR-028 A10): a null context, a principal with no authenticated identity or no request services is
@@ -634,7 +634,11 @@ public class RecordSearchAuthorizationFilter : IEndpointFilter
     {
         if (response.Results is not { Count: > 0 })
         {
-            return response;
+            // D-027-2: an empty page (typically one past the end) still carries the index's UNFILTERED total. Returning the
+            // response untouched published how many records match tenant-wide, readable or not, which is the leak the
+            // recomputation at the end of this method closes for a non-empty page. No row is returned, so the count of rows
+            // in this response is 0 — the same value a page whose every row was dropped reports.
+            return response with { Metadata = response.Metadata with { TotalCount = 0 } };
         }
 
         var permitted = new List<RecordSearchResult>(response.Results.Count);

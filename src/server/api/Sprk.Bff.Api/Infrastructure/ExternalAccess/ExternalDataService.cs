@@ -4665,7 +4665,7 @@ public class ExternalDataService
             // Task 105 (found in passing): the column is sprk_recordlogicalname. The former `sprk_recordentitylogicalname`
             // does not exist (live 2026-10-08: 400 0x80060888), so every external to-do create logged "not found" and
             // left sprk_RegardingRecordType unset — three of ADR-024's four resolver fields, not four.
-            // Active rows only, like every sibling lookup of this table (PolymorphicResolverService.ts, FieldMappingHandler.ts):
+            // Active rows only, like every sibling lookup of this table (PolymorphicResolverService.ts):
             // a deactivated type row is not a type to bind.
             var filter = Uri.EscapeDataString($"sprk_recordlogicalname eq '{entityLogicalName}' and statecode eq 0");
             // Task 105: no $top=1 — GetCollectionAsync refuses $top (it suppresses @odata.nextLink). The filter names one

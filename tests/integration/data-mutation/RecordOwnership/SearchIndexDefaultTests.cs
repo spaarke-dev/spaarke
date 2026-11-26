@@ -288,8 +288,8 @@ public sealed class SearchIndexDefaultTests
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var lines = _world.Log.Entries.Where(e => e.Message.Contains("client_search_index_dropped")).ToList();
         lines.Should().HaveCount(2, "one for the lookup, one for the name column");
-        lines.Should().OnlyContain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Information,
-            "Information until W3 lands (UAC-r2, task 041); task 035 returns it to Warning");
+        lines.Should().OnlyContain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Warning,
+            "Warning (UAC-r2, task 035): no client sends an index column any more, so any entry is a client regression");
         var lookup = lines.Single(l => l.Message.Contains("column=sprk_ai_search_index"));
         lookup.Message.Should().Contain("table=sprk_workassignment").And.Contain($"record={outcome.CreatedId}")
             .And.Contain("origin=caller")

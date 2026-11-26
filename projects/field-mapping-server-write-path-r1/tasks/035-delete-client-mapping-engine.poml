@@ -4,7 +4,7 @@
     <title>Delete the client mapping engine (applyFieldMappings + FieldMappingHandler) and add a client arch rule (FR-22)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>029 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes shared client files and adds a guard (tags include refactor, testing; TEST-MODIFYING and deletion override apply).</rigor-reason>
     <model-tier>sonnet</model-tier>

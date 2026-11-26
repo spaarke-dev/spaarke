@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// changes when an entity's creation rules change — two reasons to change, so two files. Internal static, not a DI
 /// registration (ADR-010).</para>
 ///
-/// <para><b>Semantics</b> mirror the client engine <c>FieldMappingService.applyFieldMappings</c>: rules in
+/// <para><b>Semantics</b> mirror the former client engine (deleted in field-mapping-server-write-path-r1 task 035): rules in
 /// <c>ExecutionOrder</c>; Copy (scalar + lookup), Default (literal), Concat / Template (one <c>{field}</c> resolver);
 /// every failure a warning, never a throw; no <c>source == target</c> guard. <b>Server-side differences</b> (notes/030
 /// §8), all because the SDK needs typed values where the client sends JSON: a Default literal is converted to the
