@@ -187,3 +187,22 @@ No package or DI registration is added.
 - **A4.** Record it as ADR-003/ADR-009 **Path C (comply)**: a per-request snapshot ("cache UAC snapshots per-request only"). Every allow and deny is computed fresh from it, and it clears every step.
 
 **Tests:** §6, plus the A2 and A3 guards. The restamp must-fire runs on BOTH wires.
+
+## A1: writes between Open (:1301) and the end of step 1's ExecuteAsync (audit 2026-11-25, read-only code-mapper, branch at b67488d777)
+
+**Verdict: in the normal path, no Dataverse write happens in window 0 apart from step 1's own write, which the per-step rules already cover. No extra clear is needed.**
+
+| # | Write | Where | Why it is safe |
+|---|---|---|---|
+| W1 | `sprk_signal` close (decision record, status, resolution columns), app-only | `CloseAllAsync` :1309 → `CloseSignalAsync` :2537/:2562-2584 | Only on the `finishing` (replay) branch, :1304-1322, which returns at :1312 before any executor runs. The design closes the window at the top of that branch, so W1 runs with no window. These columns are not owner, share, role, team or stamp columns, and no step asks access on the Signal: `sprk_signal` has zero matches in DecisionActionExecutors.cs and DecisionCallerRights.cs. |
+| W2 | `sprk_signal` suppression stamp (Dismissed), app-only | `SuppressAfterRepairAsync` :1021 via :1311 | Same branch as W1, so it runs with no window. A suppression timestamp. |
+| W3 | Redis ledger release | `ReleaseLedgerAsync` :809 / :1058-1066 | Not Dataverse. Runs only on cancellation before the first write. |
+| W4 | Redis options cache (currencies, picklists) | `DecisionParameterSources.cs:156` | Not Dataverse. |
+| W5 | Redis identity cache | `SystemUserIdentityResolver.cs:249,330,354` | Not Dataverse. |
+
+- The ledger claim and lease are taken before `CommitCoreAsync` (:790-803), before the window opens.
+- No Signal-marker, plan-stamp or billing write exists in the span. Every preflight was checked and found write-free: revise-budget, approve-variance, mark-complete, reschedule, reassign, extend-response-date, record-the-response, the message executors, the child-create executors and the budget inquiry.
+- **Step 1's own write.**
+  - A child create (create-budget, assign-task, to-do, work) makes all its checks before its one app-only create (A3 guards that).
+  - Every other executor is SUSPENDED during its ExecuteAsync. That covers, for example, revise-budget's caller PATCH of `sprk_budget.sprk_totalbudget` at :490 and mark-complete/reschedule's caller cores at :833/:871/:875. Their writes therefore never meet a window-served answer, and the window clears after the step.
+- **Not traced by the audit,** covered by the design instead: the DecisionRouteCores/ChildRecordEndpoints internals and CoreAncestorRestamper. These run inside step 1's own execute: after the create for a child create (A3), or while suspended for the others.
