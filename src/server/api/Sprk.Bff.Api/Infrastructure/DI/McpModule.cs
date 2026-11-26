@@ -3,6 +3,7 @@ using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
 using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Spike;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -75,7 +76,7 @@ public static class McpModule
                 // The widget the legal-operations tools render in (FR-12). A further area that has a widget adds its own branch.
                 if (string.Equals(area, McpEndpoints.LegalOperationsArea, StringComparison.OrdinalIgnoreCase))
                 {
-                    serverOptions.ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance };
+                    serverOptions.ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance, SpikeFileProbeSmallWidgetResource.Instance, SpikeFileProbeLargeWidgetResource.Instance };
                 }
 
                 return Task.CompletedTask;

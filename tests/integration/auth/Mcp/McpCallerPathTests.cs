@@ -320,6 +320,7 @@ public sealed class McpCallerPathTests
         {
             ["spaarke_show_decisions"] = ["category"],
             ["spaarke_list_decision_page"] = ["cursor"],
+            ["SpaarkeMCP_spike_return_file"] = ["size", "variant"], // THROWAWAY SPIKE (#3257), branch spike/spe-file-probe only
         }, options => options.WithStrictOrdering());
     }
 

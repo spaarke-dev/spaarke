@@ -289,9 +289,10 @@ public sealed class McpHostContractTests
                 "spaarke_get_decision_plan",
                 "spaarke_search_decision_lookup",
                 "spaarke_complete_decision",
+                "SpaarkeMCP_spike_return_file", // THROWAWAY SPIKE (#3257), branch spike/spe-file-probe only
             ],
             "FR-01: tools/list returns exactly the v1 tools; the paging tool is spaarke_list_decision_page (task 022)");
-        names.Should().HaveCount(5);
+        names.Should().HaveCount(6, "the five v1 tools plus the throwaway spike tool of this branch");
 
         // tools/list is judged per tool policy for THIS caller (the SDK filter hides a tool the caller may not call), so a sixth tool behind a
         // stricter policy (e.g. SystemAdmin) would be invisible above. The catalog is the unfiltered set of the area.
