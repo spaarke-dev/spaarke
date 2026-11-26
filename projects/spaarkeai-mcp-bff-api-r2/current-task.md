@@ -52,6 +52,7 @@ About 20 failures, mostly Office/DataMutation tests that 027 doesn't touch. Each
 10. **NFR-05:** do logs carrying the oid (007/024 shared methods) count as "claims"?
 11. **uac-r2:** the document list checks Read on the matter, not on each document (023 D1).
 12. **Stray processes:** four python.exe processes from other sessions have been spinning for days (PIDs 41460, 43772, 84288, 93720). The user decides.
+13. **Cowork review skill pairing (recorded 2026-11-26, for accelerator-r1):** `notes/cross-project-cowork-review-skill.md`. A Spaarke Cowork skill (for example `nda-review`) sits on top of this project's tools. Gaps for accelerator-r1 to decide: getting the document file into the sandbox, and matter email through `spaarke_compose_email`, not Outlook. No r2 action.
 
 ## Issues filed this wave
 #3205 #3206 #3207 #3208 #3209 #3212 #3215 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
