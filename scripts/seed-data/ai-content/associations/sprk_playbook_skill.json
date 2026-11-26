@@ -1,0 +1,18 @@
+{
+  "relationship": "sprk_playbook_skill",
+  "source": "sprk_analysisplaybook",
+  "navigationProperty": "sprk_playbook_skill",
+  "target": "sprk_analysisskill",
+  "pairs": [
+    { "source": "18cf3cc8-02ec-f011-8406-7c1e520aa4df", "target": "80f63e16-eee9-f011-8406-7c1e520aa4df" },
+    { "source": "18cf3cc8-02ec-f011-8406-7c1e520aa4df", "target": "df783810-eee9-f011-8406-7c1e520aa4df" },
+    { "source": "1e657651-9308-f111-8407-7c1e520aa4df", "target": "71012515-eee9-f011-8406-7ced8d1dc988" },
+    { "source": "bc71facf-6af1-f011-8406-7ced8d1dc988", "target": "80f63e16-eee9-f011-8406-7c1e520aa4df" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "6e012515-eee9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "78012515-eee9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "79012515-eee9-f011-8406-7ced8d1dc988" },
+    { "source": "fc343e9c-3460-f111-ab0b-7c1e521b425f", "target": "62518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "fc343e9c-3460-f111-ab0b-7c1e521b425f", "target": "63518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "fe3e5acc-4aea-f011-8406-7c1e520aa4df", "target": "78012515-eee9-f011-8406-7ced8d1dc988" }
+  ]
+}

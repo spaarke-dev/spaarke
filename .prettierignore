@@ -66,3 +66,5 @@ package-lock.json
 
 # Generated reference data: the bytes are owned by scripts/seed-data/reference/Export-ReferenceData.ps1 so a re-export diffs cleanly
 scripts/seed-data/reference/*.json
+# AI content set (H12a, fixed primary keys): bytes owned by scripts/seed-data/ai-content/Export-AiContent.ps1; the owner reviews re-exports as a diff
+scripts/seed-data/ai-content/**/*.json

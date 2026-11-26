@@ -1,0 +1,17 @@
+{
+  "relationship": "sprk_playbooknode_tool",
+  "source": "sprk_playbooknode",
+  "navigationProperty": "sprk_playbooknode_tool",
+  "target": "sprk_analysistool",
+  "pairs": [
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" },
+    { "source": "444b06d3-d418-f111-8343-7ced8d1dc988", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" },
+    { "source": "72f0c9dd-a119-f111-8343-7ced8d1dc988", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" },
+    { "source": "9f364a5a-5e2f-f111-88b5-7c1e525abd8b", "target": "69518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "a1ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" },
+    { "source": "a2ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" },
+    { "source": "c5a64493-572f-f111-88b5-7c1e520aa4df", "target": "69518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" },
+    { "source": "dacac491-4f6c-f111-ab0e-7ced8ddc4a05", "target": "c01ef382-7c16-f111-8343-7c1e520aa4df" }
+  ]
+}
