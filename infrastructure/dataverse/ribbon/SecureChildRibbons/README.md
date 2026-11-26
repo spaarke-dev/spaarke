@@ -27,17 +27,16 @@ An unreadable or empty flag, a secure root, and **any other host** (an event, a 
 BFF decides the owner from what the row is filed under. The Create privilege is **not** removed (owner round 28); a create
 from outside the product is re-owned by the reconcile job's recent-changes pass every 2 minutes.
 
-Spaarke's own parent-prefilled create of a served table — **"+ Add KPI"** (`add-kpi-ribbon.xml`, the KPI assessment quick
-create) — carries the same rule (authored in that RibbonDiff, and added by the merge script when the export carries the
-command), and its script (`sprk_kpi_ribbon_actions.js`) refuses the quick create itself unless the record reads as not
-secure.
+Spaarke's own **"+ Add KPI"** (`add-kpi-ribbon.xml`) does NOT carry this rule. It used to open the KPI assessment quick create, which
+needed the secure guard; since field-mapping-server-write-path-r1 task 051 (FR-24) it creates through the BFF (`Spaarke.SecureChild.Ribbon.newChild`)
+for a secure host and an ordinary one alike, so the rule would only hide the button for good. The merge script no longer adds it.
 
 ## Files
 
 | File | Role |
 |---|---|
 | `secure-child-new.template.xml` | The ONE authored definition (per child entity: `{{entity}}`, `{{label}}`). Carries the platform's own `Mscrm.AddNewRecordFromSubGridStandard` (copied from `RetrieveEntityRibbon`, spaarkedev1, 2026-10-04) plus the one rule. |
-| `Merge-SecureChildRibbon.ps1` | Pure file transformation into a FRESH export of the child's `RibbonDiff.xml`; idempotent; extends an existing override instead of replacing it; guards Spaarke's own parent-prefilled creates of the table ("+ Add KPI"); throws if a command is lost. |
+| `Merge-SecureChildRibbon.ps1` | Pure file transformation into a FRESH export of the child's `RibbonDiff.xml`; idempotent; extends an existing override instead of replacing it; throws if a command is lost. |
 | `src/client/webresources/js/sprk_secure_child_ribbon.js` | The command script (`sprk_/scripts/secure_child_ribbon.js`, `Spaarke.SecureChild.Ribbon`). Behaviour pinned by `Spaarke.UI.Components/src/utils/adapters/__tests__/secureChildRibbonScript.test.ts` (the script run in a sandbox). |
 | `scripts/Deploy-SecureChildNewCommands.ps1` | Dry run (reads only: a live inventory of every ownership-child subgrid on every active main form — FAIL on one not served; platform drift of the copied command; quick-create turned on; missing helper libraries; with `-ExportDir`, an export that lacks a live ribbon customisation of its tables) / `-Apply` (writes nothing on any failure) / `-Verify`. |
 
@@ -48,7 +47,7 @@ ebilling-r1 task 096b (EB-D-201) hides its platform "+ New", "New", and "Save & 
 `sprk_BillingEvent` RibbonDiff, because lines are created only by submission and Add line. `SecureChildNewCommandAgreementTests` (ArchTests)
 keeps the script, the merge script and the deploy script on one table list, every ownership-child subgrid of the live
 inventory covered, the party hosts exactly the identity tables, the create-then-open tables on the BFF route and stamped
-with the creator person, and the "+ Add KPI" guard in place.
+with the creator person, and the "+ Add KPI" command free of the native-New rule (it creates through the BFF).
 
 ## Deployment (MANUAL GATE G147-6 — main session)
 

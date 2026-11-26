@@ -304,7 +304,7 @@
         <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
         <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
         <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands.js"
                            FunctionName="Spaarke.Event.AddMemo">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>

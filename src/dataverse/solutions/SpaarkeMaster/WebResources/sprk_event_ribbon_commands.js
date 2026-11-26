@@ -584,6 +584,11 @@ Spaarke.Event.AddMemo = function(formContext) {
             Spaarke.Event.ActionType.MEMO_ADDED,
             "Memo: New memo"
         );
+        // The memo exists on the server by now, so it opens whatever the event save does. A failed save is told to the user: the
+        // history entry above is on the form but not stored, and silence here would look like a finished add.
+        var openMemo = function() {
+            return Xrm.Navigation.openForm({ entityName: "sprk_memo", entityId: created.id });
+        };
         return formContext.data.save().then(function() {
             Xrm.App.addGlobalNotification({
                 type: 2,
@@ -591,7 +596,14 @@ Spaarke.Event.AddMemo = function(formContext) {
                 message: "Memo added to event",
                 showCloseButton: true
             });
-            return Xrm.Navigation.openForm({ entityName: "sprk_memo", entityId: created.id });
+            return openMemo();
+        }, function(saveError) {
+            console.error("[Event Commands] Add Memo: the event could not be saved after the memo was created:", saveError);
+            var told = Xrm.Navigation.openAlertDialog({
+                title: "Add Memo",
+                text: "The memo was created, but the event could not be saved."
+            });
+            return Promise.resolve(told).then(openMemo, openMemo);
         });
     }).catch(function(error) {
         console.error("[Event Commands] Add Memo failed:", error);

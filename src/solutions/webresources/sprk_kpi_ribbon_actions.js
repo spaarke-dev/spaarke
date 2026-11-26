@@ -1,7 +1,7 @@
 /**
  * KPI Ribbon Actions - Button command handlers
  *
- * Web Resource Name: sprk_/scripts/kpi_ribbon_actions.js
+ * Web Resource Name: sprk_kpi_ribbon_actions.js (the name on dev; there is no sprk_/scripts/kpi_ribbon_actions.js)
  *
  * Handles the "+ Add KPI" button on the KPI Assessments subgrid of a matter or project.
  *

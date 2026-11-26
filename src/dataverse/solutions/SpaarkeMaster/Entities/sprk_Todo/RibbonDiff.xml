@@ -11,17 +11,17 @@
         <Button Id="sprk.Navigator.Todo.Grid.Button" Command="sprk.Navigator.Todo.Open.Command" LabelText="$LocLabels:sprk.Navigator.Todo.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Todo.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Todo.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Todo.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
       </CommandUIDefinition>
     </CustomAction>
-    <CustomAction Id="sprk.SecureChild.sprk_todo.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_todo.MainTab.Management.Controls._children" Sequence="4">
-      <CommandUIDefinition>
-        <Button Id="sprk.SecureChild.sprk_todo.SubGrid.New" Command="sprk.SecureChild.sprk_todo.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_todo.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
-      </CommandUIDefinition>
-    </CustomAction>
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_todo.Assign.Hide" Location="Mscrm.Form.sprk_todo.Assign" />
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_todo.Assign.Hide" Location="Mscrm.HomepageGrid.sprk_todo.Assign" />
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_todo.Assign.Hide" Location="Mscrm.SubGrid.sprk_todo.Assign" />
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_todo.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_todo.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_todo.NewRecord.Hide" Location="Mscrm.Form.sprk_todo.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_todo.SaveAndNew.Hide" Location="Mscrm.Form.sprk_todo.SaveAndNew" />
+    <CustomAction Id="sprk.SecureChild.sprk_todo.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_todo.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_todo.SubGrid.New" Command="sprk.SecureChild.sprk_todo.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_todo.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_todo.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
     <CustomAction Id="sprk.NativeCreate.sprk_todo.Form.New.CustomAction" Location="Mscrm.Form.sprk_todo.MainTab.Actions.Controls._children" Sequence="1">
       <CommandUIDefinition>
         <Button Id="sprk.NativeCreate.sprk_todo.Form.New" Command="sprk.NativeCreate.sprk_todo.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_todo.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_todo.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_todo.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_todo.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
@@ -111,6 +111,7 @@
       <EnableRule Id="sprk.SecureChild.sprk_todo.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_todo" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_todo.NewAvailable.EnableRule">
@@ -118,6 +119,7 @@
         <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_todo" />
         </CustomRule>
       </EnableRule>
     </EnableRules>

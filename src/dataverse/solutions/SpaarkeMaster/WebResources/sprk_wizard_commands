@@ -385,6 +385,32 @@ Spaarke.Commands.Wizards = (function () {
         width: { value: 70, unit: "%" },
         height: { value: 80, unit: "%" }
       });
+    },
+
+    // Owner decision 2026-11-26 (OQ-1): a report card is created only in the context of its parent matter (or project). The form's
+    // "+New Report Card" opens the Report Card wizard (sprk_createreportcardwizard, task 027) filed under the matter / project the
+    // report card form names (sprk_regardingmatter, then sprk_regardingproject). A form that names neither opens nothing and says
+    // so: there is no unfiled report card.
+    openCreateReportCardFromForm: function (primaryControl) {
+      var parents = [
+        { attribute: "sprk_regardingmatter", entityType: "sprk_matter" },
+        { attribute: "sprk_regardingproject", entityType: "sprk_project" }
+      ];
+      for (var i = 0; i < parents.length; i++) {
+        var attr = primaryControl && primaryControl.getAttribute ? primaryControl.getAttribute(parents[i].attribute) : null;
+        var value = attr && attr.getValue ? attr.getValue() : null;
+        if (value && value.length && value[0].id) {
+          var data = "entityType=" + parents[i].entityType +
+            "&entityId=" + encodeURIComponent(String(value[0].id).replace(/[{}]/g, "").toLowerCase()) +
+            "&recordName=" + encodeURIComponent(value[0].name || "");
+          openWizardWithBff(primaryControl, "sprk_createreportcardwizard", data, "Create New Report Card");
+          return;
+        }
+      }
+      Xrm.Navigation.openAlertDialog({
+        title: "New Report Card",
+        text: "A report card is created from its matter. Open the matter and use New Report Card on its Report Cards list."
+      });
     }
   };
 })();
