@@ -23,14 +23,7 @@
 | **Uncommitted** | none after the housekeeping commit |
 
 ## Next action (exact)
-**IN FLIGHT (2026-11-25 late): docs/ADR PR "playbook architecture"** (owner: "update our documentation and ADR so that it reflects our playbook architecture … so we do not recurringly re-assess 'the playbooks are not used'"). Worktree `C:code_filesspaarke-wt-docs-playbook-architecture`, branch `docs/playbook-architecture` off master 3c8778b74e, nothing written yet. Plan:
-- (a) rewrite `docs/architecture/playbook-architecture.md` (now a SUPERSEDED redirect, the root of the confusion) as the canonical "what playbook means" doc (docs-architecture structure): concept D-209 + 3 formats; frozen node engine; live composite = prompted Action / coded workflow + Binding; run record = `sprk_playbookrun` "AI Run";
-- (b) ADR-039 Path B amendment, concise `.claude/adr` and full `docs/adr`: "Playbook: concept live, engine frozen" + MUST record every AI run on `sprk_playbookrun`;
-- (c) canonical AI doc `SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`: §4.2 pointer, a run-record subsection in §6, a revision-log row;
-- (d) `CAPABILITY-INDEX.md` row 16 is MISLEADING (it points "run an AI analysis or add a playbook" at the frozen `AnalysisOrchestrationService` / `INodeExecutor`). Split it into: run an AI capability (Action + Binding: `LinearConsumers/ActionRunner.cs`, `IActionResolver.cs`); composite (`Services/Ai/ICodedWorkflow.cs`, `Narrators/DailyBriefingNarrator.cs`); record an AI run (`sprk_playbookrun/Entity.xml`); frozen engine node types (Insights only);
-- (e) frozen banners: `ai-architecture-playbook-runtime.md` and `.claude/patterns/ai/node-executor-authoring.md` point to (a);
-- (f) a FAILURE-MODES entry; INDEX rows;
-- then the PR, and send the link to mcp-r2 (D-run-record-hold released; schema split proposed: its task 005 builds the shared columns, our Phase 1 adds the profile-version lookup).
+**DONE (2026-11-25 late): docs/ADR PR [#3213](https://github.com/spaarke-dev/spaarke/pull/3213) "playbooks are used; only the node-graph engine is frozen"** (branch `docs/playbook-architecture`, worktree `C:code_filesspaarke-wt-docs-playbook-architecture`, commit ec0f7c4fa6). It contains: the canonical `docs/architecture/playbook-architecture.md`; the ADR-039 2026-11-25 Path B amendment (concise + full: every AI run on `sprk_playbookrun`, no second store); canonical AI doc §4.2.2 + §6.6; CAPABILITY-INDEX row 16 rerouted + rows 34/35; frozen banners; ADR index row; FAILURE-MODES G-26. Waiting for CI and the owner's merge. mcp-r2 was sent the link to check against task 005's columns. After the merge, remove the worktree with `scripts/worktree/Remove-WorktreeSafe.ps1`.
 
 The decision itself is recorded (fbf1bfb9a4). mcp-r2 was told.
 
