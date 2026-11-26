@@ -370,3 +370,25 @@ The Compose save path never opens an `AiMeteringContext` scope, so the detached 
 **Suggested fix**: open the metering scope for the captured tenant around the profile run, with a test.
 **Estimated effort**: about 2 hours plus the Azure Monitor check.
 **Blockers**: none. **Related**: #2620, #2622.
+
+### ISS-012 — Decision email not filed and no sender resolved: nobody is told
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-26 |
+| **Source** | ISS-010 Part E (PR #3260) known limit; ontology-r1 asked for it to be filed |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3261 |
+
+**Description**
+
+When the `CommunicationPostSend` job finally fails to file a decision email's .eml, it bells `sprk_sentby`, else the payload's `SenderSystemUserId`. With neither (the oid → systemuser lookup failed at send time), no bell is raised; the only trace is one Error (`[COMM-POSTSEND] Archive bell not raised: no sender for communication {id} ...`). Concrete failure: the email stays unfiled and nobody clicks Save to SharePoint.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationPostSendJobHandler.cs` (bell recipient, no-sender Error)
+- `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs` (sender systemuser resolution; `TryEnqueuePostSendAsync`)
+
+**Suggested fix**: another individual recipient (D-129), e.g. the Assigned To Internal contact's systemuser or the decider from the Decision Record; or show the unfiled state on the communication form.
+**Estimated effort**: half a day. **Blockers**: none. **Related**: #3184, #3260.
