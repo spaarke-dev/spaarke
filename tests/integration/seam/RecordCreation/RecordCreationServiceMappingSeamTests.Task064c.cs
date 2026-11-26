@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -228,6 +229,103 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_description").Should().Be("From the matter");
         outcome.MappingWarnings.Should().ContainSingle()
             .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_eventtype_ref");
+    }
+
+    // ── task 064d: a registry that cannot be read keeps the caller's checks on every mapped value ──
+
+    [Fact]
+    public async Task Task064d_WhenTheAccessConferringRegistryCannotBeRead_AValueFromTheFilingParent_KeepsTheCallersChecks()
+    {
+        MatterEventTypeToEventProfile();
+        _scripted.NoAppendToIn.Add(("sprk_eventtype_refs", MappedEventType));
+        var services = new ServiceCollection().AddSingleton(RecordTypeCatalog());
+        services.AddSingleton<IOptions<MembershipOptions>>(new UnreadableMembershipOptions());
+        _scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue("a registry that cannot be read never fails the create: {0}", outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_EventType_Ref@odata.bind",
+            "with the registry unread every mapped column counts as Assigned-To, so the caller's AppendTo check runs and its refusal holds");
+        StringOf(fields, "sprk_description").Should().Be("From the matter");
+        outcome.MappingWarnings.Should().ContainSingle()
+            .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_eventtype_ref");
+    }
+
+    // ── task 064d: a regarding pair whose record type is not told is not the filing record ──
+
+    [Theory]
+    [InlineData(false)] // the record-type read answers nothing
+    [InlineData(true)]  // the record-type read faults
+    public async Task Task064d_AnExplicitSourceCarryingThePairsId_WhoseRecordTypeIsNotTold_IsNotTheFilingRecord(bool faults)
+    {
+        var resolution = new MappingSourceResolution(new MappingSource("sprk_matter", OrdinaryMatter), MappingSourceOrigin.Explicit, null);
+        var callerRow = new Entity("sprk_event")
+        {
+            [SecureRootInheritance.PairIdColumn] = OrdinaryMatter.ToString("D"),
+            [SecureRootInheritance.PairTypeColumn] = new EntityReference("sprk_recordtype_ref", MatterType),
+        };
+
+        var filing = await RecordCreationService.SourceIsCallersFilingRecordAsync(
+            "sprk_event", resolution, callerRow,
+            (_, _) => faults ? throw new HttpRequestException("record type read failed") : Task.FromResult<string?>(null),
+            CancellationToken.None);
+
+        filing.Should().BeFalse("a pair whose table cannot be told is no match: the value keeps the caller's checks");
+    }
+
+    [Theory]
+    [InlineData("sprk_matter", true)]   // the pair's type names the source's table: the filing record
+    [InlineData("sprk_project", false)] // the pair's type names another table: not the filing record
+    public async Task Task064d_AnExplicitSourceCarryingThePairsId_IsTheFilingRecord_OnlyWhenTheRecordTypesTableIsTheSources(
+        string pairTable, bool filing)
+    {
+        var resolution = new MappingSourceResolution(new MappingSource("sprk_matter", OrdinaryMatter), MappingSourceOrigin.Explicit, null);
+        var callerRow = new Entity("sprk_event")
+        {
+            [SecureRootInheritance.PairIdColumn] = OrdinaryMatter.ToString("D"),
+            [SecureRootInheritance.PairTypeColumn] = new EntityReference("sprk_recordtype_ref", MatterType),
+        };
+
+        var result = await RecordCreationService.SourceIsCallersFilingRecordAsync(
+            "sprk_event", resolution, callerRow, (_, _) => Task.FromResult<string?>(pairTable), CancellationToken.None);
+
+        result.Should().Be(filing);
+    }
+
+    // ── task 064d: a rule's source column is compared by its trimmed, lower-case logical name ──
+
+    [Theory]
+    [InlineData(false)] // the column is not field-secured: the value is mapped
+    [InlineData(true)]  // the column is field-secured: nothing is mapped
+    public async Task Task064d_ARuleWhoseSourceFieldIsSpelledInMixedCaseWithTrailingSpace_IsCheckedForFieldSecurity(bool secured)
+    {
+        Profile("sprk_matter", "sprk_event", Rule("Sprk_MatterDescription ", "sprk_description", Memo));
+        if (secured)
+            _scripted.SecuredColumns.Add("sprk_matterdescription");
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        if (secured)
+        {
+            fields.Should().NotContainKey("sprk_description", "a field-secured source column is never copied, whatever its spelling");
+            outcome.MappingWarnings.Should().ContainSingle()
+                .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_description");
+        }
+        else
+        {
+            StringOf(fields, "sprk_description").Should().Be("From the matter");
+            outcome.MappingWarnings.Should().BeEmpty();
+        }
+    }
+
+    /// <summary>The membership options as a host whose configuration cannot be read: the value is not available.</summary>
+    private sealed class UnreadableMembershipOptions : IOptions<MembershipOptions>
+    {
+        public MembershipOptions Value => throw new InvalidOperationException("the membership options cannot be read");
     }
 
     // ── item 3: the step trace counts the values copied without the caller's checks ──

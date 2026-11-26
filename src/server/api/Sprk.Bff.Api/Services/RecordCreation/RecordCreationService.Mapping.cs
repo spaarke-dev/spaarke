@@ -585,7 +585,9 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// Task 022 fix round 2: whether the mapping source is a record the CALLER's own row is filed under — the regarding pair or
     /// the single typed parent the source was resolved from (FR-03, from the caller's payload before anything is mapped), or an
-    /// explicit source that one of those same filing parents names. Never a mapped lookup.
+    /// explicit source that one of those same filing parents names. Never a mapped lookup. It matches the regarding pair by id
+    /// alone, for step 3's owner gate; <see cref="SourceIsCallersFilingRecordAsync"/> (step 5's skip) also requires the table to
+    /// match, and the two differ on purpose.
     /// </summary>
     internal static bool SourceIsCallersFilingParent(string table, MappingSourceResolution resolution, Entity callerRow)
     {
@@ -1004,7 +1006,12 @@ internal sealed partial class RecordCreationService
 
         // Task 064 (boundary 3): which of the rules' source columns are field-secured, read as the caller beside the target's
         // columns (metadata only: it says nothing about the source record). Only a logical name reaches the filter.
-        var securedNames = sourceColumns.Where(c => LogicalNamePattern.IsMatch(c)).ToArray();
+        // Task 064d: by the trimmed, lower-case name (a Concat or Template placeholder may be spelled otherwise), as Dataverse names it.
+        var securedNames = sourceColumns
+            .Select(c => c.Trim().ToLowerInvariant())
+            .Where(c => LogicalNamePattern.IsMatch(c))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var securedTask = securedNames.Length == 0
             ? Task.FromResult<IReadOnlySet<string>?>(new HashSet<string>(StringComparer.OrdinalIgnoreCase))
             : SecuredColumnsAsync(user, source.EntityLogicalName, securedNames, attributesCancel.Token);
@@ -1070,6 +1077,8 @@ internal sealed partial class RecordCreationService
     private static async Task<IReadOnlySet<string>?> SecuredColumnsAsync(
         IDataverseUserClient user, string table, IReadOnlyCollection<string> columns, CancellationToken ct)
     {
+        // Task 064d: asked and compared by the trimmed, lower-case column name (Dataverse's logical names are lower case).
+        columns = [.. columns.Select(c => c.Trim().ToLowerInvariant()).Distinct(StringComparer.Ordinal)];
         var filter = string.Join(" or ", columns.Select(c => $"LogicalName eq '{c}'"));
         var response = await user.GetAsync(
                 $"EntityDefinitions(LogicalName='{table}')/Attributes?$select=LogicalName,IsSecured&$filter={Uri.EscapeDataString(filter)}", ct)
@@ -1086,13 +1095,14 @@ internal sealed partial class RecordCreationService
         {
             if (attribute.TryGetProperty("LogicalName", out var name) && name.ValueKind == JsonValueKind.String)
             {
-                answered.Add(name.GetString()!);
+                var answeredName = name.GetString()!.Trim().ToLowerInvariant();
+                answered.Add(answeredName);
 
                 // Anything but an explicit false is secured (fail closed): the one predicate, shared with the push.
                 if (FieldSecuredSourceRule.CountsAsSecured(
                         attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
                 {
-                    secured.Add(name.GetString()!);
+                    secured.Add(answeredName);
                 }
             }
         }
@@ -2008,16 +2018,18 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// A rule with its target as a logical name (trimmed, lower-case): the caller's columns are logical names, so a rule
-    /// spelled <c>"  SPRK_Name "</c> sees the caller's <c>sprk_name</c> as supplied (fill-only), and one aimed at a protected
-    /// column is refused whatever its spelling. A copy: the profile reader's rules are never changed.
+    /// A rule with its target and its source as logical names (trimmed, lower-case): the caller's columns are logical names, so
+    /// a rule spelled <c>"  SPRK_Name "</c> sees the caller's <c>sprk_name</c> as supplied (fill-only), and one aimed at a
+    /// protected column is refused whatever its spelling. Task 064d: Dataverse names every column in lower case, so the
+    /// source's column is found, and asked about for field security, by the same name. A copy: the profile reader's rules are
+    /// never changed.
     /// </summary>
     internal static FieldMappingRuleEntity NormalizedRule(FieldMappingRuleEntity rule) => new()
     {
         Id = rule.Id,
         Name = rule.Name,
         ProfileId = rule.ProfileId,
-        SourceField = rule.SourceField,
+        SourceField = rule.SourceField?.Trim().ToLowerInvariant()!,
         SourceFieldType = rule.SourceFieldType,
         TargetField = rule.TargetField?.Trim().ToLowerInvariant()!,
         TargetFieldType = rule.TargetFieldType,
