@@ -54,6 +54,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Debian security fixes published after the base digest was cut (e.g. libzstd1 CVE-2026-124851, fixed in
+# 1.5.7+dfsg-1+deb13u1, 2026-11-26). Upgrade-only: no new packages, the apt lists are removed in the same layer.
+# The Trivy gate still fails the build on anything fixable that this does not pick up. Bumping the base digest stays
+# the main way to move.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first (cache layer). --require-hashes: every package, transitive ones included, must match a hash in
 # requirements.txt. --only-binary: no sdist builds (the slim base has no compiler, and a build step is code we did
 # not pin). Then pip itself goes: nothing at runtime installs packages.
