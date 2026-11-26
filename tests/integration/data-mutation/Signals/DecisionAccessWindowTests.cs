@@ -69,22 +69,28 @@ public sealed class DecisionAccessWindowTests
 
         public Func<string, HttpStatusCode?>? Fault { get; set; }
 
+        /// <summary>Run 3: a GET of a path this answers with an exception THROWS it (a transport fault or a timeout).</summary>
+        public Func<string, Exception?>? Throw { get; set; }
+
         public int Count(string path) => Gets.GetValueOrDefault(path);
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.Method != HttpMethod.Get)
             {
                 Interlocked.Increment(ref Writes);
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
             }
 
             var original = request.RequestUri!.OriginalString;
             var path = original[(original.IndexOf("/api/data/v9.2/", StringComparison.Ordinal) + "/api/data/v9.2/".Length)..];
             Gets.AddOrUpdate(path, 1, (_, n) => n + 1);
-            return Task.FromResult(Fault?.Invoke(path) is { } status
+            await Task.Yield();
+            if (Throw?.Invoke(path) is { } thrown)
+                throw thrown;
+            return Fault?.Invoke(path) is { } status
                 ? new HttpResponseMessage(status)
-                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { AccessRights = "AppendToAccess" })) });
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(new { AccessRights = "AppendToAccess" })) };
         }
     }
 
@@ -354,5 +360,171 @@ public sealed class DecisionAccessWindowTests
         await CallerMetadataReadMemo.For(window.CallerClient(_rig.NewClient(_wire)), scope).GetAsync(metadata, default);
 
         _wire.Count(metadata).Should().Be(1);
+    }
+
+    // ── Run 3: faults that throw are never kept ───────────────────────────────────────────────────────────────────────
+
+    /// <summary>Must-fire: a probe rights question that THROWS keeps nothing; the next ask goes to the probe (fails if a fault is
+    /// stored, e.g. as a 403, before or instead of an answer).</summary>
+    [Fact]
+    public async Task ARightsQuestionThatThrows_IsNeverKept()
+    {
+        var throws = 1;
+        _probe.Setup(p => p.GetCallerRightsForRecordsOrUnknownAsync(
+                It.IsAny<string?>(), It.IsAny<IReadOnlyList<(string EntitySet, Guid RecordId)>>(), It.IsAny<CancellationToken>()))
+            .Returns(() => throws-- > 0
+                ? Task.FromException<IReadOnlyList<AccessRights?>>(new TimeoutException("no answer"))
+                : Task.FromResult<IReadOnlyList<AccessRights?>>(new AccessRights?[] { AccessRights.AppendTo }));
+        var http = Request(CallerA);
+        using var window = DecisionAccessWindow.Open(http, CallerA);
+
+        var first = () => window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default);
+        await first.Should().ThrowAsync<TimeoutException>();
+        (await window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default)).Should().Be(AccessRights.AppendTo);
+
+        RightsAsks().Should().Be(2, "a thrown question is asked again");
+    }
+
+    /// <summary>Must-fire: a privilege question that THROWS keeps nothing; the next ask goes to the probe.</summary>
+    [Fact]
+    public async Task APrivilegeQuestionThatThrows_IsNeverKept()
+    {
+        var throws = 1;
+        _probe.Setup(p => p.CallerPrivilegeAnswerAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(() => throws-- > 0
+                ? Task.FromException<CallerPrivilegeAnswer>(new TimeoutException("no answer"))
+                : Task.FromResult(CallerPrivilegeAnswer.NotHeld));
+        var http = Request(CallerA);
+        using var window = DecisionAccessWindow.Open(http, CallerA);
+
+        var first = () => window.CallerPrivilegeAsync(_probe.Object, http, Privilege, default);
+        await first.Should().ThrowAsync<TimeoutException>();
+        (await window.CallerPrivilegeAsync(_probe.Object, http, Privilege, default)).Should().Be(CallerPrivilegeAnswer.NotHeld);
+
+        PrivilegeAsks().Should().Be(2, "a thrown question is asked again");
+    }
+
+    public static TheoryData<string> RouteKeptPaths => new() { RightsPath, PrivilegesPath, CatalogPath };
+
+    /// <summary>Must-fire, every shape the route core's view keeps: a GET whose wire THROWS (a timeout) keeps nothing, and neither does
+    /// a transport failure (the client's 0 status); the next ask goes to the wire.</summary>
+    [Theory]
+    [MemberData(nameof(RouteKeptPaths))]
+    public async Task ARouteReadThatThrowsOrFailsInTransport_IsNeverKept(string path)
+    {
+        var faults = 0;
+        _wire.Throw = asked => asked == path ? (faults++) switch
+        {
+            0 => new TimeoutException("no answer"),
+            1 => new HttpRequestException("connection reset"),
+            _ => null,
+        } : null;
+        var http = Request(CallerA);
+        using var window = DecisionAccessWindow.Open(http, CallerA);
+        var client = window.CallerClient(_rig.NewClient(_wire));
+
+        var thrown = () => client.GetAsync(path, default);
+        await thrown.Should().ThrowAsync<TimeoutException>();
+        (await client.GetAsync(path, default)).IsSuccess.Should().BeFalse("the client answers a transport failure as a failure");
+        (await client.GetAsync(path, default)).IsSuccess.Should().BeTrue();
+        (await client.GetAsync(path, default)).IsSuccess.Should().BeTrue();
+
+        _wire.Count(path).Should().Be(3, "the throw and the transport failure are asked again; only the success is kept");
+    }
+
+    // ── Run 3: scope ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Two requests with windows open AT THE SAME TIME share nothing: both ask the same caller's same questions, interleaved on one
+    /// wire; each request's first ask reaches the wire and its repeat is answered from its own window; one request's step end does
+    /// not touch the other's answers. Fails if any store is shared across windows (e.g. made static).
+    /// </summary>
+    [Fact]
+    public async Task TwoConcurrentRequests_ShareNothing()
+    {
+        var first = Request(CallerA);
+        var second = Request(CallerA);
+        using var one = DecisionAccessWindow.Open(first, CallerA);
+        using var two = DecisionAccessWindow.Open(second, CallerA);
+
+        // Both windows open: the second request's first asks are not answered by the first request's.
+        foreach (var window in new[] { one, two })
+        {
+            await window.CallerClient(_rig.NewClient(_wire)).GetAsync(RightsPath, default);
+            await window.CallerClient(_rig.NewClient(_wire)).GetAsync(PrivilegesPath, default);
+        }
+
+        await one.CallerRightsAsync(_probe.Object, first, "sprk_matters", Matter, default);
+        await two.CallerRightsAsync(_probe.Object, second, "sprk_matters", Matter, default);
+        _wire.Count(RightsPath).Should().Be(2, "each request asked its own record-access question on the wire");
+        _wire.Count(PrivilegesPath).Should().Be(2, "each request asked its own privilege question on the wire");
+        RightsAsks().Should().Be(2, "each request asked the probe itself");
+
+        // Then both repeat, at the same time: each is answered from its own window.
+        await Task.WhenAll(Enumerable.Range(0, 32).Select(i => Task.Run(async () =>
+        {
+            var (window, http) = i % 2 == 0 ? (one, first) : (two, second);
+            await window.CallerClient(_rig.NewClient(_wire)).GetAsync(i % 4 < 2 ? RightsPath : PrivilegesPath, default);
+            await window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default);
+        })));
+        _wire.Count(RightsPath).Should().Be(2);
+        _wire.Count(PrivilegesPath).Should().Be(2);
+        RightsAsks().Should().Be(2);
+
+        // One request's step ends: only its own record-access answers go.
+        one.EndStep();
+        await two.CallerClient(_rig.NewClient(_wire)).GetAsync(RightsPath, default);
+        await two.CallerRightsAsync(_probe.Object, second, "sprk_matters", Matter, default);
+        _wire.Count(RightsPath).Should().Be(2, "the second request still holds its own answer");
+        RightsAsks().Should().Be(2);
+        await one.CallerClient(_rig.NewClient(_wire)).GetAsync(RightsPath, default);
+        await one.CallerRightsAsync(_probe.Object, first, "sprk_matters", Matter, default);
+        _wire.Count(RightsPath).Should().Be(3, "the first request's step ended, so it asks again");
+        RightsAsks().Should().Be(3);
+    }
+
+    /// <summary>
+    /// A request with no window (a REST create, the chat tool, a job or the reconciler with no request at all, a follow-up after the
+    /// commit closed its window) asks exactly as before: <see cref="DecisionExec"/> calls the probe's plain questions every time, and the
+    /// window's forms are never asked. The same two questions on a request WITH a window go through the window (one ask), so the test
+    /// fails if the executors stop consulting the window, and if they consult one where there is none.
+    /// </summary>
+    [Fact]
+    public async Task ARequestWithNoWindow_AsksThePlainProbeQuestions_EveryTime()
+    {
+        _probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.AppendTo);
+        _probe.Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        DecisionAccessWindow.Of(null).Should().BeNull("a job or the reconciler has no request, so no window");
+
+        var plain = Request(CallerA);
+        var closed = Request(CallerA);
+        DecisionAccessWindow.Open(closed, CallerA).Close(); // a follow-up after the commit closed its window
+        foreach (var http in new[] { plain, closed })
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                (await DecisionExec.CallerHoldsAsync(_probe.Object, http, "sprk_matters", Matter, DecisionExec.AppendToOperation, default)).Should().BeTrue();
+                (await DecisionExec.CallerHoldsPrivilegeAsync(_probe.Object, http, Privilege, default)).Should().BeTrue();
+            }
+        }
+
+        _probe.Invocations.Count(i => i.Method.Name == nameof(CallerRecordAccessProbe.GetCallerRightsAsync)).Should().Be(4);
+        _probe.Invocations.Count(i => i.Method.Name == nameof(CallerRecordAccessProbe.CallerHoldsPrivilegeAsync)).Should().Be(4);
+        RightsAsks().Should().Be(0, "the window's forms are asked only inside a window");
+        PrivilegeAsks().Should().Be(0);
+
+        var windowed = Request(CallerA);
+        using var window = DecisionAccessWindow.Open(windowed, CallerA);
+        for (var i = 0; i < 2; i++)
+        {
+            (await DecisionExec.CallerHoldsAsync(_probe.Object, windowed, "sprk_matters", Matter, DecisionExec.AppendToOperation, default)).Should().BeTrue();
+            (await DecisionExec.CallerHoldsPrivilegeAsync(_probe.Object, windowed, Privilege, default)).Should().BeTrue();
+        }
+
+        RightsAsks().Should().Be(1, "inside a window the repeat is answered from it");
+        PrivilegeAsks().Should().Be(1);
+        _probe.Invocations.Count(i => i.Method.Name == nameof(CallerRecordAccessProbe.GetCallerRightsAsync)).Should().Be(4, "unchanged");
     }
 }
