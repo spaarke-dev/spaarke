@@ -72,10 +72,9 @@ rework: none task 023
 - D-023-empty-text: the list says "No documents are filed under this matter." only when the source returned no rows; when rows came back
   and none survived the narrowing (or it failed closed), or the list may be cut, it says "No documents you can see are filed under this
   matter."
-- OPEN, not changed (needs owner go): matter and project NAMES are null in production. `DataverseServiceClientImpl.MapToDocumentEntityWithLookups`
-  sets `MatterId`/`ProjectId` only, so `regarding.name` and `regardingMatter.name` are absent from the tools. Setting `MatterName` /
-  `ProjectName` from the lookup `EntityReference.Name` would also change REST responses: `POST /api/ai/search` with `associatedOnly=true`
-  (`SemanticSearchService.MapDocumentEntityToSearchResult`: `parentEntityName` null -> the name),
-  `GET /api/ai/visualization/related/{documentId}` (`VisualizationService.CreateParentHubNode`: label "Matter"/"Project" -> the name) and
-  the index-file parent stamp (`DocumentIndexParentResolver.DecideAsync` -> `ParentEntityContext.EntityName`, "Unknown ..." fallback -> the
-  name; used by `RagEndpoints` index paths). `DocumentToolsWorld` still seeds `MatterName` until that is decided.
+- D-023-names: names withheld until the shared mapping is fixed. A deviation from the POML's model-visible "regarding matter name" field.
+  Filling DocumentEntity.MatterName/ProjectName changes POST /api/ai/search (associatedOnly parentEntityName), GET
+  /api/ai/visualization/related hub label and the index parent stamp, so it is filed as a separate issue for an owner/uac-r2 decision
+  (defer-issues.md D-023-3). Until then `regarding` (list) and `regardingMatter` / `regardingProject` (get) carry `entityType` and `id`
+  only, and the get text has no "Filed under ..." line. `DocumentToolsWorld` no longer seeds a name, so the double gives what production
+  gives; `BothTools_NeverCarryAMatterOrProjectName_EvenWhenTheSourceRowHoldsOne` seeds names on purpose to prove none is passed through.

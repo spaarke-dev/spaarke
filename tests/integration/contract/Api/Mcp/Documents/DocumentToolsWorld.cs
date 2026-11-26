@@ -154,7 +154,6 @@ internal sealed class DocumentToolsWorld
     public void Add(DocumentEntity document, Guid matter, bool readable)
     {
         document.MatterId = matter.ToString("D");
-        document.MatterName = "Acme v. Roadrunner";
         Rows[document.Id] = document;
         if (!ByMatter.TryGetValue(matter, out var list))
         {

@@ -176,5 +176,5 @@ internal static class DocumentToolSupport
 /// <summary>One document as the document tools return it (id, name, file type, size, modified date, whether a file is attached).</summary>
 internal sealed record DocumentRow(string Id, string Name, string? FileType, long? SizeBytes, DateTime? ModifiedOn, bool HasFile);
 
-/// <summary>A record a document is filed under: its type, id and display name (the name is absent when the document row carries none).</summary>
-internal sealed record RegardingRecord(string EntityType, string Id, string? Name);
+/// <summary>A record a document is filed under: its type and id. No display name (D-023-names): the shared document mapping never fills one, so the tools do not advertise it.</summary>
+internal sealed record RegardingRecord(string EntityType, string Id);

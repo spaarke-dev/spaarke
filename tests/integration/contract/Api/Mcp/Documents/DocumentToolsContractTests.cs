@@ -96,7 +96,7 @@ public sealed class DocumentToolsContractTests
         var regarding = body.GetProperty("regarding");
         regarding.GetProperty("entityType").GetString().Should().Be("sprk_matter");
         regarding.GetProperty("id").GetString().Should().Be(DocumentToolsWorld.MatterId.ToString("D"));
-        regarding.GetProperty("name").GetString().Should().Be("Acme v. Roadrunner");
+        regarding.TryGetProperty("name", out _).Should().BeFalse("D-023-names: the shared mapping never fills a matter name, so none is advertised");
 
         var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
         text.Should().Contain("Master services agreement.docx").And.Contain(DocumentToolsWorld.ReadableDocumentId);
@@ -205,7 +205,7 @@ public sealed class DocumentToolsContractTests
         document.GetProperty("modifiedOn").GetDateTime().Should().Be(source.ModifiedOn);
         document.GetProperty("hasFile").GetBoolean().Should().BeTrue();
         body.GetProperty("regardingMatter").GetProperty("id").GetString().Should().Be(source.MatterId);
-        body.GetProperty("regardingMatter").GetProperty("name").GetString().Should().Be("Acme v. Roadrunner");
+        body.GetProperty("regardingMatter").TryGetProperty("name", out _).Should().BeFalse("D-023-names");
         body.TryGetProperty("regardingProject", out _).Should().BeFalse("the document is not filed under a project");
         body.TryGetProperty("linksError", out _).Should().BeFalse();
 
@@ -237,6 +237,37 @@ public sealed class DocumentToolsContractTests
 
         text.Should().Contain(DocumentToolsWorld.ExpectedWebUrl, "the sign-in-gated links are still given");
         world.SpeCalls.Should().NotContain(c => c.StartsWith("preview:", StringComparison.Ordinal), "the preview is not even minted");
+    }
+
+    [Fact]
+    public async Task BothTools_NeverCarryAMatterOrProjectName_EvenWhenTheSourceRowHoldsOne()
+    {
+        // D-023-names: production never fills DocumentEntity.MatterName/ProjectName (the shared mapping sets ids only), so the tools do
+        // not advertise a name field. This row is seeded WITH names to prove the tools do not pass one through if the mapping ever fills it.
+        var world = new DocumentToolsWorld();
+        foreach (var row in world.Rows.Values)
+        {
+            row.MatterName = "Acme v. Roadrunner";
+            row.ProjectName = "Project Wile E";
+            row.ProjectId = Guid.Parse("23000000-0000-4000-8000-0000000000d1").ToString("D");
+        }
+
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var list = await host.CallAsync(ListTool, new { regardingEntityType = "sprk_matter", regardingId = DocumentToolsWorld.MatterId });
+        var get = await host.CallAsync(GetTool, new { documentId = DocumentToolsWorld.ReadableDocumentId });
+
+        IsError(list).Should().BeFalse(list.GetRawText());
+        IsError(get).Should().BeFalse(get.GetRawText());
+        list.GetProperty("structuredContent").GetProperty("regarding").EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(new[] { "entityType", "id" });
+        var body = get.GetProperty("structuredContent");
+        body.GetProperty("regardingMatter").EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(new[] { "entityType", "id" });
+        body.GetProperty("regardingProject").EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(new[] { "entityType", "id" });
+        foreach (var result in new[] { list, get })
+        {
+            result.GetRawText().Should().NotContain("Acme v. Roadrunner").And.NotContain("Project Wile E").And.NotContain("Filed under");
+        }
     }
 
     [Fact]

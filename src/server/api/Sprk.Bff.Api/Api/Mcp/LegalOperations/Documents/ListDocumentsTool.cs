@@ -189,9 +189,8 @@ internal sealed class ListDocumentsTool : McpToolDefinition
             return DocumentToolSupport.Fault(ex, ToolName, "the document list read", http, logger);
         }
 
-        var matterName = rows.Select(d => d.MatterName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
         var body = new ListBody(
-            new RegardingRecord(MatterEntityType, matterId.ToString("D"), WorklistItemSummary.Clip(matterName, DocumentToolSupport.NameBytes)),
+            new RegardingRecord(MatterEntityType, matterId.ToString("D")),
             listed,
             listed.Count,
             rows.Count >= ServiceRowLimit);

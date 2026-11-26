@@ -44,7 +44,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 /// exist give the same <c>isError</c> not-found (<see cref="DocumentToolSupport.NotFound"/>): the REST routes already answer the first
 /// and third alike (403, because Dataverse grants no rights on a row that does not exist), so a uniform result contradicts no contract.</para>
 /// <para><b>Metadata</b> is the row <c>GET /api/v1/documents/{id}</c> returns (<c>IDocumentDataverseService.GetDocumentAsync</c>), reduced
-/// to what the model may see (ADR-015, NFR-07): id, name, file type, size, modified date and the matter or project it is filed under. No
+/// to what the model may see (ADR-015, NFR-07): id, name, file type, size, modified date and the id of the matter or project it is filed under (no display name: D-023-names). No
 /// storage pointer, summary, description or content.</para>
 /// <para><b>Links</b> come from <see cref="FileAccessEndpoints.ResolveOpenLinksAsync"/>, the link step of the open-links route, so the tool
 /// and the route cannot disagree. The tool does not do the route's last step (a just-in-time writer role on a secure container): it is
@@ -206,14 +206,12 @@ internal sealed class GetDocumentTool : McpToolDefinition
         var row = DocumentToolSupport.RowOf(document);
         var body = new GetBody(
             row,
-            RegardingOf("sprk_matter", document.MatterId, document.MatterName),
-            RegardingOf("sprk_project", document.ProjectId, document.ProjectName),
+            RegardingOf("sprk_matter", document.MatterId),
+            RegardingOf("sprk_project", document.ProjectId),
             linksError is null ? new DocumentLinks(open?.DesktopUrl, open?.WebUrl) : null,
             linksError);
 
         var text = DocumentToolSupport.LineOf(row)
-                   + (body.RegardingMatter?.Name is { } matter ? $"\nFiled under matter: {matter}" : string.Empty)
-                   + (body.RegardingProject?.Name is { } project ? $"\nFiled under project: {project}" : string.Empty)
                    + (body.Links is { } links
                        ? $"\nOpen in the browser: {links.WebUrl}"
                          + (links.DesktopUrl is null ? string.Empty : $"\nOpen on the desktop: {links.DesktopUrl}")
@@ -221,10 +219,10 @@ internal sealed class GetDocumentTool : McpToolDefinition
         return DecisionToolCall.Success(text, body);
     }
 
-    private static RegardingRecord? RegardingOf(string entityType, string? id, string? name) =>
+    private static RegardingRecord? RegardingOf(string entityType, string? id) =>
         string.IsNullOrWhiteSpace(id)
             ? null
-            : new RegardingRecord(entityType, id, WorklistItemSummary.Clip(name, DocumentToolSupport.NameBytes));
+            : new RegardingRecord(entityType, id);
 
     /// <summary><c>structuredContent</c> of <c>spaarke_get_document</c>: <see cref="Links"/> or <see cref="LinksError"/> is set, not both.</summary>
     internal sealed record GetBody(
