@@ -32,7 +32,7 @@ Owner approves (or declines): `pwsh scripts/dataverse/Set-MatterSummaryTopicRegi
 
 ## 5. Owner go and run evidence
 
-Owner go: **not given**. No script ran against any environment (negative criterion holds). Acceptance criterion 3 (a live run fills the column; the lookup returns the TTL) is not exercised: it needs a live matter-hosted chat run as a test user and the section 4 decision.
+Owner go: **GIVEN 2026-11-26** ("yes go ahead to update", notes/decisions.md D-owner-answers-2026-11-26 #2). Pre-check: the only code reader of `sprk_playbookname` is `TopicRegistryTtlLookup`; the other "chat-summarize" strings in `src/` are the Binding's `sprk_consumertype`, a different column. Run on dev by the main session, 2026-11-26: row cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6 `sprk_playbookname` chat-summarize -> matter-summary (ttl 60, target sprk_recordsummary); a `-WhatIf` re-run reports "no change". Acceptance criterion 3 (a live matter-hosted run fills the column) is still not exercised; it moves to the dev E2E in task 039.
 
 ## 6. Follow-ups
 

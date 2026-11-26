@@ -105,6 +105,18 @@ function Get-AttributeType([string]$Entity, [string]$Attribute) {
     }
 }
 
+# Read-back after PublishXml: metadata for a just-created attribute can lag by a few seconds (seen on dev 2026-11-26: the last
+# lookup read back '' straight after publish, then 'Lookup' on the next run). Retry briefly before declaring a failure.
+function Get-AttributeTypeAfterPublish([string]$Entity, [string]$Attribute, [string]$Expected) {
+    $type = $null
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        $type = Get-AttributeType $Entity $Attribute
+        if ($type -and (-not $Expected -or $type -eq $Expected)) { return $type }
+        Start-Sleep -Seconds 5
+    }
+    return $type
+}
+
 function New-StringColumn([string]$Name, [string]$Display, [string]$Description, [int]$MaxLength) {
     return @{
         "@odata.type"   = "Microsoft.Dynamics.CRM.StringAttributeMetadata"
@@ -337,11 +349,11 @@ if (-not $WhatIf) {
     Write-Host "Published sprk_playbookrun, sprk_playbooknoderun ($created column(s) added, $relaxed lookup(s) made optional)." -ForegroundColor Green
 
     foreach ($column in $Columns) {
-        $type = Get-AttributeType $column.Entity $column.Def.SchemaName
+        $type = Get-AttributeTypeAfterPublish $column.Entity $column.Def.SchemaName $null
         if (-not $type) { throw "Verification failed: $($column.Entity).$($column.Def.SchemaName) is missing after publish." }
     }
     foreach ($lookup in $Lookups) {
-        $type = Get-AttributeType $lookup.Entity $lookup.Name
+        $type = Get-AttributeTypeAfterPublish $lookup.Entity $lookup.Name "Lookup"
         if ($type -ne "Lookup") { throw "Verification failed: $($lookup.Entity).$($lookup.Name) is '$type' after publish; expected Lookup." }
     }
     foreach ($optional in $OptionalLookups) {
