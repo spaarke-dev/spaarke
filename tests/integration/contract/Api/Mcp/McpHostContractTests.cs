@@ -253,16 +253,16 @@ public sealed class McpHostContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    // ---- FR-01 (task 025): tools/list through the REAL BFF host is exactly the five v1 tools --------------------------------------
+    // ---- FR-01 (task 025): tools/list through the REAL BFF host is exactly the pinned tools ---------------------------------------
 
     /// <summary>
-    /// The production-DI proof (task 010 K1, task 025): <see cref="McpProgramHostFactory"/> boots <c>Program</c>, so the five tools below
-    /// come from <c>AddMcpModule</c>'s real scan of the BFF assembly, not from a test's own type list. A sixth tool, a missing one, or a
-    /// renamed one fails here. The probe tools of <see cref="McpTestHost"/> live in the TEST assembly, which that scan never reads, so
+    /// The production-DI proof (task 010 K1, task 025): <see cref="McpProgramHostFactory"/> boots <c>Program</c>, so the tools below
+    /// come from <c>AddMcpModule</c>'s real scan of the BFF assembly, not from a test's own type list. An unpinned tool, a missing one, or a
+    /// renamed one fails here; a task that adds a tool adds its row. The probe tools of <see cref="McpTestHost"/> live in the TEST assembly, which that scan never reads, so
     /// their absence is part of the assertion.
     /// </summary>
     [Fact]
-    public async Task RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyTheFiveV1Tools()
+    public async Task RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyThePinnedTools()
     {
         using var factory = new McpProgramHostFactory();
         using var client = factory.CreateClient();
@@ -289,13 +289,16 @@ public sealed class McpHostContractTests
                 "spaarke_get_decision_plan",
                 "spaarke_search_decision_lookup",
                 "spaarke_complete_decision",
+                "spaarke_list_documents", // r2 task 023
+                "spaarke_get_document", // r2 task 023
+                "spaarke_get_portfolio", // r2 task 026
+                "spaarke_list_playbooks", // r2 task 024
             ],
-            "FR-01: tools/list returns exactly the v1 tools; the paging tool is spaarke_list_decision_page (task 022)");
-        names.Should().HaveCount(5);
+            "FR-01: tools/list returns exactly the pinned tools (each new tool task adds its row); the paging tool is spaarke_list_decision_page (task 022)");
 
         // tools/list is judged per tool policy for THIS caller (the SDK filter hides a tool the caller may not call), so a sixth tool behind a
         // stricter policy (e.g. SystemAdmin) would be invisible above. The catalog is the unfiltered set of the area.
         factory.Services.GetRequiredService<McpToolCatalog>().ToolsFor(McpEndpoints.LegalOperationsArea).Select(t => t.ProtocolTool.Name)
-            .Should().BeEquivalentTo(names, "the area's catalog holds exactly the five v1 tools, whatever the caller may see");
+            .Should().BeEquivalentTo(names, "the area's catalog holds exactly the pinned tools, whatever the caller may see");
     }
 }

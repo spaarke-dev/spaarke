@@ -35,3 +35,12 @@ export {
 } from './briefingService';
 
 export { fetchDigestPreferences, saveDigestPreferences } from './preferencesService';
+
+// spaarkeai-mcp-bff-api-r2 task 010 (FR-16): the data + navigation seam of DailyBriefingApp.
+export {
+  createDefaultBriefingDataService,
+  type BriefingDataService,
+  type BriefingNavigationHandler,
+  type BriefingPreferencesService,
+} from './briefingDataService';
+export type { BriefingWindowParams } from './briefingService';

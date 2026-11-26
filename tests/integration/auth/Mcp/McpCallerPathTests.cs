@@ -294,7 +294,7 @@ public sealed class McpCallerPathTests
 
         // The production assembly scan over the production DI: a caller-path parameter (IHttpContextAccessor, IDecisionCapability, ...)
         // that the real host did not register would be published as a tool ARGUMENT, so the caller path would not be the request's.
-        // This only holds for tools whose input schema the SDK INFERS from the handler's parameters (the three below); the two other
+        // This only holds for tools whose input schema the SDK INFERS from the handler's parameters (the three below); the other
         // legal-operations tools state a static schema (see the pin test next to this one), which says nothing about DI binding.
         var arguments = RealHostToolArguments(factory);
 
@@ -307,11 +307,11 @@ public sealed class McpCallerPathTests
     }
 
     [Fact]
-    public void Test5_TheRealBffHost_TheTwoStaticSchemaTools_PublishExactlyTheirPinnedArguments_ASchemaPinNotAnInjectionProof()
+    public void Test5_TheRealBffHost_TheStaticSchemaTools_PublishExactlyTheirPinnedArguments_ASchemaPinNotAnInjectionProof()
     {
-        // ShowDecisionsTool and ListDecisionPageTool overwrite ProtocolTool.InputSchema with a static schema, so these rows would stay
-        // green even if one of their services were not registered. They are pinned as the published contract (FR-03: the closed category
-        // enum, the cursor), nothing more.
+        // The static-schema tools (ShowDecisionsTool, ListDecisionPageTool and the r2 tools) overwrite ProtocolTool.InputSchema, so these
+        // rows would stay green even if one of their services were not registered. They are pinned as the published contract (FR-03: the
+        // closed category enum, the cursor; each r2 tool's arguments), nothing more.
         using var factory = RealBffHost();
 
         var arguments = RealHostToolArguments(factory);
@@ -320,6 +320,10 @@ public sealed class McpCallerPathTests
         {
             ["spaarke_show_decisions"] = ["category"],
             ["spaarke_list_decision_page"] = ["cursor"],
+            ["spaarke_list_documents"] = ["regardingEntityType", "regardingId"], // r2 task 023
+            ["spaarke_get_document"] = ["documentId"], // r2 task 023
+            ["spaarke_get_portfolio"] = [], // r2 task 026
+            ["spaarke_list_playbooks"] = ["nameFilter", "page"], // r2 task 024 (static schema: the two optional list arguments)
         }, options => options.WithStrictOrdering());
     }
 

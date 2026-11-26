@@ -12,9 +12,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Identity.Client;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -32,7 +30,8 @@ namespace Sprk.Bff.Api.Tests.Seam.Auth;
 /// What IS observable, and what actually matters if the migration is wrong, is the <b>fail-closed
 /// contract</b>: every migrated path must deny rather than degrade when no credential can be obtained.
 /// That is NFR-03, it is the property whose violation locks out or — far worse — silently admits every
-/// user, and it is what this file asserts on each of the four OBO paths.</para>
+/// user, and it is what this file asserts on each OBO path. (A fourth path, the legacy M365 Copilot
+/// agent's token service, was removed with that agent in spaarkeai-mcp-bff-api-r2 task 001.)</para>
 ///
 /// <para><b>Why "no provider" is the right stand-in for "no credential".</b> Exercising a real
 /// exhausted-credential path needs either a live identity or a network round trip, neither of which is
@@ -130,32 +129,6 @@ public class ConfidentialClientMigrationSeamTests
         response.ErrorCode.Should().Be(DataverseUserClientErrorCodes.UserContextRequired,
             "no bearer token is no user context: the caller cannot be checked, never a fallback");
         assertions.Mints.Should().Be(0, "the token's absence is detected before any credential is used");
-    }
-
-    [Fact]
-    public async Task AgentTokenService_WithNoCredentialProvider_ReturnsFailure_NeverAToken()
-    {
-        // The M365 Copilot agent path. A silent success here would mean the agent acting with no proven
-        // identity; the contract is an explicit failure result.
-        var sut = new AgentTokenService(
-            Mock.Of<ITenantCache>(),
-            Options.Create(new AgentTokenOptions
-            {
-                TenantId = Tenant,
-                ClientId = AppId,
-                AgentAppId = Guid.NewGuid().ToString(),
-                DataverseEnvironmentUrl = DataverseUrl,
-            }),
-            NullLogger<AgentTokenService>.Instance,
-            confidentialClients: null);
-
-        var httpContext = new DefaultHttpContext();
-        httpContext.Request.Headers.Authorization = "Bearer not-a-real-token";
-
-        var result = await sut.AcquireGraphTokenAsync(httpContext, CancellationToken.None);
-
-        result.IsSuccess.Should().BeFalse("no credential provider means no proven identity");
-        result.Token.Should().BeNull();
     }
 
     // =============================================================================================

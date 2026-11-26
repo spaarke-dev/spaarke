@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 // spaarkeai-mcp-bff-api-r1 task 022 (spec FR-03, FR-04, FR-14; design §9.5): what the model reads from spaarke_show_decisions.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
-//   Existing: the Console renders the lane in the browser; HandoffUrlBuilder (Api/Agent, the April surface) and
+//   Existing: the Console renders the lane in the browser; HandoffUrlBuilder (Services/Ai/Handoff, the April surface) and
 //     InquiryRecordFacts.AppLink build Dataverse links from the environment URL, but neither builds a Console or Invoice Review page
 //     link, and nothing reduces privileged Work Items.
 //   Extension: the link shape is the one those builders and openInvoiceReview.ts use (main.aspx?pagetype=webresource), from the same
