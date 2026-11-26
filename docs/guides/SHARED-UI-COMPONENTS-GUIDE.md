@@ -260,7 +260,6 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | `adapters/xrmDataServiceAdapter` | `createXrmDataService()` |
 | `adapters/xrmUploadServiceAdapter` | `createXrmUploadService()` |
 | `adapters/xrmNavigationServiceAdapter` | `createXrmNavigationService()` |
-| `adapters/bffDataServiceAdapter` | `createBffDataService()` |
 | `adapters/bffUploadServiceAdapter` | `createBffUploadService()` |
 | `adapters/bffNavigationServiceAdapter` | `createBffNavigationService()` |
 
@@ -372,7 +371,7 @@ Pre-built adapter factories in `src/utils/adapters/` wire the service interfaces
 | **Xrm** | `createXrmDataService()` | Code Pages running inside Dataverse (Xrm global available) |
 | | `createXrmUploadService(bffBaseUrl)` | File uploads via BFF API from a Code Page |
 | | `createXrmNavigationService()` | Navigation/dialogs from a Code Page |
-| **BFF** | `createBffDataService(authFetch, bffBaseUrl)` | Power Pages SPA (no Xrm, all data via BFF API) |
+| **BFF** | `createChildRecordViaBff(authFetch, …)` (`bffChildWriteAdapter`) | Creates from a host without Xrm; there is no BFF `IDataService` adapter |
 | | `createBffUploadService(authFetch, bffBaseUrl)` | File uploads from the SPA |
 | | `createBffNavigationService(navigate?)` | SPA router navigation |
 
