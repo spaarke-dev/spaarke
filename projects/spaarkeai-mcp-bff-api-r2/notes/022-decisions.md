@@ -186,3 +186,16 @@ One slip: a Bash command carried a `python` call (the wave rule forbids it). It 
 no other python process of this session exists. No output of it was used.
 
 rework: none task 022
+
+## Main-session re-check (2026-11-26)
+Scoped re-check of the verifier-fix merge:
+- **The filter overloads** resolve `ISemanticSearchService` / `IRecordSearchService` only inside the delegate, which the shared method calls after the request phase allows the search. With a null context nothing is resolved.
+- **`SearchToolSupport.DescribePage`** handles every page case correctly: past the end, full, short, truncated, and scope=all vs one record.
+- **CAPABILITY-INDEX** rows 42–43 now point at the 3-argument overloads (Path C).
+- **Gates on the merged tree:**
+  - build `-warnaserror` clean;
+  - unit tests filtered to Search, Mcp, Tenant and Regression: 2593 passed, 4 skipped;
+  - full ArchTests: 2858 passed.
+- **Deferred:** #3220 and #3221.
+
+Task 022 done.
