@@ -1001,18 +1001,35 @@ public partial class RouteAuthorizationGuardTests
 
     // ── the per-area ledger split (spaarkeai-mcp-bff-api-r2 task 020) ─────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "r2 task 020: every MCP tool class is in exactly one ledger partial, once")]
-    public void McpToolLedger_EachClassIsInExactlyOnePartial()
-    {
-        var duplicates = McpToolPartials
+    /// <summary>Every tool class listed more than once across <paramref name="partials"/> (the guard reads only the first row of a
+    /// class, so a second row with another policy or seam would be silently ignored).</summary>
+    private static List<string> McpToolLedgerDuplicates(IEnumerable<(string Area, IReadOnlyList<McpTool> Rows)> partials) =>
+        partials
             .SelectMany(p => p.Rows.Select(r => (p.Area, r.Class)))
             .GroupBy(x => x.Class, StringComparer.Ordinal)
             .Where(g => g.Count() > 1)
             .Select(g => $"{g.Key}: listed {g.Count()} times ({string.Join(", ", g.Select(x => x.Area))}); keep one row in its area's partial.")
             .ToList();
 
-        Assert.Empty(duplicates);
+    [Fact(DisplayName = "r2 task 020: every MCP tool class is in exactly one ledger partial, once")]
+    public void McpToolLedger_EachClassIsInExactlyOnePartial()
+    {
+        Assert.Empty(McpToolLedgerDuplicates(McpToolPartials));
         Assert.Equal(McpToolPartials.Sum(p => p.Rows.Count), McpTools.Count);
+    }
+
+    [Fact(DisplayName = "r2 task 020 controls: a class listed twice (across partials or in one) is named; distinct classes are not")]
+    public void McpToolLedgerDuplicates_Controls()
+    {
+        static McpTool Row(string cls) => new(cls, "", "IActionSeam", "Seeded by the ledger-split controls: a fixture row, never a real tool.");
+
+        // MUST NOT FIRE: distinct classes in distinct partials.
+        Assert.Empty(McpToolLedgerDuplicates(new (string, IReadOnlyList<McpTool>)[] { ("Search", new[] { Row("A") }), ("Email", new[] { Row("B") }) }));
+
+        // MUST FIRE: the same class in two partials, and twice in one.
+        var across = McpToolLedgerDuplicates(new (string, IReadOnlyList<McpTool>)[] { ("Search", new[] { Row("A") }), ("Email", new[] { Row("A") }) });
+        Assert.Equal("A: listed 2 times (Search, Email); keep one row in its area's partial.", Assert.Single(across));
+        Assert.Single(McpToolLedgerDuplicates(new (string, IReadOnlyList<McpTool>)[] { ("Tasks", new[] { Row("A"), Row("A") }) }));
     }
 
     [Theory(DisplayName = "r2 task 020 must-fire: a real r1 tool absent from every ledger partial fails the guard, text and reflection")]
