@@ -23,6 +23,17 @@
 | **Uncommitted** | none after the housekeeping commit |
 
 ## Next action (exact)
+**IN FLIGHT (2026-11-25 late): docs/ADR PR "playbook architecture"** (owner: "update our documentation and ADR so that it reflects our playbook architecture … so we do not recurringly re-assess 'the playbooks are not used'"). Worktree `C:code_filesspaarke-wt-docs-playbook-architecture`, branch `docs/playbook-architecture` off master 3c8778b74e, nothing written yet. Plan:
+- (a) rewrite `docs/architecture/playbook-architecture.md` (now a SUPERSEDED redirect, the root of the confusion) as the canonical "what playbook means" doc (docs-architecture structure): concept D-209 + 3 formats; frozen node engine; live composite = prompted Action / coded workflow + Binding; run record = `sprk_playbookrun` "AI Run";
+- (b) ADR-039 Path B amendment, concise `.claude/adr` and full `docs/adr`: "Playbook: concept live, engine frozen" + MUST record every AI run on `sprk_playbookrun`;
+- (c) canonical AI doc `SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`: §4.2 pointer, a run-record subsection in §6, a revision-log row;
+- (d) `CAPABILITY-INDEX.md` row 16 is MISLEADING (it points "run an AI analysis or add a playbook" at the frozen `AnalysisOrchestrationService` / `INodeExecutor`). Split it into: run an AI capability (Action + Binding: `LinearConsumers/ActionRunner.cs`, `IActionResolver.cs`); composite (`Services/Ai/ICodedWorkflow.cs`, `Narrators/DailyBriefingNarrator.cs`); record an AI run (`sprk_playbookrun/Entity.xml`); frozen engine node types (Insights only);
+- (e) frozen banners: `ai-architecture-playbook-runtime.md` and `.claude/patterns/ai/node-executor-authoring.md` point to (a);
+- (f) a FAILURE-MODES entry; INDEX rows;
+- then the PR, and send the link to mcp-r2 (D-run-record-hold released; schema split proposed: its task 005 builds the shared columns, our Phase 1 adds the profile-version lookup).
+
+The decision itself is recorded (fbf1bfb9a4). mcp-r2 was told.
+
 0. **Run path reviewed (Fable, 2026-11-25, `notes/run-path-review-2026-11-25.md`):** Phase 1 uses the **action-based model** (Action via `IActionResolver` + `IActionRunner` behind a `PublicContracts` facade; `ICodedWorkflow` for multi-step), NOT playbook orchestration. The node engine is frozen by ADR-039, and ADR-013 was amended 2026-07-05. The spec is corrected. **Stale in design.md** (owner's doc, not edited yet):
    - §3.14/§12 D-A18 (7) (lookups on `sprk_playbookrun`, which requires a playbook);
    - §3.15 (`PriorOutputReference` is documentation only, not chaining).
