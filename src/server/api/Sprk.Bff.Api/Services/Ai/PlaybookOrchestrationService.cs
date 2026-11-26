@@ -783,19 +783,21 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             ? PlaybookRuns.PlaybookNodeRunOutcome.Skipped
             : output.Success ? PlaybookRuns.PlaybookNodeRunOutcome.Completed : PlaybookRuns.PlaybookNodeRunOutcome.Failed;
 
-        var record = new PlaybookRuns.PlaybookNodeRunRecord(
-            RunId: context.RunId,
-            NodeId: node.Id,
-            Name: node.OutputVariable,
-            Outcome: outcome,
-            Sequence: sequence,
-            StartedAt: startedAt,
-            CompletedAt: completedAt,
-            DurationMs: output.Metrics.DurationMs,
-            TokensIn: output.Metrics.TokensIn,
-            TokensOut: output.Metrics.TokensOut,
-            Confidence: output.Confidence,
-            ErrorMessage: output.Success ? null : output.ErrorMessage);
+        var record = new PlaybookRuns.PlaybookNodeRunRecord
+        {
+            RunId = context.RunId,
+            NodeId = node.Id,
+            Name = node.OutputVariable,
+            Outcome = outcome,
+            Sequence = sequence,
+            StartedAt = startedAt,
+            CompletedAt = completedAt,
+            DurationMs = output.Metrics.DurationMs,
+            TokensIn = output.Metrics.TokensIn,
+            TokensOut = output.Metrics.TokensOut,
+            Confidence = output.Confidence,
+            ErrorMessage = output.Success ? null : output.ErrorMessage,
+        };
 
         var stopwatch = Stopwatch.StartNew();
         try
@@ -814,21 +816,26 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     {
         var metrics = context.GetMetrics(context.NodeOutputs.Count);
 
-        return new PlaybookRuns.PlaybookRunRecord(
-            RunId: context.RunId,
-            PlaybookId: context.PlaybookId,
-            State: context.State,
-            StartedAt: context.StartedAt,
-            CompletedAt: context.CompletedAt,
-            ErrorMessage: context.ErrorMessage,
-            ErrorCode: context.State == PlaybookRunState.Failed ? context.FailureCode : null,
-            TriggeredBy: context.UserId,
+        return new PlaybookRuns.PlaybookRunRecord
+        {
+            RunId = context.RunId,
+            PlaybookId = context.PlaybookId,
+            // This service runs the node engine: its rows are Engine runs. It sets none of the Action, Binding or
+            // parent-run references (those belong to prompted and coded runs, written by their own callers).
+            Kind = PlaybookRuns.PlaybookRunKind.Engine,
+            State = context.State,
+            StartedAt = context.StartedAt,
+            CompletedAt = context.CompletedAt,
+            ErrorMessage = context.ErrorMessage,
+            ErrorCode = context.State == PlaybookRunState.Failed ? context.FailureCode : null,
+            TriggeredBy = context.UserId,
             // The same correlation id the run's failure event carries (BuildRunFailedEvent): the request's trace id,
             // captured at start; the run id for an app-only run.
-            CorrelationId: context.CorrelationId ?? context.RunId.ToString("D"),
-            Regarding: ResolveRegarding(context.Parameters),
-            DocumentIds: context.DocumentIds,
-            Summary: BuildSummary(context.State, metrics));
+            CorrelationId = context.CorrelationId ?? context.RunId.ToString("D"),
+            Regarding = ResolveRegarding(context.Parameters),
+            DocumentIds = context.DocumentIds,
+            Summary = BuildSummary(context.State, metrics),
+        };
     }
 
     /// <summary>
