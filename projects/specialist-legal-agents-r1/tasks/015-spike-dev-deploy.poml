@@ -4,7 +4,7 @@
     <title>Spike dev deploy through uac-r2</title>
     <phase>2 Spike tools and dev deploy</phase>
     <gate>after 011 and the owner's per-SHA go</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Phase 2 deployment step with explicit constraints</rigor-reason>
     <model-tier>sonnet</model-tier>

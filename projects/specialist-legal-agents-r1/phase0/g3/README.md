@@ -103,3 +103,10 @@ To be written after the DEV run.
   - The `REVIEW_FAILED` text carries its reference.
   - The result reports `documentChars`.
 - Error codes testers may see: `NO_PROFILE`, `CALLER_UNRESOLVED`, `CALLER_LOOKUP_FAILED`, `AI_DISABLED`, `MODEL_TIER_UNAVAILABLE`, `REVIEW_FAILED`, `INVALID_ARGUMENT`.
+
+## Dev deploy (task 015)
+
+- 2026-11-26: owner go in chat, "Go, deploy it", for `d307d67e36`. origin/master was an ancestor (0 behind) when checked.
+- Deploy request sent to the uac-r2 session, which owns the dev BFF slot.
+- uac-r2 replied that the go must be given in its own session as "go BFF deploy d307d67e36". Before that it needs (1) an access review of both tools, sent 2026-11-26 (neither tool reads a per-user record or an SPE document; the Action-catalogue read is app-only), and (2) its own test pass on the SHA (full solution build plus the BFF and Arch suites, about 1.5 h).
+- At the time of the request the dev BFF was at `140c01219a` and master at `51ce01a116`, an ancestor of `d307d67e36`. The deploy also carries #2622, #3236, #3243 and #3247 to dev.
