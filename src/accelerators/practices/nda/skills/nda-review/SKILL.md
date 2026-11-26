@@ -28,7 +28,8 @@ which item is missing.
    posture, playbook folder, author name and initials, email behaviour.
 3. Ask ONE question card with only what has no saved default:
    - Our role: Disclosing / Receiving / Mutual
-   - Approach: Balanced / Aggressive / Light touch
+   - Approach: Balanced / Aggressive / Light touch (only Aggressive pushes clauses that already meet
+     the playbook's fallback towards its preferred position; see step 4)
    - Standards: <playbooks found> / Spaarke baseline / Upload one
 4. Running under an automation (no user present): ask nothing; use profile defaults, or mutual +
    balanced + baseline, and state them on page 1.
@@ -56,6 +57,14 @@ classify: compliant / fallback / deviation / missing / not-applicable / undeterm
 clause, a short quote, the playbook basis and the action (none / edit / comment / escalate).
 Prohibited-or-escalate hits are flagged to the user, never silently "fixed".
 
+**A clause at the playbook's fallback passes.** The playbook accepts its fallback as an end state, so
+status `fallback` means rating YELLOW, action `none` (or `comment` for a business confirmation) and
+no change to the text. If the user might still want the preferred position, add it to
+`open_questions` ("§7 meets the fallback; push for the preferred position?"). Apply this to every
+fallback topic the same way. Only with Approach = Aggressive may the plan move a fallback clause to
+the preferred position, and its comment then says it is a request, not a requirement.
+`review_visuals.py` refuses a plan that changes a fallback clause under any other approach.
+
 Write the result to `review.json` (`references/review-result.schema.json`): one entry for **every**
 checklist topic, each with `rating` (GREEN = preferred position; YELLOW = fallback or minor
 deviation; RED = prohibited / escalate, or a required protection missing; N/A), `status`,
@@ -80,7 +89,9 @@ Write `edit-plan.json` (`references/edit-plan.schema.json`):
   with no change), `author`, `initials`, `date`.
 
 Check first: `python scripts/ooxml_redline.py edit-plan.json <original.docx> out.docx --dry-run`.
-Exit 3 names the edit that does not fit; fix the plan and repeat.
+Exit 3 names the edit that does not fit; fix the plan and repeat. Then check the review and the
+plan agree: `python scripts/review_visuals.py review.json edit-plan.json --topics references/topics.json`
+(no outputs). Exit 3 lists each disagreement (step 7a); fix and repeat.
 
 **Show the plan before building any file.** In chat: the provenance line, a table of the changes
 (number, section, topic, priority, one-line revision) High first, the escalations, and the open
@@ -108,7 +119,8 @@ output by hand. If a renderer is available (probe `tools`), render page 1 and lo
 `python scripts/review_visuals.py review.json edit-plan.json --topics references/topics.json --html dashboard.html --xlsx audit.xlsx --doc-link <agreement link, if known>`
 
 Exit 3 means the review and the plan disagree (a topic with edits marked action "none", an
-"edit" topic with no edit, a planned topic missing from the review). Fix `review.json` or the
+"edit" topic with no edit, a planned topic missing from the review, a fallback clause changed
+without Approach = Aggressive). Fix `review.json` or the
 plan, rebuild from step 6 if the plan changed, and run it again. Exit 2 lists invalid entries in
 `review.json`. Never write or edit the dashboard or the workbook by hand: every number in them
 must come from these two files.

@@ -29,7 +29,7 @@ def review(**over):
     r = {"practice": "nda", "document": {"file_name": "a.docx"},
          "review_basis": {"side": "mutual", "posture": "balanced"},
          "topics": [
-             {"topic": "nda.term", "rating": "YELLOW", "status": "fallback", "clause": "5", "quote": "five (5) years",
+             {"topic": "nda.term", "rating": "YELLOW", "status": "deviation", "clause": "5", "quote": "five (5) years",
               "action": "edit", "priority": "Medium"},
              {"topic": "nda.residuals", "rating": "RED", "status": "deviation", "clause": "8",
               "quote": "retained in the unaided memory", "action": "escalate", "priority": "High"},
@@ -148,6 +148,25 @@ class ReviewVisualsTests(Base):
         plan = dict(PLAN, edits=[])
         code, out = self.run_main(review_visuals, [self.write("r.json", review()), self.write("p.json", plan), "--topics", self.topics])
         self.assertEqual(code, 3)
+
+    def fallback_run(self, posture, edit):
+        r = review()
+        r["topics"][0]["status"] = "fallback"  # the clause already meets the playbook's acceptable fallback
+        plan = dict(PLAN, review_basis={"side": "mutual", "posture": posture}, edits=[edit])
+        return self.run_main(review_visuals, [self.write("r.json", r), self.write("p.json", plan), "--topics", self.topics])
+
+    def test_changing_an_acceptable_fallback_is_refused_unless_posture_is_aggressive(self):
+        for posture in ("balanced", "light"):
+            code, out = self.fallback_run(posture, PLAN["edits"][0])
+            self.assertEqual(code, 3, (posture, out))
+            self.assertTrue(any("nda.term" in p and "acceptable fallback" in p for p in out["problems"]), out)
+
+    def test_aggressive_posture_or_a_comment_only_entry_may_touch_a_fallback(self):
+        code, out = self.fallback_run("aggressive", PLAN["edits"][0])
+        self.assertEqual(code, 0, out)
+        comment_only = {k: v for k, v in PLAN["edits"][0].items() if k != "replace"}
+        code, out = self.fallback_run("balanced", comment_only)
+        self.assertEqual(code, 0, out)
 
 
 class LibraryGridTests(Base):
