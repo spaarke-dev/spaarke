@@ -2152,6 +2152,13 @@ public sealed class OfficeVersionSaveWorld
     public bool WorkersFinishInstantly { get; set; } = true;
 
     /// <summary>
+    /// Runs inside the Service Bus send, BEFORE the message is recorded, with the message's JSON. A test uses it to look at the
+    /// job row at the moment the save queues (what the worker would find) or to record a worker's outcome on that row (a worker
+    /// that finishes before the save's own request returns); a throw is a queue that failed.
+    /// </summary>
+    public Action<string>? OnFinalizationSend { get; set; }
+
+    /// <summary>
     /// Task 138 (H2): makes the saved job look <paramref name="age"/> old to the code that reads it back. The effective view
     /// takes its age from the save's own view (<c>sprk_result</c>, <c>createdAt</c>), not from the row's <c>createdon</c>, so
     /// it is the view that is rewritten.
@@ -2423,6 +2430,7 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                 // and added about 1.8 s to each test that queues a finalization.
                 .Returns(async (ServiceBusMessage message, CancellationToken _) =>
                 {
+                    world.OnFinalizationSend?.Invoke(message.Body.ToString());
                     var messageKey = world.RecordFinalization(message.Body.ToString());
                     if (world.WorkersFinishInstantly && messageKey is not null)
                         await MarkFinalizationProcessedAsync(messageKey);

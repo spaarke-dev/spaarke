@@ -1001,6 +1001,21 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     // under it through its own child create, with the owner team and the communication this save resolved
                     // above (the same questions the first save asked). Its message key is this job's own, so the first
                     // save's "already processed" mark does not skip it and a redelivery of this message is still skipped.
+                    //
+                    // The queued state is recorded BEFORE the message is queued, never after: the worker records its own
+                    // outcome (AttachmentsAdded / AttachmentsIncomplete) on this same row, and a save that recorded the
+                    // queued state afterwards would overwrite a worker that finished first. If the queue call throws, the
+                    // catch-all below records this job Failed, so a retry is not the "duplicate" of a save that never queued.
+                    jobRecord = jobRecord with
+                    {
+                        Status = JobStatus.Completed,
+                        Progress = 100,
+                        CurrentPhase = EmailAttachmentAddPlanner.AttachmentsQueuedPhase,
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        Result = DocumentResult(attachmentAdd.EmlDocumentId, attachmentAdd.ItemId, attachmentAdd.DriveId, webUrl: null)
+                    };
+                    await _jobs.RecordAsync(jobRecord, null, cancellationToken);
+
                     await _jobQueue.QueueUploadFinalizationAsync(
                         jobId,
                         EmailAttachmentAddPlanner.AddJobMessageKey(idempotencyKey, jobId),
@@ -1033,18 +1048,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         relatedCommunicationId: emailCommunicationId,
                         attachmentsOnly: true);
 
-                    // The job lands on the saved email: a later re-save finds this job under the same key, with the same
-                    // result as the first save's, and the pane completes on the .eml document.
-                    jobRecord = jobRecord with
-                    {
-                        Status = JobStatus.Completed,
-                        Progress = 100,
-                        CurrentPhase = EmailAttachmentAddPlanner.AttachmentsQueuedPhase,
-                        CompletedAt = DateTimeOffset.UtcNow,
-                        Result = DocumentResult(attachmentAdd.EmlDocumentId, attachmentAdd.ItemId, attachmentAdd.DriveId, webUrl: null)
-                    };
-                    await _jobs.RecordAsync(jobRecord, null, cancellationToken);
-
+                    // The job landed on the saved email (recorded above): a later re-save finds this job under the same
+                    // key, with the same result as the first save's, and the pane completes on the .eml document.
                     return new SaveResponse
                     {
                         Success = true,
