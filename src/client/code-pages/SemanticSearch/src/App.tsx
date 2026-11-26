@@ -308,8 +308,9 @@ export const App: React.FC<AppProps> = ({
   // `activeDomain` is now DERIVED from the selected row's fragment. We still
   // keep it as state so existing code that branches on the domain (grid
   // columns, gridRecords adapter, visualization defaults) works unchanged.
-  // The legacy `initialDomain` URL envelope is honored only as a fallback
-  // when no rows are loaded yet (first render before the catalog fetch).
+  // `initialDomain` (the URL envelope's `domain`) holds until the catalog
+  // loads; then the selection below keeps a requested domain when an index of
+  // that domain exists (#3171), and otherwise takes the selected row's domain.
   const [activeDomain, setActiveDomain] = useState<SearchDomain>(initialDomain);
 
   // Column-picker state lifted out of SearchResultsGrid so the unified
@@ -709,9 +710,10 @@ export const App: React.FC<AppProps> = ({
   //
   // Default-selection precedence (spec §6):
   //   1. URL envelope `searchIndexName` matches a row → select that row
-  //   2. Row with `sprk_isdefault === true` → select it
-  //   3. First row in `sprk_displayorder` order → select it
-  //   4. Empty list → leave `selectedSearchIndexId === ''` (UI disables)
+  //   2. URL envelope `domain` has rows of that domain → select one of them (#3171)
+  //   3. Row with `sprk_isdefault === true` → select it
+  //   4. First row in `sprk_displayorder` order → select it
+  //   Empty list → leave `selectedSearchIndexId === ''` (UI disables)
   //
   // The catalog load is fire-and-forget (errors logged in the service); the
   // effect runs ONCE on mount because all deps are stable initial values.
@@ -750,15 +752,22 @@ export const App: React.FC<AppProps> = ({
       }
 
       // 2. The domain the caller asked for (`domain` in the URL envelope, e.g. the Console's
-      //    search criteria with Matters chosen). Pick an index of that domain — the default row
-      //    when it is one, else the first in display order. Without this, step 3 replaced the
-      //    requested domain with the default index's domain once the list loaded (#3171).
-      //    With no index for that domain, fall through: the catalog decides what is searchable.
+      //    search criteria with Matters chosen). Pick an index of that domain: the default row
+      //    when it is one; else a general one (tenant-wide or Document — an Events or Work
+      //    Assignment index also derives to 'documents' but searches less); else the first in
+      //    display order. Without this, step 3 replaced the requested domain with the default
+      //    index's domain once the list loaded (#3171). With no index for that domain, fall
+      //    through: the catalog decides what is searchable.
       const requestedDomain = urlParams?.domain;
       if (requestedDomain) {
         const domainRows = rows.filter(r => deriveSearchDomain(buildSearchRequestFragment(r)) === requestedDomain);
         if (domainRows.length > 0) {
-          const domainRow = domainRows.find(r => r.sprk_isdefault === true) ?? domainRows[0];
+          const isGeneral = (r: AiSearchIndexRow): boolean => {
+            const fragment = buildSearchRequestFragment(r);
+            return fragment.scope === 'all' || fragment.entityType === 'document';
+          };
+          const domainRow =
+            domainRows.find(r => r.sprk_isdefault === true) ?? domainRows.find(isGeneral) ?? domainRows[0];
           setSelectedSearchIndexId(domainRow.sprk_aisearchindexid);
           setActiveDomain(requestedDomain);
           return;
