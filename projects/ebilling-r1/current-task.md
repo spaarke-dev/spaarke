@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-26 ~03:40Z (master PR #3211 opened for the next batch)
+> **Last Updated:** 2026-11-26 ~04:45Z (#3211 merged; page deploy waits for the owner's SHA go in uac-r2)
 > History: `notes/handoff-history/current-task-2026-11-26a.md` (the previous state, verbatim), plus `-2026-11-24a`, `-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,11 +10,9 @@
 
 ## Now
 
-- **No task running.** Work tip is pushed; branch `work/ebilling-r1`. **Master PR #3211 open** (merged origin/master in 031102c7b4; jest 696/0, Pester 18/0, no open-PR overlap); CI running; waits on the owner's merge go (merge commit, no auto-merge). uac-r2 told (FYI).
-- **In PR #3211 (the next batch):**
-  - 095d-3 Billing firm field in the Invoice Review header (merged 9ad5c99e02; one review pass, fixes 7bc2910398; jest 696/0). The header firm is an editable dropdown only while the invoice has no firm, firmNeeded is true and the caller can write. It lists the core record's linked firms (`GET /api/finance/core-records/{type}/{id}/firms`) and saves through `POST /api/finance/invoices/{id}/firm`. A 403 stays in the field (it is about the chosen firm).
-  - Reader-role script accepts the 9 platform-added privileges (e714592cb2; owner yes; uac-r2 cleared). **Owed:** tell provisioning-r1 when it reaches master; it then rewords the S29 refusal text and the rejection-code doc. Until then ACME gets `-Verify` only.
-  - Docs: 095c and 095d closed; checklist Y; current-task.
+- **No task running.** Work tip is pushed; branch `work/ebilling-r1`.
+- **#3211 MERGED** 2026-11-26 04:37:54Z at 1459a14916 (merge commit; owner "Yes, merge when green", auto-merge). Carried 095d-3 (Billing firm field in the Invoice Review header, client only) and the reader-role script accepting the 9 platform-added privileges, plus a CI fix (d60656689f: the Ontology script tests job's sparse checkout now includes the S29 folder; uac-r2 found the failure). provisioning-r1 told (it now rewords the S29 refusal text and the rejection-code doc); uac-r2 told.
+- **Page deploy pending:** the owner said "deploy the page". uac-r2 deploys `sprk_invoicereviewpage` only after the owner names 1459a14916 in uac-r2's own session (its rule; a go relayed from here does not count). No BFF deploy. Record uac-r2's BEFORE/AFTER (SHA, sha256, times) in checklist Z when they arrive.
 - **Dev:** BFF 1e64e94168 live since 2026-11-26 01:56:50Z (uac-r2, owner go; carries batch 5; rollback aa933c09e6). Invoice Review page from the same SHA since 01:59:31Z (sha256 49a8243a…9502; rollback 70c9d772…8960). uac-r2's 30-minute gate PASSED 02:27Z (146 requests, 0 5xx). `sprk_apexport`, `sprk_invoicefiles` and `sprk_rulereviewpage` are not redeployed (refactor-only, our next page deploy). `sprk_recordprocedures` has never been on dev: its first rollout is task 112.
 - **SpaarkeMaster 1.3.3.0 published** 2026-11-25 (run 45708424019, buildId 2026.11.25-350; rollback = copy `dataverse-solutions-latest.previous.json` over latest). Dev unmanaged SpaarkeMaster is 1.3.3.0. provisioning-r1 owns the ACME upgrade. Before the NEXT export, remove `sprk_DocumentDelete.js` from the dev solution (runbook).
 - **Dev reader-role finding:** sent to uac-r2 privately; owner: leave it. Dev `-Verify` on the Decision Record Reader role exits 1 because of it, which is expected.
