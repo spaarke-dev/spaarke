@@ -4,13 +4,15 @@
 // WHAT RUNS: the tools' RunAsync over the REAL DetachedPlaybookRunner, task 007's REAL authorization and the REAL McpIdempotency, in
 // PlaybookRunWorld (substitutes only at the engine, the OBO factories, the access-data boundary and the clock).
 
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Playbooks;
@@ -34,17 +36,16 @@ public sealed class PlaybookRunToolsContractTests
 
     // ---- start: answers at once, the run continues ---------------------------------------------------------------------------
 
-    [Fact(DisplayName = "030 start: answers {runId, status: running, consoleLink} within 5 s while a slow run is still running; the run completes after, read through the status tool")]
+    [Fact(DisplayName = "030 start: answers {runId, status: running, consoleLink} while a slow run is still running; the run completes after, read through the status tool")]
     public async Task Start_AnswersAtOnce_AndTheRunCompletesAfterTheReply()
     {
         await using var world = await PlaybookRunWorld.StartAsync();
         var (playbookId, documentId) = world.AllowedRun();
         var http = world.CallerContext();
 
-        var clock = Stopwatch.StartNew();
         var started = await world.RunToolAsync(http, new { playbookId, documentIds = new[] { documentId }, idempotencyKey = "run-1" });
-        clock.Elapsed.Should().BeLessThan(PlaybookRunLimits.AcceptBudget, "FR-14: the start never waits for the run");
 
+        // FR-14 (the start never waits for the run): the run is held by a gate that only this test opens, and is still held now.
         started.IsError.Should().NotBe(true, started.StructuredContent?.ToString());
         world.Gate.Task.IsCompleted.Should().BeFalse("the slow run is still held when the tool has answered");
         Body(started).GetProperty("status").GetString().Should().Be("running");
@@ -169,6 +170,60 @@ public sealed class PlaybookRunToolsContractTests
         }
     }
 
+    [Fact(DisplayName = "030 status: a durable Running record with no start time (sprk_startedon empty) reads running, never interrupted")]
+    public async Task Status_RunningRecordWithNoStartTime_IsNotInterrupted()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var runId = Guid.NewGuid();
+        world.StoredRuns[runId] = new PlaybookRunStatus
+        {
+            RunId = runId,
+            PlaybookId = Guid.NewGuid(),
+            State = PlaybookRunState.Running,
+            StartedAt = DateTimeOffset.MinValue,   // what PlaybookRunRecordStore reads for a record with no sprk_startedon
+            StartedByOid = PlaybookRunWorld.CallerOid,
+        };
+
+        var status = await world.GetToolAsync(world.CallerContext(), runId);
+
+        status.IsError.Should().NotBe(true);
+        Body(status).GetProperty("status").GetString().Should().Be("running");
+        Body(status).GetProperty("result").GetProperty("outcome").GetString().Should().Be("running");
+    }
+
+    [Fact(DisplayName = "030 retry: a start whose result cannot be built (the link builder throws) answers the run's status and still keeps the retry key; a retry starts nothing")]
+    public async Task Start_ResultBuildingFaults_StillKeepsTheRetryKey()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var runs = new LinkThrows(world.Runs);
+        var arguments = PlaybookRunWorld.Args(new { playbookId, documentIds = new[] { documentId }, idempotencyKey = "link-throws" });
+
+        var first = await RunPlaybookTool.RunAsync(arguments, world.CallerContext(), world.Cache, runs, world.Time, NullLogger.Instance, CancellationToken.None);
+
+        first.IsError.Should().NotBe(true, first.StructuredContent?.ToString());
+        Body(first).GetProperty("status").GetString().Should().Be("running");
+        var runId = RunIdOf(first);
+
+        var retry = await RunPlaybookTool.RunAsync(arguments, world.CallerContext(), world.Cache, world.Runs, world.Time, NullLogger.Instance, CancellationToken.None);
+
+        RunIdOf(retry).Should().Be(runId, "the retry key was stored although the first result had to fall back");
+        world.Engine.Verify(e => e.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    /// <summary>The real runs seam, except that building the run link throws.</summary>
+    private sealed class LinkThrows(IPlaybookRunAi inner) : IPlaybookRunAi
+    {
+        public Task<PlaybookRunStartResult> StartAsCallerAsync(
+            HttpContext http, Guid playbookId, Guid[] documentIds, IReadOnlyDictionary<string, string>? parameters, CancellationToken cancellationToken) =>
+            inner.StartAsCallerAsync(http, playbookId, documentIds, parameters, cancellationToken);
+
+        public Task<PlaybookRunView?> ReadAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken) =>
+            inner.ReadAsCallerAsync(http, runId, cancellationToken);
+
+        public string? RunConsoleLink(HttpContext http, Guid? documentId) => throw new InvalidOperationException("link builder fault");
+    }
+
     [Fact(DisplayName = "030 status: a live run in this process is never mapped to interrupted (the mapping is for durable records only)")]
     public void Status_LiveRun_IsNeverInterrupted()
     {
@@ -188,9 +243,10 @@ public sealed class PlaybookRunToolsContractTests
             Guid.NewGuid(), Guid.NewGuid(), PlaybookRunPhase.Failed, 99, int.MaxValue, int.MaxValue, int.MaxValue,
             new string('x', 50_000) + "\nsecond line", DateTimeOffset.MaxValue, DateTimeOffset.MaxValue, FromDurableRecord: false);
 
-        var status = GetPlaybookRunTool.StatusResult(worst, DateTimeOffset.UtcNow);
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 26, 9, 0, 0, TimeSpan.Zero));
+        var status = GetPlaybookRunTool.StatusResult(worst, time.GetUtcNow());
         var start = RunPlaybookTool.StartedResult(
-            worst with { Phase = PlaybookRunPhase.Running }, "https://spaarke-test.crm.dynamics.com/" + new string('a', 2_000), replayed: true, DateTimeOffset.UtcNow);
+            worst with { Phase = PlaybookRunPhase.Running }, "https://spaarke-test.crm.dynamics.com/" + new string('a', 2_000), replayed: true, time.GetUtcNow());
 
         foreach (var result in new[] { status, start })
         {

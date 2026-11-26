@@ -20,10 +20,21 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 public static class PlaybookRunLimits
 {
     /// <summary>
-    /// The longest a detached run may take: 50 minutes, below the 60-minute minimum default lifetime of an Entra access token, so the
-    /// caller's token the run carries is still valid for every OBO exchange the run makes.
+    /// The longest a detached run may take: 50 minutes. The cap bounds the run; it does NOT keep the caller's token valid. The token the
+    /// run carries may have only minutes left when the run starts. The run's delegated access rests on the OBO tokens obtained at the
+    /// start (the pre-warm): MSAL's OBO cache, keyed by the caller's assertion, and the Graph Redis cache, whose TTL follows the Graph
+    /// token's own expiry. A later exchange that misses those caches fails closed (<see cref="PlaybookRunReasonCodes.AuthExpired"/>),
+    /// for example after <c>OrderedCredentialClientProvider</c> switches to another confidential client (its cache starts empty), or when
+    /// a node reaches a Dataverse host other than the pre-warmed one (<c>EnvironmentUrl</c> differing from <c>ServiceUrl</c>).
     /// </summary>
     public static readonly TimeSpan MaxRunDuration = TimeSpan.FromMinutes(50);
+
+    /// <summary>
+    /// The most detached runs one caller (by Entra object id) may have running at once in this process; a start beyond it is refused
+    /// (<see cref="PlaybookRunReasonCodes.RunLimit"/>). It bounds what one user, or one stolen token, can keep running for up to
+    /// <see cref="MaxRunDuration"/>. Per instance: the run table is this process's, so the bound is per BFF instance, not per tenant.
+    /// </summary>
+    public const int MaxConcurrentRunsPerCaller = 3;
 
     /// <summary>How long the start waits for the engine to accept the run (its first event names the run id) before giving up.</summary>
     public static readonly TimeSpan AcceptBudget = TimeSpan.FromSeconds(5);
@@ -55,6 +66,9 @@ public static class PlaybookRunReasonCodes
 
     /// <summary>Playbook runs are not available on this host.</summary>
     public const string Unavailable = "playbook.run-unavailable";
+
+    /// <summary>The caller already has <see cref="PlaybookRunLimits.MaxConcurrentRunsPerCaller"/> runs running. Nothing ran.</summary>
+    public const string RunLimit = "playbook.run-limit";
 
     /// <summary>The run failed (the engine's own terminal code, <see cref="PlaybookStreamEvent.RunFailedErrorCode"/>).</summary>
     public const string Failed = PlaybookStreamEvent.RunFailedErrorCode;
@@ -123,6 +137,9 @@ public enum PlaybookRunStartOutcome
 
     /// <summary>Playbook runs are not available on this host (the AI features are off, or the run ended before the engine accepted it).</summary>
     Unavailable,
+
+    /// <summary>The caller already has <see cref="PlaybookRunLimits.MaxConcurrentRunsPerCaller"/> runs running in this process. Nothing ran.</summary>
+    RunLimit,
 }
 
 /// <summary>The answer to a start.</summary>

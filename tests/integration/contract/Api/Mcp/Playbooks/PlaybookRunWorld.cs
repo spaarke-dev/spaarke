@@ -98,7 +98,7 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
 
     public PlaybookAuthHost Host { get; }
 
-    public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 26, 9, 0, 0, TimeSpan.Zero));
+    public WatchedTimeProvider Time { get; } = new(new DateTimeOffset(2026, 11, 26, 9, 0, 0, TimeSpan.Zero));
 
     public TestLifetime Lifetime { get; } = new();
 
@@ -176,11 +176,15 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
     // ---- engine scripts --------------------------------------------------------------------------------------------------------
 
     /// <summary>Accepted at once (RunStarted, 2 nodes), then waits for <see cref="Gate"/>, then two nodes and RunCompleted.</summary>
-    public async IAsyncEnumerable<PlaybookStreamEvent> GatedRun(PlaybookRunRequest request, [EnumeratorCancellation] CancellationToken ct)
+    public IAsyncEnumerable<PlaybookStreamEvent> GatedRun(PlaybookRunRequest request, CancellationToken ct) => GatedRunOn(Gate, request, ct);
+
+    /// <summary>As <see cref="GatedRun"/>, held by <paramref name="gate"/> (a gate per run, so one run can finish while others are held).</summary>
+    public static async IAsyncEnumerable<PlaybookStreamEvent> GatedRunOn(
+        TaskCompletionSource gate, PlaybookRunRequest request, [EnumeratorCancellation] CancellationToken ct)
     {
         var runId = Guid.NewGuid();
         yield return PlaybookStreamEvent.RunStarted(runId, request.PlaybookId, 2);
-        await Gate.Task.WaitAsync(ct);
+        await gate.Task.WaitAsync(ct);
         yield return PlaybookStreamEvent.NodeCompleted(runId, request.PlaybookId, Guid.NewGuid(), "One", null!);
         yield return PlaybookStreamEvent.NodeCompleted(runId, request.PlaybookId, Guid.NewGuid(), "Two", null!);
         yield return PlaybookStreamEvent.RunCompleted(runId, request.PlaybookId, new PlaybookRunMetrics { TotalNodes = 2, CompletedNodes = 2 });
@@ -194,11 +198,15 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
     {
         using (ct.Register(() => cancelled.TrySetResult()))
         {
-            await Task.Delay(Timeout.Infinite, ct);
+            await UntilCancelled(ct);
         }
 
         yield break;
     }
+
+    /// <summary>Waits for <paramref name="ct"/> only (no clock): throws <see cref="OperationCanceledException"/> when it is cancelled.</summary>
+    private static Task UntilCancelled(CancellationToken ct) =>
+        new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task.WaitAsync(ct);
 
     /// <summary>
     /// Accepted, then runs until its token is cancelled. <paramref name="endWithEvent"/>: the engine's own shape (it writes RunCancelled
@@ -215,12 +223,12 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
         yield return PlaybookStreamEvent.NodeCompleted(runId, request.PlaybookId, Guid.NewGuid(), "One", null!);
         if (!endWithEvent)
         {
-            await Task.Delay(Timeout.Infinite, ct);
+            await UntilCancelled(ct);
         }
 
         try
         {
-            await Task.Delay(Timeout.Infinite, ct);
+            await UntilCancelled(ct);
         }
         catch (OperationCanceledException)
         {
@@ -269,6 +277,28 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
         string TraceIdentifier,
         HttpContext? AccessorDuringRun,
         CancellationToken Token);
+
+    /// <summary>
+    /// A <see cref="FakeTimeProvider"/> that also says when a timer of a given due time has been created, so a test advances the clock
+    /// only after the code under test has armed its timer (an advance before that would be missed).
+    /// </summary>
+    internal sealed class WatchedTimeProvider(DateTimeOffset start) : FakeTimeProvider(start)
+    {
+        private readonly ConcurrentDictionary<TimeSpan, TaskCompletionSource> _armed = new();
+
+        /// <summary>Completes once a timer due after <paramref name="dueTime"/> exists (bounded, real time as a safety net only).</summary>
+        public Task TimerArmed(TimeSpan dueTime) => ArmedSource(dueTime).Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = base.CreateTimer(callback, state, dueTime, period);
+            ArmedSource(dueTime).TrySetResult();
+            return timer;
+        }
+
+        private TaskCompletionSource ArmedSource(TimeSpan dueTime) =>
+            _armed.GetOrAdd(dueTime, _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+    }
 
     /// <summary>The host lifetime: <see cref="StopApplication"/> fires ApplicationStopping.</summary>
     internal sealed class TestLifetime : IHostApplicationLifetime

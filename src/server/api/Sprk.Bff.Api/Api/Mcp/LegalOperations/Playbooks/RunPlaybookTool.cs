@@ -216,10 +216,21 @@ internal sealed class RunPlaybookTool : McpToolDefinition
                     return (DocumentToolSupport.Failure(ErrorOf(started), http), null);
                 }
 
+                // The run is live: its retry entry is built first and always returned, so nothing after this line can leave a run with
+                // no stored key (a retry would then start a second run).
                 var firstDocument = input.DocumentIds[0];
-                return (
-                    StartedResult(run, runs.RunConsoleLink(http!, firstDocument), replayed: false, time.GetUtcNow()),
-                    new RetryEntry(run.RunId, firstDocument, FingerprintOf(input)));
+                var entry = new RetryEntry(run.RunId, firstDocument, FingerprintOf(input));
+                try
+                {
+                    return (StartedResult(run, runs.RunConsoleLink(http!, firstDocument), replayed: false, time.GetUtcNow()), entry);
+                }
+                catch (Exception ex)
+                {
+                    // ADR-015: the exception type only. The run is answered by its status, without the link (no filter: whatever the
+                    // fault, the entry below must reach the store).
+                    logger.LogWarning("MCP tool {ToolName}: building the start result faulted ({ExceptionType}).", ToolName, ex.GetType().Name);
+                    return (GetPlaybookRunTool.StatusResult(run, time.GetUtcNow()), entry);
+                }
             },
             logger, cancellationToken);
 
@@ -293,6 +304,11 @@ internal sealed class RunPlaybookTool : McpToolDefinition
                 PlaybookRunReasonCodes.Unavailable,
                 "JPS playbook runs are not available right now. Try again later.",
                 StatusCodes.Status503ServiceUnavailable),
+            PlaybookRunStartOutcome.RunLimit => new McpToolError(
+                PlaybookRunReasonCodes.RunLimit,
+                "The signed-in user already has the most JPS playbook runs running at once. Nothing new was started. Wait for a run to "
+                + $"finish (check it with {GetPlaybookRunTool.ToolName}), then try again.",
+                StatusCodes.Status429TooManyRequests),
             _ => StartFailed,
         };
 

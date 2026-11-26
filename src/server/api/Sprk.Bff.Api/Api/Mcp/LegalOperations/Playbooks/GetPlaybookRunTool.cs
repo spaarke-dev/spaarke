@@ -153,10 +153,15 @@ internal sealed class GetPlaybookRunTool : McpToolDefinition
         return run is null ? DocumentToolSupport.Failure(DocumentToolSupport.NotFound, http) : StatusResult(run, time.GetUtcNow());
     }
 
-    /// <summary>True when a durable record still says running past the cap plus the margin: the run was lost (condition 7).</summary>
+    /// <summary>
+    /// True when a durable record still says running past the cap plus the margin: the run was lost (condition 7). Only when the record
+    /// has a start time: a record with no <c>sprk_startedon</c> reads <see cref="DateTimeOffset.MinValue"/>, which is not a known start,
+    /// so its stored status is reported as it is.
+    /// </summary>
     internal static bool IsInterrupted(PlaybookRunView run, DateTimeOffset now) =>
         run.FromDurableRecord
         && run.Phase == PlaybookRunPhase.Running
+        && run.StartedAt != DateTimeOffset.MinValue
         && now - run.StartedAt > PlaybookRunLimits.MaxRunDuration + PlaybookRunLimits.InterruptedMargin;
 
     /// <summary>The status result for a run (pure): <see cref="McpLongRunning.Status"/> with the slim result and one text line.</summary>
