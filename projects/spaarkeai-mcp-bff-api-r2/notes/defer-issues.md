@@ -75,7 +75,7 @@
   Task 021 (spaarkeai-mcp-bff-api-r2) moved the Decisions widget's MCP transport into `src/client/widgets/shared/mcp/`, which the
   widget now imports by relative path and builds into `dist/index.html` (the HTML the BFF embeds as `ui://spaarke/decisions.html`).
   Two path filters still list only `src/client/widgets/spaarke-decisions/**`:
-  - `.github/workflows/ci-tier1-blocking.yml` ~:217 (the MCP surface flag that runs the widget job at ~:1205: typecheck, jest, build, 3 MB gate);
+  - `.github/workflows/ci-tier1-blocking.yml` ~:217 (the MCP surface flag that runs the widget job at ~:1205). What that job runs per widget: `npm run build` (typecheck, vite build, the 3 MB bundle gate, and only the widget's `widgetSurface` guard test, plus the transport test for Decisions), and, since the task 035 review fix, a separate `npx jest --ci` step per widget (Decisions, Briefing, Search results) that runs the full behaviour suites. Before that fix the full suites ran in no workflow, so the earlier "typecheck, jest, build" wording over-stated what ran;
   - `.github/workflows/publish-bff-artifact.yml` :38 (the pull_request dry run of the embedded widget).
   Failure scenario: a PR that edits only `src/client/widgets/shared/mcp/mcpFetch.ts` (for example a change in error mapping) runs
   neither the widget's jest suite (which also runs the shared tests) nor its build, so a regression in the live Decide lane / wizard

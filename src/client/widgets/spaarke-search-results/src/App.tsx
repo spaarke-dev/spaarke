@@ -126,7 +126,8 @@ function Shell({ resultWaitMs = RESULT_WAIT_MS }: { resultWaitMs?: number }) {
     ? noticesFor(
         last,
         pages.some(page => page.partial),
-        next !== null
+        next !== null,
+        pages.length
       )
     : { incomplete: [], ending: null };
 
@@ -152,6 +153,8 @@ function Shell({ resultWaitMs = RESULT_WAIT_MS }: { resultWaitMs?: number }) {
   // inside the list is taken here, never left to the frame, and handed to the host's openLink.
   const openThroughHost = React.useCallback(
     async (event: React.SyntheticEvent) => {
+      // Chromium fires `auxclick` for every non-primary button, the context-menu (right) button included: only the middle button opens.
+      if (event.type === 'auxclick' && (event as React.MouseEvent).button !== 1) return;
       const target = event.target as Element | null;
       const anchor = target && typeof target.closest === 'function' ? target.closest('a') : null;
       if (!anchor) return;
@@ -169,6 +172,7 @@ function Shell({ resultWaitMs = RESULT_WAIT_MS }: { resultWaitMs?: number }) {
     [openLink]
   );
 
+  const pastTheEnd = first !== null && shown.length === 0 && first.offset > 0;
   const data = React.useMemo(() => ({ query: queryOf(toolInput), results: toResultItems(shown) }), [toolInput, shown]);
 
   let body: React.ReactNode;
@@ -208,18 +212,23 @@ function Shell({ resultWaitMs = RESULT_WAIT_MS }: { resultWaitMs?: number }) {
           </MessageBar>
         ) : null}
         {/* Delegated: a click or middle-click on a hit's link is routed to the host (Enter on a focused link is a click). */}
-        <div onClick={openThroughHost} onAuxClick={openThroughHost}>
-          <SearchResultsWidget data={data} className={styles.noScore} />
-        </div>
-        <div className={styles.footer}>
+        {/* A list that opened past its start with nothing on it says so below; the component's "No results found." would be wrong for a later page. */}
+        {pastTheEnd ? null : (
+          <div onClick={openThroughHost} onAuxClick={openThroughHost}>
+            <SearchResultsWidget data={data} className={styles.noScore} />
+          </div>
+        )}
+        <div className={styles.footer} aria-busy={loading}>
           {loadError ? (
             <MessageBar intent="error">
               <MessageBarBody>{loadError}</MessageBarBody>
             </MessageBar>
           ) : null}
           {next ? (
-            <Button appearance="secondary" disabled={loading} onClick={loadMore}>
-              {loading ? 'Loading' : 'Load more'}
+            // disabledFocusable, not disabled: a disabled button drops keyboard focus to the page (NFR-09). The label stays; the busy state is
+            // the spinner below and the footer's aria-busy.
+            <Button appearance="secondary" disabledFocusable={loading} onClick={loadMore}>
+              Load more
             </Button>
           ) : null}
           {loading ? <Spinner size="tiny" label="Loading more results" labelPosition="after" /> : null}

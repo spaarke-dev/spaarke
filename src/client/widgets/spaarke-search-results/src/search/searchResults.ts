@@ -42,6 +42,8 @@ export interface SearchPage {
   hits: SearchHit[];
   /** The page size the tool used. */
   limit: number;
+  /** The offset this page started at (0 for a first page). */
+  offset: number;
   /** The offset to ask for next, or null when the tool advised none (the end, a short page, or a search over every record). */
   nextOffset: number | null;
   /** The tool left hits out to keep its result small. */
@@ -154,6 +156,10 @@ export function parseSearchResult(
           typeof structured.limit === 'number' && Number.isInteger(structured.limit) && structured.limit > 0
             ? structured.limit
             : hits.length,
+        offset:
+          typeof structured.offset === 'number' && Number.isInteger(structured.offset) && structured.offset > 0
+            ? structured.offset
+            : 0,
         nextOffset: typeof next === 'number' && Number.isInteger(next) && next > 0 ? next : null,
         truncated: structured.truncated === true,
         partial: warnings.includes(PARTIAL_RESULTS_CODE),
@@ -187,18 +193,37 @@ export interface PageNotices {
 export const NARROW_ADVICE = 'There may be more matches. To see more, search inside one matter, project or invoice.';
 export const MAY_BE_MORE = 'This may not be every match.';
 export const ASK_FOR_MORE = 'There may be more matches. Ask for the next page in the chat.';
+export const NO_MORE_AFTER_THESE = 'No more matches after these.';
+export const PAGING_LIMIT = 'That is as far as paging goes. For more, narrow the search with a more specific query.';
+
+/** The largest offset the tools accept (`SearchToolSupport.MaxOffset`, REST's own bound). The widget never asks for a page beyond it. */
+export const MAX_OFFSET = 1000;
 
 /**
  * What to tell the reader about the newest page. `hasContinuation` is whether the widget offers "Load more" (a `nextOffset` AND the call's
  * arguments, which a further call needs). A list the tool advised no offset for says why: a full or cut page over every record needs a
  * narrower search; a short page may still hide matches (rows are checked for access after ranking), so it is never called the end.
+ * An empty page is the end of a list the reader paged into (`pageCount` > 1) or one that opened past its start (`page.offset` > 0), and says
+ * so; an empty first page says nothing here (the component says "No results found.").
  */
-export function noticesFor(page: SearchPage, anyPartial: boolean, hasContinuation: boolean): PageNotices {
+export function noticesFor(
+  page: SearchPage,
+  anyPartial: boolean,
+  hasContinuation: boolean,
+  pageCount = 1
+): PageNotices {
   const incomplete: string[] = [];
   if (page.truncated) incomplete.push('Some results were left out to keep this list short.');
   if (anyPartial) incomplete.push('These results may be incomplete.');
 
-  if (hasContinuation || page.hits.length === 0) return { incomplete, ending: null };
+  if (page.hits.length === 0) {
+    if (pageCount > 1) return { incomplete, ending: NO_MORE_AFTER_THESE };
+    if (page.offset > 0) return { incomplete, ending: `No more matches after the first ${page.offset}.` };
+    return { incomplete, ending: null };
+  }
+  if (hasContinuation) return { incomplete, ending: null };
+  // An advised offset above the tools' own bound would be refused: say to narrow the search instead of pointing at a page that cannot be asked for.
+  if (page.nextOffset !== null && page.nextOffset > MAX_OFFSET) return { incomplete, ending: PAGING_LIMIT };
   // The tool advised a next page but the widget cannot ask for it (the host sent no arguments): point at the chat instead of a dead button.
   if (page.nextOffset !== null) return { incomplete, ending: ASK_FOR_MORE };
   const full = page.hits.length >= page.limit || page.truncated;
@@ -213,6 +238,8 @@ export function nextCallArguments(
 ): { tool: string; args: Record<string, unknown> } | null {
   const query = text(toolInput?.query);
   if (!query) return null;
+  // The tools refuse an offset above MAX_OFFSET (INVALID_OFFSET): never ask for one, whatever the result advised.
+  if (nextOffset > MAX_OFFSET) return null;
 
   const args: Record<string, unknown> = { query, offset: nextOffset };
   if (typeof toolInput?.limit === 'number') args.limit = toolInput.limit;

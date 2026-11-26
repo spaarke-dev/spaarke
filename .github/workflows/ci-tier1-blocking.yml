@@ -1227,6 +1227,11 @@ jobs:
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
 
+      # Each widget's `build` runs only its widgetSurface guard; its behaviour suites (App, host, parsing) run here. Nothing else runs them.
+      - name: Test the decisions widget
+        working-directory: src/client/widgets/spaarke-decisions
+        run: npx jest --ci
+
       # spaarkeai-mcp-bff-api-r2 task 034: the briefing widget is embedded the same way (ui://spaarke/briefing.html).
       - name: Build the briefing widget
         working-directory: src/client/widgets/spaarke-briefing
@@ -1234,12 +1239,20 @@ jobs:
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
 
+      - name: Test the briefing widget
+        working-directory: src/client/widgets/spaarke-briefing
+        run: npx jest --ci
+
       # spaarkeai-mcp-bff-api-r2 task 035: the search results widget is embedded the same way (ui://spaarke/search-results.html).
       - name: Build the search results widget
         working-directory: src/client/widgets/spaarke-search-results
         run: |
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
+
+      - name: Test the search results widget
+        working-directory: src/client/widgets/spaarke-search-results
+        run: npx jest --ci
 
       - name: Conformance suite against the real BFF MCP route
         shell: bash

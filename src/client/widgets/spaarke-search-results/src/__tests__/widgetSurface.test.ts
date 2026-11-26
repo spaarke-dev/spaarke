@@ -138,8 +138,12 @@ describe('guard controls (each pattern fires on what it is meant to catch)', () 
     ['XHR', 'new XMLHttpRequest'],
     ['a beacon', 'navigator.sendBeacon(u)'],
     ['localStorage', 'localStorage.getItem(k)'],
+    ['sessionStorage', 'sessionStorage.setItem(k,v)'],
+    ['indexedDB', 'window.indexedDB.open("db")'],
     ['a cookie', 'document.cookie="a=1"'],
     ['a bearer token', '"Bearer "+t'],
+    ['MSAL', 'new msal.PublicClientApplication(c)'],
+    ['a token request', 'await app.acquireToken({scopes})'],
     ['Xrm', 'window.Xrm.WebApi'],
   ])('BUILT_FORBIDDEN matches %s', (_n, text) => expect(BUILT_FORBIDDEN.test(text)).toBe(true));
 

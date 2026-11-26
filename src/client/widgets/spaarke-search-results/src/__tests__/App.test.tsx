@@ -215,6 +215,23 @@ describe('Search results widget: links go through the host', () => {
     await waitFor(() => expect(openLink).toHaveBeenCalledWith(DOC_URL));
   });
 
+  it('a right click (the context-menu button) is left to the browser: no openLink, no preventDefault', async () => {
+    const openLink = jest.fn().mockResolvedValue(true);
+    renderWith({ isConnected: true, toolResult: documentsResult(), toolInput: { query: 'q' }, openLink });
+
+    // Chromium fires auxclick for every non-primary button; button 2 is the context menu, not an open.
+    const notPrevented = fireEvent(
+      screen.getByRole('link', { name: 'Master services agreement' }),
+      new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 2 })
+    );
+
+    expect(notPrevented).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(openLink).not.toHaveBeenCalled();
+  });
+
   it('draws a hit without a link as plain text: no dead link', () => {
     renderWith({ isConnected: true, toolResult: documentsResult(), toolInput: { query: 'q' } });
 
@@ -241,16 +258,24 @@ describe('Search results widget: links go through the host', () => {
   );
 
   it('says so when the host did not open the link, and when it rejects', async () => {
-    const openLink = jest.fn().mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('bridge'));
+    const openLink = jest
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('bridge'));
     renderWith({ isConnected: true, toolResult: documentsResult(), toolInput: { query: 'q' }, openLink });
     const link = screen.getByRole('link', { name: 'Master services agreement' });
 
-    fireEvent.click(link);
+    fireEvent.click(link); // the host says no: the warning shows
     expect(await screen.findByText(/Your host did not open that link/)).toBeInTheDocument();
 
-    fireEvent.click(link);
+    fireEvent.click(link); // the host opens it: the warning goes
     await waitFor(() => expect(openLink).toHaveBeenCalledTimes(2));
-    expect(screen.getByText(/Your host did not open that link/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Your host did not open that link/)).not.toBeInTheDocument());
+
+    fireEvent.click(link); // the host rejects: the warning is back
+    await waitFor(() => expect(openLink).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText(/Your host did not open that link/)).toBeInTheDocument();
   });
 });
 
@@ -357,6 +382,94 @@ describe('Search results widget: paging (022 contract)', () => {
 
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
     expect(screen.getByText(/search inside one matter, project or invoice/i)).toBeInTheDocument();
+  });
+
+  it('offers Load more for the largest offset the tools accept, and says to narrow the search (no button) above it', () => {
+    const at = renderWith({
+      isConnected: true,
+      toolResult: documentsResult({ nextOffset: 1000 }),
+      toolInput: { query: 'q' },
+      callTool: jest.fn(),
+    });
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+    at.unmount();
+
+    renderWith({
+      isConnected: true,
+      toolResult: documentsResult({ nextOffset: 1003 }),
+      toolInput: { query: 'q' },
+      callTool: jest.fn(),
+    });
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/as far as paging goes.*narrow the search/i)).toBeInTheDocument();
+    expect(screen.queryByText(/ask for the next page in the chat/i)).not.toBeInTheDocument();
+  });
+
+  it('says the list ended when Load more returns an empty page, and keeps the hits already shown', async () => {
+    const callTool = hostCalling(documentsResult({ items: [], offset: 20, nextOffset: null }));
+    renderWith({
+      isConnected: true,
+      toolResult: documentsResult({ nextOffset: 20 }),
+      toolInput: { query: 'q' },
+      callTool,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+
+    expect(await screen.findByText('No more matches after these.')).toBeInTheDocument();
+    expect(screen.getByText('Master services agreement')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('No results found.')).not.toBeInTheDocument();
+  });
+
+  it('does not say "No results found." for an opening result at a later offset with no rows', () => {
+    renderWith({
+      isConnected: true,
+      toolResult: documentsResult({ items: [], offset: 40, nextOffset: null }),
+      toolInput: { query: 'q' },
+    });
+
+    expect(screen.getByText('No more matches after the first 40.')).toBeInTheDocument();
+    expect(screen.queryByText('No results found.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps keyboard focus on Load more while a page loads: the button stays focusable, with a stable label and a busy state', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    const callTool = jest.fn().mockReturnValue(
+      new Promise(resolve => {
+        finish = resolve;
+      })
+    );
+    renderWith({
+      isConnected: true,
+      toolResult: documentsResult({ nextOffset: 20 }),
+      toolInput: { query: 'q' },
+      callTool,
+    });
+    const button = screen.getByRole('button', { name: 'Load more' });
+    button.focus();
+    expect(button).toHaveFocus();
+
+    fireEvent.click(button);
+
+    expect(await screen.findByText('Loading more results')).toBeInTheDocument();
+    const loading = screen.getByRole('button', { name: 'Load more' }); // the label did not change
+    expect(loading).toBe(button);
+    expect(loading).not.toBeDisabled(); // a disabled button drops focus to the page
+    expect(loading).toHaveAttribute('aria-disabled', 'true');
+    expect(loading).toHaveFocus();
+    expect(loading.closest('[aria-busy="true"]')).not.toBeNull();
+    fireEvent.click(loading);
+    expect(callTool).toHaveBeenCalledTimes(1); // asking again while loading does nothing
+
+    await act(async () => {
+      finish({
+        structuredContent: documentsResult({ items: [{ id: 'doc-3', name: 'Third document' }], nextOffset: null }),
+        content: [{ type: 'text', text: 'ok' }],
+      });
+    });
+    expect(await screen.findByText('Third document')).toBeInTheDocument();
   });
 
   it('does not call a short page the end of the list', () => {
