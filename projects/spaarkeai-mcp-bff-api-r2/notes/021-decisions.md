@@ -58,3 +58,14 @@ rework: fix-round-1 task 021
 - CAPABILITY-INDEX row proposed in notes/capability-index-pending.md (task 021).
 - D-021-1 in notes/defer-issues.md: CI path filters (`ci-tier1-blocking.yml`, `publish-bff-artifact.yml`) miss `src/client/widgets/shared/**`.
 - notes/decisions.md: nothing new beyond D1-D6 here (the placement decision was already recorded).
+
+## Verifier pass and fix round (2026-11-25)
+- Pass (opus): Decisions behaviour parity confirmed (titles, exports, single module instance). 4 F2 fixed in c4b9ae2066:
+  - the fetch/MSAL guard now runs in the PR build;
+  - no-answer results carry fixed user-safe text, with the raw bridge text in a non-displayed `diagnostic` field;
+  - fake-timer tests cover the late answer and timer cleanup;
+  - the guard scans all of src/client/widgets/;
+  - the EmailComposer path was added to both CI filters.
+- Seeding: every fix has a failing-when-reverted test except the `call.catch` line, which is redundant because Promise.race already subscribes. It was kept and its comment says so.
+- Widget: npm test 390 pass, tsc 0, build ok, 1.56 MB.
+- K: the ext-apps 60 s timeout fires before the 90 s backstop, so `widget.host_unavailable` covers both not-connected and SDK-timeout; both are treated as outcome-unknown. #3196 is filed for the pre-existing Worklist/DecisionWizard filter gap.
