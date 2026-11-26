@@ -311,7 +311,43 @@ time. This is the route to the advanced redline in Word: the redline engine woul
 **Record:** what Word does. A Harvey sign-in prompt is enough: it means Word tried to call Harvey's tool. **Don't
 sign up or sign in**; just screenshot and close it.
 
-**Afterwards:** remove the probe plugin (Cowork › Customize › Plugins › Remove) so it doesn't show in your lists.
+### WP-5. Word desktop: does it run JavaScript a skill supplies, exactly as written? (added 2026-11-26)
+
+**Why.** WP-1 showed Word desktop doesn't load a skill that ships Python scripts, and Word's Copilot says it runs
+JavaScript on the open document instead. If Word runs *our* JavaScript unchanged, a Word edition of the review
+skills could make its redline edits in place with tested code, instead of Word writing its own edits (W4's
+numbering gaps). Needs **probe plugin v0.2** (`Spaarke Word probe plugin v0.2.zip`), which adds the skill
+`spaarke-word-probe-js`. Its code adds one test paragraph, then replaces one word as a tracked change and adds one
+comment. Both carry a code plus a hash a model can't work out in its head.
+
+1. Cowork › Customize › Plugins: remove the old **Spaarke Word Probe**, then **Upload** v0.2 (Only you). Save the
+   zip outside OneDrive first, unextracted, as before. Wait until it shows (it took minutes last time).
+2. Word desktop: open a **new blank document** (never an agreement). Copilot pane: switch **Spaarke MCP off** (the
+   dev connector has a spike NDA tool), and check **Spaarke Word Probe** is on. If Word asks, close and reopen it.
+3. New Copilot chat: pick **`spaarke-word-probe-js`** from **+** (it shows as a chip) and type
+   *Run the Spaarke JavaScript probe.*
+4. If Word shows the code or asks to allow it to run, say yes and note that it asked.
+
+**Expected (all four must hold for a pass):**
+- Reply line: `Spaarke JS probe ran: WPJ-1126-A d81beac6`
+- Last paragraph of the document: *Spaarke JavaScript probe: alpha* ~~bravo~~ <u>charlie</u> *delta. WPJ-1126-A d81beac6*,
+  with **bravo** as a tracked deletion and **charlie** as a tracked insertion (not plain text)
+- One comment on **charlie**: `Spaarke JS probe comment WPJ-1126-A d81beac6`
+- Track Changes is back to how it was before (Review tab)
+
+| Result | Means |
+|---|---|
+| All four hold, and Copilot says it changed nothing in the code | Word runs supplied JavaScript as written: a Word edition with in-place redlines is possible |
+| Edits and comment right, but the hash is different or missing | Word rewrote the code: the route is unreliable |
+| `Spaarke JS probe · code not run · WPJ-1126-A` | Word read the skill but won't run supplied code |
+| Text added but not as tracked changes, or no comment | Word ran something, not our code: record what appeared |
+| No `WPJ-1126-A` at all | Word didn't load the skill |
+
+**Record:** the reply, a screenshot of the last paragraph with the comment, whether Word asked before running code,
+and whether `spaarke-word-probe-js` was in the **+** list. Then delete the test document.
+
+**Afterwards:** remove the probe plugin (Cowork › Customize › Plugins › Remove) so it doesn't show in your lists,
+and tell me, so copilot-platform-coordination can update its inventory.
 
 ---
 

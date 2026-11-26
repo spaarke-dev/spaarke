@@ -8,6 +8,10 @@ From the W4/W5/W6 comparison (`results.md`): the skill upgraded 2 of 4 fallback 
 
 **Word reach (owner question 2026-11-26):** `/nda-review` is a OneDrive skill folder, not a plugin, which is why Word doesn't show it. Word desktop shows plugins (Spaarke decisions, our probe incl. a .py skill) and follows their instructions; **WP-1 done 2026-11-26: Word desktop does not load a skill that ships scripts** (2 tries, answered from the instructions skill). So a Word edition needs the mechanics server-side as MCP tools (Harvey model). Related: specialist-legal-agents-r1 already has server-side NDA *review* on dev (`spike_review_nda`: documentText in, structured review out, BFF Action, no redline). Open: owner decides whether to draft the Word-edition design (engines as MCP tools, coordinated with specialist-legal-agents-r1); a redline needs the .docx, which is the same file-delivery problem as #3257 gap 1.
 
+## 2026-11-26: WP-5 JavaScript probe built (PR #3266)
+
+Probe plugin v0.2 adds `spaarke-word-probe-js` (fixed Office.js in SKILL.md; marker `WPJ-1126-A d81beac6`). Branch `test/accelerator-word-js-probe`, worktree `C:\code_files\spaarke-wt-accelerator-word-js-probe`; zip in its `src/accelerators/build/out/word-probe/` (sent to owner). Owner steps: `tier-test-script.md` WP-5. copilot-platform-coordination got the row before upload; on removal, tell it. After merge, sync `build_word_probe.py` + `tests/test_package.py` from master.
+
 ## 2026-11-26: two owner decisions received from mcp-r2 (issue #3257)
 
 Pairing `nda-review` with the Spaarke MCP tools: (1) how a Spaarke (SPE) document gets into the Cowork sandbox (connector reach to SPE unverified → researcher check); (2) matter email via `spaarke_compose_email` instead of the Outlook send card. Detail in `notes/copilot-app-components.md` "Still open". Gap 1 researched (`notes/research/cowork-access-to-spe-files-2026-11.md`): no native route; download-and-attach works today; OneDrive staging or a tool-result file need an owner decision / a tenant test. design.md §10 `spaarke_get_document` line corrected. Gap 2 not started; owner to decide.
