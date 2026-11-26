@@ -96,7 +96,7 @@
   <escalation>
     <trigger>If the pinned Azure SDKs (or `lxml`) introduce a fixable HIGH/CRITICAL CVE that no available pinned version resolves, STOP and escalate with the scan output; do not drop to hand-written REST and do not suppress the finding.</trigger>
     <trigger>If the engine CLI contract on master differs from what this task assumes, or an engine change would be needed, STOP and message the accelerator session "acclerator-r1"; never edit or fork the engines.</trigger>
-    <trigger>If container output is not byte-identical to the local run, STOP and record the diff in notes; do not normalise outputs to make the test pass.</trigger>
+    <trigger>If container output differs from the local run beyond zip entry timestamps (any part name, part byte or CRC-32, or the check report), STOP and record the diff in notes; do not normalise outputs to make the test pass.</trigger>
   </escalation>
 
   <justification>
@@ -122,7 +122,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the 3 synthetic NDAs and the golden plan, when the engines run inside the image, then every output (redline, external, clean, check report) is byte-identical to a local run of the same engine version and `check_outputs` passes (FR-01a).</criterion>
+    <criterion testable="true">Given the 3 synthetic NDAs and the golden plan, when the engines run inside the image, then every output equals a local run of the same engine version and `check_outputs` passes (FR-01a). "Equals" (main session 2026-11-26, escalation 2): for each .docx the same part names with identical bytes and CRC-32 per part (zip entry timestamps excluded, because the engines stamp the wall clock), and the check report byte-identical; one named switch tightens this to whole-file sha256 once the accelerator writes fixed zip dates (asked 2026-11-26). No output or engine is rewritten or patched.</criterion>
     <criterion testable="true">Negative: a message that is not a valid envelope (missing field, wrong `jobType`, payload carrying content) is dead-lettered and no blob is written (FR-01b).</criterion>
     <criterion testable="true">Given the same message delivered twice, then the marker is created once and one set of outputs exists at the same deterministic paths (FR-01c).</criterion>
     <criterion testable="true">A plan the engine refuses (exit 3: an anchor not unique, or crossing an existing revision) is never applied: the run ends with the non-retryable outcome `plan_does_not_fit`, carrying the refused edit index and a reason code; engine stderr (which quotes clause text) is never logged or sent; no output blob is written (FR-01g as amended by the owner 2026-11-26). The entrypoint takes the engine skip-and-report mode as an option, off until the accelerator ships it.</criterion>
@@ -138,7 +138,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Seeding proof requested for the marker test only (a broken marker is a duplicate-output / data-loss outcome): remove the `If-None-Match` condition, confirm the duplicate test fails, restore. Latency measurement on dev (FR-01e) belongs to task 008. Completion destination (owner 2026-11-25): the engine's own `intake-engine-completions` queue, consumed by a dedicated BFF processor (task 014). The job runs as its own least-privileged identity (`AZURE_CLIENT_ID`), never the BFF's: it has no right on any BFF queue, Dataverse, Graph or Key Vault.</notes>
+  <notes>Seeding proof requested for the marker test only (a broken marker is a duplicate-output / data-loss outcome): remove the `If-None-Match` condition, confirm the duplicate test fails, restore. Latency measurement on dev (FR-01e) belongs to task 008. Completion destination (owner 2026-11-25): the engine's own `intake-engine-completions` queue, consumed by a dedicated BFF processor (task 014). The job runs as its own least-privileged identity (`AZURE_CLIENT_ID`), never the BFF's: it has no right on any BFF queue, Dataverse, Graph or Key Vault. Deterministic anchoring (owner 2026-11-26, notes/decisions.md): segment_clauses runs first (engine job `segment` operation); the edit-plan AI picks `para` only from the closed para_key list and quotes verbatim; the BFF exact-match pre-check refuses bad anchors (closed codes) before the engine; never fuzzy, approximate or whole-document text matching. This task adds the `segment` operation (deterministic staging path, ids-only completion) beside `redline`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -122,11 +122,13 @@ r1 = design Phases 0–3 (owner clarification, 2026-11-25).
      - (g) A refused edit (anchor not unique, or crossing a revision) is never applied. On master the engine refuses the whole plan (exit 3); the job ends that run with the non-retryable outcome `plan_does_not_fit`, carrying the refused edit's index and a reason code, never clause text. When the accelerator ships its skip-and-report mode, the job runs in that mode and returns the refused edits as structured data while the edits that fit are applied (owner 2026-11-26).
 2. **FR-02 App-only agreement review writes an edit plan.**
    - **What:** `agreement-classify` and `agreement-review` run app-only from a job, through a PublicContracts facade, outside any chat session. The review step writes an edit plan that is valid against `edit-plan.schema.json`. Topic ids come from the pinned NDA standard.
+   - **Anchoring (owner 2026-11-26):** the review step's input is the deterministic `segment_clauses.py` output of the draft (produced by the engine job before the AI runs), not free extracted text. The model chooses `para` only from the supplied `para_key` list and quotes `find`/`old`/`after` verbatim; code pre-checks each anchor by exact match, and a failing anchor is a refused edit. No fuzzy, approximate or whole-document text matching anywhere.
    - **Acceptance:**
      - (a) On 3 synthetic NDAs, the plan validates against the schema and every `topic` id exists in the pinned `topics.yaml`.
      - (b) A non-agreement document is classified as not an NDA and produces no plan.
      - (c) No real NDA and no `answer-key/` content is used.
      - (d) `ConsumerTypes` has `agreement-classify` and `nda-review` in `All`, and `/healthz/catalog` reports no drift for them.
+     - (e) Negative: an edit with a `para` not in the supplied keys, a `find` not in that section's text, or a `find` occurring twice is refused with its index and a closed reason code; it is never placed by approximate matching.
 3. **FR-03 Cleanup PR** (design §10.1 Phase 0 items, one PR together with the real fixes).
    - **What:**
      - (1b) Delete `DocumentProcessing`, `ProfileSummary` and `EmailAnalysis`: handler, DI line, tests and diagnostics entry.

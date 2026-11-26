@@ -138,7 +138,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Completion path revised 2026-11-25 (owner): dedicated engine identity + own completion queue + dedicated BFF processor; see notes/decisions.md. Effort xhigh: multi-file concurrency/race work (completion vs timeout) with a complete spec. Seeding proof requested for the late-completion-after-timeout guard (a regression would resurrect a failed run): remove the state check, confirm the test fails, restore.</notes>
+  <notes>Completion path revised 2026-11-25 (owner): dedicated engine identity + own completion queue + dedicated BFF processor; see notes/decisions.md. Effort xhigh: multi-file concurrency/race work (completion vs timeout) with a complete spec. Seeding proof requested for the late-completion-after-timeout guard (a regression would resurrect a failed run): remove the state check, confirm the test fails, restore. Deterministic anchoring (owner 2026-11-26, notes/decisions.md): segment_clauses runs first (engine job `segment` operation); the edit-plan AI picks `para` only from the closed para_key list and quotes verbatim; the BFF exact-match pre-check refuses bad anchors (closed codes) before the engine; never fuzzy, approximate or whole-document text matching. Dispatch carries an operation field (segment | redline); the BFF reads clauses.json from staging by a path it derives from runId/attempt, never from the completion.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
