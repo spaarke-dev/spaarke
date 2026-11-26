@@ -176,7 +176,7 @@ Owner decision: retire the entry (and map the five communication types), or add 
 
 | Field | Value |
 |---|---|
-| **Status** | Fix PR #3188 open (2026-11-25; guard widened, 35 ids baselined with table; ArchTests 2833/0); stamp-breaking ids → ISS-045 #3189 |
+| **Status** | Fixed — PR #3188 merged `c3a42ad85a` (2026-11-25; guard widened, 35 ids baselined with table; ArchTests 2833/0); stamp-breaking ids → ISS-045 #3189 |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-24 |
 | **Source** | PR #3088 (ISS-039 D1+D2): widening the guard's pattern from `-f011-8406-` to `-f011-`/`-f111-` |

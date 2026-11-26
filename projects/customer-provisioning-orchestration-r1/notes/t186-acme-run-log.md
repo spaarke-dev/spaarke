@@ -302,3 +302,19 @@ Lessons (9): `provisioning-runs/acme-3b6f7b65-033d-400b-bba4-59541a0cc340/lesson
 | 11-23 14:01:09–14:01:49 | Resumed → **H13 ✓ in 40 s** (14 live checks, T1–T7, I2–I5, ARM keyless ×10, cost $344.62 / −13.8 %, census Isolated, mailbox) → run **Completed** | — |
 | 11-23 14:0x–14:3x | Step 6a: registry already Ready, all columns match (nothing reconciled). Step 6e read-only: items 1, 2, 3, 3b, 4, 5, 5b, 9 (Isolated), 10, 11, 12, 14, 15 PASS; 2b/6/7/8/13 not run (probe writes). Plan step 4: Core User on `sprk_invoicecorrection` = Read/Append/AppendTo only; `/healthz` 200 both slots; guest Console sign-in not run. Completed run still shows 5 `Pending` failure-marker gates | U-L09 ISS-035 #2986 |
 | 11-23 ~15:00–15:10 | Step 6e probe items with owner OK ("Yes, run probes"): 2b (40/40 tables), 6, 7 (jane/john 403 on secure project/matter/work assignment), 13 (child readable to the sharee after 22 s, revoked after 93 s), 8 (46 probes deleted, each re-read 404) — all PASS. ACME is secure-record ready on 1.3.2.1 | — |
+
+## 7. Upgrade run 85561c4a (2026-11-25)
+
+ACME's second UPGRADE run: SpaarkeMaster managed 1.3.2.1 → **1.3.3.0**, BFF pinned (`buildId = 2026.10.16-2`), run from
+master `af4cfb4527` (temp worktree `wtcp2`). Handoff: `runs/85561c4a-0c28-41a8-ad35-66f0aede9ce9.md`. Lessons (4):
+`provisioning-runs/acme-85561c4a-0c28-41a8-ad35-66f0aede9ce9/lessons-learned.md`. Result: **Completed** 23:52:02Z in
+1 h 20 min, 0 retries, 23 gates Verified; registry Ready.
+
+| When (UTC) | Step | Lesson / issue |
+|---|---|---|
+| 11-25 before 22:30 | Rate-card report READY; prereqs 15/15 + 16/17 — PRQ-C-03 recipe fails on Windows (curl exit 23); names confirmed by hand as ACME's own | U2-L01 ISS-044 #3183, PR #3187 |
+| 11-25 22:32 | POST with `upgradeOfProvisionedOn` + `buildId`; Dataverse MCP disconnected → Web API fallback | U2-L02 |
+| 11-25 22:32–22:34 | H0 H1 H2a H2b H4 H5 H3 H10 H8 ✓ | — |
+| 11-25 22:35–23:30 | H6 ✓ SpaarkeMaster 1.3.3.0 managed (~55 min) | — |
+| 11-25 23:31–23:52 | H7b, H4b, H9 (swap 23:49, 34.93 MB), H7, H11, H12a/b/c (37 reference + 87 taxonomy rows, Communication type), H14a/m/H14, H13 ✓ → **Completed** | — |
+| 11-25 23:52–11-26 00:15 | Registry Ready/1.3.3.0; role expectations 8/8; Step 6e read-only items PASS; prod `/healthz` 200, staging 503 under 80–99 % plan CPU | U2-L03 (plan sizing) |
