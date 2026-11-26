@@ -26,9 +26,9 @@
 | 021 | Shared widget MCP transport; Decisions widget moved onto it | 1 | ✅ [done] | 011 + r1 gate | Group E | opus / high | FULL |
 | 022 | Search tools: `spaarke_search_documents`, `spaarke_find_records` | 1 | 🔲 [open] | 009, 020, 027 | Group F | sonnet / high | FULL |
 | 023 | Document tools: `spaarke_list_documents`, `spaarke_get_document` | 1 | 🔄 [wip] | 020 | Group F | sonnet / high | FULL |
-| 024 | `spaarke_list_playbooks` | 1 | 🔲 [open] | 020 | Group F | sonnet / high | FULL |
+| 024 | `spaarke_list_playbooks` | 1 | 🔄 [wip] | 020 | Group F | sonnet / high | FULL |
 | 025 | Task read tools: `spaarke_list_tasks`, `spaarke_get_task` | 1 | 🔲 [open] | 006, 020 | Group F | sonnet / high | FULL |
-| 026 | `spaarke_get_portfolio` | 1 | 🔲 [open] | 020 | Group F | sonnet / high | FULL |
+| 026 | `spaarke_get_portfolio` | 1 | 🔄 [wip] | 020 | Group F | sonnet / high | FULL |
 | 027 | Search result authorization into shared methods (prerequisite for 022; added 2026-11-25) | 1 | 🔄 [wip] | 009, 020 | Group F | opus / high | FULL |
 | 029 | Deploy Phase 1 to dev; routing-eval run A | 1 | 🔲 [open] | 019, 020–026 | Group G (alone) | sonnet / high | STANDARD |
 | 030 | Playbook run tools: `spaarke_run_playbook`, `spaarke_get_playbook_run` | 2 | 🔲 [open] | 005, 007, 020, 024 | Group H | opus / high | FULL |
