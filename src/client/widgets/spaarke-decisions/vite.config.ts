@@ -12,12 +12,16 @@ const __dirname = path.dirname(__filename);
 // App Insights into the bundle. Shape follows src/solutions/CreateMatterWizard/vite.config.ts.
 const sharedUiSrc = path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src');
 
+// The shared widget MCP transport (spaarkeai-mcp-bff-api-r2 task 021, FR-16): a source folder imported by relative path, not a package.
+const sharedWidgetSrc = path.resolve(__dirname, '../shared');
+
 /**
- * Resolves the bare imports of the shared library's source files (for example "@fluentui/react-components") from THIS
- * package's node_modules, because that source lives outside the package root.
+ * Resolves the bare imports of the shared library's and the shared widget folder's source files (for example
+ * "@fluentui/react-components", "@modelcontextprotocol/ext-apps/react-with-deps") from THIS package's node_modules, because that
+ * source lives outside the package root.
  */
 function resolveSharedLibDeps(): Plugin {
-  const sharedLibPath = sharedUiSrc.replace(/\\/g, '/');
+  const sharedPaths = [sharedUiSrc, sharedWidgetSrc].map(p => p.replace(/\\/g, '/') + '/');
   const nodeModulesDir = path.resolve(__dirname, 'node_modules');
 
   return {
@@ -25,7 +29,8 @@ function resolveSharedLibDeps(): Plugin {
     enforce: 'pre',
     async resolveId(source, importer, options) {
       if (!importer) return null;
-      if (!importer.replace(/\\/g, '/').startsWith(sharedLibPath)) return null;
+      const from = importer.replace(/\\/g, '/');
+      if (!sharedPaths.some(p => from.startsWith(p))) return null;
       if (source.startsWith('.') || source.startsWith('/') || source.startsWith('@spaarke/')) return null;
 
       const pkgName = source.startsWith('@') ? source.split('/').slice(0, 2).join('/') : source.split('/')[0];
