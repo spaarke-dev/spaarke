@@ -73,17 +73,22 @@ public sealed class GraphClientFactory : IGraphClientFactory
 
     private readonly Lazy<GraphServiceClient> _appOnlyClient;
 
+    /// <summary>The clock the OBO token's Redis TTL is measured on (<see cref="OboTokenCacheTtl"/>); the system clock unless injected.</summary>
+    private readonly TimeProvider _time;
+
     public GraphClientFactory(
         IHttpClientFactory httpClientFactory,
         ILogger<GraphClientFactory> logger,
         GraphTokenCache tokenCache,
         IConfiguration configuration,
-        OrderedCredentialClientProvider? confidentialClients = null)
+        OrderedCredentialClientProvider? confidentialClients = null,
+        TimeProvider? timeProvider = null)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tokenCache = tokenCache ?? throw new ArgumentNullException(nameof(tokenCache));
         _confidentialClients = confidentialClients;
+        _time = timeProvider ?? TimeProvider.System;
 
         // Task 041: Managed Identity flag for app-only Graph auth.
         // Sensible default: false (preserves the legacy local-dev path for environments that haven't
@@ -298,7 +303,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
             // Cache the token until shortly before ITS OWN expiry (spaarkeai-mcp-bff-api-r2 task 030). A fixed 55 minutes outlived a
             // token issued with less than an hour left, so a long playbook run was served an expired token from this cache. A token
             // already within the margin of its expiry is not cached at all.
-            if (OboTokenCacheTtl(result.ExpiresOn, DateTimeOffset.UtcNow) is { } ttl)
+            if (OboTokenCacheTtl(result.ExpiresOn, _time.GetUtcNow()) is { } ttl)
             {
                 await _tokenCache.SetTokenAsync(tokenHash, result.AccessToken, ttl);
             }
@@ -327,15 +332,24 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// <summary>How long before an OBO Graph token's own expiry it stops being served from the Redis cache.</summary>
     internal static readonly TimeSpan OboTokenCacheSafetyMargin = TimeSpan.FromMinutes(5);
 
+    /// <summary>The longest an OBO Graph token is kept in the Redis cache, however long it lives (the TTL before task 030).</summary>
+    internal static readonly TimeSpan OboTokenCacheMaxTtl = TimeSpan.FromMinutes(55);
+
     /// <summary>
     /// The Redis TTL of an OBO Graph token that expires at <paramref name="expiresOn"/>: its remaining life less
-    /// <see cref="OboTokenCacheSafetyMargin"/>, or <c>null</c> (do not cache) when that leaves nothing. Never a fixed value: Entra issues
-    /// access tokens with 60 to 90 minutes of life and MSAL may return a cached one with less, so a fixed TTL can outlive the token.
+    /// <see cref="OboTokenCacheSafetyMargin"/>, at most <see cref="OboTokenCacheMaxTtl"/>, or <c>null</c> (do not cache) when that leaves
+    /// nothing. Entra issues access tokens with 60 to 90 minutes of life (longer under a token-lifetime policy) and MSAL may return a
+    /// cached one with less, so a fixed TTL can outlive the token; the ceiling keeps a long-lived token to the old 55 minutes.
     /// </summary>
     internal static TimeSpan? OboTokenCacheTtl(DateTimeOffset expiresOn, DateTimeOffset now)
     {
         var ttl = expiresOn - now - OboTokenCacheSafetyMargin;
-        return ttl > TimeSpan.Zero ? ttl : null;
+        if (ttl <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        return ttl < OboTokenCacheMaxTtl ? ttl : OboTokenCacheMaxTtl;
     }
 
     /// <summary>

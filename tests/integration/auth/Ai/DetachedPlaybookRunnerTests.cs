@@ -105,13 +105,11 @@ public sealed class DetachedPlaybookRunnerTests
         world.Script = PlaybookRunWorld.NeverAccepts(cancelled);
 
         var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
-        for (var i = 0; i < 1_000 && !start.IsCompleted; i++)
-        {
-            world.Time.Advance(TimeSpan.FromSeconds(1));
-            await Task.Delay(5);
-        }
+        await world.Time.TimerArmed(PlaybookRunLimits.AcceptBudget);
+        start.IsCompleted.Should().BeFalse("the start waits out the accept budget on the fake clock");
+        world.Time.Advance(PlaybookRunLimits.AcceptBudget);
 
-        (await start).Outcome.Should().Be(PlaybookRunStartOutcome.NotAccepted);
+        (await start.WaitAsync(TimeSpan.FromSeconds(15))).Outcome.Should().Be(PlaybookRunStartOutcome.NotAccepted);
         await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(15));
         await world.RunFinished();
     }
@@ -155,6 +153,71 @@ public sealed class DetachedPlaybookRunnerTests
 
         ended.Phase.Should().Be(PlaybookRunPhase.Cancelled);
         ended.ReasonCode.Should().Be(PlaybookRunReasonCodes.HostStopping);
+    }
+
+    [Fact(DisplayName = "030 bounded: a caller may have 3 runs running at once; a 4th is refused (playbook.run-limit) before 007 or any token; once one finishes a new start is allowed")]
+    public async Task Start_BeyondThePerCallerCap_IsRefused_UntilARunFinishes()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var gates = Enumerable.Range(0, 5).Select(_ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        var next = -1;
+        world.Script = (request, ct) => PlaybookRunWorld.GatedRunOn(gates[Interlocked.Increment(ref next)], request, ct);
+
+        var running = new List<Guid>();
+        for (var i = 0; i < PlaybookRunLimits.MaxConcurrentRunsPerCaller; i++)
+        {
+            var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+            started.Outcome.Should().Be(PlaybookRunStartOutcome.Started, $"run {i + 1} of {PlaybookRunLimits.MaxConcurrentRunsPerCaller} is within the cap");
+            running.Add(started.Run!.RunId);
+        }
+
+        world.Graph.Invocations.Clear();
+        var refused = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+
+        refused.Outcome.Should().Be(PlaybookRunStartOutcome.RunLimit);
+        refused.Authorization.Should().BeNull("the cap is checked before 007's authorization");
+        refused.Run.Should().BeNull();
+        world.Calls.Should().HaveCount(PlaybookRunLimits.MaxConcurrentRunsPerCaller, "the refused start ran nothing");
+        world.Graph.Verify(g => g.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Never());
+
+        var otherCaller = await world.Runs.StartAsCallerAsync(
+            world.CallerContext(PlaybookRunWorld.OtherOid), playbookId, [documentId], null, CancellationToken.None);
+        otherCaller.Outcome.Should().NotBe(PlaybookRunStartOutcome.RunLimit, "the cap is per caller, not per instance");
+
+        gates[0].SetResult();
+        await world.RunFinished();
+        (await world.Runs.ReadAsCallerAsync(world.CallerContext(), running[0], CancellationToken.None))!.Phase
+            .Should().Be(PlaybookRunPhase.Completed);
+
+        var afterOneFinished = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        afterOneFinished.Outcome.Should().Be(PlaybookRunStartOutcome.Started, "a finished run frees its place");
+    }
+
+    [Fact(DisplayName = "030 bounded: the tool answers a start beyond the per-caller cap as isError playbook.run-limit, status 429, and keeps no retry key")]
+    public async Task Tool_BeyondThePerCallerCap_Is429RunLimit()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        for (var i = 0; i < PlaybookRunLimits.MaxConcurrentRunsPerCaller; i++)
+        {
+            (await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None))
+                .Outcome.Should().Be(PlaybookRunStartOutcome.Started);
+        }
+
+        var refused = await world.RunToolAsync(world.CallerContext(), new { playbookId, documentIds = new[] { documentId }, idempotencyKey = "over-cap" });
+
+        refused.IsError.Should().BeTrue();
+        var body = refused.StructuredContent!.Value;
+        body.GetProperty("reasonCode").GetString().Should().Be(PlaybookRunReasonCodes.RunLimit);
+        body.GetProperty("status").GetInt32().Should().Be(StatusCodes.Status429TooManyRequests);
+        ((ModelContextProtocol.Protocol.TextContentBlock)refused.Content.Single()).Text.Should().Contain("Wait for a run to finish");
+
+        // The refusal kept no entry: once a run finishes, the same key starts a run.
+        world.Gate.SetResult();
+        await world.RunFinished(count: PlaybookRunLimits.MaxConcurrentRunsPerCaller);
+        var retried = await world.RunToolAsync(world.CallerContext(), new { playbookId, documentIds = new[] { documentId }, idempotencyKey = "over-cap" });
+        retried.IsError.Should().NotBe(true, retried.StructuredContent?.ToString());
     }
 
     public enum PrewarmFailure

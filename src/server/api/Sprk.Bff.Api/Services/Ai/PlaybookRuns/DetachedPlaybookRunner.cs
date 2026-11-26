@@ -45,9 +45,14 @@ namespace Sprk.Bff.Api.Services.Ai.PlaybookRuns;
 /// <item><b>No leak into the original request:</b> <see cref="ExecutionContext.SuppressFlow"/> wraps the launch, so setting
 /// <see cref="IHttpContextAccessor.HttpContext"/> inside the detached flow never clears the request's own holder (the #3224 defect).</item>
 /// <item><b>Bounded:</b> <see cref="PlaybookRunLimits.MaxRunDuration"/> (on <see cref="TimeProvider"/>) and
-/// <see cref="IHostApplicationLifetime.ApplicationStopping"/> cancel the run. Graph and Dataverse OBO tokens are obtained before the
-/// request answers. An authentication failure ends the run as failed (<see cref="AuthExpiredReasonCode"/>); nothing is retried, and
-/// nothing here calls the app-only entry.</item>
+/// <see cref="IHostApplicationLifetime.ApplicationStopping"/> cancel the run. The cap bounds the run; it does not keep the caller's
+/// token valid (that token may have only minutes left at the start). Graph and Dataverse OBO tokens are obtained before the request
+/// answers, and the run's later exchanges are answered from the caches that pre-warm fills (MSAL's per-assertion OBO cache; the Graph
+/// Redis cache, TTL = the token's own expiry less 5 minutes, at most 55). A miss fails closed: a switch to another confidential client
+/// in <c>OrderedCredentialClientProvider</c> starts with an empty cache, and a node may reach a Dataverse host other than the pre-warmed
+/// one (<c>EnvironmentUrl</c> differing from <c>ServiceUrl</c>). An authentication failure ends the run as failed
+/// (<see cref="AuthExpiredReasonCode"/>); nothing is retried, and nothing here calls the app-only entry. A caller may have at most
+/// <see cref="PlaybookRunLimits.MaxConcurrentRunsPerCaller"/> runs running in this process (<see cref="RunLimitReasonCode"/>).</item>
 /// <item><b>Authorized first:</b> task 007's method decides inside the request; the exact <c>documentIds</c> and <c>parameters</c>
 /// instances it decided on are the run's, with <c>RunUserId</c> = its <c>RunUserId</c> and <c>StartedBy = Person</c>.</item>
 /// <item><b>Visible:</b> this process's run table, then the engine's status read (task 005's durable record); a record left Running by a
@@ -73,6 +78,9 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
 
     /// <summary>The run failed (the engine's own terminal code when it names none).</summary>
     internal const string FailedReasonCode = PlaybookRunReasonCodes.Failed;
+
+    /// <summary>The caller already has <see cref="PlaybookRunLimits.MaxConcurrentRunsPerCaller"/> runs running here. Nothing ran.</summary>
+    internal const string RunLimitReasonCode = PlaybookRunReasonCodes.RunLimit;
 
     /// <summary>How long a finished run stays in the run table (the durable record answers after that).</summary>
     internal static readonly TimeSpan Retention = TimeSpan.FromHours(1);
@@ -106,6 +114,13 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(documentIds);
         Prune();
+
+        // Condition 5: at most MaxConcurrentRunsPerCaller runs running per caller in this process, checked before anything else.
+        if (CallerResolution.ResolveObjectId(http.User) is { } requester && RunningCount(requester) >= PlaybookRunLimits.MaxConcurrentRunsPerCaller)
+        {
+            _logger.LogInformation("Detached playbook run not started - Outcome: {Outcome}, CorrelationId: {CorrelationId}", RunLimitReasonCode, http.TraceIdentifier);
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.RunLimit, null, null);
+        }
 
         // Condition 6: authorized first, inside the request, by task 007's one method; no check of our own.
         var authorization = await PlaybookAuthorizationFilter
@@ -233,8 +248,10 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
 
     /// <summary>
     /// Obtains the caller's delegated Graph and Dataverse tokens through the existing factories while the request is authenticated, so
-    /// the run's later exchanges are answered from the caches those factories already keep (MSAL's OBO cache; the Graph Redis cache,
-    /// whose TTL now follows the token's expiry). Any failure refuses the start: a run that cannot act as the caller does not start.
+    /// the run's later exchanges are answered from the caches those factories already keep (MSAL's OBO cache, keyed by the assertion;
+    /// the Graph Redis cache, whose TTL follows the token's expiry). Correctness rests on these caches, not on the caller's token staying
+    /// valid: an exchange that misses them later fails closed. Any failure here refuses the start: a run that cannot act as the caller
+    /// does not start.
     /// </summary>
     private async Task<bool> PrewarmAsync(HttpContext http, CancellationToken cancellationToken)
     {
@@ -352,6 +369,10 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
             launch.Dispose();
         }
     }
+
+    /// <summary>The caller's runs still running in this process's run table (the same oid key as <c>StartedByOid</c>).</summary>
+    private int RunningCount(string callerOid) =>
+        _runs.Values.Count(r => r.Phase == PlaybookRunPhase.Running && PlaybookRunRecordStore.IsSameOid(r.StartedByOid, callerOid));
 
     private DetachedRun Register(PlaybookStreamEvent first, Launch launch)
     {
