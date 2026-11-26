@@ -51,28 +51,47 @@ so every read is still limited to what the user may see. Every one of these cond
      - `DecisionRouteCores` and `AssignTaskNotifier`. These scratch contexts carry no header.
 3. **Memory only.** The token lives only in that process's memory, on the detached context.
    - It is never written to a store, a cache key, a queue, a log, telemetry, the run record or an exception message.
-   - The OBO tokens that MSAL derives stay in the caches they use today.
+   - The OBO tokens that MSAL derives stay in the caches they use today. That includes MSAL's own OBO cache, which
+     already holds refresh tokens today; this amendment adds no new store or lifetime to it.
    - It is never handed to another host: no queue, job, Function or other process.
 4. **No leak into the original request.** The helper suppresses `ExecutionContext` flow before it detaches. Detaching
    must not change the original request's `IHttpContextAccessor` (the defect in #3224).
-5. **Bounded.** The run is capped at **50 minutes**, below the 60-minute minimum default lifetime of an Entra access
-   token, and it ends when the app shuts down.
+5. **Bounded.** The run is capped at **50 minutes**, and it ends when the app shuts down. The cap, not the token's
+   expiry, is what bounds the run.
+   - Token expiry is no guide: the caller's token may have only minutes left when the run starts.
    - Delegated downstream tokens (Graph, Dataverse) are obtained at the start, while the request is still
      authenticated.
-   - An authentication failure mid-run (an expired assertion, or a consent or Conditional Access challenge) ends the
-     run as failed. It is never retried app-only.
+   - If a downstream token cannot be renewed during the run, the run ends as failed (`auth_expired`), possibly before
+     the cap. So does an expired assertion, or a consent or Conditional Access challenge. The run is never retried
+     app-only.
+   - Each user may have at most a small fixed number of detached runs in progress at once. A start beyond it is
+     refused with a clear reason. This limits how much exposure one user or one stolen token can build up.
 6. **Authorized first.** The run's authorization completes inside the original request, before the run starts
    (ADR-028). The run acts only on the inputs that were authorized.
 7. **Visible.** The run's state is recorded on the run record, which the user can read. A run lost to a restart reads
    as interrupted, not as running.
+
+**Known limits (accepted):**
+- **Access is checked once, at start.** Access changes made during the run don't stop it: a removed share, a new No
+  Access entry or a newly set Restricted value. Reads that go through the BFF's app-only paths (the SharePoint
+  Embedded broker's document reads) still return data for up to the 50-minute cap. Dataverse reads made with the
+  user's token see such a change at once. Closing this gap would need an access recheck at each node in the engine,
+  and ADR-039 freezes the engine, so the cap is the bound.
+- **Which user.** Runs are keyed to the user's Entra object id alone. This holds because the MCP host accepts only
+  Spaarke-tenant tokens: `McpToolAuthorization.A10DenyReason` refuses any other `tid`, any issuer other than the exact
+  v2 issuer, and the home-directory (A9) and CIAM schemes. If the host ever accepts another tenant's tokens, runs must
+  be keyed on tenant plus object id (ADR-028 A9).
 
 **Not permitted under this exception:**
 - MSAL's long-running OBO sessions. They hold a refresh token that stays valid for up to 90 days, a larger exposure
   than an access token that expires within the run's cap.
 - Any detached run started by a timer, a webhook or the system. Those stay app-only, or use §6 impersonation.
 
-**Enforced by:** an ArchTest added with task 030. In production code, a detached `HttpContext` may be built only in the
-shared helper and the baseline files above. The test ships with must-fire and must-not-fire controls.
+**Enforced by:** ArchTests added with task 030, each with must-fire and must-not-fire controls:
+- In production code, a detached `HttpContext` may be built only in the shared helper and the baseline files above.
+- The caller's `Authorization` header may be read only in the token-acquisition (OBO) files and the shared helper. The
+  existing readers are a ratchet baseline.
+- A per-user cap on detached runs in progress is enforced in the helper and tested there.
 
 ---
 
