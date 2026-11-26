@@ -678,3 +678,60 @@ the script; where a detail wasn't captured, the row says so.
    `Copilot/Created/` and the archive). The user guide must name them apart and say where each lives.
 5. **Uploading from the PC makes another OneDrive copy**, which search then finds (gap #34). The guide says attach
    from OneDrive (cloud) instead.
+
+## Three-way NDA comparison: W4 Word, W5 Claude for Legal, W6 Cowork (owner, 2026-11-26)
+
+Same agreement (Brightwater Mutual NDA), same playbook (Spaarke NDA – Mutual v1.2). Files on the owner's Desktop, not
+in the repo: `W4 Word Copilot` (Word's Review contract with a playbook), `W5 Claude` (redline) and
+`W5 - Clause Audit` (Claude for Legal given the v1.2 playbook), `W6 Cowork` (the `/nda-review` skill's external
+redline, which has no comments by design; the internal copy with comments and the summary page was not
+compared). Extracted with a throwaway script (tracked changes, comments, tables), judged against v1.2.
+
+The playbook's scope line says "acceptable end state; fallbacks in order", so a clause at a fallback passes.
+
+| § | Topic | v1.2 verdict on the original | W4 Word | W5 Claude | W6 Cowork |
+|---|---|---|---|---|---|
+| 2.1 | Unmarked information | Fallback (marking plus 30-day designation): pass | Upgraded to preferred | Pass, no change | Upgraded to preferred |
+| 3.1(d) | Independent development | Escalate (no "without use of") | Fixed | Fixed | Fixed |
+| 3.2 | One-sided carve-out | Escalate | Struck (paragraph deleted) | Narrowed and made mutual (fallback), flagged [review] | "Intentionally Omitted" (preferred) |
+| 4.1 | Reverse engineering | Missing; prototypes disclosed, so add | Added as a new section with no number, between §4 and §5, in the playbook's "shall"/"analyse" | Added to 4.1 ("will"/"analyze") | Added to 4.1 ("will"/"analyze") |
+| 4.2 | Representatives | Escalate (no responsibility) | Fixed, plus "at least as protective" | Fixed (model sentence) | Fixed (model sentence) |
+| 4.4 | Derived data | Escalate | Limited to the Purpose | Limited to the Purpose | "Intentionally Omitted" |
+| 5.1 | Compelled disclosure | Escalate | Fixed | Fixed | Fixed |
+| 7 | Return or destruction | Fallback (on request, no deadline): pass | Upgraded to preferred | Pass, flagged [review] | Upgraded to preferred |
+| 8 | Residuals | Escalate | **Whole section deleted**, heading too: numbering jumps 7 → 9 | "8. [Intentionally omitted]" | "8.1 Intentionally Omitted." (heading kept) |
+| 10 | Non-solicit | Fallback (mutual, 12 months, exception): pass | **Whole section deleted**: numbering jumps 9 → 11 | Pass, flagged [review] | No change |
+| 14.3 | Governing law | Fallback (California, Brightwater's home state; Acme is in Delaware): pass | **Changed to Delaware** | Pass | No change |
+
+| | W4 Word | W5 Claude | W6 Cowork |
+|---|---|---|---|
+| Changes | 13 | 7 | 9 |
+| Changes the playbook doesn't call for | 4 (§2.1, §7, §10 deleted, §14.3) | 0 | 2 (§2.1, §7) |
+| Numbering kept | No (two gaps, one unnumbered new section) | Yes | Yes |
+| Comments | 14, one per change, plain reasons; no playbook or topic named; one duplicated (heading and body of the new section) | 7, one per change, each naming the playbook, topic, standard and the trigger hit | None in this copy (external redline); the internal copy has them |
+| Report | None | Separate clause audit: RED result, 7 flagged items with risk, 17 passing clauses, housekeeping, 3 judgment items | Summary page, dashboard and audit pack (not compared here) |
+
+**Findings.**
+1. **All three found and fixed the 7 clauses the playbook requires.** The difference is what else they changed and
+   whether the document stays intact.
+2. **W4 (Word) over-edits and breaks structure.** It moved three acceptable fallbacks to its own preferences
+   (§7, §10 struck outright, §14.3 to Delaware), deleted two whole sections without renumbering, and added an
+   unnumbered section. Same failure pattern as Test 3 (2026-11-11).
+3. **W5 (Claude for Legal) followed the playbook most closely:** changed only what fails, treated fallbacks as
+   passes, and flagged the judgment calls (§3.2, §7, §10) instead of deciding them.
+4. **W6 (our skill) is structurally right** (numbering kept, "Intentionally Omitted" per the edit plan) **but upgraded
+   two fallback clauses (§2.1, §7) and left two others (§10, §14.3).** That is inconsistent, and our SKILL.md doesn't
+   say what to do with a clause at a fallback. Fix candidate: one rule in the skill: a clause at a fallback is
+   rated YELLOW, gets no edit, and goes to the judgment list (as W5 did), unless the user asks for preferred
+   positions.
+5. **W5's clause audit is the strongest report format of the three** (risk column, clauses that pass, housekeeping,
+   judgment items). Worth comparing with our summary page and audit pack before changing either.
+
+## Word desktop runs the `spaarke-decisions` plugin (owner, 2026-11-26)
+
+The owner ran the admin-deployed **Spaarke** plugin's `spaarke-decisions` skill with **Spaarke MCP** in Word desktop,
+and it loaded. That skill is instructions only (no scripts): it tells Copilot to call `spaarke_show_decisions`, which
+runs on the BFF. So this confirms two things for Word desktop: it follows an instructions-only plugin skill (as WP-2),
+and it calls a Spaarke MCP tool (the WP-3 question, answered on desktop). It says nothing about Python: WP-1 is still
+open. `/nda-review` builds its redline, summary page and checks with Python scripts, so packaging it as a plugin would
+reach Word only if WP-1 passes, or if the engines run on the server as MCP tools.
