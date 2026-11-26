@@ -4,7 +4,7 @@
     <title>Tool: spaarke_get_portfolio</title>
     <phase>1 Read tools</phase>
     <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface (MCP tool)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,7 +96,8 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-08.</notes>
+  <notes>Spec FR-08. Done 2026-11-25 in an isolated worktree (decisions, deviations and the two shared test pins this and every new tool breaks: projects/spaarkeai-mcp-bff-api-r2/notes/026-decisions.md). Added: Api/Mcp/LegalOperations/Portfolio/GetPortfolioTool.cs (thin adapter over PortfolioService, same CallerResolution.ResolveObjectId access check as the REST filter, no widget), its ledger row, and tests/integration/contract/Api/Mcp/Portfolio/GetPortfolioToolTests.cs (12 tests over the real BFF host: parity with REST both call orders, caller isolation, no-caller, argument refusal, fault, telemetry). TASK-INDEX.md left to the main session (wave rule).
+rework: none task 026</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

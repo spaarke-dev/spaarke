@@ -7,5 +7,14 @@ namespace Spaarke.ArchTests;
 /// </summary>
 public partial class RouteAuthorizationGuardTests
 {
-    private static readonly IReadOnlyList<McpTool> McpToolsPortfolio = Array.Empty<McpTool>();
+    private static readonly IReadOnlyList<McpTool> McpToolsPortfolio = new[]
+    {
+        // --- task 026 (spaarke_get_portfolio) ---
+        new McpTool("GetPortfolioTool", "", "PortfolioService",
+            "FR-08, model-visible, read-only, no widget: the caller's matter portfolio summary through PortfolioService.GetPortfolioSummaryAsync, "
+            + "the call GET /api/workspace/portfolio makes. The REST access check is WorkspaceAuthorizationFilter, which only resolves the caller's "
+            + "oid; the tool makes the same CallerResolution.ResolveObjectId call on IHttpContextAccessor.HttpContext's User and answers "
+            + "UserContextRequired with none. Matter-level access stays inside the service (people-targeted set, read as the caller). Bare [Authorize]."),
+        // --- end task 026 ---
+    };
 }
