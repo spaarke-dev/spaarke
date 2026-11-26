@@ -4,7 +4,7 @@
     <title>FR-03 cleanup PR (part 1): §10.1 items 1b, 2, 4, 5a (+ regression test) and 6 — dead handlers, StartupDiagnostics, profile doc, one profile idempotency key, ConsumerTypes constants</title>
     <phase>0 Foundations and cleanup</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies and deletes .cs files in the BFF (tags bff-api, refactoring), changes an idempotency key on a live enqueue path, and modifies tests (deletion tag).</rigor-reason>
     <model-tier>sonnet</model-tier>

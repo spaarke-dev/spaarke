@@ -661,7 +661,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                             att.Id, communicationId, repairId);
 
                         // The earlier archive stopped before its enqueue, so the document was never profiled. The job's
-                        // idempotency key (DocAnalysis:{documentId}) makes a second enqueue a no-op if one did run. Not
+                        // idempotency key (AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey) makes a second enqueue a no-op if one did run. Not
                         // cancellable by the caller: the row is linked now, so no later archive would repair a lost enqueue.
                         await EnqueueDocumentAnalysisAsync(repairId, correlationId, CancellationToken.None);
                         continue;
@@ -4548,7 +4548,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Enqueues an AppOnlyDocumentAnalysis job for a document record (best-effort).
     /// Failures are logged but do not propagate.
     /// </summary>
-    private async Task EnqueueDocumentAnalysisAsync(Guid documentId, string correlationId, CancellationToken ct)
+    internal async Task EnqueueDocumentAnalysisAsync(Guid documentId, string correlationId, CancellationToken ct)
     {
         try
         {
@@ -4558,9 +4558,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = correlationId,
-                IdempotencyKey = $"DocAnalysis:{documentId}",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
-                MaxAttempts = 2,
+                MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,
                 Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
                 {

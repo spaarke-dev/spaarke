@@ -13,7 +13,7 @@
         "outcomeClass": "dispatch",
         "consumerType": "nda-review",
         "consumerCode": "default",
-        "catalogStatus": "mirrored",
+        "catalogStatus": "existing",
         "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
       }
     },
@@ -28,7 +28,7 @@
         "outcomeClass": "dispatch",
         "consumerType": "nda-review",
         "consumerCode": "default",
-        "catalogStatus": "mirrored",
+        "catalogStatus": "existing",
         "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
       }
     },
@@ -43,7 +43,7 @@
         "outcomeClass": "dispatch",
         "consumerType": "nda-review",
         "consumerCode": "default",
-        "catalogStatus": "mirrored",
+        "catalogStatus": "existing",
         "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
       }
     },
@@ -58,7 +58,7 @@
         "outcomeClass": "dispatch",
         "consumerType": "nda-review",
         "consumerCode": "default",
-        "catalogStatus": "mirrored",
+        "catalogStatus": "existing",
         "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
       }
     },
@@ -88,7 +88,7 @@
         "consumerType": "nda-standard-summary",
         "consumerCode": "default",
         "notConsumerType": "nda-review",
-        "catalogStatus": "mirrored",
+        "catalogStatus": "existing",
         "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
       }
     }

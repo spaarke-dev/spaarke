@@ -2492,6 +2492,66 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "ebilling-r1 task 131 (FR-50)"
       }
+    },
+    {
+      "caseId": "GU-147",
+      "family": "agreement-classify",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "the Assistant's review-intent gate classifies an uploaded agreement before it offers a review (agreements-r1 task 021, FR-07)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.AgreementClassify constant (added by spaarke-intake-pipeline-r1 task 005, design 10.1 item 6, once the Binding row's constant joined ConsumerTypes.All). The agreement-classify Action is dispatched DETERMINISTICALLY by the client's review-intent gate, never chosen by the model. Dedicated coverage lives in AgreementClassifyEvalTests.cs (agreement-classify-eval-cases.json); this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "assistant-review-intent-gate" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "agreement-classify",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarke-intake-pipeline-r1 task 005 (design 10.1 item 6)"
+      }
+    },
+    {
+      "caseId": "GU-148",
+      "family": "nda-review",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "an attorney asks the Assistant to review an uploaded NDA against the firm standard (nda-r1 task 022, UC3)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.NdaReview constant (added by spaarke-intake-pipeline-r1 task 005, design 10.1 item 6). The consumer type stays nda-review although the bound Action is agreement-review. Dedicated routing and text-projection coverage lives in NdaReviewDispatchEvalTests.cs (nda-review-eval-cases.json); this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "assistant" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-review",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarke-intake-pipeline-r1 task 005 (design 10.1 item 6)"
+      }
+    },
+    {
+      "caseId": "GU-149",
+      "family": "nda-standard-summary",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "a non-lawyer asks the Assistant what the firm's NDA standard says, in plain language (nda-r1 task 022, UC3)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.NdaStandardSummary constant (added by spaarke-intake-pipeline-r1 task 005, design 10.1 item 6). Dedicated routing and disambiguation-from-nda-review coverage lives in NdaReviewDispatchEvalTests.cs (nda-review-eval-cases.json, family nda-review-vs-standard-summary); this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "assistant" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-standard-summary",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarke-intake-pipeline-r1 task 005 (design 10.1 item 6)"
+      }
     }
   ]
 }

@@ -29,7 +29,7 @@ public static class JobProcessingModule
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
 
         // Unconditional handlers (no AI dependencies)
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
+        // (DocumentProcessing, EmailAnalysis and ProfileSummary handlers were deleted: no producer, intake-pipeline-r1 task 005.)
         // Task 156: re-stamps ONE child the storage resolver refused as container_ancestor_stale (ADR-052: queue →
         // ADR-004 IJobHandler). Its dependency, CoreAncestorRestamper, is registered unconditionally beside
         // CoreAncestorResolver (MetadataServiceExtensions.AddCoreAncestorResolver).
@@ -43,7 +43,6 @@ public static class JobProcessingModule
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AssignedAccessCreateGrantJobHandler>();
         // AI-coupled handlers relocated to Services/Ai/Jobs/ per task 051 (FR-E3); JobType strings unchanged
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.EmailAnalysisJobHandler>();
 
         // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
         // Zone B IJobHandler per SPEC §3.5 (Services/Jobs/Insights/) — injects
@@ -55,11 +54,10 @@ public static class JobProcessingModule
 
         // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
         // Mixed handlers (RagIndexing references Dataverse) stay in Services/Jobs/Handlers/;
-        // pure-AI handlers (ProfileSummary, BulkRagIndexing) relocated per task 051 (FR-E3)
+        // pure-AI handler (BulkRagIndexing) relocated per task 051 (FR-E3)
         if (documentIntelligenceEnabled)
         {
             services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
-            services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.ProfileSummaryJobHandler>();
             services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.BulkRagIndexingJobHandler>();
         }
 

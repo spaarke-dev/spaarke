@@ -65,8 +65,6 @@ public class GateCombinationConstructibilityTests
 
         // DEF-JOBS — AI job handlers and the embedding-migration hosted service registered unconditionally (JobProcessingModule).
         new Defect("DEF-JOBS", "AppOnlyDocumentAnalysisJobHandler", "IAppOnlyAnalysisService", AiOff),
-        new Defect("DEF-JOBS", "EmailAnalysisJobHandler", "IAppOnlyAnalysisService", AiOff),
-        new Defect("DEF-JOBS", "ProfileSummaryJobHandler", "IAppOnlyAnalysisService", c => c.DocIntel && !c.Analysis),
         new Defect("DEF-JOBS", "EmbeddingMigrationService", "IKnowledgeDeploymentService", c => AiOff(c) || !c.AiSearchEndpoint),
 
         // DEF-INS — Insights/session services that need AI Search or the chat client but are registered unconditionally.
@@ -95,7 +93,7 @@ public class GateCombinationConstructibilityTests
     internal static readonly IReadOnlyDictionary<string, string> DefectNotes = new Dictionary<string, string>
     {
         ["DEF-FIN"] = "task-202 punch list row 204e-F1. FinanceModule: AttachmentClassificationJobHandler is gated on RecordMatchingEnabled alone but injects TextExtractorService (DocIntel only; its AI dependency is IInvoiceAi, always registered, since task 042); InvoiceSearchService is gated on DocIntel but needs SearchIndexClient (analysis && docIntel && AiSearchEndpoint). (InvoiceIndexingJobHandler was fixed by ebilling-r1 task 152: unconditional, SearchIndexClient optional. InvoiceExtractionJobHandler, the other DEF-FIN row, was deleted by ebilling-r1 task 050b.) IJobHandler enumeration (ServiceBusJobProcessor) then throws on the first job.",
-        ["DEF-JOBS"] = "task-202 punch list row 204e-F2. JobProcessingModule: AppOnlyDocumentAnalysisJobHandler/EmailAnalysisJobHandler are registered unconditionally and ProfileSummaryJobHandler under DocIntel only, but IAppOnlyAnalysisService exists only under analysis && docIntel; EmbeddingMigrationService (a hosted service, so it crashes Host.StartAsync) injects IKnowledgeDeploymentService/IOpenAiClient.",
+        ["DEF-JOBS"] = "task-202 punch list row 204e-F2. JobProcessingModule: AppOnlyDocumentAnalysisJobHandler is registered unconditionally, but IAppOnlyAnalysisService exists only under analysis && docIntel; EmbeddingMigrationService (a hosted service, so it crashes Host.StartAsync) injects IKnowledgeDeploymentService/IOpenAiClient. (EmailAnalysisJobHandler and ProfileSummaryJobHandler rows left this ledger when the handlers were deleted, intake-pipeline-r1 task 005.)",
         ["DEF-INS"] = "task-202 punch list row 204e-F3. InsightsIngestModule/InsightsModule/session services inject SearchIndexClient (registered only under analysis && docIntel && AiSearchEndpoint) or IChatClient (AiModule, same gate) without a Null peer.",
         ["DEF-RAG"] = "task-202 punch list row 204e-F4. AddRagServices registers SearchIndexClient/IKnowledgeDeploymentService/IEmbeddingCache only when DocumentIntelligence:AiSearchEndpoint is non-empty and gives only IRagService/IFileIndexingService/IVisualizationService a Null peer; ~35 services on the wider analysis && docIntel gate (SemanticSearch, RecordSearch, PinnedContextRecall, ReferenceRetrieval, ActionRunner, the *Ai facades, ComposeService, OfficeService…) inject them, so a stamp with DocIntel on and AI Search unset cannot start.",
     };

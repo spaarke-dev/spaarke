@@ -64,7 +64,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// </summary>
     /// <remarks>
     /// Retained as the public name-based contract for backward compatibility with callers
-    /// (<c>ProfileSummaryWorker</c>, <c>ProfileSummaryJobHandler</c>, <c>AppOnlyDocumentAnalysisJobHandler</c>)
+    /// (<c>ProfileSummaryWorker</c>, <c>AppOnlyDocumentAnalysisJobHandler</c>)
     /// during the FR-03 deprecation window. Internal playbook resolution routes through
     /// <see cref="IConsumerRoutingService.ResolveAsync"/> with
     /// <see cref="ConsumerTypes.DocumentProfile"/> (FR-P3-01).

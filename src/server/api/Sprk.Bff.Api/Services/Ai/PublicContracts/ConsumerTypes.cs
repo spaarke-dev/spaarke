@@ -408,6 +408,31 @@ public static class ConsumerTypes
     /// </summary>
     public const string InvoiceFirmNotice = "invoice-firm-notice";
 
+    // ── Agreements / NDA (ai-advanced-capabilities-agreements-r1 + -nda-r1; constants added by spaarke-intake-pipeline-r1 task 005) ──
+    // Their Binding rows were seeded earlier (sprk_playbookconsumer-rows.json), but with no constant here
+    // RoutingConsumerTypeHealthCheck reported each as an Unhealthy row-without-constant on /healthz/catalog. The
+    // chat/Compose clients dispatch by these strings; the constants only make the closed catalog (ADR-039) match the rows.
+
+    /// <summary>
+    /// Reasoning-tier agreement classifier (Action <c>agreement-classify</c>, Binding row in
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>). Dispatched deterministically by the
+    /// client's review-intent gate; routing behaviour unchanged by this constant.
+    /// </summary>
+    public const string AgreementClassify = "agreement-classify";
+
+    /// <summary>
+    /// Whole-document advisory NDA review. The consumer type stays <c>nda-review</c> although the bound
+    /// Action was generalised to <c>agreement-review</c> (the asymmetry is intentional; see the row's
+    /// <c>$comment-agreements-r1-002</c>).
+    /// </summary>
+    public const string NdaReview = "nda-review";
+
+    /// <summary>
+    /// Plain-language explainer of the firm NDA standard (Action <c>nda-standard-summary</c>, Binding row in
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>).
+    /// </summary>
+    public const string NdaStandardSummary = "nda-standard-summary";
+
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
@@ -447,5 +472,8 @@ public static class ConsumerTypes
         InvoiceCodeSetMatch,
         BillingRuleDraft,
         InvoiceFirmNotice,
+        AgreementClassify,
+        NdaReview,
+        NdaStandardSummary,
     };
 }
