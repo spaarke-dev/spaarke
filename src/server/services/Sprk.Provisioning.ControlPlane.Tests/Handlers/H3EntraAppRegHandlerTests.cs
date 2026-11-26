@@ -746,6 +746,61 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([AddInClientId, OperatorToolsClientId]);
     }
 
+    [Fact]
+    public async Task Demo_7_CustomerIdMatchIgnoresCase()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var upperCaseRow = DemoRow(environmentType: 1, isActive: true) with { CustomerId = CustomerId.ToUpperInvariant() };
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-7"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(upperCaseRow));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([OperatorToolsClientId],
+            "the registry stores the customer id as entered; the match is case-insensitive like every other customer-id match");
+    }
+
+    [Fact]
+    public async Task Demo_8_RegistryTimeout_WithCallerNotCancelled_FailsResumable()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-8"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Throwing(new TaskCanceledException("HttpClient timeout")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.RegistryEnvironmentTypeUnavailable);
+        provisioner.ProvisionCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Demo_9_CallerCancelledDuringRegistryRead_Propagates_NoProvisionerCall()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        using var cts = new CancellationTokenSource();
+        var registry = FakeRegistry.Running(() =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-9"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: registry);
+
+        var act = () => handler.HandleAsync(BuildEnvelope(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        provisioner.ProvisionCallCount.Should().Be(0);
+    }
+
     private static DataverseEnvironmentRegistrySnapshot DemoRow(int? environmentType, bool? isActive) =>
         new(EnvironmentRowId, CustomerId, TenantId, "Ready", CurrentRunId: null, ProvisionedOn: null,
             EnvironmentType: environmentType, IsActive: isActive);
@@ -754,22 +809,31 @@ public sealed class H3EntraAppRegHandlerTests
     {
         private readonly DataverseEnvironmentRegistrySnapshot? _row;
         private readonly Exception? _throw;
+        private readonly Func<DataverseEnvironmentRegistrySnapshot?>? _onLookup;
 
-        private FakeRegistry(DataverseEnvironmentRegistrySnapshot? row, Exception? toThrow)
+        private FakeRegistry(DataverseEnvironmentRegistrySnapshot? row, Exception? toThrow,
+            Func<DataverseEnvironmentRegistrySnapshot?>? onLookup = null)
         {
             _row = row;
             _throw = toThrow;
+            _onLookup = onLookup;
         }
 
         public static FakeRegistry Returning(DataverseEnvironmentRegistrySnapshot? row) => new(row, null);
 
         public static FakeRegistry Throwing(Exception ex) => new(null, ex);
 
+        public static FakeRegistry Running(Func<DataverseEnvironmentRegistrySnapshot?> onLookup) => new(null, null, onLookup);
+
         public List<string> LookedUpIds { get; } = [];
 
         public Task<DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(string environmentId, CancellationToken cancellationToken)
         {
             LookedUpIds.Add(environmentId);
+            if (_onLookup is not null)
+            {
+                return Task.FromResult(_onLookup());
+            }
             return _throw is not null
                 ? Task.FromException<DataverseEnvironmentRegistrySnapshot?>(_throw)
                 : Task.FromResult(_row);
