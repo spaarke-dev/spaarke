@@ -26,6 +26,7 @@ import {
 import type { InvoiceDecisionApi } from '../../services/decisionApi';
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { decisionFailureMessage } from '../../services/decisionApi';
+import { useReportDirty } from '../useDirtyCheck';
 
 /** What the host's dialog resolves with. `confirmed: false` means the user backed out of the dialog without finishing (nothing to refresh). */
 export type CorrectionWizardResult = { confirmed?: boolean } | void | undefined;
@@ -62,6 +63,7 @@ export function correctionReadFailureMessage(f: ApiFailure): string {
 
 export function SubmitCorrectedInvoiceAction({ review, canWrite, invoiceId, api, openCorrectionWizard, reload, onNotice }: SubmitCorrectedInvoiceActionProps) {
   const [busy, setBusy] = React.useState(false);
+  useReportDirty(busy); // task 195: the correction in flight (its prefill read, its dialog) is a write in progress for the Console modal's browse guard
   // A ref as well as state: two clicks before React re-renders the disabled button are still one request.
   const busyRef = React.useRef(false);
 

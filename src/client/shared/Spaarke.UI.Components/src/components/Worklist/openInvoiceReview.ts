@@ -46,6 +46,19 @@ export function buildInvoiceReviewLaunch(target: InvoiceReviewTarget) {
 }
 
 /**
+ * The URL of the Invoice Review page for the in-app modal (`InvoiceReviewModal`, task 195): the page's web resource under the org's
+ * client URL, with the SAME `data` envelope `buildInvoiceReviewLaunch` gives `navigateTo` (`invoiceId=...&lineId=...`, GUIDs bare and
+ * lower case, `lineId` left out when there is none), URI-encoded once (the page's `parseDataParams` decodes it, as for
+ * `navigateTo`). Pure and Xrm-free (ADR-012): the HOST supplies `clientUrl` (`Xrm.Utility.getGlobalContext().getClientUrl()`).
+ * A trailing slash on `clientUrl` is dropped so there is no double slash.
+ */
+export function buildInvoiceReviewUrl(clientUrl: string, target: InvoiceReviewTarget): string {
+  const base = clientUrl.trim().replace(/\/+$/, '');
+  const { pageInput } = buildInvoiceReviewLaunch(target);
+  return `${base}/WebResources/${INVOICE_REVIEW_WEBRESOURCE_NAME}?data=${encodeURIComponent(pageInput.data)}`;
+}
+
+/**
  * Open Invoice Review for a billing item. Resolves when the dialog closes. Rejects when there is no invoice to open, when this is
  * not a Model-Driven App host (no `Xrm.Navigation.navigateTo`), or when the platform refuses the dialog.
  */

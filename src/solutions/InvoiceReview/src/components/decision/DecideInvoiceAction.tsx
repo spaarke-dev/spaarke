@@ -53,6 +53,7 @@ import { NoteField } from '../NoteField';
 import { InvoiceDecisionWizard } from './InvoiceDecisionWizard';
 import { NotifyStep } from './NotifyStep';
 import { useNoticeDrafts } from './useNoticeDrafts';
+import { useReportDirty } from '../useDirtyCheck';
 import { EMPTY_FORM, WizardContext, type WizardCtx } from './wizardContext';
 import { useApprovalSync } from './AwaitingApprovers';
 import { useApproval } from './ApprovalProvider';
@@ -86,6 +87,9 @@ export function DecideInvoiceAction({ review, canWrite, reload }: DecideInvoiceA
   // The wizard is closed with `open={false}`, never unmounted while open, which would leave the page aria-hidden (#2658).
   // `seq` keys each opening and changes only while closed, so the form, the steps and the read-only choice start fresh.
   const [wizard, setWizard] = React.useState<{ open: boolean; seq: number } | null>(null);
+  // Task 195: the decision wizard being open is work in progress (its notes, reasons and notices are in it), so the Console modal asks
+  // before it browses away from it.
+  useReportDirty(wizard?.open === true);
   const access = decisionAccess(review, state, canWrite);
 
   const refreshApproval = React.useCallback(() => refresh(), [refresh]);
@@ -192,6 +196,8 @@ export function IncompleteDecisionBanner({ review, reload }: IncompleteDecisionB
   const { loadNotice, reset: resetNoticeDrafts } = useNoticeDrafts(api, invoiceId, noticeWriter);
   const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // Task 195: a repeat in flight, or the open form with a reason or note typed, is unsaved work for the Console modal's browse guard.
+  useReportDirty(busy || (dialog?.open === true && (reason.trim() !== '' || note.trim() !== '')));
   const [error, setError] = React.useState<string | null>(null);
   // One repeat at a time: a second click before the busy state renders sends nothing.
   const sending = React.useRef(false);
