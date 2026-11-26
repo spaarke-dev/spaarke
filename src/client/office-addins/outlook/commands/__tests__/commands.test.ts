@@ -316,6 +316,7 @@ describe('outlook/commands/index.ts — quickSave (tasks 084, 118)', () => {
     it.each([
       ['NotPermitted', NOT_PERMITTED],
       ['Failed', FAILED],
+      ['FiledUnconfirmed', 'The email is filed to this record but still needs confirming in Spaarke.'],
     ])(
       'emailFiling %s: the dialog keeps "Saved to Spaarke and filed to <target>." and appends the explanation (still a success dialog)',
       async (outcome, sentence) => {

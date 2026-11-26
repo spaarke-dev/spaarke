@@ -6,16 +6,19 @@
  * change it (a secure record's thread) or the write fails, the save still succeeds — and this is how the user hears the
  * email was not filed. Shared by the task pane (`SaveFlow`) and Quick Save (`outlook/commands`).
  *
- * The server serializes the enum by name (`"Filed" | "AlreadyFiled" | "NotPermitted" | "Failed"`, like `artifact.type`);
+ * The server serializes the enum by name (`"Filed" | "AlreadyFiled" | "NotPermitted" | "Failed" | "FiledUnconfirmed"`, like `artifact.type`);
  * the property is OMITTED when there is nothing to report. A value this build does not know (a newer server) is ignored:
  * no notice, no crash. The words reveal nothing about which record the email is filed under.
  */
 
 /** What the server did about filing the reconciled email (`SaveResponse.emailFiling`). Absent = nothing to report. */
-export type EmailFilingOutcome = 'Filed' | 'AlreadyFiled' | 'NotPermitted' | 'Failed';
+export type EmailFilingOutcome = 'Filed' | 'AlreadyFiled' | 'NotPermitted' | 'Failed' | 'FiledUnconfirmed';
 
-/** The outcomes the user is told about. Filed / AlreadyFiled / absent / unknown say nothing extra. */
-export type EmailFilingProblem = 'NotPermitted' | 'Failed';
+/**
+ * The outcomes the user is told about. Filed / AlreadyFiled / absent / unknown say nothing extra. `FiledUnconfirmed`
+ * (task 140): the email is filed to the chosen record as an unconfirmed suggestion and the save could not confirm it.
+ */
+export type EmailFilingProblem = 'NotPermitted' | 'Failed' | 'FiledUnconfirmed';
 
 // The EXPLANATION only: each surface supplies its own "saved" context (the pane's "Saved to Spaarke" bar, Quick Save's
 // "Saved to Spaarke and filed to <record>." sentence). "Try again" is deliberately absent: a repeat of the same save reuses
@@ -23,6 +26,7 @@ export type EmailFilingProblem = 'NotPermitted' | 'Failed';
 const NOT_PERMITTED_NOTICE =
   "The email wasn't added to this record's communications because you don't have permission to change it.";
 const FAILED_NOTICE = "The email couldn't be added to this record's communications. File it from Spaarke.";
+const FILED_UNCONFIRMED_NOTICE = 'The email is filed to this record but still needs confirming in Spaarke.';
 
 /**
  * The outcome to tell the user about, or `null` for filed / already filed / absent / any value this build does not know.
@@ -36,6 +40,8 @@ export function readEmailFilingProblem(value: unknown): EmailFilingProblem | nul
       return 'NotPermitted';
     case 'failed':
       return 'Failed';
+    case 'filedunconfirmed':
+      return 'FiledUnconfirmed';
     default:
       return null;
   }
@@ -43,5 +49,12 @@ export function readEmailFilingProblem(value: unknown): EmailFilingProblem | nul
 
 /** The explanation sentence for a problem outcome (no "Saved." prefix; see the note above). */
 export function describeEmailFilingProblem(problem: EmailFilingProblem): string {
-  return problem === 'NotPermitted' ? NOT_PERMITTED_NOTICE : FAILED_NOTICE;
+  switch (problem) {
+    case 'NotPermitted':
+      return NOT_PERMITTED_NOTICE;
+    case 'FiledUnconfirmed':
+      return FILED_UNCONFIRMED_NOTICE;
+    default:
+      return FAILED_NOTICE;
+  }
 }
