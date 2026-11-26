@@ -187,3 +187,28 @@ UAC-r2 had no access objection.
 - **K2.** The report-card launcher needs `sprk_regardingmatter` or `sprk_regardingproject` on the form. All four main forms have them.
 - **K3.** The duplicate-id sweep over all 23 RibbonDiffs did not finish in the re-check shell. The changed tables were read by eye, with no duplicates found, and the import fails on a duplicate id.
 - **K4.** `-Verify` proves the rule passes the table, not what the script does with it. Jest covers the script.
+
+## 11. Dev deploy (main session, 2026-11-26, owner go "yes can import 051")
+
+- **Method.** This is §7's "merge into a fresh export" route, not a repo SpaarkeMaster import. The repo copy carries every form, view and web resource, and other projects deploy pieces of those straight to dev. The steps:
+  1. `pac solution export` of dev SpaarkeMaster (unmanaged) to `C:\tmp\fm051-rollback\SpaarkeMaster_dev_pre051.zip`.
+  2. Replace only the 23 tables' `RibbonDiffXml` with the repo copies (work branch 3e0268349a).
+  3. Replace the four web resources' content.
+  4. Set `sprk_project` IsQuickCreateEnabled 1 → 0.
+  5. Import with Publish All.
+  - A node-by-node comparison before import showed no other entity part, file or non-entity part changed.
+- **Drift check.** All 1,054 Spaarke ribbon id occurrences on dev (23 tables) exist in the repo copies, so nothing was lost.
+- **Pre-import web resources.**
+  - `secure_child_ribbon.js`, `sprk_wizard_commands` and `sprk_kpi_ribbon_actions.js` on dev equalled the pre-051 repo, ignoring line endings.
+  - `sprk_event_ribbon_commands.js` on dev was older than the repo: it predated task 066's status-column change. The repo version is the intended one.
+- **Timing.** Import 16:48Z–17:53Z (async op ea539c7a…, 5 min 18 s), then Publish All.
+- **Verify.**
+  - `Test-NativeCreateSurfaces.ps1 -Verify`: PASS, 23 tables, exit 0.
+  - `Set-CreatePrivilegeRibbon.ps1 -Verify -EnvironmentUrl …`: PASSED.
+  - The four web resources on dev equal the repo by sha256 (modified 17:51Z).
+- **Rollback.** Everything is in `C:\tmp\fm051-rollback`:
+  - the full pre-import export;
+  - each table's effective ribbon before the import (`<table>.ribbon`);
+  - the four web resources' content by id (`wr_*`, hashes in `capture.log`);
+  - the `sprk_project` quick-create value (True).
+- **UI checks (§6).** Pending; the ones that call the BFF wait for the d307d67e36 BFF deploy to go live.
