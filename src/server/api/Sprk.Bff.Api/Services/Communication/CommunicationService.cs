@@ -270,8 +270,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// without creating duplicates. Attachment Documents are only created for attachments that lack one.
     /// </summary>
     /// <param name="requestedBy">Task 146 c1-r1: the caller asking for the archive, recorded on the documents it creates.</param>
+    /// <param name="archiveLockOwner">ISS-010 part E (Q3): who holds the archive lock (the job id, or the request's trace id); a new id when null.</param>
     public async Task<ArchiveCommunicationResult> ArchiveExistingAsync(
-        Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
+        Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
+        string? archiveLockOwner = null)
     {
         // 1. Load the persisted communication.
         DataverseEntity record;
@@ -314,6 +316,22 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 CommunicationId = communicationId,
                 ArchiveDocumentId = existingArchiveId,
+                AlreadyArchived = true,
+                AttachmentDocumentsCreated = attachmentsCreated,
+                AttachmentsRefusedUnverified = attachmentsRefused,
+            };
+        }
+
+        // ISS-010 part E (Q3): one .eml archive of a communication at a time (the CommunicationPostSend job and this on-demand route).
+        // A held lock is a 409 archive_in_progress (the job retries it); the lock fails open (#984), and the re-check before the
+        // create below is the backstop. Once held, ask again: another archive may have finished between the check above and the lock.
+        await using var archiveLock = await AcquireArchiveLockAsync(communicationId, archiveLockOwner, ct);
+        if (archiveLock.Held && await FindExistingArchiveDocumentAsync(communicationId, ct) is { } archivedMeanwhile)
+        {
+            return new ArchiveCommunicationResult
+            {
+                CommunicationId = communicationId,
+                ArchiveDocumentId = archivedMeanwhile,
                 AlreadyArchived = true,
                 AttachmentDocumentsCreated = attachmentsCreated,
                 AttachmentsRefusedUnverified = attachmentsRefused,
@@ -371,7 +389,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         try
         {
             archiveDocumentId = await ArchiveToSpeAsync(
-                request, response, communicationId, ct, emailDirection, requestedBy, filedCommunication: record);
+                request, response, communicationId, ct, emailDirection, requestedBy, filedCommunication: record, recheckBeforeCreate: true);
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
         {
@@ -2689,13 +2707,20 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // ISS-010 part E (#3184): a deferred send hands the thread, archive, enrichment, participant index and arrived steps to the
             // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
             var deferred = false;
+            string? inlinePostSendOwner = null;
             if (request.DeferPostSend && communicationId.HasValue)
             {
                 deferred = await TryEnqueuePostSendAsync(
                     communicationId.Value, archive && archiveOutgoingOptIn, request,
                     CallerResolution.ResolveObjectId(httpContext?.User), correlationId, cancellationToken);
                 if (!deferred)
-                    await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
+                {
+                    // The fallback takes the job's lock and leaves its markers, so a job whose submit landed late is a no-op.
+                    inlinePostSendOwner = await ClaimInlinePostSendAsync(communicationId.Value, correlationId);
+                    deferred = inlinePostSendOwner is null;
+                    if (!deferred)
+                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
+                }
             }
 
             if (archive && !archiveOutgoingOptIn)
@@ -2844,6 +2869,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 if (_arrivedProducer is not null)
                     await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
             }
+
+            if (inlinePostSendOwner is not null)
+                await CompleteInlinePostSendAsync(communicationId!.Value, inlinePostSendOwner, correlationId);
 
             return new SendCommunicationResponse
             {
@@ -3056,12 +3084,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // ISS-010 part E (#3184): a deferred send hands the thread, archive, enrichment, participant index and arrived steps to the
             // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
             var deferred = false;
+            string? inlinePostSendOwner = null;
             if (request.DeferPostSend && communicationId.HasValue)
             {
                 deferred = await TryEnqueuePostSendAsync(
                     communicationId.Value, archive && archiveOutgoingOptIn, request, userObjectId, correlationId, ct);
                 if (!deferred)
-                    await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
+                {
+                    // The fallback takes the job's lock and leaves its markers, so a job whose submit landed late is a no-op.
+                    inlinePostSendOwner = await ClaimInlinePostSendAsync(communicationId.Value, correlationId);
+                    deferred = inlinePostSendOwner is null;
+                    if (!deferred)
+                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
+                }
             }
 
             if (archive && !archiveOutgoingOptIn)
@@ -3211,6 +3246,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 if (_arrivedProducer is not null)
                     await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
+
+            if (inlinePostSendOwner is not null)
+                await CompleteInlinePostSendAsync(communicationId!.Value, inlinePostSendOwner, correlationId);
 
             return new SendCommunicationResponse
             {
@@ -3854,7 +3892,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
         IReadOnlyList<ChannelAttachment>? sentAttachments = null,
         IReadOnlyList<OutboundAttachmentSource>? sentSources = null,
-        DataverseEntity? filedCommunication = null)
+        DataverseEntity? filedCommunication = null,
+        bool recheckBeforeCreate = false)
     {
         // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
         // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
@@ -3982,6 +4021,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Ontology task 177 A3 (D-218, uac-r2 Option A): an outbound archive is linked to the record its communication is
         // filed to, in this same create, so it shows in that record's Documents. Inbound (on-demand re-archive) is not.
         var linked = emailDirection == SentEmailDirection && StageArchiveRecordLink(document, filedCommunication);
+
+        // ISS-010 part E (Q3, field-mapping-r1): the on-demand archive asks again, after the PUT and before the create, whether another
+        // archive of this communication created its Document meanwhile (the lock fails open, #984). The PUT went to the same path, so the
+        // existing Document still names the file; no second row is created, and the detected race is an Error.
+        if (recheckBeforeCreate && await FindExistingArchiveDocumentAsync(communicationId, ct) is { } racedDocumentId)
+        {
+            _logger.LogError(
+                "Duplicate .eml archive detected: Document {DocumentId} was created for communication {CommunicationId} while this archive ran; no second document was created",
+                racedDocumentId, communicationId);
+            return racedDocumentId;
+        }
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -4627,6 +4677,170 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "Post-send work could not be queued ({ExceptionType}); running it inline | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                 ex.GetType().Name, communicationId, correlationId);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// ISS-010 part E (#3184): claims the <c>CommunicationPostSend</c> processing lock for an inline fallback (the job could not be queued
+    /// in time, but a late submit may still land). Returns the owner when this request may run the tail, or null when the job already
+    /// holds it (the job does the work). Without the cache, or on a cache fault, it answers the owner: the lock fails open (#984), and the
+    /// job's durable guards remain.
+    /// </summary>
+    private async Task<string?> ClaimInlinePostSendAsync(Guid communicationId, string correlationId)
+    {
+        var owner = $"inline-{Guid.NewGuid():N}";
+        if (_scopeFactory is null)
+            return owner;
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<IIdempotencyService>() is not { } idempotency)
+                return owner;
+
+            if (await idempotency.TryAcquireProcessingLockAsync(
+                    CommunicationPostSendJobHandler.KeyFor(communicationId), owner, CommunicationPostSendJobHandler.LockDuration, CancellationToken.None))
+                return owner;
+
+            _logger.LogInformation(
+                "Post-send work is already running in its job; the inline fallback leaves it there | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(
+                "Post-send lock not checked ({ExceptionType}); running inline | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                ex.GetType().Name, communicationId, correlationId);
+            return owner;
+        }
+    }
+
+    /// <summary>
+    /// ISS-010 part E (#3184): after an inline fallback ran the tail, sets the markers the job reads (done, <c>:enriched</c>,
+    /// <c>:arrived</c>) and releases the lock, so a job whose submit landed late is a no-op and never emits arrived a second time.
+    /// Best-effort: a cache fault leaves the job's durable guards.
+    /// </summary>
+    private async Task CompleteInlinePostSendAsync(Guid communicationId, string owner, string correlationId)
+    {
+        if (_scopeFactory is null)
+            return;
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<IIdempotencyService>() is not { } idempotency)
+                return;
+
+            var key = CommunicationPostSendJobHandler.KeyFor(communicationId);
+            foreach (var marker in new[] { CommunicationPostSendJobHandler.EnrichedKeyFor(communicationId), CommunicationPostSendJobHandler.ArrivedKeyFor(communicationId), key })
+                await idempotency.MarkEventAsProcessedAsync(marker, CommunicationPostSendJobHandler.MarkerRetention, CancellationToken.None);
+            await idempotency.ReleaseProcessingLockAsync(key, owner, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(
+                "Post-send markers not written ({ExceptionType}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                ex.GetType().Name, communicationId, correlationId);
+        }
+    }
+
+    /// <summary>ISS-010 part E (Q3): the reason code of an archive refused while another archive of the same communication runs (409).</summary>
+    public const string ArchiveInProgressCode = "archive_in_progress";
+
+    /// <summary>How long one archive of a communication holds its lock.</summary>
+    internal static readonly TimeSpan ArchiveLockDuration = TimeSpan.FromMinutes(2);
+
+    /// <summary>ISS-010 part E (Q3): the lock one .eml archive of a communication holds.</summary>
+    internal static string ArchiveLockKeyFor(Guid communicationId) => $"comm-archive:{communicationId:N}";
+
+    /// <summary>
+    /// ISS-010 part E (Q3): takes the communication's archive lock (<see cref="IIdempotencyService"/>, reached through a scope as
+    /// <see cref="MarkOutboundEchoProcessedAsync"/> does). A held lock throws a 409 <see cref="ArchiveInProgressCode"/>. Without the cache,
+    /// or on a cache fault, there is no lock (fails open, #984): the re-check before the create is the backstop.
+    /// </summary>
+    private async Task<ArchiveLock> AcquireArchiveLockAsync(Guid communicationId, string? owner, CancellationToken ct)
+    {
+        if (_scopeFactory is null)
+            return ArchiveLock.None;
+
+        var scope = _scopeFactory.CreateAsyncScope();
+        var key = ArchiveLockKeyFor(communicationId);
+        owner ??= Guid.NewGuid().ToString("N");
+        bool acquired;
+        IIdempotencyService? idempotency = null;
+        try
+        {
+            idempotency = scope.ServiceProvider.GetService<IIdempotencyService>();
+            acquired = idempotency is null || await idempotency.TryAcquireProcessingLockAsync(key, owner, ArchiveLockDuration, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Archive lock not checked ({ExceptionType}); archiving without it | CommunicationId: {CommunicationId}",
+                ex.GetType().Name, communicationId);
+            await scope.DisposeAsync();
+            return ArchiveLock.None;
+        }
+
+        if (idempotency is null)
+        {
+            await scope.DisposeAsync();
+            return ArchiveLock.None;
+        }
+
+        if (!acquired)
+        {
+            await scope.DisposeAsync();
+            _logger.LogInformation("Archive refused: another archive of communication {CommunicationId} is in progress", communicationId);
+            throw new SdapProblemException(
+                code: ArchiveInProgressCode,
+                title: "Archive in progress",
+                detail: "This email is being saved to SharePoint already. Try again shortly.",
+                statusCode: 409,
+                extensions: new Dictionary<string, object> { ["reasonCode"] = ArchiveInProgressCode });
+        }
+
+        return new ArchiveLock(scope, idempotency, key, owner);
+    }
+
+    /// <summary>A held archive lock (released on dispose), or <see cref="None"/>.</summary>
+    private sealed class ArchiveLock : IAsyncDisposable
+    {
+        public static readonly ArchiveLock None = new(null, null, string.Empty, string.Empty);
+
+        private readonly AsyncServiceScope? _scope;
+        private readonly IIdempotencyService? _idempotency;
+        private readonly string _key;
+        private readonly string _owner;
+
+        public ArchiveLock(AsyncServiceScope? scope, IIdempotencyService? idempotency, string key, string owner)
+        {
+            _scope = scope;
+            _idempotency = idempotency;
+            _key = key;
+            _owner = owner;
+        }
+
+        public bool Held => _idempotency is not null;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_idempotency is null)
+                return;
+
+            try
+            {
+                // Not with the caller's token: a cancelled token never reaches the cache (task 068, #1086).
+                await _idempotency.ReleaseProcessingLockAsync(_key, _owner, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // The lock expires on its own (ArchiveLockDuration).
+            }
+
+            if (_scope is { } scope)
+                await scope.DisposeAsync();
         }
     }
 

@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -37,6 +38,13 @@ public static class CommunicationPostSendEvents
 
     /// <summary>Error or Information: the payload is unreadable, or the communication no longer exists.</summary>
     public static readonly EventId PostSendSkipped = new(50423, nameof(PostSendSkipped));
+
+    /// <summary>Information: the one archive bell of a communication was created.</summary>
+    public static readonly EventId ArchiveBellRaised = new(50424, nameof(ArchiveBellRaised));
+
+    /// <summary>Error: the archive bell could not be created (no sender on the row, or the create faulted); the communication id is the
+    /// discoverable state.</summary>
+    public static readonly EventId ArchiveBellNotCreated = new(50425, nameof(ArchiveBellNotCreated));
 }
 
 /// <summary>
@@ -83,12 +91,14 @@ public class CommunicationPostSendJobHandler : IJobHandler
     private static readonly JsonSerializerOptions PayloadOptions = new() { PropertyNameCaseInsensitive = true };
 
     private static readonly string[] RowColumns =
-        ["sprk_communicationthread", "sprk_subject", "sprk_inreplyto", "sprk_from", "sprk_to", "sprk_cc", "sprk_bcc"];
+        ["sprk_communicationthread", "sprk_subject", "sprk_inreplyto", "sprk_from", "sprk_to", "sprk_cc", "sprk_bcc", "sprk_sentby"];
 
     private readonly CommunicationService _communication;
     private readonly IGenericEntityService _entities;
     private readonly ICommunicationEnrichmentService _enrichment;
     private readonly IIdempotencyService _idempotency;
+    private readonly NotificationService _notifications;
+    private readonly CallerRecordAccessProbe _probe;
     private readonly CommunicationArrivedProducer? _arrived;
     private readonly ILogger<CommunicationPostSendJobHandler> _logger;
 
@@ -97,6 +107,8 @@ public class CommunicationPostSendJobHandler : IJobHandler
         IGenericEntityService entities,
         ICommunicationEnrichmentService enrichment,
         IIdempotencyService idempotency,
+        NotificationService notifications,
+        CallerRecordAccessProbe probe,
         ILogger<CommunicationPostSendJobHandler> logger,
         CommunicationArrivedProducer? arrived = null)
     {
@@ -104,6 +116,8 @@ public class CommunicationPostSendJobHandler : IJobHandler
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _enrichment = enrichment ?? throw new ArgumentNullException(nameof(enrichment));
         _idempotency = idempotency ?? throw new ArgumentNullException(nameof(idempotency));
+        _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _arrived = arrived;
     }
@@ -112,6 +126,24 @@ public class CommunicationPostSendJobHandler : IJobHandler
 
     /// <summary>The idempotency key (and the subject of every marker) of one communication's post-send work.</summary>
     internal static string KeyFor(Guid communicationId) => $"comm-postsend:{communicationId:N}";
+
+    /// <summary>The marker set once enrichment ran (by the job, or by an inline fallback).</summary>
+    internal static string EnrichedKeyFor(Guid communicationId) => $"{KeyFor(communicationId)}:enriched";
+
+    /// <summary>The marker set once communication-arrived was emitted (by the job, or by an inline fallback).</summary>
+    internal static string ArrivedKeyFor(Guid communicationId) => $"{KeyFor(communicationId)}:arrived";
+
+    /// <summary>The marker set BEFORE the archive bell is created: at most one bell per communication, whatever the redeliveries.</summary>
+    internal static string ArchiveBellKeyFor(Guid communicationId) => $"{KeyFor(communicationId)}:archive-bell";
+
+    /// <summary>The bell's title and bodies (fixed text: no record name, no subject; D-123).</summary>
+    internal const string ArchiveBellTitle = "An email you sent was not saved to SharePoint";
+    internal const string ArchiveBellBodyWithLink = "Open the email and choose Save to SharePoint.";
+    internal const string ArchiveBellBodyWithoutLink = "Ask your administrator to save it.";
+
+    /// <summary>The communication's model-driven form, the shape <c>AssignTaskNotifier</c> links a task with.</summary>
+    internal static string CommunicationFormLink(Guid communicationId) =>
+        $"/main.aspx?etn=sprk_communication&id={communicationId:D}&pagetype=entityrecord";
 
     /// <summary>The job for <paramref name="payload"/>: keyed on the communication, carrying the send's correlation id, five attempts.</summary>
     internal static JobContract CreateJob(CommunicationPostSendPayload payload, string correlationId) => new()
@@ -224,11 +256,12 @@ public class CommunicationPostSendJobHandler : IJobHandler
             try
             {
                 var result = await _communication.ArchiveExistingAsync(
-                    id, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(objectId: payload.RequestedByObjectId)).ConfigureAwait(false);
+                    id, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(objectId: payload.RequestedByObjectId),
+                    archiveLockOwner: job.JobId.ToString("N", CultureInfo.InvariantCulture)).ConfigureAwait(false);
                 archivedDocumentId = result.ArchiveDocumentId;
                 archiveStep = result.AlreadyArchived ? "already-archived" : "archived";
             }
-            catch (SdapProblemException ex) when (ex.StatusCode == 409 || ex.Code == "ARCHIVE_NOT_CONFIGURED")
+            catch (SdapProblemException ex) when ((ex.StatusCode == 409 && ex.Code != CommunicationService.ArchiveInProgressCode) || ex.Code == "ARCHIVE_NOT_CONFIGURED")
             {
                 LogArchiveFailedFinal(job, id, ex.GetType().Name, ex.Code);
                 archiveFailure = JobOutcome.Poisoned(job.JobId, JobType, $"{ex.GetType().Name} {ex.Code}", job.Attempt, stopwatch.Elapsed);
@@ -268,7 +301,7 @@ public class CommunicationPostSendJobHandler : IJobHandler
             ct).ConfigureAwait(false);
 
         // 5. communication-arrived, once.
-        var arrivedKey = $"{key}:arrived";
+        var arrivedKey = ArrivedKeyFor(id);
         var arrivedStep = "already-emitted";
         if (!await _idempotency.IsEventProcessedAsync(arrivedKey, ct).ConfigureAwait(false))
         {
@@ -278,7 +311,12 @@ public class CommunicationPostSendJobHandler : IJobHandler
         }
 
         if (archiveFailure is not null)
+        {
+            // 6. A final archive failure (the last delivery, or a fault no retry can fix): ONE bell to the sender (D-216 as amended).
+            if (archiveFailure.Status == JobStatus.Poisoned || job.IsFinalDelivery)
+                await BellArchiveFailedOnceAsync(job, id, row, ct).ConfigureAwait(false);
             return archiveFailure;
+        }
 
         await _idempotency.MarkEventAsProcessedAsync(key, MarkerRetention, CancellationToken.None).ConfigureAwait(false);
         _logger.LogInformation(CommunicationPostSendEvents.PostSendCompleted,
@@ -292,7 +330,7 @@ public class CommunicationPostSendJobHandler : IJobHandler
     /// returns; a fault there is logged and not marked.</summary>
     private async Task<string> EnrichOnceAsync(JobContract job, Guid id, Guid? archivedDocumentId, CancellationToken ct)
     {
-        var enrichedKey = $"{KeyFor(id)}:enriched";
+        var enrichedKey = EnrichedKeyFor(id);
         if (await _idempotency.IsEventProcessedAsync(enrichedKey, ct).ConfigureAwait(false))
             return "already-enriched";
 
@@ -330,6 +368,56 @@ public class CommunicationPostSendJobHandler : IJobHandler
         query.Criteria.AddCondition("sprk_communication", ConditionOperator.Equal, id);
         var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return result?.Entities.Count > 0;
+    }
+
+    /// <summary>
+    /// The archive bell (D-216 as amended, ontology-r1 Q5): ONE per communication, to the person who sent it (<c>sprk_sentby</c>, the
+    /// decider's own systemuser, D-129), never the row's owning team. The <c>:archive-bell</c> marker is set BEFORE the create, so a
+    /// redelivery or a re-drive never adds a second bell (at most once; a create that faults is the Error
+    /// <see cref="CommunicationPostSendEvents.ArchiveBellNotCreated"/>). The bell links to the communication's form only when Dataverse
+    /// answers that the recipient holds Read and AppendTo on it (the manual Save to SharePoint needs AppendTo); otherwise, or with no
+    /// answer, it has no link and no regarding record (fail closed). Fixed text: no record name and no subject (D-123).
+    /// </summary>
+    private async Task BellArchiveFailedOnceAsync(JobContract job, Guid id, Entity row, CancellationToken ct)
+    {
+        var bellKey = ArchiveBellKeyFor(id);
+        try
+        {
+            if (await _idempotency.IsEventProcessedAsync(bellKey, ct).ConfigureAwait(false))
+                return;
+
+            if (row.GetAttributeValue<EntityReference>("sprk_sentby") is not { Id: var sentBy } || sentBy == Guid.Empty)
+            {
+                _logger.LogError(CommunicationPostSendEvents.ArchiveBellNotCreated,
+                    "[COMM-POSTSEND] job {JobId}: communication {CommunicationId} names no sender, so no archive bell was raised.", job.JobId, id);
+                return;
+            }
+
+            await _idempotency.MarkEventAsProcessedAsync(bellKey, MarkerRetention, CancellationToken.None).ConfigureAwait(false);
+
+            var rights = await _probe.GetPrincipalRightsAppOnlyOrUnknownAsync(sentBy, "sprk_communications", id, ct).ConfigureAwait(false);
+            var link = rights is { } r && r.HasFlag(AccessRights.Read) && r.HasFlag(AccessRights.AppendTo);
+
+            await _notifications.CreateNotificationAsync(
+                userId: sentBy,
+                title: ArchiveBellTitle,
+                body: link ? ArchiveBellBodyWithLink : ArchiveBellBodyWithoutLink,
+                category: "documents",
+                actionUrl: link ? CommunicationFormLink(id) : null,
+                regardingId: link ? id : null,
+                actionTitle: link ? "Open email" : null,
+                cancellationToken: ct).ConfigureAwait(false);
+
+            _logger.LogInformation(CommunicationPostSendEvents.ArchiveBellRaised,
+                "[COMM-POSTSEND] job {JobId}: the archive bell for communication {CommunicationId} went to user {UserId} (link {Linked}).",
+                job.JobId, id, sentBy, link);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(CommunicationPostSendEvents.ArchiveBellNotCreated,
+                "[COMM-POSTSEND] job {JobId}: the archive bell for communication {CommunicationId} was not created ({ExceptionType}).",
+                job.JobId, id, ex.GetType().Name);
+        }
     }
 
     /// <summary>The communication-arrived emit (spine task 024): a seam so a test can count it. No-op when the producer is not composed.</summary>
