@@ -101,3 +101,10 @@ The live dev entity still carries the old description text (it was created befor
 4. Export the entity XML (`pac solution export` of SpaarkeMaster, unpack) and update `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ProcessingJob/Entity.xml` (job type options near :808-860, new attributes, 2 relationships) and the two touched entities' relationship metadata if the export includes them.
 5. Remove the "not yet created on dev" status line from `docs/data-model/sprk_processingjob.md`.
 6. Main session: `TASK-INDEX.md` status cell, POML `<status>`, `current-task.md`.
+
+## Live run (2026-11-26, owner: "yes run 011")
+
+- `-WhatIf` re-checked (unchanged), then the real run on spaarkedev1: 2 lookups + 5 columns created, option 7 "Intake run" added, customizations published; verification step: all 7 EXIST.
+- Second real run: every column and the option "Already exists, skipping" — idempotent.
+- Metadata check (Web API): `sprk_servicerequest` → `sprk_servicerequest` (`sprk_servicerequest_processingjob_servicerequest`) and `sprk_outputdocument` → `sprk_document` (`sprk_document_processingjob_outputdocument`) are N:1, so many runs reference one request. `sprk_jobtype` options 0–7, 7 = Intake run.
+- **Deviation:** `sprk_ProcessingJob/Entity.xml` was not hand-edited. Git's solution source is regenerated as a whole by `scripts/solution-authoring/Export-SpaarkeMasterSource.ps1` (release-owner step, ADR-027 §4); running it here would sweep every other project's dev drift into this PR. `sprk_processingjob` is in SpaarkeMaster with all subcomponents (Assemble rule), so the next release export carries the new columns and option.

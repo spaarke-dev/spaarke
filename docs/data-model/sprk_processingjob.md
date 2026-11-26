@@ -4,7 +4,7 @@
 > **Projects**: SDAP Office integration (the Office save job); spaarke-intake-pipeline-r1 task 011 (intake pipeline runs, FR-06)
 > **Schema scripts**: the Office columns were created in the maker portal and are in the solution XML (`src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ProcessingJob/Entity.xml`). The intake-run extension is [`scripts/Add-ProcessingJobIntakeRunColumns.ps1`](../../scripts/Add-ProcessingJobIntakeRunColumns.ps1) (idempotent, `-WhatIf`).
 > **Ownership**: user-owned. Primary name `sprk_name`.
-> **Status of the intake columns**: scripted and dry-run verified against dev on 2026-11-26; **not yet created on dev** (the live run needs the owner's approval, project CLAUDE.md section 5). Until that run, the columns and the "Intake run" option below describe the target schema. The FR-06b read exclusion is already in the BFF code.
+> **Status of the intake columns**: created on dev 2026-11-26 by `scripts/Add-ProcessingJobIntakeRunColumns.ps1` (owner-approved; a second run skipped every column and the option). They reach `src/dataverse/solutions/SpaarkeMaster` with the next release export (`scripts/solution-authoring/Export-SpaarkeMasterSource.ps1`): `sprk_processingjob` is in SpaarkeMaster with all subcomponents, so no hand edit of `Entity.xml` is made. The FR-06b read exclusion is in the BFF code.
 > **Not to be confused with** [`sprk_backgroundjob`](sprk_backgroundjob.md) (the scheduled-job *definition* catalog) and `sprk_backgroundjobrun`.
 
 ## Purpose

@@ -4,7 +4,7 @@
     <title>FR-06: Extend sprk_processingjob as the intake run record (request + output lookups, Intake run job type, harness key, engine execution id / blob prefix, re-drive marker) + sprk_backgroundjob description (§10.1 item 8)</title>
     <phase>1 Pipeline core and first doors</phase>
     <gate>startable (script authoring); owner OK for the dev schema change</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a schema script and Dataverse columns with explicit constraints; at most a small read-filter fix in the Office status path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -111,7 +111,7 @@
     <criterion testable="true">docs/data-model/sprk_processingjob.md exists and documents every column, the job types and the BFF-only writer rule.</criterion>
   </acceptance-criteria>
 
-  <notes>Column names here are proposals; keep the `sprk_` prefix and record the final names for tasks 013, 014 and 023. If the JobStatusService filter is added, this task becomes BFF-touching for §10 purposes.</notes>
+  <notes>Completed 2026-11-26. Columns live on dev (owner-approved run, idempotent second run): sprk_servicerequest, sprk_outputdocument, sprk_harnesskey, sprk_engineexecutionid, sprk_stagingblobprefix, sprk_redrivecount (no default, null = 0), sprk_lastredriveon; sprk_jobtype 7 = Intake run. FR-06b filter added (OfficeJobStatusService.IsIntakeRun) with a contract test; publish delta -42 bytes. Entity.xml left to the next release export (notes/011-processingjob-run-columns.md). Found for later tasks: lookup writes need EntityReference (013); typed read lacks the new columns (023/024). rework: none task 011. Original note: Column names here are proposals; keep the `sprk_` prefix and record the final names for tasks 013, 014 and 023. If the JobStatusService filter is added, this task becomes BFF-touching for §10 purposes.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
