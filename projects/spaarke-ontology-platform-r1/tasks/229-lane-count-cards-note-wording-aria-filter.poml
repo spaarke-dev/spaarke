@@ -4,7 +4,7 @@
     <title>Worklist lane count cards: next-due note, overdue wording on Decide cards, progress in the aria label, stale filter not re-activated (#1688, DI-46)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies client code (.ts/.tsx).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -57,5 +57,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt229); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-26: PR #3284 squash-merged to master (aaeb1519e3; Closes #1688) after an independent Opus adversarial review and one fix round (F1 fixed). Worklist lane count cards show the next-due note, Decide cards use the overdue wording, the aria label carries progress, and a stale filter is not re-activated. Console auto-deploys from master.</completion>
 </task>

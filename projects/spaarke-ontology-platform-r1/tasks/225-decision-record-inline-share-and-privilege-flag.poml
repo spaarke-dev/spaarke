@@ -4,7 +4,7 @@
     <title>The commit route shares a new secure-child Decision Record inline, and the Decision Record records the D-212 privilege flag (#1980 DI-97, #2630 DI-143)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -62,5 +62,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt225); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-26: PR #3270 squash-merged to master (77433e5660; Closes #1980 and #2630) after two independent Opus adversarial reviews and fix rounds; uac-r2 approved the share path. The commit route shares a new secure-child Decision Record inline through SecureChildShareSynchronizer.SyncChildAsync (idempotent, decides from the stored row; the resume and finishing paths share the same record), and the Decision Record records the D-212 privilege flag. Known limits filed: DI-177 #3275 (system-closed records' privilege flag, owner decision) and DI-178 #3276 (billing Decision Records not shared inline, ebilling-r1). Reaches dev with the next uac-r2 dev BFF candidate (needs a new owner go on an exact SHA).</completion>
 </task>
