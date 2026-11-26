@@ -44,7 +44,14 @@ function resolveSharedLibDeps(): Plugin {
 export default defineConfig({
   plugins: [
     resolveSharedLibDeps(),
-    react({ include: ['src/**/*.tsx', 'src/**/*.ts', path.join(sharedUiSrc, '**/*.{ts,tsx}')] }),
+    react({
+      include: [
+        'src/**/*.tsx',
+        'src/**/*.ts',
+        path.join(sharedUiSrc, '**/*.{ts,tsx}'),
+        path.join(sharedWidgetSrc, '**/*.{ts,tsx}'),
+      ],
+    }),
     // All JS and CSS inline: the BFF serves ONE html file as the MCP resource (FR-12).
     viteSingleFile(),
   ],

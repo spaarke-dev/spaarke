@@ -37,6 +37,7 @@ on:
       - '.github/workflows/publish-bff-artifact.yml'
       - 'src/client/widgets/spaarke-decisions/**'
       - 'src/client/widgets/shared/**'
+      - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
       - 'src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj'
 
 permissions:

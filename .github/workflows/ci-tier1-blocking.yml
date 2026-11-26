@@ -216,6 +216,7 @@ jobs:
               - 'tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs'
               - 'src/client/widgets/spaarke-decisions/**'
               - 'src/client/widgets/shared/**'
+              - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
               - 'tests/integration/Mcp.Conformance.Host/**'
               - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'
               - '.github/workflows/**'
