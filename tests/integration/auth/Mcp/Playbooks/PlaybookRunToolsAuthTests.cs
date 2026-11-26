@@ -187,6 +187,8 @@ public sealed class PlaybookRunToolsAuthTests
             { "2,001-char parameter value", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = "k", parameters = new Dictionary<string, string> { ["tone"] = new string('v', 2_001) } }) },
             { "names differing in case", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = "k", parameters = new Dictionary<string, string> { ["tone"] = "a", ["Tone"] = "b" } }) },
             { "non-text parameter", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = "k", parameters = new { tone = 3 } }) },
+            { "2,001-char instructions (task 038)", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = "k", instructions = new string('i', 2_001) }) },
+            { "non-text instructions (task 038)", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = "k", instructions = 7 }) },
             { "no idempotencyKey", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document } }) },
             { "201-char idempotencyKey", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = new string('k', 201) }) },
             { "unknown argument", JsonSerializer.Serialize(new { playbookId = playbook, documentIds = new[] { document }, idempotencyKey = "k", userContext = "x" }) },

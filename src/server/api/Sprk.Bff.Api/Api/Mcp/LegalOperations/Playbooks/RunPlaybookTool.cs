@@ -52,6 +52,8 @@ internal sealed class RunPlaybookTool : McpToolDefinition
 
     internal const string ParametersArgument = "parameters";
 
+    internal const string InstructionsArgument = "instructions";
+
     internal const string IdempotencyKeyArgument = McpToolAuthorization.IdempotencyKeyArgument;
 
     /// <summary>The longest retry key accepted, in characters (task 031's bound).</summary>
@@ -69,13 +71,19 @@ internal sealed class RunPlaybookTool : McpToolDefinition
     /// <summary>The longest parameter value, in characters (constraint 3).</summary>
     internal const int MaxParameterValueLength = 2_000;
 
+    /// <summary>
+    /// The longest <c>instructions</c> text, in characters (task 038). The REST execute route sets no cap on the same engine field
+    /// (<c>ExecutePlaybookRequest.UserContext</c>, passed through untrimmed); this tool keeps the 2,000 characters of a parameter value.
+    /// </summary>
+    internal const int MaxInstructionsLength = 2_000;
+
     internal const string RetryResource = "mcp-run-playbook";
 
     internal const string LockResource = "mcp-run-playbook-lock";
 
     private static readonly McpIdempotencyScope Scope = new(ToolName, RetryResource, LockResource);
 
-    private static readonly string[] Arguments = [PlaybookIdArgument, DocumentIdsArgument, ParametersArgument, IdempotencyKeyArgument];
+    private static readonly string[] Arguments = [PlaybookIdArgument, DocumentIdsArgument, ParametersArgument, InstructionsArgument, IdempotencyKeyArgument];
 
     /// <summary>A start that faulted before the run was accepted: this host's own code (the REST route answers a bare 500).</summary>
     internal const string StartFailedReasonCode = "playbook.run-start-failed";
@@ -93,7 +101,8 @@ internal sealed class RunPlaybookTool : McpToolDefinition
         + "spaarke_get_playbook_run with the runId to see progress and the result summary. Needs the JPS playbook's id (from "
         + "spaarke_list_playbooks), 1 to 20 document ids (from spaarke_list_documents or spaarke_search_documents), optional text "
         + "parameters the playbook takes, and an idempotencyKey you make up once per run and send again unchanged on a retry, so a retry "
-        + "never starts a second run. consoleLink only opens the documents in Spaarke; the user does not need it. Not for: reading a "
+        + "never starts a second run. Optional instructions: what the user asked the run to focus on, in their words; omit if they said "
+        + "nothing. consoleLink only opens the documents in Spaarke; the user does not need it. Not for: reading a "
         + "run (use spaarke_get_playbook_run); creating an analysis record (use spaarke_start_analysis); legal or contract-review "
         + "playbooks (Markdown or Microsoft contract-review playbooks).";
 
@@ -121,6 +130,12 @@ internal sealed class RunPlaybookTool : McpToolDefinition
                 ["maxProperties"] = MaxParameters,
                 ["additionalProperties"] = new JsonObject { ["type"] = "string", ["maxLength"] = MaxParameterValueLength },
                 ["description"] = "Optional: text parameters the JPS playbook takes, as name and value pairs.",
+            },
+            [InstructionsArgument] = new JsonObject
+            {
+                ["type"] = "string",
+                ["maxLength"] = MaxInstructionsLength,
+                ["description"] = "Optional: what the user asked the run to focus on, in their words; omit if they said nothing.",
             },
             [IdempotencyKeyArgument] = new JsonObject
             {
@@ -202,7 +217,8 @@ internal sealed class RunPlaybookTool : McpToolDefinition
                 try
                 {
                     // The exact documentIds and parameters instances below are what 007's method decides on and what the run gets.
-                    started = await runs.StartAsCallerAsync(http!, input.PlaybookId, input.DocumentIds, input.Parameters, cancellationToken);
+                    started = await runs.StartAsCallerAsync(
+                        http!, input.PlaybookId, input.DocumentIds, input.Parameters, input.Instructions, cancellationToken);
                 }
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -342,21 +358,38 @@ internal sealed class RunPlaybookTool : McpToolDefinition
     /// <summary>What the retry key keeps: the run it started and the fingerprint of the inputs (no key, no parameter values).</summary>
     internal sealed record RetryEntry(Guid RunId, Guid FirstDocumentId, string Fingerprint) : IMcpRetryEntry;
 
-    internal sealed record RunInput(Guid PlaybookId, Guid[] DocumentIds, IReadOnlyDictionary<string, string>? Parameters, string IdempotencyKey);
+    /// <param name="Instructions">The caller's focus text, trimmed; <c>null</c> when absent, null or blank (the run then has no user context).</param>
+    internal sealed record RunInput(
+        Guid PlaybookId, Guid[] DocumentIds, IReadOnlyDictionary<string, string>? Parameters, string? Instructions, string IdempotencyKey);
 
-    /// <summary>The inputs a retry must repeat: the playbook, the documents in order, and the parameters by name.</summary>
-    internal static string FingerprintOf(RunInput input) =>
-        McpIdempotency.FingerprintOf(
+    /// <summary>
+    /// The inputs a retry must repeat: the playbook, the documents in order, the parameters by name and the instructions. The instructions
+    /// part is added only when present, so a call without them keeps the fingerprint it had before task 038 (a retry across a deploy still
+    /// replays); the fingerprint is a hash, so it holds no instructions text (ADR-015).
+    /// </summary>
+    internal static string FingerprintOf(RunInput input)
+    {
+        var parts = new List<string>(4)
+        {
             input.PlaybookId.ToString("D"),
             string.Join(',', input.DocumentIds.Select(d => d.ToString("D"))),
             input.Parameters is null
                 ? string.Empty
-                : string.Join('\n', input.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => $"{p.Key}={p.Value}")));
+                : string.Join('\n', input.Parameters.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => $"{p.Key}={p.Value}")),
+        };
+        if (input.Instructions is not null)
+        {
+            parts.Add($"{InstructionsArgument}={input.Instructions}");
+        }
+
+        return McpIdempotency.FingerprintOf([.. parts]);
+    }
 
     /// <summary>
     /// The closed argument set and constraint 3's caps: <c>playbookId</c> a GUID; <c>documentIds</c> 1 to <see cref="MaxDocuments"/> GUIDs;
     /// <c>parameters</c> optional, at most <see cref="MaxParameters"/> text values of at most <see cref="MaxParameterValueLength"/>
     /// characters under names of at most <see cref="MaxParameterKeyLength"/>, no two names differing only in letter case;
+    /// <c>instructions</c> optional text of at most <see cref="MaxInstructionsLength"/> characters (blank reads as absent; task 038);
     /// <c>idempotencyKey</c> required. Anything else is refused with the fix, never ignored.
     /// </summary>
     internal static bool TryReadArguments(
@@ -365,7 +398,8 @@ internal sealed class RunPlaybookTool : McpToolDefinition
         input = null!;
         error = null;
         var fix = $"{ToolName} takes {PlaybookIdArgument} (text), {DocumentIdsArgument} (1 to {MaxDocuments} ids), {IdempotencyKeyArgument} "
-                  + $"(text) and optional {ParametersArgument} (name and text value pairs). Send the call again with just those.";
+                  + $"(text), optional {ParametersArgument} (name and text value pairs) and optional {InstructionsArgument} (text). "
+                  + "Send the call again with just those.";
         if (arguments is null || arguments.Keys.Any(k => !Arguments.Contains(k, StringComparer.Ordinal)))
         {
             error = DocumentToolSupport.InvalidArgument(fix, http);
@@ -447,7 +481,25 @@ internal sealed class RunPlaybookTool : McpToolDefinition
             }
         }
 
-        input = new RunInput(playbookId, documentIds, parameters, key);
+        string? instructions = null;
+        if (arguments.TryGetValue(InstructionsArgument, out var instructionsElement)
+            && instructionsElement.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            // Over-length is refused, never cut (the length is of the text as sent, as the schema's maxLength reads it). The refusal
+            // names the limit only, never the text (NFR-05, ADR-015).
+            if (instructionsElement.ValueKind != JsonValueKind.String || instructionsElement.GetString()!.Length > MaxInstructionsLength)
+            {
+                error = DocumentToolSupport.InvalidArgument(
+                    $"'{InstructionsArgument}' must be text of at most {MaxInstructionsLength} characters. Shorten it, or leave it out.", http);
+                return false;
+            }
+
+            // Blank is the same as absent: the run then gets no user context, exactly as before this argument existed.
+            var trimmed = instructionsElement.GetString()!.Trim();
+            instructions = trimmed.Length == 0 ? null : trimmed;
+        }
+
+        input = new RunInput(playbookId, documentIds, parameters, instructions, key);
         return true;
     }
 

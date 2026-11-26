@@ -111,6 +111,7 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         Guid playbookId,
         Guid[] documentIds,
         IReadOnlyDictionary<string, string>? parameters,
+        string? userContext,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(http);
@@ -130,7 +131,7 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
 
         try
         {
-            return await StartReservedAsync(http, playbookId, documentIds, parameters, cancellationToken).ConfigureAwait(false);
+            return await StartReservedAsync(http, playbookId, documentIds, parameters, userContext, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -176,6 +177,7 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         Guid playbookId,
         Guid[] documentIds,
         IReadOnlyDictionary<string, string>? parameters,
+        string? userContext,
         CancellationToken cancellationToken)
     {
         // Condition 6: authorized first, inside the request, by task 007's one method; no check of our own.
@@ -207,6 +209,7 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
                 PlaybookId = playbookId,
                 DocumentIds = documentIds,         // the exact instance authorized above
                 Parameters = parameters,           // the exact instance authorized above
+                UserContext = userContext,         // the caller's focus text (task 038): in memory with the request only; never logged here
                 RunUserId = runUserId,             // 007's resolved caller, never Parameters["userId"]
                 StartedBy = PlaybookRunStartedBy.Person,
             },

@@ -31,7 +31,7 @@ public sealed class DetachedPlaybookRunnerTests
         var http = world.CallerContext();
         world.Accessor.HttpContext = http;
 
-        var started = await world.Runs.StartAsCallerAsync(http, playbookId, [documentId], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(http, playbookId, [documentId], null, null, CancellationToken.None);
         started.Outcome.Should().Be(PlaybookRunStartOutcome.Started);
         world.Gate.SetResult();
         await world.RunFinished();
@@ -51,7 +51,7 @@ public sealed class DetachedPlaybookRunnerTests
         var (playbookId, documentId) = world.AllowedRun();
         var http = world.CallerContext(traceId: "trace-detach-1");
 
-        await world.Runs.StartAsCallerAsync(http, playbookId, [documentId], null, CancellationToken.None);
+        await world.Runs.StartAsCallerAsync(http, playbookId, [documentId], null, null, CancellationToken.None);
 
         var call = world.Calls.Single();
         ReferenceEquals(call.Context, http).Should().BeFalse("the run has its own context");
@@ -70,7 +70,7 @@ public sealed class DetachedPlaybookRunnerTests
         var documents = new[] { documentId };
         var parameters = new Dictionary<string, string> { ["timeWindowHours"] = "24" };
 
-        await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, documents, parameters, CancellationToken.None);
+        await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, documents, parameters, null, CancellationToken.None);
 
         var request = world.Calls.Single().Request;
         request.PlaybookId.Should().Be(playbookId);
@@ -80,13 +80,30 @@ public sealed class DetachedPlaybookRunnerTests
         request.StartedBy.Should().Be(PlaybookRunStartedBy.Person);
     }
 
+    [Theory(DisplayName = "038 user context: the run request carries the caller's text as UserContext, or none; it never reaches a log (the helper logs outcomes and codes only)")]
+    [InlineData("Focus on indemnity FOCUS-SECRET-038-runner")]
+    [InlineData(null)]
+    public async Task Start_HandsTheRunTheUserContext_AndLogsNoText(string? userContext)
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, userContext, CancellationToken.None);
+        started.Outcome.Should().Be(PlaybookRunStartOutcome.Started);
+        world.Gate.SetResult();
+        await world.RunFinished();
+
+        world.Calls.Single().Request.UserContext.Should().Be(userContext);
+        world.Logs.Entries.Should().NotBeEmpty().And.NotContain(e => e.Contains("FOCUS-SECRET-038-runner", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "030 authorized first: a 007 refusal (no document ids) refuses the start; no token is fetched and nothing runs")]
     public async Task Start_RefusedByTask007_StartsNothing()
     {
         await using var world = await PlaybookRunWorld.StartAsync();
         var (playbookId, _) = world.AllowedRun();
 
-        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [], null, null, CancellationToken.None);
 
         started.Outcome.Should().Be(PlaybookRunStartOutcome.Refused);
         started.Authorization.Should().BeSameAs(PlaybookRunAuthorization.DocumentIdsRequired);
@@ -104,7 +121,7 @@ public sealed class DetachedPlaybookRunnerTests
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         world.Script = PlaybookRunWorld.NeverAccepts(cancelled);
 
-        var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
         await world.Time.TimerArmed(PlaybookRunLimits.AcceptBudget);
         start.IsCompleted.Should().BeFalse("the start waits out the accept budget on the fake clock");
         world.Time.Advance(PlaybookRunLimits.AcceptBudget);
@@ -123,7 +140,7 @@ public sealed class DetachedPlaybookRunnerTests
         var (playbookId, documentId) = world.AllowedRun();
         world.Script = PlaybookRunWorld.RunsUntilCancelled(engineEndsWithEvent);
 
-        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
         started.Run!.Phase.Should().Be(PlaybookRunPhase.Running);
 
         world.Time.Advance(PlaybookRunLimits.MaxRunDuration - TimeSpan.FromSeconds(1));
@@ -147,7 +164,7 @@ public sealed class DetachedPlaybookRunnerTests
         var (playbookId, documentId) = world.AllowedRun();
         world.Script = PlaybookRunWorld.RunsUntilCancelled(engineEndsWithEvent);
 
-        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
         world.Lifetime.StopApplication();
         var ended = await world.ReadFinishedAsync(started.Run!.RunId);
 
@@ -167,13 +184,13 @@ public sealed class DetachedPlaybookRunnerTests
         var running = new List<Guid>();
         for (var i = 0; i < PlaybookRunLimits.MaxConcurrentRunsPerCaller; i++)
         {
-            var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+            var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
             started.Outcome.Should().Be(PlaybookRunStartOutcome.Started, $"run {i + 1} of {PlaybookRunLimits.MaxConcurrentRunsPerCaller} is within the cap");
             running.Add(started.Run!.RunId);
         }
 
         world.Graph.Invocations.Clear();
-        var refused = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var refused = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
 
         refused.Outcome.Should().Be(PlaybookRunStartOutcome.RunLimit);
         refused.Authorization.Should().BeNull("the cap is checked before 007's authorization");
@@ -182,7 +199,7 @@ public sealed class DetachedPlaybookRunnerTests
         world.Graph.Verify(g => g.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Never());
 
         var otherCaller = await world.Runs.StartAsCallerAsync(
-            world.CallerContext(PlaybookRunWorld.OtherOid), playbookId, [documentId], null, CancellationToken.None);
+            world.CallerContext(PlaybookRunWorld.OtherOid), playbookId, [documentId], null, null, CancellationToken.None);
         otherCaller.Outcome.Should().NotBe(PlaybookRunStartOutcome.RunLimit, "the cap is per caller, not per instance");
 
         gates[0].SetResult();
@@ -190,7 +207,7 @@ public sealed class DetachedPlaybookRunnerTests
         (await world.Runs.ReadAsCallerAsync(world.CallerContext(), running[0], CancellationToken.None))!.Phase
             .Should().Be(PlaybookRunPhase.Completed);
 
-        var afterOneFinished = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var afterOneFinished = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
         afterOneFinished.Outcome.Should().Be(PlaybookRunStartOutcome.Started, "a finished run frees its place");
     }
 
@@ -205,13 +222,13 @@ public sealed class DetachedPlaybookRunnerTests
         // Three starts in flight: none accepted yet, so none is in the run table. Each holds a reservation.
         using var inFlight = new CancellationTokenSource();
         var starts = Enumerable.Range(0, PlaybookRunLimits.MaxConcurrentRunsPerCaller)
-            .Select(_ => world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, inFlight.Token))
+            .Select(_ => world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, inFlight.Token))
             .ToList();
 
         // Refused at once, before any await; without the reservation this start would pass the cap and wait out the accept budget
         // on the fake clock, so the bound below turns that regression into a failure instead of a hang.
         using var fourthWait = new CancellationTokenSource();
-        var fourthStart = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, fourthWait.Token);
+        var fourthStart = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, fourthWait.Token);
         fourthStart.IsCompleted.Should().BeTrue("a start beyond the cap is refused before any await");
         var fourth = await fourthStart;
         fourth.Outcome.Should().Be(PlaybookRunStartOutcome.RunLimit, "the three starts in flight already hold the caller's places");
@@ -224,7 +241,7 @@ public sealed class DetachedPlaybookRunnerTests
         }
 
         using var again = new CancellationTokenSource();
-        var afterRelease = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, again.Token);
+        var afterRelease = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, again.Token);
         if (afterRelease.IsCompleted)
         {
             (await afterRelease).Outcome.Should().NotBe(PlaybookRunStartOutcome.RunLimit, "released starts free their places");
@@ -241,7 +258,7 @@ public sealed class DetachedPlaybookRunnerTests
         var (playbookId, documentId) = world.AllowedRun();
         for (var i = 0; i < PlaybookRunLimits.MaxConcurrentRunsPerCaller; i++)
         {
-            (await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None))
+            (await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None))
                 .Outcome.Should().Be(PlaybookRunStartOutcome.Started);
         }
 
@@ -291,7 +308,7 @@ public sealed class DetachedPlaybookRunnerTests
                 break;
         }
 
-        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
 
         started.Outcome.Should().Be(PlaybookRunStartOutcome.AuthUnavailable);
         world.VerifyNothingStarted();
@@ -311,7 +328,7 @@ public sealed class DetachedPlaybookRunnerTests
             : new InvalidOperationException("node failed", new MsalServiceException("invalid_request", "AADSTS500133: Assertion is not within its valid time range " + PlaybookRunWorld.TokenSecret));
         world.Script = world.ThrowsAfterStart(failure);
 
-        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
         world.Gate.SetResult();
         var ended = await world.ReadFinishedAsync(started.Run!.RunId);
 
@@ -333,7 +350,7 @@ public sealed class DetachedPlaybookRunnerTests
             PlaybookStreamEvent.BuildRunFailedEvent(Guid.Parse("00000000-0030-4030-8030-00000000f001"), request.PlaybookId, "trace"),
         }.ToAsyncEnumerable();
 
-        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, CancellationToken.None);
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
         var ended = await world.ReadFinishedAsync(started.Run!.RunId);
 
         ended.Phase.Should().Be(PlaybookRunPhase.Failed);
