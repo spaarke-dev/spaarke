@@ -7,8 +7,9 @@
 //
 // WHAT RUNS: the REAL GraphClientFactory, the REAL GraphTokenCache and the REAL OrderedCredentialClientProvider (managed-identity
 // assertion, an opaque test string). Only MSAL's user token cache is seeded (the shared MSAL cache schema, as McpCallerPathTests does)
-// with an OBO Graph token that expires in 20 minutes, so the exchange is answered offline; the distributed cache is an in-memory
-// recorder (a module boundary, ADR-038).
+// with an OBO Graph token that expires 20 minutes, 90 minutes or 24 hours after the fake clock's now, so the exchange is answered
+// offline; the distributed cache is an in-memory recorder (a module boundary, ADR-038). The TTL is capped at the old 55 minutes
+// (uac-r2 review), so a long-lived token is never kept longer than before the fix.
 
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
@@ -20,6 +21,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Identity.Client;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
@@ -40,11 +42,14 @@ public sealed class GraphOboTokenCacheTtlTests
     private const string GraphToken = "graph-obo-token-030";
     private static readonly Guid CallerOid = Guid.Parse("0a0a0a0a-0030-4030-8030-000000000001");
 
-    [Fact(DisplayName = "030 Graph TTL: an OBO Graph token with 20 minutes left is cached for at most 15 minutes (its expiry less the margin), never a fixed 55")]
-    public async Task ForUser_TokenWithTwentyMinutesLeft_IsCachedUntilJustBeforeItsOwnExpiry()
+    [Theory(DisplayName = "030 Graph TTL: an OBO Graph token is cached until 5 minutes before its own expiry (20 min left: 15), at most 55 minutes (90 min or 24 h left: 55)")]
+    [InlineData(20, 15)]
+    [InlineData(90, 55)]
+    [InlineData(24 * 60, 55)]
+    public async Task ForUser_CachesTheTokenUntilJustBeforeItsOwnExpiry_AtMost55Minutes(int minutesLeft, int expectedMinutes)
     {
         var redis = new RecordingDistributedCache();
-        var factory = await FactoryWithSeededGraphTokenAsync(redis, minutesLeft: 20);
+        var factory = await FactoryWithSeededGraphTokenAsync(redis, minutesLeft);
         var http = new DefaultHttpContext();
         http.Request.Headers.Authorization = "Bearer " + CallerToken;
 
@@ -52,15 +57,16 @@ public sealed class GraphOboTokenCacheTtlTests
 
         var (value, options) = redis.Writes.Should().ContainSingle("the exchanged token is cached once").Subject.Value;
         Encoding.UTF8.GetString(value).Should().Be(GraphToken);
-        options.AbsoluteExpirationRelativeToNow.Should().NotBeNull();
-        options.AbsoluteExpirationRelativeToNow!.Value.Should().BeLessThanOrEqualTo(TimeSpan.FromMinutes(15),
-            "the cache must not outlive the token: 20 minutes of life less the 5-minute margin");
-        options.AbsoluteExpirationRelativeToNow!.Value.Should().BeGreaterThan(TimeSpan.FromMinutes(13), "the TTL is the token's remaining life, not zero");
+        options.AbsoluteExpirationRelativeToNow.Should().Be(TimeSpan.FromMinutes(expectedMinutes),
+            "the cache must not outlive the token (its life less the 5-minute margin) and never exceeds the 55-minute ceiling");
     }
 
-    [Theory(DisplayName = "030 Graph TTL: the TTL is the remaining life less the margin; a token within the margin of its expiry is not cached")]
-    [InlineData(90, 85.0)]
+    [Theory(DisplayName = "030 Graph TTL: the TTL is the remaining life less the margin, at most 55 minutes; a token within the margin of its expiry is not cached")]
+    [InlineData(24 * 60, 55.0)]
+    [InlineData(90, 55.0)]
+    [InlineData(61, 55.0)]
     [InlineData(60, 55.0)]
+    [InlineData(59, 54.0)]
     [InlineData(20, 15.0)]
     [InlineData(6, 1.0)]
     [InlineData(5, null)]
@@ -77,6 +83,10 @@ public sealed class GraphOboTokenCacheTtlTests
 
     private static async Task<GraphClientFactory> FactoryWithSeededGraphTokenAsync(IDistributedCache redis, int minutesLeft)
     {
+        // The factory measures the TTL on this fake clock. MSAL judges the seeded entry against the SYSTEM clock and takes no clock of
+        // its own (an entry seeded at a fixed or far-future instant is refused and MSAL calls Entra: AADSTS50027), so the fake clock is
+        // pinned, once, to the system's whole second. That one read feeds MSAL's boundary only; every TTL in this test is fake-clock exact.
+        var time = new FakeTimeProvider(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["TENANT_ID"] = TenantId,
@@ -87,7 +97,7 @@ public sealed class GraphOboTokenCacheTtlTests
             new ConfigurationBuilder().Build(),
             NullLogger<OrderedCredentialClientProvider>.Instance,
             new FixedAssertion());
-        SeedOboGraphToken(await provider.GetClientAsync(TenantId, BffClientId), CallerToken, minutesLeft);
+        SeedOboGraphToken(await provider.GetClientAsync(TenantId, BffClientId), CallerToken, time.GetUtcNow(), minutesLeft);
 
         var httpClients = new Mock<IHttpClientFactory>();
         httpClients.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient());
@@ -96,14 +106,14 @@ public sealed class GraphOboTokenCacheTtlTests
             NullLogger<GraphClientFactory>.Instance,
             new GraphTokenCache(redis, NullLogger<GraphTokenCache>.Instance),
             configuration,
-            provider);
+            provider,
+            time);
     }
 
     /// <summary>One OBO access token for the Graph scope in MSAL's user token cache, keyed by the hash of <paramref name="userAssertion"/>.</summary>
-    private static void SeedOboGraphToken(IConfidentialClientApplication client, string userAssertion, int minutesLeft)
+    private static void SeedOboGraphToken(IConfidentialClientApplication client, string userAssertion, DateTimeOffset issuedAt, int minutesLeft)
     {
-        // MSAL judges the entry against the real system clock (McpCallerPathTests: fixed values are rejected), so this one read stays.
-        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var now = issuedAt.ToUnixTimeSeconds();
         var expires = (now + (minutesLeft * 60)).ToString(System.Globalization.CultureInfo.InvariantCulture);
         var cache = new JsonObject
         {
