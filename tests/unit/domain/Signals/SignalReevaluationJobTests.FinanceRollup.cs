@@ -108,6 +108,33 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_UtilizationThreshold_ACreateThatMeetsAnExistingRow_CreatedFalse_RecalculatesNothing_232()
+    {
+        // The dedupe race: another pass created this episode between this pass's read and its create, so the writer reconciles to the
+        // existing row (Created false). That pass raised the Signal and recalculated; this one must not.
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 95m, "MAT-OVER");
+        var seeded = false;
+        h.Org.CreateFaultFor = entity =>
+        {
+            if (entity.LogicalName == "sprk_signal" && !seeded)
+            {
+                seeded = true;
+                h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+            }
+
+            return null;
+        };
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        seeded.Should().BeTrue("the planner asked for a create");
+        h.Org.CreatedPayloads.Should().BeEmpty("the create met the existing row");
+        result.ResultJson.Should().Contain("\"updated\":1");
+        h.Rollup.Calls.Should().BeEmpty("a create that returned Created=false raised nothing");
+    }
+
+    [Fact]
     public async Task Run_ANonFinancePolicy_RaisedOnAMatter_RecalculatesNothing_232()
     {
         var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);

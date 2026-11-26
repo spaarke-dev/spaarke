@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
@@ -135,8 +136,8 @@ public class FinanceRollupService
     /// PATCH, with exactly that PATCH's columns (a column missing on the environment fails only its own read). A stored read that
     /// answers null (unknown) leaves the write to go ahead as before.</para>
     /// </summary>
-    /// <param name="readStored">The parent's stored values of the given columns, or null when they cannot be read. Null (the
-    /// default): every PATCH is sent, as before task 232.</param>
+    /// <param name="readStored">The parent's stored values of the given columns and its currency's precision, or null when they cannot
+    /// be read. Null (the default): every PATCH is sent, as before task 232.</param>
     /// <returns>Whether Pending Spend is current: written, or already holding the recalculated value.</returns>
     internal static async Task<bool> WriteRollupAsync(
         IFieldMappingDataverseService writer,
@@ -146,7 +147,7 @@ public class FinanceRollupService
         Dictionary<string, object?> countedFields,
         Func<CancellationToken, Task<decimal>> readPendingSpend,
         CancellationToken ct,
-        Func<IReadOnlyCollection<string>, CancellationToken, Task<Entity?>>? readStored = null)
+        Func<IReadOnlyCollection<string>, CancellationToken, Task<StoredRollup?>>? readStored = null)
     {
         // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
         // authorization check (or a background job's stale id) would be recreated as an empty row carrying
@@ -184,17 +185,36 @@ public class FinanceRollupService
         }
     }
 
-    /// <summary>Ontology task 232: how far a recalculated amount may sit from the stored one and still be "unchanged": half the stored
-    /// precision (every decimal and money rollup column has Accuracy 2 in the SpaarkeMaster schema; Dataverse rounds on store, so an
-    /// unrounded figure such as a utilization of 95.238… is stored as 95.24).</summary>
-    internal const decimal StoredValueTolerance = 0.005m;
+    /// <summary>Ontology task 232: the parent's stored values of some rollup columns, and the precision of its currency
+    /// (<c>transactioncurrency.currencyprecision</c> through its <c>transactioncurrencyid</c>), or null when the record has no currency or
+    /// the precision cannot be read.</summary>
+    internal sealed record StoredRollup(Entity Row, int? CurrencyPrecision);
+
+    /// <summary>Ontology task 232: how far a recalculated decimal (utilization, velocity) may sit from the stored one and still be
+    /// "unchanged": less than half a unit of the columns' Accuracy 2 (Dataverse rounds on store, so 95.238… is stored as 95.24). Exactly
+    /// half a unit is a change (ebilling-r1 review).</summary>
+    internal const decimal DecimalTolerance = 0.005m;
+
+    /// <summary>Ontology task 232 (ebilling-r1 review): the money rollup columns have AccuracySource 2, so Dataverse stores them at the
+    /// record currency's precision; a money amount is unchanged only when it is less than half a unit of THAT precision away.</summary>
+    internal static decimal MoneyTolerance(int currencyPrecision)
+    {
+        var unit = 1m;
+        for (var i = 0; i < currencyPrecision; i++)
+        {
+            unit /= 10m;
+        }
+
+        return unit / 2m;
+    }
 
     /// <summary>
-    /// Ontology task 232 (D-61): true when <paramref name="stored"/> already holds every value in <paramref name="fields"/>: an amount
-    /// within <see cref="StoredValueTolerance"/> (a <see cref="Money"/> compares by its value), an equal count, an ordinally equal text.
-    /// A stored row that is unknown (null) or lacks a column (an empty column against a computed 0 is a change) is not unchanged.
+    /// Ontology task 232 (D-61): true when <paramref name="stored"/> already holds every value in <paramref name="fields"/>: a decimal
+    /// less than <see cref="DecimalTolerance"/> away; a <see cref="Money"/> less than <see cref="MoneyTolerance"/> of the record currency's
+    /// precision away (unknown precision: a change); an equal count; an ordinally equal text. A stored row that is unknown (null) or lacks
+    /// a column (an empty column against a computed 0 is a change) is not unchanged.
     /// </summary>
-    internal static bool IsUnchanged(IReadOnlyDictionary<string, object?> fields, Entity? stored)
+    internal static bool IsUnchanged(IReadOnlyDictionary<string, object?> fields, StoredRollup? stored)
     {
         if (stored is null)
         {
@@ -203,15 +223,12 @@ public class FinanceRollupService
 
         foreach (var (column, value) in fields)
         {
-            var current = stored.Attributes.TryGetValue(column, out var raw) ? raw : null;
-            if (current is Money money)
-            {
-                current = money.Value;
-            }
-
+            var current = stored.Row.Attributes.TryGetValue(column, out var raw) ? raw : null;
             var same = (value, current) switch
             {
-                (decimal computed, decimal held) => Math.Abs(computed - held) <= StoredValueTolerance,
+                (decimal computed, Money held) => stored.CurrencyPrecision is { } precision
+                    && Math.Abs(computed - held.Value) < MoneyTolerance(precision),
+                (decimal computed, decimal held) => Math.Abs(computed - held) < DecimalTolerance,
                 (int computed, int held) => computed == held,
                 (string computed, string held) => string.Equals(computed, held, StringComparison.Ordinal),
                 _ => false,
@@ -225,20 +242,66 @@ public class FinanceRollupService
         return true;
     }
 
-    /// <summary>Ontology task 232: the parent's stored values of <paramref name="columns"/>, through the application identity's read
-    /// (the one the base-row reads use). Null when they cannot be read (a parent gone, a column missing on the environment, a fault):
-    /// the caller then writes as before, so a failed read never stops or changes a recalculation. The caller's cancellation propagates.</summary>
-    private async Task<Entity?> ReadStoredAsync(string parentEntityName, Guid parentId, IReadOnlyCollection<string> columns, CancellationToken ct)
+    /// <summary>The record currency column every money rollup column is stored against.</summary>
+    private const string Field_TransactionCurrency = "transactioncurrencyid";
+
+    // Ontology task 232: currency precision per currency id, for this service's lifetime (one request, or one Signal pass).
+    private readonly ConcurrentDictionary<Guid, int> _currencyPrecision = new();
+
+    /// <summary>Ontology task 232: the parent's stored values of <paramref name="columns"/> and its currency's precision, through the
+    /// application identity's read (the one the base-row reads use). Null when they cannot be read (a parent gone, a column missing on
+    /// the environment, a fault): the caller then writes as before, so a failed read never stops or changes a recalculation. A currency
+    /// or precision that cannot be read leaves the precision null (money compares as changed). The caller's cancellation propagates.</summary>
+    private async Task<StoredRollup?> ReadStoredAsync(string parentEntityName, Guid parentId, IReadOnlyCollection<string> columns, CancellationToken ct)
     {
+        Entity row;
         try
         {
-            return await _dataverseService.RetrieveAsync(parentEntityName, parentId, columns.ToArray(), ct).ConfigureAwait(false);
+            row = await _dataverseService.RetrieveAsync(
+                parentEntityName, parentId, columns.Append(Field_TransactionCurrency).Distinct(StringComparer.Ordinal).ToArray(), ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogInformation(
                 "Stored finance rollup of {Entity} {EntityId} could not be read ({ExceptionType}); writing the recalculated values without comparing",
                 parentEntityName, parentId, ex.GetType().Name);
+            return null;
+        }
+
+        return new StoredRollup(row, await CurrencyPrecisionAsync(row.GetAttributeValue<EntityReference>(Field_TransactionCurrency), ct).ConfigureAwait(false));
+    }
+
+    /// <summary>Ontology task 232: <c>transactioncurrency.currencyprecision</c>, cached per currency id; null for no currency or a read
+    /// that fails or answers no precision (not cached, so a later recalculation asks again).</summary>
+    private async Task<int?> CurrencyPrecisionAsync(EntityReference? currency, CancellationToken ct)
+    {
+        if (currency is null || currency.Id == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (_currencyPrecision.TryGetValue(currency.Id, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var row = await _dataverseService.RetrieveAsync("transactioncurrency", currency.Id, ["currencyprecision"], ct).ConfigureAwait(false);
+            if (row.GetAttributeValue<int?>("currencyprecision") is not { } precision || precision < 0)
+            {
+                return null;
+            }
+
+            _currencyPrecision[currency.Id] = precision;
+            return precision;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Currency precision of {CurrencyId} could not be read ({ExceptionType}); money rollup values are written without comparing",
+                currency.Id, ex.GetType().Name);
             return null;
         }
     }

@@ -17,7 +17,7 @@ The stored columns are plain columns (SourceType 0) written only by `FinanceRoll
 
 1. `SignalEvaluator.cs`: `SignalEvaluation.DerivedThresholdField` (init property; set from the compiled `ThresholdComparison` when it is base-derived). Not near `AssigneeColumnBySubject` (task 227 / PR #3287).
 2. `SignalReevaluationJob.cs`: takes `IServiceScopeFactory` (the job is a singleton, `FinanceRollupService` is scoped). In `ApplyAsync`, each CREATE that returned `Created` for a policy whose evaluation has a derived Threshold field on `sprk_matter` / `sprk_project` adds the subject to a set; after the creates, `RecalculateFinanceRollupsAsync` calls `FinanceRollupService.RecalculateMatterAsync` / `RecalculateProjectAsync` once per subject. A fault (anything but the caller's cancellation) is logged as a Warning with the exception; the Signal stays raised, the run outcome is unchanged.
-3. `FinanceRollupService.cs` (ebilling-r1's): `WriteRollupAsync` takes an optional `readStored` delegate; each of its two PATCHes (counted rollup, Pending Spend) is skipped when the parent already holds the values (`IsUnchanged`: amounts within 0.005, the columns' Accuracy 2; ints equal; text ordinal). `RecalculateForEntityAsync` passes a reader (`ReadStoredAsync`, application identity `IDataverseService.RetrieveAsync`, the columns of that PATCH only) that answers null on any fault, in which case the write goes ahead exactly as before. The computation is untouched. This applies to every caller (routes, subgrid, snapshot job): fewer writes, same responses.
+3. `FinanceRollupService.cs` (ebilling-r1's): `WriteRollupAsync` takes an optional `readStored` delegate; each of its two PATCHes (counted rollup, Pending Spend) is skipped when the parent already holds the values (`IsUnchanged`: a decimal less than 0.005 away, the columns' Accuracy 2; a Money value less than half a unit of the record currency's precision away, read from `transactioncurrency.currencyprecision` through `transactioncurrencyid` and cached per currency id in the service, unknown precision or no currency = changed; exactly half a unit is a change; ints equal; text ordinal; fix round 1, ebilling-r1 review). `RecalculateForEntityAsync` passes a reader (`ReadStoredAsync`, application identity `IDataverseService.RetrieveAsync`, the columns of that PATCH only) that answers null on any fault, in which case the write goes ahead exactly as before. The computation is untouched. This applies to every caller (routes, subgrid, snapshot job): fewer writes, same responses.
 
 ## Which writes trigger a recalculation (D-61)
 
@@ -36,7 +36,9 @@ The stored columns are plain columns (SourceType 0) written only by `FinanceRoll
 
 - K4: an open finance Threshold Signal keeps the figure it was raised with; when spend moves while it stays open, neither the Signal nor the stored roll-up is refreshed by the job (planner: unchanged, D-61). The form agrees with the Signal at raise time. Pre-existing Signal behaviour, not changed here.
 - K2: enabling a spend policy on many records raises many Signals in one pass, so that pass recalculates each raised record once (bounded by the raises; unchanged values are not rewritten). Not a nightly mass write: no unchanged record is touched.
-- K4: a Money column on an environment whose currency precision is above 2 could treat a sub-cent change as unchanged (tolerance 0.005).
+- A failed recalculation is logged and not retried; the open Signal makes no later pass recalculate, so the form can stay stale until a subgrid edit or the recalculate route runs.
+- Finance Threshold Signals already open when this deploys are not recalculated; a one-off targeted call of the existing recalculate route for their subjects would fix them, which needs owner approval (a Dataverse write) and is not in this PR.
+- The unchanged check adds two parent reads (plus one currency read per currency per service instance) to every recalculation; ebilling-r1 accepted the skip for all callers.
 - `FinanceRollupService` counts only invoices with the writer's approve record (`CountedInvoiceStatuses` / `InvoiceApproveRecord`); on dev it reads spend 0 for most matters (ebilling-r1 comment on #1663). Same computation as the evaluator, so the form and the Signal agree.
 
 ## Verification
@@ -45,8 +47,14 @@ The stored columns are plain columns (SourceType 0) written only by `FinanceRoll
 - Publish size (BFF hygiene §10, NFR-01): `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o <out>`, framework-dependent, Release, `Compress-Archive -CompressionLevel Optimal` over `<out>/*`, PDBs included, fresh detached worktrees `C:\wt232m` (master `c438119bca`) and `C:\wt232b` (`4c7273310a`): master 43,676,602 bytes (41.65 MB), branch 43,680,391 bytes (41.66 MB), delta +3,789 bytes; 194 files each. No package change, so no new CVE.
 - §11: no new service, interface, endpoint, DI registration, package, column or job. One constructor dependency (`IServiceScopeFactory`, already registered) on the existing job, and one optional parameter plus two private/internal helpers inside ebilling-r1's existing service.
 
+## Fix round 1 (ebilling-r1 review; the Opus review found no F-class defect)
+
+- Money compares at the record currency's precision (option chosen: read the precision, cached per currency id; not the precision-2-only alternative). Unknown precision or no currency: write.
+- Strict `<`: exactly half a unit writes (95.245 against 95.24).
+- Tests added: a 0.003 money change on a 3-decimal currency writes; the same on 2 decimals is skipped (control, passes both ways); unreadable precision (fault, no precision, no currency) writes; half a unit writes (decimal and money); a create returning Created=false recalculates nothing. Probe (old flat 0.005 with `<=`, and `!IsSkipped` instead of `Created`): 11 fail.
+
 ## Found, not fixed (D-106)
 
 - None beyond the known limits above.
 
-rework: none task 232
+rework: fix-round-1 task 232
