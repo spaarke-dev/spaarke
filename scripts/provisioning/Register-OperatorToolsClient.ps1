@@ -5,8 +5,8 @@
     script signs in with to call a DEMO stamp's BFF as a user. One per Spaarke tenant, never per customer.
 
 .DESCRIPTION
-    Demo environment plan (projects/customer-provisioning-orchestration-r1/notes/demo-environment-plan.md) decision 1,
-    approved by the owner 2026-11-26. Operator scripts such as the demo loader (W3 document files) need a USER token
+    Demo environment plan decision 1 (customer-provisioning-orchestration-r1, notes/demo-environment-plan.md on that
+    project's branch), approved by the owner 2026-11-26. Operator scripts such as the demo loader (W3 document files) need a USER token
     for a stamp BFF; the Azure CLI client is not pre-authorized on stamp BFF apps (AADSTS65001).
 
     This script only creates the CLIENT. Which stamps accept it is decided by provisioning: H3 pre-authorizes the ids
@@ -15,16 +15,19 @@
     exact-list rule leaves it out (and removes it if a row stops being Demo).
 
     What it creates or corrects, in the Spaarke tenant:
-      1. The application: single tenant (AzureADMyOrg), public client (isFallbackPublicClient, public-client redirect
-         exactly http://localhost for the interactive flow; device code needs none). No secret, no certificate, no
-         federated credential, no web or SPA redirect, no API permissions of its own: the stamp BFF's
-         user_impersonation scope is reached by pre-authorization.
+      1. The application: single tenant (AzureADMyOrg), public client for the interactive browser flow only
+         (public-client redirect exactly http://localhost; isFallbackPublicClient = false, so neither device code nor
+         username/password sign-in can be used with it). No secret, no certificate, no federated credential, no web or
+         SPA redirect, no API permissions of its own: the stamp BFF's user_impersonation scope is reached by
+         pre-authorization.
       2. Its service principal with appRoleAssignmentRequired = true, so only principals assigned to it can sign in.
       3. Assignments (default access) for each -AssignUserUpn: the operators, and later the demo personas.
 
-    It adopts an existing app of that name ONLY when it is provably this client: exactly one app has the name, its only
-    owner is the signed-in operator (or it has none), it holds no secret, certificate or federated credential, and it
-    has no web or SPA redirect. Anything else is refused with exit 1 and nothing is changed; the script never deletes
+    It adopts an existing app of that name ONLY when it is provably this client: exactly one app has the name, the
+    signed-in operator is its only owner (an ownerless app is adopted only if it carries this script's notes marker),
+    its service principal has no other owner, it holds no secret, certificate or federated credential, and it has no
+    web or SPA redirect. So a re-run (for example to assign demo personas) is done by the operator who created it, or
+    after the platform admin makes the re-running operator its owner. Anything else is refused with exit 1 and nothing is changed; the script never deletes
     credentials or owners. (Same rule as H3's adoption of a customer BFF app: an app anyone else owns could gain a
     credential or redirect after this script finishes.)
 
@@ -66,7 +69,8 @@ if (-not $token) { throw 'Could not get a Microsoft Graph token for the signed-i
 # Named so that no module alias can shadow it (Microsoft.Graph.Authentication exports the alias Invoke-GraphRequest).
 function Invoke-OperatorToolsGraph {
     param([string]$Method = 'GET', [string]$Path, $Body)
-    $p = @{ Method = $Method; Uri = "$GraphBase/$Path"; Headers = @{ Authorization = "Bearer $token"; ConsistencyLevel = 'eventual' } }
+    # No ConsistencyLevel=eventual: these reads must see an app created seconds earlier (no duplicate on a re-run).
+    $p = @{ Method = $Method; Uri = "$GraphBase/$Path"; Headers = @{ Authorization = "Bearer $token" } }
     if ($null -ne $Body) { $p.Body = ($Body | ConvertTo-Json -Depth 8); $p.ContentType = 'application/json' }
     Microsoft.PowerShell.Utility\Invoke-RestMethod @p
 }
@@ -87,15 +91,16 @@ function Get-OperatorToolsGraphCollection {
 
 $me = Invoke-OperatorToolsGraph -Path 'me?$select=id,userPrincipalName'
 $changes = 0
+$NotesMarker = 'Created by scripts/provisioning/Register-OperatorToolsClient.ps1.'
 $escapedName = $DisplayName.Replace("'", "''")
 
 # ---- 1. Application ---------------------------------------------------------------------------------------------
-$apps = @(Get-OperatorToolsGraphCollection -Path "applications?`$filter=displayName eq '$escapedName'&`$select=id,appId,displayName,signInAudience,isFallbackPublicClient,publicClient,web,spa,passwordCredentials,keyCredentials,requiredResourceAccess")
+$apps = @(Get-OperatorToolsGraphCollection -Path "applications?`$filter=displayName eq '$escapedName'&`$select=id,appId,displayName,signInAudience,isFallbackPublicClient,publicClient,web,spa,notes,passwordCredentials,keyCredentials,requiredResourceAccess")
 if ($apps.Count -gt 1) { throw "$($apps.Count) applications are named '$DisplayName'. Resolve by hand; nothing was changed." }
 $app = $apps | Select-Object -First 1
 $desired = @{
     signInAudience         = 'AzureADMyOrg'
-    isFallbackPublicClient = $true
+    isFallbackPublicClient = $false
     publicClient           = @{ redirectUris = @($LocalhostRedirect) }
 }
 if (-not $app) {
@@ -103,7 +108,7 @@ if (-not $app) {
     if ($PSCmdlet.ShouldProcess($DisplayName, 'Create public client application')) {
         $body = $desired.Clone()
         $body.displayName = $DisplayName
-        $body.notes = 'Operator scripts sign in with this client to call DEMO stamp BFFs as a user. Pre-authorized by provisioning H3 only on stamps whose registry row is Demo. No secrets, certificates, federated credentials or web/SPA redirects. Created by scripts/provisioning/Register-OperatorToolsClient.ps1.'
+        $body.notes = 'Operator scripts sign in with this client to call DEMO stamp BFFs as a user. Pre-authorized by provisioning H3 only on stamps whose registry row is Demo. No secrets, certificates, federated credentials or web/SPA redirects. ' + $NotesMarker
         # A delegated create makes the signed-in operator the app's only owner.
         $app = Invoke-OperatorToolsGraph -Method POST -Path 'applications' -Body $body
         Write-Host "[app] created appId $($app.appId) (owner: $($me.userPrincipalName))"
@@ -118,6 +123,12 @@ else {
     $owners = @(Get-OperatorToolsGraphCollection -Path "applications/$($app.id)/owners?`$select=id")
     $otherOwners = @($owners | Where-Object { $_.id -ne $me.id })
     if ($otherOwners.Count -gt 0) { $refusals += "$($otherOwners.Count) owner(s) other than the signed-in operator" }
+    if ($owners.Count -eq 0 -and -not ("$($app.notes)".Contains($NotesMarker))) { $refusals += 'no owner and no marker showing this script created it' }
+    $existingSp = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals?`$filter=appId eq '$($app.appId)'&`$select=id") | Select-Object -First 1
+    if ($existingSp) {
+        $spOwners = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals/$($existingSp.id)/owners?`$select=id" | Where-Object { $_.id -ne $me.id })
+        if ($spOwners.Count -gt 0) { $refusals += "$($spOwners.Count) service-principal owner(s) other than the signed-in operator" }
+    }
     $creds = @(@($app.passwordCredentials) + @($app.keyCredentials) | Where-Object { $_ })
     if ($creds.Count -gt 0) { $refusals += "$($creds.Count) secret/certificate credential(s)" }
     $fics = @(Get-OperatorToolsGraphCollection -Path "applications/$($app.id)/federatedIdentityCredentials")
@@ -131,7 +142,7 @@ else {
 
     $drift = @()
     if ($app.signInAudience -ne 'AzureADMyOrg') { $drift += "signInAudience=$($app.signInAudience)" }
-    if ($app.isFallbackPublicClient -ne $true) { $drift += 'isFallbackPublicClient not true' }
+    if ($app.isFallbackPublicClient -ne $false) { $drift += 'isFallbackPublicClient not false (device code / password sign-in allowed)' }
     $publicRedirects = @($app.publicClient.redirectUris)
     if ($publicRedirects.Count -ne 1 -or $publicRedirects[0] -ne $LocalhostRedirect) { $drift += "public-client redirects are [$($publicRedirects -join ', ')], not exactly $LocalhostRedirect" }
     if ($drift) {
@@ -186,7 +197,9 @@ $assignees = if ($AssignUserUpn) {
 }
 else { @($me) }
 if ($sp) {
-    $assigned = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId" | ForEach-Object principalId)
+    $assignments = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType")
+    $assigned = @($assignments | ForEach-Object principalId)
+    Write-Host "[assign] currently assigned ($($assignments.Count)): $(($assignments | ForEach-Object { "$($_.principalDisplayName) [$($_.principalType)]" }) -join ', ')"
     foreach ($user in $assignees) {
         if ($assigned -contains $user.id) { Write-Host "[assign] $($user.userPrincipalName) already assigned"; continue }
         if ($PSCmdlet.ShouldProcess($user.userPrincipalName, 'Assign to the operator tools client')) {

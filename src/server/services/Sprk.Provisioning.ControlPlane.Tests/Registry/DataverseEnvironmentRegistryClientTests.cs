@@ -92,6 +92,15 @@ public sealed class DataverseEnvironmentRegistryClientTests
             .WithMessage("*EntitySetName*non-empty*");
     }
 
+    [Fact]
+    public void SnapshotSelectColumns_IncludeTheColumnsH3GatesTheDemoClientOn()
+    {
+        // H3 (demo plan decision 1) pre-authorizes the Demo-only client from sprk_environmenttype + sprk_isactive.
+        // Without them in $select every row parses as type unset, and no Demo stamp ever gets the client.
+        DataverseEnvironmentRegistryClient.SnapshotSelectColumns.Split(',').Should().Contain(
+            ["sprk_dataverseenvironmentid", "sprk_customerid", "sprk_tenantid", "sprk_environmenttype", "sprk_isactive"]);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

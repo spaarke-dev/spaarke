@@ -362,15 +362,26 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                _logger.LogError(ex,
+                    "H3 run {RunId} customer {CustomerId}: registry row {EnvironmentId} could not be read to decide the " +
+                    "Demo-only clients; refusing (Resumable), nothing written to Entra",
+                    run.RunId, envelope.CustomerId, run.EnvironmentId);
+                var detail = ex.Message.Length > 300 ? ex.Message[..300] + "..." : ex.Message;
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     EntraAppRegRejectionCodes.RegistryEnvironmentTypeUnavailable,
                     $"Could not read registry row '{run.EnvironmentId}' to tell whether the stamp is Demo " +
-                    $"({ex.GetType().Name}); nothing was written to Entra. Resume when the registry is reachable.",
+                    $"({ex.GetType().Name}: {detail}); nothing was written to Entra. Fix the cause (the Worker identity's " +
+                    "access to the registry, or the row itself), then resume.",
                     cancellationToken).ConfigureAwait(false);
             }
 
+            // The Demo-only clients are single-tenant Spaarke apps: only a Spaarke-tenant stamp (Model 1) whose
+            // registry row names this customer AND this tenant can carry them.
             var isDemo = registryRow is not null
                 && string.Equals(registryRow.CustomerId, envelope.CustomerId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(registryRow.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_options.SpaarkeTenantId)
+                && string.Equals(tenantId, _options.SpaarkeTenantId, StringComparison.OrdinalIgnoreCase)
                 && registryRow.IsActiveDemo;
             if (isDemo)
             {

@@ -134,10 +134,16 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     // ISS-031: when the stamp was (last) provisioned — H13 promotes it on every completed run. POST /api/runs reads it
     // to recognise an upgrade of an existing stamp.
     private const string ProvisionedOnColumn = "sprk_provisionedon";
-    // Demo environment plan decision 1 (2026-11-26): H3 pre-authorizes the Demo-only operator client only when the row
-    // is Environment Type = Demo and active — the same test the demo loader's guard applies.
+    // Demo environment plan decision 1 (2026-11-26): H3 pre-authorizes the Demo-only operator client only when the
+    // run's own row is Environment Type = Demo and active. (The demo data loader's guard is stricter: it also refuses
+    // when any Production row names the same Dataverse URL. H3 reads only the run's row.)
     private const string EnvironmentTypeColumn = "sprk_environmenttype";
     private const string IsActiveColumn = "sprk_isactive";
+
+    /// <summary>The columns both lookups read into a <see cref="DataverseEnvironmentRegistrySnapshot"/>.</summary>
+    internal const string SnapshotSelectColumns =
+        EnvironmentRowIdColumn + "," + CustomerIdColumn + "," + TenantIdColumn + "," + SetupStatusColumn + "," +
+        CurrentRunIdColumn + "," + ProvisionedOnColumn + "," + EnvironmentTypeColumn + "," + IsActiveColumn;
 
     // Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
     // state field. SINGLE-LINE-OF-TEXT column (written as a JSON string —
@@ -181,8 +187,7 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         var relative =
             $"/api/data/v9.2/{_options.EntitySetName}?" +
             $"$filter={TenantIdColumn} eq '{Uri.EscapeDataString(filterValue)}'" +
-            $"&$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
-            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn},{EnvironmentTypeColumn},{IsActiveColumn}" +
+            $"&$select={SnapshotSelectColumns}" +
             "&$top=1";
         var requestUri = new Uri(envUri, relative);
 
@@ -256,8 +261,7 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         // KeyLookup by row id via OData segment — no $filter needed.
         var relative =
             $"/api/data/v9.2/{_options.EntitySetName}({envRowId})?" +
-            $"$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
-            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn},{EnvironmentTypeColumn},{IsActiveColumn}";
+            $"$select={SnapshotSelectColumns}";
         var requestUri = new Uri(envUri, relative);
 
         var httpClient = _httpClientFactory.CreateClient(HttpClientName);

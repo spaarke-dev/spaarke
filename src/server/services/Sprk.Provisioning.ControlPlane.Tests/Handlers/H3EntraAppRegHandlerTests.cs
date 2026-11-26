@@ -801,6 +801,54 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.ProvisionCallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task Demo_10_StampOutsideTheSpaarkeTenant_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-10"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true)),
+            spaarkeTenantId: "99999999-9999-9999-9999-999999999999");
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty(
+            "the operator client is a single-tenant Spaarke app: a customer-tenant registration never lists it");
+    }
+
+    [Fact]
+    public async Task Demo_11_RegistryRowOfAnotherTenant_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var otherTenantRow = DemoRow(environmentType: 1, isActive: true) with { TenantId = "88888888-8888-8888-8888-888888888888" };
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-11"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(otherTenantRow));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Demo_12_RegistryReadFails_DiagnosticCarriesTheCause()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-12"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Throwing(new InvalidOperationException("Registry lookup returned HTTP 403 Forbidden")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Diagnostic.Should().Contain("HTTP 403 Forbidden", "the operator must see why the read failed, not only its type");
+    }
+
     private static DataverseEnvironmentRegistrySnapshot DemoRow(int? environmentType, bool? isActive) =>
         new(EnvironmentRowId, CustomerId, TenantId, "Ready", CurrentRunId: null, ProvisionedOn: null,
             EnvironmentType: environmentType, IsActive: isActive);
@@ -876,13 +924,15 @@ public sealed class H3EntraAppRegHandlerTests
         int? expectedScopeCount = null,
         List<string>? preAuthorizedClientAppIds = null,
         List<string>? demoPreAuthorizedClientAppIds = null,
-        IDataverseEnvironmentRegistryClient? registry = null)
+        IDataverseEnvironmentRegistryClient? registry = null,
+        string? spaarkeTenantId = null)
     {
         var options = Options.Create(new EntraAppRegOptions
         {
             ExpectedDelegatedScopeCount = expectedScopeCount ?? ExpectedScopeCount,
             PreAuthorizedClientAppIds = preAuthorizedClientAppIds ?? [],
             DemoPreAuthorizedClientAppIds = demoPreAuthorizedClientAppIds ?? [],
+            SpaarkeTenantId = spaarkeTenantId ?? TenantId,
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options,

@@ -101,6 +101,45 @@ public sealed class CopilotAgentClientPreAuthorizationTests
     }
 
     [Fact]
+    public void Bicep_DemoOnlyClients_AreAnEmptyByDefault_ArrayParameter_EmittedAsTheirOwnIndexedSettings()
+    {
+        using var template = LoadCompiledTemplate();
+        var root = template.RootElement;
+
+        var param = root.GetProperty("parameters").GetProperty("demoPreAuthorizedClientAppIds");
+        param.GetProperty("type").GetString().Should().Be("array");
+        param.GetProperty("defaultValue").GetArrayLength().Should().Be(0);
+        WorkerModule(root).GetProperty("properties").GetProperty("parameters")
+            .GetProperty("demoPreAuthorizedClientAppIds").GetProperty("value").GetString()
+            .Should().Be("[parameters('demoPreAuthorizedClientAppIds')]");
+
+        var settings = WorkerModule(root).GetProperty("properties").GetProperty("template")
+            .GetProperty("variables").GetProperty("entraAppRegSettings").GetString();
+        settings.Should().Contain("EntraAppRegOptions__DemoPreAuthorizedClientAppIds__{0}")
+            .And.Contain("parameters('demoPreAuthorizedClientAppIds')[lambdaVariables('i')]");
+        settings.Should().NotContain("concat(parameters('preAuthorizedClientAppIds'), parameters('demoPreAuthorizedClientAppIds'))",
+            "the Demo-only clients must never join the list H3 puts on every stamp");
+    }
+
+    [Fact]
+    public void TheEmittedDemoSettings_BindToDemoPreAuthorizedClientAppIds_NotThePlatformList()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["EntraAppRegOptions:PreAuthorizedClientAppIds:0"] = AddInClientId,
+                ["EntraAppRegOptions:DemoPreAuthorizedClientAppIds:0"] = CopilotClientId,
+            })
+            .Build();
+
+        var options = new EntraAppRegOptions();
+        config.GetSection(nameof(EntraAppRegOptions)).Bind(options);
+
+        options.PreAuthorizedClientAppIds.Should().Equal(AddInClientId);
+        options.DemoPreAuthorizedClientAppIds.Should().Equal(CopilotClientId);
+    }
+
+    [Fact]
     public void H3_PreAuthorizesTheAddIn_AndTheCopilotClient_OnUserImpersonation()
     {
         var plan = GraphAppRegistrationProvisioner.PlanClientAccess(App(preAuthorized: [Pre(AddInClientId)]), [Origin],
