@@ -864,7 +864,8 @@ describe('theme', () => {
   it('the host FluentProvider decides the colours: the page carries no colour literal (control: the scan sees one)', () => {
     const colour = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
     const read = (rel: string) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
-    for (const f of ['main.tsx', 'components/ProceduresPanel.tsx', 'components/ProcedureList.tsx', 'components/RuleList.tsx']) {
+    // '../../_ebilling-shared/codePageChrome.tsx': the surface and message states live in the e-billing pages' shared chrome (issue 2965).
+    for (const f of ['main.tsx', '../../_ebilling-shared/codePageChrome.tsx', 'components/ProceduresPanel.tsx', 'components/ProcedureList.tsx', 'components/RuleList.tsx']) {
       expect([f, colour.test(read(f))]).toEqual([f, false]);
     }
     expect(colour.test('color: #fff;')).toBe(true);

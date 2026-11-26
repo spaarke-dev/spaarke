@@ -321,8 +321,11 @@ public sealed partial class DecisionCommitServiceTests
                     // Task 174: like Dataverse, honour the review-id condition (sprk_steps LIKE %"reviewId":"{id}"%), so a record stored for
                     // ANOTHER review is not found by this one.
                     var reviewIdLike = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like);
+                    // Task 223 (DI-144): and, like Dataverse, the createdonbehalfby-is-empty half of WriterCreatedRecord.
+                    var onBehalfOfEmpty = query.Criteria.Conditions.Any(c => c.AttributeName == "createdonbehalfby" && c.Operator == ConditionOperator.Null);
                     return new EntityCollection(ExistingRecords
                         .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                        .Where(r => !onBehalfOfEmpty || r.GetAttributeValue<EntityReference>("createdonbehalfby") is null)
                         .Where(r => reviewIdLike is null
                             || (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(((string)reviewIdLike.Values.Single()).Trim('%'), StringComparison.Ordinal))
                         .ToList());
