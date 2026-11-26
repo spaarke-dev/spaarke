@@ -4,7 +4,7 @@
     <title>FR-03 cleanup PR (part 2): §10.1 item 7 threaded reply via Graph createReply/createReplyAll + item 8 docs (ADR-036:104, sprk_backgroundjobrun note)</title>
     <phase>0 Foundations and cleanup</phase>
     <gate>after 005 (same branch / same PR); the live test send needs owner OK and the shared mailbox</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs on the outbound email send path (tags bff-api); a wrong fallback silently sends unthreaded mail.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -115,6 +115,8 @@
     <criterion testable="true">Build and all tests pass.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
+
+  <completion-notes>2026-11-25. Code, tests, docs and gates done; see notes/006-threaded-reply.md. PENDING (owner-gated, not performed): the live dev test send and /bff-deploy (acceptance criterion 5 and step 7); no Graph/Azure/Dataverse call was made. The marker is carried on the createReply message parameter (Graph does not list internetMessageHeaders as updatable on a draft); that assumption is checked by the live send. rework: fix-round-1 task 006</completion-notes>
 
   <notes>Seeding proof requested for the parent-not-found test (a silent unthreaded fallback is the defect this task removes): make the branch fall back to a new message, confirm the test fails, restore.</notes>
 
