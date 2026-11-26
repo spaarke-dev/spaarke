@@ -572,6 +572,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "spaarke-intake-pipeline-r1 task 012 (FR-08) - intake harness selection Binding for request type nda. IntakeHarnessRegistry resolves consumerType intake-harness with consumerCode = the request type and a RoutingContext carrying RequestType (+ DocumentType); this row's consumerCode IS the harness key (the registered C# IIntakeHarness with Key 'nda', task 015). matchConditions requestType=nda is the FR-08 routing key; add documentType conditions here to narrow it. NOT an AI dispatch and NOT chat/loop-projectable: toolDescription, surfaces, disposition, risk, captureMode, chipTransitions and onEventBindings are all null. actionCode is set only because ConsumerRoutingService skips target-less rows; agreement-classify is the catalogued Action whose result decides whether the request reaches this harness (FR-10 triage below 0.85). Nothing dispatches this Binding's Action. ConsumerTypes.IntakeHarness joined ConsumerTypes.All in the same change (seed this row only with a BFF that has the constant). A request type with no row, or a row whose key has no registered harness, goes to manual triage (FR-10).",
+      "consumerType": "intake-harness",
+      "consumerCode": "nda",
+      "environment": "*",
+      "name": "Intake Harness - NDA review",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "agreement-classify",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": "{\"requestType\":\"nda\"}",
+      "toolDescription": null
+    },
+    {
       "$comment": "ebilling-r1 task 042 (FR-46, D-52) - Binding for invoice-classify, a Linear AI Consumer reached only through the IInvoiceAi PublicContracts facade (IInvoiceAi.ClassifyAsync, called by AttachmentClassificationJobHandler) - NOT chat/loop-projectable, deliberately: toolDescription, surfaces, disposition, risk, captureMode, chipTransitions and onEventBindings are all null (same shape as email-triage). actionCode resolves to the JPS Action infra/dataverse/actions/invoice-classify.action.json (display name INVOICE-CLASSIFY@v1, Fast tier). The sprk_modeltieroverride column is not mirrored by this script and is not applied on the linear path (ISS-005); the Action row carries the tier. ConsumerTypes.InvoiceClassify joined ConsumerTypes.All in the same change.",
       "consumerType": "invoice-classify",
       "consumerCode": "default",

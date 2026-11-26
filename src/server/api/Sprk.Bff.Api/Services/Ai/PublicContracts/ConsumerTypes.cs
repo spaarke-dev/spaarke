@@ -433,6 +433,18 @@ public static class ConsumerTypes
     /// </summary>
     public const string NdaStandardSummary = "nda-standard-summary";
 
+    // ── Intake pipeline (spaarke-intake-pipeline-r1 task 012, FR-08) ──
+
+    /// <summary>
+    /// Intake harness selection. <c>IntakeHarnessRegistry</c> resolves this consumer type with
+    /// <c>consumerCode</c> = the request type and a <see cref="RoutingContext"/> carrying
+    /// <see cref="RoutingContext.RequestType"/> (and <see cref="RoutingContext.DocumentType"/> when
+    /// classified); the matched row's <see cref="Binding.ConsumerCode"/> is the harness key. One
+    /// row per harness in <c>infra/dataverse/sprk_playbookconsumer-rows.json</c> (first: <c>nda</c>).
+    /// Never chat/loop-projected (no tool description, no chips, no event bindings).
+    /// </summary>
+    public const string IntakeHarness = "intake-harness";
+
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
@@ -475,5 +487,6 @@ public static class ConsumerTypes
         AgreementClassify,
         NdaReview,
         NdaStandardSummary,
+        IntakeHarness,
     };
 }

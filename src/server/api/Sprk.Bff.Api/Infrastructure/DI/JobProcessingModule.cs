@@ -52,6 +52,12 @@ public static class JobProcessingModule
         // queued from UploadFinalizationWorker.QueueNextStageAsync.
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestJobHandler>();
 
+        // Intake pipeline (spaarke-intake-pipeline-r1 task 012, FR-08): the harness registry, built from every
+        // registered IIntakeHarness (none yet; the NDA harness is task 015, one AddScoped<IIntakeHarness, …> line
+        // here). Scoped because IConsumerRoutingService (RoutingModule, unconditional) and the harnesses are scoped.
+        // Unconditional: it has no AI dependency of its own.
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.Harnesses.IntakeHarnessRegistry>();
+
         // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
         // Mixed handlers (RagIndexing references Dataverse) stay in Services/Jobs/Handlers/;
         // pure-AI handler (BulkRagIndexing) relocated per task 051 (FR-E3)

@@ -1125,7 +1125,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     /// Apply the flat key/value JSON predicate against the routing context.
     /// ALL keys must match. String values are equality matches; arrays are
     /// in-list (OR) matches. Null/empty/<c>{}</c> match conditions always
-    /// match. Unknown keys are IGNORED (forward-compat).
+    /// match. An unknown key fails the match (fail closed; see <see cref="ResolveContextValue"/>).
     /// </summary>
     internal static bool TryMatchConditions(string? matchConditionsJson, IRoutingContext? context)
     {
@@ -1209,6 +1209,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         {
             "mimeType" => context.MimeType,
             "documentType" => context.DocumentType,
+            "requestType" => context.RequestType,
             _ => null, // Unknown key: caller's match condition referenced a dim we don't expose; treat as no-match.
         };
     }
@@ -1261,12 +1262,15 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     {
         var mime = context?.MimeType ?? string.Empty;
         var docType = context?.DocumentType ?? string.Empty;
+        // Every IRoutingContext dimension the match conditions can read MUST be in the key, or a
+        // resolution cached for one value is served for another (e.g. requestType nda vs invoice).
+        var requestType = context?.RequestType ?? string.Empty;
         var prefix = targetKind switch
         {
             LookupTarget.Action => ActionCacheKeyPrefix,
             LookupTarget.Binding => BindingCacheKeyPrefix,
             _ => CacheKeyPrefix,
         };
-        return $"{prefix}{consumerType}:{consumerCode}:{environment}:{mime}:{docType}";
+        return $"{prefix}{consumerType}:{consumerCode}:{environment}:{mime}:{docType}:{requestType}";
     }
 }

@@ -2552,6 +2552,26 @@
         "dispatchAssertPhase": "P3",
         "activatedBy": "spaarke-intake-pipeline-r1 task 005 (design 10.1 item 6)"
       }
+    },
+    {
+      "caseId": "GU-150",
+      "family": "intake-harness",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "an intake run for a request of type nda is routed to the NDA intake harness (spaarke-intake-pipeline-r1 task 012, FR-08)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.IntakeHarness constant (added by spaarke-intake-pipeline-r1 task 012). Not an AI dispatch: IntakeHarnessRegistry resolves the Binding deterministically (consumerCode = request type, matchConditions on requestType) and the row's consumerCode names the registered C# harness; never chat/loop-projected or Click-dispatched (no tool description, surfaces, chips or event bindings). Dedicated coverage lives in tests/unit/domain/Intake/IntakeHarnessRegistryTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "intake-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "intake-harness",
+        "consumerCode": "nda",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarke-intake-pipeline-r1 task 012 (FR-08)"
+      }
     }
   ]
 }
