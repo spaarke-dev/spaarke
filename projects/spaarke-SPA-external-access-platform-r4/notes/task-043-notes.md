@@ -94,6 +94,40 @@ Known limits recorded (K):
 - **Publish size**, fresh master `51ce01a116` vs branch `675457fbb4`: short-path worktrees `C:\wt043m` / `C:\wt043b`, `dotnet publish -c Release`, `Compress-Archive`, 194 files each. Zips 43,661,147 → 43,661,371 bytes, **+224 bytes** (≈ 43.7 MB, under 55/60 MB). The review fixes add a few lines to one endpoint file: no package or DI change.
 - CVE: `dotnet list package --vulnerable --include-transitive`: no vulnerable packages. No package change.
 
-## Open at this checkpoint
-- code-review + adr-check.
-- UAC review via uac-r2 (send the diff summary); record it here and in the PR.
+## code-review (standard, after both adversarial passes)
+No Critical and no F-class finding.
+- **Security:** no secrets; fixed ProblemDetails detail; the SPA never shows a server body on these paths (ProjectPage improved from showing raw JSON).
+- **Performance:** at most 3 extra requests per client over about 7 s during an outage.
+  - Suggestion K4: the delays are fixed (no jitter), so clients retry in step after a Dataverse blip. Bounded by the owner-set 1/2/4 s and 3 retries.
+- **Lint:** BFF build 0 errors (TreatWarningsAsErrors); tsc 0; eslint clean.
+- **AI smells:** none (no new interface, no log-rethrow, comments explain why). Clean.
+- **Metrics / direction:**
+  - `CallerPrincipalResolver.cs` (large, pre-existing) is cohesive: caller-principal resolution, and the change adds one helper group and two branches.
+  - `me-client.ts` (+75) is cohesive: the `/me` client and its failure rules.
+  - `ProjectPage.tsx`: net neutral (the 404 branch removed, the binder branch added).
+  - Overall neutral.
+- **§16 enforcement:** the SPA code list duplicates the server's.
+  - Added a source pin in `me-client.binderFaultRetry.test.tsx` that reads `IsBinderFault` in `CallerPrincipalResolver.cs` and the constants in `ContactBindingDecision.cs`, and asserts the SPA list equals them.
+  - It has a must-fire control: a widened server set fails the pin.
+  - The server rule itself is pinned by BinderFaultStatusTests (must-fire and must-not-fire).
+- **§11 justification:**
+  - `CallerPrincipalResolution.IsBinderFault` / `BinderFault` / `BinderFaultDetail`. Existing: `ProblemDetailsHelper.Forbidden`, the precedent shape. Extension: `CallerPrincipalResolution` extended in place, no new type. Cost of doing nothing: the three codes stay 403 and FR-28 fails.
+  - SPA `withBinderFaultRetry` and its friends. Existing: the `OwnerUnconfiguredError` / `isOwnerUnconfigured` pattern in the same file, now sharing `problemCodeIn`. Cost of doing nothing: no retry, and a binder 503 degrades to the plane-default workspace.
+  - No new file except tests, and no endpoint, DI registration, package or column.
+
+## adr-check
+- **ADRs considered:** ADR-001, ADR-007, ADR-008, ADR-010, ADR-012, ADR-019, ADR-021, ADR-028, ADR-038, ADR-052. **All compliant.**
+  - ADR-001: no new endpoint; the changed route is still Minimal API.
+  - ADR-007: no Graph.
+  - ADR-008: filters unchanged.
+  - ADR-010: no DI.
+  - ADR-012: no shared-lib change.
+  - ADR-019: ProblemDetails with stable `reasonCode`/`errorCode`.
+  - ADR-021: Fluent v9 MessageBar, no hex.
+  - ADR-028: indeterminate → retryable 503, never 403. The client still uses `bffApiCall`, with no raw token handling.
+  - ADR-038: new tests at KEEP paths `integration/auth` and `integration/contract`; SPA tests under `tests/`; no banned mocks (the mocked resolver is the strategy's module boundary, and real resolver/binder cases sit alongside).
+  - ADR-052: no background work.
+- **ArchTests:** 2845/2845.
+
+## UAC review
+- Requested from uac-r2 on 2026-11-26 (diff summary of the resolver and registration changes, plus D-43/D-44). Answer: pending at this checkpoint.

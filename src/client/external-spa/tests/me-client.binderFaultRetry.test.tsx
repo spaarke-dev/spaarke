@@ -9,6 +9,8 @@
  * Must-not-fire pairs: a plain 503 (no binder code) keeps today's plane-default fallback; a 403 is never retried.
  * The workforce gate's half (WorkforceHomeGate) is tested in tests/workforce-home-auth.test.ts.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -201,5 +203,36 @@ describe('WorkspaceHomePage', () => {
     expect(await screen.findByTestId('bff-access-denied')).toBeTruthy();
     expect(screen.queryByText(BINDER_FAULT_MESSAGE)).toBeNull();
     expect(bffApiCall).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The SPA's BINDER_FAULT_CODES is a copy of the server's set (CallerPrincipalResolution.IsBinderFault over
+// ContactBindingDecision's constants). This source pin fails the build when the two drift apart.
+describe('BINDER_FAULT_CODES matches the BFF', () => {
+  const serverDir = path.resolve(__dirname, '../../../server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess');
+  const decision = fs.readFileSync(path.join(serverDir, 'ContactBindingDecision.cs'), 'utf8');
+  const resolver = fs.readFileSync(path.join(serverDir, 'CallerPrincipalResolver.cs'), 'utf8');
+
+  /** The constant names the server's IsBinderFault matches, mapped to their string values in ContactBindingDecision.cs. */
+  function serverBinderCodes(resolverSource: string, decisionSource: string): string[] {
+    const body = /IsBinderFault\(string\? denyCode\) =>([\s\S]*?);/.exec(resolverSource)?.[1] ?? '';
+    const names = [...body.matchAll(/ContactBindingDecision\.(\w+)/g)].map(m => m[1]);
+    return names.map(
+      name => new RegExp(`const string ${name} = "([^"]+)"`).exec(decisionSource)?.[1] ?? `<missing ${name}>`
+    );
+  }
+
+  it('BinderFaultCodes_SpaListEqualsTheServerSet', () => {
+    expect([...serverBinderCodes(resolver, decision)].sort()).toEqual([...BINDER_FAULT_CODES].sort());
+  });
+
+  it('BinderFaultCodes_ThePinFires_WhenTheServerSetGainsACode', () => {
+    // Must-fire control: a server set with a fourth code no longer equals the SPA list.
+    const widened = resolver.replace(
+      'or ContactBindingDecision.DenyContactBindFailed',
+      'or ContactBindingDecision.DenyContactBindFailed or ContactBindingDecision.DenyContactInactive'
+    );
+    expect(widened).not.toBe(resolver);
+    expect([...serverBinderCodes(widened, decision)].sort()).not.toEqual([...BINDER_FAULT_CODES].sort());
   });
 });
