@@ -168,7 +168,7 @@ internal sealed class GetTaskTool : McpToolDefinition
             TaskToolSupport.OpenLink(consoleBaseUrl, task.Id));
 
         var text = TaskToolSupport.LineOf(row)
-                   + (row.RegardingRecordName is { } regarding ? $"\nRegarding {(regardingType ?? "record").ToLowerInvariant()}: {regarding}" : string.Empty)
+                   + (row.RegardingRecordName is { } regarding ? $"\nRegarding {McpText.SingleLine(regardingType ?? "record").ToLowerInvariant()}: {McpText.SingleLine(regarding)}" : string.Empty)
                    + (body.Link is { } link ? $"\nOpen in Spaarke: {link}" : string.Empty);
         return DecisionToolCall.Success(text, body);
     }

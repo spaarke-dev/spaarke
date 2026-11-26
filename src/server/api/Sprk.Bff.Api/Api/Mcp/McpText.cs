@@ -1,15 +1,17 @@
+using System.Globalization;
+
 namespace Sprk.Bff.Api.Api.Mcp;
 
 /// <summary>
-/// Text helpers for the model-visible lines of MCP tool results (spaarkeai-mcp-bff-api-r2).
+/// Text helpers shared by the MCP tools (spaarkeai-mcp-bff-api-r2 tasks 023, 024, 025). A tool's text content is read by the model line by
+/// line, so a user-authored value (a playbook name, a task subject, a document name) must never start a line of its own and pass for another
+/// row or for a link line. Structured content keeps every value as it is.
 /// </summary>
 public static class McpText
 {
     /// <summary>
-    /// <paramref name="value"/> as one line: every control character (<see cref="char.IsControl(char)"/>: CR, LF, tab, NEL, ...) and every
-    /// Unicode line or paragraph separator becomes a space, so a user-authored value (a title, a name) cannot start a line of its own and
-    /// pass for another row. Null becomes the empty string. Use it for every user-authored value written into a line of text; a tool's
-    /// structured rows keep the value as it is.
+    /// The value on one line: every control character (CR, LF, tab, NEL, ...) and Unicode line or paragraph separator becomes a space.
+    /// Nothing else changes (no trim, no collapse, no clip). Null becomes the empty string.
     /// </summary>
     public static string SingleLine(string? value)
     {
@@ -18,21 +20,17 @@ public static class McpText
             return string.Empty;
         }
 
-        if (!value.Any(IsLineBreaking))
-        {
-            return value;
-        }
-
-        return string.Create(value.Length, value, static (span, v) =>
-        {
-            for (var i = 0; i < v.Length; i++)
+        return value.Any(IsLineBreaking)
+            ? string.Create(value.Length, value, static (span, v) =>
             {
-                span[i] = IsLineBreaking(v[i]) ? ' ' : v[i];
-            }
-        });
+                for (var i = 0; i < v.Length; i++)
+                {
+                    span[i] = IsLineBreaking(v[i]) ? ' ' : v[i];
+                }
+            })
+            : value;
     }
 
     private static bool IsLineBreaking(char c) =>
-        char.IsControl(c)
-        || char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator;
+        char.IsControl(c) || char.GetUnicodeCategory(c) is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
 }

@@ -148,7 +148,7 @@ internal static class DocumentToolSupport
         var parts = new List<string>(3);
         if (row.FileType is not null)
         {
-            parts.Add(row.FileType);
+            parts.Add(McpText.SingleLine(row.FileType));
         }
 
         if (row.SizeBytes is { } size)
@@ -161,7 +161,10 @@ internal static class DocumentToolSupport
             parts.Add($"modified {modified:yyyy-MM-dd}");
         }
 
-        return parts.Count == 0 ? $"{row.Name} (id {row.Id})" : $"{row.Name} ({string.Join(", ", parts)}; id {row.Id})";
+        // The name and the file type (the extension of a user-chosen file name) are user-authored: on one line, so neither can start a row
+        // or a link line of its own. Structured content keeps them as they are.
+        var name = McpText.SingleLine(row.Name);
+        return parts.Count == 0 ? $"{name} (id {row.Id})" : $"{name} ({string.Join(", ", parts)}; id {row.Id})";
     }
 
     private static string SizeText(long bytes) =>

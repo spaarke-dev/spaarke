@@ -156,7 +156,7 @@ No new code string was invented: `CallerContextUnavailable` reuses the request p
   unauthorizable entity type, no readable document, unknown scope, no bearer token); record search with an unreadable record
   (removed, not counted); two record refusals (invalid record type with `invalidValues`, no bearer token); null context and
   unauthenticated principal for both methods (no Dataverse call, no search, no trim).
-- Added with the verifier fixes (now 16 cases): the empty-page count regression (D-027-2), and two budget cases that drive the
+- Added with the verifier fixes (16 cases; the empty-page count regression D-027-2 has since moved to `tests/integration/regression/Ai/Issue3218_...`, leaving 15 here) and two budget cases that drive the
   check budgets to exhaustion with MORE readable records/parents than the budget: record search (60 readable records, budget 50:
   the first 50 returned, rows 51-60 absent, exactly 50 access questions per call) and document `scope=all` (40 readable parents,
   budget 25: the first 25 returned, later parents absent, `PARTIAL_RESULTS` present, exactly 25 questions per call; the pool is
@@ -186,13 +186,22 @@ POSTing `/api/ai/search/records` `{query:"Globex", recordTypes:["matter"], optio
   after (76 bytes, the digit is the same width) `{"results":[],"metadata":{"totalCount":0,"searchTime":1,"hybridMode":"rrf"}}`. Only the number changes, and only
   when the index total was non-zero on an empty page. A page with rows and a genuine no-match search are byte-identical to before.
   A client that read `totalCount` to page past the end now sees 0, the same as for a page whose rows were all unreadable.
+  The Semantic Search code page's record "load more" (`useRecordSearch.ts`, `hasMore = totalCount > results.length`) cannot
+  fire under that rule (since uac-r2 task 077 `totalCount` is the page's row count); filed as #3219, client not changed here.
 - **Document search does not have this early return.** `scope=all` goes through `AuthorizeRowsByParentAsync`, which sets
   `TotalResults = sanitized.Count` with no empty-page shortcut (an empty page reports 0). `scope=entity` and `scope=documentIds`
   go through `AuthorizeResults`, which subtracts what it dropped from `TotalResults`; that total deliberately stays the
-  authorized parent's (or named documents') total, because the parent was authorized before the search, so it discloses nothing
-  about records the caller cannot read. Unchanged.
-- **Test.** `SearchRecords_EmptyPagePastTheEnd_DoesNotLeakTheUnfilteredCount` (`tests/integration/auth/Ai/`): failed before the fix
-  (`totalCount` 7 on the method and on the route), passes after; asserts the method and the route agree.
+  authorized parent's (or named documents') total. Unchanged.
+- **Correction (second review of 027).** An earlier version of this note said that total "discloses nothing about records the
+  caller cannot read". That is false since the #1511 trim: a restricted or secure document under a READABLE matter is removed
+  from the rows by `TrimToReadableDocumentsAsync`, but the index's `TotalResults` still counts it, so the total can exceed what the
+  caller may read. The count route (`/api/ai/search/count`) is worse: it returns the raw index count, with no row to trim. This is
+  already filed as #1533 and is NOT fixed by task 027. **Task 022 must not expose `TotalResults` or a count until #1533 is
+  fixed.**
+- **Issue and test.** Filed as #3218 (fix commit `48b79df4a5`). Regression test
+  `tests/integration/regression/Ai/Issue3218_RecordSearchEmptyPageCountLeakTests.cs` (moved there from
+  `SearchAuthorizationSharedMethodTests`, which keeps the host): failed before the fix (`totalCount` 7 on the method and on the
+  route), passes after; asserts the method and the route agree.
 
 ## Review
 

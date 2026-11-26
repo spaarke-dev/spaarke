@@ -194,3 +194,10 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   the task's constraint freezes the REST bytes of these routes, and the catch is not an access decision. Task 022 must not
   surface search exceptions' messages in tool results.
 - **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## D-027-2 — empty record page past the end leaked the total count (FIXED in 027) → #3218
+- **Status**: fixed in scope (RecordSearchAuthorizationFilter sets TotalCount = 0 on an empty page); the issue tracks the regression test `tests/integration/regression/Ai/Issue3218_RecordSearchEmptyPageCountLeakTests.cs`.
+
+## D-027-3 — `useRecordSearch.ts:182` `hasMore` can never be true → #3219
+- **Status**: deferred (client, not this project's surface). Since uac-r2 task 077 `TotalCount` is the page's row count, so `hasMore = totalCount > results.length` is always false and `loadMore` never loads. Found by the 027 pass-2 review.
+- **Labels**: Type=Bug.

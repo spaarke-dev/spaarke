@@ -86,3 +86,7 @@ rework: none task 023
 - T1 fixed: a test for an HttpClient timeout (TaskCanceledException) in the links step, which keeps the metadata and sets linksError.
 - K1 (recorded): a production `AuthorizationService.AuthorizeAsync` fault is caught inside that service and answered as a deny, so the get tool's authorization-fault 503 is reachable only with a throwing double. In production a rights-read fault answers the uniform not-found, which fails closed. The 503 covers the row read.
 - K2 (recorded, kept): the fault log carries the exception type only, by the D-023-fault choice (NFR-05). A programming error inside the read step therefore shows as a retryable 503 with no stack in the tool log; `GetDocumentAsync` logs its own exception before rethrowing.
+
+## Second-review fix (025 verifier, 2026-11-25)
+
+- `DocumentToolSupport.LineOf` now writes the document name and the file type (the extension of a user-chosen file name) through `McpText.SingleLine`, the shared one-line rule (`Api/Mcp/McpText.cs`, moved out of `ListPlaybooksTool`). A name holding a line break could start a row of its own in the text of `spaarke_list_documents` and pass for another document. Structured content keeps the name as it is. Test: `List_ANameWithALineBreak_IsOneRowOfTheText_AndTheStructuredNameIsUnchanged`.

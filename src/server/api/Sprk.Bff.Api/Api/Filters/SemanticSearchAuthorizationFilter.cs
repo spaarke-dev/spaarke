@@ -237,7 +237,7 @@ public sealed record SemanticSearchAccess
 /// existing document path. <c>scope=all</c> is REFUSED. <c>default</c> DENIES.
 /// </para>
 /// </remarks>
-public class SemanticSearchAuthorizationFilter : IEndpointFilter
+public sealed class SemanticSearchAuthorizationFilter : IEndpointFilter
 {
     private readonly AuthorizationService _authorizationService;
     private readonly ILogger<SemanticSearchAuthorizationFilter>? _logger;
