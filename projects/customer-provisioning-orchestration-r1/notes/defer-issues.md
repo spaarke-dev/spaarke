@@ -10,6 +10,42 @@
 
 ## Open (in priority order)
 
+### ISS-047 — Skill Step 1f sets a stamp's registry Environment Type from the control-plane tier, not the customer
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (must land before any `demo` control-plane tier gets a registry) |
+| **Filed** | 2026-11-26 |
+| **Source** | Review pass 1 of `work/demo-operator-tools-client` (commit `dc8c521f89`); lesson L15 (ACME run b6941254) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3216 |
+
+**Description**
+
+`/provision-environment` Step 1f writes `sprk_environmenttype` from `$environment`, which is `intake.controlPlaneEnv`
+(the L2 tier: dev/demo/prod), through `@{ 'dev' = 0; 'demo' = 1; ... 'prod' = 6 }`. Every stamp created through the
+dev control plane is therefore recorded as Development, and every stamp created through a future `demo` tier would be
+recorded as Demo, real customers included. Since demo plan decision 1, H3 pre-authorizes the "Spaarke Operator Tools
+(Demo)" client on any stamp whose row is an active Demo, so this column is now an input to which clients a customer BFF
+accepts. The demo data loader's guard also reads it. Not reachable today: only the dev tier has a registry
+(`scripts/provisioning-prereqs/spaarke-constants.yaml` `registryDvUrl`).
+
+**Entry-points**
+
+- `.claude/skills/provision-environment/SKILL.md:1223-1225` (MCP path) and `:1267` (pac fallback)
+- `.claude/skills/provision-environment/SKILL.md:607` (`$environment = $intake.controlPlaneEnv`)
+- `scripts/provisioning-prereqs/intake.schema.json` (no customer environment-type field today)
+
+**Suggested fix**: take the type from a new intake field (closed set, default Production for a customer stamp) and
+never from the tier; leave an existing row's type unchanged on an upgrade run. Check the restructured skill (DRAFT PR
+#2536) for the same mapping.
+
+**Estimated effort**: half a day
+**Blockers**: none
+**Related**: lesson L15; demo environment plan decision 1; ISS-046 (no); H3 `DemoPreAuthorizedClientAppIds`
+
+---
+
 ### ISS-046 — Provisioning does not yet deploy the intake engine that customer.bicep can now create
 
 | Field | Value |
