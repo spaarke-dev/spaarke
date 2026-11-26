@@ -41,6 +41,7 @@
 12. **Stray processes:** four python.exe processes from other sessions have been spinning for days (PIDs 41460, 43772, 84288, 93720). The user decides.
 13. **Cowork review skill pairing (recorded 2026-11-26, for accelerator-r1):** `notes/cross-project-cowork-review-skill.md`. A Spaarke Cowork skill (for example `nda-review`) sits on top of this project's tools. Gaps for accelerator-r1 to decide: getting the document file into the sandbox, and matter email through `spaarke_compose_email`, not Outlook. No r2 action.
 14. **030 run-detach (🔔 ADR conflict, blocks 030 start and 032):** a run must outlive the stateless MCP request. Options 1-4 in `notes/030-decisions.md`; recommended Option 4 (run inside the request up to ~25 s, else hand off to the Console), plus ship `spaarke_get_playbook_run` now. Options 1-3 need an ADR-052, ADR-039 or ADR-028 A10 exception.
+15. **MCP AI-tool rate limit (034 review K3, project-wide):** MCP tools sit under the `mcp` limiter (60 per minute per user), while the REST AI routes they wrap use `ai-batch` (20 per minute, queue 5). A model can therefore trigger about three times more LLM renders per user than the Console can (briefing, analysis, run). Add a per-tool limiter, or accept it?
 
 ## Issues filed this wave
 #3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
