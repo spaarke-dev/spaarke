@@ -220,3 +220,6 @@ POSTing `/api/ai/search/records` `{query:"Globex", recordTypes:["matter"], optio
   `OperationCanceledException`. Both fail closed.
 - K2: a negative `options.limit` throws on the `scope=all` path (the route's `[Range(1, 50)]` metadata is not enforced by a
   validation filter on either route; this is pre-existing on REST). Fails closed.
+
+## Wider unit run after the 027 merge (main session, 2026-11-26)
+About 20 failures in the Filters, Office, Visualization and Search filter run, each taking 3–4 minutes: Office, DataMutation, SpeAdmin and Insights tests that 027 does not touch. A sample rerun on its own (OfficeQuickCreate, Issue975 RAG problem-json, SpeAdmin SearchItems, Insights search contract, Office matter-type lookup) passed 78 of 78. The failures were timeouts under machine load from parallel sessions, not regressions.
