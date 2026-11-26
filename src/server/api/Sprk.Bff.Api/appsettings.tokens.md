@@ -58,7 +58,6 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{ANALYSIS_ENABLED}#` | Enable analysis features (boolean) | `true` or `false` |
 | `#{MULTI_DOCUMENT_ENABLED}#` | Enable multi-doc analysis (boolean) | `true` or `false` |
 | `#{COPILOT_SSO_PROVIDER_APP_ID}#` | M365 Copilot SSO provider app ID (Teams Developer Portal). Used in `AgentToken:CopilotAudience` as `api://#{COPILOT_SSO_PROVIDER_APP_ID}#/#{API_APP_ID}#`. | `auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb` |
-| `#{COPILOT_AGENT_APP_ID}#` | Spaarke Copilot Agent app registration ID (`AgentToken:AgentAppId`) | GUID |
 
 ## Key Vault Secrets Required
 
@@ -141,7 +140,6 @@ RECORD_MATCHING_ENABLED=false
 ANALYSIS_ENABLED=true
 MULTI_DOCUMENT_ENABLED=false
 COPILOT_SSO_PROVIDER_APP_ID=auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb
-COPILOT_AGENT_APP_ID=<set per environment>
 ```
 
 - **`DocumentIntelligence:FastModel` / `StandardModel` / `ReasoningModel`** — model-tier deployment routing (ADR-016; wired end-to-end by `ai-advanced-capabilities-nda-r1` task 010, `ReasoningModel` tokenized by task 013). `FastModel`/`StandardModel` reuse `#{AI_SUMMARIZE_MODEL}#` so existing environments see no behavior/cost change. `ReasoningModel` uses its own distinct token, `#{AI_REASONING_MODEL}#` — do NOT alias it to `AI_SUMMARIZE_MODEL` (it must be free to point at a different deployment/model family, e.g. `gpt-5`, once provisioned). Leave the token unset/empty in environments without a reasoning deployment; set `DocumentIntelligence__ReasoningModel` (or the `AI_REASONING_MODEL` CI/CD variable) once the reasoning-tier deployment exists — see `projects/ai-advanced-capabilities-nda-r1/notes/task-013-reasoning-provisioning.md` for the provisioning runbook and recommended model.

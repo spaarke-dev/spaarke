@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>Wrap-up</phase>
+    <gate>after every other task is done or cancelled</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Runs project-close quality gates and /test-diet (task-create Step 3.7)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural close-out with fixed steps</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>O</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; runs alone after every other task; step 6 edits .claude/ and so runs in the main session</parallel-reason>
+    <deps>003, 004, 041, 042, 043, 049</deps>
+    <tags>testing, documentation</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: final code-review and adr-check on all project code with every F-class finding fixed, /test-diet reconciliation, repository cleanup, final docs (the MCP architecture doc's tool list, HOW-TO-ADD-AN-MCP-TOOL.md), CAPABILITY-INDEX rows applied from notes/capability-index-pending.md in the main session, the BriefingService retirement follow-up filed, README and plan marked complete, lessons learned, deferrals reconciled, and the project archived.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Spaarke project close-out procedure.</role>
+  <goal>All quality gates pass; tests are reconciled; architecture docs list every tool; CAPABILITY-INDEX carries the new canonical components; follow-ups are issues; README and plan show Complete; the project is archived.</goal>
+
+  <context>
+    <background>task-create Step 3.7 (mandatory wrap-up) and root CLAUDE.md §7 (task-execute runs /test-diet for 090-wrapup tasks). CAPABILITY-INDEX is under .claude/ (sub-agents cannot write there, root §3), so step 6 runs in the main session. BriefingService retirement: the legacy agent's briefing path is removed by 001; any remaining BriefingService (Services/Workspace briefing used by GET /api/workspace/briefing) that the Console no longer calls is a follow-up, not this project's deletion (spec Unresolved Questions).</background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r2/README.md</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r2/plan.md</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r2/notes/lessons-learned.md</file>
+      <file role="modify">docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md (tool list, widgets, long-running pattern)</file>
+      <file role="modify">docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md (final check)</file>
+      <file role="modify">.claude/patterns/CAPABILITY-INDEX.md (main session only; rows from notes/capability-index-pending.md)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="043" status="pending">E2E evidence</dependency>
+      <dependency task="041" status="pending">Routing eval complete</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every F-class review finding is fixed before close; K-class items are filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue).</constraint>
+    <constraint source="project">CAPABILITY-INDEX edits run in the main session (root CLAUDE.md §3); a sub-agent running this task stops at step 6 and hands the pending file to the main session.</constraint>
+    <constraint source="project">Archive with /devops-project-archive only after the owner confirms close; the worktree is preserved (the skill does not remove it).</constraint>
+    <constraint source="ADR-038">/test-diet classifies every test this project added or changed; scaffolding is deleted, maintained tests stay on KEEP paths.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review and /adr-check on all project code; classify findings per task-execute Step 9.5; fix every F-class finding.</step>
+    <step order="2">Run /test-diet for the project and apply its classification.</step>
+    <step order="3">Run /repo-cleanup projects/spaarkeai-mcp-bff-api-r2; approve removals (notes/debug/, notes/spikes/, notes/drafts/); archive notes/handoffs/ to .archive/.</step>
+    <step order="4">Update SPAARKE-MCP-SERVER-ARCHITECTURE.md (every tool with annotations and visibility, the four widgets, the long-running pattern, durable runs) and re-check HOW-TO-ADD-AN-MCP-TOOL.md; run /doc-drift-audit for the project's changed paths.</step>
+    <step order="5">File the BriefingService retirement follow-up (and any other follow-ups) with /project-defer-issue-tracking.</step>
+    <step order="6">Main session: apply notes/capability-index-pending.md rows to .claude/patterns/CAPABILITY-INDEX.md.</step>
+    <step order="7">Update README.md (Status Complete, dates, graduation criteria) and plan.md (Complete); append lessons to notes/lessons-learned.md; reconcile notes/defer-issues.md with GitHub issues; prune the project CLAUDE.md.</step>
+    <step order="8">Verify every task in TASK-INDEX.md is [done] or [cancelled]; run scripts/check-task-status-drift.ps1; with the owner's confirmation run /devops-project-archive.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <justification>
+    <existing>r1's 090 close-out procedure; notes/capability-index-pending.md collects rows from 021 and 034.</existing>
+    <extension>Procedure reused; the only new file is the project's lessons-learned note.</extension>
+    <cost-of-doing-nothing>Project-close gates (/test-diet, doc drift, CAPABILITY-INDEX) are skipped, so later projects re-derive the tool list and widget transport.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+    <tool name="gh">issues for follow-ups</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/README.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/lessons-learned.md</output>
+    <output type="docs">docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review and adr-check report no open F-class finding; the BFF builds with 0 warnings; ArchTests, contract, auth and conformance suites pass.</criterion>
+    <criterion testable="true">/test-diet output is applied and recorded.</criterion>
+    <criterion testable="true">SPAARKE-MCP-SERVER-ARCHITECTURE.md lists every spaarke_* tool this project added with annotations and visibility.</criterion>
+    <criterion testable="true">CAPABILITY-INDEX contains each row from notes/capability-index-pending.md (applied by the main session).</criterion>
+    <criterion testable="true">Every notes/defer-issues.md entry has a GitHub issue link, including the BriefingService follow-up.</criterion>
+    <criterion testable="true">Negative: no task in TASK-INDEX.md is left [open] or [in-progress].</criterion>
+  </acceptance-criteria>
+
+  <notes>task-create Step 3.7; root CLAUDE.md §7.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

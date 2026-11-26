@@ -29,9 +29,10 @@
  * identity plumbing.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import type { NarrateResponse, BriefingWindowParams } from '../services/briefingService';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { NarrateResponse, BriefingWindowParams, NarrationResult } from '../services/briefingService';
 import { fetchBriefingLive } from '../services/briefingService';
+import type { BriefingDataService } from '../services/briefingDataService';
 
 // ---------------------------------------------------------------------------
 // Hook types
@@ -71,6 +72,8 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
   return !hasFailures;
 }
 
+const MALFORMED_RESULT_MESSAGE = 'Could not load the daily briefing.';
+
 // ---------------------------------------------------------------------------
 // Hook implementation
 // ---------------------------------------------------------------------------
@@ -79,14 +82,23 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
  * Fetch the Daily Briefing render response. Fires once on mount, again on
  * `refetch()`. The /render call has no request body and authenticates via
  * the OBO token — the BFF resolves the caller's systemuserid server-side.
+ *
+ * `service` (task 010 data seam): an injected `BriefingDataService` supplies the briefing instead of
+ * `fetchBriefingLive`. A rejection from it lands in the `error` state, never an unhandled rejection.
  */
-export function useBriefingRender(windows?: BriefingWindowParams): UseBriefingRenderResult {
+export function useBriefingRender(
+  windows?: BriefingWindowParams,
+  service?: Pick<BriefingDataService, 'renderBriefing'>
+): UseBriefingRenderResult {
   const [status, setStatus] = useState<BriefingRenderStatus>('idle');
   const [data, setData] = useState<NarrateResponse | null>(null);
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Read through a ref so a host that passes a fresh service object each render does not refetch.
+  const serviceRef = useRef(service);
+  serviceRef.current = service;
 
   // r5 settings-wiring (2026-07-09): re-fetch when the user's windows change (e.g. after a
   // Settings Save) OR on explicit refetch. Serialize the windows for a stable effect dep.
@@ -98,30 +110,66 @@ export function useBriefingRender(windows?: BriefingWindowParams): UseBriefingRe
     setError(null);
     setUnavailableReason(null);
 
-    fetchBriefingLive(windows).then(result => {
-      if (cancelled) return;
+    const injected = serviceRef.current;
+    const load: Promise<NarrationResult> = injected
+      ? Promise.resolve()
+          .then(() => injected.renderBriefing(windows))
+          .catch(
+            (err: unknown): NarrationResult => ({
+              status: 'error',
+              message: err instanceof Error && err.message ? err.message : 'Could not load the daily briefing.',
+            })
+          )
+      : fetchBriefingLive(windows);
 
-      switch (result.status) {
-        case 'success': {
-          setData(result.data);
-          setLastFetchedAt(new Date());
-          setStatus(isEmptyResponse(result.data) ? 'empty' : 'success');
-          break;
+    const showError = (message: string) => {
+      setData(null);
+      setError(message);
+      setStatus('error');
+    };
+
+    // Every failure ends in the existing error state: a throw in the handler, an unrecognised status or a
+    // malformed payload from an injected service must never leave the spinner up.
+    load
+      .then(result => {
+        if (cancelled) return;
+
+        const raw = result as unknown as {
+          status?: unknown;
+          data?: unknown;
+          reason?: unknown;
+          message?: unknown;
+        } | null;
+        switch (raw?.status) {
+          case 'success': {
+            const payload = raw.data as NarrateResponse | null | undefined;
+            if (!payload || !Array.isArray(payload.channelNarratives)) {
+              showError(MALFORMED_RESULT_MESSAGE);
+              break;
+            }
+            setData(payload);
+            setLastFetchedAt(new Date());
+            setStatus(isEmptyResponse(payload) ? 'empty' : 'success');
+            break;
+          }
+          case 'unavailable': {
+            setData(null);
+            setUnavailableReason(typeof raw.reason === 'string' ? raw.reason : '');
+            setStatus('unavailable');
+            break;
+          }
+          case 'error': {
+            showError(typeof raw.message === 'string' && raw.message ? raw.message : MALFORMED_RESULT_MESSAGE);
+            break;
+          }
+          default:
+            showError(MALFORMED_RESULT_MESSAGE);
         }
-        case 'unavailable': {
-          setData(null);
-          setUnavailableReason(result.reason);
-          setStatus('unavailable');
-          break;
-        }
-        case 'error': {
-          setData(null);
-          setError(result.message);
-          setStatus('error');
-          break;
-        }
-      }
-    });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        showError(err instanceof Error && err.message ? err.message : MALFORMED_RESULT_MESSAGE);
+      });
 
     return () => {
       cancelled = true;

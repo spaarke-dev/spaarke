@@ -1,0 +1,6 @@
+# Task 003 — .claude/ references (main session, 2026-11-25)
+
+- Edited: `skills/declarative-agent/SKILL.md` (package row + conventions → Retired 2026-11-25), `skills/ci-cd/SKILL.md` (workflow row removed, the workflow is deleted), `skills/mcp-tool-handler/SKILL.md` (naming note), `skills/provision-environment/SKILL.md` (gate 6f and its checklist line marked Retired, skip, points to #3173; steps kept as history until #3173 closes), `skills/adr-check/references/adr-validation-rules.md` (removed the deleted `AgentTokenService` from the E-3 allowlist regex; no rule change), `adr/ADR-028` (two references to the agent marked Retired: the A10 connector-shape citation at :699 and the E-3 historical scope at :810; no rule changed), `AUDIT-FINDINGS-AUTH-SYSTEM.md` (example class retired).
+- Also applied CAPABILITY-INDEX rows 34 (events capability, task 006) and 35 (durable run status, task 005).
+- Acceptance grep residue: `skills/foundry-agent/SKILL.md:101` matches only because `Sprk.Bff.Api/agents/workflows/` contains "Api/agents" (case-insensitive) — a false positive, not an agent reference. `provision-environment` steps under the retired 6f banner keep their history text by design.
+- `.claude/agent-memory/**` untouched.

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>spaarke_get_briefing and the Daily Briefing widget (ui://spaarke/briefing.html)</title>
+    <phase>2 Long-running work, AI, widgets, task writes</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF tool, new widget resource, embed and CI changes, React widget over a shared component</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows r1's widget scaffold (spaarke-decisions, DecisionsWidgetResource) and task 010's seam; the one open decision (which briefing call) has a bounded choice set</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>First of the serialised widget tasks (034 → 035 → 040 share McpModule.cs, Sprk.Bff.Api.csproj and publish-bff-artifact.yml); runs beside 030–033 and 036, which touch none of those</parallel-reason>
+    <deps>010, 020, 021</deps>
+    <tags>bff-api, api, ai, react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>8-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add spaarke_get_briefing, returning the caller's AI Daily Briefing through the /api/ai/daily-briefing services (decide and record which call: render, narrate or summarize, matching what the Console shows), with a short text summary for the model and the full payload in structuredContent; and a single-file widget src/client/widgets/spaarke-briefing/ that renders DailyBriefingApp through task 010's injected data service over task 021's shared transport, served as ui://spaarke/briefing.html through McpModule with an empty CSP and embedded by the publish workflow. If generation can exceed 30 s, use McpLongRunning.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP Apps widgets, Fluent v9 and the Daily Briefing pipeline.</role>
+  <goal>The tool returns the same briefing the Console shows the same user that day; the widget renders it in Chat and Cowork in light and dark; the Console and standalone Daily Briefing tests pass unchanged; the bundle is &lt; 1 MB target, ≤ 3 MB hard.</goal>
+
+  <context>
+    <background>Spec FR-09, FR-14, FR-16, NFR-03, NFR-09. Unresolved question (spec): which daily-briefing call the tool returns — decide here among Api/Ai/DailyBriefingEndpoints.cs POST /summarize, /narrate, /render (DailyBriefingCompositeService resolves the Binding), matching the Console's call; record in notes/decisions.md. Widget scaffold to copy: src/client/widgets/spaarke-decisions/ (vite single-file, scripts/check-bundle-size.mjs, jest). Resource to copy: Api/Mcp/LegalOperations/DecisionsWidgetResource.cs (Uri, EmbeddedResourceName, empty _meta.ui.csp). Registration: Infrastructure/DI/McpModule.cs (ResourceCollection ≈ :78); embed: Sprk.Bff.Api.csproj EmbeddedResource block (≈ :271-279); CI: .github/workflows/publish-bff-artifact.yml widget build/verify steps (≈ :95-156). Line numbers from 37f0864afe; re-read after the r1 merge.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Briefing/GetBriefingTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Briefing/BriefingWidgetResource.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Briefing/GetBriefingWidgetDataTool.cs (app-only, if the widget needs data beyond the tool result)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs (add BriefingWidgetResource to the resource collection)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (EmbeddedResource for briefing.html, Condition=Exists)</file>
+      <file role="modify">.github/workflows/publish-bff-artifact.yml (build, size-check and embed-verify steps for spaarke-briefing)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Briefing.cs</file>
+      <file role="new">src/client/widgets/spaarke-briefing/** (package.json, vite.config.ts, tsconfig.json, jest config, index.html, src/main.tsx, src/App.tsx, scripts/check-bundle-size.mjs copied from spaarke-decisions)</file>
+      <file role="new">src/client/widgets/spaarke-briefing/src/__tests__/App.test.tsx</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Briefing/BriefingToolAndResourceTests.cs</file>
+      <file role="canonical-reference">src/client/widgets/spaarke-decisions/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/DecisionsWidgetResource.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Mcp/DecisionsWidgetResourceTests.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingDataService.ts (task 010)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">DailyBriefingApp data seam</dependency>
+      <dependency task="020" status="pending">McpToolResults, McpLongRunning, ledger partials</dependency>
+      <dependency task="021" status="pending">Shared widget transport</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Tools run as the caller (IHttpContextAccessor; UserContextRequired; no app-only identity fallback); they call the same daily-briefing service the chosen REST route calls, with the same user scoping.</constraint>
+    <constraint source="project">spaarke_get_briefing: readOnlyHint true (or false only if it may start generation via McpLongRunning), destructiveHint false, idempotentHint true; _meta.ui.resourceUri ui://spaarke/briefing.html. Any data-only tool the widget calls is app-only (visibility ["app"]). Ledger rows in RouteAuthorizationGuardTests.Mcp.Briefing.cs.</constraint>
+    <constraint source="project">Widget: one Console component (DailyBriefingApp) behind 010's seam, transport from src/client/widgets/shared/mcp/ (021); _meta.ui.csp empty; no fetch, MSAL or Xrm; host-unsupported actions hidden; Fluent v9 semantic tokens; follows host light/dark; keyboard operable (NFR-09). Bundle &lt; 1 MB target, 3 MB hard ceiling via the widget's check-bundle-size.mjs (NFR-03).</constraint>
+    <constraint source="project">The Console's and the standalone page's Daily Briefing tests pass unchanged; Mcp:Enabled=false removes the tool and the resource (ADR-032).</constraint>
+    <constraint source="ADR-015">Model-visible text: TL;DR ≤ 1,000 chars and counts; channel detail only in structuredContent for the widget; nothing secured. Logs: tool name, latency, outcome, correlation id. Result &lt; 64 KiB.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**, or the widget's own jest suite), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Node install: npm install --legacy-peer-deps --no-audit --no-fund (not npm ci). Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Widget resource" location="src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/DecisionsWidgetResource.cs">Embedded single-file HTML, empty CSP, Condition=Exists embed</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 010, 020, 021; find the call the Console makes for the briefing and record the decision (render/narrate/summarize, ≤ 30 s or long-running) in notes/decisions.md.</step>
+    <step order="2">Write GetBriefingTool (and the app-only data tool if needed), BriefingWidgetResource, McpModule registration, ledger rows and the contract test.</step>
+    <step order="3">Scaffold spaarke-briefing from spaarke-decisions; render DailyBriefingApp with the injected service over the shared transport; write App.test.tsx; build and run check-bundle-size.mjs.</step>
+    <step order="4">Add the csproj embed and the publish-bff-artifact.yml steps; verify a local publish embeds briefing.html.</step>
+    <step order="5">Run the Daily Briefing package tests, MCP suites, ArchTests and conformance; measure the publish-size delta (the embedded HTML counts).</step>
+    <step order="6">Write the proposed CAPABILITY-INDEX row into notes/capability-index-pending.md.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Console's briefing comes from more than one call and no single call reproduces it, STOP and present the options (spec Unresolved Question) to the owner.</trigger>
+    <trigger>If the bundle exceeds 3 MB, STOP and escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DailyBriefingApp (Spaarke.DailyBriefing.Components) with 010's seam; /api/ai/daily-briefing services; r1's widget scaffold and DecisionsWidgetResource; notes/reuse-scan.md rows "Daily Briefing component" and "Widget resource".</existing>
+    <extension>The component, services and scaffold are reused; the new resource class and widget folder are required because each MCP App widget is a separate single-file ui:// resource (owner Q5: one Console component per widget).</extension>
+    <cost-of-doing-nothing>Copilot users cannot see their Daily Briefing, and FR-09/FR-16's widget acceptance fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Briefing widget in Copilot Chat and Cowork">
+      <steps>
+        <step>After deploy 039, ask "What's my Spaarke daily briefing?" in Copilot Chat with the Spaarke MCP source</step>
+        <step>Verify the widget renders the same TL;DR and sections the Console shows the same user that day</step>
+        <step>Repeat in Cowork; tab through the widget with the keyboard</step>
+        <step>Check the widget console for errors</step>
+      </steps>
+      <expected>Same briefing as the Console; keyboard operable; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host to dark theme</step>
+        <step>Verify backgrounds and text follow the host theme; no hard-coded colours</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+    <tool name="npm">build, jest and check-bundle-size in src/client/widgets/spaarke-briefing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Briefing/GetBriefingTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Briefing/BriefingWidgetResource.cs</output>
+    <output type="code">src/client/widgets/spaarke-briefing/</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Briefing/BriefingToolAndResourceTests.cs</output>
+    <output type="test">src/client/widgets/spaarke-briefing/src/__tests__/App.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For a fixture user, the tool's structuredContent equals the chosen REST route's response; the text is ≤ 1,000 chars.</criterion>
+    <criterion testable="true">resources/list includes ui://spaarke/briefing.html with an empty _meta.ui.csp; resources/read returns the embedded HTML.</criterion>
+    <criterion testable="true">Widget jest: renders a fixture briefing through a fake transport; zero fetch/Xrm calls; unsupported actions hidden.</criterion>
+    <criterion testable="true">check-bundle-size.mjs passes (size recorded; ≤ 3 MB).</criterion>
+    <criterion testable="true">Negative: with Mcp:Enabled=false neither the tool nor the resource is listed.</criterion>
+    <criterion testable="true">Daily Briefing package tests and the Console's tests pass unchanged; ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09, FR-16, NFR-03, NFR-09. Live Chat/Cowork rendering is verified in 039/043.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

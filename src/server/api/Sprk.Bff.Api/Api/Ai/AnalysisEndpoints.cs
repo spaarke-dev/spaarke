@@ -82,7 +82,7 @@ public static class AnalysisEndpoints
 
         // POST /api/ai/analysis/fork, POST /{analysisId}/save and POST /{analysisId}/export were DELETED by
         // unified-access-control-r2 task 162 (owner round 10 item 1): none had a caller in the repo and none
-        // is in a published API description (src/solutions/CopilotAgent/spaarke-bff-openapi.yaml publishes
+        // is in a published API description (the legacy Copilot agent OpenAPI document, since removed, published
         // only /create and GET /{analysisId}). Each authorized nothing about the records it read or wrote
         // (route authorization sweep 2026-10-02, findings #1, #50, #51). Evidence:
         // projects/unified-access-control-r2/notes/task-162-ai-analysis-route-authorization.md §2.

@@ -720,8 +720,10 @@ public record PlaybookRunStatus
 
     /// <summary>
     /// The Entra object id (<c>oid</c>) of the HTTP caller who started the run
-    /// (<see cref="PlaybookRunContext.StartedByOid"/>); <c>null</c> for an app-only run. Used ONLY for the owner
-    /// comparison on <c>GET /api/agent/playbooks/status/{jobId}</c> (unified-access-control-r2 task 164, sweep #78).
+    /// (<see cref="PlaybookRunContext.StartedByOid"/>); <c>null</c> for an app-only run. It exists for an owner
+    /// comparison (unified-access-control-r2 task 164, sweep #78). Its only reader was the legacy agent status route,
+    /// which spaarkeai-mcp-bff-api-r2 task 001 removed, so no route reads it today. It is kept for the durable run-status
+    /// read (spaarkeai-mcp-bff-api-r2 tasks 005 and 030).
     /// <see cref="JsonIgnoreAttribute"/>: it never reaches a response body — <c>GET /api/ai/playbooks/runs/{runId}</c>
     /// serializes this record and must not gain it.
     /// </summary>
