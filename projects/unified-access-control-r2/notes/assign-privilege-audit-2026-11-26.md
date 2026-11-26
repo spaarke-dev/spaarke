@@ -30,8 +30,8 @@
 | Spaarke AI Analysis Admin | 18 AI tables (playbook, action, skill, tool, knowledge, output and the AI type/catalog tables, plus analysis, chat message, email metadata, working version) | Global | **Admin reassignment.** Round 124 made the role admin-trusted (Global Write and Assign on `sprk_analysisplaybook`). Its Global reach, including Read on analyses from Secure matters, is a pinned accepted exception (round 127, #2322). | **Keep**, citing rounds 124/127. No change. |
 | Spaarke Ontology Service (the ontology writer's app identity) | `sprk_DecisionRecord` | Global | **Yes.** `OntologyWriterDataverseClient.AssignAsync` (SDK `AssignRequest`; D-33c, the writer holds no Write on the table) and `GateDecisionRecordSharing`. | **Keep.** |
 | Spaarke Ontology Service | `sprk_BudgetRevision` | Global | **Yes.** `ReviseBudgetExecutor` sets the owner that `RecordOwnershipResolver` decides, so the revision does not land in the root business unit outside a Secure matter's wall (D-33/D-38, `DecisionActionExecutors.cs:383-385`). | **Keep.** |
-| Spaarke Ontology Service | `sprk_Signal` | Global | **Likely.** The writer creates Signals with a resolver-decided team owner. Setting the owner on create needs Assign when it isn't the writer. Not traced line by line. | **Keep**, pending ontology-r1's confirmation (§5 Q4). |
-| Spaarke Ontology Administrator | `sprk_Signal` | Deep | **Not found in code.** It may be meant for an admin to reassign a Signal by hand. | **Ask ontology-r1** (§5 Q4): remove it, or keep it with a written reason. |
+| Spaarke Ontology Service | `sprk_Signal` | Global | **Yes** (ontology-r1 confirmed 2026-11-26). Two writer paths use it. (1) `SignalWriter` writes `ownerid` in the create, set to the team `IRecordOwnershipResolver` answers (D-134). (2) The no-core re-own path moves an existing Signal to its item's current owner team through `OntologyWriterDataverseClient`'s `AssignRequest` (D-130/D-169). Recorded as required in ontology's `notes/security-roles.md`. | **Keep.** |
+| Spaarke Ontology Administrator | `sprk_Signal` | Deep | **None.** ontology-r1 confirmed: no shipped flow assigns a Signal as the caller, and a manual reassignment would disagree with the resolver's owner. It is held only by owner decision D-160 (2026-10-17: "not a risk; we can remove later"). | **Remove**, but only on the owner's go, because D-160 was the owner's call (§5 Q4). |
 
 ## 4. Out-of-the-box roles (no change proposed)
 
@@ -42,7 +42,7 @@ System Administrator (63 tables), Service Writer (60) and System Customizer (60)
 - **Q1 (word-add-in-r1):** may Office Add In User lose all 9 Assign grants? Nothing in `/api/office/*` asks for them.
 - **Q2 (side-pane-navigation-history):** `sprk_NavItem` is a personal per-user row. Should a user be able to hand one to someone else? Default: no, so remove it.
 - **Q3 (ebilling-r1):** the repo grants Core User Assign on `sprk_invoicecorrection` but dev doesn't have the grant. With §3 accepted, drop it from the repo file instead of importing it.
-- **Q4 (ontology-r1):** confirm the Ontology Service's `sprk_Signal` use, and say whether Ontology Administrator needs Assign on Signals.
+- **Q4 (ontology-r1, answered 2026-11-26):** the Ontology Service needs `sprk_Signal` Assign (keep). The Ontology Administrator's grant has no use. Removing it reverses owner decision D-160, so it goes to the owner. No human role holds Write, Delete or Assign on `sprk_decisionrecord`.
 
 ## 6. How the change ships (when the owner agrees)
 
