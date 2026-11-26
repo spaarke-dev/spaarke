@@ -316,11 +316,11 @@ sign up or sign in**; just screenshot and close it.
 **Why.** WP-1 showed Word desktop doesn't load a skill that ships Python scripts, and Word's Copilot says it runs
 JavaScript on the open document instead. If Word runs *our* JavaScript unchanged, a Word edition of the review
 skills could make its redline edits in place with tested code, instead of Word writing its own edits (W4's
-numbering gaps). Needs **probe plugin v0.3** (`Spaarke Word probe plugin v0.3.zip`; v0.2's code used `toString`, which Word's code runner refuses), which adds the skill
+numbering gaps). Needs **probe plugin v0.4** (`Spaarke Word probe plugin v0.4.zip`; Word's code runner refused v0.2's `toString` and v0.3's top-level `await`; v0.4 lets Copilot adapt only the first and last lines, and say so), which adds the skill
 `spaarke-word-probe-js`. Its code adds one test paragraph, then replaces one word as a tracked change and adds one
 comment. Both carry a code plus a hash a model can't work out in its head.
 
-1. Cowork › Customize › Plugins: remove the old **Spaarke Word Probe**, then **Upload** v0.3 (Only you). Save the
+1. Cowork › Customize › Plugins: remove the old **Spaarke Word Probe**, then **Upload** v0.4 (Only you). Save the
    zip outside OneDrive first, unextracted, as before. Wait until it shows (it took minutes last time).
 2. Word desktop: open a **new blank document** (never an agreement). Copilot pane: switch **Spaarke MCP off** (the
    dev connector has a spike NDA tool), and check **Spaarke Word Probe** is on. If Word asks, close and reopen it.
