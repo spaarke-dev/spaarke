@@ -46,6 +46,17 @@ instructions don't point to the skill or tell the agent to build a redline. Test
 `test_v02_style_instructions_that_build_a_redline_are_refused` (must fire).
 
 ## Still open
+- **Pairing the review skills with the Spaarke MCP** (from spaarkeai-mcp-bff-api-r2, 2026-11-26; issue #3257; their note
+  `projects/spaarkeai-mcp-bff-api-r2/notes/cross-project-cowork-review-skill.md` on `work/spaarkeai-mcp-bff-api-r2`).
+  The skill would find the matter and document with `spaarke_search_documents` / `spaarke_find_records` /
+  `spaarke_get_document` and could start `spaarke_run_playbook`. Two owner decisions, both ours:
+  1. **Document into the sandbox.** `spaarke_get_document` returns metadata and open links only, not bytes. Whether
+     Cowork's SharePoint connector can read SharePoint Embedded files is unverified (needs a `researcher` check).
+     Until then a Spaarke document reaches the skill only if the user downloads it and hands it over. A
+     content-returning tool would be new MCP surface (CLAUDE.md §11), not in mcp-r2's scope.
+  2. **Matter email.** For matter work the close-out would call `spaarke_compose_email`: pre-filled draft, the user
+     presses Send, the email is archived to the matter. That replaces the close-out's Outlook send card. It fits
+     our "never send email on my behalf" rule, since the user sends.
 - Whether an agent can start a skill (an @-agent in Cowork calling `/nda-review`). Not documented, not tested; we don't
   design around it.
 - Test 3: did it start from a fresh copy of the Brightwater NDA? Its 15 substantive edits are stamped 2:12 PM

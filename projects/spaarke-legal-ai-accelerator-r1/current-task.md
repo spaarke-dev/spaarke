@@ -2,6 +2,10 @@
 
 > **Last Updated**: 2026-11-26 late (Claude Desktop session `acclerator-r1`; #3237 merged, engines synced). Both finished worktrees and their branches (local + remote) removed on the owner's OK. **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
 
+## 2026-11-26: two owner decisions received from mcp-r2 (issue #3257)
+
+Pairing `nda-review` with the Spaarke MCP tools: (1) how a Spaarke (SPE) document gets into the Cowork sandbox (connector reach to SPE unverified → researcher check); (2) matter email via `spaarke_compose_email` instead of the Outlook send card. Detail in `notes/copilot-app-components.md` "Still open". Not started; owner to decide whether and when.
+
 ## 2026-11-26: PR #3237 MERGED (squash `244171569a`) — redline engine skip-and-report mode (for intake-pipeline-r1)
 
 - `--skip-unplaceable REPORT.json` (closed code set agreed with intake; they message us before changing it), `--refused` on summary_table/check_outputs, reproducible .docx (`safe_docx.write_parts`), exit-3 stderr carries `code`/`edit`. Default mode unchanged for our skills.
