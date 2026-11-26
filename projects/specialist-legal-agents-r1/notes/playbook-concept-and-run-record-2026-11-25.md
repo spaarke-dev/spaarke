@@ -85,3 +85,11 @@ This revises D-A18 (7). It is still "lookups on `sprk_playbookrun`", but the tab
 - **§3.14 "Other existing tables"** says that `sprk_analysisplaybook` / `sprk_playbooknode` are "the functions a profile points at, by code". That is wrong for new work: functions are **Actions and Bindings**, by `sprk_actioncode` and binding code. `sprk_analysisplaybook` stays only as the JPS format of meaning 1.
 - **§3.15 "Typed output"** cites `PromptSchema.PriorOutputReference`. Chaining is done with declared Action inputs plus the parent-run link.
 - **§3.14 / §12, D-A18 (7):** revised as above, once the owner picks.
+
+## Writer agreed with mcp-r2 (2026-11-25 late)
+
+- **One shared writer**: `PlaybookRunRecordStore` (mcp-r2 task 005, `Services/Ai/`, AI module only). It owns the row shape and the fail-safe write rule: a failed write logs `playbook_run_persist_failed` and never fails the run. That gives one owner per row invariant (ADR-002).
+- **Engine runs** call it with run kind = `engine`.
+- **Our Phase 1** calls it from the `PublicContracts` facade and the coded-workflow seam (run kind `prompted` / `coded`). It adds the profile-version and gate-decision columns **to that store**, and never writes the table directly.
+- **Open for Phase 1 design:** a gated side-effect run may need a "required" write mode that fails closed when gate attribution can't persist. The alternative is to record that attribution in the Decision Record. mcp-r2 keeps the write call extensible but builds no mode now.
+- mcp-r2 recorded this as `notes/decisions.md` D-run-record-decided, which released D-run-record-hold. The dev schema run still needs the owner's go.
