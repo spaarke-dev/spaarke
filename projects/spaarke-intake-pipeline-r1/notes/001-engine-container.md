@@ -17,18 +17,18 @@ Rework: none (first build; two escalations resolved by the owner before any code
 | `entrypoint/main.py` | Config, JSON-line logging with correlation context, telemetry, `process_message` / `run_once` / `main`. |
 | `tests/fakes.py` | In-memory blob container and Service Bus doubles honouring IfMissing/IfNotModified and lock expiry. Justification: needed by both behaviour test files. |
 | `tests/test_envelope_and_marker.py` | 12 tests: envelope accept/reject codes, InvalidFormat dead-letter with no writes, marker duplicate/busy/stale/released, deterministic paths, replay. |
-| `tests/test_message_flow.py` | 27 tests: real-engine refusal (`plan_does_not_fit`, nothing written, secret text absent; must-fire control), stderr mapping incl. structured keys, skip mode against fake engines, retries 1–4 / DLQ at 5, ProcessingError, completion shape, correlationId on every log line, lock renewal with the real `AutoLockRenewer` (+ no-renewal control), config, import isolation, env scrub. Justification for a second file: settlement/retry/lock behaviour is a different seam from envelope/marker. |
-| `tests/test_golden_parity.py` | 5 tests: golden parity (job runner vs direct CLI run, both operations) on synthetic nda-01/02/03 + golden plan; reference-manifest compare for CI; must-fire control (an altered part fails). |
+| `tests/test_message_flow.py` | 26 tests. Real engines on synthetic nda-01: skip mode (one unplaceable edit → outputs + report uploaded, `[{19, code}]` in the completion, `refusals` check in the check report, by-hand table in the internal copy; every edit refused → still `completed`; blank anchor → `plan_does_not_fit` with no code, nothing written), default mode behind the switch (exit-3 `code`/`edit` from the stderr JSON, nothing written, `"error"` text absent from everything sent; must-fire control that the real stderr carries both). Exit-3 parsing table, report validation, contract_error → `Poisoned`, retries 1–4 / DLQ at 5, ProcessingError, completion shape, correlationId on every log line, lock renewal with the real `AutoLockRenewer` (+ no-renewal control), config, import isolation, env scrub. Justification for a second file: settlement/retry/lock behaviour is a different seam from envelope/marker. |
+| `tests/test_golden_parity.py` | 5 tests on synthetic nda-01/02/03 + golden plan, skip mode: job runner vs direct CLI run by whole-file sha256 (same interpreter), `check_outputs` passes with `refusals`, comparison with reference manifests (each declares its identity), must-fire control under both identities. |
 
-`.github/workflows/build-intake-engine-image.yml`: after the local build (`load: true`) and **before** the Trivy steps and the push, a reference run on the runner (Python 3.11 + the same hash-pinned requirements) writes a manifest; then the whole unittest suite runs **inside the built image** (`--network none`, tests + synthetic `evals/` + assets mounted read-only, `INTAKE_PARITY_REQUIRE_REFERENCE=1`). Path filters gained the summary intro and `practices/nda/evals/**`.
+`.github/workflows/build-intake-engine-image.yml`: after the local build (`load: true`) and **before** the Trivy steps and the push: (1) a run on the runner (Python 3.11 + the same hash-pinned requirements) writes a `zip_parts` manifest; (2) one container of the built image writes a `sha256` manifest; (3) a second container runs the whole unittest suite against both (`--network none`, tests + synthetic `evals/` + assets mounted read-only, `INTAKE_PARITY_REQUIRE_REFERENCE=1`). Path filters gained the summary intro and `practices/nda/evals/**`.
 
 ## Contracts used
 
-**Engine CLI** (master, unchanged): table under "Engine CLI contract found on master" below. Sequence per `run_local_e2e.py`.
+**Engine CLI** (master after #3163 and #3237 / 244171569a, unchanged by this task): the table under "Engine CLI contract found on master" below, plus `notes/009-engine-changes.md` (skip-and-report, exit-3 keys, reproducible .docx). Sequence per `run_local_e2e.py`.
 
 **Operations** (one envelope field `payload.operation`, closed set; anything else → dead-letter `InvalidFormat`, `unknown_operation`):
 - `segment`: `segment_clauses.py source.docx` → `clauses.json`. Completion carries ids and outcome only (`completed` / `input_invalid`).
-- `redline`: dry-run → redline (internal, external, clean) → summary (`--intro`) → check. Outputs `redline-internal.docx`, `redline-external.docx`, `clean.docx`, `check-report.json`.
+- `redline`: dry-run → redline (internal, external, clean) → summary (`--intro`) → check, with `--skip-unplaceable refused-report.json` on both redline calls and `--refused` on summary and check. Outputs `redline-internal.docx`, `redline-external.docx`, `clean.docx`, `check-report.json`, `refused-report.json`.
 
 **Staging paths** (container `INTAKE_STAGING_CONTAINER`): source `{runId}/in/source.docx`; plan `{runId}/in/redline/{dispatchAttempt}/plan.json`; outputs `{runId}/out/{operation}/{dispatchAttempt}/{name}`; marker `{runId}/markers/{operation}/{dispatchAttempt}.json`.
 
@@ -36,19 +36,29 @@ Rework: none (first build; two escalations resolved by the owner before any code
 
 **Completion** (to `INTAKE_COMPLETION_QUEUE` only): `message_id` = request idempotencyKey, `correlation_id`, `application/json`, subject `IntakeEngineCompleted`; body = Job Contract (camelCase), payload `{operation, runId, dispatchAttempt, outcome, checkOutcome, refusedEdits:[{edit,code}], refusedBookmarks:[{bookmark,code}]}`. No paths, no content. `operation` and the refusal lists are beyond the POML's list; the first is needed by the `segment` amendment, the second by the owner's "refused edit index + reason code".
 
-**Outcomes:** `completed`; `plan_does_not_fit` (exit 3; non-retryable; nothing uploaded); `input_invalid` (exit 2; non-retryable); `contract_error` (engine output breaks its contract, or an unknown skip-report code → dead-letter `Poisoned`). Retryable (timeout, kill, other exit codes, storage/marker errors) → scheduled copy with `PriorDeliveryCount`, `JobContract.RetryDelay` (1/2/4/8 min), DLQ `MaxRetriesExceeded` at logical delivery 5; unexpected exceptions → `ProcessingError` path. Invalid envelope → `InvalidFormat`.
+**Outcomes** (redline, skip-and-report mode, the default):
+- `completed`: outputs written; `checkOutcome` passed/failed; `refusedEdits` = `[{edit, code}]` for every edit the engine could not place (none, some or all of them), `refusedBookmarks` likewise; `refused-report.json` uploaded beside the documents.
+- `plan_does_not_fit`: the plan breaks the engine contract (`ooxml_redline` exit 3 with no `code`, or `summary_table` exit 3); both lists empty; nothing uploaded; non-retryable.
+- `input_invalid`: an engine exit 2; nothing uploaded; non-retryable.
+- `contract_error`: an engine broke its documented contract (bad REPORT.json, an unknown code, malformed exit-3 stderr, a refusal code on a skip-mode exit 3, `check_outputs` exit 2) → also dead-lettered `Poisoned`.
+- Retryable (timeout, kill, other exit codes, storage/marker errors) → scheduled copy with `PriorDeliveryCount`, `JobContract.RetryDelay` (1/2/4/8 min), DLQ `MaxRetriesExceeded` at logical delivery 5; unexpected exceptions → `ProcessingError` path. Invalid envelope → `InvalidFormat`.
 
-**Refusal codes:** default mode reads `{"code","edit"|"bookmark"}` from the last stderr line when present (the shape PR #3237 put on master as 244171569a; `"error"` is never read into anything that is logged), else maps master's `edit N: …` messages onto the accelerator's closed set; no edit prefix → `plan_invalid`, garbage → `unrecognised`. Stderr is never logged, raised or sent.
+**Switch:** `INTAKE_ENGINE_SKIP_AND_REPORT`, default **on** (unset or empty = on). Kept because it costs one branch: `false` restores the engines' all-or-nothing default mode, where the first edit that does not fit ends the run `plan_does_not_fit` with `refusedEdits = [{edit, code}]` and nothing uploaded. No guard any more: the engines in the image always have the mode (#3237).
 
-**Skip-and-report (seam, OFF):** `INTAKE_ENGINE_SKIP_AND_REPORT` (default false). When on: `--skip-unplaceable refused-report.json` on the redline, `--refused` to summary and check, the report is validated strictly (closed code set; any deviation → `contract_error`) and uploaded as `refused-report.json` beside the outputs; the completion carries the refused codes. `main` refuses to start (exit 2) if the flag is on and the engines' `--help` lacks the flags.
+**Exit 3:** `engines.exit3_result` reads only `code` and `edit`/`bookmark` from the stderr JSON line; `"error"` (quotes clause text) is never read into anything, logged, raised or sent. The master-message regex fallback and the `plan_invalid` / `unrecognised` codes are gone: every code in a completion is from the accelerator's closed set.
 
-## Follow-ups now that PR #3237 is on master (244171569a; not yet merged into this branch)
+**Completion envelope change for task 014 (2026-11-26, after merging #3237):**
+- `refusedEdits[].edit` is always a 0-based integer (never `null`); `code` is always from the closed 12-code set (`plan_invalid` / `unrecognised` no longer exist).
+- `completed` may now carry non-empty `refusedEdits` / `refusedBookmarks` (skip mode, the default): the run succeeded with those edits left to the attorney (by-hand rows in the internal copy).
+- `plan_does_not_fit` with both lists empty = the plan breaks the engine contract (the edit-plan writer's fault, not the draft's).
+- `contract_error` also covers malformed exit-3 stderr.
+- New output blob `{runId}/out/redline/{dispatchAttempt}/refused-report.json` (codes only); task 015 reads by-hand rows and the refused count from it or from the completion.
 
-Contract: `notes/009-engine-changes.md`. The flags, REPORT.json shape, closed code set and exit-3 stderr shape there match what this job already implements.
+## Follow-ups from PR #3237 — done 2026-11-26 (after merge c243143409)
 
-1. **Turn on skip mode in `redline`:** set `INTAKE_ENGINE_SKIP_AND_REPORT=true` in the job's Bicep env (task 002 module), and replace the fake-engine skip-mode tests in `test_message_flow.py` with runs of the real engines (a refused edit → outputs written, `refused-report.json` uploaded, codes in the completion). `main` already refuses to start if the flag is on but the image's engines lack `--skip-unplaceable`.
-2. **Read `code`/`edit` from the exit-3 stderr JSON, never log `"error"`:** already implemented (`engines._structured_refusal`, tested with synthetic stderr). After the merge, add a real-engine test asserting the structured keys are used (not the regex fallback) and that the `"error"` text appears in no log, completion or blob.
-3. **Tighten in-image parity to whole-file sha256, same image only:** the engines' .docx bytes depend on the zlib build, so the runner-side reference manifest cannot be compared by sha256. Change the CI step so the reference run happens **inside the same image** (e.g. run `test_golden_parity.py --write-manifest` in one `docker run`, then the suite in a second), then set `DOCX_IDENTITY = "sha256"` in `tests/test_golden_parity.py`. Cross-host comparison (runner vs image, or local Windows vs image) stays per-part.
+1. Skip-and-report ON for `redline` by default; the "engines lack the mode" guard and its tests deleted; fake-engine skip tests replaced by real-engine ones.
+2. Exit-3 `code`/`edit` read from the real engine's stderr JSON, with a real-engine test and a must-fire control; `"error"` never logged.
+3. Parity: whole-file sha256 between runs in the same interpreter (job vs direct, in-process) and between two containers of the same image in CI; per-part only against the runner's reference. The task 002 Bicep needs no change: it does not set the switch, and unset means on.
 
 ## Review against code-review / adr-check criteria (Step 9.5)
 
@@ -63,13 +73,15 @@ Contract: `notes/009-engine-changes.md`. The flags, REPORT.json shape, closed co
 
 - K: the completion path's BFF timeout (task 014, 10 min) is shorter than the full retry window (1+2+4+8 min of delays plus runs); 014 must size its timeout or tolerate a late completion (its handlers already claim atomically).
 - K: when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set, the job also talks to the Application Insights ingestion host: a fourth host beyond MI token / Blob / Service Bus (criterion 11 lists three). The task 002 Bicep sets it deliberately; owner to confirm or drop it.
-- K: skip-report bookmark names are validated by pattern (`^[A-Za-z][A-Za-z0-9_]{0,39}$`) only, not against the plan.
+- K: skip-report bookmark names are validated by pattern (`^[A-Za-z][A-Za-z0-9_]{0,39}$`) only, not against the plan; a default-mode exit-3 edit index is not checked against the plan's length (the BFF treats the completion as untrusted anyway).
+- K: the engine's skip-mode exit-3 stderr is not proven free of clause text (009 K-gap); this job never reads its `"error"`, so it does not matter here.
 - K: `--only-binary=:all:` assumes every pin has a linux cp311 wheel (verified for all 46 today); a future bump to an sdist-only release fails the build loudly rather than compiling.
 
 ## Verification
 
 Verified here (Windows, Python 3.11 via `py -3.11`, venv from `requirements.txt` with `--require-hashes`):
-- Unit tests: 12/12 (`test_envelope_and_marker`) + 27/27 (`test_message_flow`); parity 5 tests, 1 skipped without a reference manifest; with `--write-manifest` + `INTAKE_PARITY_REQUIRE_REFERENCE=1`, all pass.
+- Unit tests (after merging #3237): 12/12 (`test_envelope_and_marker`) + 26/26 (`test_message_flow`) + parity 5 (1 skipped without a reference manifest) = 43 run, 42 pass, 1 skipped; with a `zip_parts` and a `sha256` manifest both required, 43/43. A tampered sha256 manifest fails the reference test (must-fire).
+- Fail-before proof for the skip-mode change: the new tests against the previous `engines.py` + `main.py` (613df25c60): 8 failures + 18 errors (skip-mode, exit-3 parsing, parity, config); restored: all pass. The default-mode exit-3 tests pass on both (the old parser already preferred the keys): they are the regression guard.
 - Seeding proof (marker): without `MatchConditions.IfMissing` the duplicate-delivery test fails; restored, it passes.
 - Image-like layout staged under the scratchpad (`/app/{engines,assets,entrypoint,tests}`, `/parity/nda/...`) with the CI env vars: the Dockerfile's contract checks pass and the CI in-image command runs 44 tests OK with the reference manifest required.
 - Hash-pin rule (same as the workflow's check): 46 pins, 0 bad. Every pin has a linux cp311 / abi3 / py3 wheel whose hash is in the file.

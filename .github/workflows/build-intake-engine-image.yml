@@ -33,7 +33,8 @@
 # In-image tests (task 001, FR-01(a)): after the build and before any scan or
 # push, the job's unittest suite runs INSIDE the built image (no network,
 # synthetic corpus mounted read-only), and its golden-parity test compares the
-# engines' outputs there with a reference run of the same engines on the runner.
+# engines' outputs there with a run on the runner (per-part bytes) and with an
+# earlier run in the same image (whole-file sha256).
 # A difference fails the build; outputs are never normalised to pass.
 #
 # Trivy gate: fails the build on any FIXABLE HIGH or CRITICAL finding
@@ -195,9 +196,13 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
 
       # FR-01(a), task 001: the engines inside the image must produce the same outputs as a run of the same engines
-      # outside it. Step 1 runs them on the runner (Python 3.11 + the same hash-pinned requirements) and writes a
-      # manifest; step 2 runs the job's whole test suite INSIDE the built image, with the golden-parity test
-      # compared to that manifest. Output identity is defined in tests/test_golden_parity.py (DOCX_IDENTITY).
+      # outside it, and the same bytes run to run inside it. Three runs, identity defined in
+      # tests/test_golden_parity.py:
+      #   1. On the runner (Python 3.11 + the same hash-pinned requirements): a `zip_parts` manifest (another host,
+      #      another zlib, so per-part bytes + CRC-32).
+      #   2. In one container of the built image: a `sha256` manifest (same image, so whole-file bytes).
+      #   3. In a second container of the same image: the job's whole test suite, its golden-parity test compared
+      #      to both manifests (and, in-process, job runner vs direct engine run by whole-file sha256).
       # Before any scan or push, so a broken image never publishes. Synthetic corpus only (NFR-10): only the
       # practice's evals/ and the summary-intro assets are mounted, read-only, with no network.
       - name: Set up Python 3.11 (reference run for golden parity)
@@ -215,17 +220,28 @@ jobs:
           ref="${IMAGE_NAME}:${{ steps.tags.outputs.sha_tag }}"
           python -m venv /tmp/parity-venv
           /tmp/parity-venv/bin/pip install --quiet --require-hashes --only-binary=:all: -r "$JOB_DIR/requirements.txt"
-          mkdir -p /tmp/parity-ref
-          /tmp/parity-venv/bin/python "$JOB_DIR/tests/test_golden_parity.py" --write-manifest /tmp/parity-ref/reference.json
-          docker run --rm --network none \
-            -v "$PWD/$JOB_DIR/tests:/app/tests:ro" \
-            -v "$PWD/$NDA_DIR/evals:/parity/nda/evals:ro" \
-            -v "$PWD/$NDA_DIR/skills/nda-review/assets:/parity/nda/skills/nda-review/assets:ro" \
+          mkdir -p /tmp/parity-ref /tmp/parity-image
+          chmod 0777 /tmp/parity-image  # written by the image's non-root user (10001)
+          # 1. Runner reference (another host): per-part identity.
+          /tmp/parity-venv/bin/python "$JOB_DIR/tests/test_golden_parity.py" \
+            --write-manifest /tmp/parity-ref/runner.json --identity zip_parts
+          mounts=(
+            -v "$PWD/$JOB_DIR/tests:/app/tests:ro"
+            -v "$PWD/$NDA_DIR/evals:/parity/nda/evals:ro"
+            -v "$PWD/$NDA_DIR/skills/nda-review/assets:/parity/nda/skills/nda-review/assets:ro"
+            -e INTAKE_ENGINES_DIR=/app/engines
+            -e INTAKE_NDA_PRACTICE_DIR=/parity/nda
+            -e INTAKE_SUMMARY_INTRO=/app/assets/summary-intro.md
+          )
+          # 2. Same-image reference: whole-file sha256.
+          docker run --rm --network none "${mounts[@]}" -v /tmp/parity-image:/parity/image \
+            --entrypoint python \
+            "$ref" /app/tests/test_golden_parity.py --write-manifest /parity/image/image.json --identity sha256
+          # 3. The suite in a second container of the same image, against both references.
+          docker run --rm --network none "${mounts[@]}" \
             -v /tmp/parity-ref:/parity/ref:ro \
-            -e INTAKE_ENGINES_DIR=/app/engines \
-            -e INTAKE_NDA_PRACTICE_DIR=/parity/nda \
-            -e INTAKE_SUMMARY_INTRO=/app/assets/summary-intro.md \
-            -e INTAKE_PARITY_REFERENCE_MANIFEST=/parity/ref/reference.json \
+            -v /tmp/parity-image:/parity/image:ro \
+            -e INTAKE_PARITY_REFERENCE_MANIFEST=/parity/ref/runner.json:/parity/image/image.json \
             -e INTAKE_PARITY_REQUIRE_REFERENCE=1 \
             --entrypoint python \
             "$ref" -m unittest discover -s /app/tests -t /app -v

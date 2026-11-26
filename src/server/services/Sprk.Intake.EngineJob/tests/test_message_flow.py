@@ -1,5 +1,6 @@
-"""Refused plans, skip-and-report mode, retries, dead-lettering, the completion message, correlation in logs, lock
-renewal and configuration (FR-01 g; ADR-004 A2 §2.3-2.5; ADR-015)."""
+"""Refused edits (skip-and-report mode, the default, and the engines' default mode behind the switch), exit-3
+parsing, retries, dead-lettering, the completion message, correlation in logs, lock renewal and configuration
+(FR-01 g; ADR-004 A2 §2.3-2.5; ADR-015). Refusal tests run the real engines on the synthetic nda-01."""
 import glob
 import io
 import json
@@ -7,9 +8,9 @@ import os
 import re
 import sys
 import tempfile
-import textwrap
 import time
 import unittest
+import zipfile
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
@@ -61,162 +62,87 @@ def golden_plan(extra_edit=None, file_name="nda-01-bluefin-harbor-mutual.docx"):
     return plan
 
 
-class RefusedPlanTests(unittest.TestCase):
-    """Default mode on the engines as on master: one unplaceable edit refuses the whole plan (exit 3)."""
-
-    def _run(self, extra_edit):
-        h = Harness()
-        body, req = stage_redline(h, golden_plan(extra_edit))
-        result = main.process_message(fakes.received(body), h.queue, h.staging, config())
-        return h, req, result
-
-    def test_unplaceable_edit_ends_plan_does_not_fit_with_index_and_code_and_nothing_written(self):
-        first_para = golden_plan()["edits"][0]["para"]
-        for find, code in ((SECRET_FIND, "not_found"), ("the", "not_unique")):
-            with self.subTest(code=code):
-                h, req, result = self._run({"para": first_para, "find": find, "comment": "probe"})
-                self.assertEqual(result, engines.OUTCOME_PLAN_DOES_NOT_FIT)
-                msg, doc = completion(h)
-                self.assertEqual(doc["payload"]["outcome"], "plan_does_not_fit")
-                self.assertEqual(doc["payload"]["refusedEdits"], [{"edit": 19, "code": code}])
-                self.assertIsNone(doc["payload"]["checkOutcome"])
-                self.assertEqual(h.container.names(req.paths.out_prefix), [])  # never applied, no output blob
-                self.assertEqual([m.settled for m in h.receiver.completed], ["completed"])  # non-retryable
-                self.assertEqual(h.request_sender.scheduled, [])
-                self.assertEqual(json.loads(h.container.blobs[req.paths.marker][0])["state"], "completed")
-                self.assertNotIn(SECRET_FIND.encode(), everything_sent(h))
-
-    def test_the_engine_stderr_really_quotes_the_text_that_is_kept_out(self):
-        # Must-fire control for the grep above: the engine's own stderr does contain the find string.
-        plan = golden_plan({"para": golden_plan()["edits"][0]["para"], "find": SECRET_FIND, "comment": "probe"})
-        with tempfile.TemporaryDirectory() as tmp:
-            p = os.path.join(tmp, "plan.json")
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(plan, f)
-            settings = config().engine_settings
-            rc, _, err = engines._run(settings, "ooxml_redline.py",
-                                      [p, os.path.join(fakes.CORPUS, "nda-01-bluefin-harbor-mutual.docx"),
-                                       os.path.join(tmp, "r.docx"), "--dry-run"], time.monotonic() + 120)
-        self.assertEqual(rc, 3)
-        self.assertIn(SECRET_FIND[:30].encode(), err)
+def default_mode_config():
+    """The switch off: the engines' all-or-nothing default mode."""
+    cfg = config()
+    return main.Config(**{**cfg.__dict__, "engine_settings": engines.EngineSettings(
+        engines_dir=cfg.engine_settings.engines_dir, summary_intro=cfg.engine_settings.summary_intro,
+        skip_and_report=False)})
 
 
-class RefusalMappingTests(unittest.TestCase):
-    def stderr(self, error, **keys):
-        return json.dumps({"error": error, **keys}).encode()
-
-    def test_master_messages_map_to_the_closed_code_set(self):
-        cases = [
-            ("edit 3: paragraph key 'Term. This' matched 0 paragraphs", 3, "para_not_found"),
-            ("edit 3: paragraph key 'Term. This' matched 2 paragraphs", 3, "para_not_unique"),
-            ("edit 4: find 'x y' occurs 0 times in the visible paragraph text", 4, "not_found"),
-            ("edit 4: after 'x y' occurs 3 times in the visible paragraph text", 4, "not_unique"),
-            ("edit 5: find 'x' is not in the paragraph's editable text (inside a revision)", 5, "in_existing_markup"),
-            ("edit 6: find 'x' starts or ends inside a word; extend it to whole words", 6, "word_boundary"),
-            ("edit 6: old '3' starts or ends inside a word", 6, "word_boundary"),
-            ("edit 7: old '3' must occur exactly once inside find '(3) years'", 7, "old_not_in_find"),
-            ("edit 8: span crosses existing ins (a tracked change)", 8, "crosses_markup"),
-            ("edit 9: span crosses a field or drawing; narrow the edit", 9, "crosses_field_or_drawing"),
-            ("edit 9: cannot split inside a non-text run", 9, "crosses_field_or_drawing"),
-            ("edit 1: span is inside a field result (it would be lost)", 1, "in_field_result"),
-            ("edit 1: anchor ends inside a field result (the insertion would be lost when Word updates)", 1,
-             "in_field_result"),
-            ("edit 2: find '*' left nothing after the section number and heading", 2, "nothing_after_heading"),
-            ("bookmark 'NDA_Sec10' already exists in the document; choose another name", None, "bookmark_exists"),
-            ("edit 0: unknown key(s) ['text']; edit 2: 'para' is required", None, "plan_invalid"),
-            ("plan must be a JSON object", None, "plan_invalid"),
-        ]
-        for error, index, code in cases:
-            with self.subTest(error=error):
-                r = engines.refusal_from_stderr(self.stderr(error))
-                self.assertEqual((r.edit, r.code), (index, code))
-
-    def test_garbage_is_unrecognised_never_an_exception(self):
-        for raw in (b"", b"Traceback (most recent call last)", b'{"error": 5}', b"\xff\xfe", b"[]"):
-            self.assertEqual(engines.refusal_from_stderr(raw).code, "unrecognised")
-
-    def test_structured_keys_are_preferred_when_present(self):
-        r = engines.refusal_from_stderr(self.stderr("edit 4: find 'x' ... clause text", code="crosses_markup",
-                                                    edit=4))
-        self.assertEqual((r.edit, r.code), (4, "crosses_markup"))
-        b = engines.refusal_from_stderr(self.stderr("bookmark ...", code="bookmark_exists", bookmark="NDA_Sec10"))
-        self.assertIsInstance(b, engines.RefusedBookmark)
-        self.assertEqual((b.bookmark, b.code), ("NDA_Sec10", "bookmark_exists"))
-        self.assertEqual(engines.refusal_from_stderr(self.stderr("edit 0: unknown key(s)")).code, "plan_invalid")
-        self.assertEqual(engines.refusal_from_stderr(self.stderr("x", code="new_code", edit=1)).code, "unrecognised")
-        self.assertEqual(engines.refusal_from_stderr(self.stderr("x", code=None)).code, "plan_invalid")
-        bad_name = engines.refusal_from_stderr(self.stderr("x", code="bookmark_exists", bookmark="not a name"))
-        self.assertEqual((bad_name.edit, bad_name.code), (None, "bookmark_exists"))
+def run_redline_message(plan, cfg=None):
+    h = Harness()
+    body, req = stage_redline(h, plan)
+    result = main.process_message(fakes.received(body), h.queue, h.staging, cfg or config())
+    return h, req, result
 
 
-# Stand-ins for the accelerator's proposed skip-and-report contract (not on master yet). They read their behaviour
-# from the plan file because the job scrubs INTAKE_* variables from an engine's environment.
-FAKE_ENGINES = {
-    "ooxml_redline.py": '''
-        import json, shutil, sys
-        a = sys.argv[1:]
-        if "--help" in a:
-            print("usage: ooxml_redline.py PLAN DOCX REDLINE [--external E] [--clean C] [--dry-run] "
-                  "[--skip-unplaceable REPORT]"); sys.exit(0)
-        plan, src, red = a[0], a[1], a[2]
-        opt = {a[i]: a[i + 1] for i in range(3, len(a) - 1) if a[i].startswith("--") and a[i] != "--dry-run"}
-        if "--skip-unplaceable" not in opt: sys.exit(9)
-        report = json.load(open(plan))["fake_report"]
-        json.dump(report, open(opt["--skip-unplaceable"], "w"))
-        if "--dry-run" not in a:
-            for out in (red, opt["--external"], opt["--clean"]): shutil.copy(src, out)
-        print(json.dumps({"edits": 2, "refused": len(report.get("refused", []))}))
-    ''',
-    "summary_table.py": '''
-        import shutil, sys
-        a = sys.argv[1:]
-        if "--help" in a: print("usage: summary_table.py PLAN REDLINE [--out O] [--intro I] [--refused R]"); sys.exit(0)
-        if "--refused" not in a: sys.exit(2)
-        shutil.copy(a[1], a[a.index("--out") + 1])
-    ''',
-    "check_outputs.py": '''
-        import json, sys
-        a = sys.argv[1:]
-        if "--help" in a: print("usage: check_outputs.py PLAN INTERNAL CLEAN --original O [--refused R]"); sys.exit(0)
-        if "--refused" not in a: sys.exit(2)
-        print(json.dumps({"checks": [{"name": "plan", "ok": True, "detail": ""}]}))
-    ''',
-}
+def blob(h, path):
+    return h.container.blobs[path][0]
 
 
 class SkipAndReportTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        for name, code in FAKE_ENGINES.items():
-            with open(os.path.join(self.tmp.name, name), "w", encoding="utf-8") as f:
-                f.write(textwrap.dedent(code))
-        self.cfg = main.Config(**{**config().__dict__, "engine_settings": engines.EngineSettings(
-            engines_dir=self.tmp.name, summary_intro=fakes.SUMMARY_INTRO, skip_and_report=True)})
+    """The default: the engines apply every edit that fits and report the rest by index and closed code (real engines,
+    synthetic nda-01)."""
 
-    def tearDown(self):
-        self.tmp.cleanup()
+    def test_one_unplaceable_edit_is_reported_and_every_other_edit_applied(self):
+        first_para = golden_plan()["edits"][0]["para"]
+        for find, code in ((SECRET_FIND, "not_found"), ("the", "not_unique")):
+            with self.subTest(code=code):
+                h, req, result = run_redline_message(golden_plan({"para": first_para, "find": find,
+                                                                  "comment": "probe"}))
+                self.assertEqual(result, engines.OUTCOME_COMPLETED)
+                _, doc = completion(h)
+                self.assertEqual(doc["payload"]["outcome"], "completed")
+                self.assertEqual(doc["payload"]["checkOutcome"], "passed")
+                self.assertEqual(doc["payload"]["refusedEdits"], [{"edit": 19, "code": code}])
+                self.assertEqual(doc["payload"]["refusedBookmarks"], [])
+                self.assertEqual(sorted(h.container.names(req.paths.out_prefix)),
+                                 sorted(req.paths.output(n) for n in (*engines.REDLINE_OUTPUTS,
+                                                                      engines.REFUSED_REPORT)))
+                report = json.loads(blob(h, req.paths.output(engines.REFUSED_REPORT)))
+                self.assertEqual((report["edits_total"], report["edits_applied"], report["refused"]),
+                                 (20, 19, [{"edit": 19, "code": code}]))
+                # check_outputs ran with --refused: its report has the `refusals` check, and it passed.
+                checks = json.loads(blob(h, req.paths.output(engines.CHECK_REPORT)))["checks"]
+                self.assertIn(("refusals", True), [(c["name"], c["ok"]) for c in checks])
+                # summary_table ran with --refused: the internal copy has the by-hand table.
+                with zipfile.ZipFile(io.BytesIO(blob(h, req.paths.output(engines.INTERNAL)))) as z:
+                    self.assertIn("Changes to make by hand".encode(), z.read("word/document.xml"))
+                self.assertEqual([m.settled for m in h.receiver.completed], ["completed"])
+                self.assertNotIn(SECRET_FIND.encode(), everything_sent(h))
 
-    def _run(self, report):
-        h = Harness()
-        body, req = stage_redline(h, {"fake_report": report})
-        return h, req, main.process_message(fakes.received(body), h.queue, h.staging, self.cfg)
-
-    def test_refused_edits_are_reported_as_codes_and_the_report_is_an_output(self):
-        report = {"engine": "ooxml_redline", "report_version": 1, "edits_total": 2, "edits_applied": 1,
-                  "refused": [{"edit": 1, "code": "crosses_markup"}],
-                  "bookmarks_refused": [{"bookmark": "NDA_Sec10", "code": "bookmark_exists"}]}
-        h, req, result = self._run(report)
+    def test_every_edit_refused_is_still_a_success_with_outputs(self):
+        plan = golden_plan()
+        for edit in plan["edits"]:
+            edit["para"] = "Zanzibar clause that is not in this agreement"
+        h, req, result = run_redline_message(plan)
         self.assertEqual(result, engines.OUTCOME_COMPLETED)
         _, doc = completion(h)
-        self.assertEqual(doc["payload"]["refusedEdits"], [{"edit": 1, "code": "crosses_markup"}])
-        self.assertEqual(doc["payload"]["refusedBookmarks"], [{"bookmark": "NDA_Sec10", "code": "bookmark_exists"}])
-        self.assertEqual(doc["payload"]["checkOutcome"], "passed")
-        self.assertIn(req.paths.output(engines.REFUSED_REPORT), h.container.names(req.paths.out_prefix))
+        self.assertEqual(doc["payload"]["refusedEdits"],
+                         [{"edit": i, "code": "para_not_found"} for i in range(len(plan["edits"]))])
+        self.assertEqual(sorted(h.container.names(req.paths.out_prefix)),
+                         sorted(req.paths.output(n) for n in (*engines.REDLINE_OUTPUTS, engines.REFUSED_REPORT)))
+        self.assertIn(doc["payload"]["checkOutcome"], ("passed", "failed"))
 
-    def test_an_unknown_code_is_a_contract_error_dead_lettered_poisoned(self):
-        report = {"engine": "ooxml_redline", "report_version": 1, "edits_total": 1, "edits_applied": 0,
-                  "refused": [{"edit": 0, "code": "something_new"}], "bookmarks_refused": []}
-        h, req, result = self._run(report)
+    def test_a_plan_that_breaks_the_contract_ends_plan_does_not_fit_with_no_code_and_nothing_written(self):
+        plan = golden_plan()
+        plan["edits"][0]["find"] = ""  # blank anchors fail validate_plan: exit 3 with no "code"
+        h, req, result = run_redline_message(plan)
+        self.assertEqual(result, engines.OUTCOME_PLAN_DOES_NOT_FIT)
+        _, doc = completion(h)
+        self.assertEqual((doc["payload"]["outcome"], doc["payload"]["refusedEdits"],
+                          doc["payload"]["refusedBookmarks"], doc["payload"]["checkOutcome"]),
+                         ("plan_does_not_fit", [], [], None))
+        self.assertEqual(h.container.names(req.paths.out_prefix), [])
+        self.assertEqual([m.settled for m in h.receiver.completed], ["completed"])  # non-retryable
+        self.assertEqual(h.request_sender.scheduled, [])
+
+    def test_a_contract_error_is_dead_lettered_poisoned_with_nothing_written(self):
+        h = Harness()
+        body, req = stage_redline(h, golden_plan())
+        result = main.process_message(fakes.received(body), h.queue, h.staging, config(),
+                                      run_engines=lambda *_: engines.EngineResult(engines.OUTCOME_CONTRACT_ERROR))
         self.assertEqual(result, engines.OUTCOME_CONTRACT_ERROR)
         self.assertEqual([r for _, r, _ in h.receiver.dead_lettered], ["Poisoned"])
         self.assertEqual(completion(h)[1]["payload"]["outcome"], "contract_error")
@@ -229,23 +155,83 @@ class SkipAndReportTests(unittest.TestCase):
         for bad in (dict(good, edits_applied=3), dict(good, extra=1), dict(good, report_version=2),
                     dict(good, refused=[{"edit": 2, "code": "not_unique", "text": "clause"}]),
                     dict(good, refused=[{"edit": 3, "code": "not_unique"}]),
+                    dict(good, refused=[{"edit": 2, "code": "something_new"}]),
                     dict(good, refused=[{"edit": 2, "code": "bookmark_exists"}]),
                     dict(good, bookmarks_refused=[{"bookmark": "bad name", "code": "bookmark_exists"}])):
             self.assertIsNone(engines.parse_refused_report(json.dumps(bad).encode()))
 
-    def test_the_mode_is_detected_from_the_engines_help(self):
-        self.assertTrue(engines.engines_support_skip_mode(self.cfg.engine_settings))
-        self.assertFalse(engines.engines_support_skip_mode(config().engine_settings))  # master engines
 
-    def test_main_refuses_to_start_with_the_mode_on_and_master_engines(self):
-        env = {"AZURE_CLIENT_ID": "cid", "INTAKE_SERVICEBUS_FQDN": "ns", "INTAKE_REQUEST_QUEUE": "q1",
-               "INTAKE_COMPLETION_QUEUE": "q2", "INTAKE_STAGING_ACCOUNT_URL": "https://a",
-               "INTAKE_STAGING_CONTAINER": "c", "INTAKE_ENGINE_SKIP_AND_REPORT": "true",
-               "INTAKE_ENGINES_DIR": fakes.ENGINES_DIR, "INTAKE_SUMMARY_INTRO": fakes.SUMMARY_INTRO}
-        with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch.object(azure_io, "open_credential", side_effect=AssertionError("must not connect")):
-            self.assertEqual(main.main(), 2)
-        main.setup_logging(io.StringIO())
+class DefaultModeTests(unittest.TestCase):
+    """The switch off: one unplaceable edit refuses the whole plan (exit 3), and the refusal is read from the
+    "code"/"edit" keys of the engine's stderr JSON line, never from its "error" text."""
+
+    def test_exit3_code_and_edit_come_from_the_engine_stderr_and_nothing_is_written(self):
+        first_para = golden_plan()["edits"][0]["para"]
+        for find, code in ((SECRET_FIND, "not_found"), ("the", "not_unique")):
+            with self.subTest(code=code):
+                h, req, result = run_redline_message(golden_plan({"para": first_para, "find": find,
+                                                                  "comment": "probe"}), default_mode_config())
+                self.assertEqual(result, engines.OUTCOME_PLAN_DOES_NOT_FIT)
+                _, doc = completion(h)
+                self.assertEqual(doc["payload"]["outcome"], "plan_does_not_fit")
+                self.assertEqual(doc["payload"]["refusedEdits"], [{"edit": 19, "code": code}])
+                self.assertIsNone(doc["payload"]["checkOutcome"])
+                self.assertEqual(h.container.names(req.paths.out_prefix), [])  # never applied, no output blob
+                self.assertEqual([m.settled for m in h.receiver.completed], ["completed"])  # non-retryable
+                self.assertEqual(json.loads(h.container.blobs[req.paths.marker][0])["state"], "completed")
+                sent = everything_sent(h)
+                self.assertNotIn(SECRET_FIND.encode(), sent)
+                self.assertNotIn(b"visible paragraph text", sent)  # the "error" text of either case
+
+    def test_the_engine_stderr_really_carries_the_keys_and_the_text_that_is_kept_out(self):
+        # Must-fire control for the two tests above: the engine's own exit-3 line has "code"/"edit" AND quotes the
+        # find string in "error".
+        plan = golden_plan({"para": golden_plan()["edits"][0]["para"], "find": SECRET_FIND, "comment": "probe"})
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "plan.json")
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(plan, f)
+            rc, _, err = engines._run(default_mode_config().engine_settings, "ooxml_redline.py",
+                                      [p, os.path.join(fakes.CORPUS, "nda-01-bluefin-harbor-mutual.docx"),
+                                       os.path.join(tmp, "r.docx"), "--dry-run"], time.monotonic() + 120)
+        self.assertEqual(rc, 3)
+        line = json.loads(err.decode("utf-8").strip().splitlines()[-1])
+        self.assertEqual((line["code"], line["edit"]), ("not_found", 19))
+        self.assertIn(SECRET_FIND[:30], line["error"])
+
+
+class Exit3ParsingTests(unittest.TestCase):
+    def stderr(self, error="edit 4: find 'x y' ... clause text", **keys):
+        return json.dumps({"error": error, **keys}).encode()
+
+    def outcome(self, raw, skip=False):
+        r = engines.exit3_result(raw, skip)
+        return (r.outcome, [(e.edit, e.code) for e in r.refused_edits],
+                [(b.bookmark, b.code) for b in r.refused_bookmarks])
+
+    def test_structured_keys(self):
+        self.assertEqual(self.outcome(self.stderr(code="crosses_markup", edit=4)),
+                         ("plan_does_not_fit", [(4, "crosses_markup")], []))
+        self.assertEqual(self.outcome(self.stderr(code="bookmark_exists", bookmark="NDA_Sec10")),
+                         ("plan_does_not_fit", [], [("NDA_Sec10", "bookmark_exists")]))
+        for skip in (False, True):  # no "code": the plan breaks the contract, in either mode
+            self.assertEqual(self.outcome(self.stderr("edit 0: 'find' must not be blank"), skip),
+                             ("plan_does_not_fit", [], []))
+
+    def test_anything_off_contract_is_a_contract_error_never_an_exception(self):
+        cases = [b"", b"Traceback (most recent call last)", b"\xff\xfe", b"[]", b'{"error": 5}', b'{"code": "x"}',
+                 self.stderr(code="something_new", edit=1), self.stderr(code=None, edit=1),
+                 self.stderr(code="not_found"), self.stderr(code="not_found", edit=-1),
+                 self.stderr(code="not_found", edit=True), self.stderr(code="not_found", edit="1"),
+                 self.stderr(code="bookmark_exists", edit=1),
+                 self.stderr(code="not_found", bookmark="NDA_Sec10"),
+                 self.stderr(code="bookmark_exists", bookmark="not a name"),
+                 self.stderr(code="bookmark_exists", bookmark="NDA_Sec10", edit=1)]
+        for raw in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(self.outcome(raw)[0], "contract_error")
+        # Skip mode reports refusals in REPORT.json; a refusal code on its exit-3 line breaks that contract.
+        self.assertEqual(self.outcome(self.stderr(code="not_found", edit=1), skip=True)[0], "contract_error")
 
 
 class RetryTests(unittest.TestCase):
@@ -406,8 +392,11 @@ class ConfigAndBoundaryTests(unittest.TestCase):
     def test_config_from_the_bicep_settings(self):
         cfg = main.load_config(dict(self.BASE, INTAKE_MAX_DELIVERY_COUNT="5", INTAKE_JOB_TIMEOUT_SECONDS="600"))
         self.assertEqual((cfg.max_delivery_count, cfg.job_timeout_seconds), (5, 600))
-        self.assertFalse(cfg.engine_settings.skip_and_report)  # the seam is OFF by default
+        self.assertTrue(cfg.engine_settings.skip_and_report)  # skip-and-report is ON by default
         self.assertGreater(cfg.lock_renewal_seconds, cfg.job_timeout_seconds)
+        for value, expected in (("false", False), ("off", False), ("true", True), ("", True)):
+            env = dict(self.BASE, INTAKE_ENGINE_SKIP_AND_REPORT=value)
+            self.assertEqual(main.load_config(env).engine_settings.skip_and_report, expected, value)
 
     def test_config_errors(self):
         for env in ({k: v for k, v in self.BASE.items() if k != "INTAKE_COMPLETION_QUEUE"},

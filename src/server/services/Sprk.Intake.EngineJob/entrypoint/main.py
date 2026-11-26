@@ -24,10 +24,15 @@ taken over, also by compare-and-swap; a younger one means another execution may 
 retried later rather than run twice at once.
 
 Outcomes the completion carries (envelope.completion_body), all non-retryable:
-  completed          the engines ran; checkOutcome passed / failed (a failed check is the run's result, task 014)
-  plan_does_not_fit  ooxml_redline exit 3 (default mode): refusedEdits = [{edit: index|null, code}]; nothing written
+  completed          the engines ran; checkOutcome passed / failed (a failed check is the run's result, task 014).
+                     redline, skip-and-report mode (the default): refusedEdits = [{edit, code}] for every edit the
+                     engine could not place (possibly all of them), refusedBookmarks likewise; refused-report.json is
+                     uploaded beside the documents
+  plan_does_not_fit  the plan breaks the engine contract (ooxml_redline or summary_table exit 3): both lists empty.
+                     In default mode (switch off) also the first edit that does not fit: refusedEdits = [{edit, code}].
+                     Nothing written
   input_invalid      an engine exit 2 (unreadable .docx or plan); nothing written
-  contract_error     an engine broke its documented contract (skip-mode report, check_outputs exit 2): also
+  contract_error     an engine broke its documented contract (report, exit-3 stderr, check_outputs exit 2): also
                      dead-lettered `Poisoned` so the DLQ alert fires
 """
 import contextvars
@@ -95,9 +100,11 @@ class ConfigError(Exception):
     pass
 
 
-def _flag(value):
+def _flag(value, default):
     v = (value or "").strip().lower()
-    if v in ("", "0", "false", "no", "off"):
+    if not v:
+        return default
+    if v in ("0", "false", "no", "off"):
         return False
     if v in ("1", "true", "yes", "on"):
         return True
@@ -129,9 +136,9 @@ def load_config(env=None):
         engine_settings=engines.EngineSettings(
             engines_dir=env.get("INTAKE_ENGINES_DIR", os.path.join(here, "engines")),
             summary_intro=env.get("INTAKE_SUMMARY_INTRO", os.path.join(here, "assets", "summary-intro.md")),
-            # SEAM (owner 2026-11-26, "A with B as backup"): the accelerator's skip-and-report engine mode. OFF until
-            # their PR is on master; with it ON, main() refuses to start unless the engines advertise the flags.
-            skip_and_report=_flag(env.get("INTAKE_ENGINE_SKIP_AND_REPORT"))))
+            # Owner 2026-11-26, "A with B as backup": skip-and-report is ON. Setting it false restores the engines'
+            # all-or-nothing default mode (exit 3 on the first edit that does not fit); nothing else changes.
+            skip_and_report=_flag(env.get("INTAKE_ENGINE_SKIP_AND_REPORT"), default=True)))
 
 
 # --- logging and telemetry ---------------------------------------------------------------------------------------
@@ -425,10 +432,6 @@ def main(argv=None):
         log.error("Configuration error: %s", ex, extra={"event": "ConfigError"})
         return 2
     setup_telemetry()
-    if cfg.engine_settings.skip_and_report and not engines.engines_support_skip_mode(cfg.engine_settings):
-        log.error("INTAKE_ENGINE_SKIP_AND_REPORT is on but the engines in this image lack the skip-and-report flags",
-                  extra={"event": "ConfigError"})
-        return 2
     try:
         credential = azure_io.open_credential(cfg.client_id)
         with azure_io.open_staging(cfg.staging_account_url, cfg.staging_container, credential) as staging, \
