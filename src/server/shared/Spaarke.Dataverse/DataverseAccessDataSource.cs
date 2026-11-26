@@ -24,8 +24,8 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// Supplies the OBO confidential client, with the credential already selected from the configured
     /// ordered list (MI-FIC → Key Vault certificate → transitional secret).
     ///
-    /// <para><b>This class is the only reason the contract exists.</b> The three BFF-side consumers
-    /// (<c>GraphClientFactory</c>, <c>DataverseUserClient</c>, <c>AgentTokenService</c>) inject the
+    /// <para><b>This class is the only reason the contract exists.</b> The two BFF-side consumers
+    /// (<c>GraphClientFactory</c>, <c>DataverseUserClient</c>) inject the
     /// implementation concretely. This one is in <c>Spaarke.Dataverse</c> — the base layer, CI-enforced
     /// to reference no other Spaarke project (FR-14) — so it can only receive a BFF-owned credential by
     /// dependency inversion.</para>

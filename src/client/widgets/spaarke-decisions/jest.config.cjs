@@ -2,7 +2,8 @@
  * Jest config for the Spaarke decisions widget (spaarkeai-mcp-bff-api-r1 task 030).
  *
  * Patterned after src/solutions/InvoiceReview/jest.config.cjs (ts-jest, jsdom, React forced onto this package's copy). The MCP Apps SDK is
- * ESM-only and is imported by `mcp/mcpHost.ts` alone; no test loads that file, because components read the host through
+ * ESM-only and is imported by the shared `../shared/mcp/mcpHost.ts` alone (re-exported by `mcp/mcpHost.ts`); no test but
+ * `mcpHost.test.tsx` (which mocks the SDK) loads that file, because components read the host through
  * `mcp/mcpHostContext.ts` (a test provides a plain object). Pure-logic tests (the fetch shim, the size gate) opt into the node
  * environment with a docblock, because jsdom has no `Response`.
  *
@@ -12,7 +13,9 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
   testTimeout: 20000,
-  roots: ['<rootDir>/src'],
+  // `../shared` holds the shared widget MCP transport (spaarkeai-mcp-bff-api-r2 task 021) and its tests, which run here: it is a source
+  // folder with no package of its own, and this widget is its first consumer.
+  roots: ['<rootDir>/src', '<rootDir>/../shared'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
   // The wizard's email composer reaches RichTextEditor in the shared lib, which imports lexical and @lexical/* (react, rich-text, list,

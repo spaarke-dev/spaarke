@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
@@ -51,11 +52,13 @@ public sealed class RecordSearchService : IRecordSearchService
     private readonly ITenantCache _distributedCache;
 
     // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
-    // spaarke:tenant:{tenantId}:record-search:{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:v1
-    // NOTE: records-index has no tenantId field; tenant scoping here is for cache-key isolation
-    // (avoids cross-tenant cache poisoning) — security continues to be enforced at the Dataverse layer.
+    // spaarke:tenant:{tenantId}:record-search:{requestHash}:v2
+    // Tenant scoping in the cache key avoids cross-tenant cache poisoning. It is separate from the
+    // tenantId search filter (class remarks), which is the search-layer tenant boundary.
     private const string CacheResource = "record-search";
-    private const int CacheVersion = 1;
+    // v2: the cache id now covers the explicit index and PreferKeywordRanking and hashes an unambiguous
+    // serialisation (review F1); v1 entries are unreachable by construction.
+    private const int CacheVersion = 2;
     private readonly DocumentIntelligenceOptions _docIntelOptions;
     private readonly ILogger<RecordSearchService> _logger;
     // multi-container-multi-index-r1 FR-BFF-07 (part 3) — resolver routing for caller-supplied
@@ -64,9 +67,8 @@ public sealed class RecordSearchService : IRecordSearchService
     // Required for the explicit-index path; the existing direct path never touches this field
     // (NFR-02 backward-compat).
     private readonly IKnowledgeDeploymentService _deploymentService;
-    // Consumed ONLY on the explicit-index path to derive tenantId for the resolver's cache key.
-    // The records-index does NOT have a tenantId field (per the class-level remarks above), so
-    // tenant isolation continues to be enforced at the Dataverse layer; tenantId here is purely
+    // On the explicit-index path, also used to derive tenantId for the resolver's cache key.
+    // This is separate from the tenantId search filter (class remarks): here tenantId is
     // a resolver cache-key isolator per (tenant, indexName) — see KnowledgeDeploymentService
     // GetOrCreateExplicitIndexClient. Optional so existing direct-path tests need not stand up
     // an HttpContext mock.
@@ -125,8 +127,8 @@ public sealed class RecordSearchService : IRecordSearchService
     /// is the 8th parameter and is consumed ONLY when <c>SearchIndexName</c> is non-empty,
     /// to derive the tenantId required by
     /// <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, CancellationToken)"/>
-    /// for per-(tenant, index) cache-key isolation. The records-index itself has no tenantId
-    /// field; tenant isolation is enforced at the Dataverse layer, not at the search layer.
+    /// for per-(tenant, index) cache-key isolation. (Separately, the records-index has a tenantId
+    /// field, and every search applies the tenantId filter described in the class remarks.)
     /// </para>
     /// <para>
     /// NFR-02 backward-compat: the existing direct path (when <c>SearchIndexName</c> is null
@@ -185,11 +187,16 @@ public sealed class RecordSearchService : IRecordSearchService
         try
         {
             // Step 1: Check Redis cache (FR-05 + ADR-014)
-            // Derive tenantId for cache-key isolation. Records-index has no tenantId field so
-            // this is purely cache-side scoping; security is enforced at Dataverse.
+            // Derive tenantId for cache-key isolation (cache-side scoping; the search-layer
+            // tenant boundary is the tenantId filter applied below).
             var tenantIdForCache = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
                 ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
                 ?? _noUserTenantFallback;
+            // Step 1a: Resolve the search client BEFORE the cache lookup. On the explicit-index path this
+            // is where the allow-list is enforced (INDEX_NOT_ALLOWED), so a cached answer can never stand
+            // in for the refusal the caller would otherwise get (adversarial review F1).
+            var searchClient = await ResolveSearchClientAsync(request, cancellationToken);
+
             var cacheId = BuildCacheId(request);
             var cachedResult = await GetFromCacheAsync(tenantIdForCache, cacheId, cancellationToken);
             if (cachedResult is not null)
@@ -216,42 +223,6 @@ public sealed class RecordSearchService : IRecordSearchService
                     hybridMode = RecordHybridSearchMode.KeywordOnly;
                 }
                 embeddingStopwatch.Stop();
-            }
-
-            // Step 3: Get SearchClient for the records index.
-            //
-            // multi-container-multi-index-r1 FR-BFF-07 (part 3): when the caller supplied an
-            // explicit SearchIndexName on the request DTO, route via the 3-arg resolver
-            // overload. That overload validates the index against AiSearchOptions.AllowedIndexes
-            // (FR-BFF-02 / NFR-08) — RecordSearchService MUST NOT replicate that logic locally.
-            // On rejection, the resolver throws SdapProblemException(INDEX_NOT_ALLOWED, 400)
-            // which propagates up to the endpoint where the ProblemDetails middleware renders it.
-            //
-            // When SearchIndexName is null/whitespace, preserve the original direct
-            // SearchIndexClient.GetSearchClient(indexName) path verbatim — every existing test
-            // assertion (UsesConfiguredIndexName, FallsBackToDefaultIndexName_WhenConfigEmpty,
-            // etc.) continues to pass UNCHANGED per NFR-02 (backward-compat).
-            SearchClient searchClient;
-            if (!string.IsNullOrWhiteSpace(request.SearchIndexName))
-            {
-                // Derive tenantId from the current HttpContext for resolver cache-key isolation.
-                // The records-index has no tenantId field; this string is NEVER applied as an
-                // OData filter — it is consumed only by KnowledgeDeploymentService for its
-                // {tenantId}:explicit:{indexName} cache key.
-                var tenantId = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
-                    ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-                    ?? "anonymous";
-                searchClient = await _deploymentService.GetSearchClientAsync(
-                    tenantId, request.SearchIndexName, cancellationToken);
-            }
-            else
-            {
-                var indexName = _docIntelOptions.AiSearchIndexName;
-                if (string.IsNullOrWhiteSpace(indexName))
-                {
-                    indexName = RecordsIndexName;
-                }
-                searchClient = _searchIndexClient.GetSearchClient(indexName);
             }
 
             // Step 4: Build OData filter (FR-12: tenantId predicate ALWAYS present —
@@ -319,6 +290,44 @@ public sealed class RecordSearchService : IRecordSearchService
     }
 
     #region Private Methods
+
+    /// <summary>
+    /// Gets the SearchClient for the records index.
+    /// </summary>
+    /// <remarks>
+    /// multi-container-multi-index-r1 FR-BFF-07 (part 3): when the caller supplied an explicit
+    /// <see cref="RecordSearchRequest.SearchIndexName"/>, route via the 3-arg resolver overload. That
+    /// overload validates the index against <c>AiSearchOptions.AllowedIndexes</c> (FR-BFF-02 / NFR-08) —
+    /// this service MUST NOT replicate that logic locally. On rejection the resolver throws
+    /// <c>SdapProblemException(INDEX_NOT_ALLOWED, 400)</c>, which propagates to the endpoint where the
+    /// ProblemDetails middleware renders it. Must run before any cache read (see <see cref="SearchAsync"/>).
+    /// When SearchIndexName is null/whitespace the original direct
+    /// <c>SearchIndexClient.GetSearchClient(indexName)</c> path is preserved verbatim (NFR-02).
+    /// </remarks>
+    private async Task<SearchClient> ResolveSearchClientAsync(
+        RecordSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(request.SearchIndexName))
+        {
+            // Derive tenantId from the current HttpContext for resolver cache-key isolation.
+            // This value is consumed only by KnowledgeDeploymentService for its
+            // {tenantId}:explicit:{indexName} cache key; the tenantId search filter is built
+            // separately.
+            var tenantId = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+                ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+                ?? "anonymous";
+            return await _deploymentService.GetSearchClientAsync(
+                tenantId, request.SearchIndexName, cancellationToken);
+        }
+
+        var indexName = _docIntelOptions.AiSearchIndexName;
+        if (string.IsNullOrWhiteSpace(indexName))
+        {
+            indexName = RecordsIndexName;
+        }
+        return _searchIndexClient.GetSearchClient(indexName);
+    }
 
     /// <summary>
     /// Gets embedding with caching support via IEmbeddingCache.
@@ -596,34 +605,37 @@ public sealed class RecordSearchService : IRecordSearchService
     }
 
     /// <summary>
-    /// Builds the cache "id" component (query+filters+mode hash) consumed by ITenantCache.
+    /// Builds the cache "id" component consumed by ITenantCache: a hash of an unambiguous (JSON)
+    /// serialisation of everything that changes what a request returns or whether it is allowed.
     /// </summary>
+    /// <remarks>
+    /// Includes the normalised explicit index name and <c>PreferKeywordRanking</c>, which the id omitted
+    /// before (adversarial review F1). Lists go in as JSON arrays — never joined with a delimiter — so
+    /// <c>["a","b"]</c> and <c>["a,b"]</c> cannot collide. Lists are sorted (ordinal), so order is not part
+    /// of a request's identity. The cache is read only AFTER the explicit index passed the allow-list.
+    /// </remarks>
     private string BuildCacheId(RecordSearchRequest request)
     {
-        var queryHash = _embeddingCache.ComputeContentHash(request.Query);
-        var recordTypesHash = _embeddingCache.ComputeContentHash(
-            string.Join(",", request.RecordTypes.OrderBy(t => t)));
+        static string[] Sorted(IEnumerable<string>? values) =>
+            values is null ? [] : values.OrderBy(v => v, StringComparer.Ordinal).ToArray();
 
-        var filtersHash = "none";
-        if (request.Filters is not null)
+        var identity = new
         {
-            var filterParts = new List<string>();
-            if (request.Filters.Organizations is { Count: > 0 })
-                filterParts.Add("org:" + string.Join(",", request.Filters.Organizations.OrderBy(o => o)));
-            if (request.Filters.People is { Count: > 0 })
-                filterParts.Add("ppl:" + string.Join(",", request.Filters.People.OrderBy(p => p)));
-            if (request.Filters.ReferenceNumbers is { Count: > 0 })
-                filterParts.Add("ref:" + string.Join(",", request.Filters.ReferenceNumbers.OrderBy(r => r)));
+            q = request.Query,
+            types = Sorted(request.RecordTypes),
+            orgs = Sorted(request.Filters?.Organizations),
+            people = Sorted(request.Filters?.People),
+            refs = Sorted(request.Filters?.ReferenceNumbers),
+            index = string.IsNullOrWhiteSpace(request.SearchIndexName)
+                ? null
+                : request.SearchIndexName.Trim().ToLowerInvariant(),
+            keyword = request.Options?.PreferKeywordRanking ?? false,
+            mode = request.Options?.HybridMode ?? RecordHybridSearchMode.Rrf,
+            limit = request.Options?.Limit ?? 20,
+            offset = request.Options?.Offset ?? 0,
+        };
 
-            if (filterParts.Count > 0)
-                filtersHash = _embeddingCache.ComputeContentHash(string.Join("|", filterParts));
-        }
-
-        var mode = request.Options?.HybridMode ?? RecordHybridSearchMode.Rrf;
-        var limit = request.Options?.Limit ?? 20;
-        var offset = request.Options?.Offset ?? 0;
-
-        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}";
+        return _embeddingCache.ComputeContentHash(JsonSerializer.Serialize(identity));
     }
 
     /// <summary>

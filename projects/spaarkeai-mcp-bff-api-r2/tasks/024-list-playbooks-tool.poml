@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Tool: spaarke_list_playbooks (caller's + public, de-duplicated)</title>
+    <phase>1 Read tools</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF surface (MCP tool)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single thin adapter over IPlaybookService with a reference de-duplication in history</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Playbooks/ListPlaybooksTool.cs and the Playbooks ledger partial</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, api, ai, integration-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the read-only MCP tool spaarke_list_playbooks: one list of the caller's playbooks (GET /api/ai/playbooks) and public playbooks (GET /api/ai/playbooks/public), de-duplicated by id, over IPlaybookService, run as the caller.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool handlers and the JPS playbook service.</role>
+  <goal>The tool returns exactly the union of the two REST lists for the same caller, with no duplicate ids, as slim rows (id, name, description ≤ 200 chars, owner kind, format).</goal>
+
+  <context>
+    <background>Spec FR-04, D-209 (qualify "playbook" by format). REST: Api/Ai/PlaybookEndpoints.cs (group /api/ai/playbooks; ListUserPlaybooks :90, ListPublicPlaybooks :98). The legacy de-duplication is readable at git show 37f0864afe:src/server/api/Sprk.Bff.Api/Api/Agent/AgentEndpoints.cs (:62, :334, :357).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/ListPlaybooksTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Playbooks.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Playbooks/ListPlaybooksToolTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">General McpToolResults, ledger partials</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback). Call the same IPlaybookService methods the two REST handlers call, with the same paging limits.</constraint>
+    <constraint source="project">[McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, description ≤ 1,024 characters that says "JPS playbooks (AI analysis recipes)", not bare "playbook" (D-209). Ledger row in RouteAuthorizationGuardTests.Mcp.Playbooks.cs.</constraint>
+    <constraint source="ADR-015">Slim rows only; no playbook definition JSON or prompts in model-visible text. Logs: tool name, latency, row count, outcome, correlation id. Result &lt; 64 KiB at the list maximum.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 020; read both REST handlers and the legacy de-duplication from history.</step>
+    <step order="2">Write the tool, ledger row and tests; run MCP suites, ArchTests and conformance.</step>
+    <step order="3">Measure the publish-size delta.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <justification>
+    <existing>notes/reuse-scan.md row "Playbook list": IPlaybookService behind ListUserPlaybooks/ListPublicPlaybooks; legacy de-duplication in AgentEndpoints (deleted by 001).</existing>
+    <extension>The service is reused unchanged; the tool is a thin adapter that unions two existing calls.</extension>
+    <cost-of-doing-nothing>Copilot users cannot discover which playbooks they may run, so spaarke_run_playbook (030) has no discoverable ids (FR-04 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/ListPlaybooksTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Playbooks/ListPlaybooksToolTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The tool's ids equal the set union of the two REST lists for the same caller.</criterion>
+    <criterion testable="true">Negative: a playbook in both lists appears once.</criterion>
+    <criterion testable="true">Negative: no caller context returns UserContextRequired.</criterion>
+    <criterion testable="true">Model-visible text has no definition JSON or prompt text; result under 64 KiB at the maximum.</criterion>
+    <criterion testable="true">ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04, D-209.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

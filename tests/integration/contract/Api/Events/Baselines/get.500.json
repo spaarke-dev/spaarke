@@ -1,0 +1,12 @@
+{
+  "case": "get.500",
+  "status": 500,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc7231#section-6.6.1\",\"title\":\"Internal Server Error\",\"status\":500,\"detail\":\"An error occurred while retrieving the event\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc7231#section-6.6.1",
+    "title": "Internal Server Error",
+    "status": 500,
+    "detail": "An error occurred while retrieving the event"
+  }
+}

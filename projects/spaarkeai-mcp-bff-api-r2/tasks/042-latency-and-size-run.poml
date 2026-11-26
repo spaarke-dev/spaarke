@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Latency and result-size run on dev (NFR-01, NFR-02)</title>
+    <phase>3 Email, evaluation and E2E</phase>
+    <gate>After 049 (all tools on dev)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Measurement against dev with a script; no product code expected</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scripted measurement against fixed thresholds</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-mostly probes against dev plus project notes; runs beside 043</parallel-reason>
+    <deps>049</deps>
+    <tags>testing, bff-api</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Measure every tool on the dev BFF as the test user: 50 calls each, p50/p95 latency against NFR-01 (read ≤ 3 s, search ≤ 5 s, start ≤ 5 s, send ≤ 15 s, all &lt; 30 s), and the serialised result size at realistic maxima (50 search hits, 200 tasks) against NFR-02 (&lt; 64 KiB). Record results; file any breach as a defect.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP clients and performance measurement.</role>
+  <goal>notes/nfr-latency-size.md records p50/p95 and max size per tool with the SHA and date; every breach is filed via /project-defer-issue-tracking or fixed in scope.</goal>
+
+  <context>
+    <background>Spec NFR-01, NFR-02, FR-14 ("no tool's p95 exceeds 30 s"). r1 measured NFRs in its task 025 (projects/spaarkeai-mcp-bff-api-r1/tasks/025-conformance-ci-nfr-measurements.poml); reuse its client script if present. Send is measured with test recipients only (≤ 50 sends, owner-approved mailbox) or, if the owner prefers, at ≥ 10 calls.</background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r2/notes/nfr-latency-size.md</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r2/notes/scripts/Measure-McpTools.ps1 (project-scoped probe script, not product code)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/tasks/025-conformance-ci-nfr-measurements.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="049" status="pending">All tools on dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Dev only, as the test user; the token is held in memory only and never written to the note, the script or logs (NFR-05).</constraint>
+    <constraint source="project">Write tools run only against test matters with test data; email send only to owner-approved test recipients, with the call count the owner approves; clean up or mark created records.</constraint>
+    <constraint source="project">A breach is a defect: fix it in scope if it is in this project's code, otherwise file it with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Reuse or write the probe script; agree send count and recipients with the owner.</step>
+    <step order="2">Run 50 calls per tool (send per the owner's count); record p50/p95/max latency and max result size.</step>
+    <step order="3">Fix or file every breach.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any tool's p95 exceeds 30 s, STOP and escalate (owner rule Q3).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>r1 task 025's NFR measurement approach.</existing>
+    <extension>Reused; the probe script is project-scoped tooling under the project's notes, not product surface.</extension>
+    <cost-of-doing-nothing>NFR-01, NFR-02 and FR-14's latency acceptance have no evidence.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">notes/scripts/Measure-McpTools.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/nfr-latency-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note lists every tool with call count, p50, p95, max latency and max result size, the SHA and date.</criterion>
+    <criterion testable="true">Read p95 ≤ 3 s, search p95 ≤ 5 s, start p95 ≤ 5 s, send p95 ≤ 15 s, every tool &lt; 30 s; every result &lt; 64 KiB at 50 hits / 200 tasks — or each breach is linked to a fix commit or a filed issue.</criterion>
+    <criterion testable="true">Negative: the note and script contain no token, claim or email content.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec NFR-01, NFR-02, FR-14.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

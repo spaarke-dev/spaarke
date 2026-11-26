@@ -1334,6 +1334,11 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Insights.Routing.IInsightsActionRouter,
                            Sprk.Bff.Api.Services.Ai.Insights.Routing.InsightsActionRouter>();
 
+        // spaarkeai-mcp-bff-api-r2 task 005 (FR-13): the durable run record PlaybookOrchestrationService writes on the
+        // run's own path and reads when a run is not in memory. Concrete only (ADR-010): its test seam is
+        // IGenericEntityService. Registered beside its only consumer, so the compound-OFF branch never needs a peer
+        // (NullPlaybookOrchestrationService does not take it; ADR-032 F.1 static scan: no endpoint injects it).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PlaybookRuns.PlaybookRunRecordStore>();
         services.AddScoped<IPlaybookOrchestrationService, PlaybookOrchestrationService>();
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).

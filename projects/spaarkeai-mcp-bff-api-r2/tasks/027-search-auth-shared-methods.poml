@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Search result authorization into shared methods (document and record search)</title>
+    <phase>1 Read tools</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api, auth and tenant-isolation; it refactors two security filters and the endpoint row-authorization code, and the REST responses are frozen</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization refactor on the search hot path (scope decision, per-parent and per-record caller access, SPE pointer stripping, PARTIAL_RESULTS); the REST behaviour must stay identical</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits only the two search filters, the two search endpoint files and new search-auth tests; no other Wave 5 task touches them</parallel-reason>
+    <deps>009, 020</deps>
+    <tags>bff-api, auth, tenant-isolation, refactoring, integration-test</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move the access decisions of the two REST search routes into shared methods that take the request HttpContext and the search inputs or results and return typed outcomes. These are POST /api/ai/search (SemanticSearchAuthorizationFilter plus the endpoint's NarrowToAuthorized / AuthorizeResults / AuthorizeRowsByParentAsync / TrimToReadableDocumentsAsync) and the record search route (RecordSearchAuthorizationFilter plus the endpoint's AuthorizeRowsAsync). The filters and endpoints then become thin callers, and task 022's MCP search tools call the same methods instead of copying checks.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core endpoint filters, caller-scoped authorization and retrieval access trimming.</role>
+  <goal>One owner per search access decision. A document-search method owns the scope decision (entity / documentIds / all), parent and document authorization, the per-row parent check, the readable-document trim, the SPE pointer stripping, the count recomputation and the PARTIAL_RESULTS warning. A record-search method owns the per-row record authorization. Both REST routes return byte-identical responses, and the typed outcomes carry the reasonCodes an MCP tool can return.</goal>
+
+  <context>
+    <background>
+      <p>Added 2026-11-25 by the main session after task 022 hit its escalation trigger. Its report found that both REST search routes enforce access inside endpoint filters and private endpoint statics, not in a reusable service. Spec line 275 says "MUST NOT copy authorization checks into tools. Move them to one shared method that REST and MCP both call."</p>
+      <p>Document search: Api/Ai/SemanticSearchEndpoints.cs; Api/Filters/SemanticSearchAuthorizationFilter.cs (about 667 lines). The filter passes its decision to the handler through HttpContext.Items. IRetrievalAccessTrim.TrimAsync is reached through internal static TrimToReadableDocumentsAsync. Per-parent checks call AuthorizationService.GetCallerRecordAccessAsync(callerObjectId, entitySet, id, callerBearerToken).</p>
+      <p>Record search: Api/Ai/RecordSearchEndpoints.cs (private AuthorizeRowsAsync, MaxRecordAuthorizationChecks = RecordSearchOptions.MaxLimit); Api/Filters/RecordSearchAuthorizationFilter.cs (about 320 lines). IRecordSearchService.SearchAsync applies only the tenant filter.</p>
+      <p>Pattern to copy: task 007, PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync. It is a public static method over a private Decide method, takes HttpContext?, returns a typed result with a reasonCode, and reads the caller and token from the context itself, so no token is passed by callers.</p>
+      <p>Also task 008: FinanceAuthorizationFilter.AuthorizeMatterFinanceReadAsync.</p>
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+      <file role="new">tests/integration/auth/Ai/SearchAuthorizationSharedMethodTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/PlaybookAuthorizationFilter.cs (AuthorizePlaybookRunAsync / DecideRunAsync, task 007)</file>
+      <file role="canonical-reference">tests/integration/auth/Ai/PlaybookRunAuthorizationSharedMethodTests.cs (method-vs-route parity test shape)</file>
+      <file role="canonical-reference">existing search contract/auth tests: grep tests/ for SemanticSearch*Authorization* and RecordSearchRowAuthorizationContractTests (must pass unchanged)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="009" status="completed">Record-search query construction proof and cache fixes</dependency>
+      <dependency task="020" status="completed">McpToolError reasonCode shape</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">The shared methods are the only implementation of the search access decisions. Filters and endpoints bind, call and map; no check is duplicated, and HttpContext.Items hand-off stays only where REST needs it.</constraint>
+    <constraint source="project">REST responses of both search routes stay byte-for-byte unchanged for every case the existing search contract and auth tests cover: status, ProblemDetails, result rows, counts, warnings and stripped fields. The Dataverse access-call sequence and count are also unchanged.</constraint>
+    <constraint source="ADR-028">The methods take the request HttpContext and read the caller and bearer token from it themselves (as 007 does). Callers never pass a token, and nothing logs it. They fail closed (UserContextRequired) on a null or unauthenticated context; there is no app-only fallback. Document that the principal and the Authorization header must come from the same request.</constraint>
+    <constraint source="ADR-019">Typed outcomes carry a stable reasonCode per refusal (the REST codes, or new ones recorded in notes/027-decisions.md) and no ProblemDetails or IResult.</constraint>
+    <constraint source="ADR-013">Methods live in Api/Filters/ (as 007/008) unless MCP tools cannot reach them there; record the choice. No AI-internal type appears in a public signature, so wrap retrieval types if needed.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md. The PR records the publish-size delta against a fresh master build (+5 MB or more needs justification; 55 MB total triggers a review; 60 MB is a hard stop). No new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push, run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress. Reviews: unified-access-control-r2 (caller path).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/007-decisions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/009-decisions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Merge origin/master. Run the existing search contract and auth suites green, and list the cases.</step>
+    <step order="2">Extract the document-search decision (scope, parent and document authorization, row checks, trim, stripping, counts, warning) into a shared method with a typed outcome. The filter and endpoint call it.</step>
+    <step order="3">Extract the record-search per-row authorization into a shared method. The filter and endpoint call it.</step>
+    <step order="4">Write SearchAuthorizationSharedMethodTests: call each method directly, then send the same input to the route, and assert the same status/code/rows and the same Dataverse questions.</step>
+    <step order="5">Run the search suites, ArchTests and the build. Measure the publish-size delta and run the CVE check.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory; the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">Document any deviation from plan in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If keeping REST byte-identical requires a filter or endpoint to keep a check of its own beyond binding and mapping, STOP and escalate. Also STOP if the MCP caller cannot obtain the caller-scoped Dataverse read identity the checks need without passing a token.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SemanticSearchAuthorizationFilter, RecordSearchAuthorizationFilter and the private row-authorization statics in SemanticSearchEndpoints / RecordSearchEndpoints are the only owners today. IRetrievalAccessTrim covers only the final trim.</existing>
+    <extension>Yes, extended in place: the filters' and endpoints' own logic becomes callable methods in the same files (pattern: tasks 007 and 008). No new service class unless placement requires one.</extension>
+    <cost-of-doing-nothing>Task 022's spaarke_search_documents / spaarke_find_records would either copy the scope and per-row checks (spec MUST NOT; two owners that drift) or call the services alone. The services alone return records and documents under parents the caller cannot read, which breaks must-not-leak.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/, dotnet test, dotnet publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs, RecordSearchAuthorizationFilter.cs, Api/Ai/SemanticSearchEndpoints.cs, RecordSearchEndpoints.cs</output>
+    <output type="test">tests/integration/auth/Ai/SearchAuthorizationSharedMethodTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every existing document-search and record-search contract and auth test passes unchanged.</criterion>
+    <criterion testable="true">Calling each shared method directly for an allowed caller returns the same rows, counts and warnings the route returns for the same input.</criterion>
+    <criterion testable="true">Negative: a document whose parent the caller cannot read is removed (with PARTIAL_RESULTS when REST adds it); a record the caller cannot read is removed; an out-of-scope documentIds or entity request returns the REST refusal code. Each matches REST for the same input.</criterion>
+    <criterion testable="true">Negative: a null HttpContext or unauthenticated principal returns UserContextRequired and makes no Dataverse or search call.</criterion>
+    <criterion testable="true">grep shows each search access check implemented once; the filters and endpoints contain no scope, parent or record check of their own.</criterion>
+    <criterion testable="true">The PR records the publish-size delta (total at or under 60 MB), no new HIGH CVE, and the uac-r2 review.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02 prerequisite (added after task 022 escalated). Two adversarial-verifier passes (auth, tenant-isolation), run by the main session.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
