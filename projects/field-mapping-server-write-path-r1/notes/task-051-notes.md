@@ -212,3 +212,25 @@ UAC-r2 had no access objection.
   - the four web resources' content by id (`wr_*`, hashes in `capture.log`);
   - the `sprk_project` quick-create value (True).
 - **UI checks (§6).** Pending; the ones that call the BFF wait for the d307d67e36 BFF deploy to go live.
+
+## 12. UI checks on dev (main session, Chrome, 2026-11-26 18:10–18:30Z, after BFF d307d67e36 went live)
+
+| Check (§6) | Result |
+|---|---|
+| To Do home grid | PASS. "+New To Do" opens the Create New To Do wizard; there is no platform New. |
+| Report card, budget and KPI assessment home grids | PASS. No New. |
+| Email (communication) home grid | PASS. "+New Email" is present. |
+| Matter form (MAT-000113) | PASS. The More menu has "New Matter" (`sprk.NativeCreate.sprk_matter.Form.New`). No Assign, no platform New or Save & New. |
+| Matter Report Card subgrid "New Report Card" | PASS. It opens `sprk_createreportcardwizard`; Cancel creates nothing. |
+| Report card form | PASS. "New Report Card" launcher, no Assign. The KPI subgrid shows "New KPI Assessment" (SecureChild) and "Add KPI Assessment" (`sprk.matter.subgrid.kpi.AddKpiButton`, enabled). |
+| Add KPI on report card 9d1477e8… | PASS. KPI assessment 141e3045-10fe-4142-a4b8-0937b5184e99 was created by the BFF identity, filed to the report card, owned by the BU team, and opened; no alert. |
+| Event form (b63bdc13…, under MAT-000113) | PASS. "New Event" launcher and "Add Memo" are present. No Assign, no platform New. |
+| Add Memo | PASS. Memo c353265b-7926-460a-89fd-dcadab20f138 was created by the BFF identity, filed to the event and to MAT-000113, owned by the BU team, with created-by-person set, and opened; no alert. |
+
+Not run:
+- §6 item 5b (forcing an event save failure);
+- item 7 (CommunicationConnections, DI-048);
+- item 9 (a user without Create on To Do);
+- the project subgrid.
+
+The two dev test rows above stay.
