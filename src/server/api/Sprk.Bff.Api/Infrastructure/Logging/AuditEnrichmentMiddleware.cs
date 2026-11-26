@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Spaarke.Core.Auth;
 
 namespace Sprk.Bff.Api.Infrastructure.Logging;
@@ -77,11 +78,30 @@ public sealed class AuditEnrichmentMiddleware
         // Anonymous requests get no enrichment — pass straight through.
         // This keeps health probes, /ping, and unauthenticated diagnostic endpoints
         // out of the audit scope (and out of customer SIEM noise).
-        var user = context.User;
-        if (user?.Identity is null || !user.Identity.IsAuthenticated)
+        var scope = BuildAuditScope(context.User, context.TraceIdentifier);
+        if (scope is null)
         {
             await _next(context);
             return;
+        }
+
+        using (_logger.BeginScope(scope))
+        {
+            await _next(context);
+        }
+    }
+
+    /// <summary>
+    /// The audit scope for an authenticated caller, or <see langword="null"/> for an anonymous one.
+    /// <c>internal</c> so work that DETACHES from the request with flow suppressed (where this scope does
+    /// not flow) can re-open the identical scope instead of re-deriving the fields — e.g.
+    /// <c>ComposeProfileDispatcher</c> (#2620).
+    /// </summary>
+    internal static Dictionary<string, object?>? BuildAuditScope(ClaimsPrincipal? user, string correlationId)
+    {
+        if (user?.Identity is null || !user.Identity.IsAuthenticated)
+        {
+            return null;
         }
 
         // Extract the canonical identity fields from the ONE classifier (task 081). It reads every
@@ -89,30 +109,19 @@ public sealed class AuditEnrichmentMiddleware
         // helpers this replaced were doing by hand. Null (not empty string) means "missing", so log
         // sinks can still distinguish "present but empty" from "absent".
         var caller = CallerIdentity.FromPrincipal(user);
-        var oid = caller.ObjectId;
-        var appId = caller.ApplicationId;
-        var tenantId = caller.TenantId;
-
-        // Two-valued projection of a three-valued classification — see the asymmetry note on the class.
-        var isObo = caller.IsUserDelegated;
-        var correlationId = context.TraceIdentifier;
 
         // Build the scope dictionary. ILogger<T>.BeginScope(IDictionary) is the
         // documented contract for structured-logging providers (Application Insights,
         // OpenTelemetry, Serilog) to materialise these as top-level log properties.
-        var scope = new Dictionary<string, object?>
+        return new Dictionary<string, object?>
         {
-            ["oid"] = oid,
-            ["appid"] = appId,
-            ["obo"] = isObo,
-            ["tenantId"] = tenantId,
+            ["oid"] = caller.ObjectId,
+            ["appid"] = caller.ApplicationId,
+            // Two-valued projection of a three-valued classification — see the asymmetry note on the class.
+            ["obo"] = caller.IsUserDelegated,
+            ["tenantId"] = caller.TenantId,
             ["correlationId"] = correlationId
         };
-
-        using (_logger.BeginScope(scope))
-        {
-            await _next(context);
-        }
     }
 
     // NOTE (task 081): ResolveOid / ResolveAppId / ResolveTenantId / IsOnBehalfOfFlow used to live here
