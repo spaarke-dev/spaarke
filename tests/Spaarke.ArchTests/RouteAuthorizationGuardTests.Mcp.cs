@@ -937,18 +937,20 @@ public partial class RouteAuthorizationGuardTests
         }
 
         // MUST NOT FIRE: the real McpModule (WithHttpTransport, AddAuthorizationFilters, ConfigureSessionOptions, ToolCollection, and
-        // task 030's ResourceCollection of the real DecisionsWidgetResource), the catalog, the endpoints and the widget class itself.
-        const string widgetPath = "Api/Mcp/LegalOperations/DecisionsWidgetResource.cs";
-        var widgetUnit = new SourceUnit(widgetPath, ReadRepoFile("src/server/api/Sprk.Bff.Api/" + widgetPath)!);
+        // task 030's ResourceCollection of the real DecisionsWidgetResource and, since r2 task 034, BriefingWidgetResource), the catalog, the endpoints and
+        // the widget classes themselves.
+        var widgetUnits = new[] { "Api/Mcp/LegalOperations/DecisionsWidgetResource.cs", "Api/Mcp/LegalOperations/Briefing/BriefingWidgetResource.cs" }
+            .Select(p => new SourceUnit(p, ReadRepoFile("src/server/api/Sprk.Bff.Api/" + p)!))
+            .ToArray();
         foreach (var path in new[] { "Infrastructure/DI/McpModule.cs", "Api/Mcp/McpToolCatalog.cs", "Api/Mcp/McpEndpoints.cs", "Api/Mcp/McpToolAuthorization.cs" })
         {
             var source = ReadRepoFile("src/server/api/Sprk.Bff.Api/" + path)!;
-            Assert.Empty(McpToolViolations(new[] { new SourceUnit(path, source), widgetUnit }, Array.Empty<McpTool>(), new HashSet<string>()));
+            Assert.Empty(McpToolViolations(new[] { new SourceUnit(path, source) }.Concat(widgetUnits).ToArray(), Array.Empty<McpTool>(), new HashSet<string>()));
         }
 
         Assert.Contains("ConfigureSessionOptions", ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
-        Assert.Contains("ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance }",
-            ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!, StringComparison.Ordinal);
+        Assert.Matches(@"ResourceCollection = new McpServerResourceCollection\s*\{\s*DecisionsWidgetResource\.Instance,\s*BriefingWidgetResource\.Instance,?\s*\}",
+            ReadRepoFile("src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs")!);
 
         // Task 030 widget exception (2026-11-14). Sanctioned: McpModule, a static Api/Mcp class, one Create(Read, ...), Read().
         const string module = "o.ResourceCollection = new McpServerResourceCollection { FakeWidgetResource.Instance };";
