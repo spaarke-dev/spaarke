@@ -4,7 +4,7 @@
     <title>Task read tools: spaarke_list_tasks, spaarke_get_task</title>
     <phase>1 Read tools</phase>
     <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface over events read with the BFF identity plus a BFF-applied filter (FR-15 caller scope)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -110,7 +110,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-07, FR-15. Two adversarial-verifier passes (tenant-isolation tag). uac-r2 reviews.</notes>
+  <notes>Spec FR-07, FR-15. Two adversarial-verifier passes (tenant-isolation tag). uac-r2 reviews.
+Completion summary (2026-11-25): spaarke_list_tasks and spaarke_get_task are thin adapters over IEventsCapability (no filter or check of their own), with the slim rows, the byte budget and the open link in Api/Mcp/LegalOperations/Tasks/. Decisions, deviations (no per-row link in the list; the byte budget), the outcome mapping, tests and results: notes/025-decisions.md. The main session runs the two adversarial passes and applies the TASK-INDEX row (the wave rules reserve both).
+rework: none task 025</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

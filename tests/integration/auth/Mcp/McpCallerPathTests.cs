@@ -324,6 +324,8 @@ public sealed class McpCallerPathTests
             ["spaarke_get_document"] = ["documentId"], // r2 task 023
             ["spaarke_get_portfolio"] = [], // r2 task 026
             ["spaarke_list_playbooks"] = ["nameFilter", "page"], // r2 task 024 (static schema: the two optional list arguments)
+            ["spaarke_list_tasks"] = ["dueDateFrom", "dueDateTo", "pageNumber", "pageSize", "priority", "regardingRecordId", "regardingRecordType", "status"], // r2 task 025 (static schema: the optional list filters)
+            ["spaarke_get_task"] = ["taskId"], // r2 task 025
         }, options => options.WithStrictOrdering());
     }
 

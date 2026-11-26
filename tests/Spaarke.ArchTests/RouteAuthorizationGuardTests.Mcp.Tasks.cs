@@ -7,5 +7,16 @@ namespace Spaarke.ArchTests;
 /// </summary>
 public partial class RouteAuthorizationGuardTests
 {
-    private static readonly IReadOnlyList<McpTool> McpToolsTasks = Array.Empty<McpTool>();
+    // Task 025 (FR-07 read half): spaarke_list_tasks and spaarke_get_task, both read-only and model-visible (task 036 adds the writes).
+    private static readonly IReadOnlyList<McpTool> McpToolsTasks = new[]
+    {
+        new McpTool("ListTasksTool", "", "IEventsCapability",
+            "FR-07, read-only: the caller's tasks (events) through IEventsCapability.ListAsync with exactly IHttpContextAccessor.HttpContext: "
+            + "the capability runs the list impersonated AS the caller, narrowed to my events, and fails closed with no caller or no Dataverse "
+            + "user (the route's own core). The tool adds no filter and no check. Bare [Authorize]."),
+        new McpTool("GetTaskTool", "", "IEventsCapability",
+            "FR-07, read-only: one task (event) through IEventsCapability.GetAsync with exactly IHttpContextAccessor.HttpContext: the "
+            + "capability asks the caller's Read on the event (RecordRouteAccessAuthorizationFilter.DecideRouteRecordAsync, the route filter's "
+            + "decision); no Read and an absent event are one not-found. The tool adds no check. Bare [Authorize]."),
+    };
 }
