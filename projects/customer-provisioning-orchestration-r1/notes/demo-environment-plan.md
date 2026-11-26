@@ -68,6 +68,8 @@ About **12–17 working days**. W2 and W3 are the largest pieces.
 | 5 | Is the volume pack needed? | Not for the first full demo. Build it when a performance or search demo is scheduled. |
 | 6 | `SPAARKE-DATA-CLI` | Retire it (archive the repo) and keep its scenario content as the source for W3 and W8 text. |
 
+**Decided 2026-11-26 (owner):** decision 1 approved (operator client created, PR #3217, pre-authorized on ACME by run 7a7cbda1); decisions 2, 3, 4 and 5 adopted as recommended above ("Yes adopt the plan recommendations"). The owner signs in personas through the Claude desktop browser for W3/W6.
+
 ## 6. Until then (ACME today)
 
 ACME already shows the curated story in every record grid. For a demo before W3, upload the 8 files in
