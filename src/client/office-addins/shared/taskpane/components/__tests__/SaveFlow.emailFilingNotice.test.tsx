@@ -38,6 +38,7 @@ const MATTER = {
 const NOT_PERMITTED =
   "The email wasn't added to this record's communications because you don't have permission to change it.";
 const FAILED = "The email couldn't be added to this record's communications. File it from Spaarke.";
+const FILED_UNCONFIRMED = 'The email is filed to this record but still needs confirming in Spaarke.';
 
 type FakeResponse = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<unknown> };
 const json = (status: number, body: unknown): FakeResponse => ({
@@ -118,6 +119,16 @@ describe('SaveFlow — the email was saved but not filed (task 131)', () => {
     await saveToTheMatter();
 
     expect(await screen.findByText(FAILED)).toBeInTheDocument();
+  });
+
+  it('FiledUnconfirmed (task 140): a warning says the email is filed but still needs confirming in Spaarke', async () => {
+    serverAnswers({ emailFiling: 'FiledUnconfirmed' });
+
+    await saveToTheMatter();
+
+    const notice = await screen.findByText(FILED_UNCONFIRMED);
+    expect(notice.textContent).not.toContain(MATTER.name);
+    expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument();
   });
 
   it('the notice names nothing about the record or why access was refused beyond "permission to change it"', async () => {

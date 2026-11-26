@@ -824,8 +824,11 @@ prereqs:
         # resources, so on an upgrade run an unavailable name is read at its expected resource ID in the stamp's resource group
         # (T186 L23, same rule as H2a): 200 = ours (pass), 404 = another tenant holds the name (collision), anything else fails.
         owned() { # label provider-path api-version -> 0 ours (200), 1 not found (404), 2 any other status
-          h=$(curl -sS -o /dev/null -D - -H "Authorization: Bearer $tok" "https://management.azure.com/subscriptions/{stampSubscriptionId}/resourceGroups/$rg/providers/$2?api-version=$3") || { echo "UNAVAILABLE $1: ownership GET in $rg failed (curl)"; return 2; }
-          code=$(echo "$h" | sed -n 1p | tr -d '\r' | awk '{print $2}')
+          # Headers and body both go to stdout and only the status line is read. No -o /dev/null: under MSYS_NO_PATHCONV (SKILL
+          # Step 0.5b) Git Bash hands /dev/null to the native curl.exe as a literal path it cannot write (exit 23) - ISS-044.
+          # No -w either: its %-variables are written in braces, which Step 0.5b reads as an unresolved placeholder.
+          h=$(curl -sS -D - -H "Authorization: Bearer $tok" "https://management.azure.com/subscriptions/{stampSubscriptionId}/resourceGroups/$rg/providers/$2?api-version=$3") || { echo "UNAVAILABLE $1: ownership GET in $rg failed (curl)"; return 2; }
+          code=$(printf '%s\n' "$h" | sed -n 1p | tr -d '\r' | awk '{print $2}')
           case "$code" in
             200) return 0 ;;
             404) return 1 ;;
@@ -850,7 +853,7 @@ prereqs:
         [ "$failed" = 0 ] || exit 1
         echo ok
       expect: "`ok` - the stamp's Service Bus namespace, storage account and the three Cognitive Services subdomains (openai, docintel, contentsafety) are each either available or already this stamp's own resource. A name Azure reports unavailable is read at its expected ID in `rg-spaarke-{customerId}-{stampEnvironment}`: HTTP 200 prints `OWNED <label>` and passes (safe on an upgrade or resume run); HTTP 404 prints `UNAVAILABLE <label>: <Azure's reason>` (another tenant holds the name) and the recipe exits 1; any other status prints it and exits 1"
-    remediation: 'Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace). A name that is unavailable and absent from the stamp''s resource group is held elsewhere (another tenant, or a soft-deleted Cognitive Services account - purge it with `az cognitiveservices account purge`).'
+    remediation: "Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace). A name that is unavailable and absent from the stamp's resource group is held elsewhere (another tenant, or a soft-deleted Cognitive Services account - purge it with `az cognitiveservices account purge`)."
     related_findings: [F10]
 
   - id: PRQ-C-04

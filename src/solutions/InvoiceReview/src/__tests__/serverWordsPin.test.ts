@@ -332,3 +332,24 @@ describe('Finish decision (ISS-032): the approval state\'s hint', () => {
     for (const verb of ['Approve', 'Reject', 'Return'] as const) expect(incompleteOutcome(strandedApproval(verb))).not.toBeNull();
   });
 });
+
+describe('Set firm and the linked firms (095d-3): the request, the answer and the two routes the Billing firm field calls', () => {
+  const finance = (file: string) => read(`${BFF}/Api/Finance/${file}`);
+
+  it('the request carries FirmId and Note, the answer carries what the page reads, and both routes are mapped', () => {
+    expect(recordMembers(finance('InvoiceApprovalEndpoints.cs'), 'AssignFirmRequest')).toEqual(['FirmId', 'Note']);
+    expect(recordMembers(finance('InvoiceApprovalEndpoints.cs'), 'AssignFirmResponse')).toEqual([
+      'Outcome',
+      'DecisionId',
+      'TrackingNumber',
+      'PreviousTrackingNumber',
+      'RulesRerun',
+    ]);
+    expect(finance('InvoiceApprovalEndpoints.cs')).toMatch(/MapPost\("\/invoices\/\{invoiceId:guid\}\/firm",\s*AssignFirm\)/);
+    expect(finance('InvoiceSubmissionEndpoints.cs')).toMatch(/MapGet\("\/core-records\/\{entityType\}\/\{entityId:guid\}\/firms"/);
+  });
+
+  it('(must-not-fire) the helper finds nothing for a record the source does not have', () => {
+    expect(recordMembers(finance('InvoiceApprovalEndpoints.cs'), 'NoSuchRequest')).toBeNull();
+  });
+});

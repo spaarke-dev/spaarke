@@ -57,7 +57,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     /// <summary>The world one four-action commit runs in, with every seam counted.</summary>
     private sealed record FourActionWorld(
-        Commit.Rig Rig, HttpContext Http, DecisionCommitCallProfile Profile, ScriptedUserClient User, DecisionCommitCallProfile.ProfiledProbe Probe)
+        Commit.Rig Rig, HttpContext Http, DecisionCommitCallProfile Profile, ScriptedUserClient User, DecisionCommitCallProfile.ProfiledProbe Probe,
+        RealCallerClientRig Callers)
     {
         public Task<DecisionCommitResult> CommitAsync(Guid? reviewId = null)
         {
@@ -94,7 +95,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(profile.Wrap<IDataverseUserClient>(user, "caller (route core, IDataverseUserClient)"));
+        // Production registers the caller's client as a transient typed HttpClient, so every create resolves a fresh REAL
+        // DataverseUserClient; only its wire is replaced (counted, and answered by the scripted caller's Dataverse).
+        var callers = RealCallerClientRig.Create();
+        var callerWire = new DecisionCommitCallProfile.CallerWire(profile, "caller (route core, IDataverseUserClient)", user);
+        services.AddTransient<IDataverseUserClient>(_ => callers.NewClient(callerWire));
         services.AddSingleton(creation);
         services.AddSingleton(appOnly);
 
@@ -127,7 +132,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             new AssignWorkExecutor(probe, cores, entities),
         }.Select(profile.Staged).ToList();
 
-        return new FourActionWorld(rig, http, profile, user, probe);
+        return new FourActionWorld(rig, http, profile, user, probe, callers);
     }
 
     private static DecisionReview FourActionReview(Guid reviewId) => new()
@@ -182,7 +187,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// ISS-010 fix 1: on the route, the four creates' caller checks share the request's table-metadata answers, so a metadata
     /// path is read again only by the step that keeps the caller's own client (the work assignment's re-map,
     /// <c>DataverseWriteItemMapper.MapCoreAsync</c> / <c>MapWebApiPayloadAsync</c>, a follow-up). Before the fix every create
-    /// re-read its tables' metadata, and each create's two check passes read it twice.
+    /// re-read its tables' metadata, and each create's two check passes read it twice. This is the must-fire test of the
+    /// per-request keying: the creates run on DISTINCT client instances (the real transient <c>DataverseUserClient</c>), so it
+    /// fails if the store is keyed per client instance.
     /// </summary>
     [Fact]
     public async Task Iss010_OnTheRoute_TheFourCreates_ReadEachMetadataPathOnce_ExceptTheStepThatKeepsTheCallersOwnClient()
@@ -192,6 +199,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await w.CommitAsync();
 
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        w.Callers.ClientsCreated.Should().BeGreaterThanOrEqualTo(4,
+            "production resolves a fresh transient DataverseUserClient per create, so the share is across distinct client instances");
         var repeated = w.Profile.MetadataReads.GroupBy(c => c.Key).Where(g => g.Count() > 1).ToList();
         repeated.Should().OnlyContain(g => g.Count() == 2 && g.Last().Stage == "assign-work execute"
                 && (g.Last().Site == "DataverseWriteItemMapper.MapCoreAsync" || g.Last().Site == "DataverseWriteItemMapper.MapWebApiPayloadAsync"),

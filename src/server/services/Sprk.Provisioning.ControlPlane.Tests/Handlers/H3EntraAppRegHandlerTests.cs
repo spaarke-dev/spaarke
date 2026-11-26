@@ -75,6 +75,7 @@ using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Models;
+using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Xunit;
 
@@ -91,6 +92,8 @@ public sealed class H3EntraAppRegHandlerTests
     private static readonly int ExpectedScopeCount = EntraAppRegPermissionCatalog.All.Count;
     private const string DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com/";
     private const string AddInClientId = "c1258e2d-1688-49d2-ac99-a7485ebd9995";
+    private const string OperatorToolsClientId = "7d0e6c1a-3b2f-4e5d-9a8b-1c2d3e4f5a6b";
+    private const string EnvironmentRowId = "721bce03-13c8-f111-a05c-0022482913fc";
 
     private static readonly string ExpectedKvUriRef =
         GraphAppRegistrationProvisioner.BuildKvUriReference(KeyVaultName, GraphAppRegistrationProvisioner.ClientSecretName);
@@ -595,6 +598,318 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.ProvisionCallCount.Should().Be(0, "nothing is written to Entra");
     }
 
+    // ---------- Demo environment plan decision 1: Demo-only clients ----------
+
+    [Fact]
+    public async Task Demo_1_ActiveDemoRow_AddsTheDemoClient_AfterThePlatformClients()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var registry = FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-1"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), preAuthorizedClientAppIds: [AddInClientId],
+            demoPreAuthorizedClientAppIds: [OperatorToolsClientId.ToUpperInvariant()], registry: registry);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([AddInClientId, OperatorToolsClientId]);
+        registry.LookedUpIds.Should().Equal([EnvironmentRowId], "H3 reads the run's own registry row by id");
+    }
+
+    public static TheoryData<int?, bool?, string> NotActiveDemoRows => new()
+    {
+        { 6, true, "Production" },
+        { 0, true, "Development" },
+        { null, true, "type unset" },
+        { 1, false, "Demo but inactive" },
+        { 1, null, "Demo, active unset" },
+    };
+
+    [Theory]
+    [MemberData(nameof(NotActiveDemoRows))]
+    public async Task Demo_2_RowThatIsNotAnActiveDemo_LeavesTheDemoClientOut(int? environmentType, bool? isActive, string because)
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-2"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), preAuthorizedClientAppIds: [AddInClientId],
+            demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(DemoRow(environmentType, isActive)));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([AddInClientId], because);
+    }
+
+    [Fact]
+    public async Task Demo_2b_NoRow_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-2b"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(null));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Demo_2c_ActiveDemoRowOfAnotherCustomer_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var otherCustomersRow = DemoRow(environmentType: 1, isActive: true) with { CustomerId = "contoso" };
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-2c"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(otherCustomersRow));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty(
+            "a run whose environment id points at another customer's row never borrows that row's Demo flag");
+    }
+
+    [Fact]
+    public async Task Demo_3_RegistryReadFails_FailsResumable_NoProvisionerCall()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-3"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Throwing(new InvalidOperationException("Registry lookup infrastructure error")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.RegistryEnvironmentTypeUnavailable);
+        provisioner.ProvisionCallCount.Should().Be(0, "nothing is written to Entra");
+    }
+
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task Demo_4_InvalidDemoClientId_FailsResumable_BeforeAnyRegistryRead(string badClientId)
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var registry = FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-4"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId, badClientId],
+            registry: registry);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.DemoPreAuthorizedClientAppIdInvalid);
+        provisioner.ProvisionCallCount.Should().Be(0);
+        registry.LookedUpIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Demo_5_NoDemoClientsConfigured_NeverReadsTheRegistry()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var registry = FakeRegistry.Throwing(new InvalidOperationException("must not be called"));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-5"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), preAuthorizedClientAppIds: [AddInClientId], registry: registry);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([AddInClientId]);
+        registry.LookedUpIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Demo_6_DemoClientAlsoInThePlatformList_IsListedOnce()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-6"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), preAuthorizedClientAppIds: [AddInClientId, OperatorToolsClientId],
+            demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true)));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([AddInClientId, OperatorToolsClientId]);
+    }
+
+    [Fact]
+    public async Task Demo_7_CustomerIdMatchIgnoresCase()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var upperCaseRow = DemoRow(environmentType: 1, isActive: true) with { CustomerId = CustomerId.ToUpperInvariant() };
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-7"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(upperCaseRow));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().Equal([OperatorToolsClientId],
+            "the registry stores the customer id as entered; the match is case-insensitive like every other customer-id match");
+    }
+
+    [Fact]
+    public async Task Demo_8_RegistryTimeout_WithCallerNotCancelled_FailsResumable()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-8"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Throwing(new TaskCanceledException("HttpClient timeout")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.RegistryEnvironmentTypeUnavailable);
+        provisioner.ProvisionCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Demo_9_CallerCancelledDuringRegistryRead_Propagates_NoProvisionerCall()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        using var cts = new CancellationTokenSource();
+        var registry = FakeRegistry.Running(() =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-9"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: registry);
+
+        var act = () => handler.HandleAsync(BuildEnvelope(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        provisioner.ProvisionCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Demo_10_StampOutsideTheSpaarkeTenant_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-10"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true)),
+            spaarkeTenantId: "99999999-9999-9999-9999-999999999999");
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty(
+            "the operator client is a single-tenant Spaarke app: a customer-tenant registration never lists it");
+    }
+
+    [Fact]
+    public async Task Demo_10b_SpaarkeTenantIdNotConfigured_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-10b"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(DemoRow(environmentType: 1, isActive: true)), spaarkeTenantId: "");
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty(
+            "without a configured Spaarke tenant H3 cannot prove the stamp is a Spaarke-tenant one");
+    }
+
+    [Fact]
+    public async Task Demo_11_RegistryRowOfAnotherTenant_LeavesTheDemoClientOut()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var otherTenantRow = DemoRow(environmentType: 1, isActive: true) with { TenantId = "88888888-8888-8888-8888-888888888888" };
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-11"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Returning(otherTenantRow));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.PreAuthorizedClientAppIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Demo_12_RegistryReadFails_DiagnosticCarriesTheCause()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-demo-12"), provisioner,
+            FakeVerifier.Verified(ExpectedScopeCount), demoPreAuthorizedClientAppIds: [OperatorToolsClientId],
+            registry: FakeRegistry.Throwing(new InvalidOperationException("Registry lookup returned HTTP 403 Forbidden")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Diagnostic.Should().Contain("HTTP 403 Forbidden", "the operator must see why the read failed, not only its type");
+    }
+
+    private static DataverseEnvironmentRegistrySnapshot DemoRow(int? environmentType, bool? isActive) =>
+        new(EnvironmentRowId, CustomerId, TenantId, "Ready", CurrentRunId: null, ProvisionedOn: null,
+            EnvironmentType: environmentType, IsActive: isActive);
+
+    private sealed class FakeRegistry : IDataverseEnvironmentRegistryClient
+    {
+        private readonly DataverseEnvironmentRegistrySnapshot? _row;
+        private readonly Exception? _throw;
+        private readonly Func<DataverseEnvironmentRegistrySnapshot?>? _onLookup;
+
+        private FakeRegistry(DataverseEnvironmentRegistrySnapshot? row, Exception? toThrow,
+            Func<DataverseEnvironmentRegistrySnapshot?>? onLookup = null)
+        {
+            _row = row;
+            _throw = toThrow;
+            _onLookup = onLookup;
+        }
+
+        public static FakeRegistry Returning(DataverseEnvironmentRegistrySnapshot? row) => new(row, null);
+
+        public static FakeRegistry Throwing(Exception ex) => new(null, ex);
+
+        public static FakeRegistry Running(Func<DataverseEnvironmentRegistrySnapshot?> onLookup) => new(null, null, onLookup);
+
+        public List<string> LookedUpIds { get; } = [];
+
+        public Task<DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(string environmentId, CancellationToken cancellationToken)
+        {
+            LookedUpIds.Add(environmentId);
+            if (_onLookup is not null)
+            {
+                return Task.FromResult(_onLookup());
+            }
+            return _throw is not null
+                ? Task.FromException<DataverseEnvironmentRegistrySnapshot?>(_throw)
+                : Task.FromResult(_row);
+        }
+
+        public Task<DataverseEnvironmentRegistrySnapshot?> LookupByTenantIdAsync(string tenantId, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("H3 never looks the registry up by tenant id");
+
+        public Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("H3 never writes the registry");
+    }
+
     // ---------- AC-KV-1 deferred commit failure after consent verified ----------
 
     [Fact]
@@ -623,15 +938,21 @@ public sealed class H3EntraAppRegHandlerTests
         FakeProvisioner provisioner,
         FakeVerifier verifier,
         int? expectedScopeCount = null,
-        List<string>? preAuthorizedClientAppIds = null)
+        List<string>? preAuthorizedClientAppIds = null,
+        List<string>? demoPreAuthorizedClientAppIds = null,
+        IDataverseEnvironmentRegistryClient? registry = null,
+        string? spaarkeTenantId = null)
     {
         var options = Options.Create(new EntraAppRegOptions
         {
             ExpectedDelegatedScopeCount = expectedScopeCount ?? ExpectedScopeCount,
             PreAuthorizedClientAppIds = preAuthorizedClientAppIds ?? [],
+            DemoPreAuthorizedClientAppIds = demoPreAuthorizedClientAppIds ?? [],
+            SpaarkeTenantId = spaarkeTenantId ?? TenantId,
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options,
+            registry ?? FakeRegistry.Throwing(new InvalidOperationException("no Demo-only clients configured: H3 must not read the registry")),
             NullLogger<H3EntraAppRegHandler>.Instance);
     }
 
@@ -655,7 +976,7 @@ public sealed class H3EntraAppRegHandlerTests
         {
             RunId = RunId,
             CustomerId = CustomerId,
-            EnvironmentId = "env-guid",
+            EnvironmentId = EnvironmentRowId,
             TenancyModel = tenancyModel,
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",

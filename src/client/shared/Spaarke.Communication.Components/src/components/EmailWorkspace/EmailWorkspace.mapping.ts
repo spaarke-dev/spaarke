@@ -140,6 +140,7 @@ function deriveCardReviewTone(row: Record<string, unknown>): 'red' | 'yellow' | 
       {
         recordName: asNullableString(row['sprk_regardingrecordname']),
         recordNumber: asNullableString(row['sprk_regardingrecordnumber']),
+        recordId: readRegardingRecordId(row),
       }
     )
   ).tone;

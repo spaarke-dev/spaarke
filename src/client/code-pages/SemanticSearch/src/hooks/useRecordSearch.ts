@@ -20,6 +20,7 @@ import { useState, useCallback, useRef } from 'react';
 import { isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 import { search as searchRecords } from '../services/RecordSearchApiService';
 import type {
+  RecordSearchFilters,
   RecordSearchRequest,
   RecordSearchResult,
   RecordSearchResponse,
@@ -105,6 +106,23 @@ export interface UseRecordSearchReturn {
 function buildSearchIndexNameFragment(searchIndexName: string | null | undefined): { searchIndexName?: string } {
   const trimmed = typeof searchIndexName === 'string' ? searchIndexName.trim() : '';
   return trimmed.length > 0 ? { searchIndexName: trimmed } : {};
+}
+
+/** Record types that carry a matter type in the records index (#3165). */
+const MATTER_TYPED_RECORDS: ReadonlySet<string> = new Set(['sprk_matter', 'sprk_project']);
+
+/**
+ * The record-search `filters` body (#3165): the matter types, only when every record type
+ * searched carries one. Before, record search sent no filter at all, so a Matter Type chosen
+ * on Matters did nothing. Sent for matters and projects; an invoice has no matter type, so a
+ * selection kept from another domain must not empty an invoice search.
+ */
+export function buildRecordFilters(
+  filters: SearchFilters,
+  recordTypes: readonly string[]
+): { filters?: RecordSearchFilters } {
+  const typed = recordTypes.length > 0 && recordTypes.every(t => MATTER_TYPED_RECORDS.has(t));
+  return typed && filters.matterTypes.length > 0 ? { filters: { matterTypes: filters.matterTypes } } : {};
 }
 
 /**
@@ -228,6 +246,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
       const requestBody = {
         query,
         recordTypes,
+        ...buildRecordFilters(filters, recordTypes),
         options: {
           limit: PAGE_SIZE,
           offset: 0,
@@ -289,6 +308,7 @@ export function useRecordSearch(): UseRecordSearchReturn {
     const requestBody = {
       query: currentQueryRef.current,
       recordTypes: currentRecordTypesRef.current,
+      ...buildRecordFilters(filters, currentRecordTypesRef.current),
       options: {
         limit: PAGE_SIZE,
         offset: currentLength,

@@ -162,6 +162,8 @@ export function parseUrlParams(search?: string): AppUrlParams {
     threshold: parseNumber(params.get('threshold'), 0, 100),
     searchMode: parseSearchMode(params.get('searchMode')),
     fileTypes: parseCsv(params.get('fileTypes')),
+    documentTypes: parseCsv(params.get('documentTypes')),
+    matterTypes: parseCsv(params.get('matterTypes')),
     dateFrom: parseIsoDate(params.get('dateFrom')),
     dateTo: parseIsoDate(params.get('dateTo')),
     tags: parseCsv(params.get('tags')),

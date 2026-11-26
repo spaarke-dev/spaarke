@@ -541,7 +541,9 @@ public class ReconciledEmailFilingTests
 
         var (_, result) = await world.SaveAsync(PaneSave(Matter()));
 
-        result.Should().Be(ReconciledFilingResult.AlreadyFiled);
+        // Filed to the save's matter, with no ADR-024 pair: not confirmable by the save (task 140 review pass 2), so it is
+        // left as it was and reported as still needing confirmation. Either way nothing is queued.
+        result.Should().Be(ReconciledFilingResult.NotConfirmable);
         FilingSignalDoubles.VerifyNothingEnqueued(trigger);
     }
 

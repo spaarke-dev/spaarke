@@ -18,21 +18,23 @@ namespace Spaarke.ArchTests;
 /// <para><b>Enforced by:</b> this source scan (CI and the Stop hook). Scanned: <c>.cs .ts .tsx .js .jsx .json</c> under
 /// <c>src/server</c>, <c>src/client</c> and <c>src/solutions/*/src</c>, excluding build output, tests (<c>__tests__</c>, <c>tests</c>,
 /// <c>*.test.*</c>, <c>*.spec.*</c>, <c>*.Tests</c> projects) and the explicit <see cref="HarnessOnly"/> files. A dev-pattern id
-/// (<c>xxxxxxxx-xxxx-f011-8406-xxxxxxxxxxxx</c>) in a scanned file must be a seed-file primary key or in
+/// (<c>xxxxxxxx-xxxx-f[01]11-xxxx-xxxxxxxxxxxx</c>) in a scanned file must be a seed-file primary key or in
 /// <c>ReferenceRowIdLiteral.baseline.txt</c> (<c>path | id | reason</c>), unless it appears in the solution source. The list only shrinks: a
 /// baseline entry whose id is no longer in its file, or whose id is now a seed key or a solution component id, fails until the line is
 /// deleted.</para>
-/// <para><b>Known limit:</b> the pattern is the dev environment's id shape for rows created in its first 2026 generation
-/// (<c>-f011-8406-</c>). Rows created later carry other suffixes (<c>-f111-...</c>) and are not detected; widening the pattern means
-/// baselining dozens of grid-configuration ids in the external SPA, tracked separately. A guard for every id would need the id shape
-/// of every environment, which Dataverse does not promise.</para>
+/// <para><b>Known limit:</b> since ISS-041 (#3090) the pattern is every id shape the dev environment has generated so far:
+/// <c>xxxxxxxx-xxxx-f[01]11-xxxx-xxxxxxxxxxxx</c> (rows created in 2026 carry <c>-f011-</c> or <c>-f111-</c> and a varying fourth group).
+/// A row created after Dataverse changes its sequential-id scheme, and rows of another environment (a customer stamp, a
+/// <c>Guid.NewGuid()</c> id such as the external record-documents grid configuration), have other shapes and are not detected. A guard for
+/// every id would need the id shape of every environment, which Dataverse does not promise. Prefer seeding or an alternate-key lookup
+/// over baselining a new hit.</para>
 /// <para><b>Controls:</b> a planted unlisted id fires; a seed key, a solution component id, a baselined id, a harness-only file and a test
 /// file do not; a stale baseline line fires.</para>
 /// </remarks>
 public sealed class ReferenceRowIdLiteralGuardTests
 {
     private static readonly Regex DevRowId = new(
-        @"(?<![0-9A-Fa-f-])[0-9a-f]{8}-[0-9a-f]{4}-f011-8406-[0-9a-f]{12}(?![0-9A-Fa-f-])",
+        @"(?<![0-9A-Fa-f-])[0-9a-f]{8}-[0-9a-f]{4}-f[01]11-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Fa-f-])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly string[] ScannedExtensions = [".cs", ".ts", ".tsx", ".js", ".jsx", ".json"];
@@ -306,6 +308,12 @@ public sealed class ReferenceRowIdLiteralGuardTests
     private const string SeedId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
     private const string OtherId = "aaaaaaaa-1111-f011-8406-000000000001";
 
+    /// <summary>A later-generation dev id shape (<c>-f111-</c>, another fourth group), invisible to the pre-ISS-041 pattern.</summary>
+    private const string LaterGenerationId = "aaaaaaaa-2222-f111-b8dc-000000000002";
+
+    /// <summary>A random (v4) GUID: the third group is not <c>f011</c>/<c>f111</c>, so it is not a dev-generated id (e.g. a stamp's row).</summary>
+    private const string NonDevId = "286be8b4-f96f-4d5a-b1d5-82fd83ca9693";
+
     private static readonly IReadOnlyDictionary<(string Path, string Id), string> NoBaseline = new Dictionary<(string, string), string>();
     private static readonly IReadOnlySet<string> NoHarness = new HashSet<string>();
 
@@ -321,6 +329,32 @@ public sealed class ReferenceRowIdLiteralGuardTests
         Assert.Contains("Thing.cs:1", problems[0]);
     }
 
+    [Fact(DisplayName = "ISS-041 control (must fire): an unlisted -f111- shaped dev row id (a later generation than -f011-8406-) is a problem")]
+    public void Control_UnlistedLaterGenerationId_Fires()
+    {
+        var hits = FindHits([("src/client/external-spa/src/widgets/XWidget.tsx", $"const CONFIG_ID = '{LaterGenerationId.ToUpperInvariant()}';")]);
+
+        var problems = FindProblems(hits, new HashSet<string> { SeedId }, NoBaseline, NoHarness);
+
+        Assert.Single(problems);
+        Assert.Contains(LaterGenerationId, problems[0]);
+        Assert.Contains("XWidget.tsx:1", problems[0]);
+    }
+
+    [Fact(DisplayName = "ISS-041 control (must not fire): a non-dev GUID (random v4, not -f011-/-f111-) is not a row id this guard detects")]
+    public void Control_NonDevGuid_DoesNotFire()
+    {
+        var hits = FindHits(
+        [
+            ("src/server/api/X/Thing.cs", $"Guid.Parse(\"{NonDevId}\")"),
+            ("src/server/api/X/Other.cs", "\"aaaaaaaa-1111-f211-8406-000000000001\""),   // f211: not a dev-generated third group
+            ("src/server/api/X/Long.cs", $"\"{LaterGenerationId}-extra\""),               // longer hex run: not a whole id
+        ]);
+
+        Assert.Empty(hits);
+        Assert.Empty(FindProblems(hits, new HashSet<string> { SeedId }, NoBaseline, NoHarness));
+    }
+
     [Fact(DisplayName = "ISS-039 control (must not fire): a seeded id, a baselined id and a harness-only file are accepted")]
     public void Control_SeededBaselinedAndHarnessIds_DoNotFire()
     {
@@ -329,7 +363,7 @@ public sealed class ReferenceRowIdLiteralGuardTests
             ("src/server/api/X/Thing.cs", $"new Guid(\"{SeedId.ToUpperInvariant()}\")"),                 // seed key (any casing)
             ("src/solutions/Page/src/config.ts", $"id: '{OtherId}'"),                                      // baselined
             ("src/client/office-addins/Demo.ts", $"{{ id: '{OtherId}' }}"),                                // harness-only
-            ("src/server/api/X/Other.cs", "\"aaaaaaaa-1111-f111-8406-000000000001\""),                     // not the dev pattern
+            ("src/server/api/X/Other.cs", $"\"{NonDevId}\""),                                              // not a dev-generated shape
         ]);
         var baseline = new Dictionary<(string Path, string Id), string> { [("src/solutions/Page/src/config.ts", OtherId)] = "reason" };
 

@@ -136,4 +136,15 @@ public sealed class EntraAppRegOptions
     /// Empty by default; the Worker Bicep supplies it. Each entry must be a GUID.
     /// </summary>
     public List<string> PreAuthorizedClientAppIds { get; set; } = [];
+
+    /// <summary>
+    /// Demo environment plan decision 1 (owner 2026-11-26): client apps H3 pre-authorizes on a customer BFF app's
+    /// <c>user_impersonation</c> scope ONLY when that customer's registry row (<c>sprk_dataverseenvironment</c>) is
+    /// Environment Type = Demo and active — today the "Spaarke Operator Tools (Demo)" public client
+    /// (<c>scripts/provisioning/Register-OperatorToolsClient.ps1</c>), which operator scripts sign in with to call a demo
+    /// stamp's BFF as a user. On every other stamp they are left out, and because H3 sets the list exactly, a row that
+    /// stops being Demo loses them on its next run. Empty by default (no registry read); each entry must be a GUID. The
+    /// Worker Bicep parameter <c>demoPreAuthorizedClientAppIds</c> sets <c>EntraAppRegOptions__DemoPreAuthorizedClientAppIds__N</c>.
+    /// </summary>
+    public List<string> DemoPreAuthorizedClientAppIds { get; set; } = [];
 }

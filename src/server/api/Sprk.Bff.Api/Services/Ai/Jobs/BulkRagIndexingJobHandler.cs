@@ -5,6 +5,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Telemetry;
 
@@ -35,6 +36,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
     private readonly IIdempotencyService _idempotencyService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ISearchIndexNameResolver _searchIndexNameResolver;
+    private readonly DocumentIndexParentResolver _parentResolver;
     private readonly RagTelemetry _telemetry;
     private readonly IConfiguration _configuration;
     private readonly ILogger<BulkRagIndexingJobHandler> _logger;
@@ -60,12 +62,14 @@ public class BulkRagIndexingJobHandler : IJobHandler
         IIdempotencyService idempotencyService,
         IDocumentDataverseService documentService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        DocumentIndexParentResolver parentResolver,
         RagTelemetry telemetry,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         TokenCredential credential,
         ILogger<BulkRagIndexingJobHandler> logger)
     {
+        _parentResolver = parentResolver ?? throw new ArgumentNullException(nameof(parentResolver));
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _statusStore = statusStore ?? throw new ArgumentNullException(nameof(statusStore));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
@@ -274,16 +278,10 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 return DocumentIndexOutcome.Skipped;
             }
 
-            // Build parent entity context if matter is associated
-            ParentEntityContext? parentEntity = null;
-            if (!string.IsNullOrEmpty(doc.MatterId))
-            {
-                parentEntity = new ParentEntityContext(
-                    EntityType: "matter",
-                    EntityId: doc.MatterId,
-                    EntityName: doc.MatterName ?? "Unknown Matter"
-                );
-            }
+            // The record that governs the document (matter, project, work assignment or invoice): the ONE decision every other
+            // indexing path uses (DocumentIndexParentResolver). It fails closed to no parent when it cannot decide, and that
+            // answer is kept: no parent of this handler's own is substituted.
+            var parentEntity = await _parentResolver.ResolveAsync(doc.DocumentId, ct);
 
             // Build the file index request. It names no index (task 041, FR-40): every document lands in the content
             // type's index; no record or business-unit index column is read.

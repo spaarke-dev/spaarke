@@ -11,10 +11,11 @@
  *      (`acquireSpaarkeGuestToken('silent')`, the home account as login hint) goes in the body of
  *      POST /api/v1/external/workforce/link, then /me is read again. No token ({@link afterSilentLinkFailure}), or the guest
  *      has no licensed user (`no_systemuser`) -> `RegistrationPage`: the profile form, or, when the refusal's `licensedUser`
- *      hint says the token email is a licensed user's (R4 FR-25, #2192), its "Link my account" step. Any other refusal -> an
- *      administrator must resolve it. In Teams the silent token comes through NAA (`setGuestLinkHost('teams')`).
- *   3. A second `registration_required` always shows `RegistrationPage` (the form, or its link step when the hint is
- *      true) and never re-runs the silent link, so nothing loops without a click. The form registers through the BFF (or,
+ *      hint says the token email is a licensed user's (R4 FR-25, #2192), its "Link my account" step, or, when the refusal
+ *      carries no email (R4 FR-27, #2449: the registration could only refuse), its email-missing screen. Any other
+ *      refusal -> an administrator must resolve it. In Teams the silent token comes through NAA (`setGuestLinkHost('teams')`).
+ *   3. A second `registration_required` always shows `RegistrationPage` (the form, its link step or its email-missing
+ *      screen, by the same rules) and never re-runs the silent link, so nothing loops without a click. The form registers through the BFF (or,
  *      for a licensed user whose silent link failed, the link step links through the popup), then /me is read again.
  *
  * 401 -> the sign-in state; any other 403 -> the denied state; 5xx or a network fault -> a generic error with a retry.
@@ -64,6 +65,11 @@ export function afterSilentLinkFailure(prefill: RegistrationPrefill): GateState 
 export interface WorkforceHomeGateProps {
   /** Called with `false` while the gate holds the workspace back and `true` once it shows. Not called when inactive. */
   onReady?: (ready: boolean) => void;
+  /**
+   * The shell's sign-out (the header's), offered on `RegistrationPage`'s email-missing screen so the next sign-in gets a
+   * new token (R4 task 042, FR-26). Absent in Teams, which has no account of ours to sign out of.
+   */
+  onSignOut?: () => void;
   children: React.ReactNode;
 }
 
@@ -76,19 +82,24 @@ export type GateState =
   | { kind: 'access'; failure: BffAccessFailure }
   | { kind: 'ready' };
 
-export const WorkforceHomeGate: React.FC<WorkforceHomeGateProps> = ({ onReady, children }) => {
+export const WorkforceHomeGate: React.FC<WorkforceHomeGateProps> = ({ onReady, onSignOut, children }) => {
   if (!isHomeGateActive()) return <>{children}</>;
-  return <ActiveGate onReady={onReady}>{children}</ActiveGate>;
+  return (
+    <ActiveGate onReady={onReady} onSignOut={onSignOut}>
+      {children}
+    </ActiveGate>
+  );
 };
 
 const Centered: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto' }}>{children}</div>
 );
 
-const ActiveGate: React.FC<{ onReady?: (ready: boolean) => void; children: React.ReactNode }> = ({
-  onReady,
-  children,
-}) => {
+const ActiveGate: React.FC<{
+  onReady?: (ready: boolean) => void;
+  onSignOut?: () => void;
+  children: React.ReactNode;
+}> = ({ onReady, onSignOut, children }) => {
   const { instance, accounts } = useMsal();
   const [state, setState] = React.useState<GateState>({ kind: 'checking' });
   // The latest run wins: a superseded run (StrictMode's second effect, a retry) never sets state.
@@ -191,7 +202,14 @@ const ActiveGate: React.FC<{ onReady?: (ready: boolean) => void; children: React
         </Centered>
       );
     case 'register':
-      return <RegistrationPage prefill={state.prefill} loginHint={loginHint} onDone={() => void probe(false)} />;
+      return (
+        <RegistrationPage
+          prefill={state.prefill}
+          loginHint={loginHint}
+          onDone={() => void probe(false)}
+          onSignOut={onSignOut}
+        />
+      );
     case 'linkBlocked':
       return <LinkBlockedNotice />;
     case 'access':

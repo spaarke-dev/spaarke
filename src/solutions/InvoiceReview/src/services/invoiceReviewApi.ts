@@ -11,6 +11,8 @@
  *   Task 092  GET  /api/finance/files/{fileId}/content                              the invoice PDF bytes (the read model's invoicePdfFileId)
  *   Task 102  adjustment lines and the stored totals arrive in the read model; adding one is 111's approve wizard.
  *   Task 164  POST /api/finance/invoices/{invoiceId}/lines                                  Add line: a reviewer adds a Fee or Expense line the firm did not bill
+ *   Task 095d-3  GET /api/finance/core-records/{entityType}/{entityId}/firms   the firms linked to the invoice's core record (contract section 8)
+ *             POST /api/finance/invoices/{invoiceId}/firm                         Set firm: give an invoice that has none its firm (tracking number, rules re-run)
  *
  * Task 095f-2ui: `decideLine`, `decideLines`, `correctLine` and `correctHeader` (a correct and a confirm) take an optional `note`; a blank or
  * whitespace-only note is left out of the request, never sent as null or "". `acceptClean` never takes one.
@@ -303,6 +305,24 @@ export interface CorrectionRequest {
 }
 
 /** Body of Add line (task 164, AddLineRequest). No total, status, owner or person: the server takes the decider from the caller's token. */
+/** A firm linked to a core record (contract section 8: `GET core-records/{type}/{id}/firms`). */
+export interface ReviewFirm {
+  firmId: string;
+  name: string;
+}
+
+/**
+ * 200 body of Set firm (InvoiceApprovalEndpoints.cs `AssignFirmResponse`): `assigned` (this call applied it) or `alreadyAssigned` (a repeat), the
+ * new and the previous tracking number, and `rulesRerun` (`pending` until the queued re-run commits, then `completed`).
+ */
+export interface AssignFirmResponse {
+  outcome: string;
+  decisionId: string | null;
+  trackingNumber: string | null;
+  previousTrackingNumber: string | null;
+  rulesRerun: string | null;
+}
+
 export interface AddLineRequest {
   /** The client's id for this add; one per opened form, kept across a retry or Repeat (the server derives the line id from it). */
   requestId: string;
@@ -431,6 +451,29 @@ export function isIncomplete(f: ApiFailure): boolean {
  */
 export function isFirmFirst(f: ApiFailure): boolean {
   return f.status === 409 && f.errorCode === CODE_LINE_DECISION_FIRM_MISSING;
+}
+
+/**
+ * Set firm: no answer at all (status 0) is one fixed sentence that does not claim nothing changed (the server may have committed before the
+ * answer was lost; the page re-reads the review, and sending the same firm again is safe: `alreadyAssigned`). A 403 without a detail is about
+ * the chosen firm. Any other failure is the shared write-failure sentence (the server's detail first).
+ */
+export function setFirmFailureMessage(f: ApiFailure): string {
+  if (f.status === 0 && !f.signInFailed) return 'The firm could not be confirmed. Check the invoice header; if no firm is shown, try again.';
+  if (f.status === 403 && !f.detail && !f.signInFailed) return 'You do not have permission to use this firm. Choose another firm.';
+  return writeFailureMessage(f);
+}
+
+/**
+ * The sentence for a failed read of the firms linked to the core record. An empty list is never this (it is the 200 `[]`): a failure must not
+ * say "no firm is linked" when the page could not ask.
+ */
+export function firmsFailureMessage(f: ApiFailure): string {
+  if (f.signInFailed) return 'Sign-in could not be verified for this session. Retry, or reload the page.';
+  if (f.status === 404) return "This record isn't available to you: it may not exist, or you can't open it.";
+  if (f.status === 503) return "The firms for this record couldn't be listed right now. Retry in a moment.";
+  if (f.status === 0) return "The firms for this record couldn't be loaded. Check your connection and retry.";
+  return "The firms for this record couldn't be loaded. Retry in a moment.";
 }
 
 /** The page-level sentence for a failed read of the review. */
@@ -597,6 +640,13 @@ export interface InvoiceReviewApi {
   listCorrections(invoiceId: string): Promise<ApiResult<Correction[]>>;
   /** Task 164: add a Fee or Expense line the firm did not bill. Send the same `requestId` again on a retry. */
   addLine(invoiceId: string, request: AddLineRequest): Promise<ApiResult<AddLineResponse>>;
+  /**
+   * Task 095d-3: the firms linked to a core record (`entityType` as the read model names it: matter, project, workAssignment). An empty list
+   * is the server's own answer (200 `[]`); every failure is a failure.
+   */
+  listFirms(entityType: string, entityId: string): Promise<ApiResult<ReviewFirm[]>>;
+  /** Task 095d-3: Set firm on an invoice that has none. The server refuses a firm change on an invoice that has one (409). */
+  setFirm(invoiceId: string, firmId: string): Promise<ApiResult<AssignFirmResponse>>;
   /** The invoice PDF bytes. */
   fetchFile(fileId: string): Promise<ApiResult<ArrayBuffer>>;
 }
@@ -620,6 +670,9 @@ export const routes = {
     `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/lines/${id(lineId)}/corrections`,
   correctHeader: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/header/corrections`,
   addLine: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/lines`,
+  coreRecordFirms: (base: string, entityType: string, entityId: string) =>
+    `${trimBase(base)}/api/finance/core-records/${encodeURIComponent(entityType)}/${id(entityId)}/firms`,
+  assignFirm: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/firm`,
   corrections: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/corrections`,
   fileContent: (base: string, fileId: string) => `${trimBase(base)}/api/finance/files/${id(fileId)}/content`,
 };
@@ -724,6 +777,26 @@ export function createInvoiceReviewApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl
       } catch (err) {
         return { ok: false, failure: toFailure(err) };
       }
+    },
+
+    async listFirms(entityType, entityId) {
+      try {
+        const res = await fetchFn(routes.coreRecordFirms(bffBaseUrl, entityType, entityId), { method: 'GET' });
+        const body = (await res.json()) as unknown;
+        if (!Array.isArray(body)) return { ok: false, failure: unexpected('firms body') };
+        // A row without a string id and name is dropped, as the Office add-in reads it.
+        const firms = body
+          .filter((row): row is ReviewFirm => !!row && typeof row.firmId === 'string' && typeof row.name === 'string')
+          .map(row => ({ firmId: row.firmId, name: row.name }));
+        return { ok: true, value: firms };
+      } catch (err) {
+        return { ok: false, failure: toFailure(err) };
+      }
+    },
+
+    // The field has no note: the request's `note` is null.
+    setFirm(invoiceId, firmId) {
+      return post(routes.assignFirm(bffBaseUrl, invoiceId), { firmId, note: null });
     },
 
     async fetchFile(fileId) {

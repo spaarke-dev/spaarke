@@ -55,6 +55,7 @@ import {
   staysInNoteDialog,
   isRetryableRepeatFailure,
   repeatFailureMessage,
+  setFirmFailureMessage,
   writeFailureMessage,
   type ApiFailure,
   type ApiResult,
@@ -79,6 +80,7 @@ import {
   nextToDecide,
   resolveFilterKey,
   reviewAccess,
+  setFirmSuccessWords,
   shortDate,
   signedMoney,
   type AddLineForm,
@@ -91,6 +93,7 @@ import { LinesGrid } from './LinesGrid';
 import { LineReviewPane, type PaneDecision } from './LineReviewPane';
 import { RuleGroups } from './RuleGroups';
 import { ProcedureChangeNotice } from './ProcedureChangeNotice';
+import { SetFirmField } from './SetFirmField';
 import {
   AddLineModal,
   BulkDecisionModal,
@@ -316,6 +319,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const [refused403, setRefused403] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<Notice | null>(null);
+  /** Set firm (095d-3): the server's sentence for a refused Set firm, shown beside the Billing firm field. The field keeps the chosen firm. */
+  const [firmFault, setFirmFault] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<LineFilterKey>('all');
   const [view, setView] = React.useState<View>('lines');
   const [tab, setTab] = React.useState('review');
@@ -444,6 +449,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const lines = React.useMemo(() => (review ? [...review.lines].sort((a, b) => a.sequence - b.sequence) : []), [review]);
   const access = review ? reviewAccess(review, refused403) : { canWrite: false, reason: null };
   const canWrite = access.canWrite;
+  // 095d-3: the firm is a field only while the invoice has none, the approval state needs it and the caller can write. An invoice that has a
+  // firm is never editable (the server refuses a change: ebilling.assign_firm.firm_already_set).
+  const firmEditable = review !== null && canWrite && firmNeeded && review.header.firm == null;
+  // A refusal shown beside the field goes when the field does (a 409 re-read that finds the firm set): no red bar beside a set firm.
+  React.useEffect(() => {
+    if (!firmEditable && firmFault !== null) setFirmFault(null);
+  }, [firmEditable, firmFault]);
   const resolvedFilter = resolveFilterKey(lines, filter);
   const shown = React.useMemo(() => filterLines(lines, resolvedFilter), [lines, resolvedFilter]);
   const selectedLine = lines.find(l => l.id === selectedLineId) ?? null;
@@ -505,13 +517,20 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
     async <T,>(
       call: () => Promise<ApiResult<T>>,
       opts: {
-        success: string;
+        /** The success sentence; a function of the server's answer when the sentence carries what it returned (Set firm's tracking number). */
+        success: string | ((value: T) => string);
         /** The write was sent from a dialog: an ordinary refusal stays in the dialog. */
         inDialog?: boolean;
         /** Closes that dialog: on a 403 or a 503 incomplete the outcome belongs to the page, not the form. */
         closeDialog?: () => void;
         /** The sentence for a refusal (default: the shared write-failure sentence). */
         failureText?: (f: ApiFailure) => string;
+        /**
+         * Set firm (095d-3): a refusal is shown beside its field, with this sentence, not as the page notice. A 409 or no answer re-reads the
+         * review first. A 403 is shown there too and does NOT make the page read-only (it is about the chosen firm). A 503 incomplete and a
+         * Repeat keep the page's own handling.
+         */
+        inField?: (text: string) => void;
         /** A refusal that also stays in the dialog (default: only the firm-first 409), for forms whose 409s are fixed by editing the form. */
         staysInDialog?: (f: ApiFailure) => boolean;
         /**
@@ -553,7 +572,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         // The write is saved; if the re-read failed, what is on the page is NOT the server's state: say so instead of a plain "Saved".
         // A write the server found already in place (and so did not store the note) is a warning, never a plain "Saved".
         const warn = opts.warnAfter?.(result.value, opts.isRepeat === true) ?? null;
-        const text = warn ?? opts.success;
+        const text = warn ?? (typeof opts.success === 'function' ? opts.success(result.value) : opts.success);
         setNotice(
           fresh
             ? { intent: warn ? 'warning' : 'success', text }
@@ -569,15 +588,22 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         setNoteFault({ where: opts.noteField, message: noteRefusalMessage(f), lineId: opts.noteLine });
         return false;
       }
-      if (f.status === 403) setRefused403(true);
+      // A 403 turns the page read-only, except for a write that answers it in its field (Set firm: the 403 is about the CHOSEN firm, not the invoice).
+      if (f.status === 403 && !opts.inField) setRefused403(true);
       const ordinaryText = (opts.failureText ?? writeFailureMessage)(f);
       const text = opts.isRepeat ? repeatFailureMessage(f, ordinaryText) : ordinaryText;
       const incomplete = isIncomplete(f);
       const repeatAgain = opts.isRepeat === true && isRetryableRepeatFailure(f);
       // 503 incomplete: part of the change was saved. Show the server's state (the page still shows the old one) before offering Repeat.
-      if (incomplete) await reload();
+      const inField = opts.inField && !opts.isRepeat && !incomplete ? opts.inField : null;
+      // A 409 (another user may have set the firm) and no answer at all (the write may have landed) re-read the review, so what is true shows.
+      if (incomplete || (inField && (f.status === 409 || f.status === 0))) await reload();
       if (!alive.current) return false;
       setBusy(false);
+      if (inField) {
+        inField(text);
+        return false;
+      }
       // An ordinary refusal stays in its form so nothing is lost. A 409 (the invoice or line changed) cannot be fixed in the form: the page
       // notice offers Reload instead. EB-D-185: a 409 firm_missing is an ordinary refusal - nothing changed, so there is nothing to reload: the
       // dialog stays open with what the reviewer typed and shows the server's sentence, and the page notice (a decision made in the pane)
@@ -637,6 +663,23 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                 lines: f.committedLineIds.map(id => ({ lineId: id, approvedAmount: null })),
               })
           : () => api.acceptClean(invoiceId, decisionId),
+    });
+  };
+
+  /**
+   * Set firm (095d-3): one write through `runWrite` (busy, the re-read, the 503 incomplete Repeat). The server gives the invoice the firm's next
+   * tracking number and queues the rules re-run; the page then re-reads the approval state once, and the firm-gate poll (ISS-014) unlocks the
+   * page when the re-run finishes. Nothing here checks the firm: an invoice that already has one is refused by the server (409).
+   */
+  const submitFirm = (firmId: string) => {
+    setFirmFault(null);
+    void runWrite(() => api.setFirm(invoiceId, firmId), {
+      success: r => setFirmSuccessWords(r),
+      failureText: setFirmFailureMessage,
+      inField: text => setFirmFault(text),
+      after: () => {
+        void Promise.resolve(refreshApproval?.()).catch(() => undefined);
+      },
     });
   };
 
@@ -892,11 +935,24 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         <div className={s.headMain}>
           <div className={s.titleRow}>
             <Text size={500} weight="semibold" data-testid="review-title">
-              {h.firm?.name ?? 'Unknown firm'} · Invoice {h.firmInvoiceNumber ?? '—'}
+              {firmEditable ? '' : `${h.firm?.name ?? 'Unknown firm'} · `}Invoice {h.firmInvoiceNumber ?? '—'}
             </Text>
             {h.trackingNumber && <Caption1 className={s.muted}>{h.trackingNumber}</Caption1>}
             <StatusBadge label={status.label} tone={status.tone} />
           </div>
+          {firmEditable && <SetFirmField api={api} core={core} busy={busy} onSet={submitFirm} onChoose={() => setFirmFault(null)} />}
+          {firmFault && (
+            <MessageBar intent="error" data-testid="set-firm-fault">
+              <MessageBarBody>{firmFault}</MessageBarBody>
+              <MessageBarActions
+                containerAction={
+                  <Button appearance="transparent" size="small" aria-label="Dismiss" onClick={() => setFirmFault(null)}>
+                    ×
+                  </Button>
+                }
+              />
+            </MessageBar>
+          )}
           <div className={s.meta}>
             {core && (
               <Link

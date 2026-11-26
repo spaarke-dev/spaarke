@@ -238,7 +238,7 @@ For (a) and (b), our submission wizard must be hostable in a SprkModal and accep
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on work (merged 2d8aa1d59b from task/ebilling-def064 cde47c85a9; review + 2 fix rounds + re-check). Closes when the next master PR merges. Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
+| **Status** | Done (master PR #3174, fbde7ef9a1, 2026-11-25 23:06Z; #2643 closed). Was: fixed on work (merged 2d8aa1d59b from task/ebilling-def064 cde47c85a9; review + 2 fix rounds + re-check).  Enforced by: `InvoiceFamilyCoreLookupWriterGuardTests` |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-09 |
 | **Source** | ebilling-r1 task 130b fix round 4, review question Q1 (uac-r2 ruling (ii)) |
@@ -728,7 +728,7 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on work (merged 6444b25adb from task/ebilling-iss016 8d802b9102; review + fix round 1). Closes when the next master PR merges |
+| **Status** | Done (master PR #3174, fbde7ef9a1, 2026-11-25 23:06Z; #2755 closed). Was: fixed on work (merged 6444b25adb from task/ebilling-iss016 8d802b9102; review + fix round 1). |
 | **Urgency** | someday |
 | **Filed** | 2026-11-12 |
 | **Source** | ebilling-r1 task 084b adversarial review (finding 2) |
@@ -1824,7 +1824,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on work (merged caac9a518d from task/ebilling-def046 3c91bceba7: navigation anchors in the Invoice group, read-only preflight of both sitemaps, early refusal; Pester 49/0). Closes when the next master PR merges; live full run needs the owner's go |
+| **Status** | Done (master PR #3174, fbde7ef9a1, 2026-11-25 23:06Z; #2312 closed; a live full run still needs the owner's go). Was: fixed on work (merged caac9a518d from task/ebilling-def046 3c91bceba7: navigation anchors in the Invoice group, read-only preflight of both sitemaps, early refusal; Pester 49/0) |
 | **Urgency** | medium |
 | **Filed** | 2026-10-23 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2312 |

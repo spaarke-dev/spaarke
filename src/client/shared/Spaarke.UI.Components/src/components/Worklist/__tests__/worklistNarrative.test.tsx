@@ -291,7 +291,7 @@ describe('WorklistWidget narrative', () => {
     await screen.findByTestId('worklist-narrative');
     expect(service.narrate).toHaveBeenCalledTimes(1);
 
-    await userEvent.click(within(lane('Do')).getByRole('button', { name: /^Coming due/ }));
+    await userEvent.click(within(lane('Do')).getByRole('button', { name: /^Coming due,/ }));
     expect(screen.queryByTestId('worklist-narrative')).not.toBeInTheDocument();
 
     await userEvent.click(within(lane('Do')).getByRole('button', { name: 'Show all' }));

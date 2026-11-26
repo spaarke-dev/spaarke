@@ -31,9 +31,9 @@ These are the most likely home of the live SDK calls the harness does not reach 
 | `sprk_recordtype_refs(id)` reads | 8 | 8 | 8 |
 | `RetrievePrincipalAccess` (probe + route core) | 51 together | 32 | 32 |
 | `RetrieveUserSetOfPrivilegesByNames` (probe + route core) | (in the 51) | 18 | 18 |
-| `WhoAmI` | memoised | 6 (route core's 4 go through the scripted client, not the real `DataverseUserClient` memo) | 6 |
+| `WhoAmI` | memoised | 3 (the real client's per-request WhoAmI memo answers the route core's repeats) | 3 |
 | SDK side (app-only reads + writer) | 113 | 49 (6 writes) | 49 |
-| All calls | ~220 | 152 | 140 |
+| All calls | ~220 | 149 | 137 |
 
 The caller-access, metadata and `sprk_recordtype_refs` counts match the live trace, which validates those parts of the model. The SDK block does not match (see "Not modelled").
 
@@ -54,7 +54,7 @@ The caller-access, metadata and `sprk_recordtype_refs` counts match the live tra
 | caller (route core) | `sprk_recordtype_refs(id)` | `CallerWriteAuthorization.CallerMayAppendToOrganizationOwnedAsync` | 4 | 4 |
 | caller (route core) | `sprk_recordtype_refs(id)` | `CallerWriteAuthorization.PairTypeTableAsync` | 4 | 4 |
 | caller (route core) | `transactioncurrencies(id)` | `CallerWriteAuthorization.CallerMayAppendToOrganizationOwnedAsync` | 1 | 1 |
-| caller (route core) | `WhoAmI()` | `CallerWriteAuthorization.WhoAmIAsync` | 4 | 4 |
+| caller (route core) | `WhoAmI()` | `CallerWriteAuthorization.WhoAmIAsync` | 1 | 1 |
 | probe | RetrievePrincipalAccess | `DecisionExec.CallerHoldsAsync` (preflight 12 + execute 12 − shared) | 17 | 17 |
 | probe | RetrieveUserSetOfPrivilegesByNames | `DecisionExec.CallerHoldsPrivilegeAsync` (preflight 4 + execute 4) | 8 | 8 |
 | probe | WhoAmI | `DecisionCommitService.CommitCoreAsync` | 1 | 1 |
@@ -72,11 +72,11 @@ The caller-access, metadata and `sprk_recordtype_refs` counts match the live tra
 
 | | Calls | 20 ms per call: serial sum, measured | 100 ms per call: serial sum |
 |---|---|---|---|
-| Before B | 155 | 3,100 ms, 3,826 ms | 15.5 s |
-| After B | 141 | 2,820 ms, 3,493 ms | 14.1 s |
+| Before B | 152 | 3,040 ms, 4,034 ms | 15.2 s |
+| After B | 138 | 2,760 ms, 3,573 ms | 13.8 s |
 
 - The calls run almost entirely in series: measured time ≈ serial sum + CPU.
-- Live, B removes 12 metadata reads at about 88 ms each: about 1.1 s of the 26.9 s.
+- Live, B removes 12 metadata reads at about 88 ms each: about 1.1 s of the 26.9 s. (The totals here are the run with a fixed latency: concurrent first asks of one path can both reach the wire there, so they run a few calls above the no-latency totals, 149 and 137.)
 
 ## Fix B: what changed, and why it is safe
 
@@ -85,7 +85,7 @@ The caller-access, metadata and `sprk_recordtype_refs` counts match the live tra
   - step 5 (`DecideAsync`);
   - the type-only pair rewrite (`CompleteTypeOnlyRegardingPairAsync`, which gains a `metadataReads` parameter).
 - `ChildRecordEndpoints.CreateAsync` sets `RecordCreationRequest.MetadataReads = CallerMetadataReadMemo.RequestScope.Of(httpContext)`. The decision commit's creates run through this route core, in-process, in the commit's own request.
-- With a scope, every memo of that request and that caller client shares one store, and a row write does not clear it: a row write does not change a schema.
+- With a scope, every memo of that request over a `DataverseUserClient` shares one store, and a row write does not clear it: a row write does not change a schema.
 - Without a scope (the chat tool, jobs, every other caller of the service), the memo is per instance and clears on any write, exactly as before.
 
 **What is kept is unchanged:** only a successful GET whose path starts with `EntityDefinitions(` (with `/Attributes`).
@@ -96,7 +96,7 @@ The caller-access, metadata and `sprk_recordtype_refs` counts match the live tra
 - `RetrievePrincipalAccess` and `RetrieveUserSetOfPrivilegesByNames`;
 - failures.
 
-**Scope:** the store lives in `HttpContext.Items` under a private key, keyed per caller-client instance (`ConditionalWeakTable`). Nothing is shared across requests or callers, and there is no process-wide cache.
+**Scope:** one store per request, in `HttpContext.Items` under a private key. It is shared only by memos over the real `DataverseUserClient` (see "Review F4" below). Nothing is shared across requests, and there is no process-wide cache.
 
 **Equivalence:** the A tests were committed first and pass unchanged after B. They pin:
 - the writes in order with their payloads, the Decision Record last;
@@ -107,6 +107,38 @@ The caller-access, metadata and `sprk_recordtype_refs` counts match the live tra
 - a metadata-read fault on the first read.
 
 **Must not change, and did not:** D-17, execution order, validation, the response shape and warnings, the Signals contract baselines, and every REST response.
+
+## Review F4: the store is keyed per request, and shared only by the real caller client
+
+**Finding (ontology-r1's review).** The first version of B kept the store in a `ConditionalWeakTable` keyed per `IDataverseUserClient` instance. In production that client is a transient typed `HttpClient` (`AddHttpClient<IDataverseUserClient, DataverseUserClient>`, `SpaarkeCore.cs`), and `DecisionRouteCores.CreateChildAsync` resolves a fresh one per create, so the four creates never shared a store. The harness registered one scripted client as a singleton, so it shared where production cannot; the "37 → 25" above was a harness-only figure.
+
+**Measured, same harness now resolving the REAL `DataverseUserClient` per create (transient, wire counted and answered by the scripted caller's Dataverse):**
+
+| Store | `EntityDefinitions(…)` reads | All calls (no latency) |
+|---|---|---|
+| none (before B) | 37 | 149 |
+| per client instance (the first version of B, in production's shape) | 34 (about 0.27 s live) | 146 |
+| **per request (this fix)** | **25** (about 1.1 s live) | **137** |
+
+So the per-client store would have saved 3 reads, not 12. The per-request store is what makes the 37 → 25 figure true in the production shape.
+
+**Fix.**
+- `RequestScope` holds one store per request (`HttpContext.Items`, private key); the `ConditionalWeakTable` is gone.
+- `CallerMetadataReadMemo.For` shares that store only when the inner client IS the concrete `DataverseUserClient`. Any other `IDataverseUserClient` (a test double, a later token-based or impersonating client, a chat or job client inside a request) keeps today's per-create memo (uac-r2's binding condition).
+- A system-principal or no-user create has no caller client and still gets no memo.
+
+**Identity-safety argument.** Every `DataverseUserClient` of one request takes the same caller bearer token from `IHttpContextAccessor` (`DataverseUserClient.cs`, `SendAsync`), exchanges it on behalf of that caller, and sends `Authorization: Bearer`. The type has no `MSCRMCallerID`, no impersonation and no app-only path. One request therefore means one caller identity for everything the type sends, and a table's metadata read under it is the same answer each time. The store wraps only the caller's client, never an app-only one. Kept as before: only successful `EntityDefinitions(` GETs (faults and 404s are not kept), and a request that has ended returns no scope, so every read goes to the wire. Off-request callers keep the per-create memo that clears on writes. `RecordCreationPrincipal` and `ChildRecordEndpoints` assume no per-client keying: the route sets `MetadataReads` from its own request and the principal only carries the caller's client.
+
+**Tests.**
+- The harness registers the caller client as transient and real (`RealCallerClientRig`: the OBO exchange is answered from a seeded MSAL cache, the wire is `DecisionCommitCallProfile.CallerWire`, which counts each request as the interface call that produced it, with the production method that asked and the decision step). All counts stay complete; the call-site names are unchanged.
+- Must-fire: `Iss010_OnTheRoute_TheFourCreates_ReadEachMetadataPathOnce_…` now also requires four or more distinct client instances; with a per-client store in place of the per-request one it fails (34 reads, 5 reads of one path).
+- Must-fire, unit level: two distinct real clients in one request read a path once.
+- Must-not-fire: two requests share nothing; a client that is not the `DataverseUserClient` gets no shared answers even in a request with a scope.
+- One effect of the real client: its per-request WhoAmI memo now answers the route core's WhoAmI repeats, so the harness's `WhoAmI` count is 3, not 6, before and after B.
+
+**K1 (notes only).** `BudgetInquiryExecutor.cs:344` creates through `RecordCreationService` directly, with no `MetadataReads`, so it gets no sharing. It is not one of #3184's four actions.
+
+**This PR alone does not reach NFR-01's 15 s target.** B removes about 1.1 s of the 26.9 s live commit.
 
 ## Access methods touched (for uac-r2)
 

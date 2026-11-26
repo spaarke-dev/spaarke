@@ -12,6 +12,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
@@ -102,7 +103,8 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         CreateSut(
             ILogger<BulkRagIndexingJobHandler>? logger = null,
             Mock<IDocumentDataverseService>? documentService = null,
-            string? odataJson = null)
+            string? odataJson = null,
+            DocumentIndexParentResolver? parentResolver = null)
     {
         var fileIndexingMock = new Mock<IFileIndexingService>();
         fileIndexingMock
@@ -140,6 +142,7 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
             idempotencyMock.Object,
             (documentService ?? new Mock<IDocumentDataverseService>()).Object,
             Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == DefaultIndexName),
+            parentResolver ?? TestDocumentIndexParentResolver.Over(),
             new RagTelemetry(),
             configuration,
             httpClientFactoryMock.Object,
@@ -305,6 +308,54 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
         logger.Completion!["Processed"].Should().Be(1);
         fileIndexingMock.Verify(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()), Times.Once,
             "a failed stamp never retries the index");
+    }
+
+    /// <summary>
+    /// Issue #3165: the bulk job asks <see cref="DocumentIndexParentResolver"/> for the parent (it used to stamp a hard-coded
+    /// "matter" parent from the Dataverse row), so a document filed under a project is indexed with a project parent and
+    /// a document that names no record is indexed with none.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_project", "sprk_project", "project")]
+    [InlineData("sprk_matter", "sprk_matter", "matter")]
+    [InlineData(null, null, null)]
+    public async Task ProcessAsync_IndexRequestParent_IsTheOneDocumentIndexParentResolverDecides(
+        string? column, string? target, string? expectedType)
+    {
+        var linked = Guid.Parse("4d000000-0000-4000-8000-000000003165");
+        var dataverse = new Mock<IGenericEntityService>();
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_document", Guid.Parse(DocumentId));
+        if (column is not null)
+        {
+            row[column] = new Microsoft.Xrm.Sdk.EntityReference(target!, linked) { Name = "Filed Record" };
+        }
+
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", Guid.Parse(DocumentId), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+        dataverse.Setup(d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+
+        var (handler, fileIndexingMock, _) = CreateSut(parentResolver: TestDocumentIndexParentResolver.Over(dataverse.Object));
+        FileIndexRequest? captured = null;
+        fileIndexingMock
+            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 2 });
+
+        var outcome = await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        captured.Should().NotBeNull();
+        if (expectedType is null)
+        {
+            captured!.ParentEntity.Should().BeNull("a document that names no record has no parent");
+        }
+        else
+        {
+            captured!.ParentEntity.Should().NotBeNull();
+            captured.ParentEntity!.EntityType.Should().Be(expectedType);
+            captured.ParentEntity.EntityId.Should().Be(linked.ToString());
+        }
     }
 
     /// <summary>Captures the structured state of the handler's "completed" log line.</summary>
