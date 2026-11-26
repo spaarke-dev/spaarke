@@ -4,7 +4,7 @@
     <title>Invoice Review opens in-app on the shared modal shell (SprkModal, ADR-050) with "N of M" browse in its header; compact one-row count cards</title>
     <phase>Owner request after the 095d-3 dev check; added 2026-11-26</phase>
     <gate>Owner's go typed in the ebilling-r1 session 2026-11-26 ("Yes, both together"). Dev deploys (Console bundle, Invoice Review page) are separate owner gos.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes .ts/.tsx in a shared library consumed by the Console, plus a code page; cross-frame messaging.</rigor-reason>
     <model-tier>sonnet</model-tier>
