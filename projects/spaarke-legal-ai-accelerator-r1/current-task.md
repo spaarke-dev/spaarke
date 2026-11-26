@@ -4,7 +4,7 @@
 
 ## 2026-11-26: two owner decisions received from mcp-r2 (issue #3257)
 
-Pairing `nda-review` with the Spaarke MCP tools: (1) how a Spaarke (SPE) document gets into the Cowork sandbox (connector reach to SPE unverified → researcher check); (2) matter email via `spaarke_compose_email` instead of the Outlook send card. Detail in `notes/copilot-app-components.md` "Still open". Not started; owner to decide whether and when.
+Pairing `nda-review` with the Spaarke MCP tools: (1) how a Spaarke (SPE) document gets into the Cowork sandbox (connector reach to SPE unverified → researcher check); (2) matter email via `spaarke_compose_email` instead of the Outlook send card. Detail in `notes/copilot-app-components.md` "Still open". Gap 1 researched (`notes/research/cowork-access-to-spe-files-2026-11.md`): no native route; download-and-attach works today; OneDrive staging or a tool-result file need an owner decision / a tenant test. design.md §10 `spaarke_get_document` line corrected. Gap 2 not started; owner to decide.
 
 ## 2026-11-26: PR #3237 MERGED (squash `244171569a`) — redline engine skip-and-report mode (for intake-pipeline-r1)
 

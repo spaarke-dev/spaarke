@@ -54,6 +54,13 @@ instructions don't point to the skill or tell the agent to build a redline. Test
      Cowork's SharePoint connector can read SharePoint Embedded files is unverified (needs a `researcher` check).
      Until then a Spaarke document reaches the skill only if the user downloads it and hands it over. A
      content-returning tool would be new MCP surface (CLAUDE.md §11), not in mcp-r2's scope.
+     **Researched 2026-11-26** (`notes/research/cowork-access-to-spe-files-2026-11.md`): Cowork can't read SPE
+     bytes natively (file picker = OneDrive, SharePoint, Teams; 403 observed 2026-10-30; our container type has
+     discoverability off), and a pasted link won't change that. SPE retrieval surfaces (Retrieval API, Work IQ
+     `retrieve`) return text, not files. Routes: (1) user downloads and attaches: works today; (2) the BFF stages
+     a copy in the user's OneDrive, user attaches it: inferred, needs an owner decision on copying client content
+     to OneDrive and an ADR-028 check; (3) a tool result saved as a sandbox file: undocumented, one tenant test
+     settles it; (4) a signed URL fetched by the script: undocumented, egress likely blocked.
   2. **Matter email.** For matter work the close-out would call `spaarke_compose_email`: pre-filled draft, the user
      presses Send, the email is archived to the matter. That replaces the close-out's Outlook send card. It fits
      our "never send email on my behalf" rule, since the user sends.

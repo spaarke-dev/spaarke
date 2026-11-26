@@ -89,6 +89,7 @@
 - EXO: [sidecar identity](exo-sidecar-identity-2026-10-03.md) (MI-FIC) · [RBAC-for-Apps](exo-rbac-for-apps-design-2026-10-04.md) · [DC-write error](exo-apponly-dc-write-error-2026-10-04.md) (-Organization)
 
 ## AI platform / models / competitors
+- [Cowork vs SPE file bytes (11-26)](cowork-access-to-spe-file-bytes-2026-11-26.md) — no native path; base64 contract is input-only; stage to OneDrive
 - [Declarative agents in Word (2026-11-09)](declarative-agents-in-word-2026-11-09.md) — DA v1.9; plain-text doc, tables lost; no text edit; 1 DA + skills > many DAs
 - [Word saved playbooks (11-06)](word-saved-playbooks-org-sharing-2026-11-06.md) — per-review .docx only; no org library
 - [Harvey Vault vs Legora Tabular (11-06)](harvey-vault-legora-tabular-review-2026-11-06.md) — limits; no playbook grid

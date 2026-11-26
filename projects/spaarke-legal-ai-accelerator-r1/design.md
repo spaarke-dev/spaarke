@@ -1400,8 +1400,11 @@ Building this is the connector project's scope. R1 records the pattern so that s
   - An attorney can upload and share it, and each user consents `[Cited]`. Tenants that restrict user consent need an admin.
 - **Tools.** These come from POC Appendix H and carry read-only or destructive annotations. Write tools take an explicit target, so automations can be pre-approved narrowly.
   - `spaarke_find_documents`
-  - `spaarke_get_document`: returns the file to Cowork as base64 (≤ 8 files and 150 MiB per call `[Cited]`)
-  - `spaarke_save_version`
+  - `spaarke_get_document`: metadata and open links only (as built by spaarkeai-mcp-bff-api). **Corrected
+    2026-11-26:** the base64 limits (≤ 8 files, 150 MiB per call `[Cited]`) apply to tool *input* (workspace file →
+    server), not to tool results. Nothing documents a tool result landing in the sandbox as a file, so a tool can't
+    be relied on to hand the skill a `.docx` (Unknown; tenant test in `notes/research/cowork-access-to-spe-files-2026-11.md`)
+  - `spaarke_save_version`: sandbox file → SPE, the documented direction (base64 input)
   - `spaarke_create_document`
   - `spaarke_log_analysis`: takes the review-result schema
   - `spaarke_matter_card`: an MCP App
