@@ -256,7 +256,7 @@ internal sealed class DecisionCommitCallProfile
             if (name.StartsWith('<') && Between(name) is { Length: > 0 } lambdaOwner)
                 name = lambdaOwner;
             // The memo and the caller client are pass-through wrappers: the site is the method that asked them.
-            if ((skipProbe && type.Name == nameof(CallerRecordAccessProbe)) || type.Name is "CallerMetadataReadMemo" or nameof(DataverseUserClient))
+            if ((skipProbe && type.Name == nameof(CallerRecordAccessProbe)) || type.Name is "CallerMetadataReadMemo" or nameof(DataverseUserClient) or "DecisionAccessWindowCallerClient")
                 continue;
             return $"{type.Name}.{name}";
         }
