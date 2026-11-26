@@ -187,6 +187,112 @@ describe('the modal shell and browse (design A, D)', () => {
   });
 });
 
+describe('the page theme (fix round 1, F2)', () => {
+  it('the helper adds theme=dark|light beside data, not inside it; with no theme the URL is as before', () => {
+    const plain = buildInvoiceReviewUrl(CLIENT, { invoiceId: INV_A, lineId: LINE_A });
+    for (const theme of ['dark', 'light'] as const) {
+      const url = buildInvoiceReviewUrl(CLIENT, { invoiceId: INV_A, lineId: LINE_A }, theme);
+      expect(url).toBe(`${plain}&theme=${theme}`);
+      const params = new URL(url).searchParams;
+      expect(params.get('theme')).toBe(theme);
+      expect(params.get('data')).toBe(`invoiceId=${INV_A}&lineId=${LINE_A}`); // the envelope is untouched
+    }
+    expect(plain).not.toContain('theme=');
+  });
+
+  it('the modal puts the host theme on every record it shows', async () => {
+    renderModal({ theme: 'dark' });
+    expect(new URL(src()!).searchParams.get('theme')).toBe('dark');
+    fireEvent.click(next());
+    await screen.findByText('2 of 3', undefined, SETTLE);
+    expect(src()).toBe(buildInvoiceReviewUrl(CLIENT, TARGETS[1], 'dark'));
+  });
+
+  it('negative: with no theme prop the frame URL has no theme parameter', () => {
+    renderModal();
+    expect(new URL(src()!).searchParams.has('theme')).toBe(false);
+  });
+});
+
+describe('each record gets a fresh frame (fix round 1, F3)', () => {
+  it('a move mounts a NEW iframe element (changing one frame src would add a history entry per move)', async () => {
+    renderModal();
+    const first = frame();
+    fireEvent.click(next());
+    await screen.findByText('2 of 3', undefined, SETTLE);
+    const second = frame();
+    expect(second).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+    expect(document.querySelectorAll('iframe')).toHaveLength(1);
+    fireEvent.click(prev());
+    await screen.findByText('1 of 3', undefined, SETTLE);
+    expect(frame()).not.toBe(second);
+  });
+
+  it('the dirty check after a move asks the CURRENT frame', async () => {
+    renderModal();
+    fireEvent.click(next());
+    await screen.findByText('2 of 3', undefined, SETTLE);
+    const post = watchFrame(); // the new frame's window
+    fireEvent.click(next());
+    const request = lastRequest(post);
+    expect(request.type).toBe(DIRTY_CHECK_REQUEST_TYPE);
+    act(() => answer(request, false)); // `answer` takes the current frame's window as the source
+    await screen.findByText('3 of 3', undefined, SETTLE);
+  });
+
+  it('negative: Cancel on the discard prompt keeps the same frame element', async () => {
+    renderModal();
+    const first = frame();
+    const post = watchFrame();
+    fireEvent.click(next());
+    act(() => answer(lastRequest(post), true));
+    await screen.findByText("Discard what you haven't saved?");
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(async () => undefined);
+    expect(frame()).toBe(first);
+  });
+});
+
+describe('keyboard focus after a move (fix round 1, F4)', () => {
+  it('reaching the last record: focus goes to Previous, the enabled nav button, not the body', async () => {
+    renderModal({ startIndex: 1 });
+    next().focus();
+    expect(document.activeElement).toBe(next());
+    fireEvent.click(next());
+    await screen.findByText('3 of 3', undefined, SETTLE);
+    expect(next()).toBeDisabled();
+    expect(document.activeElement).toBe(prev());
+  });
+
+  it('reaching the first record: focus goes to Next', async () => {
+    renderModal({ startIndex: 1 });
+    prev().focus();
+    fireEvent.click(prev());
+    await screen.findByText('1 of 3', undefined, SETTLE);
+    expect(prev()).toBeDisabled();
+    expect(document.activeElement).toBe(next());
+  });
+
+  it('focus lost to the body mid-set goes back to the nav button in the direction of travel', async () => {
+    renderModal({ startIndex: 0 });
+    next().focus();
+    fireEvent.click(next());
+    (document.activeElement as HTMLElement | null)?.blur(); // what a real browser does when the old frame goes
+    await screen.findByText('2 of 3', undefined, SETTLE);
+    expect(document.activeElement).toBe(next());
+  });
+
+  it('negative: focus the person put on the close button is left alone', async () => {
+    renderModal({ startIndex: 1 });
+    const close = screen.getByRole('button', { name: 'Close' });
+    close.focus();
+    fireEvent.click(next());
+    await screen.findByText('3 of 3', undefined, SETTLE);
+    expect(document.activeElement).toBe(close);
+  });
+});
+
 describe('the dirty check before browse (design E)', () => {
   it('asks the frame with a correlationId, and a clean answer moves without a prompt', async () => {
     renderModal();

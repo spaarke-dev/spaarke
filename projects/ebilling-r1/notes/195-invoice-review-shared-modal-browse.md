@@ -42,7 +42,9 @@ Nothing deployed. Browser behaviour is not verified here (see "Not verified").
 7. `flex: '1 1 480px'` is a layout basis, not a colour or spacing token; no colour literals or inline `style` were added.
 8. `InvoiceReviewModal` is exported to the Worklist barrel as a TYPE only (the barrel guard in `Worklist.test.tsx` forbids a second row/value component there); the
    widget imports the file directly. `laneCountFilters.test.tsx`'s file list gained `InvoiceReviewModal.tsx`.
-9. No test for the LegalWorkspace registration (that package has no jest config); it is covered by the typecheck and by the AI.Widgets test for the same wiring.
+9. ~~No test for the LegalWorkspace registration (that package has no jest config)~~ WRONG, corrected in fix round 1: the registration shim IS tested, in
+   `src/client/shared/Spaarke.DailyBriefing.Components/test/worklistSectionRegistration.test.tsx` (that package imports LegalWorkspace's source, as its header says).
+   Round 0 broke that suite (see F1 below).
 10. "The set is not reshuffled when the lanes reload under the open modal" holds by construction (the set is state captured at open) and has no test.
 
 ## Theme finding (design note 2)
@@ -110,3 +112,43 @@ Under `src/client/shared/Spaarke.UI.Components/` (`src/components/`): `Worklist/
 5. Count cards on one row at 1280 wide, readable, about 62-72px tall.
 6. The lanes refresh after the modal closes; the set stays put if they reload under the open modal.
 7. The Navigator side pane still registers inside the iframe.
+
+## Fix round 1 (independent review of `fa956e7c76`)
+
+| Item | Fix | Tests |
+|---|---|---|
+| **F1** broken suite | `DailyBriefing.Components/test/__mocks__/spaarke-ui-components.tsx` now exports the REAL `getClientUrl` (same deep import as `getXrm`); the suite had failed to compile (TS2305), losing every case. Note 9 above corrected. | `worklistSectionRegistration.test.tsx`: with Xrm the shim passes `invoiceReviewClientUrl`; without Xrm `undefined`; an empty client URL gives `undefined`. Whole DailyBriefing.Components suite run. |
+| **F2** light page in a dark Console | The shared resolver already reads a direct `theme=dark\|light` URL parameter (`detectDarkModeFromUrl`, tier 2 of `resolveCodePageTheme`, after a stored preference and before the navbar check), and the e-billing page bootstrap already uses `resolveCodePageTheme`, so NO page or `themeStorage.ts` change. The widget runs the shared `getEffectiveDarkMode()` in the Console's own frame (stored preference, URL flag, then the navbar of the frame above, which IS the model-driven app from there) when the modal opens, and `buildInvoiceReviewUrl(clientUrl, target, theme)` adds `&theme=dark\|light` beside `data` (not inside it). Supersedes the "no fix applied" in the theme finding above. | `InvoiceReviewModal.test.tsx` (URL carries the theme beside `data`; every record keeps it; none when no prop), `WorklistInvoiceReviewModal.test.tsx` (stored dark gives dark; stored light and nothing stored give light; the dark URL flag with nothing stored gives dark), `themeStorage.test.ts` (nothing stored and `theme=dark` gives dark, `theme=light` beats a dark navbar, an explicit stored preference beats `theme=`). |
+| **F3** history entries | `key={url}` on the iframe: each invoice mounts a FRESH frame, whose first load adds no history entry. The dirty query reads `frameRef.current` at call time, so it targets the current frame. | `InvoiceReviewModal.test.tsx`: each move mounts a NEW iframe element (old one disconnected, one iframe in the document); the dirty check after a move asks the current frame; Cancel keeps the same element. |
+| **F4** focus lost at the ends | After a move, if `document.activeElement` is the body or a disabled button, focus goes to the enabled nav button in the direction of travel, else the other one, else Close. `SprkModal.tsx` is untouched. The widget test no longer queries with `hidden: true`: it clicks with `userEvent` (real focus) and asserts focus lands on Previous. | `InvoiceReviewModal.test.tsx`: last record gives Previous, first record gives Next, focus lost to the body mid-set returns to the direction of travel, and focus the person put on Close is left alone. |
+| **F5** test claimed more | The filter case now selects a count filter (Do lane, "Coming due") over three billing invoices, activates an item, and asserts M, the order and the neighbour come from the filtered list (unfiltered: "3 of 3"; filtered: "2 of 2", Previous skips the filtered-out invoice). The old one-invoice case is renamed to what it checks. | `WorklistInvoiceReviewModal.test.tsx` |
+| View decision | A read-only decision view no longer counts as dirty: `useReportDirty(wizard?.open === true && access === 'decide')`. | `dirtyCheckResponder.test.tsx` |
+| Firm chosen | A firm chosen in `SetFirmField` but not yet set counts as dirty (`useReportDirty(chosen !== null)`). | `dirtyCheckResponder.test.tsx` |
+| `uiScale` | SKIPPED: `WorklistWidget` has no `uiScale` (no Worklist modal passes one; `InvoiceReviewModal` still accepts the prop). | none |
+| Cards | Left as is. Five cards need roughly 5 x 100 px, so beside the toolbar there is no room at modal width in any case; the reviewer's figures (about 103 px a card at 1280 px with the 560 px detail pane, a two-digit "Processing" wrapping to about 78-82 px tall, Lines / By rule / Add line on their own row) are the reviewer's computation and are NOT measured here (no browser). The five stay on one row. Measure on dev. | none |
+
+### Fix round 1: results
+
+| Command | Result |
+|---|---|
+| UI.Components `npm run build` | clean |
+| UI.Components jest: Worklist, SprkModal, RecordNavigationModalShell and `utils/__tests__/themeStorage.test.ts` | 31 suites, 559 tests, all pass |
+| InvoiceReview `npx jest` (all) | 23 suites, 708 tests, all pass |
+| InvoiceReview `npm run build` | green (surface-owned errors 0; 47 existing shared-library errors, deferred) |
+| LegalWorkspace `npm run typecheck` | clean, no new errors |
+| AI.Widgets jest `WorklistWorkspaceWidget` | 1 suite, 9 tests, all pass |
+| DailyBriefing.Components jest, whole package | 28 suites, 194 tests, all pass |
+
+Seen failing before the fix (source reverted to `fa956e7c76`, tests kept):
+- F1: the registration suite did not compile (`worklist.registration.ts:70: TS2305 ... no exported member 'getClientUrl'`), 0 tests ran.
+- F2/F3/F4 in UI.Components (`InvoiceReviewModal.tsx`, `WorklistWidget.tsx`, `openInvoiceReview.ts` reverted): 9 failed, 31 passed. The 9: the theme helper and modal cases, two widget theme cases, the new-iframe case, the three focus cases, and the header-count case (it now asserts focus without `hidden: true`). The remaining new cases (Cancel keeps the frame, the dirty check asks the current frame, focus left on Close, the widget "stored dark" URL) pass at base by design or because the base URL helper ignores an extra argument.
+- View decision and firm chosen (`DecideInvoiceAction.tsx`, `SetFirmField.tsx` reverted): 2 failed, 10 passed.
+- The `themeStorage.test.ts` cases pin existing resolver behaviour that F2 relies on; they pass at base, by design.
+- F5 is a test-honesty fix: the filtered-list case passes at base too (the widget already built the set from the filtered list), which is the point; it now proves it.
+
+Test-run notes: (1) DailyBriefing.Components' jest config builds `testMatch` from the absolute path, and a worktree under `.claude\worktrees\...` breaks the glob (`\.claude` is read as an escape), so here it was run with `--testMatch '**/test/**/*.test.ts' '**/test/**/*.test.tsx'`; CI, whose checkout has no dot directory, uses the config as is. (2) A first whole-package run alongside two other jest runs failed 2 cases in `DailyBriefingApp.openRecord` / `itemEmail` (timeouts under load, each passes alone); the run recorded above is the package alone. (3) `npm install` for that package changed its lock file; that change was reverted, not committed.
+
+### Not verified (added in round 1)
+- The theme in a real dark app: that the Console frame's `getEffectiveDarkMode()` resolves dark from the model-driven app's navbar one frame up, and that the page then honours `theme=dark`. Check on dev with no stored theme, once with the dark app theme and once with the dark URL flag.
+- No history entry per move (Back leaves the modal's page alone), and focus after the end of the set, in a real browser.
+- Count-card height and the toolbar row at 1280 wide.

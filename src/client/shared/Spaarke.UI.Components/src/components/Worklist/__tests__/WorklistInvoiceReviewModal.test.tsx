@@ -40,6 +40,11 @@ const LINE_1 = '22222222-2222-2222-2222-222222222222';
 const LINE_2 = '44444444-4444-4444-4444-444444444444';
 const INVOICE_2 = '33333333-3333-3333-3333-333333333333';
 const INVOICE_3 = '55555555-5555-5555-5555-555555555555';
+const INVOICE_4 = '66666666-6666-6666-6666-666666666666';
+const INVOICE_5 = '77777777-7777-7777-7777-777777777777';
+const DO_B1 = 'b3000000-0000-0000-0000-000000000001'; // the filter test's Do lane: Coming due, invoice 3
+const DO_B2 = 'b3000000-0000-0000-0000-000000000002'; // Finish or reschedule, invoice 4
+const DO_B3 = 'b3000000-0000-0000-0000-000000000003'; // Coming due, invoice 5
 
 const lanes = body(
   'lanes',
@@ -96,16 +101,18 @@ beforeEach(() => window.localStorage.clear());
 const lane = (name: 'Decide' | 'Do') => screen.getByTestId(`worklist-lane-${name}`);
 const lanesReads = (service: { read: jest.Mock }) => service.read.mock.calls.filter(c => c[0] === 'lanes').length;
 const frame = () => document.querySelector('iframe') as HTMLIFrameElement;
-const urlFor = (invoiceId: string, lineId?: string) => buildInvoiceReviewUrl(CLIENT, { invoiceId, lineId });
+// The widget adds the theme it resolved (F2): with nothing stored and no flag the Console resolves light.
+const urlFor = (invoiceId: string, lineId?: string, theme: 'dark' | 'light' = 'light') =>
+  buildInvoiceReviewUrl(CLIENT, { invoiceId, lineId }, theme);
 
 async function ready() {
   await screen.findByTestId('worklist-widget');
 }
 
-function line(signalId: string): HTMLElement {
-  const toggle = within(lane('Decide')).getByTestId('lane-toggle-Decide');
+function line(signalId: string, laneName: 'Decide' | 'Do' = 'Decide'): HTMLElement {
+  const toggle = within(lane(laneName)).getByTestId(`lane-toggle-${laneName}`);
   if (toggle.getAttribute('aria-expanded') === 'false') fireEvent.click(toggle);
-  const el = within(lane('Decide'))
+  const el = within(lane(laneName))
     .getAllByTestId('issue-line')
     .find(l => l.getAttribute('data-signal-id') === signalId);
   expect(el).toBeDefined();
@@ -143,13 +150,13 @@ describe('with a client URL (design C)', () => {
     expect(screen.getByText('1 of 2')).toBeInTheDocument();
     expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_1, LINE_2)); // the line that was activated, not the first
     expect(screen.getByRole('button', { name: 'Previous record' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
+    // A real click focuses the button, as a user's does; the move then disables it (the end), and the modal hands focus on (F4).
+    await userEvent.click(screen.getByRole('button', { name: 'Next record' }));
     await screen.findByText('2 of 2', undefined, SETTLE);
     expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_2));
-    // `hidden: true`: after the move, jsdom's tabster modalizer (focus-driven, on a timer) marks the surface aria-hidden because nothing in
-    // it holds focus (fireEvent does not focus). That is the shell's own focus bookkeeping, not this modal's; the buttons are still there.
-    expect(screen.getByRole('button', { name: 'Next record', hidden: true })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Previous record', hidden: true }));
+    expect(screen.getByRole('button', { name: 'Next record' })).toBeDisabled();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Previous record' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Previous record' }));
     await screen.findByText('1 of 2', undefined, SETTLE);
     expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_1, LINE_2));
   });
@@ -163,7 +170,7 @@ describe('with a client URL (design C)', () => {
     expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_2));
   });
 
-  it('follows the filter in force: under Invoice decisions the set is the same billing items; a one-invoice lane shows "1 of 1"', async () => {
+  it('a one-invoice lane shows "1 of 1" with both buttons disabled', async () => {
     renderWidget({ invoiceReviewClientUrl: CLIENT }, onlyOneInvoice);
     await ready();
     await userEvent.click(line(INV_LINE));
@@ -171,6 +178,80 @@ describe('with a client URL (design C)', () => {
     expect(screen.getByText('1 of 1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Previous record' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Next record' })).toBeDisabled();
+  });
+
+  it('follows the count filter in force (fix round 1, F5): M and the order come from the FILTERED list, not the whole lane', async () => {
+    // Do lane, three billing items on three invoices: Coming due, Finish or reschedule, Coming due.
+    const doLane = body(
+      'lanes',
+      [],
+      [
+        group(projectCore, [
+          routeItem(DO_B1, 'Do', { workType: 'comingDue', invoiceReview: { invoiceId: INVOICE_3 } }),
+          routeItem(DO_B2, 'Do', { workType: 'finishOrReschedule', invoiceReview: { invoiceId: INVOICE_4 } }),
+          routeItem(DO_B3, 'Do', { workType: 'comingDue', invoiceReview: { invoiceId: INVOICE_5 } }),
+        ]),
+      ]
+    );
+    renderWidget({ invoiceReviewClientUrl: CLIENT }, doLane);
+    await ready();
+
+    // No filter: the whole lane, three invoices.
+    await userEvent.click(line(DO_B3, 'Do'));
+    await screen.findByRole('dialog', undefined, SETTLE);
+    expect(screen.getByText('3 of 3')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), SETTLE);
+
+    // Select the Coming due count filter, then activate the same item: the set is the two Coming due invoices, in the order shown.
+    fireEvent.click(await screen.findByRole('button', { name: /^Coming due/ }));
+    await userEvent.click(line(DO_B3, 'Do'));
+    await screen.findByRole('dialog', undefined, SETTLE);
+    expect(screen.getByText('2 of 2')).toBeInTheDocument();
+    expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_5));
+    expect(screen.getByRole('button', { name: 'Next record' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous record' }));
+    await screen.findByText('1 of 2', undefined, SETTLE);
+    expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_3)); // invoice 4 (Finish or reschedule) is not in the filtered list
+  });
+
+  it("the frame URL carries the Console's resolved theme (fix round 1, F2)", async () => {
+    window.localStorage.setItem('spaarke-theme', 'dark');
+    renderWidget({ invoiceReviewClientUrl: CLIENT });
+    await ready();
+    await userEvent.click(line(INV_LINE));
+    await screen.findByRole('dialog');
+    expect(frame().getAttribute('src')).toBe(buildInvoiceReviewUrl(CLIENT, { invoiceId: INVOICE_1, lineId: LINE_1 }, 'dark'));
+  });
+
+  it('the theme follows the resolver: a stored light preference gives light; none stored and no flag gives light', async () => {
+    window.localStorage.setItem('spaarke-theme', 'light');
+    const first = renderWidget({ invoiceReviewClientUrl: CLIENT });
+    await ready();
+    await userEvent.click(line(INV_LINE));
+    await screen.findByRole('dialog');
+    expect(new URL(frame().getAttribute('src')!).searchParams.get('theme')).toBe('light');
+    first.unmount();
+
+    window.localStorage.clear();
+    renderWidget({ invoiceReviewClientUrl: CLIENT });
+    await ready();
+    await userEvent.click(line(INV_LINE));
+    await screen.findByRole('dialog');
+    expect(new URL(frame().getAttribute('src')!).searchParams.get('theme')).toBe('light');
+  });
+
+  it('the theme is dark when the app set the dark URL flag and nothing is stored (the "auto" user with a dark app)', async () => {
+    window.history.pushState({}, '', '/?flags=themeOption%3Ddarkmode');
+    try {
+      renderWidget({ invoiceReviewClientUrl: CLIENT });
+      await ready();
+      await userEvent.click(line(INV_LINE));
+      await screen.findByRole('dialog');
+      expect(new URL(frame().getAttribute('src')!).searchParams.get('theme')).toBe('dark');
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
   });
 
   it('closing the modal (the ×) reads the lanes again, once', async () => {

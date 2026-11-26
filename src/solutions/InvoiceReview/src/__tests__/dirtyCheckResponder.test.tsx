@@ -17,9 +17,27 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewWithDecisions } from '../components/InvoiceReviewWithDecisions';
 import { InvoiceReviewPage } from '../components/InvoiceReviewPage';
 import { DIRTY_CHECK_REQUEST_TYPE, DIRTY_CHECK_RESULT_TYPE } from '@spaarke/ui-components';
-import { INVOICE_ID, flagged, line, lineId, mockApi, mockDecisionApi, review, type MockApi } from './testKit';
+import {
+  INVOICE_ID,
+  decidedApproval,
+  decidedReview,
+  flagged,
+  line,
+  lineId,
+  mockApi,
+  mockDecisionApi,
+  ok,
+  review,
+  type MockApi,
+} from './testKit';
 
 const normal = () => review([line(1), flagged(2), flagged(4)]);
+const FIRM_A = { firmId: 'a1a1a1a1-0000-4000-8000-0000000000a1', name: 'Alpha Law LLP' };
+/** An invoice with no firm yet, the case the header's firm field is for (as `setFirm.test.tsx`'s own). */
+function noFirm() {
+  const base = review([line(1), flagged(2)]);
+  return { ...base, header: { ...base.header, firm: null, trackingNumber: null }, flags: { ...base.flags, canDecide: true } };
+}
 const row = (n: number) => screen.getByTestId(`line-row-${lineId(n)}`);
 
 /** A stand-in for the Console modal's window: what the page replies to. */
@@ -126,6 +144,38 @@ describe('the dirty-check responder (design E, page side)', () => {
     expect(isDirty()).toBe(true);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close', hidden: true }));
     await waitFor(() => expect(isDirty()).toBe(false));
+  });
+
+  it('fix round 1: the READ-ONLY decision view ("View decision") is not unsaved work, so it never prompts', async () => {
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <InvoiceReviewWithDecisions
+          invoiceId={INVOICE_ID}
+          api={mockApi(decidedReview('Reject')) as never}
+          decisionApi={mockDecisionApi(decidedApproval('Reject')) as never}
+          pollIntervalMs={60_000}
+        />
+      </FluentProvider>
+    );
+    fireEvent.click(await screen.findByTestId('view-decision'));
+    await waitFor(() => expect(screen.queryAllByRole('dialog', { hidden: true }).length).toBeGreaterThan(0));
+    expect(screen.queryByTestId('decide-invoice')).not.toBeInTheDocument();
+    expect(isDirty()).toBe(false);
+  });
+
+  it('fix round 1: a firm chosen in the header but not yet set is unsaved work; clean before choosing', async () => {
+    const api = mockApi(noFirm());
+    api.listFirms.mockResolvedValue(ok([FIRM_A]));
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <InvoiceReviewPage invoiceId={INVOICE_ID} api={api as never} pollIntervalMs={60_000} firmNeeded />
+      </FluentProvider>
+    );
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Billing firm' }));
+    expect(isDirty()).toBe(false); // the list is open, nothing is chosen
+    fireEvent.click(await screen.findByRole('option', { name: FIRM_A.name }));
+    await waitFor(() => expect(isDirty()).toBe(true));
+    expect(api.setFirm).not.toHaveBeenCalled();
   });
 
   it('is dirty while a write is in flight, and clean when it settles', async () => {

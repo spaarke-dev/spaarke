@@ -51,11 +51,16 @@ export function buildInvoiceReviewLaunch(target: InvoiceReviewTarget) {
  * lower case, `lineId` left out when there is none), URI-encoded once (the page's `parseDataParams` decodes it, as for
  * `navigateTo`). Pure and Xrm-free (ADR-012): the HOST supplies `clientUrl` (`Xrm.Utility.getGlobalContext().getClientUrl()`).
  * A trailing slash on `clientUrl` is dropped so there is no double slash.
+ *
+ * `theme` (the host's resolved `dark` / `light`) is added as a `theme=` parameter BESIDE `data`, not inside it: the page's theme
+ * resolver (`resolveCodePageTheme`, tier 2: `detectDarkModeFromUrl`) reads `theme=` after a stored explicit preference and before its
+ * navbar check, which reaches only one parent frame and so cannot see the model-driven app from inside this modal.
  */
-export function buildInvoiceReviewUrl(clientUrl: string, target: InvoiceReviewTarget): string {
+export function buildInvoiceReviewUrl(clientUrl: string, target: InvoiceReviewTarget, theme?: 'dark' | 'light'): string {
   const base = clientUrl.trim().replace(/\/+$/, '');
   const { pageInput } = buildInvoiceReviewLaunch(target);
-  return `${base}/WebResources/${INVOICE_REVIEW_WEBRESOURCE_NAME}?data=${encodeURIComponent(pageInput.data)}`;
+  const themeParam = theme ? `&theme=${theme}` : '';
+  return `${base}/WebResources/${INVOICE_REVIEW_WEBRESOURCE_NAME}?data=${encodeURIComponent(pageInput.data)}${themeParam}`;
 }
 
 /**

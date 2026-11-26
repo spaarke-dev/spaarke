@@ -13,6 +13,7 @@ import * as React from 'react';
 import { Button, Caption1, Dropdown, Field, MessageBar, MessageBarActions, MessageBarBody, Option, Spinner, makeStyles, tokens } from '@fluentui/react-components';
 import { firmsFailureMessage, type InvoiceReviewApi, type ReviewCoreRecord, type ReviewFirm } from '../services/invoiceReviewApi';
 import { CORE_KIND_LABEL, SET_FIRM_EFFECT_WORDS } from '../services/reviewModel';
+import { useReportDirty } from './useDirtyCheck';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, maxWidth: '520px' },
@@ -45,6 +46,8 @@ export function SetFirmField({ api, core, busy, onSet, onChoose }: SetFirmFieldP
   const [list, setList] = React.useState<FirmList>(core ? { kind: 'loading' } : { kind: 'ready', firms: [] });
   const [chosen, setChosen] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
+  // Task 195: a firm chosen but not yet set is unsaved work for the Console modal's browse guard.
+  useReportDirty(chosen !== null);
   const coreType = core?.type ?? null;
   const coreId = core?.id ?? null;
 

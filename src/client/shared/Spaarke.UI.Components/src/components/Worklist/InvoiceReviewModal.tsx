@@ -9,7 +9,7 @@
  * `BrowseModal`: that preset is fixed at `lg` with a metadata grid and a Close footer, none of which a full review page can use.
  *
  * Browse. `targets` is the browse set, one invoice per entry, captured by the caller when the modal opens (a lane reload while it is
- * open does not reshuffle it). Previous / next swap the iframe `src` to the neighbouring invoice. At either end the matching button is
+ * open does not reshuffle it). Previous / next mount a FRESH iframe on the neighbouring invoice (`key` = its URL: a new frame's first load adds no browser history entry, where changing one frame's `src` would add one per move and make Back disagree with the header). At either end the matching button is
  * disabled, and a one-invoice set shows "1 of 1" with both disabled (the shell derives both from `index` / `total`).
  *
  * Unsaved work. The page may hold unsaved work (a note being typed, an open decision). Before the frame moves, `nav.onBeforeNavigate`
@@ -45,6 +45,11 @@ export interface InvoiceReviewModalProps {
   startIndex?: number;
   /** The `--sprk-ui-scale` factor forwarded to the shell. */
   uiScale?: number;
+  /**
+   * The theme the host resolved (`dark` / `light`), passed to the page as `theme=` beside `data`. The page is two frames below the
+   * model-driven app, so its own navbar check (one parent frame) cannot see the app theme; a stored explicit preference still wins there.
+   */
+  theme?: 'dark' | 'light';
 }
 
 /** What the person is asked when the frame holds unsaved work. */
@@ -88,13 +93,14 @@ export const InvoiceReviewModal: React.FC<InvoiceReviewModalProps> = ({
   targets,
   startIndex = 0,
   uiScale,
+  theme,
 }) => {
   const styles = useStyles();
   const frameRef = React.useRef<HTMLIFrameElement>(null);
   const total = targets.length;
   const [index, setIndex] = React.useState(() => Math.min(Math.max(startIndex, 0), Math.max(total - 1, 0)));
   const current = targets[index] as InvoiceReviewTarget | undefined;
-  const url = current ? buildInvoiceReviewUrl(clientUrl, current) : null;
+  const url = current ? buildInvoiceReviewUrl(clientUrl, current, theme) : null;
 
   // The pending "discard what you haven't saved?" answer: set while the confirm is up, settled by its buttons (or by unmount).
   const [confirming, setConfirming] = React.useState(false);
@@ -132,11 +138,38 @@ export const InvoiceReviewModal: React.FC<InvoiceReviewModalProps> = ({
   }, [clientUrl]);
 
   // Functional update: the shell calls this from the render the click happened in, after the (up to 1 s) dirty check.
+  const lastDir = React.useRef<'prev' | 'next'>('next');
   const onNavigate = React.useCallback(
-    (dir: 'prev' | 'next') =>
-      setIndex(i => Math.min(Math.max(i + (dir === 'next' ? 1 : -1), 0), Math.max(total - 1, 0))),
+    (dir: 'prev' | 'next') => {
+      lastDir.current = dir;
+      setIndex(i => Math.min(Math.max(i + (dir === 'next' ? 1 : -1), 0), Math.max(total - 1, 0)));
+    },
     [total]
   );
+
+  // Keyboard focus after a move (the shell is not changed here; its own fix is filed separately). The button just pressed becomes
+  // disabled at an end, and the old frame is removed (see `key` below), so a real browser drops focus to the body. When that has
+  // happened, put it back on an enabled control of the header: the nav button in the direction of travel, else the other one, else
+  // the close button. Focus that is somewhere real (inside the frame, on the close button) is left alone.
+  const frameWrapRef = React.useRef<HTMLDivElement>(null);
+  const movedOnce = React.useRef(false);
+  React.useEffect(() => {
+    if (!movedOnce.current) {
+      movedOnce.current = true; // not on the first render
+      return;
+    }
+    const dialog = frameWrapRef.current?.closest('[role="dialog"]');
+    if (!dialog) return;
+    const active = document.activeElement;
+    const lost = !active || active === document.body || (active instanceof HTMLButtonElement && active.disabled);
+    if (!lost) return;
+    const byLabel = (label: string) => dialog.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+    const forward = byLabel('Next record');
+    const backward = byLabel('Previous record');
+    const order = lastDir.current === 'next' ? [forward, backward] : [backward, forward];
+    const target = [...order, byLabel('Close')].find(b => b && !b.disabled);
+    target?.focus();
+  }, [index]);
 
   return (
     <>
@@ -150,8 +183,11 @@ export const InvoiceReviewModal: React.FC<InvoiceReviewModalProps> = ({
         uiScale={uiScale}
         nav={{ index, total, onNavigate, onBeforeNavigate: beforeNavigate }}
       >
-        <div className={styles.frameWrap}>
-          {url && <iframe ref={frameRef} src={url} title="Invoice Review" className={styles.frame} />}
+        <div ref={frameWrapRef} className={styles.frameWrap}>
+          {/* `key={url}`: each invoice gets a FRESH frame. Changing one frame's `src` adds a browser history entry per move, so Back
+              would put the frame on the previous invoice while the header kept its count (and skip the dirty check). A new frame's first
+              load adds no entry. */}
+          {url && <iframe key={url} ref={frameRef} src={url} title="Invoice Review" className={styles.frame} />}
         </div>
       </SprkModal>
       <ConfirmModal

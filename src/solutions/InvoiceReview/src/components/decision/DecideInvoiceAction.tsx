@@ -87,10 +87,10 @@ export function DecideInvoiceAction({ review, canWrite, reload }: DecideInvoiceA
   // The wizard is closed with `open={false}`, never unmounted while open, which would leave the page aria-hidden (#2658).
   // `seq` keys each opening and changes only while closed, so the form, the steps and the read-only choice start fresh.
   const [wizard, setWizard] = React.useState<{ open: boolean; seq: number } | null>(null);
-  // Task 195: the decision wizard being open is work in progress (its notes, reasons and notices are in it), so the Console modal asks
-  // before it browses away from it.
-  useReportDirty(wizard?.open === true);
   const access = decisionAccess(review, state, canWrite);
+  // Task 195: an EDITABLE decision wizard being open is work in progress (its notes, reasons and notices are in it), so the Console modal
+  // asks before it browses away from it. The read-only view ("View decision") holds nothing to lose, so it never prompts.
+  useReportDirty(wizard?.open === true && access === 'decide');
 
   const refreshApproval = React.useCallback(() => refresh(), [refresh]);
   const openWizard = React.useCallback(() => {

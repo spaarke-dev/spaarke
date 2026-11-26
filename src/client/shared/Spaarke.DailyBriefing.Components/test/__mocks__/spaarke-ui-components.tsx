@@ -17,7 +17,7 @@
  *   factory has a non-empty catalog to compare against.
  */
 import * as React from 'react';
-import { getXrm as realGetXrm } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
+import { getXrm as realGetXrm, getClientUrl as realGetClientUrl } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
 // #1416: the REAL cleanGuid (ADR-044: strip braces, trim, lowercase) — dependency-free deep import,
 // same pattern as realGetXrm. Never re-implement it here: an identity stub hides brace/case bugs.
 import { cleanGuid as realCleanGuid } from '../../../Spaarke.UI.Components/src/utils/guid';
@@ -253,6 +253,9 @@ export const searchUsersAndContacts: (...args: any[]) => Promise<any[]> = async 
 // `getXrm` is the REAL shared walker (task 081 — see the note further down);
 // bound here so the `_driftGuard` object below can reference it.
 export const getXrm = realGetXrm;
+// Task 195: `worklist.registration.ts` passes `getClientUrl()` to the Worklist (Invoice Review opens in-app when it is set). The REAL
+// helper, the same deep import as getXrm: a stub would hide whether the shim reads it from Xrm.
+export const getClientUrl = realGetClientUrl;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const getXrmForPicker: (...args: any[]) => any = () => undefined;
 export interface RecordTypeCatalogEntry {

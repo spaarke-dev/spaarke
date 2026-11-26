@@ -50,6 +50,7 @@ import type {
   DecisionOpenLookup,
   DecisionOpenRecord,
 } from '../DecisionWizard/decisionWizardTypes';
+import { getEffectiveDarkMode } from '../../utils/themeStorage';
 import type { LaneFilterKey } from './laneCountFilters';
 import { buildInvoiceBrowseSet } from './invoiceReviewBrowse';
 import type { InvoiceBrowseSet } from './invoiceReviewBrowse';
@@ -180,7 +181,9 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   const [picker, setPicker] = React.useState<PickerState | null>(null);
   // The in-app Invoice Review modal (task 195): its browse set, taken when it opens and never changed while it is open, so a lane
   // reload under it cannot reshuffle "N of M".
-  const [reviewModal, setReviewModal] = React.useState<InvoiceBrowseSet | null>(null);
+  // `theme` is what THIS frame (the Console) resolved when it opened, handed to the page so a dark Console never gets a light page (the
+  // page is two frames below the model-driven app, out of reach of the navbar check that only walks one parent frame).
+  const [reviewModal, setReviewModal] = React.useState<{ browse: InvoiceBrowseSet; theme: 'dark' | 'light' } | null>(null);
   // Every open takes the next sequence number; a lookup that returns after a later open is stale and is dropped, so a slow lookup can
   // never put a picker on top of the wizard (or the picker of another To Do) the person opened since. `pendingTodoId` is the To Do whose
   // lookup is the latest in flight (a second click on it is ignored). An object, not a `let`: set across an await, which control-flow
@@ -300,7 +303,11 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       // Task 195: with the org client URL the page opens in-app on the shared modal shell, with browse over `browse` (the billing
       // items of the list it was activated from). Without it, the navigateTo path below runs as before.
       if (invoiceReviewClientUrl) {
-        setReviewModal(browse ?? buildInvoiceBrowseSet([review], review));
+        // The shared resolver, run in this (the Console's) frame: stored preference, URL flag, then the navbar of the frame above.
+        setReviewModal({
+          browse: browse ?? buildInvoiceBrowseSet([review], review),
+          theme: getEffectiveDarkMode() ? 'dark' : 'light',
+        });
         return;
       }
       if (!openInvoiceReview) {
@@ -534,8 +541,9 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
           open
           onClose={closeReviewModal}
           clientUrl={invoiceReviewClientUrl}
-          targets={reviewModal.targets}
-          startIndex={reviewModal.startIndex}
+          targets={reviewModal.browse.targets}
+          startIndex={reviewModal.browse.startIndex}
+          theme={reviewModal.theme}
         />
       )}
 
