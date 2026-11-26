@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-043 reopened: the reconciliation page shows a written regarding as needs-confirmation, not "No confident match"</title>
     <phase>Phase 7: fixes before close</phase>
-    <status>in-progress</status>
+    <status>in-progress (live on dev, owner re-check pending)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Shared client logic (.ts) on every ReconciliationWorkspace mount; tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -47,5 +47,7 @@ closed and ontology-r1 is told.</criterion>
   </acceptance-criteria>
 
   <notes>2026-11-26: fix + test in `C:\wt142` (branch fix/word-addin-142). New test fails 8/8 before the fix, 8/8 after;
-package jest 45 suites / 475 tests; tsc 0; client-lint ok; prettier clean.</notes>
+package jest 45 suites / 475 tests; tsc 0; client-lint ok; prettier clean.
+Adversarial review (sonnet): no blockers; should-fix = the Console (SpaarkeAi) widget kept its own inline mapper and gate, fixed in 887474cf89 (widget uses the shared buildResolveReview / resolveRegarding; its gate now opens for a Resolved typed regarding like the other mounts). AI.Widgets jest 61/906, tsc 0, client-lint ok. Test file now 11 cases.
+Merged 2026-11-26 (owner go "Yes, merge and deploy"): PR #3254, 177b0ebb7c. Deployed: sprk_communicationreconciliation 18:04Z (byte-identical to the 177b0ebb7c build; the copy it replaced, deployed 17:51Z, was byte-identical to master before the merge, so nothing unmerged was overwritten); Console sprk_spaarkeai by CI run 45870463814 from 166a941b18 (includes the merge) 17:56Z; CI run for 177b0ebb7c itself failed at its upload step, superseded. ontology-r1 told. Open: owner re-check, then close #3194.</notes>
 </task>
