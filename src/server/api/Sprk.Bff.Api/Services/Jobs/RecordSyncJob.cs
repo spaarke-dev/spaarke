@@ -111,6 +111,13 @@ public sealed class RecordSearchDocument
     [JsonPropertyName("lastModified")]
     public DateTimeOffset LastModified { get; set; }
 
+    /// <summary>
+    /// Record id of the matter type (<c>sprk_mattertype</c>) of a matter or project; null for other record types or when
+    /// the record has no type. Backs the Matter Type filter of record search.
+    /// </summary>
+    [JsonPropertyName("matterTypeId")]
+    public string? MatterTypeId { get; set; }
+
     [JsonPropertyName("dataverseRecordId")]
     public string DataverseRecordId { get; set; } = string.Empty;
 
@@ -164,7 +171,7 @@ public class RecordSyncJob : BackgroundService
             NameField:         "sprk_mattername",
             DescriptionField:  "sprk_matterdescription",
             ReferenceField:    "sprk_matternumber",
-            SelectFields:      "sprk_matterid,sprk_mattername,sprk_matterdescription,sprk_matternumber,modifiedon"),
+            SelectFields:      "sprk_matterid,sprk_mattername,sprk_matterdescription,sprk_matternumber,modifiedon,_sprk_mattertype_value"),
 
         new EntityConfig(
             EntityLogicalName: "sprk_project",
@@ -173,7 +180,7 @@ public class RecordSyncJob : BackgroundService
             NameField:         "sprk_projectname",
             DescriptionField:  "sprk_projectdescription",
             ReferenceField:    "sprk_projectnumber",
-            SelectFields:      "sprk_projectid,sprk_projectname,sprk_projectdescription,sprk_projectnumber,modifiedon"),
+            SelectFields:      "sprk_projectid,sprk_projectname,sprk_projectdescription,sprk_projectnumber,modifiedon,_sprk_mattertype_value"),
 
         // Invoice (email-r4 Phase 2, 2026-07-18): indexing invoices makes them matchable by the Association
         // Engine's record-name/number + semantic rungs (previously matter/project only). Name field is
@@ -556,6 +563,8 @@ public class RecordSyncJob : BackgroundService
             ReferenceNumbers = refNumbers,
             Keywords = keywords,
             LastModified = lastModified,
+            // Matter and project select the matter type column; other entity types do not (-> null).
+            MatterTypeId = GetString(record, "_sprk_mattertype_value") is { Length: > 0 } matterType ? matterType.ToLowerInvariant() : null,
             DataverseRecordId = recordId,
             DataverseEntityName = entity.EntityLogicalName,
             PrivilegeGroupIds = new List<string>(),

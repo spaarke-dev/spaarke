@@ -36,7 +36,7 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
             NameField = "sprk_mattername",
             DescriptionField = "sprk_description",
             ReferenceField = "sprk_matternumber",
-            SelectFields = "sprk_matterid,sprk_mattername,sprk_description,sprk_matternumber,modifiedon,_sprk_client_value"
+            SelectFields = "sprk_matterid,sprk_mattername,sprk_description,sprk_matternumber,modifiedon,_sprk_client_value,_sprk_mattertype_value"
         },
         ["sprk_project"] = new EntityConfig
         {
@@ -44,7 +44,7 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
             NameField = "sprk_projectname",
             DescriptionField = "sprk_description",
             ReferenceField = "sprk_projectnumber",
-            SelectFields = "sprk_projectid,sprk_projectname,sprk_description,sprk_projectnumber,modifiedon"
+            SelectFields = "sprk_projectid,sprk_projectname,sprk_description,sprk_projectnumber,modifiedon,_sprk_mattertype_value"
         },
         ["sprk_invoice"] = new EntityConfig
         {
@@ -387,7 +387,9 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
             DataverseRecordId = recordId,
             RecordName = name,
             RecordDescription = description,
-            LastModified = modifiedOn
+            LastModified = modifiedOn,
+            // Matter and project carry a matter type; other record types select no such column (empty -> null).
+            MatterTypeId = NullIfEmpty(GetPropertyString(record, "_sprk_mattertype_value"))?.ToLowerInvariant()
         };
 
         // Add reference number if present
@@ -439,6 +441,8 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
 
         return indexed;
     }
+
+    private static string? NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
 
     private static string GetPropertyString(JsonElement element, string propertyName)
     {

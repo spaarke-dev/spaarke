@@ -91,6 +91,14 @@ public class SearchIndexDocument
     public DateTimeOffset? LastModified { get; set; }
 
     /// <summary>
+    /// Record id of the matter type (<c>sprk_mattertype</c>) of a matter or project; null for other record types or
+    /// when the record has no type. Backs the Matter Type filter of record search.
+    /// </summary>
+    [SimpleField(IsFilterable = true, IsFacetable = true)]
+    [JsonPropertyName("matterTypeId")]
+    public string? MatterTypeId { get; set; }
+
+    /// <summary>
     /// Original Dataverse record GUID.
     /// </summary>
     [SimpleField(IsFilterable = true)]

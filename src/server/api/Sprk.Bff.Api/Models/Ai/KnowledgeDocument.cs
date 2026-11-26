@@ -244,6 +244,30 @@ public class KnowledgeDocument
     public string? ParentEntityName { get; set; }
 
     /// <summary>
+    /// Record id of the matter type (<c>sprk_mattertype</c>) of the matter or project this document belongs to.
+    /// Null when that record has no type or the type is not resolved yet.
+    /// </summary>
+    /// <remarks>
+    /// Backs the Matter Type search filter. Suppressed from JSON when null (session-files index lacks this field).
+    /// Kept current by <c>MatterTypeIndexSyncJob</c> when a matter's or project's type changes.
+    /// </remarks>
+    [SimpleField(IsFilterable = true, IsFacetable = true)]
+    [JsonPropertyName("matterTypeId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MatterTypeId { get; set; }
+
+    /// <summary>
+    /// Id of the matter or project <see cref="MatterTypeId"/> was read from, so a later change of that record's
+    /// type can find every chunk. Empty string means "resolved: the document belongs to no matter or project";
+    /// null means not resolved yet.
+    /// </summary>
+    /// <remarks>Suppressed from JSON when null (session-files index lacks this field).</remarks>
+    [SimpleField(IsFilterable = true)]
+    [JsonPropertyName("matterTypeSourceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MatterTypeSourceId { get; set; }
+
+    /// <summary>
     /// Azure AD group IDs that are authorised to retrieve this document chunk.
     /// Empty collection means the document is public (no privilege restriction).
     /// Filterable string collection — used by privilege-aware retrieval (AIPU2-027).

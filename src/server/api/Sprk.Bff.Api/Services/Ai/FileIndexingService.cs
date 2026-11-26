@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -30,6 +31,7 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly IRagService _ragService;
     private readonly ILogger<FileIndexingService> _logger;
     private readonly RecordContainerResolver _containerResolver;
+    private readonly DocumentMatterTypeResolver _matterTypeResolver;
 
     /// <summary>
     /// The <see cref="FileIndexingResult.SkipReason"/> for a file in a container that is never indexed. This service skips no container
@@ -49,14 +51,19 @@ public sealed class FileIndexingService : IFileIndexingService
     /// <param name="containerResolver">
     /// Verifies a <c>sprk_document</c> row's pointer before the app-only download (unified-access-control-r2 task 166 r1).
     /// </param>
+    /// <param name="matterTypeResolver">
+    /// Derives the matter type stamped on every chunk (<c>matterTypeId</c> / <c>matterTypeSourceId</c>) for the Matter Type search filter.
+    /// </param>
     public FileIndexingService(
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         ITextChunkingService chunkingService,
         IRagService ragService,
         ILogger<FileIndexingService> logger,
-        RecordContainerResolver containerResolver)
+        RecordContainerResolver containerResolver,
+        DocumentMatterTypeResolver matterTypeResolver)
     {
+        _matterTypeResolver = matterTypeResolver ?? throw new ArgumentNullException(nameof(matterTypeResolver));
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _chunkingService = chunkingService;
@@ -343,6 +350,10 @@ public sealed class FileIndexingService : IFileIndexingService
         var fileExtension = Path.GetExtension(fileName)?.TrimStart('.').ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
 
+        // The matter type of the matter/project the document belongs to, resolved once per document and stamped on every chunk
+        // (backs the Matter Type search filter). Never fails indexing: unresolved leaves both fields unset for MatterTypeIndexSyncJob.
+        var matterType = await _matterTypeResolver.ResolveAsync(documentId, parentEntity, cancellationToken);
+
         var documents = chunks.Select(chunk => new KnowledgeDocument
         {
             Id = $"{chunkIdBase}_{chunk.Index}",
@@ -365,7 +376,9 @@ public sealed class FileIndexingService : IFileIndexingService
             // Parent entity fields for entity-scoped search
             ParentEntityType = parentEntity?.EntityType,
             ParentEntityId = parentEntity?.EntityId,
-            ParentEntityName = parentEntity?.EntityName
+            ParentEntityName = parentEntity?.EntityName,
+            MatterTypeId = matterType.MatterTypeId,
+            MatterTypeSourceId = matterType.SourceId
         }).ToList();
 
         // Step 3: Batch index (embeddings generated inside RagService), into the tenant-default index (task 041).
