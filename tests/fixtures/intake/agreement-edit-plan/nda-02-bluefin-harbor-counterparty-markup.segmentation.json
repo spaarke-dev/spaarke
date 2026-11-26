@@ -1,0 +1,161 @@
+{
+  "paragraphs": 19,
+  "has_tracked_changes": true,
+  "revised_parts": ["word/document.xml"],
+  "has_comments": true,
+  "has_hidden_text": false,
+  "sections": [
+    {
+      "index": 0,
+      "number": null,
+      "heading": null,
+      "para_key": "MUTUAL NONDISCLOSURE",
+      "auto_numbered": false,
+      "text": "MUTUAL NONDISCLOSURE AGREEMENT"
+    },
+    {
+      "index": 1,
+      "number": null,
+      "heading": null,
+      "para_key": "This Mutual Nondisclosure",
+      "auto_numbered": false,
+      "text": "This Mutual Nondisclosure Agreement (the “Agreement”) is entered into as of July 9, 2017 (the “Effective Date”) by and between Bluefin Robotics, Inc., a Delaware corporation with offices in Pittsburgh, Pennsylvania, and Harbor Analytics LLC, an Ohio limited liability company with offices in Columbus, Ohio. Each party may disclose Confidential Information to the other in connection with the Purpose."
+    },
+    {
+      "index": 2,
+      "number": "1",
+      "heading": "Confidential Information",
+      "para_key": "1. Confidential",
+      "auto_numbered": false,
+      "text": "1.\tConfidential Information. “Confidential Information” means all non-public business, technical and financial information disclosed by one party (the “Disclosing Party”) to the other (the “Recipient”) that is marked “Confidential” at the time of disclosure. Information disclosed orally shall not be Confidential Information unless reduced to writing and delivered to the Recipient within ten (10) days."
+    },
+    {
+      "index": 3,
+      "number": "2",
+      "heading": "Exclusions",
+      "para_key": "2. Exclusions.",
+      "auto_numbered": false,
+      "text": "2.\tExclusions. Confidential Information does not include information that (a) is or becomes publicly available through no fault of the Recipient; (b) is already in the possession of the Recipient; (c) is independently developed by the Recipient; or (d) is received from a third party without breach known to the Recipient."
+    },
+    {
+      "index": 4,
+      "number": "3",
+      "heading": "Use and Protection",
+      "para_key": "3. Use and Protection.",
+      "auto_numbered": false,
+      "text": "3.\tUse and Protection. The Recipient shall use Confidential Information solely for the purpose of evaluating a potential supply relationship between the parties (the “Purpose”) and shall protect it with at least reasonable care."
+    },
+    {
+      "index": 5,
+      "number": "4",
+      "heading": "Representatives",
+      "para_key": "4. Representatives.",
+      "auto_numbered": false,
+      "text": "4.\tRepresentatives. The Recipient may disclose Confidential Information to its employees, officers and professional advisors who have a need to know it for the Purpose (“Representatives”)."
+    },
+    {
+      "index": 6,
+      "number": "5",
+      "heading": "Anonymized Data",
+      "para_key": "5. Anonymized",
+      "auto_numbered": false,
+      "text": "5.\tAnonymized Data. The Recipient may use anonymized or aggregated data derived from Confidential Information to improve its products and services."
+    },
+    {
+      "index": 7,
+      "number": "6",
+      "heading": "Compelled Disclosure",
+      "para_key": "6. Compelled",
+      "auto_numbered": false,
+      "text": "6.\tCompelled Disclosure. The Recipient may disclose Confidential Information to the extent required by law, regulation or court order."
+    },
+    {
+      "index": 8,
+      "number": "7",
+      "heading": "Return of Information",
+      "para_key": "7. Return of",
+      "auto_numbered": false,
+      "text": "7.\tReturn of Information. Upon the Disclosing Party’s request, the Recipient shall return or destroy all Confidential Information in its possession."
+    },
+    {
+      "index": 9,
+      "number": "8",
+      "heading": "Residuals",
+      "para_key": "8. Residuals.",
+      "auto_numbered": false,
+      "text": "8.\tResiduals. Nothing in this Agreement restricts either party from using any ideas, concepts or know-how retained in the unaided memory of its personnel."
+    },
+    {
+      "index": 10,
+      "number": "9",
+      "heading": "Term",
+      "para_key": "9. Term. This",
+      "auto_numbered": false,
+      "text": "9.\tTerm. This Agreement shall remain in effect for one (1) year from the Effective Date, and the Recipient’s obligations shall terminate upon expiration of this Agreement. Either party may extend this Agreement by written notice."
+    },
+    {
+      "index": 11,
+      "number": "10",
+      "heading": "Non-Solicitation",
+      "para_key": "10. Non-Solicitation.",
+      "auto_numbered": false,
+      "text": "10.\tNon-Solicitation. For eighteen (18) months after the Effective Date, neither party shall solicit for employment any employee of the other party."
+    },
+    {
+      "index": 12,
+      "number": "11",
+      "heading": "Remedies",
+      "para_key": "11. Remedies.",
+      "auto_numbered": false,
+      "text": "11.\tRemedies. Each party acknowledges that a breach may cause irreparable harm, and the Disclosing Party may seek injunctive relief in addition to any other remedy."
+    },
+    {
+      "index": 13,
+      "number": "12",
+      "heading": "No License; As Is",
+      "para_key": "12. No License;",
+      "auto_numbered": false,
+      "text": "12.\tNo License; As Is. No license is granted under this Agreement except to use Confidential Information for the Purpose. All Confidential Information is provided “as is”."
+    },
+    {
+      "index": 14,
+      "number": "13",
+      "heading": "Assignment",
+      "para_key": "13. Assignment.",
+      "auto_numbered": false,
+      "text": "13.\tAssignment. Either party may assign this Agreement without the consent of the other party."
+    },
+    {
+      "index": 15,
+      "number": "14",
+      "heading": "Governing Law and Venue",
+      "para_key": "14. Governing",
+      "auto_numbered": false,
+      "text": "14.\tGoverning Law and Venue. This Agreement is governed by the laws of the State of Texas. The courts of Travis County, Texas shall have exclusive jurisdiction over any dispute arising under this Agreement."
+    },
+    {
+      "index": 16,
+      "number": null,
+      "heading": null,
+      "para_key": "IN WITNESS WHEREOF,",
+      "auto_numbered": false,
+      "text": "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date."
+    },
+    {
+      "index": 17,
+      "number": null,
+      "heading": "Bluefin Robotics, Inc",
+      "para_key": "Bluefin Robotics, Inc. By:",
+      "auto_numbered": false,
+      "text": "Bluefin Robotics, Inc.\tBy: ____________________\tName:\tTitle:"
+    },
+    {
+      "index": 18,
+      "number": null,
+      "heading": "Harbor Analytics LLC\tBy",
+      "para_key": "Harbor Analytics LLC By:",
+      "auto_numbered": false,
+      "text": "Harbor Analytics LLC\tBy: ____________________\tName:\tTitle:"
+    }
+  ]
+}

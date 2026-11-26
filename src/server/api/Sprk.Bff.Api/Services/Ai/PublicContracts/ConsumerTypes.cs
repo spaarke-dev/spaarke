@@ -446,6 +446,15 @@ public static class ConsumerTypes
     public const string IntakeHarness = "intake-harness";
 
     /// <summary>
+    /// App-only NDA edit plan (Action <c>agreement-edit-plan</c>, Binding row in
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>; spaarke-intake-pipeline-r1 task 004, FR-02).
+    /// Reached only through <see cref="IAgreementAi.BuildEditPlanAsync"/> (never chat/loop-projected: the Binding
+    /// carries no tool description). The model writes topic-keyed edits against the pinned NDA standard; the facade
+    /// completes and validates the plan. <c>agreement-review</c>'s closed output contract is not involved.
+    /// </summary>
+    public const string AgreementEditPlan = "agreement-edit-plan";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -488,5 +497,6 @@ public static class ConsumerTypes
         NdaReview,
         NdaStandardSummary,
         IntakeHarness,
+        AgreementEditPlan,
     };
 }

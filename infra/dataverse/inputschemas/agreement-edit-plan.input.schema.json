@@ -1,0 +1,90 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for agreement-edit-plan (spaarke-intake-pipeline-r1 task 004, FR-02). The Action is reached only through IAgreementAi.BuildEditPlanAsync (the Binding carries no tool description, so it is never loop-projected); the schema documents the operand the facade sends as the '## Input' section ({ sections, has_tracked_changes, has_comments, has_hidden_text, standard, topics }): sections is the accelerator's segment_clauses.py result, so the model anchors only on a para_key it was given and is validated by CatalogInputSchemaContractTests like every other mirror. The standard (name, version, scope, topic ids and position text) comes from the facade's pinned, embedded copy of 'Spaarke NDA - Mutual', never from retrieval. Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix. The tenant id travels in the LinearRunContext, never in the operand. Deployed to the row by scripts/ebilling/Ensure-ActionRow.ps1 -ActionCode agreement-edit-plan.",
+  "actionCode": "agreement-edit-plan",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["sections", "has_tracked_changes", "has_comments", "has_hidden_text", "standard", "topics"],
+    "properties": {
+      "sections": {
+        "type": "array",
+        "description": "The draft's clauses from the deterministic segmentation. para_key is the only value an edit's para may take; null means the section cannot be edited.",
+        "items": {
+          "type": "object",
+          "required": ["index", "number", "heading", "para_key", "text"],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "description": "The paragraph's position in the document body."
+            },
+            "number": {
+              "type": ["string", "null"],
+              "description": "The clause number, when there is one."
+            },
+            "heading": {
+              "type": ["string", "null"],
+              "description": "The clause heading, when there is one."
+            },
+            "para_key": {
+              "type": ["string", "null"],
+              "description": "The shortest leading text that occurs in exactly one paragraph; null when none could be made."
+            },
+            "text": {
+              "type": "string",
+              "description": "The paragraph's visible text."
+            }
+          }
+        }
+      },
+      "has_tracked_changes": {
+        "type": "boolean",
+        "description": "True when the draft already carries tracked changes."
+      },
+      "has_comments": {
+        "type": "boolean",
+        "description": "True when the draft already carries comments."
+      },
+      "has_hidden_text": {
+        "type": "boolean",
+        "description": "True when the draft carries hidden text (the text itself is never sent)."
+      },
+      "standard": {
+        "type": "object",
+        "description": "The standard the review is measured against.",
+        "required": ["name", "version", "scope"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The standard's name, for example 'Spaarke NDA - Mutual'."
+          },
+          "version": {
+            "type": "string",
+            "description": "The standard's version, for example '1.2'."
+          },
+          "scope": {
+            "type": "string",
+            "description": "What the standard covers: side represented, jurisdiction default, what it is not for."
+          }
+        }
+      },
+      "topics": {
+        "type": "array",
+        "description": "The standard's topics, in the standard's order.",
+        "items": {
+          "type": "object",
+          "required": ["id", "position"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The topic id, for example nda.term."
+            },
+            "position": {
+              "type": "string",
+              "description": "The topic's Preferred, Fallback, Prohibited / escalate, Model language, Rationale and Priority lines."
+            }
+          }
+        }
+      }
+    }
+  }
+}

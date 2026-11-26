@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/agreement-edit-plan.schema.json",
+  "title": "Agreement Edit Plan (AGREEMENT-EDIT-PLAN@v1) - Output Schema (agreement-edit-plan)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='agreement-edit-plan' (spaarke-intake-pipeline-r1 task 004, FR-02, ADR-039). Deployed by scripts/Deploy-ActionMirrors.ps1 as the sprk_outputschemajson sidecar of infra/dataverse/actions/agreement-edit-plan.action.json. It MUST stay in step with AgreementEditPlanAssembler (Services/Ai/PublicContracts) which parses it; tests/integration/contract/Catalog/AgreementEditPlanActionContractTests.cs pins the two together. The model anchors only on the para_key values of the supplied segmentation; AgreementSegmentation.CheckAnchors refuses any edit whose para or quotes do not match exactly (no fuzzy matching anywhere). This is the Azure OpenAI Structured Outputs (strict) SUBSET of the accelerator's edit-plan.schema.json: every member is required, optional members are nullable, additionalProperties is false, and there is no oneOf, format, pattern or length bound. Everything the subset cannot say (the topic id pattern, find XOR after, the date, the bookmark and summary rules) is enforced in code by validating the assembled plan against the full edit-plan.schema.json and the pinned standard's topic ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["edits", "unplaceable"],
+  "$comment-required": "Object-level required array only - property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "edits": {
+      "type": "array",
+      "description": "Topic-keyed edits the model can anchor, in document order and, within one section, later text first. Empty when the draft meets the standard.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "topic",
+          "para",
+          "find",
+          "old",
+          "replace",
+          "after",
+          "insert",
+          "comment",
+          "section",
+          "issue",
+          "revision",
+          "priority"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "A topic id copied exactly from the standard (for example nda.term)."
+          },
+          "para": {
+            "type": "string",
+            "description": "One of the supplied para_key values, copied exactly. Never invented, shortened or extended."
+          },
+          "find": {
+            "type": ["string", "null"],
+            "description": "Text copied character for character from that section, occurring once, for a replacement, deletion or comment-only edit; '*' for the whole clause body. Null for a pure insertion."
+          },
+          "old": {
+            "type": ["string", "null"],
+            "description": "The exact part of find that is replaced (occurs once inside find). Null when find itself is replaced or for any edit that does not replace."
+          },
+          "replace": {
+            "type": ["string", "null"],
+            "description": "The replacement text; the empty string deletes; null for a comment-only edit or an insertion."
+          },
+          "after": {
+            "type": ["string", "null"],
+            "description": "Text copied character for character from that section, occurring once, after which insert is added. Null unless the edit is a pure insertion."
+          },
+          "insert": {
+            "type": ["string", "null"],
+            "description": "The words inserted after 'after'. Null unless the edit is a pure insertion."
+          },
+          "comment": {
+            "type": ["string", "null"],
+            "description": "One or two plain sentences for the reviewing attorney. Null when the edit needs no comment."
+          },
+          "section": {
+            "type": ["string", "null"],
+            "description": "Summary-table row, first cell: the clause's number and a short name. Null with issue, revision and priority when the edit carries no summary row."
+          },
+          "issue": {
+            "type": ["string", "null"],
+            "description": "Summary-table row: what is wrong, under twelve words."
+          },
+          "revision": {
+            "type": ["string", "null"],
+            "description": "Summary-table row: what the edit does, under twelve words."
+          },
+          "priority": {
+            "type": ["string", "null"],
+            "enum": ["High", "Medium", "Low", null],
+            "description": "Summary-table row priority."
+          }
+        }
+      }
+    },
+    "unplaceable": {
+      "type": "array",
+      "description": "Findings on sections that have no para_key and so cannot be edited. Reported to an attorney, never anchored. Empty when there are none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["topic", "section_index", "comment"],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "A topic id copied exactly from the standard."
+          },
+          "section_index": {
+            "type": "integer",
+            "description": "The index of the section (from the supplied sections) the finding is about."
+          },
+          "comment": {
+            "type": "string",
+            "description": "One or two plain sentences for the reviewing attorney."
+          }
+        }
+      }
+    }
+  }
+}
