@@ -1008,7 +1008,18 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         userId,
                         request with
                         {
-                            Email = request.Email! with { SelectedAttachmentFileNames = attachmentAdd.AttachmentNames.ToList() },
+                            Email = attachmentAdd.NamedEmail
+                                // Task 141 review (F4): a named add's children carry the .eml ROW's message id and
+                                // conversation index, never the request's (the payload's message id is the stored one,
+                                // OfficeEmailEnricher.ResolveStoredMessageId, so the item id is cleared with it).
+                                ? request.Email! with
+                                {
+                                    SelectedAttachmentFileNames = attachmentAdd.AttachmentNames.ToList(),
+                                    InternetMessageId = attachmentAdd.EmlMessageId,
+                                    ExchangeItemId = null,
+                                    ConversationId = attachmentAdd.EmlConversationIndex,
+                                }
+                                : request.Email! with { SelectedAttachmentFileNames = attachmentAdd.AttachmentNames.ToList() },
                         },
                         attachmentAdd.DriveId,
                         attachmentAdd.ItemId,

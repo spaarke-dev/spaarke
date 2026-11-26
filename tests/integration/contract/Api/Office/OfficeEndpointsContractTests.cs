@@ -1201,6 +1201,15 @@ public sealed class OfficeVersionSaveWorld
 
         /// <summary>Task 141 review: the row's <c>sprk_relatedcommunication</c>, written in the create.</summary>
         public Guid? RelatedCommunicationId { get; set; }
+
+        /// <summary>Task 141 review (F3): the row's <c>sprk_isemailarchive</c>, written by the email save's update.</summary>
+        public bool? IsEmailArchive { get; set; }
+
+        /// <summary>Task 141 review (F4): the row's <c>sprk_emailconversationindex</c>, written by the email save's update.</summary>
+        public string? EmailConversationIndex { get; set; }
+
+        /// <summary>Task 141 review (F5): the row's invoice-submission marker (<c>sprk_restrictedbysubmission</c>), written in the create.</summary>
+        public bool RestrictedBySubmission { get; set; }
     }
 
     public sealed class SpeItem
@@ -1435,6 +1444,11 @@ public sealed class OfficeVersionSaveWorld
                         document["sprk_emailmessageid"] = emailMessageId;
                     if (row.RelatedCommunicationId is { } communicationId)
                         document["sprk_relatedcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", communicationId);
+                    // Task 141 review (F4, F5): the named add takes the row's conversation index and refuses a submission's .eml.
+                    if (row.EmailConversationIndex is { } conversationIndex)
+                        document["sprk_emailconversationindex"] = conversationIndex;
+                    if (row.RestrictedBySubmission)
+                        document["sprk_restrictedbysubmission"] = true;
                     return document;
                 }
             }
@@ -1479,6 +1493,7 @@ public sealed class OfficeVersionSaveWorld
                 DocumentName = request.Name,
                 ParentDocumentId = request.ParentDocumentLookup,
                 RelatedCommunicationId = request.RelatedCommunicationId,
+                RestrictedBySubmission = request.RestrictedBySubmission,
             };
             // Field-mapping task 030b: the save's association moved from the follow-up update into the CREATE
             // (CreateDocumentRequest.Association), so the world files the row to its matter here, as Dataverse does.
@@ -1523,6 +1538,9 @@ public sealed class OfficeVersionSaveWorld
             row.FilePath = update.FilePath ?? row.FilePath;
             row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
             row.EmailMessageId = update.EmailMessageId ?? row.EmailMessageId;
+            // Task 141 review (F3, F4): the email save's update flags the archive and stores its conversation index.
+            row.IsEmailArchive = update.IsEmailArchive ?? row.IsEmailArchive;
+            row.EmailConversationIndex = update.EmailConversationIndex ?? row.EmailConversationIndex;
             // Task 055: the ASSOCIATION the save writes. (Since field-mapping task 030b the save puts it on the CREATE,
             // read above; this line stays for any update that still carries one.) DocumentAssociationMap.TryApply put it on the
             // UPDATE (Spaarke.Dataverse/Models.cs:78-110) and DataverseServiceClientImpl:922-931 writes it to
@@ -1552,6 +1570,7 @@ public sealed class OfficeVersionSaveWorld
                     FileName = row.FileName,
                     GraphDriveId = row.DriveId,
                     GraphItemId = row.ItemId,
+                    IsEmailArchive = row.IsEmailArchive,
                 }
                 : null;
         }

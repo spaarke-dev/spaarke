@@ -187,7 +187,8 @@ public static class OfficeEndpoints
         //   X-Idempotency-Key response cache is bound to that same key for Document saves
         //   (DocumentSaveIdempotencyBinding), so a reused header can never replay a response for a different document.
         //   A VERSION save is never replayed from that cache (task 047, SaveResponseMayBeReplayed): whether it repeats
-        //   a completed save depends on what the document holds now, which only the service can check.
+        //   a completed save depends on what the document holds now, which only the service can check. Nor is a task 141
+        //   attachments add that names its saved email (the .eml's children may have changed since).
         // Rate Limit: 10 requests/minute/user (per spec.md)
         group.MapPost("/save", SaveAsync)
             .WithName("OfficeSave")
@@ -401,7 +402,8 @@ public static class OfficeEndpoints
 
     /// <summary>
     /// Task 047: may <c>IdempotencyFilter</c> answer this save from its response cache? Not a VERSION save
-    /// (<see cref="OfficeService.IsVersionSave"/>). Everything else may, exactly as before.
+    /// (<see cref="OfficeService.IsVersionSave"/>), and not (task 141 review) an attachments add that names its saved email
+    /// (<see cref="OfficeService.SavedEmailAttachmentAddDocumentId"/>). Everything else may, exactly as before.
     /// </summary>
     /// <remarks>
     /// A version save's key names a document and its content. Whether a request under that key repeats a completed save
@@ -410,10 +412,14 @@ public static class OfficeEndpoints
     /// still takes the in-flight lock (a concurrent double submit gets 409). A sequential retry reaches
     /// <c>OfficeService.SaveAsync</c>, which answers it with the first save's job when the document still holds these
     /// bytes (<c>200</c>, <c>duplicate: true</c>).
+    /// <para>A named attachments add is the same case: whether it repeats a completed add depends on which children the
+    /// <c>.eml</c> has NOW (one was deleted since, or the worker failed to create it), and the cache would replay the first
+    /// add's 202 while nothing is written. It keeps the in-flight lock; a sequential repeat reaches the service, whose
+    /// planner adds only what is missing.</para>
     /// </remarks>
     internal static bool SaveResponseMayBeReplayed(EndpointFilterInvocationContext context) =>
         context.Arguments.OfType<SaveRequest>().FirstOrDefault() is not { } request
-        || !OfficeService.IsVersionSave(request);
+        || (!OfficeService.IsVersionSave(request) && OfficeService.SavedEmailAttachmentAddDocumentId(request) is null);
 
     /// <summary>
     /// Validates a save request for required fields and constraints.

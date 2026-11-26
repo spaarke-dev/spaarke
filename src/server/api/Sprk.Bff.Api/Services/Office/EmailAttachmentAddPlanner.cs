@@ -2,6 +2,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Workers.Office;
 
@@ -37,6 +38,23 @@ public class EmailAttachmentAddPlanner
     /// <see cref="IsFinalizationPendingAsync"/>, which tells such a job from a first save's).
     /// </summary>
     internal const string AttachmentsQueuedPhase = "AttachmentsQueued";
+
+    /// <summary>
+    /// Task 141 review (F2): the stage the upload-finalization worker records when an attachments-only finalization created
+    /// every attachment it was queued with. The job's status read reports it as the job's phase
+    /// (<see cref="OfficeJobStatusService.ToEffectiveView"/>), so the pane knows the add is finished.
+    /// </summary>
+    internal const string AttachmentsAddedPhase = "AttachmentsAdded";
+
+    /// <summary>
+    /// Task 141 review (F2): the stage the worker records (with <c>sprk_status</c> Failed and the names not created in
+    /// <c>sprk_errormessage</c>) when an attachments-only finalization finished WITHOUT creating every attachment it was
+    /// queued with. The status read reports it as the job's phase, with that error.
+    /// </summary>
+    internal const string AttachmentsIncompletePhase = "AttachmentsIncomplete";
+
+    /// <summary>The error code of an <see cref="AttachmentsIncompletePhase"/> job.</summary>
+    internal const string AttachmentsNotCreatedErrorCode = "OFFICE_ATTACHMENTS_NOT_ADDED";
 
     /// <summary>
     /// The message key of the attachments-only finalization a re-save queues for job <paramref name="jobId"/>: its own, so the
@@ -108,6 +126,22 @@ public class EmailAttachmentAddPlanner
         /// this communication, never to one found from the request.
         /// </summary>
         public Guid? CommunicationId { get; init; }
+
+        /// <summary>
+        /// Task 141 review (F4): the <c>.eml</c> row's own <c>sprk_emailmessageid</c> (named add only; <see langword="null"/> when
+        /// the row has none, and on task 138's key-matched add). The children of a named add carry it as their parent email's
+        /// message id, never the request's.
+        /// </summary>
+        public string? EmlMessageId { get; init; }
+
+        /// <summary>
+        /// Task 141 review (F4): the <c>.eml</c> row's own <c>sprk_emailconversationindex</c> (named add only, as
+        /// <see cref="EmlMessageId"/>). The children of a named add carry it, never the request's conversation id.
+        /// </summary>
+        public string? EmlConversationIndex { get; init; }
+
+        /// <summary>Whether this plan is for an add that NAMED its saved email (task 141), not task 138's key-matched add.</summary>
+        public bool NamedEmail { get; init; }
     }
 
     /// <summary>
@@ -145,7 +179,10 @@ public class EmailAttachmentAddPlanner
         /// <summary>Every name asked for already has a child document: nothing to add or report.</summary>
         NothingToAdd,
 
-        /// <summary>The document is gone, is not a saved email (<c>.eml</c>), or has no file to read the attachments from.</summary>
+        /// <summary>
+        /// The document is gone, is not a saved email (the email archive itself, <see cref="IsSavedEmail"/>), is an invoice
+        /// submission's email (task 141 review, F5), or has no file to read the attachments from.
+        /// </summary>
         NotASavedEmail,
 
         /// <summary>The <c>.eml</c> is not filed to the request's record (<see cref="IsFiledTo"/>).</summary>
@@ -169,6 +206,9 @@ public class EmailAttachmentAddPlanner
 
     /// <summary><c>sprk_document</c>'s stored message id (the Office save writes the RFC Message-ID, or an item id before task 121).</summary>
     internal const string EmailMessageIdColumn = "sprk_emailmessageid";
+
+    /// <summary>Task 141 review (F4): <c>sprk_document</c>'s stored conversation index (the email save writes the conversation id).</summary>
+    internal const string EmailConversationIndexColumn = "sprk_emailconversationindex";
 
     private const string RelatedCommunicationColumn = "sprk_relatedcommunication";
     private const string CommunicationEntityName = "sprk_communication";
@@ -230,12 +270,26 @@ public class EmailAttachmentAddPlanner
             return (SavedEmailOutcome.NotASavedEmail, null);
         }
 
-        // A named add (task 141) also reads the row's own message id, in the same read; the communication link is one of the
-        // filing columns.
+        // A named add (task 141) also reads the row's own message id and conversation index (its children carry them, F4) and
+        // its invoice-submission marker (F5), in the same read; the communication link is one of the filing columns.
         var columns = requestEmail is null
             ? DocumentLinkFields.LogicalNames.ToArray()
-            : DocumentLinkFields.LogicalNames.Append(EmailMessageIdColumn).ToArray();
+            : DocumentLinkFields.LogicalNames
+                .Append(EmailMessageIdColumn)
+                .Append(EmailConversationIndexColumn)
+                .Append(InheritedAccessPermission.SubmissionMarkerColumn)
+                .ToArray();
         var filing = await _entities.RetrieveAsync("sprk_document", emlDocumentId, columns, cancellationToken);
+        if (requestEmail is not null && IsSubmissionEmail(filing))
+        {
+            // Task 141 review (F5): a from-email invoice submission's .eml never has attachment documents (its own Restricted
+            // narrowing covers the .eml alone). Refused as "not a saved email"; nothing is added.
+            _logger.LogWarning(
+                "Email attachments add: .eml document {DocumentId} is an invoice submission's email; nothing is added",
+                emlDocumentId);
+            return (SavedEmailOutcome.NotASavedEmail, null);
+        }
+
         if (requestEmail is not null && !await IsTheNamedEmailAsync(filing, requestEmail, cancellationToken))
         {
             // Task 141 review: the request names this .eml but describes another email. Nothing is added, captured or filed
@@ -321,6 +375,11 @@ public class EmailAttachmentAddPlanner
                         NotStored = notStored,
                         NotSaveable = notSaveable,
                         CommunicationId = requestEmail is null ? null : CommunicationOf(filing),
+                        EmlMessageId = requestEmail is null ? null : NonEmpty(filing?.GetAttributeValue<string>(EmailMessageIdColumn)),
+                        EmlConversationIndex = requestEmail is null
+                            ? null
+                            : NonEmpty(filing?.GetAttributeValue<string>(EmailConversationIndexColumn)),
+                        NamedEmail = requestEmail is not null,
                     });
         }
         finally
@@ -351,6 +410,12 @@ public class EmailAttachmentAddPlanner
         string idempotencyKey,
         CancellationToken cancellationToken)
     {
+        if (job.CurrentPhase is AttachmentsAddedPhase or AttachmentsIncompletePhase)
+        {
+            // Task 141 review (F2): the status read says this add's worker has finished (it reports the worker's final stage).
+            return false;
+        }
+
         var messageKey = string.Equals(job.CurrentPhase, AttachmentsQueuedPhase, StringComparison.Ordinal)
             ? AddJobMessageKey(idempotencyKey, job.JobId)
             : idempotencyKey;
@@ -532,11 +597,19 @@ public class EmailAttachmentAddPlanner
             : null;
 
     /// <summary>
-    /// Task 141: whether a document the request named is a saved email: flagged an email archive, or stored as a <c>.eml</c>
-    /// (the Office save writes both). Anything else (a Word document, an attachment child) has no stored email to read
-    /// attachments from.
+    /// Task 141: whether a document the request named is a saved email: flagged an email archive
+    /// (<c>sprk_isemailarchive = true</c>), the predicate <c>resolve-email-identity</c> finds the saved <c>.eml</c> by
+    /// (<c>DocumentUrlIdentityResolution</c>). Task 141 review (F3): a <c>.eml</c> FILE NAME is not enough: a forwarded
+    /// <c>.eml</c> saved as an attachment child of another email is named so too, and is not the email archive itself.
     /// </summary>
-    internal static bool IsSavedEmail(DocumentEntity document) =>
-        document.IsEmailArchive == true
-        || (document.FileName?.EndsWith(".eml", StringComparison.OrdinalIgnoreCase) ?? false);
+    internal static bool IsSavedEmail(DocumentEntity document) => document.IsEmailArchive == true;
+
+    /// <summary>
+    /// Task 141 review (F5): whether the <c>.eml</c> row carries the invoice-submission marker
+    /// (<see cref="InheritedAccessPermission.SubmissionMarkerColumn"/>). A value of another type throws: the caller refuses.
+    /// </summary>
+    private static bool IsSubmissionEmail(Microsoft.Xrm.Sdk.Entity? emlRow) =>
+        emlRow?.GetAttributeValue<bool?>(InheritedAccessPermission.SubmissionMarkerColumn) == true;
+
+    private static string? NonEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 }
