@@ -536,3 +536,11 @@ Owner: "For SharePoint fail it should be reported where the user can address it 
 - This replaces D-216's in-response "sent, but .eml not archived" warning for the budget inquiry, and likewise for the Assign Task email.
 - One bell per communication, not one per retry.
 - D-217's Messages entry appears after a short lag; the PR says so.
+
+### D-227 follow-ups (2026-11-25)
+- The heading change is PR **#3199** (`ux/decision-finding-first`, head `6a0d7cc6e0`). ontology-r1's Opus review is running; auto-merge is off.
+- ontology-r1 rules that the widget's DecideLane invoice-review (billing) rows also lead with the finding ("ALL surfaces"). That is mcp-r2's file, so it is raised with r2 as r2's change, and ontology reviews it.
+- Deploys after merge:
+  - the Console redeploys from master automatically (deploy-spaarke-ai.yml watches Spaarke.UI.Components);
+  - LegalWorkspace needs its own code-page deploy;
+  - the BFF-embedded widget needs a BFF deploy (owner per-SHA go).
