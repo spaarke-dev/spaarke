@@ -6,7 +6,9 @@ module ever sees an Azure SDK.
 
 CLI contract used (accelerator engines on master after #3163 and #3237; projects/spaarke-intake-pipeline-r1/notes/
 009-engine-changes.md; sequence as practices/nda/evals/run_local_e2e.py):
-  segment_clauses.py DOCX                                   0 ok (JSON on stdout) | 2 bad input
+  segment_clauses.py DOCX --anchor-text                     0 ok (JSON on stdout) | 2 bad input
+                                    (--anchor-text: each section also carries the raw visible and editable
+                                    text ooxml_redline locates anchors in, for the BFF's anchor pre-check)
   ooxml_redline.py PLAN DOCX REDLINE [--external E] [--clean C] [--dry-run] [--skip-unplaceable REPORT]
                                     skip mode:              0 outputs written (read REPORT) | 2 bad input
                                                             | 3 the plan breaks the contract
@@ -202,8 +204,11 @@ def _run(settings, script, args, deadline):
 
 
 def run_segment(settings, source, workdir, deadline):
-    """segment_clauses.py on the draft. Completed -> outputs {clauses.json}; exit 2 -> input_invalid."""
-    rc, out, _ = _run(settings, "segment_clauses.py", [source], deadline)
+    """segment_clauses.py --anchor-text on the draft. Completed -> outputs {clauses.json}; exit 2 -> input_invalid.
+
+    --anchor-text: the BFF's anchor pre-check (AgreementSegmentation) needs the exact texts the redliner searches.
+    """
+    rc, out, _ = _run(settings, "segment_clauses.py", [source, "--anchor-text"], deadline)
     if rc == 2:
         return EngineResult(OUTCOME_INPUT_INVALID)
     if rc != 0:

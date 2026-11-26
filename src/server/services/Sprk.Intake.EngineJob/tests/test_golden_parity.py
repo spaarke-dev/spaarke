@@ -113,7 +113,8 @@ def run_direct(out_root):
         red = os.path.join(work, "working.docx")
         skip = ["--skip-unplaceable", p[engines.REFUSED_REPORT]]
         refused = ["--refused", p[engines.REFUSED_REPORT]]
-        seg = subprocess.run(py + [eng("segment_clauses.py"), src], capture_output=True, check=True, timeout=300)
+        seg = subprocess.run(py + [eng("segment_clauses.py"), src, "--anchor-text"], capture_output=True, check=True,
+                             timeout=300)
         for args in ([plan, src, red, "--dry-run", *skip],
                      [plan, src, red, "--external", p[engines.EXTERNAL], "--clean", p[engines.CLEAN], *skip]):
             subprocess.run(py + [eng("ooxml_redline.py"), *args], capture_output=True, check=True, timeout=300)
@@ -173,6 +174,13 @@ class GoldenParityTests(unittest.TestCase):
         for stem, outs in self.job.items():
             self.assertEqual(set(outs) - {"_check"},
                              {engines.CLAUSES, *engines.REDLINE_OUTPUTS, engines.REFUSED_REPORT}, stem)
+
+    def test_segment_output_carries_the_anchor_text_the_bff_pre_check_needs(self):
+        for stem, outs in self.job.items():
+            with open(outs[engines.CLAUSES], "rb") as f:
+                sections = json.loads(f.read())["sections"]
+            self.assertTrue(sections, stem)
+            self.assertTrue(all(set(s.get("anchor_text") or {}) == {"visible", "editable"} for s in sections), stem)
 
     def test_check_outputs_passes_on_every_case(self):
         for stem, outs in self.job.items():
