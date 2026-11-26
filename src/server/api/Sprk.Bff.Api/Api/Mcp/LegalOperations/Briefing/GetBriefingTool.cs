@@ -44,6 +44,9 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Briefing;
 /// most <see cref="MaxTextLength"/> characters, every value on one line. The per-channel detail (record names, descriptions) is in
 /// <c>structuredContent</c> for the widget. When the response would not fit under 64 KiB the descriptions, then the trailing highlights, are left
 /// out (<see cref="BriefingSizeBound"/>) and the text says how many; a briefing that fits is returned exactly as the route answers it.</para>
+/// <para><b>Windows.</b> The Console always sends windows (the user's saved Daily Digest preferences, or its defaults: 5 days, 168 hours). A call
+/// with no argument gets those defaults (<see cref="DefaultDueWithinDays"/>, <see cref="DefaultRecencyHours"/>), not the collector's own 120 hours,
+/// which the email and scheduled paths keep. The user's SAVED preferences are not applied: no BFF service reads them as the caller (D-034-2).</para>
 /// <para><b>Caller (ADR-028, FR-10).</b> The request context is <c>IHttpContextAccessor.HttpContext</c>, passed through unchanged to the route's
 /// rules: no caller is <c>UserContextRequired</c> before anything is read, and nothing falls back to app-only.</para>
 /// <para><b>30 seconds (FR-14).</b> The rules run under a budget of <see cref="McpLongRunning.Budget"/> minus a margin. A briefing that has not
@@ -72,8 +75,23 @@ internal sealed class GetBriefingTool : McpToolDefinition
     /// <summary>The route's clamp: recency look-back in hours, 1 to 744.</summary>
     public const int MaxRecencyHours = 744;
 
+    /// <summary>
+    /// The due-soon look-ahead used when the call gives none: the Console's own default preference (<c>DEFAULT_DAILY_DIGEST_PREFERENCES.dueWithinDays</c>),
+    /// which the Console sends on every render. FR-09: a call with no arguments shows what the Console shows a user with no saved preferences.
+    /// </summary>
+    public const int DefaultDueWithinDays = 5;
+
+    /// <summary>
+    /// The recency look-back (hours) used when the call gives none: the Console's default preference (<c>timeWindow</c> "7d" = 168 h). This is NOT the
+    /// collector's own default (120 h), which the email and scheduled paths keep.
+    /// </summary>
+    public const int DefaultRecencyHours = 168;
+
     /// <summary>The longest <c>content</c> text (ADR-015, spec FR-09: TL;DR at most 1,000 characters).</summary>
     public const int MaxTextLength = 1000;
+
+    /// <summary>The <c>structuredContent</c> property that says how many highlights a size-trimmed briefing left out (absent when none were).</summary>
+    public const string OmittedHighlightsProperty = "omittedHighlights";
 
     /// <summary>A refused argument's <c>reasonCode</c> (the route has no argument errors: it clamps).</summary>
     public const string InvalidParameterReason = "briefing.invalid_parameter";
@@ -95,7 +113,7 @@ internal sealed class GetBriefingTool : McpToolDefinition
         "Use for: showing the signed-in user's Spaarke AI Daily Briefing, the same briefing the Spaarke Console shows them: a short summary "
         + "and key takeaways, and per section (tasks, documents, matters and so on) the items that need attention. Where the host shows widgets, "
         + "the briefing widget lists every section. Use it when the user asks what needs their attention today, what is due or overdue, or what "
-        + "changed in their matters. The optional dueWithinDays (1 to 31, default 5) and recencyHours (1 to 744, default 120) set how far ahead and "
+        + "changed in their matters. The optional dueWithinDays (1 to 31, default 5) and recencyHours (1 to 744, default 168, one week) set how far ahead and "
         + "back it looks. It can take up to half a minute. "
         + "Not for: one matter's summary or finances; searching records or documents; the Decide lane (use spaarke_show_decisions); "
         + "emailing or changing the briefing.";
@@ -119,7 +137,7 @@ internal sealed class GetBriefingTool : McpToolDefinition
                 ["type"] = "integer",
                 ["minimum"] = 1,
                 ["maximum"] = MaxRecencyHours,
-                ["description"] = "Optional. How many hours back to look for changed records. Default: 120.",
+                ["description"] = "Optional. How many hours back to look for changed records. Default: 168 (one week).",
             },
         },
         ["additionalProperties"] = false,
@@ -135,8 +153,10 @@ internal sealed class GetBriefingTool : McpToolDefinition
                 Name = Name,
                 Title = "Get my daily briefing",
                 Description = Description,
-                // The Console's own load of the briefing is the same call: it reads the caller's records and writes only the capability
-                // ledger entry and the proactive suggestions the route has always written (FR-15), never a user-visible change.
+                // The Console's own load of the briefing is the same call. It reads the caller's records, and each call also writes a
+                // capability-ledger entry (when there is something to narrate) and may write de-duplicated suggestion cards (FR-15) that
+                // appear in the Console. Those writes are the route's own and are not undone by asking again, so a client that reads
+                // readOnlyHint as "no side effect at all" is slightly wrong about this tool (known limit K1, notes/034-decisions.md).
                 ReadOnly = true,
                 Idempotent = true,
                 Destructive = false,
@@ -190,7 +210,8 @@ internal sealed class GetBriefingTool : McpToolDefinition
             return McpToolResults.FromError(
                 new McpToolError(
                     TimeoutReason,
-                    "The daily briefing took longer than expected to prepare. Ask for it again in a moment, or open it in the Spaarke Console.",
+                    // The render stops with the budget; it does not keep running, so waiting does not help: ask again, or use the Console.
+                    "The daily briefing took longer than expected to prepare. Ask again, or open it in the Spaarke Console.",
                     StatusCodes.Status504GatewayTimeout),
                 correlationId);
         }
@@ -201,7 +222,24 @@ internal sealed class GetBriefingTool : McpToolDefinition
         }
 
         var bounded = BriefingSizeBound.Fit(rendered.Briefing);
-        return DecisionToolCall.Success(BuildText(bounded.Briefing, bounded.Omitted), bounded.Briefing);
+        return DecisionToolCall.Success(BuildText(bounded.Briefing, bounded.Omitted), Structured(bounded.Briefing, bounded.Omitted));
+    }
+
+    /// <summary>
+    /// What goes in <c>structuredContent</c>: the briefing exactly as the route answers it, plus, only when trailing highlights were left out to fit
+    /// <see cref="BriefingSizeBound.BudgetBytes"/>, <c>omittedHighlights</c> (how many) so the widget can say so. REST parity (<c>structuredContent</c>
+    /// equals the route's body) holds for a briefing that was not trimmed; a trimmed one is never the route's body.
+    /// </summary>
+    internal static object Structured(DailyBriefingNarrateResponse briefing, int omittedHighlights)
+    {
+        if (omittedHighlights <= 0)
+        {
+            return briefing;
+        }
+
+        var node = JsonSerializer.SerializeToNode(briefing, Json)!.AsObject();
+        node[OmittedHighlightsProperty] = omittedHighlights;
+        return node;
     }
 
     /// <summary>
@@ -303,7 +341,8 @@ internal sealed class GetBriefingTool : McpToolDefinition
     private static bool TryReadArguments(
         IDictionary<string, JsonElement>? arguments, string? correlationId, out RenderDailyBriefingRequest? windows, out CallToolResult? error)
     {
-        windows = null;
+        // An absent window is the Console's default (5 days, 168 hours), not the collector's (120 hours): FR-09, same briefing as the Console.
+        windows = new RenderDailyBriefingRequest { DueWithinDays = DefaultDueWithinDays, RecencyHours = DefaultRecencyHours };
         error = null;
         if (arguments == null || arguments.Count == 0)
         {
@@ -322,9 +361,11 @@ internal sealed class GetBriefingTool : McpToolDefinition
             return false;
         }
 
-        windows = dueWithinDays == null && recencyHours == null
-            ? null
-            : new RenderDailyBriefingRequest { DueWithinDays = dueWithinDays, RecencyHours = recencyHours };
+        windows = new RenderDailyBriefingRequest
+        {
+            DueWithinDays = dueWithinDays ?? DefaultDueWithinDays,
+            RecencyHours = recencyHours ?? DefaultRecencyHours,
+        };
         return true;
     }
 
