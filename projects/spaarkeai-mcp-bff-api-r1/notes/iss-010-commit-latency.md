@@ -138,3 +138,8 @@
 - the job raises a bell to the decider on archive failure.
 
 D-217: every filed outgoing email becomes an `.eml` Document in Messages. Async means a short lag. The job is idempotent (one Document per communication) and retried. Say so in the PR.
+
+### Part E: ontology-r1's further requirements (2026-11-25; D-216 amended on their side, so the bell replaces the in-response warning)
+- **The bell link works for the decider.** It never links to a record the recipient can't open, and never names a record a non-member could infer (D-123). Both communications are internal-only and may be secure children.
+- **A manual "Save to SharePoint" during the job's retries never leaves two Documents.** Both go through ArchiveExistingAsync, so it must be race-safe.
+- **Final failure has a defined end:** a fixed retry limit, the final state recorded and logged with the communication id. A lost job (enqueue failure) ends in a bell or a logged, discoverable state, never silence.
