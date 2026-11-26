@@ -16,12 +16,12 @@
 
 ---
 
-## 🟡 AMENDMENT 2026-11-26 (PROPOSED) — a playbook run a user started may finish after its request (§3 B1, §5 MUST NOT)
+## ✅ AMENDMENT 2026-11-26 (ACCEPTED) — a playbook run a user started may finish after its request (§3 B1, §5 MUST NOT)
 
 > **Path**: CLAUDE.md §6.5 **path B**. **Source**: owner decision D-030-run-model
 > (`projects/spaarkeai-mcp-bff-api-r2/notes/decisions.md`), 2026-11-26.
-> **Status**: the owner approved the approach (Option A). This text needs the owner's security sign-off and a review by
-> `unified-access-control-r2`. It lands with `spaarkeai-mcp-bff-api-r2` task 030 and takes effect when that merges.
+> **Status**: **accepted.** The owner approved the approach (Option A) and gave security sign-off on this text on 2026-11-26;
+> `unified-access-control-r2` reviewed it (no blocking finding). It lands with `spaarkeai-mcp-bff-api-r2` task 030 and takes effect when that merges.
 > **Scope**: one narrow exception to §5's token rule and to B1. The placement decision is **unchanged**, and so is
 > §6's impersonation.
 

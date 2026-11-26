@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (2026-09-13) — owner-approved direction 2026-09-12 (D1–D7) and identity wording 2026-09-13; lands with `unified-access-control-r2` (PR #950)
 > **Domain**: Background, scheduled and event-driven work; hosting
-> **Last Updated**: 2026-11-26 (PROPOSED: detached caller run for a user-started JPS playbook run, D-030-run-model; pending owner security sign-off and uac-r2 review, lands with spaarkeai-mcp-bff-api-r2 task 030) · 2026-09-15 (conditional Dataverse impersonation, owner-accepted; §5 MUST NOT narrowed to the caller's token)
+> **Last Updated**: 2026-11-26 (ACCEPTED: detached caller run for a user-started JPS playbook run, D-030-run-model; owner security sign-off 2026-11-26, uac-r2 reviewed; lands with spaarkeai-mcp-bff-api-r2 task 030) · 2026-09-15 (conditional Dataverse impersonation, owner-accepted; §5 MUST NOT narrowed to the caller's token)
 > **Supersedes**: ADR-001's Functions / Durable provisions · ADR-004's Durable prohibition · **Amends**: ADR-013, ADR-036
 
 > **This ADR is the only place the placement rule is stated in full.** Other documents link here.

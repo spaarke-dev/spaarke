@@ -138,7 +138,7 @@ Microsoft Copilot users can reach Spaarke today only through r1's five decision 
 9. **FR-09: Daily Briefing.**
    - `spaarke_get_briefing` returns the caller's AI Daily Briefing summary, through the `/api/ai/daily-briefing` services (owner, Step 5). It opens the Daily Briefing widget (FR-16).
    - If generation can exceed 30 s, it follows FR-14.
-   - **Acceptance:** the briefing equals the one the Console shows the same user that day; the widget renders it in Chat and Cowork.
+   - **Acceptance:** the briefing equals the one the Console shows the same user that day **with the Console's default preferences** (5 days, 168 hours; owner, 2026-11-26: a user's saved Daily Digest preferences are out of scope, #3232); the widget renders it in Chat and Cowork.
 
 10. **FR-10: Matter AI summary.**
     - `spaarke_get_matter_summary` reads the matter-summary topic from the Insights cache (`InsightsPlaybookExecutionCache` with the `sprk_aitopicregistry` TTL) and returns it with its date. If it is missing or expired, the tool starts an Insights run and returns FR-14's start result; the status tool then returns the summary.
@@ -335,7 +335,10 @@ Two items were checked and found compliant (Path C):
 - **Persisting run status** isn't background work under ADR-052. It is written on the run's existing execution path.
 
 One tension resolved by the owner (Path B, 2026-11-26, notes/decisions.md D-030-run-model):
-- **A playbook run continues after `spaarke_run_playbook` replies, acting as the user** (FR-05, FR-14). ADR-052 §5 keeps the caller's token inside its request; the amendment adds one narrow exception (shared helper, memory only, capped run length). The amendment lands with task 030.
+- **A playbook run continues after `spaarke_run_playbook` replies, acting as the user** (FR-05, FR-14). ADR-052 §5 keeps the caller's token inside its request; the amendment adds one narrow exception (shared helper, memory only, capped run length). The amendment is ACCEPTED (owner security sign-off 2026-11-26) and lands with task 030.
+
+One project exception (Path A, owner, 2026-11-26, notes/decisions.md D-owner-answers-2026-11-26 #3; detail notes/008-decisions.md):
+- **ADR-028 A10 vs FR-11, finance tool (task 008/033).** A10 says an `/mcp` caller with no `systemuser` row "gets the existing `UserContextRequired` refusal". The finance method returns REST's `sdap.access.deny.internal_callers_only` for that caller, because FR-11 requires the tool to return the same `reasonCode` as REST. FR-11 parity wins for this tool; the code is unchanged. Both answers refuse and expose nothing. Task 033 keeps the method's code. Cite this in the PR; code-review approves it explicitly.
 
 ## Success Criteria
 

@@ -59,6 +59,6 @@ rework: none task 008
 - **Proposed path:** A (project exception in spec ADR Tensions: FR-11 parity wins; code unchanged). Both answers refuse; nothing is exposed either way.
 - **Alternative:** C — expose a distinct no-row verdict from `EvaluateStepZeroAsync` (REST code unchanged) and map it to `UserContextRequired` in the method; gives up FR-11 parity for that one case.
 - **Impact:** blocks 008 completion and task 033's error mapping; nothing in Phase 0 waits on it.
-- **Status:** OPEN — owner chooses A or C.
+- **Status:** RESOLVED 2026-11-26 — owner chose **Path A** ("path A"); recorded in spec.md ADR Tensions and notes/decisions.md D-owner-answers-2026-11-26.
 
 Other pass-1 findings: K2 method/route linked by tests not shared code (a future extra filter on the summary route would not reach the tool; optional pin test); K4 publish delta to be re-measured vs fresh master before the PR. No other F-class findings; REST behaviour unchanged for every route using the filter; method fail-closed for every input; 403 (not 404) is correct and leaks nothing.

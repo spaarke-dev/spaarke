@@ -127,3 +127,28 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
   - It needs the owner's security sign-off (given in principle by this decision; the final text goes back to the owner) and a review by unified-access-control-r2.
 - **Replaces:** the "ADR-052 Path C" line in spec.md ADR Tensions for run persistence. The run continuing after the reply is now Path B.
 - **Also unblocks:** task 032 (matter summary starts a run). Compose's informal detach (#3224) should move onto the same helper; that is a follow-up, not this project.
+
+## D-owner-answers-2026-11-26 — owner answers to open questions 1–18 (current-task.md numbering), this session
+
+Owner's words verbatim, then what each one means here.
+
+| # | Question | Owner's words | Meaning / action |
+|---|---|---|---|
+| 1 | 005: run `Add-PlaybookRunColumns.ps1` on dev; accept acceptance criterion 3 as "identical except the documented differences" | "yes go ahead and run" | Go given. The main session runs the script on dev (spaarkedev1). AC-3 is accepted with the differences listed in notes/005-schema.md §4 items 1–3. |
+| 2 | 012: registry-key PATCH on dev | "yes go ahead to update" | Go given. The main session runs `Set-MatterSummaryTopicRegistryKey.ps1` on dev. |
+| 3 | 008: ADR-028 A10 conflict | "path A" | Path A, a project exception: FR-11 parity wins, and the code is unchanged. Recorded in spec.md ADR Tensions. |
+| 4 | #3181 fix (a) or (b) | "what is #3181 provide details and recommendation" | Explanation sent. Still open until the owner picks (a) or (b). |
+| 5 | 019: is runbook E1 done? | "no this hasn't been done--need steps" | E1 is not done, so 019 stays blocked. Steps sent to the owner. |
+| 6 | design.md lacks `<hot-path-declaration>` | "yes add it so have complete documentation" | Add the block from spec.md to design.md. The owner's instruction overrides the brief's "do not edit design.md" for this block only. |
+| 7 | Consumer tsc via a draft PR | "ok" | Go: open a draft PR that runs consumer tsc for DailyBriefing and LegalWorkspace. |
+| 8 | REST changes (#3205, #3208, #3215, D-027-2, 024 499) | "ok" | Accepted as made or proposed. |
+| 9 | D-023-preview | "what is advantage to allowing preview link to be shown? if low risk and it is a user advantage then include it--but if minimal feature value then omit" | The owner set the rule. The main session's assessment: little user value in Copilot (the browser link already opens the document in the web viewer), and a real risk (an app-only link that works without sign-in until it expires, written into the chat transcript). So **omit** (D-023-preview stands, owner-confirmed by rule). |
+| 10 | NFR-05: does an oid in a log count as a "claim"? | "not sure exactly what this means or the implications--what does this impact?" | Explanation sent. Open until the owner answers. |
+| 11 | uac-r2: the document list checks Read on the matter only (023 D1) | "yes that's sufficient" | Accepted. |
+| 12 | Stray python.exe processes | "yes stop--AND IMPORTANT we need some way to check this and not allow this to happen; it uses up a lot of resources and slows up other work processing--what is the fix?" | Stop them. Propose a mechanised prevention (root CLAUDE.md enforcement ladder). |
+| 13 | Cowork review skill pairing (for accelerator-r1) | "ok BUT ensure it is happening or has been communicated so not lost" | Send it to acclerator-r1 and file a tracked issue. |
+| 15 | MCP AI-tool rate limit | "accept" | Accepted as is: the `mcp` limiter is 60 per minute per user. No per-tool limiter. |
+| 16 | FR-09 saved preferences | "default preferences" | Narrow FR-09 in the spec to the Console's default preferences. No preference reader. #3232 stays a backlog follow-up. |
+| 17 | Run results in Copilot | "yes add these feature capabilities; present in modern UI/UX" | New scope: a run-results widget in Copilot (MCP App widget, modern Fluent v9 UI). A new task. |
+| 18 | Run instructions argument | "yes add this feature but make easy for user to use and do not add many other steps" | New scope: an optional, capped `instructions` argument on `spaarke_run_playbook`. No extra prompt or step: the user just says it in chat. A new task. |
+| — | ADR-052 amendment | "ADR-052 amendment is approved." | Security sign-off given 2026-11-26. Both ADR-052 files now read ACCEPTED. |
