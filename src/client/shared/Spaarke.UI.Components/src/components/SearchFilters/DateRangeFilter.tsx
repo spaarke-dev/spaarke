@@ -192,9 +192,9 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   const activePreset = React.useMemo(() => {
     const known = preset ?? pickedPreset;
     if (known === 'custom' && value && (value.from || value.to)) return 'custom';
-    if (known && known !== 'custom' && known !== 'off') {
+    if (value && known && known !== 'custom' && known !== 'off') {
       const range = calculatePresetRange(known);
-      if (range.from === value?.from && range.to === value?.to) return known;
+      if (range.from === value.from && range.to === value.to) return known;
     }
     return detectActivePreset(value);
   }, [value, preset, pickedPreset]);

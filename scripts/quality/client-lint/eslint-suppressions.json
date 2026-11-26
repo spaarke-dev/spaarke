@@ -50,14 +50,6 @@
       "count": 2
     }
   },
-  "src/client/code-pages/SemanticSearch/src/services/DataverseWebApiService.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/client/code-pages/SemanticSearch/src/services/aiSearchIndexService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
