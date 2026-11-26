@@ -49,12 +49,21 @@ from `origin/master` `d43fc9e16d`. Rigor FULL (BFF `.cs`). Model opus @ high.
 
 ## Fail-before proof
 
-The original file cannot compile against the new rig (constructor), so each fix was removed by mutation and the suite re-run:
-see "Verification" below.
+The original file cannot compile against the new rig (constructor), so each fix was removed by mutation and the commit-service
+suite (389 tests) re-run, restoring the file after each:
+
+| Mutation | Failed | Which |
+|---|---|---|
+| M1: inline share call removed | 3 | the inline-share test and both share-fault tests (they assert the logged warning) |
+| M2: derivation removed (flag always false) | 6 | Privileged and Potentially Privileged evidence, read fault, unreadable communication, uninterpretable evidence, Privileged subject |
+| M3: the Signal column read again as a source | 3 | None and null with the column set true, and the no-communication must-not-fire |
 
 ## Verification
 
-(filled in at completion)
+- `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~DecisionCommitServiceTests"`: 389 passed (14 new).
+- `--filter "FullyQualifiedName~Signals"` (contract baselines included): 5565 passed, 0 failed, 6 skipped. No baseline moved.
+- `tests/Spaarke.ArchTests` built explicitly, full run: 2845 passed, 0 failed.
+- Publish size: see the PR.
 
 ## Known limits
 
@@ -66,6 +75,13 @@ see "Verification" below.
   non-communication subject is over-flagged).
 
 ## Found, not fixed
+
+- **Same class, outside this task (report to the main session):** `Services/Signals/SignalReevaluationJob.cs:965` writes the
+  ConditionCleared Decision Record's flag from the Signal's `sprk_privilegeflagged` (read at :1523), the column nothing writes (DI-64).
+  Every system-closed record therefore says not privileged. D-212 says "as the caller", and a system closure has no caller, so how to
+  derive it there (app-only, or left unflagged) is an owner decision, not a copy of this fix. Grep (`sprk_privilegeflagged` under
+  `Sprk.Bff.Api`): no other reader treats the Signal column as a source; the gate Decision Record copies from the gate decision, a
+  different source.
 
 - The register entries DI-64 / DI-97 / DI-143 in `notes/defer-issues.md` should point at this fix; that file is the main session's (it lags
   on master), so it is reported, not edited here.
