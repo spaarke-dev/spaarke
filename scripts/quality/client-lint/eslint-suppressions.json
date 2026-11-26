@@ -1637,7 +1637,7 @@
   },
   "src/solutions/SpaarkeAi/src/components/context/SemanticSearchCriteriaTool.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     },
     "no-restricted-syntax": {
       "count": 2
