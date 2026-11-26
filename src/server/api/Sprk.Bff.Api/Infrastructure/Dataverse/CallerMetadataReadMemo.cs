@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -21,8 +20,8 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// re-read the table's relationships and the entity sets step 2 read); each is then dropped (locals of
 /// <c>RecordCreationService.DecideAsync</c>). Off the child-records route (the chat tool, jobs) each keeps its own answers:
 /// nothing is shared across those groups, creates, requests or callers. On the route (ISS-010, #3184) the instances are built
-/// with <see cref="For"/> over the request's <see cref="RequestScope"/>, so they share one store for that request and that
-/// caller client, across the groups and across every create the request runs (the decision commit runs four); see
+/// with <see cref="For"/> over the request's <see cref="RequestScope"/> (when the client is the <see cref="DataverseUserClient"/>), so they share one store for that request,
+/// across the groups and across every create the request runs (the decision commit runs four, each with its own transient client); see
 /// <see cref="RequestScope"/> for that contract. The
 /// other steps (3½, the pre-write rules, 6 to 10) keep the caller's own client, so a read they make is asked as before (a
 /// stamp bind whose metadata read fails still fails), and a pre-write rule still receives the caller's own client. Each hit returns its own freshly parsed body
@@ -60,15 +59,16 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     }
 
     /// <summary>
-    /// The memo a create's caller checks use: over <paramref name="requestReads"/>'s store for <paramref name="inner"/> when the
-    /// create runs in a request that carries one (the child-records route, and so the decision commit's in-process creates), so
-    /// every create of that request shares one answer per metadata path and a row write forgets nothing; otherwise a memo of its
-    /// own, exactly as before (the chat tool, jobs and every other off-route create).
+    /// The memo a create's caller checks use: over <paramref name="requestReads"/>'s store when the create runs in a request that
+    /// carries one (the child-records route, and so the decision commit's in-process creates) AND <paramref name="inner"/> is
+    /// the <see cref="DataverseUserClient"/> itself, so every create of that request shares one answer per metadata path and a
+    /// row write forgets nothing; otherwise a memo of its own, exactly as before (the chat tool, jobs, every other off-route
+    /// create, and any other <see cref="IDataverseUserClient"/> even inside a request).
     /// </summary>
     internal static CallerMetadataReadMemo For(IDataverseUserClient inner, RequestScope? requestReads) =>
-        requestReads is null
-            ? new CallerMetadataReadMemo(inner)
-            : new CallerMetadataReadMemo(inner, requestReads.StoreFor(inner), forgetOnWrite: false);
+        requestReads is not null && inner is DataverseUserClient
+            ? new CallerMetadataReadMemo(inner, requestReads.Store, forgetOnWrite: false)
+            : new CallerMetadataReadMemo(inner);
 
     /// <summary>A write passes through; a memo of its own then forgets everything (a request-scoped one keeps the schema it read).</summary>
     private void Forget()
@@ -78,35 +78,45 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     }
 
     /// <summary>
-    /// ISS-010 (#3184): ONE request's table-metadata answers, per caller client, carried in that request's
-    /// <see cref="HttpContext.Items"/> (the <see cref="CallerWhoAmIMemo"/> pattern), so a request that runs several creates (the
-    /// decision commit: four creates, each checked in two passes) reads each <c>EntityDefinitions(…)</c> path once.
+    /// ISS-010 (#3184): ONE request's table-metadata answers, carried in that request's <see cref="HttpContext.Items"/> (the
+    /// <see cref="CallerWhoAmIMemo"/> pattern), so a request that runs several creates (the decision commit: four creates,
+    /// each checked in two passes) reads each <c>EntityDefinitions(…)</c> path once.
     /// </summary>
     /// <remarks>
+    /// <para><b>Why one store per request, not per client, and why only for <see cref="DataverseUserClient"/>.</b> In production
+    /// the caller's client is a transient typed <c>HttpClient</c> (<c>AddHttpClient&lt;IDataverseUserClient, DataverseUserClient&gt;</c>),
+    /// so a request that runs four creates resolves four clients; a store keyed by client instance would never be shared. The
+    /// store is shared on this argument: every <see cref="DataverseUserClient"/> of one request takes the SAME caller bearer
+    /// token from <c>IHttpContextAccessor</c> (the request's own <c>Authorization</c> header), exchanges it on behalf of that
+    /// caller, and sends it as <c>Authorization: Bearer</c>; the type has no <c>MSCRMCallerID</c>, no impersonation and no
+    /// app-only path. So one request means one caller identity for everything the type sends, and a table's metadata read under
+    /// it is the same answer every time. The share is therefore gated on the concrete type
+    /// (<see cref="For"/>): any other <see cref="IDataverseUserClient"/> (a test double, a later token-based or impersonating
+    /// client, a chat or job client that happens to run inside a request) keeps its own per-create memo and never touches this
+    /// store, because nothing says it speaks as the request's caller. This store wraps only the caller's client, never an
+    /// app-only one; a system-principal or no-user create has no caller client and gets no memo, as before.</para>
     /// <para><b>Contract change.</b> Before, every memo instance kept its own answers for one step of one create and forgot them
-    /// on any write. A memo built over this scope shares its answers with every other memo of the same request and the same
-    /// caller client, and a row write (POST, PATCH, DELETE) forgets nothing: a row write does not change a table's schema. What
+    /// on any write. A memo built over this scope shares its answers with every other memo of the same request, and a row write
+    /// (POST, PATCH, DELETE) forgets nothing: a row write does not change a table's schema. What
     /// is kept is unchanged: only a SUCCESSFUL answer to a GET whose path starts with <c>EntityDefinitions(</c> (its
     /// <c>/Attributes</c> and other sub-paths included). Never a row, a record-type catalog row (<c>sprk_recordtype_refs</c>), an
     /// access answer (<c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>) or a failure: those are asked
     /// every time, as before (ADR-009: no authorization answer is cached). The store lives and dies with the request: nothing is
-    /// shared across requests or callers, and there is no process-wide cache.</para>
+    /// shared across requests, and there is no process-wide cache.</para>
     /// <para><b>Who gets it.</b> Only a create whose request names it (<c>RecordCreationRequest.MetadataReads</c>), which the
     /// child-records route sets from its own request. Off-request creates (the chat tool, jobs) name none and keep the
     /// per-create memo.</para>
     /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: this memo (one step of one create) and
     /// <see cref="CallerWhoAmIMemo"/> (the caller's <c>WhoAmI</c> per request, static over <c>HttpContext.Items</c>). Extension:
     /// this IS the extension of the memo, scoped to a request instead of a step; the WhoAmI memo holds one keyed answer per
-    /// credential and cannot hold a store per caller client. Cost of doing nothing: the four-action decision reads the same
-    /// table metadata 37 times over 21 distinct paths (ISS-010 profile; 25 with this scope), each a sequential round trip of about 90 ms
+    /// credential and cannot hold a store of answers per path. Cost of doing nothing: the four-action decision reads the same
+    /// table metadata 37 times over 21 distinct paths (ISS-010 profile, over the real transient client: 34 with a store per client instance, 25 with this scope), each a sequential round trip of about 90 ms
     /// live inside a commit already over its 15 s target.</para>
     /// </remarks>
     internal sealed class RequestScope
     {
         /// <summary>The <see cref="HttpContext.Items"/> key; a private object, so no other code can reach it.</summary>
         private static readonly object ItemsKey = new();
-
-        private readonly ConditionalWeakTable<IDataverseUserClient, ConcurrentDictionary<string, (int StatusCode, string? RawJson)>> _stores = new();
 
         private RequestScope()
         {
@@ -143,9 +153,8 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
             }
         }
 
-        /// <summary>The store for one caller client of this request.</summary>
-        internal ConcurrentDictionary<string, (int StatusCode, string? RawJson)> StoreFor(IDataverseUserClient client) =>
-            _stores.GetValue(client, _ => new ConcurrentDictionary<string, (int StatusCode, string? RawJson)>(StringComparer.Ordinal));
+        /// <summary>The request's store; handed out only by <see cref="For"/>, and only for a <see cref="DataverseUserClient"/>.</summary>
+        internal ConcurrentDictionary<string, (int StatusCode, string? RawJson)> Store { get; } = new(StringComparer.Ordinal);
     }
 
     /// <summary>Whether a GET path reads table metadata (and so may be remembered).</summary>

@@ -15,6 +15,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -254,8 +255,8 @@ internal sealed class DecisionCommitCallProfile
 
             if (name.StartsWith('<') && Between(name) is { Length: > 0 } lambdaOwner)
                 name = lambdaOwner;
-            // The memo is a pass-through wrapper: the site is the method that asked it.
-            if ((skipProbe && type.Name == nameof(CallerRecordAccessProbe)) || type.Name == "CallerMetadataReadMemo")
+            // The memo and the caller client are pass-through wrappers: the site is the method that asked them.
+            if ((skipProbe && type.Name == nameof(CallerRecordAccessProbe)) || type.Name is "CallerMetadataReadMemo" or nameof(DataverseUserClient))
                 continue;
             return $"{type.Name}.{name}";
         }
@@ -309,6 +310,71 @@ internal sealed class DecisionCommitCallProfile
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
             _profile.Intercept(_inner, _seam, _staged, targetMethod!, args);
+    }
+
+    /// <summary>
+    /// The caller's Dataverse WIRE, counted: the handler under the REAL <c>DataverseUserClient</c> (so the type production
+    /// resolves is what the request measures). It records each request as the interface call that produced it (method name,
+    /// Web API path, table) with the production method that asked, waits the latency, and has <paramref name="answers"/> (the
+    /// scripted caller's Dataverse) answer it.
+    /// </summary>
+    public sealed class CallerWire : HttpMessageHandler
+    {
+        private const string ApiRoot = "/api/data/v9.2/";
+        private readonly DecisionCommitCallProfile _profile;
+        private readonly string _seam;
+        private readonly IDataverseUserClient _answers;
+
+        public CallerWire(DecisionCommitCallProfile profile, string seam, IDataverseUserClient answers)
+        {
+            _profile = profile;
+            _seam = seam;
+            _answers = answers;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var site = SiteOf(new StackTrace(1, false), skipProbe: false); // before the first await: the caller's frames are still on the stack
+            var original = request.RequestUri!.OriginalString;
+            var apiPath = original[original.IndexOf("/api/", StringComparison.Ordinal)..];
+            var relative = apiPath.StartsWith(ApiRoot, StringComparison.Ordinal) ? apiPath[ApiRoot.Length..] : apiPath;
+            var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var isGet = request.Method == HttpMethod.Get;
+            var operation = request.Method.Method switch { "GET" => "GetAsync", "POST" => "PostAsync", "PATCH" => "PatchAsync", "DELETE" => "DeleteAsync", var m => m };
+
+            var (target, key) = TargetOf([apiPath]);
+            _profile.Add(_seam, operation, target, key, site, isGet ? null : $"{(request.Method == HttpMethod.Post ? apiPath : relative)} {body}");
+            if (_profile.Latency > TimeSpan.Zero)
+                await Task.Delay(_profile.Latency, cancellationToken).ConfigureAwait(false);
+
+            var response = request.Method.Method switch
+            {
+                "GET" => await _answers.GetAsync(relative, cancellationToken).ConfigureAwait(false),
+                "POST" => await _answers.PostAsync(apiPath, body ?? string.Empty, request.Headers.Contains("Prefer"), cancellationToken).ConfigureAwait(false),
+                "PATCH" when request.Headers.TryGetValues("If-Match", out var ifMatch) && ifMatch.FirstOrDefault() is { } etag && etag != "*" =>
+                    await _answers.PatchAsync(relative, body ?? string.Empty, long.Parse(etag.Trim('W', '/', '"'), CultureInfo.InvariantCulture), cancellationToken).ConfigureAwait(false),
+                "PATCH" => await _answers.PatchAsync(relative, body ?? string.Empty, cancellationToken).ConfigureAwait(false),
+                "DELETE" => await _answers.DeleteAsync(relative, cancellationToken).ConfigureAwait(false),
+                _ => throw new NotSupportedException(request.Method.Method),
+            };
+            return ToHttp(response);
+        }
+
+        private static HttpResponseMessage ToHttp(DataverseUserResponse response)
+        {
+            var status = response.StatusCode >= 100 ? response.StatusCode : 500;
+            if (!response.IsSuccess)
+            {
+                return new HttpResponseMessage((HttpStatusCode)status)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { error = new { code = "0x0", message = response.ErrorMessage } }), Encoding.UTF8, "application/json"),
+                };
+            }
+
+            return response.Body is { } body
+                ? new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json") }
+                : new HttpResponseMessage((HttpStatusCode)status);
+        }
     }
 
     /// <summary>
