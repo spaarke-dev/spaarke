@@ -9,6 +9,7 @@
 import type { MetricCardConfig, IPdfHighlight, IPdfNormalisedBox, StatusBadgeTone } from '@spaarke/ui-components';
 import type {
   AddLineRequest,
+  AssignFirmResponse,
   InvoiceReview,
   ReviewFinding,
   ReviewHeader,
@@ -26,7 +27,21 @@ import type {
  * has no firm, is held for one, or its billing rules are being checked again after the firm was set. The server refuses them (409) in that state.
  */
 export const FIRM_FIRST_WORDS =
-  'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.';
+  'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). If it has no firm, set the firm in the invoice header above, then decide.';
+
+/** Task 095d-3: what Set firm does, shown under the Billing firm field before it is pressed (the server gives the firm's next tracking number and re-runs the rules). */
+export const SET_FIRM_EFFECT_WORDS =
+  "Setting the firm gives this invoice the firm's next tracking number and checks its billing rules again.";
+
+/**
+ * Task 095d-3: the success sentence of Set firm, from the server's answer only. The tracking-number clause is left out when the server sent
+ * none; a re-run still `pending` adds that the page unlocks when it finishes (the page's own firm-gate poll does that, ISS-014).
+ */
+export function setFirmSuccessWords(r: Pick<AssignFirmResponse, 'trackingNumber' | 'rulesRerun'>): string {
+  const number = r.trackingNumber ? ` The tracking number is now ${r.trackingNumber}.` : '';
+  const rerun = r.rulesRerun === 'pending' ? ' Billing rules are being checked again; the page unlocks when that finishes.' : '';
+  return `Firm set.${number}${rerun}`;
+}
 
 export const DECIDED_STATUSES: ReadonlySet<string> = new Set(['Accepted', 'Reduced', 'Disallowed']);
 

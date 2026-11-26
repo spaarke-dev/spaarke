@@ -2521,6 +2521,9 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
         /// <summary>Who created each Decision Record (the row's createdby): the writer's service identity for a genuine one.</summary>
         public Dictionary<Guid, Guid> DecisionRecordCreator { get; } = [];
 
+        /// <summary>Task 223 (DI-144): who each Decision Record was created on behalf of (createdonbehalfby); absent for one the writer created itself.</summary>
+        public Dictionary<Guid, Guid> DecisionRecordOnBehalfOf { get; } = [];
+
         public Guid Decision(
             Guid[] readers,
             string number = "DR-00001",
@@ -2531,10 +2534,12 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             string? reason = null,
             string? steps = null,
             string? followOns = null,
-            Guid? createdBy = null)
+            Guid? createdBy = null,
+            Guid? createdOnBehalfBy = null)
         {
             var id = Guid.NewGuid();
             DecisionRecordCreator[id] = createdBy ?? WriterUser;
+            if (createdOnBehalfBy is { } onBehalfOf) DecisionRecordOnBehalfOf[id] = onBehalfOf;
             DecisionRecords[id] = (readers, new Dictionary<string, object?>
             {
                 ["sprk_decisionrecordid"] = id,
@@ -2981,11 +2986,14 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 // systemuser on sprk_confirmedby (so a link on any other column returns no name).
                 var createdByCondition = drFetch.Descendants("condition").FirstOrDefault(c => (string?)c.Attribute("attribute") == "createdby" && (string?)c.Attribute("operator") == "eq");
                 var createdBy = createdByCondition is null ? (Guid?)null : Guid.Parse((string)createdByCondition.Attribute("value")!);
+                var onBehalfOfEmpty = drFetch.Descendants("condition").Any(c => (string?)c.Attribute("attribute") == "createdonbehalfby" && (string?)c.Attribute("operator") == "null");
                 var nameLinked = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "systemuser"
                     && (string?)l.Attribute("to") == "sprk_confirmedby" && (string?)l.Attribute("link-type") == "outer" && (string?)l.Attribute("alias") == "by");
                 var found = DecisionRecords
                     .Where(r => wanted.Contains(r.Key) && r.Value.Readers.Contains(me2))
                     .Where(r => createdBy is null || DecisionRecordCreator[r.Key] == createdBy)
+                    // Task 223 (DI-144): and the createdonbehalfby-is-empty half of WriterCreatedRecord, as Dataverse evaluates it.
+                    .Where(r => !onBehalfOfEmpty || !DecisionRecordOnBehalfOf.ContainsKey(r.Key))
                     .Select(r => nameLinked ? r.Value.Row : r.Value.Row.Where(kv => kv.Key != "by.fullname").ToDictionary(kv => kv.Key, kv => kv.Value))
                     .ToList();
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = found }));

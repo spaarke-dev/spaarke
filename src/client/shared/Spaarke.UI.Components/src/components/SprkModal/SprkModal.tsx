@@ -344,7 +344,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // when it allows it. A throwing / rejecting guard blocks the move (fail closed) and is reported with a
   // console.warn, so a broken guard shows up as a diagnosable failure rather than a dead ‹ › button.
   const handleNavigate = (dir: 'prev' | 'next') => {
-    if (!nav) return;
+    if (!nav || nav.disabled) return;
     const guard = nav.onBeforeNavigate;
     if (!guard) {
       nav.onNavigate(dir);
@@ -398,7 +398,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                     appearance="subtle"
                     size="small"
                     icon={<ChevronLeft20Regular />}
-                    disabled={nav.index <= 0}
+                    disabled={nav.disabled || nav.index <= 0}
                     onClick={() => handleNavigate('prev')}
                     aria-label="Previous record"
                   />
@@ -411,7 +411,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
                     appearance="subtle"
                     size="small"
                     icon={<ChevronRight20Regular />}
-                    disabled={nav.index >= nav.total - 1}
+                    disabled={nav.disabled || nav.index >= nav.total - 1}
                     onClick={() => handleNavigate('next')}
                     aria-label="Next record"
                   />

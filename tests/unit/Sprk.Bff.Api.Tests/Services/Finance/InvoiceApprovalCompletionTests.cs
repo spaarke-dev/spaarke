@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -318,13 +320,21 @@ public sealed class InvoiceApprovalCompletionTests
         var w = World();
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
 
-        // The record the writer will find is the writer's by createdby but created on its behalf by another identity: the completion's lookup
-        // (createdby and createdonbehalfby) does not count it, the writer's own "already recorded" lookup (createdby alone) does.
+        // Ontology task 223 (DI-144): the writer's "already recorded" lookup now applies the completion's rule (WriterCreatedRecord), so a row
+        // created on the writer's behalf no longer splits them. What still can: a writer record that lands between the completion's read and
+        // the writer's lookup (a concurrent approve). The completion's read does not see it; only the writer's keyed lookup does.
         var record = w.ApproveRecords.Single();
         w.H.Created.Remove(record);
         record["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser);
-        record["createdonbehalfby"] = new EntityReference("systemuser", BobUser);
-        w.H.Seeded.Add(record);
+        w.H.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_decisionrecord"
+                    && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                w.H.Lookups.Add(q);
+                return new EntityCollection(new List<Entity> { record });
+            });
         w.Portion["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionPending);
         w.Portion.Attributes.Remove("sprk_decisionrecord");
 

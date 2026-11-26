@@ -135,7 +135,7 @@ export interface SaveResponse {
   correlationId: string;
   /**
    * Task 131 (#2171): what the save did about filing the email it reconciled to. OMITTED when there is nothing to report
-   * (and on a duplicate replay). Only `NotPermitted` / `Failed` are shown to the user. A value this build does not know
+   * (and on a duplicate replay). Only `NotPermitted` / `Failed` / `FiledUnconfirmed` (task 140) are shown to the user. A value this build does not know
    * is ignored — see {@link readEmailFilingProblem}.
    */
   emailFiling?: EmailFilingOutcome;

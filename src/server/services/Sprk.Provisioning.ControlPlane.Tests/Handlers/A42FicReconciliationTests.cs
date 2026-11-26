@@ -557,7 +557,10 @@ public sealed class A42FicReconciliationTests
             ExpectedDelegatedScopeCount = EntraAppRegPermissionCatalog.All.Count,
         });
         return new H3EntraAppRegHandler(
-            repo, provisioner, verifier, options, NullLogger<H3EntraAppRegHandler>.Instance);
+            repo, provisioner, verifier, options,
+            new Sprk.Provisioning.ControlPlane.Registry.NullDataverseEnvironmentRegistryClient(
+                NullLogger<Sprk.Provisioning.ControlPlane.Registry.NullDataverseEnvironmentRegistryClient>.Instance),
+            NullLogger<H3EntraAppRegHandler>.Instance);
     }
 
     /// <summary>

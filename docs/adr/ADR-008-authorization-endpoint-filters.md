@@ -150,7 +150,7 @@ A resource check MAY run inside the service, instead of in an endpoint filter, o
 | Where | Resource the service finds | Check | On refusal |
 |---|---|---|---|
 | `OfficeService` email re-save add (task 138) | the earlier save's `.eml` document | Write via `AuthorizeDocumentsAsync`, before the planner reads anything and before the add job's row | 403 `OFFICE_009`; nothing read, queued or written |
-| `ReconciledEmailFiling` (task 121) | the matched unfiled communication | Write on it via `CallerRecordAccessProbe` with the caller's token, before the filing write. AppendTo on the save's record is the route's `EntityAccessFilter` (`entity.associate_document`) | the save still completes; the communication is left unfiled |
+| `ReconciledEmailFiling` (task 121; confirm, task 140) | the matched unfiled communication; or (task 140) the matched communication already filed to the save's record as its only regarding, whose status the save confirms | Write on it via `CallerRecordAccessProbe` with the caller's token, before the filing write or the confirm (status-only) write. AppendTo on the save's record is the route's `EntityAccessFilter` (`entity.associate_document`) | the save still completes; the communication is left unfiled, or filed but unconfirmed |
 
 This list is not complete. Other in-service checks cite A1 as their owners review them; many check a resource the
 route already named, as a second check, and are not A1 cases.

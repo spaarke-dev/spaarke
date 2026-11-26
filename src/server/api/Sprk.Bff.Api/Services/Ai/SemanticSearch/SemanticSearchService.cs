@@ -620,6 +620,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             EntityTypes = request.Filters?.EntityTypes,
             DocumentTypes = request.Filters?.DocumentTypes,
             FileTypes = request.Filters?.FileTypes,
+            MatterTypes = request.Filters?.MatterTypes,
             Tags = request.Filters?.Tags,
             DateRange = request.Filters?.DateRange is not null
             ? new AppliedDateRange { From = request.Filters.DateRange.From, To = request.Filters.DateRange.To }

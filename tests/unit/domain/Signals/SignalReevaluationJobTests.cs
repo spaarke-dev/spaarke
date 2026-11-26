@@ -3298,6 +3298,8 @@ public partial class SignalReevaluationJobTests
                              {
                                  ConditionOperator.Equal => r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id is { } id && Equals(id, c.Values[0]),
                                  ConditionOperator.Like => r.GetAttributeValue<string>(c.AttributeName)?.Contains(((string)c.Values[0]).Trim('%'), StringComparison.Ordinal) == true,
+                                 // Task 223 (DI-144): WriterCreatedRecord's createdonbehalfby-is-empty condition, as Dataverse evaluates it.
+                                 ConditionOperator.Null => !r.Contains(c.AttributeName) || r[c.AttributeName] is null,
                                  _ => false,
                              })))
                     {
@@ -3428,9 +3430,12 @@ public partial class SignalReevaluationJobTests
                         .SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
                     // Adversarial pass 2: a createdby condition is evaluated (a row with no createdby was not created by that user).
                     var creator = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby")?.Values.Single();
+                    // Task 223 (DI-144): and the createdonbehalfby-is-empty half of WriterCreatedRecord, as Dataverse evaluates it.
+                    var onBehalfOfEmpty = query.Criteria.Conditions.Any(c => c.AttributeName == "createdonbehalfby" && c.Operator == ConditionOperator.Null);
                     // Task 153: and the records the writer created (a condition-cleared closure's, once linked).
                     foreach (var record in DecisionRecords.Values.Concat(Org.DecisionRecordRows.Values).Where(r => wanted.Contains(r.Id)
-                                 && (creator is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, creator))))
+                                 && (creator is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, creator))
+                                 && (!onBehalfOfEmpty || r.GetAttributeValue<EntityReference>("createdonbehalfby") is null)))
                     {
                         var copy = new Entity("sprk_decisionrecord", record.Id);
                         // uac-r2 re-check 2 F3-2: only the selected columns come back, as in Dataverse (a column the query leaves out is absent).

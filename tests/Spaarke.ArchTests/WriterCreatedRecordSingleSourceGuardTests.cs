@@ -23,15 +23,16 @@ namespace Spaarke.ArchTests;
 /// <item>spells the Web API form <c>_createdby_value</c> / <c>_createdonbehalfby_value</c> (an OData <c>$filter</c>).</item>
 /// </list>
 /// <para>Not caught, by design of a scan: the column held in a local or a field of another name, an in-memory comparison of a read row's
-/// <c>createdby</c> (the seventh DI-144 site, <c>Services/Signals/GateDecisionRecordSharing.cs:521</c>, compares a read row's <c>createdby</c> in
-/// memory and is invisible to this scan; DI-144 covers it), a <c>LinkEntity</c> built with positional constructor arguments, and a FetchXML
+/// <c>createdby</c> (the seventh DI-144 site, <c>Services/Signals/GateDecisionRecordSharing.cs</c> <c>FindGateRecordsAsync</c>, compares a read
+/// row's <c>createdby</c> in memory and is invisible to this scan; ontology task 223 made it require <c>createdonbehalfby</c> empty as well, with
+/// a unit test), a <c>LinkEntity</c> built with positional constructor arguments, and a FetchXML
 /// string whose line holds <c>//</c> before the attribute (a URL). Controls: <see cref="TheDetector_FiresOnEachForm"/>,
 /// <see cref="TheDetector_FiresOnTheK2Forms"/> and <see cref="TheDetector_StaysQuietOnTheHelperAndOtherColumns"/>.</para>
 /// <para><b>Maintenance.</b> If this fails on your code: build the condition with <c>WriterCreatedRecord.AddConditions</c> (a query's or a link's
-/// criteria) or <c>WriterCreatedRecord.FetchXmlFilter</c>, never by hand. The <see cref="Baseline"/> is a ratchet for the ontology's existing
-/// lookups (DI-144, #2632 moves them onto the helper): a new site fails; a site removed must lower its count here (<see cref="TheBaseline_IsTight"/>);
-/// an entry is added only with its own reason and ADR citation, and only for code this project does not own. An ebilling site is never
-/// baselined: it moves onto the helper.</para>
+/// criteria) or <c>WriterCreatedRecord.FetchXmlFilter</c>, never by hand. The <see cref="Baseline"/> was a ratchet for the ontology's existing
+/// lookups; ontology task 223 (DI-144, #2632) moved every one onto the helper, so it is empty and any site fails. A site removed from a future
+/// entry must lower its count here (<see cref="TheBaseline_IsTight"/>); an entry is added only with its own reason and ADR citation, and only
+/// for code this project does not own. An ebilling site is never baselined: it moves onto the helper.</para>
 /// </remarks>
 public class WriterCreatedRecordSingleSourceGuardTests
 {
@@ -42,24 +43,10 @@ public class WriterCreatedRecordSingleSourceGuardTests
     /// <summary>One baselined file: how many sites it may hold, why, and the decisions that allow it until it is worked down.</summary>
     internal sealed record BaselineEntry(int Count, string Reason, string Citation);
 
-    /// <summary>The cite every entry shares: ArchTests are a KEEP path (ADR-038 A1), this guard enforces EB-D-208's one definition of
-    /// "writer-created", and each site is ontology-r1's, tracked onto the helper by DI-144 (#2632).</summary>
-    private const string Cite = "ADR-038 A1; EB-D-208; DI-144 (#2632, ontology-r1 owns the file)";
-
-    /// <summary>DI-144 (ontology-r1, #2632): the ontology's existing writer-identity lookups, by file, count and reason. Work it down; never up.
-    /// Re-checked in the 165b-3 part B fix round with the K2 forms added: no new site in either folder, so no entry grew.</summary>
-    internal static readonly IReadOnlyDictionary<string, BaselineEntry> Baseline = new Dictionary<string, BaselineEntry>(StringComparer.Ordinal)
-    {
-        ["Services/Signals/DecisionCommitService.cs"] = new(1,
-            "FindRecordAsync (:1868): the commit's 'already recorded' lookup filters createdby = the writer without createdonbehalfby.", Cite),
-        ["Services/Signals/DecisionRecordWriter.cs"] = new(3,
-            "FindGateRecordAsync (:733), FindConditionClearedRecordAsync (:1017) and AddBillingWriterFilterAsync (:1673): the writer's own " +
-            "'already recorded' lookups filter createdby = the writer without createdonbehalfby (completion's K3 guard covers the billing one).", Cite),
-        ["Services/Signals/SignalReadService.cs"] = new(1,
-            "ReadDecisionRecordsAsync (:1193): the FetchXML read of a Signal's Decision Records filters createdby = the writer without createdonbehalfby.", Cite),
-        ["Services/Signals/SignalReevaluationJob.cs"] = new(1,
-            "RetriesReplacingAPriorLinkAsync (:955): the re-evaluation reads only the writer's prior records by createdby, without createdonbehalfby.", Cite),
-    };
+    /// <summary>DI-144 (ontology-r1, #2632): empty since ontology task 223 moved the ontology's last six writer-identity lookups
+    /// (DecisionCommitService 1, DecisionRecordWriter 3, SignalReadService 1, SignalReevaluationJob 1) onto <c>WriterCreatedRecord</c>.
+    /// Never grows without its own reason and ADR citation (see the remarks).</summary>
+    internal static readonly IReadOnlyDictionary<string, BaselineEntry> Baseline = new Dictionary<string, BaselineEntry>(StringComparer.Ordinal);
 
     private const string Column =
         @"(?:""createdby""|""createdonbehalfby""|(?<![\w])(?:[A-Za-z_]\w*\.)*(?:CreatedByColumn|CreatedOnBehalfByColumn)\b)";

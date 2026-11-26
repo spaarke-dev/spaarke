@@ -273,6 +273,14 @@ if ($m -and $m.prereqs) {
       $fail += "${id}: recipe uses 'grep' with both -i and -F - the grep in Git for Windows aborts (exit 134) on that combination. Use a regex (-i without -F) or drop -i."
     }
 
+    # f. /dev/null passed as an ARGUMENT (curl -o /dev/null, -D /dev/null ...). SKILL Step 0.5b sets MSYS_NO_PATHCONV=1, so
+    #    Git Bash hands the literal path to a native Windows exe, which cannot open it (curl exit 23) - ISS-044. A bash
+    #    redirect (> /dev/null, 2>/dev/null, &>/dev/null, < /dev/null) is resolved by bash itself and is fine.
+    $noCommentF = [regex]::Replace($cli, '(?m)(^|\s)#.*$', '$1')
+    if ($noCommentF -match '(?<![<>]\s*)/dev/null') {
+      $fail += "${id}: recipe passes /dev/null as a command argument - under MSYS_NO_PATHCONV a native Windows exe receives the literal path and cannot open it (ISS-044). Use a bash redirect, or curl -D - with the body on stdout (not -w: its %{...} variables read as unresolved tokens)."
+    }
+
     # d. Windows az.cmd breaks on a parenthesis inside an argument
     foreach ($line in ($cli -split "`n")) {
       if ($line -notmatch '(^|[\s(`])az\s') { continue }
@@ -287,7 +295,7 @@ if ($m -and $m.prereqs) {
     }
   }
   if ($fail.Count -eq $failBeforeLints) {
-    Write-Host "  [PASS] Recipe lints (token availability, undefined shell vars, exit-1 contract, no PowerShell under bash, no parenthesis in az args)" -ForegroundColor Green
+    Write-Host "  [PASS] Recipe lints (token availability, undefined shell vars, exit-1 contract, no PowerShell under bash, no parenthesis in az args, no /dev/null argument)" -ForegroundColor Green
   }
 }
 

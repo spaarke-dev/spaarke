@@ -136,6 +136,34 @@ describe('SearchCriteriaResultWidget — body rendering by domain', () => {
     expect(allLabels.length).toBeGreaterThanOrEqual(3);
   });
 
+  // #3131: the Console sends label lists and local dates; the single values and preset id above
+  // are the pre-#3131 shape that saved workspace tabs still carry.
+  it('renders the selected labels of each filter list', () => {
+    renderWidget({
+      query: 'q',
+      domain: 'documents',
+      documentTypes: ['Contract', 'NDA'],
+      fileTypes: ['PDF'],
+      matterTypes: [],
+    });
+
+    expect(screen.getByText('Contract, NDA')).toBeInTheDocument();
+    expect(screen.getByText('PDF')).toBeInTheDocument();
+    expect(screen.getByText('All')).toBeInTheDocument();
+  });
+
+  it('renders the date range as local days, an open side as "any"', () => {
+    renderWidget({ query: 'q', domain: 'invoices', dateFrom: '2026-11-01', dateTo: null });
+
+    expect(screen.getByText('2026-11-01 – any')).toBeInTheDocument();
+  });
+
+  it('renders "Off" when both dates are empty', () => {
+    renderWidget({ query: 'q', domain: 'invoices', dateFrom: null, dateTo: null });
+
+    expect(screen.getByText('Off')).toBeInTheDocument();
+  });
+
   it('renders a notice banner explaining the demo scope', () => {
     renderWidget({
       query: 'q',

@@ -2,7 +2,7 @@
  * Worklist (MatterCard + IssueLine) — unit tests (task 051). The stated contract:
  *  - ONE component renders every Work Item shape (cross-source, threshold, Do-lane) and every core type (matter,
  *    project, work assignment, service request, Not filed) from data, with no per-type code (FR-25, D-34..D-36)
- *  - a Decide line shows headline + rule short name + age; a Do line shows headline + rule short name + due state
+ *  - a Decide line shows finding + subject name + age; a Do line shows finding + subject name + due state
  *    computed from sprk_duedate in the viewer's local date (D-23)
  *  - the WHOLE line opens: click, Enter and Space raise the open-item event with the item id and the visible list
  *  - the component never re-sorts (row-contract requirement 2); a row resolves to an object (requirement 1)
@@ -118,7 +118,7 @@ describe('MatterCard — one component, every shape', () => {
 });
 
 describe('IssueLine content (D-23)', () => {
-  it('a Decide line shows the headline, the rule short name and the age', () => {
+  it('a Decide line shows the finding, the subject name and the age', () => {
     renderThemed(<MatterCard core={matterCore} items={[pathBItem]} today={TODAY} />);
     const line = screen.getByTestId('issue-line');
     expect(line).toHaveTextContent('Invoice 4411 from Acme LLP');
@@ -127,7 +127,7 @@ describe('IssueLine content (D-23)', () => {
     expect(screen.getByTestId('issue-timing')).toHaveAttribute('data-tone', 'age');
   });
 
-  it('a Do line shows the headline, the rule short name and the due state from sprk_duedate', () => {
+  it('a Do line shows the finding, the subject name and the due state from sprk_duedate', () => {
     renderThemed(<MatterCard core={matterCore} items={[overdueTaskItem]} today={TODAY} />);
     const line = screen.getByTestId('issue-line');
     expect(line).toHaveTextContent('Send engagement letter');
@@ -172,6 +172,7 @@ describe('IssueLine content (D-23)', () => {
 
   it('missing data reads as a statement, never blank or zero', () => {
     expect(composeIssueLine({ signalId: 'x', lane: 'Do' }, TODAY)).toEqual({
+      finding: 'Untitled item',
       headline: 'Untitled item',
       ruleShortName: null,
       timing: { text: 'No due date', tone: 'none' },
@@ -348,9 +349,9 @@ describe('negative: what a line must not contain', () => {
     expect(text).not.toContain('Witness text 77');
   });
 
-  it('never shows a witness value: only the subject name, the rule short name and the timing', () => {
+  it('never shows a witness value: only the finding, the subject name and the timing (finding first)', () => {
     renderThemed(<MatterCard core={matterCore} items={[pathBItem]} today={TODAY} />);
-    expect(screen.getByTestId('issue-line').textContent).toBe('Invoice 4411 from Acme LLPFee or scope change3d');
+    expect(screen.getByTestId('issue-line').textContent).toBe('Fee or scope changeInvoice 4411 from Acme LLP3d');
   });
 });
 
