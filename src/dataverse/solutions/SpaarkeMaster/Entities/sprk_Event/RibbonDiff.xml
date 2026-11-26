@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
     <CustomAction Id="sprk.Event.NewWizard.Grid.Button.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="1">
@@ -50,6 +50,16 @@
             </MenuSection>
           </Menu>
         </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.Assign.Hide" Location="Mscrm.Form.sprk_event.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_event.Assign.Hide" Location="Mscrm.HomepageGrid.sprk_event.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.Assign.Hide" Location="Mscrm.SubGrid.sprk_event.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.NewRecord.Hide" Location="Mscrm.Form.sprk_event.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.SaveAndNew.Hide" Location="Mscrm.Form.sprk_event.SaveAndNew" />
+    <CustomAction Id="sprk.NativeCreate.sprk_event.Form.New.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.NativeCreate.sprk_event.Form.New" Command="sprk.NativeCreate.sprk_event.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_event.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_event.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_event.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_event.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
       </CommandUIDefinition>
     </CustomAction>
   </CustomActions>
@@ -150,6 +160,15 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="sprk.NativeCreate.sprk_event.New.Command">
+      <EnableRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventStandalone" Library="$webresource:sprk_wizard_commands" />
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
@@ -223,6 +242,26 @@
     <LocLabel Id="sprk.SecureChild.sprk_event.New.ToolTipDescription">
       <Titles>
         <Title description="Add a Event to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_event.New.Alt">
+      <Titles>
+        <Title description="+New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_event.New.LabelText">
+      <Titles>
+        <Title description="+New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_event.New.ToolTipTitle">
+      <Titles>
+        <Title description="New Event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_event.New.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new Event in Spaarke, so it is filed, owned and mapped by the server" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

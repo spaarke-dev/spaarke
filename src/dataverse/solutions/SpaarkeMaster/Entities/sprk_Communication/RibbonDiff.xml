@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
     <CustomAction Id="sprk.Navigator.Communication.Form.Button.CustomAction" Location="Mscrm.Form.sprk_communication.MainTab.Actions.Controls._children" Sequence="1">
@@ -44,6 +44,22 @@
             </MenuSection>
           </Menu>
         </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_communication.Assign.Hide" Location="Mscrm.Form.sprk_communication.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_communication.Assign.Hide" Location="Mscrm.HomepageGrid.sprk_communication.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_communication.Assign.Hide" Location="Mscrm.SubGrid.sprk_communication.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_communication.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_communication.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_communication.NewRecord.Hide" Location="Mscrm.Form.sprk_communication.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_communication.SaveAndNew.Hide" Location="Mscrm.Form.sprk_communication.SaveAndNew" />
+    <CustomAction Id="sprk.NativeCreate.sprk_communication.Form.New.CustomAction" Location="Mscrm.Form.sprk_communication.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.NativeCreate.sprk_communication.Form.New" Command="sprk.NativeCreate.sprk_communication.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_communication.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_communication.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_communication.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_communication.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.NativeCreate.sprk_communication.Grid.New.CustomAction" Location="Mscrm.HomepageGrid.sprk_communication.MainTab.Actions.Controls._children" Sequence="1">
+      <CommandUIDefinition>
+        <Button Id="sprk.NativeCreate.sprk_communication.Grid.New" Command="sprk.NativeCreate.sprk_communication.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_communication.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_communication.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_communication.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_communication.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
       </CommandUIDefinition>
     </CustomAction>
   </CustomActions>
@@ -135,10 +151,23 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="sprk.NativeCreate.sprk_communication.New.Command">
+      <EnableRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_communication.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openNewEmailStandalone" Library="$webresource:sprk_wizard_commands" />
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_communication.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_communication" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.Navigator.Communication.Open.EnableRule">
         <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
@@ -184,6 +213,26 @@
     <LocLabel Id="sprk.SecureChild.sprk_communication.New.ToolTipDescription">
       <Titles>
         <Title description="Write an email related to this secure record (sent and saved by Spaarke so it stays as private as the record)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_communication.New.Alt">
+      <Titles>
+        <Title description="+New Email" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_communication.New.LabelText">
+      <Titles>
+        <Title description="+New Email" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_communication.New.ToolTipTitle">
+      <Titles>
+        <Title description="New Email" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.NativeCreate.sprk_communication.New.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new Email in Spaarke, so it is filed, owned and mapped by the server" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

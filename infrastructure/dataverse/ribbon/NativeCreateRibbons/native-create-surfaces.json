@@ -1,0 +1,38 @@
+{
+  "$comment": "field-mapping-server-write-path-r1 task 051 (FR-24). The ONE list of what the native UI does for each mapping-target table (the 22 sprk_ tables of RecordTableRules.All that the task 050 decision names, plus sprk_procedureversion, registered by ebilling-r1 DEF-061 after that decision). Read by Merge-NativeCreateRibbon.ps1 (authors the ribbon) and scripts/Test-NativeCreateSurfaces.ps1 (checks an environment). A guard (tests/scripts/Test-NativeCreateSurfaces.Tests.ps1) keeps the table list equal to the sprk_ tables of RecordTableRules.cs.",
+  "$fields": {
+    "quickCreate": "Expected IsQuickCreateEnabled. Always 'off': every listed table has quick create off on every environment (sprk_project was the one table on).",
+    "assign": "Expected state of the three OOB Assign buttons (Mscrm.Form.<t>.Assign, Mscrm.HomepageGrid.<t>.Assign, Mscrm.SubGrid.<t>.Assign). Always 'hidden'. Hiding the command only: prvAssign is NOT removed from any role (owner Q12; UAC-r2 audit, task 063).",
+    "nativeNew": "'redirected' = the platform New is hidden on the grid and the form (New and Save & New) and a Spaarke 'New' opens the table's create surface; 'hidden-outright' = hidden everywhere, no replacement (the table has one server-side creator); 'kept' = the platform New stays (reason + owner question in the entry). -Verify gates the first two and reports the third.",
+    "launcher": "The standalone launcher a redirected 'New' calls (JavaScriptFunction FunctionName @ Library).",
+    "gridButton": "'existing' = the grid already carries a Spaarke New wizard button (this merge only adds the missing hides); 'add' = this merge adds it."
+  },
+  "tables": [
+    { "table": "sprk_matter", "kind": "root", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "existing", "label": "Matter", "launcher": { "function": "Spaarke.Commands.Wizards.openCreateMatterStandalone", "library": "sprk_wizard_commands" } },
+    { "table": "sprk_project", "kind": "root", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "existing", "label": "Project", "launcher": { "function": "Spaarke.Commands.Wizards.openCreateProjectStandalone", "library": "sprk_wizard_commands" } },
+    { "table": "sprk_workassignment", "kind": "root", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "existing", "label": "Work Assignment", "launcher": { "function": "Spaarke.Commands.Wizards.openCreateWorkAssignmentStandalone", "library": "sprk_wizard_commands" } },
+    { "table": "sprk_event", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "existing", "label": "Event", "launcher": { "function": "Spaarke.Commands.Wizards.openCreateEventStandalone", "library": "sprk_wizard_commands" } },
+    { "table": "sprk_document", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "existing", "label": "Document", "launcher": { "function": "Spaarke_UploadDocumentsStandalone", "library": "sprk_subgrid_commands" } },
+    { "table": "sprk_todo", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "add", "label": "To Do", "launcher": { "function": "Spaarke.Commands.Wizards.openCreateTodoStandalone", "library": "sprk_wizard_commands" } },
+    { "table": "sprk_communication", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "redirected", "gridButton": "add", "label": "Email", "launcher": { "function": "Spaarke.Commands.Wizards.openNewEmailStandalone", "library": "sprk_wizard_commands" } },
+
+    { "table": "sprk_invoice", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "hidden-outright", "reason": "An invoice is created only by submission (ebilling-r1 EB-D-201); the Invoice wizard is offered from a core record's subgrid." },
+    { "table": "sprk_billingevent", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "hidden-outright", "reason": "An invoice line is created only by extraction, a line decision and Add line (ebilling-r1 EB-D-201)." },
+
+    { "table": "sprk_reportcard", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-1", "reason": "User-creatable, no standalone wizard (the Report Card wizard files under a matter). The subgrid New is redirected; the grid and form New stay native until the owner decides: hide, or route to the parent wizard." },
+    { "table": "sprk_budget", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-1", "reason": "User-creatable, no wizard (a BFF create-then-open from a parent subgrid). Same decision as the report card." },
+    { "table": "sprk_kpiassessment", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-1", "reason": "User-creatable, no wizard (a BFF create-then-open from a parent subgrid). Same decision as the report card." },
+    { "table": "sprk_memo", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-1", "reason": "User-creatable, no wizard; the Event form's Add Memo is the BFF create. Same decision as the report card." },
+    { "table": "sprk_analysis", "kind": "child", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-1", "reason": "Created by the analysis wizard / playbook launcher; its subgrid New is already hidden (AnalysisRibbons). The grid and form New stay native." },
+
+    { "table": "sprk_invoicesubmission", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Invoice-family system table: out of the New redirect (task 050)." },
+    { "table": "sprk_invoiceapproval", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Invoice-family system table: out of the New redirect (task 050)." },
+    { "table": "sprk_externalidentifier", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Invoice-family system table: out of the New redirect (task 050)." },
+    { "table": "sprk_invoicecorrection", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Invoice-family system table: out of the New redirect (task 050)." },
+    { "table": "sprk_procedureversion", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Created only by ProcedureService; registered after the task 050 list (DEF-061). Out of the New redirect." },
+    { "table": "sprk_signal", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Ontology writer table: out of the New redirect (task 050)." },
+    { "table": "sprk_decisionrecord", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Ontology writer table: out of the New redirect (task 050)." },
+    { "table": "sprk_budgetrevision", "kind": "system", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Ontology writer table: out of the New redirect (task 050)." },
+    { "table": "sprk_servicerequest", "kind": "external", "quickCreate": "off", "assign": "hidden", "nativeNew": "kept", "ownerQuestion": "OQ-2", "reason": "Stays with external-access-r3 (task 050)." }
+  ]
+}
