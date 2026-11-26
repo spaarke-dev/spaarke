@@ -94,7 +94,7 @@ with
 `IPlaybookRunAi.StartAsCallerAsync(HttpContext, playbookId, Guid[] documentIds, parameters, string? userContext, ct)`
 and add to "Extension point": "`userContext` is the engine's `PlaybookRunRequest.UserContext` (the Console's per-run user text); the caller trims and caps it; the helper only passes it on and never logs it."
 
-## Task 033 — read one matter's finance position as the signed-in caller from an MCP tool (status: PENDING; main session applies)
+## Task 033 — read one matter's finance position as the signed-in caller from an MCP tool (status: APPLIED as row 53, 2026-11-26)
 
 | # | Capability | Synonyms | Canonical component | Symbol | Governing ADR | Extension point |
 |---|---|---|---|---|---|---|
