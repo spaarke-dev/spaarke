@@ -4,7 +4,7 @@
     <title>FR-08: requestType match key on RoutingContext/IRoutingContext + keyed intake harness contract and registry (unknown key → triage)</title>
     <phase>1 Pipeline core and first doors</phase>
     <gate>after 005 (shared files)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a PublicContracts interface used across the BFF and adds new .cs abstractions and DI registrations (bff-api).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -129,7 +129,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>`Services/Intake/` is a proposed new folder for all intake pipeline BFF code (orchestrator 013, dispatch 014, harnesses 015, triage 016); keep it unless the BFF CLAUDE.md names a better home.</notes>
+  <notes>`Services/Intake/` is a proposed new folder for all intake pipeline BFF code (orchestrator 013, dispatch 014, harnesses 015, triage 016); keep it unless the BFF CLAUDE.md names a better home.
+
+Completion (2026-11-26, commit 2201c2ce6c): harness key rides Binding.ConsumerCode (registry resolves intake-harness with consumerCode = request type; WorkflowClass rejected as a repurpose of the ICodedWorkflow reference). Routing cache key now includes RequestType (latent cross-request-type cache defect, pinned by a test). Open for 013: one RunAsync vs separate Analyse/Build (015 persists the edit plan before Build). Main session: add requestType to docs/data-model/sprk-playbookconsumer.md:50 and the proposed CAPABILITY-INDEX row. Details, tests, publish size, Placement Justification: notes/012-routing-key-harness-registry.md. No out-of-scope defects filed.
+rework: fix-round-1 task 012</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
