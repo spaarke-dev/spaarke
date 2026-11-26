@@ -49,9 +49,12 @@ import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
 import {
+  combineAttachmentsAddOutcomes,
   describeAttachmentsAdded,
+  describeAttachmentsAddFinished,
   describeAttachmentsNotSaveable,
   describeAttachmentsNotStored,
+  type AttachmentsAddOutcome,
 } from '../services/attachmentsAddedNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
@@ -485,6 +488,12 @@ export interface SavedDocumentState {
    * confirmation then reads "Added N attachments to the saved email". Absent otherwise.
    */
   attachmentsAdded?: number;
+  /**
+   * Task 141: how the adds ended, set when their jobs finished (and the identity was re-read): the confirmation then says
+   * what happened ("N attachments added", or how many could not be added) instead of "Adding N attachments…". Absent
+   * while an add is still running.
+   */
+  attachmentsAddOutcome?: AttachmentsAddOutcome;
   /**
    * Task 138 (#2209): the attachments the save was asked to add that the saved email does not hold (not saved with it the
    * first time): their names. A warning beside the confirmation says they could not be added. Absent otherwise.
@@ -926,9 +935,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           if (!prev.savedDocument || prev.savedDocument.documentId !== documentId) return prev;
           const { savedAttachmentNames: _known, attachmentsAdding, ...rest } = prev.savedDocument;
           const stillAdding = withoutNames(attachmentsAdding ?? [], names);
+          // No re-read path: what was stored is not known, so the outcome is not either (the title is the plain one).
           return {
             ...prev,
-            savedDocument: { ...rest, ...(stillAdding.length ? { attachmentsAdding: stillAdding } : {}) },
+            savedDocument: {
+              ...rest,
+              ...(stillAdding.length ? { attachmentsAdding: stillAdding } : {}),
+              attachmentsAddOutcome: combineAttachmentsAddOutcomes(rest.attachmentsAddOutcome, {
+                total: names.length,
+                notAdded: null,
+              }),
+            },
           };
         });
       },
@@ -1616,12 +1633,22 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       if (!prev.savedDocument || prev.savedDocument.documentId !== pending.documentId) return prev;
       const { savedAttachmentNames: _previous, attachmentsAdding, ...rest } = prev.savedDocument;
       const stillAdding = withoutNames(attachmentsAdding ?? [], pending.finished);
+      // Task 141: the finished adds' outcome, from what the server now lists as saved — the confirmation stops saying "Adding…".
+      const finishedOutcome: AttachmentsAddOutcome | undefined = pending.finished.length
+        ? {
+            total: pending.finished.length,
+            notAdded: serverNames ? withoutNames(pending.finished, serverNames).length : null,
+          }
+        : undefined;
       return {
         ...prev,
         savedDocument: {
           ...rest,
           ...(serverNames ? { savedAttachmentNames: serverNames } : {}),
           ...(stillAdding.length ? { attachmentsAdding: stillAdding } : {}),
+          ...(finishedOutcome
+            ? { attachmentsAddOutcome: combineAttachmentsAddOutcomes(rest.attachmentsAddOutcome, finishedOutcome) }
+            : {}),
         },
       };
     });
@@ -2230,7 +2257,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     title:
       saved.lastSave === 'version'
         ? 'New version saved to Spaarke'
-        : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
+        : saved.attachmentsAddOutcome && !saved.attachmentsAdding?.length
+          ? (describeAttachmentsAddFinished(saved.attachmentsAddOutcome) ?? 'Saved to Spaarke')
+          : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
     filedTo: saved.filedTo,
     filedToNumber: saved.filedToNumber ?? null,
     filedRecord: saved.filedRecord ?? null,

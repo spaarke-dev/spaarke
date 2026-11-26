@@ -53,6 +53,46 @@ export function describeAttachmentsAdded(count: number | undefined): string | nu
     : `Adding ${count} attachments to the saved email. If they don't appear on the record in a few minutes, save the email again.`;
 }
 
+/**
+ * How the adds of this pane session ended, once their jobs have finished and the identity was re-read: `total` = the names
+ * the adds queued, `notAdded` = how many of them the server does not list as saved (`null` = not known: no re-read answered).
+ */
+export interface AttachmentsAddOutcome {
+  total: number;
+  notAdded: number | null;
+}
+
+/** The sum of two outcomes (adds that overlapped); one that is not known makes the sum not known. */
+export function combineAttachmentsAddOutcomes(
+  first: AttachmentsAddOutcome | undefined,
+  second: AttachmentsAddOutcome
+): AttachmentsAddOutcome {
+  if (!first) return second;
+  return {
+    total: first.total + second.total,
+    notAdded: first.notAdded === null || second.notAdded === null ? null : first.notAdded + second.notAdded,
+  };
+}
+
+/**
+ * The confirmation title once an add's job has FINISHED: what happened, from what the server then lists as saved. `null` when
+ * the outcome is not known (the caller keeps its plain title) — it never claims "added" for what it cannot confirm.
+ */
+export function describeAttachmentsAddFinished(outcome: AttachmentsAddOutcome | undefined): string | null {
+  if (!outcome || outcome.total < 1 || outcome.notAdded === null) return null;
+  const { total, notAdded } = outcome;
+  const added = total - notAdded;
+  if (notAdded <= 0) {
+    return total === 1 ? '1 attachment added to the saved email' : `${total} attachments added to the saved email`;
+  }
+  if (added <= 0) {
+    return notAdded === 1
+      ? '1 attachment could not be added to the saved email.'
+      : `${notAdded} attachments could not be added to the saved email.`;
+  }
+  return `${added} of ${total} attachments added to the saved email. ${notAdded} could not be added.`;
+}
+
 /** The warning for attachments the stored email does not hold, or `null` when there are none. */
 export function describeAttachmentsNotStored(names: readonly string[] | undefined): string | null {
   if (!names || names.length < 1) return null;
