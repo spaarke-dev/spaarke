@@ -139,7 +139,7 @@ The freeze applies to the node-graph **engine** only (`PlaybookOrchestrationServ
 
 ### Status of the schema
 
-DECIDED, not yet implemented. The extension (optional `sprk_playbookid`; run kind, Action and Binding lookups, parent-run self-lookup, correlation id, error code, regarding, summary) is `spaarkeai-mcp-bff-api-r2` task 005; profile-version and gate-decision references follow in `specialist-legal-agents-r1` Phase 1. `sprk_playbooknoderun` will record coded-workflow steps. Rationale: the Binding precedent (`sprk_playbookconsumer` kept its name and changed meaning), one table answers "what AI ran", and CLAUDE.md §11 prefers extension over a new table.
+DECIDED, not yet implemented. The extension (optional `sprk_playbookid`; run kind, Action and Binding lookups, parent-run self-lookup, correlation id, error code, regarding, summary) is `spaarkeai-mcp-bff-api-r2` task 005; profile-version and gate-decision references follow in `specialist-legal-agents-r1` Phase 1. `sprk_playbooknoderun` will record coded-workflow steps (`sprk_playbooknodeid` optional; Action lookup, started-on, completed-on and sequence added). Every run is written through one shared writer, `PlaybookRunRecordStore` (task 005), which owns the row shape (one owner per invariant, ADR-002). Rationale: the Binding precedent (`sprk_playbookconsumer` kept its name and changed meaning), one table answers "what AI ran", and CLAUDE.md §11 prefers extension over a new table.
 
 ## References
 

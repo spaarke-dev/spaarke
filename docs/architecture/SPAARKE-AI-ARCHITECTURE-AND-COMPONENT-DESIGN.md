@@ -2532,7 +2532,7 @@ from the table.
 
 ### 6.6 The AI-run record (`sprk_playbookrun`, decided 2026-11-25)
 
-`sprk_playbookrun` (display name "AI Run") becomes the one durable record for every AI run: node-graph engine, prompted Action and coded workflow. **Decided; schema not yet changed.** Precedent: the Binding (`sprk_playbookconsumer`) kept its table name and changed meaning. The session ledger (ADR-040) is erasable and is not the durable record. `sprk_playbooknoderun` records coded-workflow steps (`sprk_playbooknodeid` optional, plus an Action lookup).
+`sprk_playbookrun` (display name "AI Run") becomes the one durable record for every AI run: node-graph engine, prompted Action and coded workflow. **Decided; schema not yet changed.** Precedent: the Binding (`sprk_playbookconsumer`) kept its table name and changed meaning. The session ledger (ADR-040) is erasable and is not the durable record. `sprk_playbooknoderun` records coded-workflow steps (`sprk_playbooknodeid` optional, plus an Action lookup, started-on and completed-on date-times, and a sequence number; also task 005). One shared writer owns the row shape and its fail-safe write rule: `PlaybookRunRecordStore` (task 005). Engine, prompted and coded runs all write through it.
 
 | Column plan | Delivered by |
 |---|---|

@@ -170,7 +170,7 @@ never the *accuracy or auditability of facts*.
 ### ❌ MUST NOT (2026-11-25)
 - **MUST NOT** read the engine freeze as "playbooks are not used", or design as if the
   playbook concept were retired.
-- **MUST NOT** introduce a second AI-run store. The ADR-040 session ledger stays the
+- **MUST NOT** introduce a second AI-run store or writer: every run is written through `PlaybookRunRecordStore` (task 005). The ADR-040 session ledger stays the
   per-session, erasable record; it is not the durable run record.
 
 ## Integration
