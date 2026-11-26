@@ -152,3 +152,20 @@ Owner's words verbatim, then what each one means here.
 | 17 | Run results in Copilot | "yes add these feature capabilities; present in modern UI/UX" | New scope: a run-results widget in Copilot (MCP App widget, modern Fluent v9 UI). A new task. |
 | 18 | Run instructions argument | "yes add this feature but make easy for user to use and do not add many other steps" | New scope: an optional, capped `instructions` argument on `spaarke_run_playbook`. No extra prompt or step: the user just says it in chat. A new task. |
 | — | ADR-052 amendment | "ADR-052 amendment is approved." | Security sign-off given 2026-11-26. Both ADR-052 files now read ACCEPTED. |
+
+## D-3268-user-focus — per-run user instructions reach the prompt (owner, 2026-11-26)
+
+- **Owner's words:** "Yes, approve (a)" — answering: approve the one engine edit so run instructions reach the prompt (#3268), or (b) withdraw.
+- **Decision:** a non-empty `UserContext` (run instructions) is added to the AI prompt as a clearly delimited "User focus" block. The edit is made where prompts are built (`Tools/PromptContextHelper.cs` / `GenericAnalysisHandler`, plus any other prompt builder that receives `ToolExecutionContext`).
+- **Repairs three paths at once:**
+  - the Console chat "rerun with additional instructions", which today claims the instructions were used;
+  - the REST execute `userContext`;
+  - task 038's `instructions` argument.
+- **ADR-039 check, Path C (compliant), recorded under CLAUDE.md §6.5:**
+  - The rule "MUST NOT land new capability on the frozen node-graph engine" is not crossed. This repairs an input the REST contract and the chat already promise. It adds no node type, executor, graph, control flow or routing.
+  - The rule "MUST NOT emit free-form LLM text untethered from a capability's prompt" holds: the block sits inside the capability's own prompt, marked as the user's focus, and cannot replace the action's system prompt or its output schema.
+  - The owner approved the edit in any case.
+- **Constraints:**
+  - The text is never logged.
+  - It is delimited and labelled as user-supplied: it may narrow emphasis, but cannot override the action's instructions or output format.
+  - Absent or blank: the prompt is byte-identical to today's.

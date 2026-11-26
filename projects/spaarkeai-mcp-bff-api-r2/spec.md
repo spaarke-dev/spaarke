@@ -337,6 +337,9 @@ Two items were checked and found compliant (Path C):
 One tension resolved by the owner (Path B, 2026-11-26, notes/decisions.md D-030-run-model):
 - **A playbook run continues after `spaarke_run_playbook` replies, acting as the user** (FR-05, FR-14). ADR-052 §5 keeps the caller's token inside its request; the amendment adds one narrow exception (shared helper, memory only, capped run length). The amendment is ACCEPTED (owner security sign-off 2026-11-26) and lands with task 030.
 
+One compliance check (Path C, owner-approved, 2026-11-26, notes/decisions.md D-3268-user-focus):
+- **ADR-039 vs #3268, run instructions in the prompt.** A non-empty `UserContext` goes into the prompt as a delimited "User focus" block. This repairs an input the REST contract and the chat already promise. It adds no node type, executor, graph or control flow (not "new capability on the frozen engine"), and the text stays inside the capability's own prompt. Cite this in the PR.
+
 One project exception (Path A, owner, 2026-11-26, notes/decisions.md D-owner-answers-2026-11-26 #3; detail notes/008-decisions.md):
 - **ADR-028 A10 vs FR-11, finance tool (task 008/033).** A10 says an `/mcp` caller with no `systemuser` row "gets the existing `UserContextRequired` refusal". The finance method returns REST's `sdap.access.deny.internal_callers_only` for that caller, because FR-11 requires the tool to return the same `reasonCode` as REST. FR-11 parity wins for this tool; the code is unchanged. Both answers refuse and expose nothing. Task 033 keeps the method's code. Cite this in the PR; code-review approves it explicitly.
 
