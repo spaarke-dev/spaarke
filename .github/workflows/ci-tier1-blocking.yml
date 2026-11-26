@@ -215,6 +215,7 @@ jobs:
               - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs'
               - 'tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs'
               - 'src/client/widgets/spaarke-decisions/**'
+              - 'src/client/widgets/shared/**'
               - 'tests/integration/Mcp.Conformance.Host/**'
               - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'
               - '.github/workflows/**'

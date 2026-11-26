@@ -10,7 +10,6 @@ including customer-supplied projects with customer-managed keys.
 | File | Purpose |
 |------|---------|
 | `spaarke-legal-agent.yaml` | Agent identity, model, system prompt, and tool registrations |
-| `bff-function-tools.yaml` | OpenAI function schemas for BFF-side tools (analyze-data, research-legal) |
 | `README.md` | This file — deployment instructions and environment variable reference |
 
 ---
@@ -119,8 +118,7 @@ export FOUNDRY_BING_CONNECTION_NAME="bing-grounding-connection"
 envsubst < infrastructure/ai-foundry/agents/spaarke-legal-agent.yaml \
   | az ai agent create \
       --project-endpoint "${FOUNDRY_ENDPOINT}" \
-      --file /dev/stdin \
-      --functions-file infrastructure/ai-foundry/agents/bff-function-tools.yaml
+      --file /dev/stdin
 
 # 3. Capture the agent ID from the output
 AGENT_ID=$(az ai agent list \
@@ -156,8 +154,7 @@ $agentYaml | Set-Content $tempFile -Encoding UTF8
 # 3. Create the agent
 az ai agent create `
   --project-endpoint $env:FOUNDRY_ENDPOINT `
-  --file $tempFile `
-  --functions-file infrastructure\ai-foundry\agents\bff-function-tools.yaml
+  --file $tempFile
 
 Remove-Item $tempFile
 
@@ -216,9 +213,10 @@ envsubst < infrastructure/ai-foundry/agents/spaarke-legal-agent.yaml \
   | az ai agent update \
       --project-endpoint "${FOUNDRY_ENDPOINT}" \
       --agent-id "${AGENT_ID}" \
-      --file /dev/stdin \
-      --functions-file infrastructure/ai-foundry/agents/bff-function-tools.yaml
+      --file /dev/stdin
 ```
+
+> Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2): the BFF function tools (`bff-function-tools.yaml`, `/api/agent/tools/*`) were removed; Copilot reaches Spaarke through the Spaarke MCP connector.
 
 ---
 

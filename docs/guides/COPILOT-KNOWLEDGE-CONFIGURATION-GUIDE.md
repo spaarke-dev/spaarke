@@ -193,15 +193,7 @@ When adding a new Dataverse entity to Spaarke:
 
 ## Declarative Agent Instructions
 
-In addition to Dataverse knowledge configuration, the Declarative Agent's instructions in `declarativeAgent.json` provide explicit guidance:
-
-- **Vocabulary mapping table** - maps user terms to API functions
-- **CRITICAL routing rule** - always use API Plugin functions, never native Dataverse
-- **Domain concepts** - explains Spaarke's entity model
-
-See `src/solutions/CopilotAgent/declarativeAgent.json` for the current instructions.
-
-**Limit**: Instructions are capped at 8000 characters. Keep them focused on routing rules and vocabulary, not detailed entity descriptions -- those belong in Dataverse metadata.
+Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2): the "Spaarke AI" declarative agent and its instructions were removed; Copilot reaches Spaarke through the Spaarke MCP connector. The Dataverse knowledge configuration above is unaffected.
 
 ---
 
@@ -210,7 +202,6 @@ See `src/solutions/CopilotAgent/declarativeAgent.json` for the current instructi
 | Problem | Cause | Fix |
 |---------|-------|-----|
 | Copilot queries standard Task entity | Missing glossary term for "task" | Add glossary: "task" = sprk_event |
-| Copilot gives generic answers | API Plugin not invoked | Check webApplicationInfo in manifest, verify auth |
 | Copilot says "I can't find that" | Dataverse Search not enabled | Enable in PP Admin Center |
 | Changes not reflected | Propagation delay | Wait 15-30 minutes after changes |
 | Copilot ignores custom tables | Tables not in knowledge sources | Add via Copilot Studio |

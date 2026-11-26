@@ -2,7 +2,7 @@
 description: Implement or modify an MCP tool handler for the Spaarke MCP server
 tags: [mcp, ai, tool-handler, api]
 techStack: [aspnet-core, csharp, mcp]
-appliesTo: ["**/Api/Mcp/**/*.cs", "**/Infrastructure/DI/McpModule.cs", "**/RouteAuthorizationGuardTests.Mcp.cs", "**/McpTool*.cs"]
+appliesTo: ["**/Api/Mcp/**/*.cs", "**/Infrastructure/DI/McpModule.cs", "**/RouteAuthorizationGuardTests.Mcp.cs", "**/RouteAuthorizationGuardTests.Mcp.*.cs", "**/McpTool*.cs"]
 alwaysApply: false
 ---
 
@@ -30,7 +30,7 @@ Architecture: `docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md`. Step-by-st
 | Rule | Where it is enforced |
 |---|---|
 | **One MCP server.** A new product area is a new `/mcp/{area}` route on this host, never a second server or service (ADR-013 placement). | `Api/Mcp/McpEndpoints.cs` (one `MapMcp` per area, area constant beside `LegalOperationsArea`) |
-| **Tool name** `spaarke_{verb}_{object}` (e.g. `spaarke_show_decisions`). Copilot shows it prefixed by the connector (`SpaarkeMCP_`). Not the April camelCase `/api/agent/*` names. | naming note `projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md` §1 |
+| **Tool name** `spaarke_{verb}_{object}` (e.g. `spaarke_show_decisions`). Copilot shows it prefixed by the connector (`SpaarkeMCP_`). Not the April camelCase `/api/agent/*` names (Retired 2026-11-25 with that gateway). | naming note `projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md` §1 |
 | **Shape:** one `McpToolDefinition` subclass per tool, tagged `[McpArea(McpEndpoints.{Area}Area)]`, under `Api/Mcp/{Area}/{Group}/`. `Create(IServiceProvider services)` returns `McpServerTool.Create(<static method group>, new McpServerToolCreateOptions { Services = services, ... })`. The handler is a `static` method taking services as parameters; no state between calls. No reflection (`Type.GetMethods`) and no SDK `WithToolsFromAssembly`. | `Api/Mcp/McpToolCatalog.cs` (discovers by attribute, partitions by area) |
 | **Caller identity:** every tool runs as the caller (OBO). Pass exactly `IHttpContextAccessor.HttpContext` to the capability; a null context or unauthenticated caller fails closed, never app-only. The route stays **stateless**: that is what keeps the accessor populated. | `Infrastructure/DI/McpModule.cs`; tests `tests/integration/auth/Mcp/McpCallerPathTests.cs` |
 | **Authorization:** `[Authorize]` on the class, naming only the allowed policies (bare `[Authorize]` or `SystemAdmin`). Never `ExternalCollaboration` or any other scheme's policy. The route accepts only ADR-028 **A10** tokens (Spaarke tenant, v2 issuer, scope `user_impersonation`, `aud` = BFF app); CIAM and A9 home-directory tokens are refused before any tool runs. | `Api/Mcp/McpToolAuthorization.cs`; ledger `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs` (`McpTools`) |
@@ -47,8 +47,8 @@ Architecture: `docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md`. Step-by-st
 
 1. **Placement.** Confirm the tool belongs in an existing area; a new area follows `docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md` "Add an area". Answer root CLAUDE.md §11's three questions for the new surface.
 2. **Service first.** Find or extend the service the REST route uses. If none exists, the logic goes in a service, not the tool.
-3. **Write the tool class** by copying the nearest existing one: read-only and model-visible → `ShowDecisionsTool.cs`; app-only read → `ListDecisionPageTool.cs` / `GetDecisionPlanTool.cs` / `SearchDecisionLookupTool.cs`; app-only write → `CompleteDecisionTool.cs`. Shared argument parsing: `DecisionToolCall.cs`.
-4. **Add the ledger entry** in `RouteAuthorizationGuardTests.Mcp.cs` `McpTools` (policy, caller seam, reason). The ArchTest fails on any tagged tool missing from it.
+3. **Write the tool class** by copying the nearest existing one: read-only and model-visible → `ShowDecisionsTool.cs`; app-only read → `ListDecisionPageTool.cs` / `GetDecisionPlanTool.cs` / `SearchDecisionLookupTool.cs`; app-only write → `CompleteDecisionTool.cs`. Shared argument parsing: `DecisionToolCall.cs`. Errors: `McpToolResults.FromError(new McpToolError(reasonCode, message, status, partial?), http?.TraceIdentifier)` with the REST route's `reasonCode`. Work that can take over 30 s (`McpLongRunning.Budget`): return `McpLongRunning.Started(...)` and add a status tool that returns `McpLongRunning.Status(...)` (FR-14).
+4. **Add the ledger entry** in your area's partial, `RouteAuthorizationGuardTests.Mcp.{Area}.cs` (`McpTools{Area}`: policy, caller seam, reason), never in `RouteAuthorizationGuardTests.Mcp.cs` (it concatenates the partials). The ArchTest fails on any tagged tool missing from every partial or listed twice.
 5. **Tests** (all required):
    - auth: `tests/integration/auth/Mcp/` (unauthenticated → 401; refused token types; caller path);
    - contract: `tests/integration/contract/Api/Mcp/` (`tools/list` entry: name, title, hints, visibility, schema; happy path; `isError` mapping);
