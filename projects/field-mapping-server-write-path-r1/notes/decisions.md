@@ -1172,3 +1172,11 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - **Owner of the rule.** One refusal in the re-file core, so it holds for every writer: the filing route, the AI update tools, push, Office reconcile, thread moves and inbound association. Placement and authorship are agreed with UAC-r2 before code.
 - **A participant who wants the record's team to see something** sends an ordinary message on the record.
 - **Follow-up, not built here:** invite-only conversations, where participants may add named people who each pass the record-access check. The conversation then widens only by invitation, never by filing. Filed for `messages-enhancements-r1`.
+
+## 2026-11-26 — Owner answers on 051 scope and the 4b/4c copy rule
+
+- **051 OQ-1:** memo and analysis New stay native. Report card New goes to the existing report card wizard if a launcher fits cleanly; budget and KPI assessment New stay native until their wizards are built (separate work, owner). No placeholder page in 051.
+- **051 home grid:** report card, budget and KPI assessment are created only in their parent matter's context: the platform New is hidden on their home grid and kept on the record command bar and subgrid. The seven redirected tables get the "+New X" launcher on the home grid.
+- **051 OQ-2 / OQ-3:** unchanged (invoice-family, ontology and service-request keep native New with Assign hidden; `sprk_procedureversion` stays in the 23).
+- **051 dev import:** approved ("yes can import 051").
+- **4b/4c reconfirmed:** "the copy should happen no matter of appendto - the mapping is a data consistency rule so should happen regardless of user's permissions." The 2026-10-27 decision stands and was never implemented (the create still drops a mapped ordinary lookup that fails the caller's AppendTo or field security). New task 064 implements it inside the 2026-10-27 boundaries: a mapped FILING lookup keeps the caller's AppendTo check (refuse); BFF-owned invariant columns are never copied; a field-secured source value is never copied into a non-field-secured target; the FR-04 source Read check stays as the caller.

@@ -254,3 +254,14 @@ Labels: none were visible on comparable follow-ups in this project's `defer-issu
    CI run of the full `Sprk.Bff.Api.Tests` Events folder is red until those two files stop naming the column (or the test's
    exclusion list names them). Not touched here.
 2. The `AuthenticatedFetch` type has three importers plus a public barrel export tied to a dead factory (section 1.2).
+
+## 6. Main-session completion (2026-11-26)
+
+- **Adapter deleted** (e5142c175b): the three `AuthenticatedFetch` type importers (`BffChildRecordDataverseClient.ts`, `bffChildWriteAdapter.ts`, `bffUploadServiceAdapter.ts`) now import the existing `ResponseFetchFn` (`utils/fetchTypes`); the barrel export, the lint suppression entry, ADR-012:186, ADR-028:896 and four doc references were updated. Not an alias: the type already existed. Shared library `tsc` clean; adapter and document-upload Jest 13 suites / 182 tests pass. Left on purpose: a historical comment in `external-spa/scripts/check-dist.mjs`, a scanner fixture string in `external-spa/tests/out-of-plane-routes.test.ts`, and `.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md` (a dated audit).
+- **Publish delta:** master 24d53fb333 43,659,830 bytes vs branch 5cd9ba2153 43,657,245 bytes = −2,585 bytes; 194 = 194 files; 41.63 MB; Compress-Archive. `dotnet list package --vulnerable --include-transitive`: none.
+- **Adversarial review (Opus, one pass over 063 + 051):** 063 has no F-class finding. K1: creator-person on events has no seam test (the owner is pinned end to end).
+- **Issues posted:** comments on #1614, #1617 (status, names the unimplemented 2026-10-27 owner decision → task 064), #1437 (open for the 403 wording), #2098; #1318 commented and closed; #3245 filed (Assign audit, UAC-r2 acknowledged). DI-045, DI-046 recorded.
+- **Out of scope, filed and reported:** DI-047 #3246 (demo data writes the deprecated event status column; `EventStatusDeprecationTests` fails 1 of 13 on master, confirmed on the branch with master merged).
+- **Python process note:** the agent's mistaken `python -` was stopped by the agent; the one long-running `python.exe` seen afterwards belonged to another session's scratchpad and was left alone.
+
+rework: fix-round-1 task 063

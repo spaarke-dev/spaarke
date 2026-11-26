@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Copy ordinary mapped lookups and values regardless of the caller's AppendTo or field security (owner 4b/4c, 2026-10-27, reconfirmed 2026-11-26)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>none</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the caller-check step of the BFF create (and push) path; security-adjacent (AppendTo, field security); bff-api.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes an authorization step on the write path; boundaries must hold exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, field-mapping, security, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the owner's 4b/4c rule (notes/decisions.md 2026-10-27 and 2026-11-26): field mapping is a data consistency rule, so an ORDINARY mapped lookup or value is copied whatever the caller's AppendTo or the target column's field security. Today `RecordCreationService` step 5 drops such a value with `MappedValueDroppedCode`. Keep every boundary of the 2026-10-27 decision.</prompt>
+  <role>SPAARKE BFF developer; Dataverse write path; authorization.</role>
+  <goal>On create (and on push, if push applies the same per-value drop), an ordinary mapped lookup or value that fails only the caller's AppendTo or field-security check is written, with no drop warning; every boundary below still holds and is proven by a test.</goal>
+
+  <context>
+    <background>Owner decision 4b/4c (2026-10-27, accepted as UAC-r2 recommended) said "lands with 017" but was never implemented; the code still follows the FR-08 drop (project CLAUDE.md binding rule). Owner 2026-11-26: "the copy should happen no matter of appendto - the mapping is a data consistency rule so should happen regardless of user's permissions."</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs (step 5: merged payload by origin; MappedValueDroppedCode)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/FieldMappingEndpoints.cs and the push Copy path (task 040): check whether push applies the same drop</file>
+      <file role="read">tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests.cs ("#1617" section: tests that pin the drop)</file>
+      <file role="modify">projects/field-mapping-server-write-path-r1/CLAUDE.md is main-session only: the FR-08 binding-rule text is updated there by the main session, not by an agent</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-27 boundary 1">A mapped FILING lookup (`IsFilingLookup`: SecureChildLineage / FilingParentOf) keeps the caller's AppendTo check: a failure refuses the whole create (uniform 404/403). The K-2 field-security refusal on filing lookups stays.</constraint>
+    <constraint source="owner 2026-10-27 boundary 3">Never copied, whatever the rights: BFF-owned invariant columns (ownerid, sprk_issecure, sprk_accessinheritance, sprk_createdbyperson, sprk_regarding* stamps, sprk_accesspermission, contact identity/binding). A field-secured SOURCE value is never copied into a non-field-secured target (declassification): dropped with a warning.</constraint>
+    <constraint source="FR-04">The source Read check as the caller stays: denied source → no mapping + a warning.</constraint>
+    <constraint source="FR-08">The caller's OWN values are checked exactly as today: a failure refuses.</constraint>
+    <constraint source="ADR-008 path A">Checks stay in CallerWriteAuthorization, called by the service.</constraint>
+    <constraint source="project">Do not edit UAC-r2's files (OwnedChildWrite, RecordOwnershipResolver, SecureRootInheritance, SecureChildShareSynchronizer, SecureChildReconciler, SecureRecordOwnerTeam, RestrictedContentOwnerTeam, RefileIsolationRead, DirectThreadAccessService, DirectMessageParticipantShares, SecureChildShareReconciliationJob). UAC-r2 reviews the diff before merge.</constraint>
+    <constraint source="project">Public repo: comments and notes state rules, never holes.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL rigor; read decisions.md (2026-10-27 4b/4c and 2026-11-26), spec FR-04/FR-08, the step-5 code, and the #1617 seam tests.</step>
+    <step order="1">Change step 5 so an ordinary mapped value is written without the caller's AppendTo / field-security check; filing lookups, invariant columns and declassification keep their behaviour.</step>
+    <step order="2">Apply the same rule on push if push drops the same way (one predicate, not two copies).</step>
+    <step order="3">Update the #1617 seam tests: the ordinary-lookup case now writes; add must-not-regress tests for each boundary.</step>
+    <step order="4">Gates: filtered BFF tests, ArchTests, publish delta (main session), CVE check; two adversarial passes (security tag); UAC-r2 diff review.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A mapped ordinary lookup the caller cannot AppendTo is written on create; no MappedValueDropped warning for it.</criterion>
+    <criterion testable="true">A mapped ordinary value into a field-secured target the caller cannot update is written.</criterion>
+    <criterion testable="true">Negative: a mapped FILING lookup the caller cannot AppendTo still refuses the create.</criterion>
+    <criterion testable="true">Negative: invariant columns are never copied; a field-secured source into a non-field-secured target is still dropped with a warning; a denied source Read still maps nothing.</criterion>
+    <criterion testable="true">Negative: a caller-supplied value that fails AppendTo still refuses.</criterion>
+    <criterion testable="true">Push follows the same rule (or the notes show push never applied the drop).</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-11-26 by the main session from the owner's answer; FR-08 binding-rule text in the project CLAUDE.md is updated by the main session when this lands.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
