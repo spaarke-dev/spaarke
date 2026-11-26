@@ -129,7 +129,7 @@ Membership in the closed platform event vocabulary (`document_uploaded`, `matter
 | Disposition | Shipped leg (2026-07-07) |
 |---|---|
 | `informational` | ✅ Rendered to the Assistant pane from the stored ledger entry (platform default; the terminal chunk renders FROM the store). |
-| `work_product` | ✅ `TopicRegistryWorkProductPersister` (task 047): persists the `work-product-envelope-v1` JSON to the host record field declared by the capability's `sprk_aitopicregistry` row (topic = ConsumerCode, e.g. `matter-summary` → `sprk_matter.sprk_mattersummary`). Store-first, idempotent single-field PATCH, user-OBO, loud failures. |
+| `work_product` | ✅ `TopicRegistryWorkProductPersister` (task 047): persists the `work-product-envelope-v1` JSON to the host record field declared by the capability's `sprk_aitopicregistry` row (topic = ConsumerCode, e.g. `matter-summary` → `sprk_matter.sprk_recordsummary`). Store-first, idempotent single-field PATCH, user-OBO, loud failures. |
 | `email` | ✅ `IEmailDispositionSender` leg (task 043): routes to the Communication (Email) service — Daily Briefing `email` row is the shipped instance (DRAFT-only posture for chat drafting). |
 | `overlay` | ⏳ Not yet dispatchable — `SessionDispatchOrchestrator` 422s `dispatch.disposition-not-supported`. |
 | `record` | ⏳ Not yet dispatchable (same 422). |
@@ -163,7 +163,7 @@ Membership in the closed platform event vocabulary (`document_uploaded`, `matter
 | `ai-summary` | default | — | — (→Informational) | — | — | legacy; playbook target |
 | `chat-classify` | default | UC-A-7 | Informational | None | assistant | |
 | `chat-summarize` | default | UC-A-1 | Informational | None | assistant | SUM-CHAT@v1 |
-| `chat-summarize` | matter-summary | UC-A-1 | **Work Product** | None | assistant | → `sprk_matter.sprk_mattersummary` (task 047) |
+| `chat-summarize` | matter-summary | UC-A-1 | **Work Product** | None | assistant | → `sprk_matter.sprk_recordsummary` (task 047) |
 | `compose-summarize` | default | — | — | — | — | legacy |
 | `create-task` | default | UC-H-1 | Informational | None | assistant | drafting capability; write bridges to `dataverse.create_record` |
 | `daily-briefing-narrate` | default | UC-D-1 | Informational | None | (all) | coded Action DAILY-BRIEFING@v1 |

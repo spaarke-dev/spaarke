@@ -11,8 +11,8 @@ namespace Sprk.Bff.Api.Tests;
 /// REGRESSION GUARD — unified-access-control-r2 task 164 (owner round 10 item 1).
 ///
 /// <para>Ten routes were DELETED rather than gated, because each had no caller anywhere in the repository and
-/// appears in no published API description (src/solutions/CopilotAgent/spaarke-bff-openapi.yaml,
-/// spaarke-api-plugin.json and declarativeAgent.json were checked; no other OpenAPI, ai-plugin or
+/// appears in no published API description (the legacy Copilot agent package's spaarke-bff-openapi.yaml,
+/// spaarke-api-plugin.json and declarativeAgent.json were checked at the time; no other OpenAPI, ai-plugin or
 /// declarativeAgent file exists outside knowledge/ samples). Each let ANY signed-in caller act, as the BFF's own
 /// identity, on a record the caller chose:</para>
 /// <list type="bullet">

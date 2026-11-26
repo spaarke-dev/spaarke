@@ -1,0 +1,13 @@
+{
+  "case": "create.409.owner",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Record owner unresolved\",\"status\":409,\"detail\":\"The event was not saved: double: refused.\",\"reasonCode\":\"record_owner_secure_parent_not_isolated\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "Record owner unresolved",
+    "status": 409,
+    "detail": "The event was not saved: double: refused.",
+    "reasonCode": "record_owner_secure_parent_not_isolated"
+  }
+}

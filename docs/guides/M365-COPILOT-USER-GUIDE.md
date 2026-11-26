@@ -1,5 +1,7 @@
 # Spaarke AI in Microsoft 365 Copilot — User Guide
 
+> **Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2); Copilot reaches Spaarke through the Spaarke MCP connector** ([SPAARKE-MCP-SERVER-ARCHITECTURE.md](../architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md)). The "Spaarke AI" declarative agent described below no longer exists; this page is kept for history only.
+
 > **Last Updated**: March 26, 2026
 > **Purpose**: How to use Spaarke AI capabilities from within M365 Copilot in Power Apps model-driven apps.
 > **Audience**: End users, legal staff, analysts
@@ -311,7 +313,7 @@ When you hit these limits, ask Copilot to hand off to the Analysis Workspace —
 
 ### Why don't I see the Spaarke AI agent in Copilot?
 
-The Spaarke AI agent must be deployed to your organization's app catalog by an administrator. Contact your IT administrator to verify the agent is installed. See the [Admin Guide](./M365-COPILOT-ADMIN-GUIDE.md) for deployment steps.
+The Spaarke AI agent must be deployed to your organization's app catalog by an administrator. Contact your IT administrator to verify the agent is installed. The Admin Guide was removed on 2026-11-25.
 
 ### Why can't I find a document I know exists?
 
@@ -339,4 +341,4 @@ Playbook analyses are read-only — they do not modify your documents. You can r
 
 ---
 
-*For deployment and configuration, see the [M365 Copilot Admin Guide](./M365-COPILOT-ADMIN-GUIDE.md).*
+*The Admin Guide was removed on 2026-11-25 with the agent.*

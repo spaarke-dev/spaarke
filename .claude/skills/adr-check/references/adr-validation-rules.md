@@ -575,7 +575,7 @@ Select-String -Path src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClient
 #
 # $E3 = the transitional sites enumerated in ADR-028 exception E-3. Cite E-3 for these; do NOT report as
 # violations. E-3 is time-boxed to `spaarke-auth-v4-dataverse-MI` — remove this allowlist when it closes.
-$E3 = 'GraphClientFactory|DataverseAccessDataSource|DataverseUserClient|AgentTokenService|ReportingEmbedService|ReportingProfileManager|DataverseServiceClientImpl|DataverseWebApiService|DataverseWebApiClient'
+$E3 = 'GraphClientFactory|DataverseAccessDataSource|DataverseUserClient|ReportingEmbedService|ReportingProfileManager|DataverseServiceClientImpl|DataverseWebApiService|DataverseWebApiClient'
 # E-1 (per-customer owning apps) is architectural, not transitional — permanently exempt.
 $E1 = 'SpeAdminTokenProvider|SpeAdminGraphService'
 

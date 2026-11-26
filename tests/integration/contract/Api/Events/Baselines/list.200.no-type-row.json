@@ -1,0 +1,15 @@
+{
+  "case": "list.200.no-type-row",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"items\":[],\"totalCount\":0,\"pageSize\":50,\"pageNumber\":1,\"totalPages\":0,\"hasNextPage\":false,\"hasPreviousPage\":false}",
+  "bodyPretty": {
+    "items": [],
+    "totalCount": 0,
+    "pageSize": 50,
+    "pageNumber": 1,
+    "totalPages": 0,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  }
+}
