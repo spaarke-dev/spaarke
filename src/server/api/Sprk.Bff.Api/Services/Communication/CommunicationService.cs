@@ -2709,6 +2709,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
             var deferred = false;
             string? inlinePostSendOwner = null;
+            // Run 3b (review F1): the inline fallback's tail runs to completion whatever the caller's token (the email is sent; the
+            // non-deferred tail below was never bounded by a caller that gave up either). Otherwise the caller's token.
+            var tailCt = cancellationToken;
+            var enrichedInline = false;
             if (request.DeferPostSend && communicationId.HasValue)
             {
                 deferred = await TryEnqueuePostSendAsync(
@@ -2717,11 +2721,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     correlationId);
                 if (!deferred)
                 {
-                    // The fallback takes the job's lock and leaves its markers, so a job whose submit landed late is a no-op.
+                    // The fallback takes the job's lock and leaves the markers of the steps it completed, so a job whose submit
+                    // landed late does only what is left.
                     inlinePostSendOwner = await ClaimInlinePostSendAsync(communicationId.Value, correlationId);
                     deferred = inlinePostSendOwner is null;
                     if (!deferred)
-                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
+                    {
+                        tailCt = CancellationToken.None;
+                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, tailCt);
+                    }
                 }
             }
 
@@ -2749,14 +2757,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 {
                     // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
-                        request, partialResponse, communicationId.Value, cancellationToken,
+                        request, partialResponse, communicationId.Value, tailCt,
                         requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User),
                         sentAttachments: fileAttachments ?? [],
                         sentSources: attachmentSources ?? [],
                         filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
-                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, cancellationToken);
+                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, tailCt);
                 }
                 catch (Exception archEx)
                 {
@@ -2846,7 +2854,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         CommunicationDirection.Outgoing,
                         BuildOutboundEnvelope(request, senderResult.Email!),
                         archivedDocumentId,
-                        cancellationToken);
+                        tailCt);
+                    enrichedInline = true;
                 }
                 catch (Exception enrichEx)
                 {
@@ -2863,17 +2872,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderResult.Email, null,
-                    request.To, request.Cc, request.Bcc, cancellationToken);
+                    request.To, request.Cc, request.Bcc, tailCt);
 
                 // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
                 // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
                 // spine-owned producer + emit point as the other four persist paths (channel-identical).
                 if (_arrivedProducer is not null)
-                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, tailCt);
             }
 
             if (inlinePostSendOwner is not null)
-                await CompleteInlinePostSendAsync(communicationId!.Value, inlinePostSendOwner, correlationId);
+                await CompleteInlinePostSendAsync(
+                    communicationId!.Value, inlinePostSendOwner, correlationId,
+                    archived: !(archive && archiveOutgoingOptIn) || archivedDocumentId.HasValue, enriched: enrichedInline);
 
             return new SendCommunicationResponse
             {
@@ -3087,17 +3098,25 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
             var deferred = false;
             string? inlinePostSendOwner = null;
+            // Run 3b (review F1): the inline fallback's tail runs to completion whatever the caller's token (the email is sent; the
+            // non-deferred tail below was never bounded by a caller that gave up either). Otherwise the caller's token.
+            var tailCt = ct;
+            var enrichedInline = false;
             if (request.DeferPostSend && communicationId.HasValue)
             {
                 deferred = await TryEnqueuePostSendAsync(
                     communicationId.Value, archive && archiveOutgoingOptIn, request, userObjectId, senderSystemUserId, correlationId);
                 if (!deferred)
                 {
-                    // The fallback takes the job's lock and leaves its markers, so a job whose submit landed late is a no-op.
+                    // The fallback takes the job's lock and leaves the markers of the steps it completed, so a job whose submit
+                    // landed late does only what is left.
                     inlinePostSendOwner = await ClaimInlinePostSendAsync(communicationId.Value, correlationId);
                     deferred = inlinePostSendOwner is null;
                     if (!deferred)
-                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
+                    {
+                        tailCt = CancellationToken.None;
+                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, tailCt);
+                    }
                 }
             }
 
@@ -3124,14 +3143,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 {
                     // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
-                        request, partialResponse, communicationId.Value, ct,
+                        request, partialResponse, communicationId.Value, tailCt,
                         requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId),
                         sentAttachments: fileAttachments ?? [],
                         sentSources: attachmentSources ?? [],
                         filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
-                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, ct);
+                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, tailCt);
                 }
                 catch (Exception archEx)
                 {
@@ -3222,7 +3241,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         CommunicationDirection.Outgoing,
                         BuildOutboundEnvelope(request, userEmail),
                         archivedDocumentId,
-                        ct);
+                        tailCt);
+                    enrichedInline = true;
                 }
                 catch (Exception enrichEx)
                 {
@@ -3240,17 +3260,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 await WriteParticipantIndexAsync(
                     communicationId.Value, userEmail, null,
-                    request.To, request.Cc, request.Bcc, ct);
+                    request.To, request.Cc, request.Bcc, tailCt);
 
                 // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
                 // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
                 // spine-owned producer + emit point as the other four persist paths (channel-identical).
                 if (_arrivedProducer is not null)
-                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, tailCt);
             }
 
             if (inlinePostSendOwner is not null)
-                await CompleteInlinePostSendAsync(communicationId!.Value, inlinePostSendOwner, correlationId);
+                await CompleteInlinePostSendAsync(
+                    communicationId!.Value, inlinePostSendOwner, correlationId,
+                    archived: !(archive && archiveOutgoingOptIn) || archivedDocumentId.HasValue, enriched: enrichedInline);
 
             return new SendCommunicationResponse
             {
@@ -4724,11 +4746,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
-    /// ISS-010 part E (#3184): after an inline fallback ran the tail, sets the markers the job reads (done, <c>:enriched</c>,
-    /// <c>:arrived</c>) and releases the lock, so a job whose submit landed late is a no-op and never emits arrived a second time.
-    /// Best-effort: a cache fault leaves the job's durable guards.
+    /// ISS-010 part E (#3184): after an inline fallback ran the tail, sets the markers the job reads for the steps that completed,
+    /// with the job's own semantics (run 3b): <c>:enriched</c> only when enrichment returned, <c>:arrived</c> once the emit ran, and
+    /// done only when the .eml was archived (or no archive was asked for), so a job whose submit landed late retries a failed inline
+    /// archive instead of finding it hidden. Then releases the lock. Best-effort: a cache fault leaves the job's durable guards.
     /// </summary>
-    private async Task CompleteInlinePostSendAsync(Guid communicationId, string owner, string correlationId)
+    private async Task CompleteInlinePostSendAsync(Guid communicationId, string owner, string correlationId, bool archived, bool enriched)
     {
         if (_scopeFactory is null)
             return;
@@ -4740,7 +4763,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 return;
 
             var key = CommunicationPostSendJobHandler.KeyFor(communicationId);
-            foreach (var marker in new[] { CommunicationPostSendJobHandler.EnrichedKeyFor(communicationId), CommunicationPostSendJobHandler.ArrivedKeyFor(communicationId), key })
+            var markers = new List<string> { CommunicationPostSendJobHandler.ArrivedKeyFor(communicationId) };
+            if (enriched)
+                markers.Add(CommunicationPostSendJobHandler.EnrichedKeyFor(communicationId));
+            if (archived)
+                markers.Add(key);
+            else
+                _logger.LogInformation(
+                    "Post-send work ran inline but the .eml was not archived; the job, if it lands, retries it | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                    communicationId, correlationId);
+            foreach (var marker in markers)
                 await idempotency.MarkEventAsProcessedAsync(marker, CommunicationPostSendJobHandler.MarkerRetention, CancellationToken.None);
             await idempotency.ReleaseProcessingLockAsync(key, owner, CancellationToken.None);
         }

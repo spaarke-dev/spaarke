@@ -639,26 +639,93 @@ public class CommunicationPostSendTests
         }
     }
 
-    [Fact]
-    public async Task Deferred_TheQueueFails_AndTheCallersTokenFires_TheInlineFallbackStillLeavesTheJobsMarkers()
+    [Theory]
+    [InlineData(SendMode.User)]
+    [InlineData(SendMode.SharedMailbox)]
+    public async Task Deferred_TheCallersTokenFiresDuringTheSend_AndTheQueueFails_TheInlineTailRunsToCompletion_AndLeavesItsMarkers(SendMode mode)
     {
+        // Run 3b (review F1): AssignTaskNotifier's 10 s token fires while Graph sends, and the queue is down. The doubles honour the
+        // token (as Graph and Dataverse do): a tail run on the caller's token would archive nothing, thread nothing, emit nothing,
+        // yet leave the job's markers, so no job would ever do the work.
         using var caller = new CancellationTokenSource();
-        var h = Build(postSendSubmit: _ =>
-        {
-            caller.Cancel();
-            throw new ServiceBusException("queue down", ServiceBusFailureReason.ServiceCommunicationProblem);
-        });
+        var h = Build(
+            postSendSubmit: _ => throw new ServiceBusException("queue down", ServiceBusFailureReason.ServiceCommunicationProblem),
+            arrived: true);
+        h.OnSent = caller.Cancel;
 
-        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext(), caller.Token)).CommunicationId!.Value;
+        var response = await h.Sut.SendAsync(
+            AssignTaskShape(defer: true) with { SendMode = mode }, mode == SendMode.User ? UserContext() : null, caller.Token);
+
+        caller.IsCancellationRequested.Should().BeTrue("the precondition: the caller's token fired after Graph sent");
+        response.Status.Should().Be(CommunicationStatus.Send);
+        h.SendCalls.Should().Be(1);
+        h.PostSendJobs.Should().BeEmpty("the precondition: nothing was queued");
+        var id = response.CommunicationId!.Value;
+        var eml = h.ArchivedEmls.Should().ContainSingle("the inline archive ran to completion").Subject;
+        response.ArchivedDocumentId.Should().Be(eml.Id);
+        response.ArchivalWarning.Should().BeNull();
+        h.ThreadCalls.Should().ContainSingle();
+        h.EnrichCalls.Should().Be(1);
+        h.Rows[id].Contains("sprk_communicationthread").Should().BeTrue();
+        h.ParticipantRows.Should().NotBeEmpty();
+        h.ArrivedEmits.Should().Equal(id);
 
         foreach (var marker in new[]
                  {
                      CommunicationPostSendJobHandler.KeyFor(id), CommunicationPostSendJobHandler.EnrichedKeyFor(id),
                      CommunicationPostSendJobHandler.ArrivedKeyFor(id),
                  })
-            (await h.Idempotency.IsEventProcessedAsync(marker)).Should().BeTrue(marker);
+            (await h.Idempotency.IsEventProcessedAsync(marker)).Should().BeTrue($"{marker}: its step ran");
         h.Idempotency.IsLocked(CommunicationPostSendJobHandler.KeyFor(id)).Should().BeFalse("the fallback released the job's lock");
-        h.SendCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Deferred_TheQueueFails_AndTheInlineArchiveFails_TheDoneMarkerIsNotSet_SoALateJobRetriesTheArchive()
+    {
+        // Run 3b: the fallback leaves the markers of the steps that completed, with the job's semantics. A failed inline archive
+        // leaves no done marker, so a job whose submit landed late archives the .eml instead of finding the failure hidden.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var h = Build(postSendSubmit: _ => release.Task); // slower than 2 s, then it lands anyway
+        h.UploadFails = true;
+
+        var response = await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext());
+
+        var id = response.CommunicationId!.Value;
+        response.ArchivalWarning.Should().Contain("archival failed", "the inline fallback's response is today's");
+        (await h.Idempotency.IsEventProcessedAsync(CommunicationPostSendJobHandler.KeyFor(id))).Should().BeFalse("the archive did not complete");
+        (await h.Idempotency.IsEventProcessedAsync(CommunicationPostSendJobHandler.EnrichedKeyFor(id))).Should().BeTrue();
+        (await h.Idempotency.IsEventProcessedAsync(CommunicationPostSendJobHandler.ArrivedKeyFor(id))).Should().BeTrue();
+
+        h.UploadFails = false;
+        release.SetResult();
+        await WaitUntilAsync(() => h.PostSendJobs.Count == 1);
+        var handler = h.Handler();
+        (await handler.ProcessAsync(h.PostSendJobs.Single(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.ArchivedEmls.Should().ContainSingle("the late job archived the .eml");
+        handler.Arrived.Should().Be(0, "the fallback already emitted arrived");
+        h.EnrichCalls.Should().Be(1, "the fallback already enriched");
+        h.ThreadCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TheJob_AnOldPayloadWithoutTheSenderSystemUserId_Runs_AndBellsTheRowsSender()
+    {
+        // K4: a job queued before SenderSystemUserId existed has no such member; it deserializes (null) and the bell uses sprk_sentby.
+        var h = Build();
+        var id = (await h.Sut.SendAsync(AssignTaskShape(defer: true), UserContext())).CommunicationId!.Value;
+        var sentBy = h.Rows[id].GetAttributeValue<EntityReference>("sprk_sentby").Id;
+        var job = h.PostSendJobs.Single();
+        var old = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(job.Payload!.RootElement.GetRawText())!;
+        old.Remove(nameof(CommunicationPostSendPayload.SenderSystemUserId)).Should().BeTrue("the precondition: today's payload carries it");
+        job.Payload = JsonSerializer.SerializeToDocument(old);
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        h.UploadFails = true;
+
+        (await h.Handler().ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Failed, "the archive failed, not the payload");
+
+        h.Bells.Should().ContainSingle().Which.Entity.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("systemuser", sentBy));
+        h.ThreadCalls.Should().ContainSingle("the job ran its steps");
     }
 
     // ── K1: the REAL owner-based lock, with the job running while the inline fallback runs ────────────────────────
@@ -765,6 +832,12 @@ public class CommunicationPostSendTests
 
         /// <summary>Thrown by every <c>sprk_communication</c> read when set.</summary>
         public Exception? RowReadFault { get; set; }
+
+        /// <summary>Called once the channel sender accepted the email (after Graph sent it).</summary>
+        public Action? OnSent { get; set; }
+
+        /// <summary>The communications the send path's communication-arrived producer emitted for (with <c>arrived: true</c>).</summary>
+        public required List<Guid> ArrivedEmits { get; init; }
 
         /// <summary>The job handler's log lines.</summary>
         public ListLogger<CommunicationPostSendJobHandler> HandlerLog { get; } = new();
@@ -924,8 +997,11 @@ public class CommunicationPostSendTests
 
     /// <param name="postSendSubmit">How the queue answers a <c>CommunicationPostSend</c> submit (null: it accepts); the Q4 tests throw or hang.</param>
     /// <param name="realCache">True: the REAL owner-based <see cref="IdempotencyService"/> over an in-memory distributed cache.</param>
-    private static Harness Build(Exception? sendFault = null, Func<CancellationToken, Task>? postSendSubmit = null, bool realCache = false)
+    /// <param name="arrived">True: the send path's communication-arrived producer is composed; its emits land in <see cref="Harness.ArrivedEmits"/>.</param>
+    private static Harness Build(
+        Exception? sendFault = null, Func<CancellationToken, Task>? postSendSubmit = null, bool realCache = false, bool arrived = false)
     {
+        var arrivedEmits = new List<Guid>();
         var options = new CommunicationOptions
         {
             ApprovedSenders = [new ApprovedSenderConfig { Email = SharedMailbox, DisplayName = "Contoso", IsDefault = true }],
@@ -1003,6 +1079,7 @@ public class CommunicationPostSendTests
             {
                 sendCount++;
                 if (sendFault is not null) throw sendFault;
+                harness?.OnSent?.Invoke(); // Graph accepted the email (a test fires the caller's token here)
                 return new ChannelSendResult { FromAddress = r.FromAddress };
             });
         var dispatcher = new CommunicationChannelDispatcher(
@@ -1043,8 +1120,9 @@ public class CommunicationPostSendTests
         var threadCalls = new List<ThreadResolutionRequest>();
         var threads = new Mock<IThreadResolver>();
         threads.Setup(t => t.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ThreadResolutionRequest r, CancellationToken _) =>
+            .ReturnsAsync((ThreadResolutionRequest r, CancellationToken ct) =>
             {
+                ct.ThrowIfCancellationRequested(); // the doubles honour the token, as Dataverse does
                 threadCalls.Add(r);
                 var threadId = Guid.NewGuid();
                 if (rows.TryGetValue(r.CommunicationId, out var row))
@@ -1055,8 +1133,9 @@ public class CommunicationPostSendTests
         // Enrichment: its propose step writes a review row naming the communication (the durable evidence the job reads).
         var enrichment = new Mock<ICommunicationEnrichmentService>();
         enrichment.Setup(e => e.EnrichAsync(It.IsAny<Guid>(), It.IsAny<CommunicationDirection>(), It.IsAny<NormalizedMessage>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .Returns((Guid id, CommunicationDirection _, NormalizedMessage _, Guid? _, CancellationToken _) =>
+            .Returns((Guid id, CommunicationDirection _, NormalizedMessage _, Guid? _, CancellationToken ct) =>
             {
+                if (ct.IsCancellationRequested) return Task.FromCanceled(ct);
                 lock (created) created.Add((new Entity("sprk_emailreviewlog") { ["sprk_communication"] = new EntityReference("sprk_communication", id) }, Guid.NewGuid()));
                 return Task.CompletedTask;
             });
@@ -1081,7 +1160,8 @@ public class CommunicationPostSendTests
             log,
             threadResolver: threads.Object,
             scopeFactory: ScopeFactory(spe.Object, cache),
-            participantIndexer: indexer);
+            participantIndexer: indexer,
+            arrivedProducer: arrived ? ArrivedProducer(arrivedEmits) : null);
 
         harness = new Harness
         {
@@ -1096,11 +1176,37 @@ public class CommunicationPostSendTests
             ThreadCalls = threadCalls,
             Idempotency = idempotency,
             Cache = cache,
+            ArrivedEmits = arrivedEmits,
             Log = log,
             Probe = new ScriptedProbe(),
             SendCount = () => sendCount,
         };
         return harness;
+    }
+
+    /// <summary>
+    /// The REAL communication-arrived producer over its own Dataverse double, which honours the token: an emit made with a live
+    /// token re-reads the communication and is recorded in <paramref name="emits"/>; the row it answers has no thread, so the
+    /// producer stops there (fan-out, outbox and delivery are never reached, so they are bare instances).
+    /// </summary>
+    private static CommunicationArrivedProducer ArrivedProducer(List<Guid> emits)
+    {
+        var reads = new Mock<IGenericEntityService>();
+        reads.Setup(r => r.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string[] _, CancellationToken ct) =>
+            {
+                if (ct.IsCancellationRequested) return Task.FromCanceled<Entity>(ct);
+                lock (emits) emits.Add(id);
+                return Task.FromResult(new Entity("sprk_communication", id));
+            });
+        T Unused<T>() => (T)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(T));
+        return new CommunicationArrivedProducer(
+            reads.Object,
+            Unused<CommunicationFanOutTargetingService>(),
+            Unused<Sprk.Bff.Api.Services.Notifications.OutboxService>(),
+            Unused<Sprk.Bff.Api.Services.Notifications.SignalRDeliveryService>(),
+            Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam>(),
+            NullLogger<CommunicationArrivedProducer>.Instance);
     }
 
     private static Mock<SpeFileStore> BuildSpeFileStore(
@@ -1120,8 +1226,9 @@ public class CommunicationPostSendTests
 
         speMock
             .Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Returns(async (string driveId, string path, Stream content, CancellationToken _) =>
+            .Returns(async (string driveId, string path, Stream content, CancellationToken ct) =>
             {
+                ct.ThrowIfCancellationRequested(); // the doubles honour the token, as Graph does
                 if (uploadGate() is { } gate)
                     await gate();
                 if (uploadFault() is { } fault)

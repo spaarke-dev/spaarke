@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -160,12 +161,16 @@ public class BudgetInquiryEmailFilingTests
 
         // (b) The job, on its final delivery, with the archive failing.
         job.DeliveryCount = JobContract.MaxDeliveryCount;
+        var log = new Sprk.Bff.Api.Tests.Auth.Finance.CapturingLogger<CommunicationPostSendJobHandler>();
         var handler = new CommunicationPostSendJobHandler(
             harness.Service, harness.Entities.Object, Mock.Of<ICommunicationEnrichmentService>(),
             new CommunicationPostSendTests.InMemoryIdempotency(),
             new Sprk.Bff.Api.Services.NotificationService(harness.Entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
-            new UnansweredProbe(), NullLogger<CommunicationPostSendJobHandler>.Instance);
+            new UnansweredProbe(), log);
         (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().NotBe(JobStatus.Completed, "the archive failed");
+        // K5: the failure is the ARCHIVE's (its final Error), not a fault in another step that would also leave the job not completed.
+        log.Entries.Where(e => e.Level == LogLevel.Error).Should().ContainSingle()
+            .Which.Message.Should().Contain("could not be archived and will not be retried").And.Contain(harness.CommunicationId.ToString());
 
         // (c) One bell, owned by the sender's systemuser, with the fixed title.
         var sentBy = harness.Communication().GetAttributeValue<EntityReference>("sprk_sentby")!.Id;
