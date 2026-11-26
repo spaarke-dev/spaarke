@@ -213,7 +213,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 ## From task 030 (2026-11-26)
 
 ### D-030-1: ComposeProfileDispatcher clears the save request's IHttpContextAccessor and carries the bearer token out of the request (pre-existing, found in passing)
-- **GitHub issue**: to file (main session)
+- **GitHub issue**: #3224 (filed by the main session 2026-11-26)
 - **Title**: `Compose: background profile dispatch nulls the request's HttpContext accessor and detaches the caller token (ADR-052)`
 - **Body**:
   - `Services/Compose/ComposeProfileDispatcher.cs` `Dispatch` → `Task.Run(() => RunAsync(...))`. `RunAsync` sets `accessor.HttpContext = detachedContext` on a pool thread.

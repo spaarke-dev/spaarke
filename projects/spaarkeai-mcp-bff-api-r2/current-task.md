@@ -7,7 +7,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 Wave 7. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **Running now** | Wave 7 implementers: 030 (playbook run tools, ADR-039 check passed as Path C, see notes/decisions.md D-030-adr039), 031 (analysis tools), 034 (briefing tool and widget). |
+| **Running now** | Wave 7 implementers: 031 (analysis tools), 034 (briefing tool and widget). 030 stopped before code: owner question 14 (run-detach). |
 | **Next** | On each completion: merge, run two reviews, fix, re-check, mark done. Then Wave 8: 032 (after 030; its dev data needs the 012 go, code does not) and 035 (after 034). 033 waits on the 008 owner decision; 036 waits on the #3181 owner choice. Deploys (019, 029, 039) wait on owner gates. Then devops-project-sync and the shared notes status file. |
 | **Uncommitted** | None. HEAD 71f7c02e46 is pushed. |
 | **Branch state** | Master merged at 3b5c87fbe1 + agent-worktree master pickups (#3203, #3204, InvoiceReview/Office PRs). Build clean; full ArchTests 2858; Search/Mcp/Tenant/Regression unit tests 2593 passed. |
@@ -40,6 +40,7 @@
 11. **uac-r2:** the document list checks Read on the matter, not on each document (023 D1).
 12. **Stray processes:** four python.exe processes from other sessions have been spinning for days (PIDs 41460, 43772, 84288, 93720). The user decides.
 13. **Cowork review skill pairing (recorded 2026-11-26, for accelerator-r1):** `notes/cross-project-cowork-review-skill.md`. A Spaarke Cowork skill (for example `nda-review`) sits on top of this project's tools. Gaps for accelerator-r1 to decide: getting the document file into the sandbox, and matter email through `spaarke_compose_email`, not Outlook. No r2 action.
+14. **030 run-detach (🔔 ADR conflict, blocks 030 start and 032):** a run must outlive the stateless MCP request. Options 1-4 in `notes/030-decisions.md`; recommended Option 4 (run inside the request up to ~25 s, else hand off to the Console), plus ship `spaarke_get_playbook_run` now. Options 1-3 need an ADR-052, ADR-039 or ADR-028 A10 exception.
 
 ## Issues filed this wave
 #3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
