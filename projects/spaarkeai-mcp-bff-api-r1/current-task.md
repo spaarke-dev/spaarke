@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-26 ~01:00Z (mcp-r1: ISS-010 parts 1/C/E in flight; heading change building; r2 Phase 1 started)
+> **Last Updated**: 2026-11-26 ~02:30Z (mcp-r1: #3193 F4 fixed, out for review; #3199 under review; Part C waits on part 1; Part E waits on owner Q0)
 > **Recovery**: Read "Quick Recovery" first. History: commit messages and `notes/wave{6,7,8}-review.md`, `notes/merge-review-2026-11-15.md`.
 
 ---
@@ -9,13 +9,8 @@
 
 **NOW (2026-11-25 late): ISS-010 #3184 (decision commit ~27 s; target 15 s) is split into parts, each with its own reviewer. Also the owner's heading UX change (D-227). r2 Phase 1 has STARTED (gate released by agreement, terms in `notes/decisions.md` "r2's Phase 1 gate"); r2 now owns `Api/Mcp/**`, McpModule, the catalog, the ledger and the widget transport/build files.**
 - **Part 1 (metadata memo):** PR **#3193**, branch `perf/decision-commit-latency`, worktree `C:\wt3184`, auto-merge OFF. uac-r2 cleared the first version. ontology's Opus review found **F4**: production makes a new transient `DataverseUserClient` per create, so the per-client store never shares (real saving ~0.27 s).
-  - **Fix agent RUNNING**, briefed:
-    - one store per request;
-    - TYPE-GATED to a concrete `DataverseUserClient` (uac-r2 condition (i));
-    - transient harness with a real DataverseUserClient over a counting handler;
-    - must-fire across instances, must-not-fire across requests and for non-DataverseUserClient;
-    - re-profile; correct the notes and PR body ("does not reach 15 s"); name K1 `BudgetInquiryExecutor.cs:344`.
-  - **When it reports:** send the fix diff to ontology-r1 (re-check only), uac-r2 (keying and type gate only) and **field-mapping-r1** (the memo and RecordCreationService are theirs, task 049). Merge = owner.
+  - **F4 FIXED** at head `deda2211f0` (one store per request, shared only for the sealed `DataverseUserClient`; real transient clients: 37 -> 25 metadata reads, 149 -> 137 calls; must-fire and must-not-fire tests). Publish-size delta (+1,036 B) was measured BEFORE this commit; re-measure at Part C run 4 or before merge.
+  - **Sent for review 2026-11-26:** ontology-r1 (F4 re-check), uac-r2 (keying + type gate), field-mapping-r1 (task 049 contract). Waiting. Merge = owner.
 - **Part C (access window):** design `notes/iss-010-part-c-design.md`. uac-r2 APPROVED it WITH AMENDMENTS:
   - C2 rejected; A1 audit done (no Dataverse write in window 0); A4 is Path C;
   - A2 = pinned exemption of the 4 role-association reads in `SecureRootInheritance.Cascade.cs` `PlatformReadableTablesAsync`;
@@ -27,8 +22,8 @@
   - Owner decision: an archive failure is reported where the user can fix it, via a bell to the communication record's "Save to SharePoint" (`decisions.md`). ontology amended D-216.
   - **Q0 blocker:** our spec forbids background work, so field-mapping-r1 is asked to own and build the handler. Also open: Q1-Q6 in §9.
 - **Part D scoping:** `notes/iss-010-commit-latency.md` "Part D scoping". D1 (BU/team config memo) is not started.
-- **Heading change (D-227, owner "Apply to both"):** an implementer agent is building `ux/decision-finding-first` (worktree `C:\wtux`, from master): FoundStep h2 = finding; IssueLine line 1 = finding (ruleShortName → title → subject), line 2 = subject; new `IssueLineView.finding`; `headline` unchanged.
-  - When it reports: check, send to ontology-r1 with the host deploy list, tell mcp-r2 at open and merge. No auto-merge.
+- **Heading change (D-227, owner "Apply to both"):** PR **#3199** (`ux/decision-finding-first`, worktree `C:\wtux`, head `4491eab395`): FoundStep h2 = finding; IssueLine line 1 = finding, line 2 = subject; the Copilot widget's DecideLane billing rows also lead with the finding (DecideLane UI stays with r1; mcp-r2 confirmed no conflict and merges master after). ontology-r1 is reviewing. Auto-merge off; merge = owner.
+  - After merge: tell mcp-r2; deploys = Console auto, LegalWorkspace code-page deploy, BFF deploy for the widget (owner per-SHA go).
 - **Owner rules from today:** a failed email send must surface on every surface (the send stays inline); the email bell on the final fallback failure is agreed with ontology.
 - **042 open items:** Chat resolve, the because-rationale check (read the run-3 Decision Record read-only), the billing link-out check, the runbook re-run by a second admin, and NFR-01 50 calls after #3161 is deployed. 042 no longer gates r2.
 - **Uncommitted:** none. Worktrees `C:\wt3184`, `C:\wt3184c` and `C:\wtux` hold the agents' branches; remove them only via `Remove-WorktreeSafe.ps1` after the owner approves.
