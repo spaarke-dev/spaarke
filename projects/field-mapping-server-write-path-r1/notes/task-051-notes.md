@@ -32,7 +32,7 @@ The Pester K1 case pins the write order from the script text (no check can be fo
 **Owner decisions, 2026-11-26** (received during this round; recorded, implemented below):
 
 - **OQ-1 report card.** A report card is created only in the context of its parent matter. Its form "New" opens the Report Card wizard (`sprk_createreportcardwizard`, task 027) filed under the matter (or project) the form names; the subgrid "+ New" already opens it (`Spaarke.SecureChild.Ribbon.newChild` via `NATIVE_NEW_REDIRECTED` + `WIZARDS`, working now that the table parameter is passed); the HOME grid has no New. New launcher `Spaarke.Commands.Wizards.openCreateReportCardFromForm` (`sprk_wizard_commands.js`, both copies identical; registered in `create-launchers.json` as `sprk_reportcard`). A form that names no parent opens nothing and says so (there is no unfiled report card). `sprk_reportcard` is now `redirected` in the config, `gridButton: none`.
-- **OQ-1 budget and KPI assessment.** Created only in the context of the parent matter: the platform HOME-grid New is hidden (no replacement). The form and subgrid New stay native for now: the owner will have wizards built as separate work and no placeholder page is built here. `-Verify` expects `Mscrm.HomepageGrid.<t>.NewRecord` absent (config `homeGridNew: hidden`) and still only reports their form New. The subgrid "+ Add KPI" creates through the BFF; left as fixed.
+- **OQ-1 budget and KPI assessment.** Created only in the context of the parent matter: the platform HOME-grid New is hidden (no replacement). The form New stays native; the subgrid New is the SecureChild BFF create-then-open (it creates the row through `POST /api/v1/child-records/{table}`, so mapping and owner are server-side, and opens it), unchanged from before 051. The owner will have wizards built as separate work; no placeholder page is built here. `-Verify` expects `Mscrm.HomepageGrid.<t>.NewRecord` absent (config `homeGridNew: hidden`) and still only reports their form New. The subgrid "+ Add KPI" creates through the BFF; left as fixed.
 - **OQ-1 memo and analysis.** New stays native (no change).
 - **Unchanged:** OQ-2 (invoice family, ontology tables, `sprk_servicerequest`: New native, Assign hidden) and OQ-3 (`sprk_procedureversion` stays in the list: 23 tables).
 
@@ -82,7 +82,7 @@ Open owner question that remains (not decided here): whether the home-grid New o
 | sprk_invoice | system-created | invoice wizard from a core record's subgrid | hidden | hidden | off | unchanged New (already hidden outright); Assign hidden |
 | sprk_billingevent | system-created | none (extraction) | hidden | hidden | off | as invoice |
 | sprk_reportcard | yes, in its matter's context | Report Card wizard | native | native | off | home-grid New hidden (no replacement); form New hidden + "+New Report Card" (wizard under the form's matter); subgrid "+ New" opens the wizard |
-| sprk_budget, sprk_kpiassessment | yes, in the matter's context | none yet (separate work) | native | native | off | home-grid New hidden; form and subgrid New native (reported); "+ Add KPI" on the KPI subgrid (BFF) |
+| sprk_budget, sprk_kpiassessment | yes, in the matter's context | none yet (separate work) | native | native | off | home-grid New hidden; form New native (reported); subgrid New = BFF create-then-open (as before); "+ Add KPI" on the KPI subgrid (BFF) |
 | sprk_memo, sprk_analysis | yes | Add Memo (BFF) / analysis wizard | native | native | off | New kept (owner OQ-1); Assign hidden |
 | invoicesubmission, invoiceapproval, externalidentifier, invoicecorrection, procedureversion, signal, decisionrecord, budgetrevision, servicerequest | no | server only | native | native | off | New kept (OQ-2); Assign hidden |
 
@@ -122,7 +122,7 @@ Quick create: `EntityDefinitions` read. Assign, New, the launcher buttons, Add M
 1. Matter, project, work assignment, event, document grids and forms: no Assign; "+New X" present on forms; the HOME-grid New is the wizard / upload button, not the platform form.
 2. To Do and Email grids: "+New To Do" opens the to-do wizard; "+New Email" opens the composer; no platform New or Save & New.
 3. A project subgrid and a matter subgrid: "+ New" opens the create surface and the created row appears in the subgrid. A matter's Report Cards subgrid "+ New" opens the Report Card wizard filed under the matter.
-4. Report card form: "+New Report Card" opens the wizard under the form's matter; the report cards home grid has no New. Budget and KPI assessment home grids have no New; their form and subgrid New still open the native form.
+4. Report card form: "+New Report Card" opens the wizard under the form's matter; the report cards home grid has no New. Budget and KPI assessment home grids have no New; their form New opens the native form; their subgrid "+ New" creates the row through the BFF and opens it.
 5. Event form, "Add Memo": a memo is created, filed to the event, and opens; no quick create flyout. Make the event save fail (for example a required field cleared by a business rule): the memo still opens and the message "The memo was created, but the event could not be saved." shows.
 6. Matter and project forms, KPI subgrid, "+ Add KPI": a KPI assessment is created and opens; it is NOT disabled.
 7. Project: the Communication Connections "new" control shows no quick create (see section 9).
@@ -156,7 +156,7 @@ The repo ships ONE import that lands everything: SpaarkeMaster (its WebResources
 
 ## 8. Owner questions
 
-- **OQ-1: decided 2026-11-26** (section 0): memo and analysis New stay native; report card form and subgrid New open the Report Card wizard under the matter, home-grid New hidden; budget and KPI assessment: home-grid New hidden, form and subgrid New native until their wizards exist.
+- **OQ-1: decided 2026-11-26** (section 0): memo and analysis New stay native; report card form and subgrid New open the Report Card wizard under the matter, home-grid New hidden; budget and KPI assessment: home-grid New hidden, form New native, subgrid New the BFF create-then-open (unchanged; the re-check of 2026-11-26 found the earlier "subgrid native" wording wrong), until their wizards exist.
 - **OQ-2** (invoice-family system tables, ontology tables, `sprk_servicerequest`): confirm the New stays native (the task 050 decision), with Assign hidden. Open.
 - **OQ-3**: confirm `sprk_procedureversion` is out of the redirect (system-created by `ProcedureService`). Open.
 - **OQ-4 (open)**: should the home-grid New on matter, project, work assignment, event and document (today the wizard button, platform New hidden), and the subgrid "+ New", also be closed beyond this?
@@ -168,3 +168,22 @@ The repo ships ONE import that lands everything: SpaarkeMaster (its WebResources
 2. **The other EventRibbons buttons** (Complete, Cancel, Reschedule, Reassign, Complete Selected, the homepage-grid set) are not on dev (overwritten by a later ribbon import) and their commands in `EventRibbonDiffXml.xml` and the SpaarkeMaster-less sources still name `sprk_event_ribbon_commands` without `.js`. Not restored here.
 3. `src/solutions/EventCommands/README.md` tells the operator to name the web resource without `.js`; dev's has it.
 4. A report card form's "+New Report Card" cannot work from a report card whose matter / project lookups are empty (it says so).
+
+## 10. Scoped re-check of the fix round (main session, 2026-11-26)
+
+A Sonnet re-check of `02e2ff0833..5f9546d8ba` confirmed every fix and scope item listed below. It also confirmed that the SpaarkeMaster web-resource copies are byte-identical to their sources.
+- items 1–7;
+- the report-card launcher (it passes entityType, entityId, recordName and bffBaseUrl);
+- the home-grid hides (correct OOB ids);
+- the To Do and Email grid launchers;
+- the Add Memo alert path (a failed create returns before it, so it is not swallowed).
+
+UAC-r2 had no access objection.
+
+**F1, closed as a docs fix.** The budget and KPI assessment subgrid "+ New" is not native. It is the SecureChild BFF create-then-open: `NATIVE_NEW_REDIRECTED` in `sprk_secure_child_ribbon.js`, deliberate since before 051, and what dev does today. Three places wrongly said "native": the notes (§0, §2, §6 item 4, §8), the config reasons and `homeGridNew`. They are corrected. This route keeps mapping and owner on the server, in line with the owner's answer that mapping always applies. The owner is told; nothing changes on dev for the subgrid.
+
+**Known limits.**
+- **K1.** If `openMemo` rejects after the save-failure alert, it only logs. The memo exists; the user opens it from the subgrid.
+- **K2.** The report-card launcher needs `sprk_regardingmatter` or `sprk_regardingproject` on the form. All four main forms have them.
+- **K3.** The duplicate-id sweep over all 23 RibbonDiffs did not finish in the re-check shell. The changed tables were read by eye, with no duplicates found, and the import fails on a duplicate id.
+- **K4.** `-Verify` proves the rule passes the table, not what the script does with it. Jest covers the script.
