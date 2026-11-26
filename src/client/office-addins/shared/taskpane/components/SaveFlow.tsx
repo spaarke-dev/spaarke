@@ -15,6 +15,7 @@ import {
   mergeClasses,
   Textarea,
   Input,
+  Tooltip,
 } from '@fluentui/react-components';
 import {
   DocumentRegular,
@@ -24,6 +25,7 @@ import {
   CopyRegular,
   EditRegular,
   CheckmarkRegular,
+  Warning20Filled,
 } from '@fluentui/react-icons';
 import { RelatedToPicker, type CreateRecordResult } from './RelatedToPicker';
 import { RelatedRecordCard } from './RelatedRecordCard';
@@ -71,6 +73,12 @@ import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 // Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
 import { stripDocumentExtension } from '../utils/documentFileName';
 import { copyText } from '../utils/copyText';
+import {
+  classifySavedAttachments,
+  hasUnsavedAttachments,
+  mergeSavedAttachmentNames,
+  withoutNames,
+} from '../services/savedEmailAttachments';
 
 /** True inside the browser test harness (taskpane-test.html sets the flag). */
 function isBrowserTestMode(): boolean {
@@ -288,12 +296,40 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalS,
     minWidth: 0,
   },
-  // Task 105: stable width while the label swaps to "Copied" / "Opened" (no layout jump) — a fixed flex basis, so
-  // the width never follows the label; a row narrower than two bases wraps rather than overflowing.
-  savedBarButton: { flex: '1 1 8.5rem', minWidth: 0, maxWidth: '100%' },
   savedBarDetail: {
     display: 'block',
     marginTop: tokens.spacingVerticalXXS,
+  },
+  // Task 141 (owner points 1-3, 9): the one "Saved to Spaarke" section — the item's own lines, "Filed to" with its icon
+  // link, the unsaved-attachments warning and the smaller "Save again as a new document".
+  savedBarLine: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXXS,
+    minWidth: 0,
+    overflowWrap: 'anywhere',
+  },
+  savedBarWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXS,
+  },
+  savedBarWarningIcon: {
+    flexShrink: 0,
+    color: tokens.colorPaletteYellowForeground1,
+  },
+  saveAgainLink: {
+    alignSelf: 'flex-start',
+    minWidth: 'auto',
+    paddingLeft: 0,
+    paddingRight: 0,
+    marginTop: tokens.spacingVerticalXXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForegroundLink,
+    ':hover': { color: tokens.colorBrandForegroundLinkHover },
   },
   // Task 111: the "File to record" action under the picker, and its error line.
   filingActions: {
@@ -349,6 +385,8 @@ interface SavedBarModel {
   documentId: string;
   title: string;
   filedTo: FiledTo;
+  /** Task 141 (owner point 2): the filed-to record's number, shown after its name. Absent when it has none. */
+  filedToNumber?: string | null;
   /** The record `filedTo` names, for the bar's "Open in Spaarke" (only the post-save bar sets it). */
   filedRecord?: FiledRecordRef | null;
   filingUnknown?: boolean;
@@ -359,6 +397,13 @@ interface SavedBarModel {
    * rendered — in both variants, never rendered disabled.
    */
   copyUrl: string | null;
+  /**
+   * Task 141: an item with no version path (an email): the section also shows its subject, sender and date, the
+   * "Unsaved attachments" warning (`unsavedAttachments`) and the smaller "Save again as a new document".
+   */
+  itemDetails?: boolean;
+  /** Task 141 (owner point 9): some attachment is known unsaved. */
+  unsavedAttachments?: boolean;
 }
 
 /** Task 088: taken when a save is SUBMITTED, committed to {@link SavedDocumentState} when it completes. */
@@ -366,8 +411,17 @@ interface PendingSaveSnapshot {
   /** The Document Name field's value at submission — "Saved" again once the field is reverted to it. */
   name: string;
   filedTo: FiledTo;
+  filedToNumber?: string | null;
   filedRecord?: FiledRecordRef | null;
   mode: SaveTarget['mode'];
+  /**
+   * Task 141: whether this save's attachment names are tracked (an email save): on completion the names it sent become
+   * the saved state's `savedAttachmentNames`, merged with `priorSavedAttachmentNames` for an add.
+   */
+  tracksAttachments?: boolean;
+  priorSavedAttachmentNames?: string[];
+  /** Task 141: the names an earlier add found the stored email does not hold — kept across adds. */
+  priorAttachmentsNotStored?: string[];
 }
 
 /** Task 088: the document this pane session last saved — the target of the next version save. */
@@ -376,10 +430,17 @@ export interface SavedDocumentState {
   documentId: string;
   savedName: string;
   filedTo: FiledTo;
+  /** Task 141: the filed-to record's number, shown after its name. */
+  filedToNumber?: string | null;
   /** The record `filedTo` names (its logical name and id), for the confirmation bar's "Open in Spaarke". */
   filedRecord?: FiledRecordRef | null;
-  /** Whether the save that produced this state created the document or added a version to it. */
+  /** Whether the save that produced this state created the document, added a version to it, or (task 141) added attachments to it. */
   lastSave: SaveTarget['mode'];
+  /**
+   * Task 141: the names of the saved email's attachments known to be saved under it — what this pane's save sent (and,
+   * after an add, what was saved before). Absent when not known: the attachments then show no saved/unsaved marks.
+   */
+  savedAttachmentNames?: string[];
   /**
    * Task 131 (#2171): set when the save worked but the email it reconciled to could not be filed to the chosen record
    * (the server's `SaveResponse.emailFiling` was `NotPermitted` / `Failed`), or is filed there but could not be confirmed
@@ -429,6 +490,33 @@ export const DEFAULT_SAVED_DOCUMENT_PANE_STATE: SavedDocumentPaneState = {
 /** Task 088: the confirmation bar's name for the record a resolved document is filed to. */
 function relatedRecordLabel(view: RelatedRecordView): string {
   return view.displayName || view.number || view.type;
+}
+
+/**
+ * Task 141 (owner point 2): the number shown after {@link relatedRecordLabel} — only when the label is the record's name
+ * (a number-only record shows its number once).
+ */
+function relatedRecordNumber(view: RelatedRecordView): string | null {
+  return view.displayName && view.number ? view.number : null;
+}
+
+/** Task 141: the friendly save type of a record's logical name (the save route takes `Matter` / `Project`). */
+const SAVE_TYPE_BY_LOGICAL_NAME: Record<string, EntityType> = { sprk_matter: 'Matter', sprk_project: 'Project' };
+
+/**
+ * Task 141: what the saved-email attachments section needs. `record` is the record the saved `.eml` is filed to, as an
+ * add sends it — `null` when attachments cannot be added from here (not filed, the record withheld or unknown, or not a
+ * record Save files to). `savedNames` undefined = not determined (no marks, no add).
+ */
+interface SavedEmailAttachmentsView {
+  documentId: string;
+  name: string;
+  savedNames: string[] | undefined;
+  notStoredNames: string[] | undefined;
+  record: { entityType: string; id: string; name: string } | null;
+  filedTo: FiledTo;
+  filedToNumber: string | null;
+  filedRecord: FiledRecordRef | null;
 }
 
 /**
@@ -711,6 +799,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const updateSavedState = onSavedStateChange ?? setInternalSavedState;
   const { savedDocument, profileRefreshSignal, contentChangedSinceSave } = savedStateBundle;
   const pendingSaveRef = useRef<PendingSaveSnapshot | null>(null);
+  // Task 141: read by onComplete (built before the hook) — the attachment names the completed save sent. Set below, after
+  // the hook, to the hook's stable getter.
+  const sentAttachmentNamesGetterRef = useRef<(() => string[] | undefined) | undefined>(undefined);
 
   // Initialize save flow hook
   const saveFlowOptions: UseSaveFlowOptions = useMemo(
@@ -719,16 +810,30 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       getAccessToken,
       onComplete: (docId, docUrl, emailFilingProblem, attachmentsAdded, attachmentsNotStored) => {
         const pending = pendingSaveRef.current;
+        // Task 141: the attachments this save sent to become documents are saved now — less any the stored email does not
+        // hold. An add merges them into what was saved before; the names an add could not use are kept across adds.
+        const sentNames = withoutNames(sentAttachmentNamesGetterRef.current?.() ?? [], attachmentsNotStored);
+        const savedAttachmentNames = pending?.tracksAttachments
+          ? pending.mode === 'addAttachments'
+            ? mergeSavedAttachmentNames(pending.priorSavedAttachmentNames, sentNames)
+            : sentNames
+          : undefined;
+        const notStored =
+          pending?.mode === 'addAttachments'
+            ? (mergeSavedAttachmentNames(pending.priorAttachmentsNotStored ?? [], attachmentsNotStored ?? []) ?? [])
+            : (attachmentsNotStored ?? []);
         updateSavedState(prev => ({
           savedDocument: {
             documentId: cleanGuid(docId) || docId,
             savedName: pending?.name ?? '',
             filedTo: pending?.filedTo,
+            ...(pending?.filedToNumber ? { filedToNumber: pending.filedToNumber } : {}),
             ...(pending?.filedRecord ? { filedRecord: pending.filedRecord } : {}),
             lastSave: pending?.mode ?? 'create',
             ...(emailFilingProblem ? { emailFilingProblem } : {}),
             ...(attachmentsAdded ? { attachmentsAdded } : {}),
-            ...(attachmentsNotStored?.length ? { attachmentsNotStored } : {}),
+            ...(notStored.length ? { attachmentsNotStored: notStored } : {}),
+            ...(savedAttachmentNames ? { savedAttachmentNames } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -763,7 +868,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     startSave,
     reset,
     retry,
+    getSentAttachmentFileNames,
   } = useSaveFlow(saveFlowOptions);
+  sentAttachmentNamesGetterRef.current = getSentAttachmentFileNames;
 
   // Task 088: the open document's own filing, from the SAME resolved identity the related-record card reads
   // (no second call) — used to name the record in the confirmation bar after a version save.
@@ -1177,6 +1284,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       if (target.mode === 'create') {
         return selectedEntity?.name ?? null;
       }
+      if (target.mode === 'addAttachments') return savedDocument?.filedTo; // task 141: never re-files
       if (savedDocument && cleanGuid(target.existingDocumentId) === savedDocument.documentId) {
         return savedDocument.filedTo; // a version never re-files the document (task 023 D-4/D-5)
       }
@@ -1193,6 +1301,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       if (target.mode === 'create') {
         return selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null;
       }
+      if (target.mode === 'addAttachments') return savedDocument?.filedRecord ?? null; // task 141: never re-files
       if (savedDocument && cleanGuid(target.existingDocumentId) === savedDocument.documentId) {
         return savedDocument.filedRecord ?? null;
       }
@@ -1201,14 +1310,47 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [selectedEntity, savedDocument, resolvedRelatedRecord]
   );
 
+  // Task 141: the number shown after the record a save to `target` is filed to (null: none, or not known).
+  const filingNumberOf = useCallback(
+    (target: SaveTarget): string | null => {
+      if (target.mode === 'create') {
+        // `displayInfo` is the record's number (a save target is a Matter or Project: SAVE_TARGET_TYPES).
+        return selectedEntity?.displayInfo ?? null;
+      }
+      if (
+        target.mode === 'version' &&
+        savedDocument &&
+        cleanGuid(target.existingDocumentId) === savedDocument.documentId
+      ) {
+        return savedDocument.filedToNumber ?? null;
+      }
+      return resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null;
+    },
+    [selectedEntity, savedDocument, resolvedRelatedRecord]
+  );
+
   // Task 088: every submission records what the confirmation bar and the "Saved" comparison will need once it
   // completes. `retry()` resends the last context, so the snapshot taken for that context still applies.
   const submitSave = useCallback(
-    (context: SaveFlowContext, filedTo: FiledTo, filedRecord: FiledRecordRef | null = null) => {
-      pendingSaveRef.current = { name: documentName, filedTo, filedRecord, mode: context.saveTarget?.mode ?? 'create' };
+    (
+      context: SaveFlowContext,
+      filedTo: FiledTo,
+      filedRecord: FiledRecordRef | null = null,
+      filedToNumber: string | null = null
+    ) => {
+      const mode = context.saveTarget?.mode ?? 'create';
+      pendingSaveRef.current = {
+        name: documentName,
+        filedTo,
+        filedToNumber,
+        filedRecord,
+        mode,
+        // Task 141: an email save's attachment names become the saved state's (Outlook has no version path).
+        tracksAttachments: hostType === 'outlook' && mode === 'create',
+      };
       void startSave(context);
     },
-    [documentName, startSave]
+    [documentName, startSave, hostType]
   );
 
   // Build save context
@@ -1259,8 +1401,37 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleSave = useCallback(() => {
     if (!activeTarget) return;
     setSubmittedTarget(activeTarget);
-    submitSave(buildSaveContext(), filingOf(activeTarget), filingRecordOf(activeTarget));
-  }, [activeTarget, buildSaveContext, filingOf, filingRecordOf, submitSave]);
+    submitSave(buildSaveContext(), filingOf(activeTarget), filingRecordOf(activeTarget), filingNumberOf(activeTarget));
+  }, [activeTarget, buildSaveContext, filingOf, filingRecordOf, filingNumberOf, submitSave]);
+
+  // Task 141 (owner point 7): Save in a saved email's attachments section adds exactly the ticked, unsaved attachments as
+  // children of the saved .eml, filed to the record it is filed to — never a second save of the email, and without the
+  // user picking the record. `names` is never empty (the button is disabled then; the hook refuses it as well).
+  const handleAddAttachments = useCallback(
+    (view: SavedEmailAttachmentsView, names: string[]) => {
+      if (!view.record || names.length === 0) return;
+      const target: SaveTarget = {
+        mode: 'addAttachments',
+        savedDocumentId: view.documentId,
+        record: view.record,
+        attachmentFileNames: names,
+      };
+      setSubmittedTarget(target);
+      pendingSaveRef.current = {
+        name: view.name,
+        filedTo: view.filedTo,
+        filedToNumber: view.filedToNumber,
+        filedRecord: view.filedRecord,
+        mode: 'addAttachments',
+        tracksAttachments: true,
+        ...(view.savedNames ? { priorSavedAttachmentNames: view.savedNames } : {}),
+        ...(view.notStoredNames ? { priorAttachmentsNotStored: view.notStoredNames } : {}),
+      };
+      void startSave({ ...buildSaveContext(), saveTarget: target });
+      announce(names.length === 1 ? 'Saving 1 attachment.' : `Saving ${names.length} attachments.`, 'polite');
+    },
+    [buildSaveContext, startSave, announce]
+  );
 
   // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
   // the identity's default. Task 088: in the saved state it also leaves that state — the pane returns to an
@@ -1313,7 +1484,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               // filedTo and the record its "Open in Spaarke" opens move together: the link never names a record the
               // "Filed to" text no longer does (an unknown filing changes neither).
               ...(refreshedFiledTo !== undefined
-                ? { filedTo: refreshedFiledTo, filedRecord: relatedRecordRef(resolvedRelatedRecord) }
+                ? {
+                    filedTo: refreshedFiledTo,
+                    filedToNumber:
+                      resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
+                    filedRecord: relatedRecordRef(resolvedRelatedRecord),
+                  }
                 : {}),
             },
           }
@@ -1350,7 +1526,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     submitSave(
       { ...buildSaveContext(), allowRename: true },
       selectedEntity?.name ?? null,
-      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null
+      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null,
+      selectedEntity?.displayInfo ?? null
     );
     announce('Saving under a new name.', 'polite');
   }, [buildSaveContext, clearError, submitSave, selectedEntity, announce]);
@@ -1367,7 +1544,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     submitSave(
       { ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } },
       selectedEntity?.name ?? null,
-      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null
+      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null,
+      selectedEntity?.displayInfo ?? null
     );
     announce('Saving as a new version of the existing document.', 'polite');
   }, [buildSaveContext, clearError, submitSave, selectedEntity, announce, error]);
@@ -1506,6 +1684,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       (flowState === 'complete' || flowState === 'duplicate') &&
       selectedEntity &&
       submittedTarget?.mode !== 'version' &&
+      submittedTarget?.mode !== 'addAttachments' &&
       !savedNotifiedRef.current
     ) {
       savedNotifiedRef.current = true;
@@ -1726,95 +1905,141 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Task 088 (UAT-1/6, owner 2026-10-03 "Keep the form"): the confirmation bar at the top of the SAVED state.
   // Replaces the full-screen success card. Names the record the document is filed to — or says it is filed to
   // none — with View Document (the Spaarke record, in the Spaarke app) and Copy Link (that record's link, task 117).
-  const renderSavedBar = (bar: SavedBarModel) => (
-    <div ref={savedBarRef} tabIndex={-1} className={styles.savedBarWrap}>
-      <MessageBar intent="success" layout="multiline">
-        <MessageBarBody>
-          <MessageBarTitle>{bar.title}</MessageBarTitle>
-          {bar.filingUnknown ? (
-            <Text size={200} className={styles.savedBarDetail}>
-              Filing record not available here.
-            </Text>
-          ) : (
-            bar.filedTo !== undefined && (
-              <Text size={200} className={styles.savedBarDetail}>
-                {bar.filedTo === null ? (
-                  bar.notFiledText
-                ) : (
-                  <>
-                    Filed to <Text weight="semibold">{bar.filedTo}</Text>.
-                    {/* NFR-10: the same gate as View Document (ORG_URL + a way to open a tab), never rendered disabled. */}
-                    {openRecordAvailable && bar.filedRecord && (
-                      <Button
-                        appearance="transparent"
-                        size="small"
-                        icon={<OpenRegular />}
-                        onClick={() => handleOpenFiledRecord(bar.filedRecord)}
-                        data-testid="saved-bar-open-filed-record"
-                      >
-                        Open in Spaarke
-                      </Button>
-                    )}
-                    {openRecordAvailable && bar.filedRecord && filedRecordOpenFailure && (
-                      <Text
-                        size={200}
-                        className={styles.savedBarDetail}
-                        data-testid="saved-bar-open-filed-record-error"
-                      >
-                        {filedRecordOpenFailure}
-                      </Text>
-                    )}
-                  </>
-                )}
+  //
+  // Task 141 (owner points 1-3, 9): ONE compact "Saved to Spaarke" section. View Document and Copy Link are icon buttons
+  // with tooltips; "Filed to {name} ({number})" has an icon-only open-record button. For an email (`itemDetails`) it also
+  // carries the subject, From and Sent lines, the "Unsaved attachments" warning and a smaller "Save again as a new
+  // document" — there is no separate "Email" header and no separate "Filed to" card in the saved states.
+  const renderSavedBar = (bar: SavedBarModel) => {
+    const viewLabel =
+      buttonFeedback.view === 'done' ? 'Opened' : buttonFeedback.view === 'failed' ? "Couldn't open" : 'View Document';
+    const copyLabel =
+      buttonFeedback.copy === 'done' ? 'Copied' : buttonFeedback.copy === 'failed' ? "Couldn't copy" : 'Copy Link';
+    return (
+      <div ref={savedBarRef} tabIndex={-1} className={styles.savedBarWrap}>
+        <MessageBar intent="success" layout="multiline">
+          <MessageBarBody>
+            <MessageBarTitle>{bar.title}</MessageBarTitle>
+            {bar.itemDetails && showDocumentInfo && itemName && (
+              <Text weight="semibold" className={styles.savedBarDetail}>
+                {itemName}
               </Text>
-            )
-          )}
-        </MessageBarBody>
-        <MessageBarActions className={styles.wrappingActions}>
-          {/* NFR-10: rendered only when the host can open a browser tab AND ORG_URL is set — never rendered
-            disabled (AC4). */}
-          {openRecordAvailable && (
-            <Button
-              appearance="outline"
-              size="small"
-              className={styles.savedBarButton}
-              icon={buttonFeedback.view === 'done' ? <CheckmarkRegular /> : <OpenRegular />}
-              onClick={() => handleViewDocument(bar.documentId)}
-            >
-              {buttonFeedback.view === 'done'
-                ? 'Opened'
-                : buttonFeedback.view === 'failed'
-                  ? "Couldn't open"
-                  : 'View Document'}
-            </Button>
-          )}
-          {bar.copyUrl !== null && (
-            <Button
-              appearance="outline"
-              size="small"
-              className={styles.savedBarButton}
-              icon={buttonFeedback.copy === 'done' ? <CheckmarkRegular /> : <CopyRegular />}
-              onClick={() => void handleCopyLink(bar.copyUrl)}
-            >
-              {buttonFeedback.copy === 'done'
-                ? 'Copied'
-                : buttonFeedback.copy === 'failed'
-                  ? "Couldn't copy"
-                  : 'Copy Link'}
-            </Button>
-          )}
-        </MessageBarActions>
-      </MessageBar>
-      {manualCopyUrl && (
-        <Input
-          readOnly
-          value={manualCopyUrl}
-          aria-label="Document link — select and copy"
-          onFocus={event => event.target.select()}
-        />
-      )}
-    </div>
-  );
+            )}
+            {bar.itemDetails && showDocumentInfo && (senderDisplayName || senderEmail) && (
+              <Text size={200} className={styles.savedBarDetail}>
+                From: {senderDisplayName || senderEmail}
+              </Text>
+            )}
+            {bar.itemDetails && showDocumentInfo && sentDate && (
+              <Text size={200} className={styles.savedBarDetail}>
+                Sent: {sentDate.toLocaleDateString()}
+              </Text>
+            )}
+            {bar.filingUnknown ? (
+              <Text size={200} className={styles.savedBarDetail}>
+                Filing record not available here.
+              </Text>
+            ) : (
+              bar.filedTo !== undefined && (
+                <div className={styles.savedBarLine}>
+                  {bar.filedTo === null ? (
+                    <Text size={200}>{bar.notFiledText}</Text>
+                  ) : (
+                    <>
+                      <Text size={200}>
+                        Filed to <Text weight="semibold">{bar.filedTo}</Text>
+                        {bar.filedToNumber ? ` (${bar.filedToNumber})` : ''}.
+                      </Text>
+                      {/* NFR-10: the same gate as View Document (ORG_URL + a way to open a tab), never rendered disabled. */}
+                      {openRecordAvailable && bar.filedRecord && (
+                        <Tooltip content="Open in Spaarke" relationship="label">
+                          <Button
+                            appearance="transparent"
+                            size="small"
+                            icon={<OpenRegular />}
+                            // The name says which record opens; the tooltip is the short form.
+                            aria-label={`Open ${bar.filedTo} in Spaarke`}
+                            onClick={() => handleOpenFiledRecord(bar.filedRecord)}
+                            data-testid="saved-bar-open-filed-record"
+                          />
+                        </Tooltip>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            )}
+            {bar.filedTo !== null &&
+              bar.filedTo !== undefined &&
+              !bar.filingUnknown &&
+              openRecordAvailable &&
+              bar.filedRecord &&
+              filedRecordOpenFailure && (
+                <Text size={200} className={styles.savedBarDetail} data-testid="saved-bar-open-filed-record-error">
+                  {filedRecordOpenFailure}
+                </Text>
+              )}
+            {bar.itemDetails && bar.unsavedAttachments && (
+              <div className={styles.savedBarWarning} data-testid="saved-bar-unsaved-attachments">
+                <Warning20Filled className={styles.savedBarWarningIcon} aria-hidden="true" />
+                <Text size={200} weight="semibold">
+                  Unsaved attachments
+                </Text>
+              </div>
+            )}
+            {/* Task 120: an email may be saved again, e.g. to another record, behind this explicit action. The error banner
+                offers the same action while it shows one (OFFICE_009/OFFICE_016) — not twice. */}
+            {bar.itemDetails && !error?.offerSaveAsNew && (
+              <Button
+                appearance="transparent"
+                size="small"
+                className={styles.saveAgainLink}
+                onClick={handleSaveAsNewInstead}
+                disabled={isSaving}
+              >
+                Save again as a new document
+              </Button>
+            )}
+          </MessageBarBody>
+          <MessageBarActions className={styles.wrappingActions}>
+            {/* NFR-10: rendered only when the host can open a browser tab AND ORG_URL is set — never rendered
+              disabled (AC4). Task 141: icon only; the name (and tooltip) is the label it used to show, so a click still
+              confirms itself ("Opened" / "Copied") for ~2 s. */}
+            {openRecordAvailable && (
+              <Tooltip content={viewLabel} relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  aria-label={viewLabel}
+                  icon={buttonFeedback.view === 'done' ? <CheckmarkRegular /> : <OpenRegular />}
+                  onClick={() => handleViewDocument(bar.documentId)}
+                />
+              </Tooltip>
+            )}
+            {bar.copyUrl !== null && (
+              <Tooltip content={copyLabel} relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  aria-label={copyLabel}
+                  icon={buttonFeedback.copy === 'done' ? <CheckmarkRegular /> : <CopyRegular />}
+                  onClick={() => void handleCopyLink(bar.copyUrl)}
+                />
+              </Tooltip>
+            )}
+          </MessageBarActions>
+        </MessageBar>
+        {manualCopyUrl && (
+          <Input
+            readOnly
+            value={manualCopyUrl}
+            aria-label="Document link — select and copy"
+            onFocus={event => event.target.select()}
+          />
+        )}
+      </div>
+    );
+  };
 
   // Task 131 (#2171): the save worked, but the email it reconciled to could not be filed to the chosen record. A
   // non-blocking warning beside the confirmation — never an error (the save succeeded) and never naming the record.
@@ -1847,6 +2072,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       : null;
   };
 
+  // Task 141: whether the saved email's attachments include one known unsaved (owner point 9). Outlook only — Word has no
+  // attachments section; host-shaped DATA, like the attachment list itself.
+  const unsavedAttachmentsIn = (savedNames: string[] | undefined): boolean =>
+    hostType === 'outlook' &&
+    attachments.length > 0 &&
+    hasUnsavedAttachments(classifySavedAttachments(attachments, savedNames));
+
   // The box for a save this pane just made.
   const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
     documentId: saved.documentId,
@@ -1855,21 +2087,119 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         ? 'New version saved to Spaarke'
         : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
     filedTo: saved.filedTo,
+    filedToNumber: saved.filedToNumber ?? null,
     filedRecord: saved.filedRecord ?? null,
     notFiledText: 'Not filed to a record.',
     copyUrl: documentRecordLinkOf(saved.documentId),
+    itemDetails: !canSaveNewVersion,
+    unsavedAttachments: unsavedAttachmentsIn(saved.savedAttachmentNames),
   });
 
   // Task 111: the box for a document that was already in Spaarke when the pane opened. Copy Link copies the
-  // document's Spaarke record link (task 117); without ORG_URL it is not shown.
-  const resolvedBarOf = (identity: { documentId: string }): SavedBarModel => ({
+  // document's Spaarke record link (task 117); without ORG_URL it is not shown. Task 141: it names the record's number
+  // and opens the record itself — the separate "Filed to" card is gone from this state.
+  const resolvedBarOf = (identity: { documentId: string; savedAttachmentNames?: string[] }): SavedBarModel => ({
     documentId: identity.documentId,
     title: 'Saved to Spaarke',
     filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
+    filedToNumber: resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
+    filedRecord: relatedRecordRef(resolvedRelatedRecord),
     filingUnknown: resolvedRelatedRecord.kind === 'unknown',
     notFiledText: 'Not filed to a record yet.',
     copyUrl: documentRecordLinkOf(identity.documentId),
+    itemDetails: !canSaveNewVersion,
+    unsavedAttachments: unsavedAttachmentsIn(identity.savedAttachmentNames),
   });
+
+  // Task 141: the saved-email attachments section's view of a document already in Spaarke (the resolved identity).
+  const resolvedAttachmentsViewOf = (identity: {
+    documentId: string;
+    documentName: string;
+    fileName: string;
+    savedAttachmentNames?: string[];
+  }): SavedEmailAttachmentsView => {
+    const record =
+      resolvedRelatedRecord.kind === 'associated' && isSaveTargetType(resolvedRelatedRecord.type)
+        ? {
+            entityType: resolvedRelatedRecord.type,
+            id: resolvedRelatedRecord.id,
+            name: relatedRecordLabel(resolvedRelatedRecord),
+          }
+        : null;
+    return {
+      documentId: identity.documentId,
+      name: identity.documentName || identity.fileName,
+      savedNames: identity.savedAttachmentNames,
+      notStoredNames: undefined,
+      record,
+      filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
+      filedToNumber: resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
+      filedRecord: relatedRecordRef(resolvedRelatedRecord),
+    };
+  };
+
+  // Task 141: the same view of the email this pane saved (or added attachments to) in this session.
+  const savedAttachmentsViewOf = (saved: SavedDocumentState): SavedEmailAttachmentsView => {
+    const saveType = saved.filedRecord ? SAVE_TYPE_BY_LOGICAL_NAME[saved.filedRecord.entityType] : undefined;
+    const record =
+      saved.filedRecord && saveType && typeof saved.filedTo === 'string'
+        ? { entityType: saveType, id: saved.filedRecord.id, name: saved.filedTo }
+        : null;
+    return {
+      documentId: saved.documentId,
+      name: saved.savedName,
+      savedNames: saved.savedAttachmentNames,
+      notStoredNames: saved.attachmentsNotStored,
+      record,
+      filedTo: saved.filedTo,
+      filedToNumber: saved.filedToNumber ?? null,
+      filedRecord: saved.filedRecord ?? null,
+    };
+  };
+
+  // Task 141 (owner points 7-8): a saved email's attachments, each marked saved (a check) or not (a checkbox), with Save
+  // only when one is unsaved and can be added, enabled only once one is ticked. Not determined → the attachments show with
+  // no marks and nothing to save, never claimed unsaved. A saved email that cannot take an add (not filed, its record
+  // withheld) lists them without checkboxes; so are names an add found the stored email does not hold.
+  const renderSavedEmailAttachments = (view: SavedEmailAttachmentsView): React.ReactElement | null => {
+    if (hostType !== 'outlook' || attachments.length === 0) return null;
+    const states = classifySavedAttachments(attachments, view.savedNames);
+    const canAdd = view.record !== null && view.savedNames !== undefined;
+    const notStored = new Set((view.notStoredNames ?? []).map(name => name.toLowerCase()));
+    const nonSelectableIds = new Set(
+      attachments.filter(a => !canAdd || notStored.has(a.name.toLowerCase())).map(a => a.id)
+    );
+    const addable = attachments.filter(a => states.get(a.id) === 'unsaved' && !nonSelectableIds.has(a.id));
+    const tickedIds = new Set(addable.filter(a => selectedAttachmentIds.has(a.id)).map(a => a.id));
+    const tickedNames = addable.filter(a => tickedIds.has(a.id)).map(a => a.name);
+    return (
+      <>
+        <AttachmentSelector
+          attachments={attachments}
+          selectedIds={tickedIds}
+          onSelectionChange={setSelectedAttachmentIds}
+          savedStates={states}
+          nonSelectableIds={nonSelectableIds}
+          disabled={isSaving}
+          showHeader
+          label="Attachments"
+        />
+        {addable.length > 0 && (
+          <div className={styles.footer}>
+            <div className={styles.footerEnd}>
+              <Button
+                appearance="primary"
+                onClick={() => handleAddAttachments(view, tickedNames)}
+                disabled={isSaving || tickedNames.length === 0}
+              >
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
 
   // Render duplicate state
   const renderDuplicateState = () => (
@@ -2048,13 +2378,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
         {!hideForCreate &&
           // Task 099 (owner item 5): the Document header IS where the name is edited (or shown locked) — there is
-          // no separate "Document Details" card any more.
+          // no separate "Document Details" card any more. Task 141 (owner point 3): an item already in Spaarke with no
+          // version path (an email) has no header — its lines are in the "Saved to Spaarke" section.
           (!isExistingMode
             ? renderDocumentHeader('editable')
-            : renderDocumentHeader(
-                canSaveNewVersion ? 'locked' : 'readonly',
-                saveMode.documentLabel ?? itemName ?? undefined
-              ))}
+            : canSaveNewVersion && renderDocumentHeader('locked', saveMode.documentLabel ?? itemName ?? undefined))}
 
         {/* Filed-to card — task 026 / FR-09. A READ-BACK of what the identified document is ALREADY filed to,
           sourced from the SAME resolved identity SaveModeSection reads (no second network call, so the pane
@@ -2065,7 +2393,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           together for an explicit "a new document" override. The click seam (`onOpenRecord`) is task 027 /
           FR-10 (NFR-10): supplied only when `canOpenRecord` is true — absent it, the card renders as
           plain, non-interactive text (its own fallback, not a host-type branch here). */}
-        {!hideForCreate && !showFilingPicker && (
+        {/* Task 141 (owner point 3): not beside the "Saved to Spaarke" section, which names the record, its number and
+            opens it. */}
+        {!hideForCreate && !showFilingPicker && !showResolvedBox && (
           <RelatedRecordCard
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
             {...(openRecordAvailable ? { onOpenRecord: handleOpenRelatedRecord } : {})}
@@ -2112,8 +2442,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               <DocumentProfileSection
                 {...(resolvedDocumentId !== undefined ? { documentId: resolvedDocumentId } : {})}
                 refreshSignal={profileRefreshSignal}
+                showDocumentType={itemNoun !== 'email'}
               />
             </div>
+
+            {/* Task 141 (owner point 7): an email already in Spaarke lists its attachments, saved or not, below the Profile. */}
+            {showResolvedBox &&
+              resolvedIdentity &&
+              renderSavedEmailAttachments(resolvedAttachmentsViewOf(resolvedIdentity))}
 
             {/* Attachment Selector (Outlook only). Task 120: not while the email is shown as already saved — there is
                 nothing to send until the user chooses to save it again. */}
@@ -2161,9 +2497,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // - `'locked'`: the Spaarke name, read-only, with a hint + a "Save as new document" link that
   //   unlocks it (pre-save: switches the save mode choice to "new"; post-save: leaves the saved state —
   //   both routes through `handleSaveAsNewInstead`, so there is exactly one unlock path).
-  // - `'readonly'`: the name, read-only — the saved state of a pane with no document bytes at all (Outlook), where
-  //   there is nothing to version or rename from here. Task 120: with a "Save again as a new document" link (the same
-  //   `handleSaveAsNewInstead` path), since an email may be saved again, e.g. to another record.
+  // Task 141: the former `'readonly'` mode (an email's saved state) is gone — its lines and its "Save again as a new
+  // document" moved into the "Saved to Spaarke" section (`renderSavedBar`, `itemDetails`).
   //
   // `lockedName` overrides the displayed value for `'locked'` only — the TRUE Spaarke name (the
   // resolved identity's `documentName`/`fileName` for a version save, or the name this pane's own
@@ -2172,14 +2507,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   //
   // A host that cannot supply a document name (`!canProvideDocumentName` — Outlook) additionally shows the item's
   // own name (the email subject) as the first row, with the sender/date rows — host-shaped DATA, as before.
-  function renderDocumentHeader(mode: 'editable' | 'locked' | 'readonly', lockedName?: string): React.ReactElement {
+  function renderDocumentHeader(mode: 'editable' | 'locked', lockedName?: string): React.ReactElement {
     const shownName =
-      mode === 'locked' && lockedName !== undefined
-        ? lockedName
-        : // Task 120: an already-saved email shows its Spaarke name when the pane knows it.
-          (mode === 'readonly' && lockedName) || documentName || itemName || 'Untitled Document';
-    // Task 120: the read-only name repeats nothing — when it IS the subject already shown as the first row, skip it.
-    const showReadonlyName = !(showDocumentInfo && itemName && !canProvideDocumentName && shownName === itemName);
+      mode === 'locked' && lockedName !== undefined ? lockedName : documentName || itemName || 'Untitled Document';
     return (
       <div className={styles.section}>
         <div className={styles.sectionTitle}>
@@ -2200,29 +2530,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           {showDocumentInfo && hostType === 'outlook' && sentDate && (
             <div className={styles.documentInfoRow}>
               <Text size={200}>Sent: {sentDate.toLocaleDateString()}</Text>
-            </div>
-          )}
-          {mode === 'readonly' && (
-            // Task 120: 'readonly' is the already-saved state of an item with no version path — an email (saved this
-            // session, or found saved when the pane opened). It can still be saved again, e.g. to another record, but
-            // only behind this explicit action, collapsed by default: the same unlock path as Word's locked name.
-            <div className={styles.documentNameLockedRow}>
-              {showReadonlyName && <Text className={styles.documentNameText}>{shownName}</Text>}
-              <Text size={200} className={styles.documentNameHint}>
-                This {itemNoun} is saved in Spaarke. To save it again, for example to another record, save it as a new
-                document.
-              </Text>
-              {!error?.offerSaveAsNew && (
-                <Button
-                  appearance="transparent"
-                  size="small"
-                  className={styles.secondaryLink}
-                  onClick={handleSaveAsNewInstead}
-                  disabled={isSaving}
-                >
-                  Save again as a new document
-                </Button>
-              )}
             </div>
           )}
           {mode === 'locked' && (
@@ -2417,15 +2724,18 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         {renderSavedBar(savedBarOf(saved))}
         {renderEmailFilingNotice(saved.emailFilingProblem)}
         {renderAttachmentsNotStoredNotice(saved.attachmentsNotStored)}
-        {renderDocumentHeader(canSaveNewVersion ? 'locked' : 'readonly', lockedName)}
+        {/* Task 141 (owner point 3): an email has no header — its lines are in the section above. */}
+        {canSaveNewVersion && renderDocumentHeader('locked', lockedName)}
         <div className={styles.section}>
           <DocumentProfileSection
             documentId={saved.documentId}
             refreshSignal={profileRefreshSignal}
             mode="refresh"
             onRefresh={handleRefreshSaved}
+            showDocumentType={itemNoun !== 'email'}
           />
         </div>
+        {renderSavedEmailAttachments(savedAttachmentsViewOf(saved))}
         {renderFooter()}
       </>
     );

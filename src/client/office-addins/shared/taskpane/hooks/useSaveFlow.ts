@@ -149,6 +149,12 @@ export interface SaveResponse {
    * first time), so they cannot be added. OMITTED when there are none. Read through {@link readAttachmentsNotStored}.
    */
   attachmentsNotStored?: string[];
+  /**
+   * The saved document. Task 141: an add to a saved email that adds nothing (every name already saved, or only names the
+   * stored email does not hold) answers 200 with `duplicate: true`, NO job, and this naming the saved `.eml` — the save
+   * completes on it directly.
+   */
+  artifact?: JobResultArtifact;
 }
 
 /**
@@ -198,9 +204,23 @@ export interface EmailRecipient {
  * - `version` — a new SPE version of the EXISTING `sprk_document` task 013 resolved, via task 023's
  *   server path (`document.existingDocumentId` + `document.isNewVersion: true`). One row before and after.
  *
- * Only the Document branch reads it; an Outlook (Email) save never carries version fields.
+ * - `addAttachments` — task 141: add attachments to an email ALREADY saved in Spaarke, as children of its `.eml`
+ *   (`email.savedDocumentId`). Nothing else is saved: no `.eml`, no upload, no re-filing. `record` is the record the
+ *   `.eml` is filed to (sent as `targetEntity`; `entityType` is the friendly type, e.g. `Matter`), and
+ *   `attachmentFileNames` are exactly the names to add (the ticked, unsaved ones) — sent as
+ *   `email.selectedAttachmentFileNames`. Only the Email branch reads it.
+ *
+ * Only the Document branch reads `version`; an Outlook (Email) save never carries version fields.
  */
-export type SaveTarget = { mode: 'create' } | { mode: 'version'; existingDocumentId: string };
+export type SaveTarget =
+  | { mode: 'create' }
+  | { mode: 'version'; existingDocumentId: string }
+  | {
+      mode: 'addAttachments';
+      savedDocumentId: string;
+      record: { entityType: string; id: string; name: string };
+      attachmentFileNames: string[];
+    };
 
 /**
  * Save flow context data.
@@ -349,6 +369,13 @@ export interface UseSaveFlowResult {
   savedDocumentId: string | null;
   /** Document URL after successful save */
   savedDocumentUrl: string | null;
+  /**
+   * Task 141: the attachment file names the LAST submitted save asked to become documents
+   * (`email.selectedAttachmentFileNames` as sent), or `undefined` when it sent none (a Word save, an email without
+   * attachments, or nothing submitted yet). Read at completion so the pane can mark those attachments saved. A stable
+   * function, safe to call from a callback.
+   */
+  getSentAttachmentFileNames: () => string[] | undefined;
 }
 
 /**
@@ -436,13 +463,29 @@ export interface VersionIdempotencyParts {
 }
 
 /**
+ * Task 141: the parts of an ADD-ATTACHMENTS save that make its idempotency key distinct. The route's response cache
+ * replays an answer for a repeated `X-Idempotency-Key`, so without these an add could share the key of an ordinary save
+ * of the same email to the same record with the same ticks and be answered with THAT save's response. `failedAttempts`
+ * plays the same part as in {@link VersionIdempotencyParts}: a retry after a failed add is a new attempt.
+ */
+export interface AddAttachmentsIdempotencyParts {
+  savedDocumentId: string;
+  attachmentFileNames: string[];
+  failedAttempts: number;
+}
+
+/**
  * The canonical string an idempotency key is the SHA-256 of. Exported for its unit tests.
  *
- * For every save that is NOT a version save the string is byte-for-byte what it was before task 024 (the
- * `version` member is absent, and `JSON.stringify` emits nothing for it), matching task 023's rule that
- * "the canonical string for every other request is unchanged".
+ * For every save that is NOT a version save (or, task 141, an add-attachments save) the string is byte-for-byte what it
+ * was before task 024 (the `version` / `addAttachments` members are absent, and `JSON.stringify` emits nothing for them),
+ * matching task 023's rule that "the canonical string for every other request is unchanged".
  */
-export function buildIdempotencyCanonical(request: SaveRequest, version?: VersionIdempotencyParts): string {
+export function buildIdempotencyCanonical(
+  request: SaveRequest,
+  version?: VersionIdempotencyParts,
+  addAttachments?: AddAttachmentsIdempotencyParts
+): string {
   return JSON.stringify({
     sourceType: request.sourceType,
     associationType: request.associationType,
@@ -458,6 +501,15 @@ export function buildIdempotencyCanonical(request: SaveRequest, version?: Versio
             fileName: version.fileName,
             contentSha256: version.contentSha256,
             ...(version.failedAttempts > 0 ? { failedAttempts: version.failedAttempts } : {}),
+          },
+        }
+      : {}),
+    ...(addAttachments
+      ? {
+          addAttachments: {
+            savedDocumentId: addAttachments.savedDocumentId,
+            attachmentFileNames: [...addAttachments.attachmentFileNames].sort(),
+            ...(addAttachments.failedAttempts > 0 ? { failedAttempts: addAttachments.failedAttempts } : {}),
           },
         }
       : {}),
@@ -487,8 +539,12 @@ async function sha256Hex(text: string): Promise<string> {
 /**
  * Compute idempotency key (SHA-256 of the canonical payload — see {@link buildIdempotencyCanonical}).
  */
-export async function computeIdempotencyKey(request: SaveRequest, version?: VersionIdempotencyParts): Promise<string> {
-  return sha256Hex(buildIdempotencyCanonical(request, version));
+export async function computeIdempotencyKey(
+  request: SaveRequest,
+  version?: VersionIdempotencyParts,
+  addAttachments?: AddAttachmentsIdempotencyParts
+): Promise<string> {
+  return sha256Hex(buildIdempotencyCanonical(request, version, addAttachments));
 }
 
 /**
@@ -600,7 +656,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // The existing document an in-flight VERSION save targets. By contract (task 023) a version save's resulting
   // document IS that document, so completion can name it even when the job record carries no artifact — which
   // the synchronous save path never sets (only the AI workers do, later, over SSE).
+  // Task 141: the same fallback serves an ADD-ATTACHMENTS save — its resulting document is the saved .eml it named.
   const activeVersionDocumentIdRef = useRef<string | null>(null);
+  // Task 141: whether the save in flight is an add-attachments save, and how many have FAILED in this pane session (its
+  // key's failedAttempts, as for a version save; never reset).
+  const activeAddSaveRef = useRef(false);
+  const addFailuresRef = useRef(0);
+  // Task 141: the attachment names the last submitted save asked to become documents (see getSentAttachmentFileNames).
+  const sentAttachmentFileNamesRef = useRef<string[] | undefined>(undefined);
+  const getSentAttachmentFileNames = useCallback(() => sentAttachmentFileNamesRef.current, []);
   // Task 131 (#2171): the refused / failed email filing the CURRENT save's 202 reported, handed to onComplete when the job
   // completes. Null = nothing to tell the user. Cleared when a save starts and on reset.
   const emailFilingProblemRef = useRef<EmailFilingProblem | null>(null);
@@ -780,6 +844,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         if (activeVersionSaveRef.current) {
           versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
         }
+        if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
         const errorMsg: ErrorMessage = {
           title: 'Processing Failed',
           message: (data.message as string) || (data.errorMessage as string) || 'An error occurred during processing.',
@@ -914,6 +979,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             if (activeVersionSaveRef.current) {
               versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
             }
+            if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
             const errorMsg: ErrorMessage = {
               title: 'Processing Failed',
               message: status.error?.message || 'An error occurred during processing.',
@@ -1041,6 +1107,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       let isVersionAttempt = false;
       activeVersionSaveRef.current = false;
       activeVersionDocumentIdRef.current = null;
+      activeAddSaveRef.current = false;
+      sentAttachmentFileNamesRef.current = undefined;
       emailFilingProblemRef.current = null;
       attachmentsAddedRef.current = 0;
       attachmentsNotStoredRef.current = [];
@@ -1090,11 +1158,28 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         activeVersionSaveRef.current = isVersionAttempt;
         activeVersionDocumentIdRef.current = existingDocumentId ?? null;
 
+        // Task 141: an ADD-ATTACHMENTS save names the saved .eml and the record it is filed to. Only the Email branch
+        // carries it. ADR-044: the id is canonicalized before it leaves the client; an id that is not a GUID, or an add with
+        // no names, is refused here — it never falls back to saving the email again.
+        const addTarget =
+          contentType === 'Email' && context.saveTarget?.mode === 'addAttachments' ? context.saveTarget : undefined;
+        const savedEmailDocumentId = addTarget ? cleanGuid(addTarget.savedDocumentId) : undefined;
+        if (addTarget) {
+          if (!savedEmailDocumentId || !CANONICAL_GUID.test(savedEmailDocumentId)) {
+            throw new Error('The saved email could not be identified, so no attachments were added.');
+          }
+          if (addTarget.attachmentFileNames.length === 0) {
+            throw new Error('Select at least one attachment to add.');
+          }
+          activeAddSaveRef.current = true;
+          activeVersionDocumentIdRef.current = savedEmailDocumentId;
+        }
+
         // The "Related to" record actually sent. NOT on a version save: that path writes to the existing
         // document's own item and never re-associates it (task 023 D-4/D-5), so a picker selection would be
         // inert — and would add an unrelated authorization check (EntityAccessFilter) that could refuse a
-        // legitimate version save.
-        const sentEntity = versionTarget ? null : selectedEntity;
+        // legitimate version save. Task 141: NOT the picker's either on an add — it is filed to the saved email's record.
+        const sentEntity = versionTarget || addTarget ? null : selectedEntity;
         let documentFileName: string | undefined;
         // Task 045: the bytes actually sent for a Document save — resolved below, at submission time,
         // from `context.captureDocumentContent()` when supplied (the live path) or the plain
@@ -1128,6 +1213,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             entityId: sentEntity.id,
             displayName: sentEntity.name,
           };
+        } else if (addTarget) {
+          // Task 141: the record the saved .eml is filed to. The route checks the caller may file to it, and the server
+          // refuses (OFFICE_009) when the .eml is not filed to it.
+          serverRequest.targetEntity = {
+            entityType: addTarget.record.entityType,
+            entityId: cleanGuid(addTarget.record.id),
+            displayName: addTarget.record.name,
+          };
         }
 
         // Add content-type-specific metadata
@@ -1150,20 +1243,30 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           // A read failure THROWS here, inside the existing try/catch, so it surfaces as an ordinary save error and
           // nothing is sent. Attachments that cannot be carried (too large, cloud links) come back in
           // `captured.skipped`, which the provider (SaveView) shows; the rest of the save goes ahead.
+          //
+          // Task 141: an ADD reads the body only — no attachment bytes. The server creates the children from the STORED
+          // .eml and never from request bytes; the body is sent so the server's own content check (it falls back to a
+          // Graph read when the body is absent) takes the client-content path, as for every pane save.
           const captured: EmailContentCapture | undefined = captureEmailContent
-            ? await captureEmailContent(context.attachments, selectedAttachmentIds)
+            ? addTarget
+              ? await captureEmailContent([], new Set())
+              : await captureEmailContent(context.attachments, selectedAttachmentIds)
             : undefined;
 
           // Which attachments become Documents. Always sent when the email has attachments (an empty array means
           // "create no Documents"); undefined only when it has none at all. With a capture, these are the names
           // of the attachments actually sent (a skipped one is not in the .eml, so it cannot become a Document).
-          const selectedAttachmentFileNames = captured
-            ? captured.selectedAttachmentFileNames
-            : context.attachments.length > 0
-              ? Array.from(selectedAttachmentIds)
-                  .map(id => context.attachments.find(a => a.id === id)?.name)
-                  .filter((name): name is string => !!name)
-              : undefined;
+          // Task 141: an add sends exactly the names it was given (the ticked, unsaved ones).
+          const selectedAttachmentFileNames = addTarget
+            ? [...addTarget.attachmentFileNames]
+            : captured
+              ? captured.selectedAttachmentFileNames
+              : context.attachments.length > 0
+                ? Array.from(selectedAttachmentIds)
+                    .map(id => context.attachments.find(a => a.id === id)?.name)
+                    .filter((name): name is string => !!name)
+                : undefined;
+          sentAttachmentFileNamesRef.current = selectedAttachmentFileNames;
 
           const typedEmailName = context.documentName?.trim();
           serverRequest.email = {
@@ -1185,7 +1288,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             // Task 116a: read in the add-in. Undefined only without a reader — the server then fetches from Graph.
             body: captured?.body,
             isBodyHtml: true,
-            ...(captured ? { attachments: captured.attachments } : {}),
+            // Task 141: an add carries no attachment bytes (see the capture above).
+            ...(captured && !addTarget ? { attachments: captured.attachments } : {}),
             // Task 121: the RFC Message-ID, exactly as Quick Save sends it. The server stores it on the .eml
             // (Message-ID header, sprk_emailmessageid), keys the communication record and its idempotency on it, and
             // links the save to the communication that captured the same email. Absent when Office gives none (a
@@ -1195,6 +1299,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             // when no content was captured.
             ...(context.itemId ? { exchangeItemId: context.itemId } : {}),
             selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
+            // Task 141: the saved .eml this save adds the attachments to. Absent on every other save.
+            ...(savedEmailDocumentId ? { savedDocumentId: savedEmailDocumentId } : {}),
           };
         } else if (contentType === 'Document') {
           // Task 045: capture the document's bytes HERE — at the moment this save is actually
@@ -1273,6 +1379,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             failedAttempts: versionFailuresRef.current,
           });
           serverRequest.idempotencyKey = idempotencyKey;
+        } else if (addTarget && savedEmailDocumentId) {
+          // Task 141: an add keys on the saved .eml, its names and its failed attempts — never the key of an ordinary
+          // save of the same email (see AddAttachmentsIdempotencyParts). Header only: the server needs no earlier job.
+          idempotencyKey = await computeIdempotencyKey(request, undefined, {
+            savedDocumentId: savedEmailDocumentId,
+            attachmentFileNames: addTarget.attachmentFileNames,
+            failedAttempts: addFailuresRef.current,
+          });
         } else {
           idempotencyKey = await computeIdempotencyKey(request);
         }
@@ -1345,6 +1459,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             if (isVersionAttempt) {
               versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
             }
+            if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
             // A refused VERSION save is described in terms of the existing document and — when the refusal is
             // about that document — offers "Save as new document" as the way forward (task 024). A refused
             // CREATE save (task 025) is described in terms of the collision and offers the two-option choice
@@ -1372,6 +1487,19 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Task 138 (#2209): a re-save that added attachments to the already-saved email — counted for onComplete.
         attachmentsAddedRef.current = readAttachmentsAddedCount(saveResponse?.attachmentsAdded);
         attachmentsNotStoredRef.current = readAttachmentsNotStored(saveResponse?.attachmentsNotStored);
+
+        // Task 141: an answer with NO job that names the saved document completes here — nothing was queued to track
+        // (an add whose names were all saved already, or none of which the stored email holds).
+        const artifactId = saveResponse?.artifact?.id;
+        if (!saveResponse?.jobId && typeof artifactId === 'string' && artifactId) {
+          terminalOutcomeAppliedRef.current = true;
+          setSavedDocumentId(artifactId);
+          setSavedDocumentUrl(saveResponse.artifact?.webUrl || null);
+          setFlowState('complete');
+          notifyComplete(artifactId, saveResponse.artifact?.webUrl || '');
+          return;
+        }
+
         await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
@@ -1383,6 +1511,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           // writes one more identical SPE version of the same document — never a second row (task 023).
           versionFailuresRef.current += 1;
         }
+        if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
 
         const errorMsg = createErrorFromException(err, 'Failed to save. Please try again.');
         setError(errorMsg);
@@ -1396,6 +1525,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       cleanup,
       getAccessToken,
       includeBody,
+      notifyComplete,
       onDuplicate,
       onError,
       processingOptions,
@@ -1441,5 +1571,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     retry,
     savedDocumentId,
     savedDocumentUrl,
+    getSentAttachmentFileNames,
   };
 }
