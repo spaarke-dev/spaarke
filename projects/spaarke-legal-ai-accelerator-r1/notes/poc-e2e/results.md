@@ -759,3 +759,10 @@ plugin's instructions-only skill instead. Together with WP-2 (pass): Word deskto
 instructions-only skills and its MCP tools, but not a skill that ships Python scripts. A Word edition of
 `/nda-review` therefore can't run our engines in Word; the mechanics would have to run server-side as MCP tools.
 (Not checked: whether `spaarke-word-probe-script` appeared in the **+** list.)
+
+**Word Copilot's own account (owner asked it, 2026-11-26):** "In this Word session I have no way to run Python (.py)
+scripts. What I can run is JavaScript that edits the open document, plus a few built-in document tools. The probe
+skill I loaded earlier was instructions only." A model's self-report, so low authority, but it matches WP-1. New
+point: Word Copilot runs **JavaScript against the open document** (Office.js). That is how W4's tracked changes and
+comments were written. It opens a route besides server-side tools: an instructions-only skill that carries fixed
+Office.js code for Word to run. Untested; a probe would show whether Word runs supplied code as written.
