@@ -209,7 +209,7 @@ public sealed record RecordSearchAccess
 /// any log review.
 /// </para>
 /// </remarks>
-public class RecordSearchAuthorizationFilter : IEndpointFilter
+public sealed class RecordSearchAuthorizationFilter : IEndpointFilter
 {
     private readonly ILogger<RecordSearchAuthorizationFilter>? _logger;
 

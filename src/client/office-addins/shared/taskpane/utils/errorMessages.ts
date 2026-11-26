@@ -574,6 +574,39 @@ export function createErrorFromException(
   };
 }
 
+/** Shown when the pane starts with no email selected (`HostAdapterError` code `NO_ITEM_SELECTED`). */
+export const NO_ITEM_SELECTED_MESSAGE = 'Select an email to use Spaarke.';
+
+/** Shown when a start-up failure carries no usable message of its own. */
+export const STARTUP_FAILED_FALLBACK_MESSAGE = 'Spaarke could not start. Try again.';
+
+/** A start-up failure the pane can show: what to say, and whether it only means "no email is selected". */
+export interface StartupFailure {
+  message: string;
+  /** True for `NO_ITEM_SELECTED` — an expected, non-error state (the pane shows it as information). */
+  noItemSelected: boolean;
+}
+
+/**
+ * Turns whatever the pane's start-up threw into something it can show.
+ *
+ * The host adapters throw `HostAdapterError` — a PLAIN OBJECT `{ code, message }`, not an `Error` — so an
+ * `instanceof Error` check loses every adapter failure's text (the pane used to say "Failed to initialize" for all
+ * of them). The text is read from ANY thrown value that carries a non-empty string `message`; a generic sentence
+ * is the fallback only when there is none. `NO_ITEM_SELECTED` gets plain text instead of the adapter's technical one.
+ */
+export function describeStartupFailure(error: unknown): StartupFailure {
+  const record = typeof error === 'object' && error !== null ? (error as Record<string, unknown>) : undefined;
+  if (record?.code === 'NO_ITEM_SELECTED') {
+    return { message: NO_ITEM_SELECTED_MESSAGE, noItemSelected: true };
+  }
+  const message = record?.message;
+  return {
+    message: typeof message === 'string' && message.trim() !== '' ? message : STARTUP_FAILED_FALLBACK_MESSAGE,
+    noItemSelected: false,
+  };
+}
+
 /**
  * Checks if an error response is a ProblemDetails object.
  *

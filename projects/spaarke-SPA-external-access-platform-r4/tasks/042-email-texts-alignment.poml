@@ -4,7 +4,7 @@
     <title>Email-missing text, and the profile form's email aligned with registration (FR-26 #2155, FR-27 #2449)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 041</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx and (for FR-27) the BFF's registration_required prefill (.cs)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -35,7 +35,7 @@
       <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-042-notes.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="041" status="pending">041 changes the same first-sign-in screens (RegistrationPage) and possibly the registration_required answer</dependency>
+      <dependency task="041" status="completed">041 changes the same first-sign-in screens (RegistrationPage) and possibly the registration_required answer</dependency>
     </dependencies>
   </context>
 

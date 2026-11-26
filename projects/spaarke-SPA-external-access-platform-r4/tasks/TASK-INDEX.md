@@ -48,7 +48,7 @@
 | 044 | no-mock-identity test warm-up (FR-29) | 4 | 🔲 [open] | 038 | Group E | sonnet / medium |
 | 045 | Contact store log labels + test double + gate fix (FR-30) | 4 | 🔲 [open] | 038 | Group E | sonnet / high |
 | 047 | Foreign-environment 403 → Warning / cooldown (FR-31c) | 4 | 🔲 [open] | 038 | Group E | sonnet / xhigh |
-| 042 | Email-missing text + email rule alignment (FR-26, FR-27) | 4 | 🔲 [open] | 041 | Group F | sonnet / high |
+| 042 | Email-missing text + email rule alignment (FR-26, FR-27) | 4 | ✅ [done] | 041 | Group F | sonnet / high |
 | 048 | Teams mobile layout (FR-32) | 4 | 🔲 [open] | 040 | Group F | sonnet / high |
 | 046 | acme fault: owner-approved checks + data fix (FR-31a/b) | 4 | 🔲 [open] | none (owner-gated) | — (live) | sonnet / high |
 | 058 | P4 deploy (BFF via uac-r2, SPA dev, Teams package) + E2E | 4 | 🔲 [open] | 040, 041, 042, 043, 044, 045, 046, 047, 048 | — (live) | sonnet / high |

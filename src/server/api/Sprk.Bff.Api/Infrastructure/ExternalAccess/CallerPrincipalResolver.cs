@@ -787,10 +787,10 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     /// environment a licensed user reaches the link step (whose route makes its own checks) rather than the POST's
     /// "registration environment" refusal. Deliberate; the hint never grants.
     /// </summary>
-    private async Task<bool> IsLicensedUserEmailAsync(ClaimsPrincipal home, CancellationToken ct)
+    /// <param name="email">The caller's registration email (<see cref="Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail"/>), or null.</param>
+    private async Task<bool> IsLicensedUserEmailAsync(string? email, CancellationToken ct)
     {
-        if (_identityStore is null) return false;
-        if (Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail(home) is not { } email) return false;
+        if (_identityStore is null || email is null) return false;
         try
         {
             var lookup = await _identityStore.FindEnabledSystemUsersByEmailAsync(email, ct).ConfigureAwait(false);
@@ -841,8 +841,15 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                         ? new ClaimsPrincipal(homeIdentity)
                         : httpContext.User;
                     var prefill = WorkforceCallerClaims.From(home);
+                    // R4 FR-27 (#2449): the prefill email is the one the registration route would use
+                    // (ExternalRegistrationEndpoints.TokenEmail: the email claim only, exactly one value), NOT
+                    // WorkforceCallerClaims.TokenEmail, whose preferred_username / upn fallback showed an address the
+                    // registration then refused. No usable email → null, and the SPA shows its email-missing screen
+                    // instead of a form that cannot succeed. The names stay as WorkforceCallerClaims reads them.
+                    var registrationEmail = Api.ExternalAccess.ExternalRegistrationEndpoints.TokenEmail(home);
                     // R4 FR-25: the routing hint (see IsLicensedUserEmailAsync). Only the caller's own token email is read.
-                    var licensedUser = await IsLicensedUserEmailAsync(home, httpContext.RequestAborted).ConfigureAwait(false);
+                    var licensedUser = await IsLicensedUserEmailAsync(registrationEmail, httpContext.RequestAborted)
+                        .ConfigureAwait(false);
                     return CallerPrincipalResolution.Denied(Results.Problem(
                         statusCode: StatusCodes.Status403Forbidden,
                         title: "Forbidden",
@@ -852,7 +859,7 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                             ["reasonCode"] = resolution.DenyCode,
                             ["givenName"] = prefill.GivenName,
                             ["familyName"] = prefill.FamilyName,
-                            ["email"] = prefill.Email,
+                            ["email"] = registrationEmail,
                             ["licensedUser"] = licensedUser,
                         }));
 

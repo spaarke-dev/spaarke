@@ -17,10 +17,14 @@ const SYSTEMUSER_ID = '5c6b1d2e-0000-0000-0000-000000000001';
 const OID_A = 'a0000000-0000-0000-0000-00000000000a';
 const OID_B = 'b0000000-0000-0000-0000-00000000000b';
 
+// One expiry for every token in the file: a test compares a token the double issued with one it builds again, and an
+// expiry read from the clock at each call differs whenever a second boundary falls between the two (a CI flake).
+const EXP = Math.floor(Date.now() / 1000) + 3600;
+
 function jwtClaims(claims: Record<string, unknown>): string {
   // base64url, as Entra issues it (the decoder must not rely on plain base64).
   const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  return `${enc({ alg: 'none' })}.${enc({ tid: TENANT, exp: Math.floor(Date.now() / 1000) + 3600, ...claims })}.sig`;
+  return `${enc({ alg: 'none' })}.${enc({ tid: TENANT, exp: EXP, ...claims })}.sig`;
 }
 const jwt = (oid: string): string => jwtClaims({ oid });
 const account = (oid: string, tenantId = TENANT, username = `${oid.slice(0, 1)}@x.test`) => ({

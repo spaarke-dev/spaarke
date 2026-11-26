@@ -28,9 +28,12 @@ namespace Spaarke.ArchTests;
 /// <para><b>Limits, stated exactly</b>: a source scan of <c>src/server/**</c>, allowing the four files by repo-relative path.
 /// It sees the two unique phase names anywhere (qualified, <c>using static</c>, a delegate or <c>nameof</c>), the qualified
 /// <c>DecideCount</c> (a bare <c>DecideCount</c> is too common a name to flag), a quoted name of any of the three (reflection by
-/// string), and a <c>using static</c> or <c>using</c> alias of either filter type. A call through reflection that builds the name
-/// at run time, or a delegate captured inside an allowed file and handed out, is not seen. Tests (<c>tests/**</c>) are not scanned:
-/// they reach the internals through <c>InternalsVisibleTo</c> and are not a production caller.</para>
+/// string), and a <c>using static</c> or <c>using</c> alias of either filter type, plain or <c>global</c>. An alias is flagged at
+/// its declaration, so a call through it (<c>Flt.DecideCount(...)</c>) needs no separate rule. A bare <c>DecideCount(...)</c> from a
+/// class derived from a filter is closed by a different mechanism, not by this scan: both filter classes are <c>sealed</c>, and
+/// <see cref="BothSearchFiltersAreSealed"/> keeps them so. A call through reflection that builds the name at run time, or a
+/// delegate captured inside an allowed file and handed out, is not seen. Tests (<c>tests/**</c>) are not scanned: they reach the
+/// internals through <c>InternalsVisibleTo</c> and are not a production caller.</para>
 ///
 /// <para><b>Maintenance procedure.</b> This test failed because a file other than the four above names one of the three phase
 /// methods. Do not add the file to <see cref="AllowedFiles"/>. Call the public method instead —
@@ -73,7 +76,7 @@ public class SearchAuthorizationPhaseCallerGuardTests
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex UsingStaticOrAlias = new(
-        @"^\s*using\s+(?:static\s+|\w+\s*=\s*)(?:global::)?(?:Sprk\.Bff\.Api\.Api\.Filters\.)?(?<type>SemanticSearchAuthorizationFilter|RecordSearchAuthorizationFilter)\s*;",
+        @"^\s*(?:global\s+)?using\s+(?:static\s+|\w+\s*=\s*)(?:global::)?(?:Sprk\.Bff\.Api\.Api\.Filters\.)?(?<type>SemanticSearchAuthorizationFilter|RecordSearchAuthorizationFilter)\s*;",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline);
 
     /// <summary>"what" for every reference to a phase method (or a using static / alias of a filter) in <paramref name="code"/> (comments stripped).</summary>
@@ -148,6 +151,16 @@ public class SearchAuthorizationPhaseCallerGuardTests
         Assert.Contains(
             "using static/alias SemanticSearchAuthorizationFilter",
             ViolationsIn("using F = SemanticSearchAuthorizationFilter;\nclass X {}"));
+        // global using forms (a project-wide alias or static import is the widest reach one line can have).
+        Assert.Contains(
+            "using static/alias SemanticSearchAuthorizationFilter",
+            ViolationsIn("global using static Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter;\nclass X {}"));
+        Assert.Contains(
+            "using static/alias RecordSearchAuthorizationFilter",
+            ViolationsIn("global using static global::Sprk.Bff.Api.Api.Filters.RecordSearchAuthorizationFilter;"));
+        Assert.Contains(
+            "using static/alias SemanticSearchAuthorizationFilter",
+            ViolationsIn("global using Flt = Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter;\nclass X { int n = Flt.DecideCount(a, b, c); }"));
         Assert.Equal(["\"DecideCount\""], ViolationsIn("typeof(SemanticSearchAuthorizationFilter).GetMethod(\"DecideCount\")"));
         Assert.Equal(
             ["SearchAndAuthorizeResultsAsync"],
@@ -159,5 +172,16 @@ public class SearchAuthorizationPhaseCallerGuardTests
             + " var b = await RecordSearchAuthorizationFilter.SearchRecordsAsCallerAsync(http, request, search, ct);"));
         Assert.Empty(ViolationsIn("var n = Counter.DecideCount(x); static int DecideCount(int a) => a;"));
         Assert.Empty(ViolationsIn("using Sprk.Bff.Api.Api.Filters;\nvar f = new SemanticSearchAuthorizationFilter(logger);"));
+        Assert.Empty(ViolationsIn("global using Sprk.Bff.Api.Api.Filters;\nvar f = new RecordSearchAuthorizationFilter(logger);"));
+    }
+
+    [Fact(DisplayName = "r2 task 027: both search filters are sealed, so no subclass can call the internal DecideCount / phase methods unqualified")]
+    public void BothSearchFiltersAreSealed()
+    {
+        // The scan above cannot see a bare DecideCount(...) inside a derived class (the name is too common to flag). Sealing the
+        // two filter classes removes that route instead of trying to detect it. If a test needs a double, extract an interface;
+        // do not unseal.
+        Assert.True(typeof(Sprk.Bff.Api.Api.Filters.SemanticSearchAuthorizationFilter).IsSealed, "SemanticSearchAuthorizationFilter must stay sealed");
+        Assert.True(typeof(Sprk.Bff.Api.Api.Filters.RecordSearchAuthorizationFilter).IsSealed, "RecordSearchAuthorizationFilter must stay sealed");
     }
 }

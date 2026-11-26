@@ -1,27 +1,25 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-25 ~21:30Z (task 041 completed locally; not pushed)
+> **Last Updated**: 2026-11-26 ~01:50Z (task 042 completed on the branch; PR pending)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Active** | None. Task 041 is ✅ completed (FR-25, #2192); details in `notes/task-041-notes.md`. The next 🔲 in `TASK-INDEX.md` is the next task. |
-| **In flight** | **PR #3180** (task 041) is open, pushed at merge `e53166915c` (master `af4cfb4527` merged in; only the 11 task-041 files in the diff); CI is starting. Auto-merge is OFF: **merge only on the owner's go.** PR #3160 (040) MERGED. The next dev deploy candidate (040 + 041 once merged): the BFF through uac-r2 (owner go on the exact master SHA, in uac-r2's session); the SPA with the owner's go (re-check master HEAD vs the approved SHA). |
-| **Next action** | Ask the owner for the #3180 merge go (check CI with `mcp__ccd_pr__get_status`, never poll). Then the next 🔲 in `TASK-INDEX.md` via task-execute (042 depends on 041). No uncommitted files except this one. |
+| **Active** | None. Task 042 is ✅ completed (FR-26 #2155, FR-27 #2449); details in `notes/task-042-notes.md`. The next 🔲 in `TASK-INDEX.md` is the next task. |
+| **In flight** | **PR #3203** (task 042) open, pushed at `2e1a02dec3`; auto-merge OFF: **merge only on the owner's go.** #2449 now has only the r4 label. PR #3180 (041) and #3160 (040) MERGED. No uncommitted files. |
+| **Next action** | Check #3203 CI with `mcp__ccd_pr__get_status` (never poll), then ask the owner for the merge go. Then the next 🔲 in `TASK-INDEX.md` via task-execute. After the 042 merge: flip #2449 / #2155 in R3's `notes/defer-issues.md` (ISS entries at ~:692 and ~:815) to Done with the PR link. |
 
-## Task 041 outcome
-- BFF: the workforce 403 `registration_required` carries a `licensedUser` boolean (the caller's own token email, the registration route's rule, read and decision; any doubt → false). SPA: `RegistrationPage` opens on "Link my account" when it is true; the popup opens only on the click.
-- Popup timeout: uac-r2 decided (a), keep msal's 60 s default (`popupBridgeTimeout`); no change. UAC review: no objection (recorded in the notes).
-- Two adversarial passes: no F-class. One comment fix and one test added. K-limits recorded (an extra Dataverse read per unregistered request; probes skipped; an unverified email gives the same answer as the POST).
-- Publish size +1,401 bytes (≈ 43.6 MB). No CVE. ArchTests 2831/2831. The conflict check is clean.
-
-## Task 040 outcome (details in notes/task-040-notes.md)
-- `assigned-work` for a workforce contact with ≥ 1 readable project/matter/WA. The SPA's record tabs use `RECORD_TAB_GATE`. Submit invoice is hidden on the workforce plane (F1, owner 2026-11-25); the question went to ebilling as D-41 #3159.
+## Task 042 outcome
+- BFF: the workforce 403 `registration_required` prefills `email` with `ExternalRegistrationEndpoints.TokenEmail` (the registration's rule: the email claim only, one value). `WorkforceCallerClaims.TokenEmail` unchanged. The licensedUser hint reads the same value.
+- SPA: an empty prefill email opens on the email-missing screen (no form). New text: ask the organization's IT administrator to set the Email on the Microsoft Entra account, then sign in again. A **Sign out** button there (browser only; the shell's own sign-out, threaded App → gate → page).
+- One adversarial pass: no fix-now runtime defect; 2 doc/comment fixes and the Sign out button applied; K1 filed as D-42 #3201.
+- Publish size +201 bytes (≈ 43.6 MB). No CVE, no package change. Conflict check clean (35 open PRs).
 
 ## Live on dev
-SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `aa933c09e6` since 2026-11-25 21:49:11Z (rollback `a1b7db1def`; uac-r2 deploys; owner go per SHA; uac-r2's 30-minute gate PASSED at 22:20Z). Tasks 040 and 041 are not in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal.
+- **BFF:** master `1e64e94168` (tasks 040 + 041 BFF) LIVE since 2026-11-26 01:56:50Z (uac-r2, owner's go; healthz 200); rollback `aa933c09e6`. uac-r2's 30-minute gate PASSED at 02:27Z (146 requests, 0 5xx). Task 042's BFF part is not in it (uac-r2 reviewed #3203's BFF hunk: no objection; it rides the next candidate after the merge, on the owner's SHA go).
+- **SPA:** `0267ee64a2` (rollback `3067fb3bdc`). Tasks 040, 041 (and 042 once merged) are NOT in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal. The SPA deploy needs the owner's go on an exact SHA; re-check master HEAD before running `deploy-external-spa.yml`.
 
 ## Owner questions open
 - Track the raw filing-reference footer seen in an older PRJ-000046 system email? (Told to the owner; not filed. The repo is public.)
@@ -31,7 +29,7 @@ SPA `0267ee64a2` (rollback `3067fb3bdc`); BFF `aa933c09e6` since 2026-11-25 21:4
 - `useHostRowSource` row in `.claude/patterns/CAPABILITY-INDEX.md` row 31 (`.claude` edit, owner approval)?
 
 ## Filed
-- D-24 #2939 … D-33 #3010; D-34 #3045 done; D-35 #3046; D-36 #3050; D-37 #3129; D-38 #3149; D-39 #3153; D-40 #3154; D-41 #3159.
+- D-24 #2939 … D-33 #3010; D-34 #3045 done; D-35 #3046; D-36 #3050; D-37 #3129; D-38 #3149; D-39 #3153; D-40 #3154; D-41 #3159; D-42 #3201.
 
 ## Merge trap (seen 2026-11-22, again 2026-11-25)
-Master holds older squashes of this project's notes. On a master merge, keep the branch's copies of `projects/spaarke-SPA-external-access-platform-r4/**` (`git checkout --ours`).
+Master holds older squashes of this project's notes. On a master merge, keep the branch's copies of `projects/spaarke-SPA-external-access-platform-r4/**` (`git checkout --ours`). Also: after a squash merge of this branch's PR, the next master merge conflicts on the same source lines; take ours only after checking that master's only commit to those files is that squash.

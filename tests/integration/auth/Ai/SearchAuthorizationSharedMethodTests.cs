@@ -267,33 +267,6 @@ public sealed class SearchAuthorizationSharedMethodTests
         host.Records.Requests.Should().BeEmpty("a refused request never reaches the index");
     }
 
-    [Fact(DisplayName = "D-027-2: an empty record page past the end carries no unfiltered tenant-wide count, by the method and by the route")]
-    public async Task SearchRecords_EmptyPagePastTheEnd_DoesNotLeakTheUnfilteredCount()
-    {
-        await using var host = await SearchAuthHost.StartAsync();
-
-        // The index holds 7 matching matters tenant-wide; the caller pages past the end (offset 1000, limit 1), so the
-        // page is empty but the index still reports the unfiltered total. None of the 7 is known to the caller.
-        host.Records.ReturnsEmptyPage(unfilteredTotal: 7);
-        var request = RecordRequest(RecordEntityType.Matter) with
-        {
-            Options = new RecordSearchOptions { Offset = 1000, Limit = 1 },
-        };
-
-        var (direct, rest) = await host.RecordsDirectThenRestAsync(request);
-
-        direct.Outcome.Should().Be(RecordSearchAccessOutcome.Allowed);
-        direct.Response!.Results.Should().BeEmpty();
-        direct.Response.Metadata.TotalCount.Should().Be(0, "an empty page reports the count of rows in the response, as a filtered page does");
-        rest.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await BodyAsync(rest);
-        body["results"]!.AsArray().Should().BeEmpty();
-        body["metadata"]!["totalCount"]!.GetValue<int>().Should().Be(0,
-            $"the route must not disclose how many matters match tenant-wide. body: {body.ToJsonString()}");
-        await host.AssertSameBodyAsync(rest, direct.Response);
-        host.Access.Calls.Should().BeEmpty("an empty page has no record to ask Dataverse about");
-    }
-
     // ══ Check budgets ════════════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact(DisplayName = "Record budget: rows past the 50-check budget are dropped, never served unchecked, and exactly 50 Dataverse questions are asked")]
@@ -432,20 +405,20 @@ public sealed class SearchAuthorizationSharedMethodTests
         ConfidenceScore = 0.8,
     };
 
-    private static RecordSearchRequest RecordRequest(string recordType) => new()
+    internal static RecordSearchRequest RecordRequest(string recordType) => new()
     {
         Query = "acme",
         RecordTypes = [recordType],
     };
 
-    private static async Task<JsonObject> BodyAsync(HttpResponseMessage response) =>
+    internal static async Task<JsonObject> BodyAsync(HttpResponseMessage response) =>
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
 
     /// <summary>
     /// Both search routes over the real filters, handlers and authorization stack, substituted only at the access-data source,
     /// the two search services and the retrieval trim. The direct calls use the SAME container, so a grant applies to both.
     /// </summary>
-    private sealed class SearchAuthHost : IAsyncDisposable
+    internal sealed class SearchAuthHost : IAsyncDisposable
     {
         private WebApplication? _app;
         private HttpClient? _client;
@@ -590,7 +563,7 @@ public sealed class SearchAuthorizationSharedMethodTests
     }
 
     /// <summary>The document index at its module boundary: returns the seeded rows and records every request it is sent.</summary>
-    private sealed class StubSemanticSearch : ISemanticSearchService
+    internal sealed class StubSemanticSearch : ISemanticSearchService
     {
         private SearchResult[] _rows = [];
 
@@ -615,7 +588,7 @@ public sealed class SearchAuthorizationSharedMethodTests
     }
 
     /// <summary>The record index at its module boundary.</summary>
-    private sealed class StubRecordSearch : IRecordSearchService
+    internal sealed class StubRecordSearch : IRecordSearchService
     {
         private RecordSearchResult[] _rows = [];
         private int? _unfilteredTotal;
@@ -651,7 +624,7 @@ public sealed class SearchAuthorizationSharedMethodTests
     /// <see cref="IRetrievalAccessTrim"/> at its PublicContracts boundary: answers as the caller's Dataverse read would, keeping every
     /// row whose document is not listed as unreadable.
     /// </summary>
-    private sealed class StubTrim : IRetrievalAccessTrim
+    internal sealed class StubTrim : IRetrievalAccessTrim
     {
         public HashSet<string> Unreadable { get; } = new(StringComparer.OrdinalIgnoreCase);
 
