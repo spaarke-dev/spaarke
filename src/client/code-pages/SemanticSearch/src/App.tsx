@@ -31,7 +31,6 @@ import { Dismiss16Regular } from '@fluentui/react-icons';
 import type {
   SearchDomain,
   SearchFilters,
-  HybridMode,
   ViewMode,
   VisualizationColorBy,
   TimelineDateField,
@@ -62,6 +61,7 @@ import { DocumentPreviewDialog } from './components/DocumentPreviewDialog';
 import { SearchResultsGrid } from './components/SearchResultsGrid';
 import { listActiveSearchIndexes, type AiSearchIndexRow } from './services/aiSearchIndexService';
 import { buildSearchRequestFragment, type SearchRequestFragment } from './services/targetEntityNormalize';
+import { DEFAULT_FILTERS, buildInitialFilters } from './utils/initialFilters';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -93,15 +93,6 @@ export interface AppProps {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const DEFAULT_FILTERS: SearchFilters = {
-  documentTypes: [],
-  fileTypes: [],
-  matterTypes: [],
-  dateRange: { from: null, to: null },
-  threshold: 50,
-  searchMode: 'rrf',
-};
 
 /** Maps non-document domains to their Dataverse entity logical names */
 const DOMAIN_RECORD_TYPES: Record<SearchDomain, string[]> = {
@@ -142,42 +133,6 @@ function deriveSearchDomain(fragment: SearchRequestFragment | null | undefined):
       // all flow through useSemanticSearch.
       return 'documents';
   }
-}
-
-/**
- * Map the envelope `searchMode` literal (PCF/URL) to the API `HybridMode`
- * literal used by request bodies. See `EnvelopeSearchMode` doc-comment in
- * `types/index.ts` — `hybrid` is the envelope alias for the API's `rrf`.
- */
-function envelopeSearchModeToHybridMode(mode: AppUrlParams['searchMode']): HybridMode | undefined {
-  if (mode === 'hybrid') return 'rrf';
-  if (mode === 'vectorOnly') return 'vectorOnly';
-  if (mode === 'keywordOnly') return 'keywordOnly';
-  return undefined;
-}
-
-/**
- * Seed `SearchFilters` state from URL-derived envelope params (FR-CP-03).
- * Used as the lazy `useState` initializer so values are present BEFORE the
- * first render commits and the auto-search effect fires — guaranteeing the
- * very first network POST uses URL-derived filters.
- *
- * Missing/undefined URL values fall back to `DEFAULT_FILTERS` so the page
- * still renders correctly when opened without any envelope.
- */
-function buildInitialFilters(urlParams: AppUrlParams | undefined): SearchFilters {
-  if (!urlParams) return DEFAULT_FILTERS;
-  const mappedSearchMode = envelopeSearchModeToHybridMode(urlParams.searchMode);
-  return {
-    ...DEFAULT_FILTERS,
-    fileTypes: urlParams.fileTypes ?? DEFAULT_FILTERS.fileTypes,
-    dateRange: {
-      from: urlParams.dateFrom ?? null,
-      to: urlParams.dateTo ?? null,
-    },
-    threshold: urlParams.threshold ?? DEFAULT_FILTERS.threshold,
-    searchMode: mappedSearchMode ?? DEFAULT_FILTERS.searchMode,
-  };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 using System.Diagnostics.Metrics;
 using System.ServiceModel;
 using System.Xml.Linq;
@@ -2661,7 +2662,8 @@ public partial class SignalReevaluationJobTests
 
         /// <summary>Task 143: the reconciler's conditional owner write, over <see cref="Org"/>.</summary>
         public ReownWebApi ReownApi { get; }
-        public IDistributedCache Cache { get; } = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        /// <summary>The job's distributed cache (a <see cref="MemoryDistributedCache"/> unless a test passes its own, task 224).</summary>
+        public IDistributedCache Cache { get; }
         public List<LogEntry> Log { get; } = new();
         public SignalWriter Writer { get; }
         public SignalEvaluator Evaluator { get; }
@@ -2672,8 +2674,9 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 153: the real Decision Record writer, over the same two seams (its creates land in <see cref="WriterOrg.DecisionRecordRows"/>).</summary>
         public DecisionRecordWriter Records { get; }
 
-        public Harness(DateTimeOffset? runAt = null, string? writerClientId = null)
+        public Harness(DateTimeOffset? runAt = null, string? writerClientId = null, IDistributedCache? cache = null)
         {
+            Cache = cache ?? new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
             Clock = new FakeTimeProvider(runAt ?? RunAt);
             Sysadmin.Org = Org;
             Org.Now = () => Clock.GetUtcNow().UtcDateTime;
@@ -3209,10 +3212,13 @@ public partial class SignalReevaluationJobTests
         }
 
         /// <summary>A query with <c>PageInfo.Count</c> set is answered one page at a time, ordered by id (every paged read here orders by
-        /// its primary key), with <c>MoreRecords</c> and a paging cookie as Dataverse sets them; any other query gets every row.</summary>
-        private EntityCollection Paged(QueryExpression query, IEnumerable<Entity> rows)
+        /// its primary key), with <c>MoreRecords</c> and a paging cookie as Dataverse sets them; any other query gets every row.
+        /// <paramref name="sqlOrder"/> (task 224): order by SQL Server's <c>uniqueidentifier</c> order (<see cref="SqlGuid"/>), as Dataverse
+        /// sorts ids. The .NET <see cref="Guid"/> order differs, so a cursor computed in .NET order would skip rows live yet pass here. Only the
+        /// deleted-policy cursor read uses it: the task 204/209 tests seed and assert in the .NET order.</summary>
+        private EntityCollection Paged(QueryExpression query, IEnumerable<Entity> rows, bool sqlOrder = false)
         {
-            var ordered = rows.OrderBy(r => r.Id).ToList();
+            var ordered = sqlOrder ? rows.OrderBy(r => new SqlGuid(r.Id)).ToList() : rows.OrderBy(r => r.Id).ToList();
             var result = new EntityCollection();
             if (query.PageInfo is not { Count: > 0 } paging)
             {
@@ -3292,6 +3298,8 @@ public partial class SignalReevaluationJobTests
                              {
                                  ConditionOperator.Equal => r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id is { } id && Equals(id, c.Values[0]),
                                  ConditionOperator.Like => r.GetAttributeValue<string>(c.AttributeName)?.Contains(((string)c.Values[0]).Trim('%'), StringComparison.Ordinal) == true,
+                                 // Task 223 (DI-144): WriterCreatedRecord's createdonbehalfby-is-empty condition, as Dataverse evaluates it.
+                                 ConditionOperator.Null => !r.Contains(c.AttributeName) || r[c.AttributeName] is null,
                                  _ => false,
                              })))
                     {
@@ -3337,7 +3345,7 @@ public partial class SignalReevaluationJobTests
                             var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
                             foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
                             return copy;
-                        }));
+                        }), sqlOrder: true); // task 224: the deleted-policy cursor pages these, so ids sort as Dataverse sorts them
                     break;
                 // Task 209 (#3014): the nightly close's read of the open Signals whose policy is not in force: sprk_signal inner-joined to
                 // sprk_policy on the lookup, answered as Dataverse answers it. The root conditions (the status) hold on the Signal and the
@@ -3422,9 +3430,12 @@ public partial class SignalReevaluationJobTests
                         .SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
                     // Adversarial pass 2: a createdby condition is evaluated (a row with no createdby was not created by that user).
                     var creator = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby")?.Values.Single();
+                    // Task 223 (DI-144): and the createdonbehalfby-is-empty half of WriterCreatedRecord, as Dataverse evaluates it.
+                    var onBehalfOfEmpty = query.Criteria.Conditions.Any(c => c.AttributeName == "createdonbehalfby" && c.Operator == ConditionOperator.Null);
                     // Task 153: and the records the writer created (a condition-cleared closure's, once linked).
                     foreach (var record in DecisionRecords.Values.Concat(Org.DecisionRecordRows.Values).Where(r => wanted.Contains(r.Id)
-                                 && (creator is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, creator))))
+                                 && (creator is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, creator))
+                                 && (!onBehalfOfEmpty || r.GetAttributeValue<EntityReference>("createdonbehalfby") is null)))
                     {
                         var copy = new Entity("sprk_decisionrecord", record.Id);
                         // uac-r2 re-check 2 F3-2: only the selected columns come back, as in Dataverse (a column the query leaves out is absent).
@@ -3524,6 +3535,9 @@ public partial class SignalReevaluationJobTests
                     // Task 217: a LIKE as Dataverse evaluates it on a string column: % any run, _ one character, case-insensitive; a null
                     // never matches.
                     ConditionOperator.Like => value is string text && LikeHolds(text, (string)c.Values[0]),
+                    // Task 224: an id cursor (the primary key greater than the last id read), compared in the SQL Server order Paged sorts by.
+                    ConditionOperator.GreaterThan when c.AttributeName == row.LogicalName + "id" =>
+                        new SqlGuid(row.Id).CompareTo(new SqlGuid((Guid)c.Values[0])) > 0,
                     _ => throw new NotSupportedException($"Operator {c.Operator} on {c.AttributeName} is not modelled by the joined read."),
                 };
             }).Concat(filter.Filters.Select(f => Holds(row, f))).ToList();

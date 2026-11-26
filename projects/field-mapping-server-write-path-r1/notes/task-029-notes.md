@@ -69,3 +69,55 @@ POML step 3 said to pass `mappingSource` only when the filing parent differs fro
   - `sprk_documentuploadwizard`;
   - `sprk_summarizefileswizard`;
   - `sprk_spaarkeai` — its `vite.config.ts` bundles `DocumentUploadWizard/src`, and the Summarize dialog comes from the shared library through `inAppWizardRenderers.tsx`.
+
+## Deploy and live check (owner go 2026-11-25: "Yes, deploy after merge")
+
+- **Rollback copies** of dev before the deploy, in `C:\tmp\fm029-rollback`:
+  - `sprk_documentuploadwizard`: 2026-11-23 21:35Z, 1,542,762 bytes, SHA BF9A8613…BC68FA03.
+  - `sprk_summarizefileswizard`: 2026-11-23 21:35Z, 1,512,677 bytes, SHA 7D6598EA…6EEEB977.
+  - `sprk_spaarkeai`: 2026-11-25 17:35Z, 6,466,220 bytes, SHA 90503EEE…745D6A90.
+- **Planned temporary profile** "FMSWP-029 live check: Matter to Document (temporary)":
+  - source type Matter (e8547bb4…) → target type Document (b83dbfc1…);
+  - rule `sprk_matterdescription` → `sprk_documentdescription` (Memo, 6/100000006);
+  - rule `sprk_assignedtointernal` → `sprk_assignedtointernal` (contact lookup, 1/100000001);
+  - deactivate it after the check.
+- **Test matter:** MAT-000113 `68190578-c655-458f-8518-34eff189c39c`. It is Standard, has a description, and its Internal assignee is set.
+
+### Results (2026-11-25, dev)
+
+- **Merged:** PR #3158, 19:27Z, as 520ca7917d.
+  - Every required check passed.
+  - The advisory `api-office` leg was cancelled at its 40-minute limit during pass 1, not failed by a test (known).
+- **Built and deployed** from master 520ca7917d in a temporary worktree (`C:\tmp\w029`). Master had moved on since the PR head, so the pages were rebuilt there. `sprk_wizard_commands` is unchanged on master since its last deploy.
+
+| Page | Deployed (UTC) | Bytes | SHA256 (read-back = build) | Rollback |
+|---|---|---|---|---|
+| `sprk_documentuploadwizard` | 21:09:49 | 1,545,188 | CC515070…7576AEAF | BF9A8613…BC68FA03 |
+| `sprk_summarizefileswizard` | 21:16:25 | 1,515,721 | 229F1B4B…C2A45F2A | 7D6598EA…6EEEB977 |
+| `sprk_spaarkeai` | 19:54:59 (Deploy SpaarkeAi workflow from 520ca7917d) | 6,485,985 | contains the 029 delete message and `mappingSourceEntity`; no business-unit container read | 90503EEE…745D6A90 |
+
+- **Temporary profile** "FMSWP-029 live check: Matter to Document (temporary)" `d349f3a0-14e9-f111-84ea-00224829aef9`:
+  - rules `6a8107a0…` (`sprk_matterdescription` → `sprk_documentdescription`) and `8bf2cba1…` (`sprk_assignedtointernal` → `sprk_assignedtointernal`);
+  - created 21:10Z, deactivated 21:20Z.
+
+**Document Upload: PASS.** Run on MAT-000113 from the matter form's Documents "+" button. Document `1400088a-a633-46d3-beb4-10523499a65b`:
+- `sprk_documentdescription` = the matter's description, and `sprk_assignedtointernal` = the matter's Internal assignee. Both are mapped; the wizard sends neither key. `sprk_document` is not in the inferred-source set, so mapping proves the wizard named its source.
+- Owner = Spaarke Business Unit 1 (the matter's team, record-first).
+- File attached (`sprk_graphitemid` set), status Draft.
+- `sprk_searchindexname` = `spaarke-files-index` (the server default, task 041); no index bind.
+- Success screen: "1 document created successfully", with no warnings. That is correct: the source was readable and nothing was dropped.
+
+**Summarize Files: PASS.** From MAT-000113, Work on Analysis → Document Summary. Document `09806312-0efb-422e-a9bf-4561945d3557`:
+- name only; no search index, no container, not filed under anything;
+- owner = the caller's business-unit team ("Spaarke": the signed-in user's business unit);
+- the Playbook Library opened. It was closed without running, because of DI-042: the row has no file.
+
+**Negative criterion.** The payload holds only keys the user entered (closed-set tests, plus the bundle checks above). "A user value wins" could not be exercised in this wizard: it has no field for the mapped columns. Fill-only behaviour is covered by the server tests and the 021–028 live checks.
+
+**Known limits:**
+- K1: not measured. One file took about 1 s to create.
+- K2: `statuscode` Draft on both rows, the same as the old route.
+
+**Found:** DI-043 / #3176. The wizard silently drops TXT/PPTX/MSG/EML files it says it accepts. Pre-existing.
+- The first live attempt used a TXT file, which hit this; the check was rerun with a PDF.
+- The matter form showed an "Access status unavailable…" banner on MAT-000113 throughout. It was not investigated here, and the uploads were unaffected.

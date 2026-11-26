@@ -2241,8 +2241,9 @@ public sealed class DecisionCommitService
         // Create on sprk_decisionrecord, and sprk_confirmedby / sprk_steps are not field-secured, so a person can write a row carrying their own
         // confirmer, this review id, the (predictable) review hash and the Signals; without this condition it would be taken as "already written"
         // and the finishing path would close the Signals with the forged resolution, running no executor. A WhoAmI fault throws here and lands in
-        // the caller's catch (Unavailable, fail closed), never as "no record found".
-        query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, await _writer.GetWriterUserIdAsync(ct).ConfigureAwait(false));
+        // the caller's catch (Unavailable, fail closed), never as "no record found". Task 223 (DI-144): through WriterCreatedRecord, so a row
+        // created on the writer's behalf by another identity (createdonbehalfby set) is not the writer's own either.
+        WriterCreatedRecord.AddConditions(query.Criteria, await _writer.GetWriterUserIdAsync(ct).ConfigureAwait(false));
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return rows.Entities.FirstOrDefault() is { } row && row.Id != Guid.Empty ? StoredRecord.From(row) : null;
     }

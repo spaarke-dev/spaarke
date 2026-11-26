@@ -184,3 +184,10 @@ Both rows have:
 The PAT-176903 note under "Live-check setup" above was written before the Restricted flag was noticed. For a mapping check, use a Standard Matter such as MAT-000113.
 
 Task 028 is done except for the owner's dark-mode look.
+- 2026-11-25: the final 138 diff (3bb88235bc, PR #3157) was checked against the four conditions.
+  - All four pass; ArchTests 2823/2823 at its head.
+  - Known limits sent to word-add-in-r1:
+    - no guard scans the attachment-add planner for creates;
+    - the fault test is weak;
+    - add-job children take the current record-first owner, not the parent .eml's;
+    - an untested null access decision fails closed.

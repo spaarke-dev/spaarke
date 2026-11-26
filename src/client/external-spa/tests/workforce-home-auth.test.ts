@@ -1154,6 +1154,71 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(h.console.join('\n')).not.toContain('guest-token-popup');
   });
 
+  // R4 task 041 (FR-25, #2192): the BFF's `licensedUser` routing hint on registration_required.
+  const REG_REQUIRED_LICENSED = (licensedUser: unknown): Reply => ({
+    status: 403,
+    json: { ...(REG_REQUIRED.json as Record<string, unknown>), licensedUser },
+  });
+
+  it('licensedUser hint + silent failure: opens on "Link my account" (no form, no popup yet); the click links, then /me', async () => {
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(true), ME_OK], [LINK]: [LINKED] };
+    const g = await renderGate({
+      guest: { popup: async () => ({ accessToken: 'guest-token-popup', account: guestAccount }) },
+    });
+    const button = await g.screen.findByRole('button', { name: /link my account/i });
+    expect(g.screen.getByRole('heading', { name: /link your spaarke account/i })).toBeTruthy();
+    expect(g.screen.queryByLabelText(/first name/i)).toBeNull(); // the profile form is skipped
+    expect(h.requests.filter(r => r.call === 'acquireTokenPopup')).toEqual([]); // no gesture-less popup
+    expect(calls()).toEqual([ME]);
+
+    g.fireEvent.click(button);
+    expect(await g.screen.findByTestId('workspace')).toBeTruthy();
+
+    const popup = h.requests.find(r => r.call === 'acquireTokenPopup')!;
+    expect(popup.request).toStrictEqual({ scopes: [scopeOf(CONTOSO.bffAppId)], loginHint: 'jane@contoso.test' });
+    expect(calls()).toEqual([ME, LINK, ME]); // never a registration POST
+    expect(bodies(LINK)).toEqual([{ guestAccessToken: 'guest-token-popup' }]);
+  });
+
+  it('licensedUser hint alone never reaches the workspace: a cancelled popup keeps the link step and posts nothing', async () => {
+    const { BrowserAuthError, BrowserAuthErrorCodes } = await import('@azure/msal-browser');
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(true)] };
+    const g = await renderGate({
+      guest: {
+        popup: async () => {
+          throw new BrowserAuthError(BrowserAuthErrorCodes.userCancelled);
+        },
+      },
+    });
+    g.fireEvent.click(await g.screen.findByRole('button', { name: /link my account/i }));
+    expect(await g.screen.findByText(/closed before it finished/i)).toBeTruthy();
+    expect(g.screen.queryByTestId('workspace')).toBeNull();
+    expect(g.onReady).not.toHaveBeenCalledWith(true);
+    expect(calls()).toEqual([ME]);
+  });
+
+  it('licensedUser hint + silent link success: the workspace shows; the hint does not replace the stored link', async () => {
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(true), ME_OK], [LINK]: [LINKED] };
+    const g = await renderGate({
+      guest: { sso: async () => ({ accessToken: 'guest-token-xyz', account: guestAccount }) },
+    });
+    expect(await g.screen.findByTestId('workspace')).toBeTruthy();
+    expect(calls()).toEqual([ME, LINK, ME]);
+    expect(h.requests.filter(r => r.call === 'acquireTokenPopup')).toEqual([]);
+  });
+
+  it.each([
+    ['false', false],
+    ['the string "true"', 'true'],
+    ['1', 1],
+  ])('licensedUser %s is not the hint: the profile form shows, as before', async (_label, value) => {
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(value)] };
+    const g = await renderGate();
+    expect(((await g.screen.findByLabelText(/first name/i)) as HTMLInputElement).value).toBe('Jane');
+    expect(g.screen.queryByRole('button', { name: /link my account/i })).toBeNull();
+    expect(calls()).toEqual([ME]);
+  });
+
   it('popup cancelled: the page stays with an explanation, no registration POST and no link POST follow', async () => {
     const { BrowserAuthError, BrowserAuthErrorCodes } = await import('@azure/msal-browser');
     h.script = {

@@ -629,9 +629,12 @@ public class SignalClosureService
     /// and keeps each parseable code that <paramref name="existing"/> calls an orphan for at least one of them (the same rule as
     /// <see cref="CloseSignalsOfDeletedPoliciesAsync"/>, so a reused code's older Signals are included). A read fault throws: the caller
     /// redacts nothing extra and fails the run. Bounded to <see cref="SignalEvaluator.MaxPages"/> pages: past it the codes read so far are
-    /// returned with <see cref="DeletedPolicyCodes.MoreRemain"/> set (a partial list redacts less than the whole, never something else).
+    /// returned with <see cref="DeletedPolicyCodes.MoreRemain"/> set (a partial list redacts less than the whole, never something else) and
+    /// <see cref="DeletedPolicyCodes.ResumeAfter"/> naming the last Signal read.
+    /// Task 224 (#2085): <paramref name="after"/> continues an earlier run's read after that Signal id (<c>sprk_signalid</c> greater than it,
+    /// in the same id order, so Dataverse compares and orders by the same rule); null reads from the start.
     /// </summary>
-    internal async Task<DeletedPolicyCodes> DeletedPolicyCodesWithSignalsAsync(ExistingPolicyCodes existing, CancellationToken ct)
+    internal async Task<DeletedPolicyCodes> DeletedPolicyCodesWithSignalsAsync(ExistingPolicyCodes existing, CancellationToken ct, Guid? after = null)
     {
         ArgumentNullException.ThrowIfNull(existing);
         var query = new QueryExpression("sprk_signal")
@@ -640,14 +643,19 @@ public class SignalClosureService
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Null);
+        if (after is { } cursor) query.Criteria.AddCondition("sprk_signalid", ConditionOperator.GreaterThan, cursor);
         query.AddOrder("sprk_signalid", OrderType.Ascending);
 
         var codes = new SortedSet<string>(StringComparer.Ordinal);
+        var read = 0;
+        Guid? last = null;
         for (var page = 1; ; page++)
         {
             var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in result.Entities)
             {
+                read++;
+                last = row.Id;
                 if (row.GetAttributeValue<EntityReference>("sprk_policy") is not null) continue; // defence in depth, as above
                 if (SignalWriter.TryParseDedupeKey(row.GetAttributeValue<string>("sprk_dedupekey"), out var code, out _, out _, out _)
                     && existing.IsOrphan(code, row.GetAttributeValue<DateTime?>("createdon")))
@@ -656,8 +664,8 @@ public class SignalClosureService
                 }
             }
 
-            if (!result.MoreRecords) return new DeletedPolicyCodes(codes.ToList(), false);
-            if (page >= SignalEvaluator.MaxPages) return new DeletedPolicyCodes(codes.ToList(), true);
+            if (!result.MoreRecords) return new DeletedPolicyCodes(codes.ToList(), false) { SignalsRead = read };
+            if (page >= SignalEvaluator.MaxPages) return new DeletedPolicyCodes(codes.ToList(), true) { SignalsRead = read, ResumeAfter = last };
             query.PageInfo.PageNumber = page + 1;
             query.PageInfo.PagingCookie = result.PagingCookie;
         }
@@ -935,7 +943,14 @@ internal sealed record DeletedPolicySweep(
 /// <summary>What <see cref="SignalClosureService.DeletedPolicyCodesWithSignalsAsync"/> found (task 102b fix round 4).</summary>
 /// <param name="Codes">The deleted policies' codes that still have Signals, in ordinal order.</param>
 /// <param name="MoreRemain">The per-run bound was reached: more Signals with no policy lookup were not read this run.</param>
-internal sealed record DeletedPolicyCodes(IReadOnlyList<string> Codes, bool MoreRemain);
+internal sealed record DeletedPolicyCodes(IReadOnlyList<string> Codes, bool MoreRemain)
+{
+    /// <summary>Task 224: the Signals with no policy lookup this read returned.</summary>
+    public int SignalsRead { get; init; }
+
+    /// <summary>Task 224: when <see cref="MoreRemain"/>, the id of the last Signal read, after which the next run continues; otherwise null.</summary>
+    public Guid? ResumeAfter { get; init; }
+}
 
 /// <summary>
 /// Every existing <c>sprk_policy</c> code (any state), compared ignoring case, with the <c>createdon</c> of the policy holding it (task 102b
