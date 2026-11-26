@@ -282,7 +282,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 communicationId,
                 // Ontology task 177 A3: plus the regarding (its typed lookups and the primary's id), from which an outbound
                 // archive chooses its record link (StageArchiveRecordLink).
-                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode", "sprk_regardingrecordid" }
+                // ISS-010 part E (Q2): plus the body format and Bcc, so an outgoing row's .eml matches the one the send would have archived.
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode", "sprk_regardingrecordid", "sprk_bodyformat", "sprk_bcc" }
                     .Concat(Engine.RegardingFieldMap.AllRegardingFields).ToArray(),
                 ct);
         }
@@ -337,13 +338,21 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var directionValue = record.GetAttributeValue<OptionSetValue>("sprk_direction")?.Value;
         var emailDirection = directionValue == 100000000 ? 100000000 : 100000001;
 
+        // ISS-010 part E (Q2, field-mapping-r1): an OUTGOING row's Bcc and body format as sent (both written on every send); HTML when
+        // the format is unset. Bcc goes into the .eml only, never a log or a response. An incoming row is unchanged.
+        var outgoing = directionValue == (int)CommunicationDirection.Outgoing;
+        var bcc = outgoing ? SplitRecipients(record.GetAttributeValue<string>("sprk_bcc")) : [];
+        var storedFormat = record.GetAttributeValue<OptionSetValue>("sprk_bodyformat")?.Value;
+        var bodyFormat = outgoing && storedFormat is { } fmt && Enum.IsDefined(typeof(BodyFormat), fmt) ? (BodyFormat)fmt : BodyFormat.HTML;
+
         var request = new SendCommunicationRequest
         {
             To = to.Length > 0 ? to : new[] { string.Empty },
             Cc = cc.Length > 0 ? cc : null,
+            Bcc = bcc.Length > 0 ? bcc : null,
             Subject = record.GetAttributeValue<string>("sprk_subject") ?? "(No Subject)",
             Body = record.GetAttributeValue<string>("sprk_body") ?? string.Empty,
-            BodyFormat = BodyFormat.HTML,
+            BodyFormat = bodyFormat,
             FromMailbox = string.IsNullOrEmpty(from) ? null : from,
             CommunicationType = commType,
         };
@@ -400,7 +409,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>Split a Dataverse recipient string (";"- or ","-separated) into trimmed, non-empty addresses.</summary>
-    private static string[] SplitRecipients(string? raw) =>
+    internal static string[] SplitRecipients(string? raw) =>
         string.IsNullOrWhiteSpace(raw)
             ? Array.Empty<string>()
             : raw.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -841,7 +850,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// (<c>InReplyToMessageId</c> set) joins its parent's thread and a fresh email creates one; the thread anchors
     /// to the record's regarding (mapped at create time, ADR-024 reuse). Both paths MUST NOT fail the send.
     /// </summary>
-    private async Task ResolveOutboundThreadAsync(
+    internal async Task ResolveOutboundThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string correlationId, CancellationToken ct)
     {
         // (1) FR-19 explicit target: mirror the Message path — stamp the supplied thread directly and skip
@@ -2449,6 +2458,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "A server-only send must be a send-as-user email that is not archived to SharePoint Embedded and is not system mail.");
         }
 
+        // ISS-010 part E (#3184): the deferred post-send tail is defined for a plain email only. Refused before anything is sent.
+        if (request.DeferPostSend
+            && (request.CommunicationType != CommunicationType.Email
+                || request.AttachmentDocumentIds is { Length: > 0 }
+                || request.ServerSend is not null
+                || request.SystemMail is not null
+                || request.ThreadId.HasValue))
+        {
+            throw new InvalidOperationException(
+                "A deferred post-send must be an email with no attachments, thread, server-send options or system mail.");
+        }
+
         // Ebilling-r1 task 151c-2 (uac-r2 K5): the batch the email is linked to and the record its owner follows are one decision made twice. If
         // both are set and they differ, the email would be owned like one batch and listed under another: refused before anything is sent or
         // written, like the owner mismatch.
@@ -2635,7 +2656,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !request.DeferPostSend)
             {
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
             }
@@ -2665,6 +2686,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
+            // ISS-010 part E (#3184): a deferred send hands the thread, archive, enrichment, participant index and arrived steps to the
+            // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
+            var deferred = false;
+            if (request.DeferPostSend && communicationId.HasValue)
+            {
+                deferred = await TryEnqueuePostSendAsync(
+                    communicationId.Value, archive && archiveOutgoingOptIn, request,
+                    CallerResolution.ResolveObjectId(httpContext?.User), correlationId, cancellationToken);
+                if (!deferred)
+                    await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
+            }
+
             if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
@@ -2672,7 +2705,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for sender {SenderEmail} | CorrelationId: {CorrelationId}",
                     senderResult.Email, correlationId);
             }
-            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn && !deferred)
             {
                 // Build a partial response for .eml generation (before archival fields are known)
                 var partialResponse = new SendCommunicationResponse
@@ -2777,7 +2810,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
             // Task 185: a system-mail send is never enriched — its body carries a secret (an invite link) that must not
             // reach AI indexing, triage summaries or proposals.
-            if (communicationId.HasValue && request.SystemMail is null)
+            if (communicationId.HasValue && !deferred && request.SystemMail is null)
             {
                 try
                 {
@@ -2799,7 +2832,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
             // resolve via the shared email→contact resolver (no pre-resolved sender identity on this path).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !deferred)
             {
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderResult.Email, null,
@@ -2987,7 +3020,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !request.DeferPostSend)
             {
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
             }
@@ -3020,6 +3053,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
+            // ISS-010 part E (#3184): a deferred send hands the thread, archive, enrichment, participant index and arrived steps to the
+            // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
+            var deferred = false;
+            if (request.DeferPostSend && communicationId.HasValue)
+            {
+                deferred = await TryEnqueuePostSendAsync(
+                    communicationId.Value, archive && archiveOutgoingOptIn, request, userObjectId, correlationId, ct);
+                if (!deferred)
+                    await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
+            }
+
             if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
@@ -3027,7 +3071,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for user sender {UserEmail} | CorrelationId: {CorrelationId}",
                     userEmail, correlationId);
             }
-            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn && !deferred)
             {
                 var partialResponse = new SendCommunicationResponse
                 {
@@ -3132,7 +3176,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
             // Task 151c-1a: a server-only send may skip enrichment, and one whose owner follows a record always does (enrichment's
             // category routing would re-own it).
-            if (communicationId.HasValue && request.ServerSend is not ({ SkipEnrichment: true } or { OwnerFollows: not null }))
+            if (communicationId.HasValue && !deferred && request.ServerSend is not ({ SkipEnrichment: true } or { OwnerFollows: not null }))
             {
                 try
                 {
@@ -3155,7 +3199,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
             // resolve via the shared email→contact resolver (the sender's typed identity is already on the
             // record's sprk_sentby lookup; the junction is additive and back-fillable).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !deferred)
             {
                 await WriteParticipantIndexAsync(
                     communicationId.Value, userEmail, null,
@@ -4544,6 +4588,48 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    /// <summary>ISS-010 part E (#3184): how long a deferred send waits for its <c>CommunicationPostSend</c> job to be queued before it
+    /// runs the post-send tail inline instead (field-mapping-r1 Q4).</summary>
+    internal static readonly TimeSpan PostSendEnqueueTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// ISS-010 part E (#3184): queues the <c>CommunicationPostSend</c> job for a sent, persisted email
+    /// (<see cref="SendCommunicationRequest.DeferPostSend"/>). True when it was queued. False when the queue faulted or did not answer
+    /// within <see cref="PostSendEnqueueTimeout"/>: one Warning with the communication id, and the caller runs today's inline tail, so
+    /// nothing is lost and the response does not change. The payload holds ids and flags only.
+    /// </summary>
+    private async Task<bool> TryEnqueuePostSendAsync(
+        Guid communicationId, bool archive, SendCommunicationRequest request, string? requestedByObjectId, string correlationId,
+        CancellationToken ct)
+    {
+        var job = CommunicationPostSendJobHandler.CreateJob(
+            new CommunicationPostSendPayload(
+                communicationId,
+                Guid.TryParse(requestedByObjectId, out var oid) && oid != Guid.Empty ? oid : null,
+                Archive: archive,
+                Enrich: request.SystemMail is null && request.ServerSend is null,
+                CreateThreadPrivate: request.CreateThreadPrivate),
+            correlationId);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(PostSendEnqueueTimeout);
+        try
+        {
+            await _jobSubmissionService.SubmitJobAsync(job, timeout.Token).WaitAsync(PostSendEnqueueTimeout, ct);
+            _logger.LogInformation(
+                "Post-send work queued (job {JobId}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                job.JobId, communicationId, correlationId);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Post-send work could not be queued ({ExceptionType}); running it inline | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                ex.GetType().Name, communicationId, correlationId);
+            return false;
+        }
+    }
+
     /// <summary>
     /// Enqueues an AppOnlyDocumentAnalysis job for a document record (best-effort).
     /// Failures are logged but do not propagate.
@@ -5003,7 +5089,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// junction-write failure never fails an already-sent + persisted message (NFR-02). No-op when the indexer
     /// is not composed (test constructions that predate it).
     /// </summary>
-    private Task WriteParticipantIndexAsync(
+    internal Task WriteParticipantIndexAsync(
         Guid communicationId,
         string? fromAddress,
         ParticipantReference? fromResolved,
