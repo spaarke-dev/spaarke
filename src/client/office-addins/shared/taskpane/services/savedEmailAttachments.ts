@@ -10,8 +10,9 @@
  * attachment is then `unknown`, and the pane makes no claim either way — never "unsaved", which would invite the user to
  * add something that may already be there. An EMPTY list is an answer: nothing is saved yet.
  *
- * Task 141 review: the names only ever come from the SERVER (the identity answer, and an add's `attachmentsAdded`), never
- * from what the pane sent. An attachment no email save ever creates a document for is `notSaveable`: it is never marked
+ * Task 141 review: the saved names only ever come from the SERVER's identity answer, never from what the pane sent nor
+ * from an add's `attachmentsAdded` (the names it QUEUED: shown `adding` until the add's job finishes and the identity is
+ * re-read). An attachment no email save ever creates a document for is `notSaveable`: it is never marked
  * saved, never tickable, and never counts as "unsaved" (see {@link isNeverSavedByTheServer}).
  */
 
@@ -19,9 +20,11 @@ import type { AttachmentInfo } from '@shared/adapters/types';
 
 /**
  * One attachment's saved state. `unknown` = the pane was not told (no saved/unsaved mark). `notSaveable` = no email save
- * creates a document for it (task 141 review): shown as such, never ticked, never counted as unsaved.
+ * creates a document for it (task 141 review): shown as such, never ticked, never counted as unsaved. `adding` = an add
+ * the server queued names it and its job has not finished (task 141 review, F2): shown as "Adding…", never ticked, never
+ * counted as unsaved, and never "saved" — the server lists it as saved only once its document exists.
  */
-export type AttachmentSavedState = 'saved' | 'unsaved' | 'unknown' | 'notSaveable';
+export type AttachmentSavedState = 'saved' | 'unsaved' | 'unknown' | 'notSaveable' | 'adding';
 
 /** The comparison key for a file name: case-insensitive, as the server's own rule. */
 function nameKey(name: string): string {
@@ -90,33 +93,41 @@ export function isNeverSavedByTheServer(attachment: AttachmentInfo): boolean {
 }
 
 /**
- * Each attachment's saved state, keyed by attachment id. With `savedNames` undefined every attachment is `unknown`.
- * Otherwise a name the server lists is `saved`; one the server reported it can never save (`notSaveableNames`, an add's
- * `attachmentsNotSaveable`) or that {@link isNeverSavedByTheServer} is `notSaveable`; the rest are `unsaved`.
+ * Each attachment's saved state, keyed by attachment id. A name the server lists (`savedNames`) is `saved`; otherwise
+ * one a queued add names (`addingNames`, the add's `attachmentsAdded` until its job finished) is `adding`. With
+ * `savedNames` undefined every other attachment is `unknown`. Otherwise one the server reported it can never save
+ * (`notSaveableNames`, an add's `attachmentsNotSaveable`) or that {@link isNeverSavedByTheServer} is `notSaveable`; the
+ * rest are `unsaved`.
  */
 export function classifySavedAttachments(
   attachments: readonly AttachmentInfo[],
   savedNames: readonly string[] | undefined,
-  notSaveableNames?: readonly string[]
+  notSaveableNames?: readonly string[],
+  addingNames?: readonly string[]
 ): Map<string, AttachmentSavedState> {
   const states = new Map<string, AttachmentSavedState>();
-  if (savedNames === undefined) {
-    for (const attachment of attachments) states.set(attachment.id, 'unknown');
-    return states;
-  }
-  const saved = new Set(savedNames.map(nameKey));
+  const saved = new Set((savedNames ?? []).map(nameKey));
+  const adding = new Set((addingNames ?? []).map(nameKey));
   const notSaveable = new Set((notSaveableNames ?? []).map(nameKey));
   for (const attachment of attachments) {
     const key = nameKey(attachment.name);
     states.set(
       attachment.id,
-      saved.has(key) ? 'saved' : notSaveable.has(key) || isNeverSavedByTheServer(attachment) ? 'notSaveable' : 'unsaved'
+      saved.has(key)
+        ? 'saved'
+        : adding.has(key)
+          ? 'adding'
+          : savedNames === undefined
+            ? 'unknown'
+            : notSaveable.has(key) || isNeverSavedByTheServer(attachment)
+              ? 'notSaveable'
+              : 'unsaved'
     );
   }
   return states;
 }
 
-/** True when any attachment is known to be unsaved. `unknown` and `notSaveable` never count. */
+/** True when any attachment is known to be unsaved. `unknown`, `notSaveable` and `adding` never count. */
 export function hasUnsavedAttachments(states: ReadonlyMap<string, AttachmentSavedState>): boolean {
   for (const state of states.values()) {
     if (state === 'unsaved') return true;

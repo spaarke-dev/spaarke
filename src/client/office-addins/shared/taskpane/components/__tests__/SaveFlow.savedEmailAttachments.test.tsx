@@ -10,7 +10,8 @@
  *   warning shows while any is unsaved;
  * - Save shows only when an unsaved attachment can be added, is enabled only once one is ticked, and sends
  *   `email.savedDocumentId` with ONLY the ticked unsaved names, filed to the `.eml`'s record;
- * - after the add those names show saved; the warning clears once none is unsaved;
+ * - after the add those names show "Adding…" (task 141 review F2: never saved from the queued list — only the identity
+ *   re-read once the add's job finished says saved); the warning clears once none is unsaved;
  * - negatives: all saved → no Save, no warning; nothing ticked → Save disabled; names not determined → no claim that
  *   any is saved (or unsaved), nothing to save; not filed / record withheld → nothing to add; a refusal marks nothing.
  *
@@ -187,8 +188,10 @@ describe('SaveFlow — a saved email with unsaved attachments (task 141)', () =>
     expect(body.email).not.toHaveProperty('attachments');
     expect(body.targetEntity).toEqual({ entityType: 'Matter', entityId: MATTER_ID, displayName: 'Gamma Merger' });
 
-    // B is now saved; C is still unsaved, so the warning stays.
-    await waitFor(() => expect(rowOf('Exhibit B.pdf')).toHaveAttribute('data-saved-state', 'saved'));
+    // B is now being added (F2: not "saved" — this harness's identity re-read never settles); C is still unsaved, so the
+    // warning stays.
+    await waitFor(() => expect(rowOf('Exhibit B.pdf')).toHaveAttribute('data-saved-state', 'adding'));
+    expect(screen.queryByRole('checkbox', { name: 'Select Exhibit B.pdf' })).toBeNull();
     expect(rowOf('Exhibit A.pdf')).toHaveAttribute('data-saved-state', 'saved');
     expect(rowOf('Exhibit C.pdf')).toHaveAttribute('data-saved-state', 'unsaved');
     expect(screen.getByTestId('saved-bar-unsaved-attachments')).toBeInTheDocument();
@@ -200,7 +203,9 @@ describe('SaveFlow — a saved email with unsaved attachments (task 141)', () =>
     await waitFor(() => expect(saveCalls()).toHaveLength(2));
     expect(sentBody(1).email.selectedAttachmentFileNames).toEqual(['Exhibit C.pdf']);
     expect(sentBody(1).email.savedDocumentId).toBe(EML_ID);
-    await waitFor(() => expect(savedMarks()).toHaveLength(3));
+    await waitFor(() => expect(rowOf('Exhibit C.pdf')).toHaveAttribute('data-saved-state', 'adding'));
+    expect(rowOf('Exhibit B.pdf')).toHaveAttribute('data-saved-state', 'adding');
+    expect(savedMarks()).toHaveLength(1);
     expect(screen.queryByTestId('saved-bar-unsaved-attachments')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
   });

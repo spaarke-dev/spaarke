@@ -330,7 +330,23 @@ export interface UseSaveFlowOptions {
   onError?: (error: ErrorMessage) => void;
   /** Callback on duplicate detected */
   onDuplicate?: (documentId: string, message: string) => void;
+  /**
+   * Task 141 review (F2): called once an add-attachments save's job has FINISHED creating documents — its status read
+   * reports phase `AttachmentsAdded` or `AttachmentsIncomplete` (or anything but `AttachmentsQueued`), or it can no longer
+   * be watched (the watch's cap, or repeated read failures). `names` are the names that add's answer said it queued. The
+   * save itself completed earlier (`onComplete`), when the add was queued: only now can the saved names be re-read.
+   */
+  onAttachmentsAddFinished?: (documentId: string, names: string[]) => void;
 }
+
+/**
+ * Task 141 review (F2): how many status reads an add's watch makes, at the polling interval, before it stops waiting and
+ * reports the add finished anyway (the caller then re-reads what is saved, which is the truth whatever the job says).
+ */
+export const ATTACHMENTS_ADD_WATCH_MAX_POLLS = 40;
+
+/** Task 141 review (F2): the phase an add's job reads while its worker has not finished. */
+const ATTACHMENTS_QUEUED_PHASE = 'AttachmentsQueued';
 
 /**
  * Hook result.
@@ -628,6 +644,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     onComplete,
     onError,
     onDuplicate,
+    onAttachmentsAddFinished,
   } = options;
 
   // State
@@ -691,8 +708,73 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const attachmentsAddedRef = useRef(0);
   // Task 138 (#2209): the names the CURRENT save was asked to add that the stored email does not hold. Empty = none.
   const attachmentsNotStoredRef = useRef<string[]>([]);
+  // Task 141 review (F2): the job of the CURRENT add-attachments save, when its answer queued names; read (and cleared)
+  // when that save completes, to start watching the job until the add has finished. Cleared when a save starts.
+  const pendingAddJobRef = useRef<{ jobId: string; names: string[] } | null>(null);
+  // Task 141 review (F2): the add jobs being watched, by job id → the timer of the next read. Several adds can be watched at
+  // once; a new save never stops an earlier add's watch. Stopped by reset() and on unmount.
+  const addWatchesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const onAttachmentsAddFinishedRef = useRef(onAttachmentsAddFinished);
+  onAttachmentsAddFinishedRef.current = onAttachmentsAddFinished;
+  const stopAddWatches = useCallback(() => {
+    for (const timer of addWatchesRef.current.values()) clearTimeout(timer);
+    addWatchesRef.current.clear();
+  }, []);
+  // Task 141 review (F2): reads an add's job until its worker has finished (any phase but `AttachmentsQueued`, or a failed
+  // job), then reports it. The first read is immediate (the worker may be done already). It also reports after
+  // ATTACHMENTS_ADD_WATCH_MAX_POLLS reads, or `maxPollingRetries` failed reads in a row: the caller's re-read of what is
+  // saved is the answer either way, and an add must never show "Adding…" forever.
+  const watchAttachmentsAdd = useCallback(
+    (jobId: string, documentId: string, names: string[]) => {
+      if (addWatchesRef.current.has(jobId)) return;
+      let reads = 0;
+      let failuresInARow = 0;
+      const finish = () => {
+        addWatchesRef.current.delete(jobId);
+        onAttachmentsAddFinishedRef.current?.(documentId, names);
+      };
+      const read = async () => {
+        reads += 1;
+        let finished = false;
+        try {
+          const accessToken = await getAccessToken();
+          const response = await authenticatedJsonFetch(`${apiBaseUrl}/api/office/jobs/${jobId}`, {}, accessToken, {
+            getRetryToken: getAccessToken,
+          });
+          if (!addWatchesRef.current.has(jobId)) return; // stopped while reading
+          if (response.ok) {
+            failuresInARow = 0;
+            const job = (await response.json()) as JobStatus;
+            finished =
+              job.status === 'Failed' || job.status === 'Cancelled' || job.currentPhase !== ATTACHMENTS_QUEUED_PHASE;
+          } else {
+            failuresInARow += 1;
+          }
+        } catch {
+          if (!addWatchesRef.current.has(jobId)) return;
+          failuresInARow += 1;
+        }
+        if (finished || failuresInARow >= maxPollingRetries || reads >= ATTACHMENTS_ADD_WATCH_MAX_POLLS) {
+          finish();
+          return;
+        }
+        addWatchesRef.current.set(
+          jobId,
+          setTimeout(() => void read(), pollingIntervalMs)
+        );
+      };
+      addWatchesRef.current.set(
+        jobId,
+        setTimeout(() => void read(), 0)
+      );
+    },
+    [apiBaseUrl, getAccessToken, pollingIntervalMs]
+  );
   const notifyComplete = useCallback(
     (documentId: string, documentUrl: string) => {
+      const addJob = pendingAddJobRef.current;
+      pendingAddJobRef.current = null;
+      if (addJob) watchAttachmentsAdd(addJob.jobId, documentId, addJob.names);
       const problem = emailFilingProblemRef.current;
       const added = attachmentsAddedRef.current;
       const notStored = attachmentsNotStoredRef.current;
@@ -702,7 +784,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       else if (problem) onComplete?.(documentId, documentUrl, problem);
       else onComplete?.(documentId, documentUrl);
     },
-    [onComplete]
+    [onComplete, watchAttachmentsAdd]
   );
 
   // Computed values
@@ -757,6 +839,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // Reset state
   const reset = useCallback(() => {
     cleanup();
+    stopAddWatches();
+    pendingAddJobRef.current = null;
     setFlowState('idle');
     setSelectedAttachmentIds(new Set());
     setIncludeBody(true);
@@ -771,7 +855,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     attachmentsNotStoredRef.current = [];
     attachmentsAnswerRef.current = { added: [], notSaveable: [] };
     savedContextRef.current = null;
-  }, [cleanup]);
+  }, [cleanup, stopAddWatches]);
 
   // Task 060 (#1084): a job reported Completed that names no document, on a save with no version target to fall back
   // on. It matched neither completion branch, so the pane sat on "processing" forever with no error. It is a terminal
@@ -1128,6 +1212,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       activeVersionDocumentIdRef.current = null;
       activeAddSaveRef.current = false;
       attachmentsAnswerRef.current = { added: [], notSaveable: [] };
+      pendingAddJobRef.current = null;
       emailFilingProblemRef.current = null;
       attachmentsAddedRef.current = 0;
       attachmentsNotStoredRef.current = [];
@@ -1532,6 +1617,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           return;
         }
 
+        // Task 141 review (F2): an add that queued names is watched, once its save completes, until its worker finished.
+        if (activeAddSaveRef.current && saveResponse?.jobId && attachmentsAnswerRef.current.added.length > 0) {
+          pendingAddJobRef.current = { jobId: saveResponse.jobId, names: attachmentsAnswerRef.current.added };
+        }
+
         await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
@@ -1578,8 +1668,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   useEffect(() => {
     return () => {
       cleanup();
+      stopAddWatches();
     };
-  }, [cleanup]);
+  }, [cleanup, stopAddWatches]);
 
   return {
     flowState,

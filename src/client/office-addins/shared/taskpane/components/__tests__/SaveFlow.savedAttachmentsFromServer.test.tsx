@@ -3,8 +3,9 @@
  *
  * - Finding 2: after the pane's own save, "saved" was what the pane SENT — wrong when the save deduplicated to an existing
  *   email (no new children) or the worker left names out. Now the pane re-reads the identity after the save and uses its
- *   `savedAttachmentNames`; until it arrives nothing is marked, nothing is offered and there is no warning. An add marks
- *   what the server's answer says it is adding (`attachmentsAdded`), never what was ticked.
+ *   `savedAttachmentNames`; until it arrives nothing is marked, nothing is offered and there is no warning. An add shows
+ *   what the server's answer says it is adding (`attachmentsAdded`) as "Adding…" — never what was ticked, and (F2) never
+ *   "saved" until the identity says so.
  * - Finding 3: an attachment no email save ever creates (a calendar invite) shows "Can't be saved": never a check, never
  *   tickable, and it never keeps the "Unsaved attachments" warning up. A name the server reports in
  *   `attachmentsNotSaveable` is shown the same way.
@@ -247,7 +248,7 @@ describe('SaveFlow — saved attachments come from the server (task 141 review)'
     expect(addButton()).toBeNull();
   });
 
-  it('an add marks what the server says it is adding, never what was ticked', async () => {
+  it('an add shows what the server says it is adding as "Adding…" (never saved), never what was ticked', async () => {
     mockFetch.mockImplementation(async (url: string) =>
       String(url).includes('/api/office/save')
         ? accepted({ attachmentsAdded: [B] })
@@ -266,16 +267,17 @@ describe('SaveFlow — saved attachments come from the server (task 141 review)'
       C,
     ]);
 
-    await waitFor(() => expect(stateOf(B)).toBe('saved'));
+    // Task 141 review F2: B is queued, not saved — "Adding…" until the add's job finished and the identity says so.
+    await waitFor(() => expect(stateOf(B)).toBe('adding'));
     expect(stateOf(C)).toBe('unsaved');
     expect(warning()).toBeInTheDocument();
 
-    // The re-read lands before the worker has created B: B stays saved (the server said it is adding it).
+    // The re-read right after the save lands before the worker has created B: B stays "Adding…", never saved.
     expect(retry).toHaveBeenCalledTimes(1);
     identitySettles(savedEmail([A]));
     await waitFor(() => expect(stateOf(C)).toBe('unsaved'));
     expect(stateOf(A)).toBe('saved');
-    expect(stateOf(B)).toBe('saved');
+    expect(stateOf(B)).toBe('adding');
   });
 
   it('finding 3: an attachment no save creates shows "Can\'t be saved", cannot be ticked, and raises no warning', () => {

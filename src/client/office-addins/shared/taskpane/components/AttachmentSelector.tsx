@@ -303,7 +303,8 @@ export interface AttachmentSelectorProps {
    * Task 141: each attachment's saved state (keyed by attachment id), for an email already saved in Spaarke. A `saved`
    * attachment shows a check mark labelled "Saved" instead of a checkbox and cannot be ticked; an `unknown` one (the pane
    * was not told) shows neither and cannot be ticked; an `unsaved` one is a checkbox as usual. A `notSaveable` one (task
-   * 141 review: no email save creates a document for it) shows "Can't be saved" and cannot be ticked. Absent: every
+   * 141 review: no email save creates a document for it) shows "Can't be saved" and cannot be ticked. An `adding` one (a
+   * queued add names it and its job has not finished) shows "Adding…" and cannot be ticked. Absent: every
    * attachment is a checkbox, as before.
    */
   savedStates?: ReadonlyMap<string, AttachmentSavedState>;
@@ -385,12 +386,12 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
   // Check if total size exceeds limit
   const isTotalSizeExceeded = totalSelectedSize > MAX_TOTAL_SIZE;
 
-  // Task 141: whether a row can be ticked at all — not when it is saved, not determined, never saveable, or marked
-  // non-selectable.
+  // Task 141: whether a row can be ticked at all — not when it is saved, being added, not determined, never saveable, or
+  // marked non-selectable.
   const isSelectable = useCallback(
     (attachmentId: string) => {
       const state = savedStates?.get(attachmentId);
-      if (state === 'saved' || state === 'unknown' || state === 'notSaveable') return false;
+      if (state === 'saved' || state === 'unknown' || state === 'notSaveable' || state === 'adding') return false;
       return !nonSelectableIds?.has(attachmentId);
     },
     [savedStates, nonSelectableIds]
@@ -530,6 +531,11 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
                   {attachment.isInline && (
                     <Badge appearance="outline" size="small">
                       Inline
+                    </Badge>
+                  )}
+                  {savedState === 'adding' && (
+                    <Badge appearance="outline" size="small">
+                      Adding…
                     </Badge>
                   )}
                   {savedState === 'notSaveable' && (
