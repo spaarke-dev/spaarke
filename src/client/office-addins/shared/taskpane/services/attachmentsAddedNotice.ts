@@ -93,6 +93,13 @@ export function describeAttachmentsAddFinished(outcome: AttachmentsAddOutcome | 
   return `${added} of ${total} attachments added to the saved email. ${notAdded} could not be added.`;
 }
 
+/**
+ * Task 141 review (round 2): the title while an add's job could not be followed to a final phase (the pane stopped waiting, or
+ * its status reads kept failing). It claims neither success nor failure: the names stay "Adding…" until a later read of the
+ * job or of the saved email settles them.
+ */
+export const ATTACHMENTS_ADD_UNCONFIRMED_TITLE = 'Still adding attachments. Check again in a moment.';
+
 /** The warning for attachments the stored email does not hold, or `null` when there are none. */
 export function describeAttachmentsNotStored(names: readonly string[] | undefined): string | null {
   if (!names || names.length < 1) return null;

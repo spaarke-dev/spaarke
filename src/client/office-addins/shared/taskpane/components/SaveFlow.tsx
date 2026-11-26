@@ -49,6 +49,7 @@ import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
 import {
+  ATTACHMENTS_ADD_UNCONFIRMED_TITLE,
   combineAttachmentsAddOutcomes,
   describeAttachmentsAdded,
   describeAttachmentsAddFinished,
@@ -412,6 +413,25 @@ interface SavedBarModel {
   itemDetails?: boolean;
   /** Task 141 (owner point 9): some attachment is known unsaved. */
   unsavedAttachments?: boolean;
+  /** Round 2: an add's job could not be followed to a final phase — offers "Check again" beside the neutral title. */
+  checkAgain?: boolean;
+}
+
+/**
+ * Round 2: an add's job, kept in the lifted saved state (it outlives the Save tab) until its names settle. Leaving the tab
+ * unmounts the hook and its watch; on return the job is watched again from here. `unconfirmed` = its watch stopped waiting
+ * without seeing a final phase (nothing is known about the job): the names stay "Adding…" under a neutral message, and
+ * whatever the server lists as saved on a later identity read settles them.
+ */
+export interface AttachmentsAddJob {
+  jobId: string;
+  names: string[];
+  unconfirmed?: boolean;
+}
+
+/** `jobs` without the names in `settled`; a job left with no names is dropped. */
+function withoutSettledNames(jobs: readonly AttachmentsAddJob[], settled: readonly string[]): AttachmentsAddJob[] {
+  return jobs.map(job => ({ ...job, names: withoutNames(job.names, settled) })).filter(job => job.names.length > 0);
 }
 
 /** Task 088: taken when a save is SUBMITTED, committed to {@link SavedDocumentState} when it completes. */
@@ -432,6 +452,8 @@ interface PendingSaveSnapshot {
   priorSavedAttachmentNames?: string[];
   /** Task 141 review (F2): the names earlier adds queued whose jobs have not finished — kept across adds. */
   priorAttachmentsAdding?: string[];
+  /** Round 2: the jobs of the earlier adds that have not settled — kept across adds. */
+  priorAttachmentsAddJobs?: AttachmentsAddJob[];
   /** Task 141: the names an earlier add found the stored email does not hold — kept across adds. */
   priorAttachmentsNotStored?: string[];
   /** Task 141 review: the names an earlier add said no save can create — kept across adds. */
@@ -474,6 +496,8 @@ export interface SavedDocumentState {
    * and the identity is re-read; one the server then does not list shows unsaved, with the warning. Absent otherwise.
    */
   attachmentsAdding?: string[];
+  /** Round 2: the jobs creating `attachmentsAdding` (see {@link AttachmentsAddJob}). Absent when none is running. */
+  attachmentsAddJobs?: AttachmentsAddJob[];
   /** Task 141 review: the names the server said no save can ever create (`attachmentsNotSaveable`). Absent otherwise. */
   attachmentsNotSaveable?: string[];
   /**
@@ -558,6 +582,8 @@ interface SavedEmailAttachmentsView {
   notSaveableNames: string[] | undefined;
   /** Task 141 review (F2): the names a queued add is still creating ("Adding…"). */
   addingNames: string[] | undefined;
+  /** Round 2: the jobs creating `addingNames`. */
+  addJobs: AttachmentsAddJob[] | undefined;
   record: { entityType: string; id: string; name: string } | null;
   filedTo: FiledTo;
   filedToNumber: string | null;
@@ -892,6 +918,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                 savedAttachmentNames
               )
             : [];
+        // Round 2: the jobs creating the "Adding…" names, kept so a pane that was left and returned to can watch them again.
+        const addJobs: AttachmentsAddJob[] =
+          pending?.tracksAttachments && isAdd
+            ? [
+                ...(pending.priorAttachmentsAddJobs ?? []),
+                ...(answer.jobId && answer.added.length > 0 ? [{ jobId: answer.jobId, names: answer.added }] : []),
+              ]
+            : [];
         const notStored = isAdd
           ? (mergeSavedAttachmentNames(pending?.priorAttachmentsNotStored ?? [], attachmentsNotStored ?? []) ?? [])
           : (attachmentsNotStored ?? []);
@@ -912,6 +946,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             ...(notSaveable.length ? { attachmentsNotSaveable: notSaveable } : {}),
             ...(savedAttachmentNames ? { savedAttachmentNames } : {}),
             ...(adding.length ? { attachmentsAdding: adding } : {}),
+            ...(addJobs.length ? { attachmentsAddJobs: addJobs } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
           // task 094: a fresh save always clears the re-enable trigger — this save IS the content as
@@ -933,14 +968,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         if (requestAttachmentsRefresh(documentId, names)) return;
         updateSavedState(prev => {
           if (!prev.savedDocument || prev.savedDocument.documentId !== documentId) return prev;
-          const { savedAttachmentNames: _known, attachmentsAdding, ...rest } = prev.savedDocument;
+          const { savedAttachmentNames: _known, attachmentsAdding, attachmentsAddJobs, ...rest } = prev.savedDocument;
           const stillAdding = withoutNames(attachmentsAdding ?? [], names);
+          const jobsLeft = withoutSettledNames(attachmentsAddJobs ?? [], names);
           // No re-read path: what was stored is not known, so the outcome is not either (the title is the plain one).
           return {
             ...prev,
             savedDocument: {
               ...rest,
               ...(stillAdding.length ? { attachmentsAdding: stillAdding } : {}),
+              ...(jobsLeft.length ? { attachmentsAddJobs: jobsLeft } : {}),
               attachmentsAddOutcome: combineAttachmentsAddOutcomes(rest.attachmentsAddOutcome, {
                 total: names.length,
                 notAdded: null,
@@ -948,6 +985,25 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             },
           };
         });
+      },
+      // Round 2: an add's watch stopped waiting WITHOUT seeing a final phase (its cap, or repeated failed reads). Nothing is
+      // known about the job, so the names stay "Adding…" under a neutral message — never "could not be added". The identity
+      // is re-read: a name the server lists is saved. Another watch (Check again, or returning to the tab) may still settle the rest.
+      onAttachmentsAddUnconfirmed: (docId, _names, jobId) => {
+        const documentId = cleanGuid(docId) || docId;
+        updateSavedState(prev => {
+          if (!prev.savedDocument || prev.savedDocument.documentId !== documentId) return prev;
+          const jobs = prev.savedDocument.attachmentsAddJobs;
+          if (!jobs?.some(job => job.jobId === jobId)) return prev;
+          return {
+            ...prev,
+            savedDocument: {
+              ...prev.savedDocument,
+              attachmentsAddJobs: jobs.map(job => (job.jobId === jobId ? { ...job, unconfirmed: true } : job)),
+            },
+          };
+        });
+        requestAttachmentsRefresh(documentId, []);
       },
       onError: error => {
         announce(`Error: ${error.message}`, 'assertive');
@@ -975,8 +1031,31 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     reset,
     retry,
     getAttachmentsAnswer,
+    watchAttachmentsAdd,
   } = useSaveFlow(saveFlowOptions);
   attachmentsAnswerGetterRef.current = getAttachmentsAnswer;
+
+  // Round 2: leaving the Save tab unmounts this pane and the hook (its add watches stop) while `attachmentsAdding` lives on in
+  // the lifted state. On return, watch every kept job again, so the names settle from the job — a final phase — instead of
+  // showing "Adding…" forever. The hook ignores a job it already watches.
+  useEffect(() => {
+    if (!savedDocument?.attachmentsAddJobs?.length) return;
+    for (const job of savedDocument.attachmentsAddJobs) {
+      watchAttachmentsAdd(job.jobId, savedDocument.documentId, job.names);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on mount only; later adds are watched by the hook as they complete
+  }, []);
+
+  // Round 2: "Check again" after an add's watch stopped waiting: watch the job again and re-read what is saved.
+  const handleCheckAddAgain = useCallback(() => {
+    const saved = savedDocument;
+    if (!saved?.attachmentsAddJobs?.length) return;
+    for (const job of saved.attachmentsAddJobs) {
+      if (job.unconfirmed) watchAttachmentsAdd(job.jobId, saved.documentId, job.names);
+    }
+    requestAttachmentsRefresh(saved.documentId, []);
+    announce('Checking the attachments again.', 'polite');
+  }, [savedDocument, watchAttachmentsAdd, requestAttachmentsRefresh, announce]);
 
   // Task 088: the open document's own filing, from the SAME resolved identity the related-record card reads
   // (no second call) — used to name the record in the confirmation bar after a version save.
@@ -1534,6 +1613,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         ...(view.notStoredNames ? { priorAttachmentsNotStored: view.notStoredNames } : {}),
         ...(view.notSaveableNames ? { priorAttachmentsNotSaveable: view.notSaveableNames } : {}),
         ...(view.addingNames ? { priorAttachmentsAdding: view.addingNames } : {}),
+        ...(view.addJobs ? { priorAttachmentsAddJobs: view.addJobs } : {}),
       };
       void startSave({ ...buildSaveContext(), saveTarget: target });
       announce(names.length === 1 ? 'Saving 1 attachment.' : `Saving ${names.length} attachments.`, 'polite');
@@ -1631,13 +1711,25 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         : undefined;
     updateSavedState(prev => {
       if (!prev.savedDocument || prev.savedDocument.documentId !== pending.documentId) return prev;
-      const { savedAttachmentNames: _previous, attachmentsAdding, ...rest } = prev.savedDocument;
-      const stillAdding = withoutNames(attachmentsAdding ?? [], pending.finished);
+      const { savedAttachmentNames: _previous, attachmentsAdding, attachmentsAddJobs, ...rest } = prev.savedDocument;
+      // Only names still "Adding…" are settled here (a finish that arrives after an earlier read already settled a name must
+      // not count it twice).
+      const adding = attachmentsAdding ?? [];
+      const finishedNow = withoutNames(pending.finished, withoutNames(pending.finished, adding));
+      // Round 2: the names of an add whose watch stopped waiting without a final phase (`unconfirmed`) are settled by what
+      // the server lists: one it lists is saved. One it does not list stays "Adding…" — it is not a failure.
+      const unconfirmedNames = (attachmentsAddJobs ?? []).filter(job => job.unconfirmed).flatMap(job => job.names);
+      const listedNames = serverNames
+        ? withoutNames(unconfirmedNames, withoutNames(unconfirmedNames, serverNames))
+        : [];
+      const settledNames = mergeSavedAttachmentNames(finishedNow, listedNames) ?? [];
+      const stillAdding = withoutNames(adding, settledNames);
+      const jobsLeft = withoutSettledNames(attachmentsAddJobs ?? [], pending.finished.concat(listedNames));
       // Task 141: the finished adds' outcome, from what the server now lists as saved — the confirmation stops saying "Adding…".
-      const finishedOutcome: AttachmentsAddOutcome | undefined = pending.finished.length
+      const finishedOutcome: AttachmentsAddOutcome | undefined = settledNames.length
         ? {
-            total: pending.finished.length,
-            notAdded: serverNames ? withoutNames(pending.finished, serverNames).length : null,
+            total: settledNames.length,
+            notAdded: serverNames ? withoutNames(settledNames, serverNames).length : null,
           }
         : undefined;
       return {
@@ -1646,6 +1738,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           ...rest,
           ...(serverNames ? { savedAttachmentNames: serverNames } : {}),
           ...(stillAdding.length ? { attachmentsAdding: stillAdding } : {}),
+          ...(jobsLeft.length ? { attachmentsAddJobs: jobsLeft } : {}),
           ...(finishedOutcome
             ? { attachmentsAddOutcome: combineAttachmentsAddOutcomes(rest.attachmentsAddOutcome, finishedOutcome) }
             : {}),
@@ -2136,6 +2229,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                   {filedRecordOpenFailure}
                 </Text>
               )}
+            {bar.checkAgain && (
+              <Button
+                appearance="transparent"
+                size="small"
+                className={styles.saveAgainLink}
+                onClick={handleCheckAddAgain}
+                data-testid="saved-bar-check-again"
+              >
+                Check again
+              </Button>
+            )}
             {bar.itemDetails && bar.unsavedAttachments && (
               <div className={styles.savedBarWarning} data-testid="saved-bar-unsaved-attachments">
                 <Warning20Filled className={styles.savedBarWarningIcon} aria-hidden="true" />
@@ -2252,26 +2356,33 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     hasUnsavedAttachments(classifySavedAttachments(attachments, savedNames, notSaveableNames, addingNames));
 
   // The box for a save this pane just made.
-  const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
-    documentId: saved.documentId,
-    title:
-      saved.lastSave === 'version'
-        ? 'New version saved to Spaarke'
-        : saved.attachmentsAddOutcome && !saved.attachmentsAdding?.length
-          ? (describeAttachmentsAddFinished(saved.attachmentsAddOutcome) ?? 'Saved to Spaarke')
-          : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
-    filedTo: saved.filedTo,
-    filedToNumber: saved.filedToNumber ?? null,
-    filedRecord: saved.filedRecord ?? null,
-    notFiledText: 'Not filed to a record.',
-    copyUrl: documentRecordLinkOf(saved.documentId),
-    itemDetails: !canSaveNewVersion,
-    unsavedAttachments: unsavedAttachmentsIn(
-      saved.savedAttachmentNames,
-      saved.attachmentsNotSaveable,
-      saved.attachmentsAdding
-    ),
-  });
+  const savedBarOf = (saved: SavedDocumentState): SavedBarModel => {
+    // Round 2: an add whose job could not be followed to a final phase says so neutrally (never failed, never added).
+    const addUnconfirmed =
+      Boolean(saved.attachmentsAdding?.length) && Boolean(saved.attachmentsAddJobs?.some(job => job.unconfirmed));
+    return {
+      documentId: saved.documentId,
+      title: addUnconfirmed
+        ? ATTACHMENTS_ADD_UNCONFIRMED_TITLE
+        : saved.lastSave === 'version'
+          ? 'New version saved to Spaarke'
+          : saved.attachmentsAddOutcome && !saved.attachmentsAdding?.length
+            ? (describeAttachmentsAddFinished(saved.attachmentsAddOutcome) ?? 'Saved to Spaarke')
+            : (describeAttachmentsAdded(saved.attachmentsAdded) ?? 'Saved to Spaarke'),
+      filedTo: saved.filedTo,
+      filedToNumber: saved.filedToNumber ?? null,
+      filedRecord: saved.filedRecord ?? null,
+      notFiledText: 'Not filed to a record.',
+      copyUrl: documentRecordLinkOf(saved.documentId),
+      itemDetails: !canSaveNewVersion,
+      unsavedAttachments: unsavedAttachmentsIn(
+        saved.savedAttachmentNames,
+        saved.attachmentsNotSaveable,
+        saved.attachmentsAdding
+      ),
+      ...(addUnconfirmed ? { checkAgain: true } : {}),
+    };
+  };
 
   // Task 111: the box for a document that was already in Spaarke when the pane opened. Copy Link copies the
   // document's Spaarke record link (task 117); without ORG_URL it is not shown. Task 141: it names the record's number
@@ -2311,6 +2422,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       notStoredNames: undefined,
       notSaveableNames: undefined,
       addingNames: undefined,
+      addJobs: undefined,
       record,
       filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
       filedToNumber: resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
@@ -2332,6 +2444,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       notStoredNames: saved.attachmentsNotStored,
       notSaveableNames: saved.attachmentsNotSaveable,
       addingNames: saved.attachmentsAdding,
+      addJobs: saved.attachmentsAddJobs,
       record,
       filedTo: saved.filedTo,
       filedToNumber: saved.filedToNumber ?? null,
@@ -2362,7 +2475,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         <AttachmentSelector
           attachments={attachments}
           selectedIds={tickedIds}
-          onSelectionChange={setSelectedAttachmentIds}
+          // Round 2: the selector only sees (and so only returns) the addable names. Keep the user's tick on every other one
+          // (a name that is "Adding…" now), so it is still ticked if that add fails and the name is unsaved again.
+          onSelectionChange={next => {
+            const kept = [...selectedAttachmentIds].filter(id => !addable.some(a => a.id === id));
+            setSelectedAttachmentIds(new Set([...kept, ...next]));
+          }}
           savedStates={states}
           nonSelectableIds={nonSelectableIds}
           disabled={isSaving}

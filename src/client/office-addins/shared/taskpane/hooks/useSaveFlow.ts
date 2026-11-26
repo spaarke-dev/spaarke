@@ -332,11 +332,18 @@ export interface UseSaveFlowOptions {
   onDuplicate?: (documentId: string, message: string) => void;
   /**
    * Task 141 review (F2): called once an add-attachments save's job has FINISHED creating documents — its status read
-   * reports phase `AttachmentsAdded` or `AttachmentsIncomplete` (or anything but `AttachmentsQueued`), or it can no longer
-   * be watched (the watch's cap, or repeated read failures). `names` are the names that add's answer said it queued. The
+   * reports phase `AttachmentsAdded` or `AttachmentsIncomplete`, or a status of Failed / Cancelled; nothing else finishes it
+   * (round 2: a watch that stops waiting reports `onAttachmentsAddUnconfirmed` instead). `names` are the names that add's answer said it queued. The
    * save itself completed earlier (`onComplete`), when the add was queued: only now can the saved names be re-read.
    */
   onAttachmentsAddFinished?: (documentId: string, names: string[]) => void;
+  /**
+   * Task 141 review (round 2): called once when an add's watch STOPPED WAITING without seeing a final phase — its read cap, or
+   * repeated failed reads. The job may well have finished (or failed): nothing is known. The caller must not report the names
+   * as added or as failed; it keeps them "Adding…" with a neutral message, re-reads what is saved, and may resume the watch
+   * ({@link UseSaveFlowResult.watchAttachmentsAdd}).
+   */
+  onAttachmentsAddUnconfirmed?: (documentId: string, names: string[], jobId: string) => void;
 }
 
 /**
@@ -345,8 +352,11 @@ export interface UseSaveFlowOptions {
  */
 export const ATTACHMENTS_ADD_WATCH_MAX_POLLS = 40;
 
-/** Task 141 review (F2): the phase an add's job reads while its worker has not finished. */
-const ATTACHMENTS_QUEUED_PHASE = 'AttachmentsQueued';
+/**
+ * Task 141 review (round 2): the phases that say an add's worker has finished — the ONLY ones (with a job status of Failed or
+ * Cancelled) that finish a watch. `AttachmentsQueued`, and any phase this build does not know, keep it watching.
+ */
+const ATTACHMENTS_ADD_FINAL_PHASES: readonly string[] = ['AttachmentsAdded', 'AttachmentsIncomplete'];
 
 /**
  * Hook result.
@@ -401,12 +411,20 @@ export interface UseSaveFlowResult {
    * from a callback.
    */
   getAttachmentsAnswer: () => SaveAttachmentsAnswer;
+  /**
+   * Round 2: (re)starts the watch of an add's job — for a pane that was left and came back (the hook, and its watches, were
+   * unmounted while the add was still queued) or an add that stopped waiting without a final phase. A no-op while that job is
+   * already being watched. Finishes through `onAttachmentsAddFinished` / `onAttachmentsAddUnconfirmed` like any watch.
+   */
+  watchAttachmentsAdd: (jobId: string, documentId: string, names: string[]) => void;
 }
 
 /** Task 141 review: the server's answer about a save's attachments (see {@link UseSaveFlowResult.getAttachmentsAnswer}). */
 export interface SaveAttachmentsAnswer {
   added: string[];
   notSaveable: string[];
+  /** Round 2: the job creating `added`, present only when the save is an add that queued names (kept so a watch can resume). */
+  jobId?: string;
 }
 
 /**
@@ -645,6 +663,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     onError,
     onDuplicate,
     onAttachmentsAddFinished,
+    onAttachmentsAddUnconfirmed,
   } = options;
 
   // State
@@ -716,14 +735,17 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const addWatchesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const onAttachmentsAddFinishedRef = useRef(onAttachmentsAddFinished);
   onAttachmentsAddFinishedRef.current = onAttachmentsAddFinished;
+  const onAttachmentsAddUnconfirmedRef = useRef(onAttachmentsAddUnconfirmed);
+  onAttachmentsAddUnconfirmedRef.current = onAttachmentsAddUnconfirmed;
   const stopAddWatches = useCallback(() => {
     for (const timer of addWatchesRef.current.values()) clearTimeout(timer);
     addWatchesRef.current.clear();
   }, []);
-  // Task 141 review (F2): reads an add's job until its worker has finished (any phase but `AttachmentsQueued`, or a failed
-  // job), then reports it. The first read is immediate (the worker may be done already). It also reports after
-  // ATTACHMENTS_ADD_WATCH_MAX_POLLS reads, or `maxPollingRetries` failed reads in a row: the caller's re-read of what is
-  // saved is the answer either way, and an add must never show "Adding…" forever.
+  // Task 141 review (F2): reads an add's job until its worker has finished, then reports it. The first read is immediate
+  // (the worker may be done already). Round 2: ONLY a final phase finishes it (ATTACHMENTS_ADD_FINAL_PHASES, or a job status
+  // of Failed / Cancelled); any other phase keeps watching. Stopping at ATTACHMENTS_ADD_WATCH_MAX_POLLS reads, or after
+  // `maxPollingRetries` failed reads in a row, is NOT an outcome: it reports `onAttachmentsAddUnconfirmed` (the job may
+  // have finished or failed — nothing is known), never "finished", so the caller cannot claim success or failure from it.
   const watchAttachmentsAdd = useCallback(
     (jobId: string, documentId: string, names: string[]) => {
       if (addWatchesRef.current.has(jobId)) return;
@@ -732,6 +754,10 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       const finish = () => {
         addWatchesRef.current.delete(jobId);
         onAttachmentsAddFinishedRef.current?.(documentId, names);
+      };
+      const giveUp = () => {
+        addWatchesRef.current.delete(jobId);
+        onAttachmentsAddUnconfirmedRef.current?.(documentId, names, jobId);
       };
       const read = async () => {
         reads += 1;
@@ -746,7 +772,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             failuresInARow = 0;
             const job = (await response.json()) as JobStatus;
             finished =
-              job.status === 'Failed' || job.status === 'Cancelled' || job.currentPhase !== ATTACHMENTS_QUEUED_PHASE;
+              job.status === 'Failed' ||
+              job.status === 'Cancelled' ||
+              (typeof job.currentPhase === 'string' && ATTACHMENTS_ADD_FINAL_PHASES.includes(job.currentPhase));
           } else {
             failuresInARow += 1;
           }
@@ -754,8 +782,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           if (!addWatchesRef.current.has(jobId)) return;
           failuresInARow += 1;
         }
-        if (finished || failuresInARow >= maxPollingRetries || reads >= ATTACHMENTS_ADD_WATCH_MAX_POLLS) {
+        if (finished) {
           finish();
+          return;
+        }
+        if (failuresInARow >= maxPollingRetries || reads >= ATTACHMENTS_ADD_WATCH_MAX_POLLS) {
+          giveUp();
           return;
         }
         addWatchesRef.current.set(
@@ -1620,6 +1652,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Task 141 review (F2): an add that queued names is watched, once its save completes, until its worker finished.
         if (activeAddSaveRef.current && saveResponse?.jobId && attachmentsAnswerRef.current.added.length > 0) {
           pendingAddJobRef.current = { jobId: saveResponse.jobId, names: attachmentsAnswerRef.current.added };
+          attachmentsAnswerRef.current = { ...attachmentsAnswerRef.current, jobId: saveResponse.jobId };
         }
 
         await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
@@ -1695,5 +1728,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     savedDocumentId,
     savedDocumentUrl,
     getAttachmentsAnswer,
+    watchAttachmentsAdd,
   };
 }
