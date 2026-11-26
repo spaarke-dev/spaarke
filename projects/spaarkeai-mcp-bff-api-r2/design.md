@@ -141,6 +141,20 @@ The platform facts come from `knowledge/dataverse-mcp/` (2026-05). The spec re-c
 
 BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the existing MCP host, so expect no new packages; measure the publish-size delta per task as usual. Hot-path declaration: `Api/Mcp/**`, `AuthorizationModule.cs` (only if needed), the services in §3.
 
+### 5.1 Hot-path declaration (added 2026-11-26, owner: "yes add it so have complete documentation")
+
+Copied from spec.md, updated for what tasks 005 and 030 actually touched. Registry: `projects/INDEX.md`.
+
+```xml
+<hot-path-declaration>
+  <bff>Y — Api/Mcp/** (new tools, McpToolResults generalised, widget resources); Api/Agent/** + AgentModule + Program.cs + EndpointMappingExtensions (delete); Api/Events (capability extraction); Api/Filters/PlaybookAuthorizationFilter (shared check); Services/Ai/PlaybookRuns/** (run record store, DetachedPlaybookRunner); Services/Ai/PublicContracts/IPlaybookRunAi; Infrastructure/Graph/GraphClientFactory (OBO cache TTL); finance authorization move; csproj (widget embeds)</bff>
+  <spaarkeai>N — src/solutions/SpaarkeAi/** untouched; shared libraries (Spaarke.DailyBriefing.Components, Spaarke.UI.Components EmailComposer, Spaarke.AI.Widgets) gain seams consumed unchanged by the Console</spaarkeai>
+  <ci-workflows>Y — publish-bff-artifact.yml builds and verifies three more widgets; ci-tier1-blocking.yml runs jest per widget; publish-copilot-agent-template.yml deleted</ci-workflows>
+  <skill-directives>Y — declarative-agent and mcp-tool-handler skills drop legacy-agent references; ADR-052 amended (detached caller run, accepted 2026-11-26)</skill-directives>
+  <root-claude-md>N</root-claude-md>
+</hot-path-declaration>
+```
+
 ## 6. Dependencies and coordination
 
 | With | What |
@@ -167,7 +181,7 @@ BFF hygiene (`.claude/constraints/bff-extensions.md`): the tools sit on the exis
 
 - **ADR-028 (auth):** tools run as the caller under A10. No new auth route is expected; any app-only read needs the caller's own record-access check (r1 FR-02 conditions).
 - **ADR-013 (AI placement):** tools live in the BFF on the existing MCP host. No tension.
-- None found that needs path A or B yet.
+- Resolved during implementation (detail: spec.md ADR Tensions): **ADR-052, Path B** — a playbook run a user started continues after `spaarke_run_playbook` replies, acting as the user (amendment accepted 2026-11-26, D-030-run-model). **ADR-028 A10, Path A** — the finance tool keeps REST's reason code for a caller with no `systemuser` row (FR-11 parity; owner 2026-11-26).
 
 ## 9. Open questions for the owner
 

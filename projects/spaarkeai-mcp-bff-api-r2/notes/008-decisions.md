@@ -62,3 +62,11 @@ rework: none task 008
 - **Status:** RESOLVED 2026-11-26 — owner chose **Path A** ("path A"); recorded in spec.md ADR Tensions and notes/decisions.md D-owner-answers-2026-11-26.
 
 Other pass-1 findings: K2 method/route linked by tests not shared code (a future extra filter on the summary route would not reach the tool; optional pin test); K4 publish delta to be re-measured vs fresh master before the PR. No other F-class findings; REST behaviour unchanged for every route using the filter; method fail-closed for every input; 403 (not 404) is correct and leaks nothing.
+
+## Verifier pass 2 (opus, independent, 2026-11-26, on d07678e751)
+
+- No F-class finding on the authorization logic or the tests. REST behaviour re-derived line by line as unchanged; every refusal is replayed against the real route. Runs: 183/183 targeted tests, 159/159 filtered ArchTests (throwaway worktree, removed with Remove-WorktreeSafe.ps1).
+- F2, fixed by the main session: no CAPABILITY-INDEX row had been proposed for the shared method. Applied directly as row 52.
+- K2, doc fixed: "Never throws" is now "never throws once its services resolve". A DI failure or disposed `RequestServices` still throws, reads nothing, and so fails closed.
+- K3, recorded: no test covers the missing-`AuthorizationService` branch or a cancelled `ct` (both refuse by construction), and the empty-id case does not assert that no rights call is made.
+- External reviews requested 2026-11-26: ebilling-r1, unified-access-control-r2, ontology-platform-r1.

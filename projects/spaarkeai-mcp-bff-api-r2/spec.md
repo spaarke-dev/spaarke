@@ -290,7 +290,7 @@ Microsoft Copilot users can reach Spaarke today only through r1's five decision 
 
 ### Hot-Path Declaration
 
-design.md states the hot paths in prose (§5) but has no `<hot-path-declaration>` block. This is the declaration for this spec. It should also be added to design.md (see Unresolved Questions).
+design.md now carries this block too (§5.1, added 2026-11-26 on the owner's instruction).
 
 ```xml
 <hot-path-declaration>

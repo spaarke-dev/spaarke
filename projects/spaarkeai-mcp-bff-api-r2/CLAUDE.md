@@ -42,9 +42,9 @@ Tasks (2026-11-25, 35 POMLs): Phase 0 removal, prerequisites and seams 001–012
 - CAPABILITY-INDEX (`.claude/patterns/CAPABILITY-INDEX.md`) is `.claude/`: tasks that add a canonical component write the proposed row into `notes/capability-index-pending.md`; the main session applies it.
 - Deferred work and newly found issues: `/project-defer-issue-tracking` writes `notes/defer-issues.md` AND a GitHub issue — never one without the other.
 
-ADR tensions approved for this project (root CLAUDE.md §6.5): none. Two Path C checks are recorded in spec "ADR Tensions" (model-callable reversible writes vs ADR-028 A10; run persistence vs ADR-052).
+ADR tensions approved for this project (root CLAUDE.md §6.5), all in spec "ADR Tensions": **Path B** ADR-052 amendment, detached caller run for a user-started playbook run (accepted 2026-11-26, D-030-run-model); **Path A** ADR-028 A10 vs FR-11 for the finance tool (owner 2026-11-26). Two Path C checks: model-callable reversible writes vs A10; run persistence vs ADR-052.
 
-**HARD WARNING (hot path).** `design.md` has no `<hot-path-declaration>` block; the block is in `spec.md` ("Hot-Path Declaration": BFF Y, SpaarkeAi N, ci-workflows Y, skill-directives Y, root-CLAUDE-md N). The owner may add it to design.md. Do not edit design.md.
+**Hot path.** design.md §5.1 now carries the `<hot-path-declaration>` (added 2026-11-26 on the owner's instruction). Other design.md edits still need the owner.
 
 ## 3. Owner directives and standing decisions
 

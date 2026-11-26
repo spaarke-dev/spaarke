@@ -619,7 +619,7 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// <para>Fails closed (ADR-028 A10): a null context, a principal with no authenticated identity, or one with no Entra <c>oid</c> is
     /// <see cref="MatterFinanceReadAuthorization.UserContextRequired"/> before any Dataverse call (REST answers each of these with a
     /// 401 that carries no reasonCode); a missing <see cref="AuthorizationService"/> is <see cref="SystemFailureReasonCode"/>. Never falls back to app-only.
-    /// Does not set <see cref="StepZeroVerdictKey"/> (that item is for the REST pipeline). Never throws: a fault, a cancelled request
+    /// Does not set <see cref="StepZeroVerdictKey"/> (that item is for the REST pipeline). Never throws once its services resolve (a DI failure or disposed <c>RequestServices</c> still throws, and nothing is read): a fault, a cancelled request
     /// included, is a refusal, as on the route.</para>
     /// </summary>
     public static async Task<MatterFinanceReadAuthorization> AuthorizeMatterFinanceReadAsync(
