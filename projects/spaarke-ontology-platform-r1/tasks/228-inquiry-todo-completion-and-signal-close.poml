@@ -21,7 +21,7 @@
   <role>SPAARKE full-stack developer: .NET 10 BFF write paths and ADR-004 jobs, React/Fluent v9 shared components.</role>
   <goal>No path completes an open budget inquiry's outcome To Do without a disposition, and recording a disposition closes the To Do's Signal within the job latency instead of at the next nightly run.</goal>
   <context>
-    <background>The route serves every child-record table and every To Do: the check must run only for sprk_todo completion and cost nothing for a To Do with no open inquiry beyond the existing lookup. A closed inquiry's To Do completes as today. The re-evaluation must not write a Decision Record (BR-1) and must not stamp unchanged Signals (D-61). Run /conflict-check (ChildRecordEndpoints is shared).</background>
+    <background>The route serves every child-record table and every To Do: the check must run only for sprk_todo completion and cost nothing for a To Do with no open inquiry beyond the existing lookup. A closed inquiry's To Do completes as today. The re-evaluation writes no human-resolution Decision Record (BR-1); its one Routine ConditionCleared record is the one the nightly would write (D-145b, idempotent key; corrected 2026-11-26 after the PR #3273 review). It must not stamp unchanged Signals (D-61). Run /conflict-check (ChildRecordEndpoints is shared).</background>
   </context>
   <constraints>
     <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
