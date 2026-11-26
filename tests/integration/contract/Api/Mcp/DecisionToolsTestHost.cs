@@ -262,6 +262,9 @@ internal sealed class DecideLaneDouble : IDecisionCapability
     /// <summary>When set, a <see cref="WorklistSet.ClosedToday"/> read answers it.</summary>
     public SignalReadResult? ClosedTodayFailure { get; set; }
 
+    /// <summary>When set, a <see cref="WorklistSet.ClosedToday"/> read faults with it (an exception, not an outcome).</summary>
+    public Exception? ClosedTodayThrows { get; set; }
+
     /// <summary>Reads of <see cref="WorklistSet.ClosedToday"/>.</summary>
     public int ClosedTodayReads => Volatile.Read(ref _closedTodayReads);
 
@@ -275,6 +278,11 @@ internal sealed class DecideLaneDouble : IDecisionCapability
         {
             case WorklistSet.ClosedToday:
                 Interlocked.Increment(ref _closedTodayReads);
+                if (ClosedTodayThrows is { } thrown)
+                {
+                    return Task.FromException<SignalReadResult>(thrown);
+                }
+
                 return Task.FromResult(
                     ClosedTodayFailure ?? new SignalReadResult(SignalReadOutcome.Ok, ClosedResponse("closedToday", ClosedTodayFor?.Invoke(user) ?? ClosedTodayGroups)));
             case WorklistSet.Lanes:

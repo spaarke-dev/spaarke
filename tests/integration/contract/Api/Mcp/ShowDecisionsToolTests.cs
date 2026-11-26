@@ -381,6 +381,68 @@ public sealed class ShowDecisionsToolTests
         structured.TryGetProperty("closedToday", out _).Should().BeFalse("absent, not zero: the widget shows no line, as the Console does when its set did not load");
     }
 
+    public static TheoryData<Exception> ClosedTodayFaults() => new()
+    {
+        new InvalidOperationException("ZQX-FAULT-4410 unexpected"),
+        new HttpRequestException("ZQX-FAULT-4410 dataverse"),
+        // A timeout surfaces as a cancellation the caller did not ask for: it is a fault, not the caller's cancel.
+        new TaskCanceledException("ZQX-FAULT-4410 timeout"),
+    };
+
+    [Theory]
+    [MemberData(nameof(ClosedTodayFaults))]
+    public async Task ShowDecisions_WhenTheClosedTodayReadThrows_TheLaneIsStillAnswered_AndClosedTodayIsAbsent(Exception fault)
+    {
+        // mcp-r2 review: Task.WhenAll rethrows a faulted closed read, so without the catch the whole call failed for the closed figure.
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build()) { ClosedTodayThrows = fault };
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        AssertNotError(result);
+        var structured = result.GetProperty("structuredContent");
+        structured.GetProperty("total").GetInt32().Should().Be(200, "the lane is answered in full");
+        lane.ClosedTodayReads.Should().Be(1);
+        structured.TryGetProperty("closedToday", out _).Should().BeFalse("absent, as for a failed read");
+        result.GetRawText().Should().NotContain("ZQX-FAULT-4410", "the exception's message never reaches the result");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_WhenTheCallerCancels_TheCancellationFromTheClosedTodayReadIsNotSwallowed()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var lane = new DecideLaneDouble(DecideLaneSeed.Build()) { ClosedTodayThrows = new OperationCanceledException(cts.Token) };
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", Guid.NewGuid().ToString())], authenticationType: "test")),
+        };
+
+        var run = () => ShowDecisionsTool.RunAsync(null, http, lane, DecisionToolsTestHost.EnvironmentUrl, cts.Token);
+
+        await run.Should().ThrowAsync<OperationCanceledException>("the caller's own cancellation ends the call; it is not a closed-read fault");
+    }
+
+    [Fact]
+    public async Task ShowDecisions_ClosedToday_CountsPrivilegedItemsExactlyAsTheCategoryCardsDo()
+    {
+        // FR-04 parity (mcp-r2 review): the seed's lane holds privileged items (all of matter P and three of A). Given the same items as its
+        // closed-today set, the closed-today counts must equal the cards' counts key for key: both include a privileged item as a bare count.
+        var seed = DecideLaneSeed.Build();
+        var lane = new DecideLaneDouble(seed);
+        lane.ClosedTodayGroups.AddRange(seed.Groups);
+        await using var host = await DecisionToolsTestHost.StartAsync(lane);
+
+        var result = await host.CallAsync(ShowDecisionsTool.Name, null, Token);
+
+        AssertNotError(result);
+        var cards = result.GetProperty("structuredContent").GetProperty("categories").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("key").GetString()!, c => c.GetProperty("count").GetInt32());
+        seed.Privileged.Should().NotBeEmpty("the parity is only shown over a set that holds privileged items");
+        cards["all"].Should().Be(200, "the cards count the privileged items");
+        ClosedToday(result).Should().Equal(cards);
+    }
+
     private static Guid? OidOf(ClaimsPrincipal? user) =>
         Guid.TryParse((user?.FindFirst("oid") ?? user?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier"))?.Value, out var oid) ? oid : null;
 

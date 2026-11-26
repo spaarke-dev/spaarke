@@ -130,7 +130,7 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         var rows = 0;
         try
         {
-            var result = await RunAsync(request.Params?.Arguments, http, decisions, dataverse.Value.EnvironmentUrl, cancellationToken);
+            var result = await RunAsync(request.Params?.Arguments, http, decisions, dataverse.Value.EnvironmentUrl, cancellationToken, logger);
             rows = result.Rows;
             outcome = DecisionToolCall.OutcomeOf(result.Result);
             return result.Result;
@@ -146,7 +146,8 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         HttpContext? http,
         IDecisionCapability decisions,
         string? environmentUrl,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ILogger? logger = null)
     {
         if (!DecisionToolCall.TryReadSingleArgument(arguments, Name, CategoryArgument, http?.TraceIdentifier, out var argument, out var argumentError))
         {
@@ -177,7 +178,7 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         // The closed-today read starts beside it (independent reads; the same caller) and is awaited with it on every path, so no read
         // outlives the call. It never fails the call: see ReadClosedTodayAsync.
         var pageRead = decisions.ListDecidePageAsync(http.User, null, cancellationToken);
-        var closedRead = ReadClosedTodayAsync(decisions, http.User, cancellationToken);
+        var closedRead = ReadClosedTodayAsync(decisions, http.User, logger, http.TraceIdentifier, cancellationToken);
         await Task.WhenAll(pageRead, closedRead);
         var page = await pageRead;
         var closedToday = await closedRead;
@@ -221,15 +222,37 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
     /// <see cref="IDecisionCapability.ListDecideAsync"/> as the lane's, as the caller, so it holds what the caller may read and no more
     /// (core-record access, the Do-lane "mine" rule) and "today" is each item's own day (D-25 as amended by D-129): nothing is redefined
     /// here. The counts are partitioned by <see cref="DecideLaneCategories"/>, like the cards.
-    /// <para>A read that does not answer Ok is null, so the figure is absent and the widget shows no line: what the Console does when its
-    /// closed-today set did not load (<c>doneToday</c> undefined). The lane's own answer is never held back for it.</para>
+    /// <para>A read that does not answer Ok, or that throws (anything but the caller's own cancellation), is null, so the figure is absent and
+    /// the widget shows no line: what the Console does when its closed-today set did not load (<c>doneToday</c> undefined). The lane's own
+    /// answer is never held back for it.</para>
+    /// <para><b>Privileged items (FR-04).</b> They are counted here exactly as the lane's <c>Categories</c> count them: both partition
+    /// <see cref="DecideLaneMember"/>, which carries no privilege flag, so a privileged item is one more in its category's number in both,
+    /// and neither names it. Counts only.</para>
     /// </summary>
     private static async Task<IReadOnlyDictionary<string, int>?> ReadClosedTodayAsync(
-        IDecisionCapability decisions, ClaimsPrincipal user, CancellationToken cancellationToken)
+        IDecisionCapability decisions, ClaimsPrincipal user, ILogger? logger, string? correlationId, CancellationToken cancellationToken)
     {
-        var read = await decisions.ListDecideAsync(user, cancellationToken, WorklistSet.ClosedToday);
+        SignalReadResult read;
+        try
+        {
+            read = await decisions.ListDecideAsync(user, cancellationToken, WorklistSet.ClosedToday);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // A thrown read (an unexpected Dataverse or HTTP fault, not an outcome) is the same as a failed one: the member is left out and
+            // the lane is answered. Task.WhenAll would otherwise rethrow it and fail the whole call. Only the exception type is logged:
+            // its message may carry request data. The caller's own cancellation still propagates.
+            logger?.LogWarning(
+                "MCP tool {ToolName}: the closed-today read threw {ExceptionType}; closedToday is left out. Correlation {CorrelationId}.",
+                Name, ex.GetType().Name, correlationId);
+            return null;
+        }
+
         if (read.Outcome != SignalReadOutcome.Ok || read.Response == null)
         {
+            logger?.LogInformation(
+                "MCP tool {ToolName}: the closed-today read answered {Outcome}; closedToday is left out. Correlation {CorrelationId}.",
+                Name, read.Outcome, correlationId);
             return null;
         }
 
