@@ -125,7 +125,7 @@
     <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof each for the external requester check and the internal read check.</criterion>
   </acceptance-criteria>
 
-  <notes>FR-16. The MCP status tool (task 044) calls `IntakeRunStatusService` with the caller's identity, so keep the authorization decision callable from the service layer as well as the filter. External SPA status UI, if any, is out of scope here (Front Door shows request stage today).</notes>
+  <notes>FR-16. The MCP status tool (task 044) calls `IntakeRunStatusService` with the caller's identity, so keep the authorization decision callable from the service layer as well as the filter. External SPA status UI, if any, is out of scope here (Front Door shows request stage today). Task 011 found the typed read (ProcessingJobColumns / ProcessingJobRecord) stops at the Office columns: the status read needs the new columns (shared with 023, extend once) and must select sprk_jobtype = 7 only; Office runs never appear here (FR-06b mirror of OfficeJobStatusService.IsIntakeRun).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

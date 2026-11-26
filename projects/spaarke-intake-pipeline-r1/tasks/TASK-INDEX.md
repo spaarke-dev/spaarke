@@ -16,8 +16,8 @@
 | 007 | Review and merge ADR-004 Amendment A2 (FR-04) — **main session only** (`.claude/`) | 0 | ✅ [done] | none | SERIAL | opus / high |
 | 008 | Phase 0 dev deploy + engine-hosting spike report (latency, golden, Clean-copy finding) | 0 | 🔲 [open] | 001–006 | P0-C | sonnet / high |
 | 010 | `sprk_servicerequest` intake columns (FR-05) | 1 | 🔲 [open] | none (coordinate ontology first) | P1-A | sonnet / high |
-| 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | 🔲 [open] | none | P1-A | sonnet / high |
-| 012 | `requestType` on RoutingContext + intake harness registry (FR-08) | 1 | 🔲 [open] | 005 | P1-A | opus / high |
+| 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | 🔄 [wip] script + Office filter done; live dev run waits on owner OK | none | P1-A | sonnet / high |
+| 012 | `requestType` on RoutingContext + intake harness registry (FR-08) | 1 | ✅ [done] | 005 | P1-A | opus / high |
 | 013 | Orchestrator IJobHandler: stages, resume, atomic claim, terminal-last, kill switches (FR-07) | 1 | 🔲 [open] | 004, 010, 011, 012 | P1-B | opus / high |
 | 014 | Engine dispatch + completion: blob staging, ids-only dispatch, completion handler, timeout | 1 | 🔲 [open] | 013, 001, 002 | P1-C | sonnet / xhigh |
 | 015 | NDA harness: outputs + clause table, check_outputs, version stamp, prior markup preserved (FR-09) | 1 | 🔲 [open] | 014, 004, 008 | P1-E | opus / high |

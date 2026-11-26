@@ -124,7 +124,7 @@
     <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof for the terminal-run refusal.</criterion>
   </acceptance-criteria>
 
-  <notes>FR-15; §10.1 item 3. Scope is intake runs; a general DLQ view for every job type is not added (file a follow-up with `/project-defer-issue-tracking` if wanted). Folder `Api/Admin/` per the brief ("extend Api/Admin").</notes>
+  <notes>FR-15; §10.1 item 3. Scope is intake runs; a general DLQ view for every job type is not added (file a follow-up with `/project-defer-issue-tracking` if wanted). Folder `Api/Admin/` per the brief ("extend Api/Admin"). Task 011 found the typed read (ProcessingJobColumns / ProcessingJobRecord) stops at the Office columns: extend it with sprk_harnesskey, sprk_engineexecutionid, sprk_stagingblobprefix, sprk_redrivecount (null = 0), sprk_lastredriveon and the two lookups, and filter intake reads on sprk_jobtype = 7.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

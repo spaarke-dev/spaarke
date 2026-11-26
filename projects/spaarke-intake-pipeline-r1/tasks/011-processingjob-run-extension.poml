@@ -4,7 +4,7 @@
     <title>FR-06: Extend sprk_processingjob as the intake run record (request + output lookups, Intake run job type, harness key, engine execution id / blob prefix, re-drive marker) + sprk_backgroundjob description (§10.1 item 8)</title>
     <phase>1 Pipeline core and first doors</phase>
     <gate>startable (script authoring); owner OK for the dev schema change</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a schema script and Dataverse columns with explicit constraints; at most a small read-filter fix in the Office status path.</rigor-reason>
     <model-tier>sonnet</model-tier>
