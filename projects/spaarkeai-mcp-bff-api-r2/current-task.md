@@ -1,16 +1,16 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (checkpoint at 85% context: Wave 7 merged; 031 and 034 waiting only on a merged-tree full ArchTests + publish delta)
-> **Phase**: Phase 0 and Phase 1 code complete. Phase 2 Wave 7: 031 and 034 merged with verifier fixes; 030 stopped (owner Q14); 033 and 036 blocked on owner decisions.
+> **Last Updated**: 2026-11-26 (Wave 8: 035 merged, reviewed, fixed and done; every remaining code task waits on an owner decision)
+> **Phase**: Phase 0 and Phase 1 code complete. Phase 2: 031, 034, 035 done; 030 stopped (owner Q14), 032 waits on 030; 033 and 036 blocked on owner decisions.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
-| **Active work** | `/project-pipeline` Step 5, Phase 2 Wave 7. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **State** | 031 (analysis tools) and 034 (briefing tool and widget) are merged with both review passes' fixes. Merges: 034 3a93364b9d, fixes 6895d4525b; 031 ef89428a89, fixes 6a566dafcd. Scoped re-checks done. CAPABILITY-INDEX rows 45–48 are applied. Issues filed: #3226–#3233. |
-| **Next (exact)** | (1) When 035 reports: merge, run two opus review passes, fix, re-check, mark done. (2) Then the owner questions decide the rest: Q14 (030 run model, blocks 030 and 032), 008 (blocks 033), #3181 (blocks 036), Q16 (FR-09 preferences). Deploys 019/029/039 wait on owner gates. |
-| **Uncommitted** | None. 031 and 034 marked done; pushed. |
-| **Branch state** | Agent worktrees brought in newer master PRs. The agent gates were green: 031 branch full ArchTests 2859; 034 fixes, filtered ArchTests 117, widget jest 130. The merged tree has not had a full ArchTests run yet. |
+| **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
+| **State** | 035 (search results widget) merged 4f56fbbe54, review fixes merged (550e4bcb71) plus a main-session re-check fix; CAPABILITY-INDEX row 49 applied; issues #3234, #3235 filed. Merged-tree gates at 4f56fbbe54: ArchTests 2859, `Mcp|Search` unit 1538, widget jest Decisions 400, Briefing 130, Search results 117. CI now runs each widget's full jest (`ci-tier1-blocking.yml`). |
+| **Next (exact)** | No code task can start without an owner decision: Q14 (030 run model; unblocks 030 then 032), 008 A10 Path A or C (unblocks 033), #3181 fix choice (unblocks 036), Q16 (FR-09 preferences). Deploys 019/029/039 wait on owner gates. 040 (email) needs 039. When #3213 merges, fold CAPABILITY-INDEX row 35. |
+| **Uncommitted** | None after the 035 done commit; pushed. |
+| **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
 
 ## Status (TASK-INDEX is authoritative)
 - ✅ **Phase 0:** 001, 002, 003, 004, 006, 007, 009, 010, 011.
@@ -19,9 +19,9 @@
   - 005: code and widened script merged; the dev schema go is not given;
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
-- ✅ **Phase 2 done:** 031, 034 (merged-tree gates at 1895213b48: ArchTests 2859, unit tests 1367; publish about 42 MB). Wave 8: 035 running.
+- ✅ **Phase 2 done:** 031, 034, 035 (publish about 42 MB; 035 adds +0.23 MB).
 - 🛑 **030:** stopped before code (owner Q14). 032 waits on it.
-- 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 035 is ready (Wave 8).
+- 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions
 1. **005:** the go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev. Also the earlier §4 acceptance-criterion-3 question in notes/005-schema.md.
@@ -47,7 +47,7 @@
 16. **FR-09 saved preferences (034, #3232):** the briefing tool now uses the Console's default windows (5 days, 168 hours), but not a user's saved Daily Digest preferences: no BFF reader of `sprk_userpreference` exists. Either narrow FR-09's "equals the Console" to default preferences, or approve a new caller-scoped preference reader (§11 surface).
 
 ## Issues filed this wave
-#3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
+#3234 #3235 #3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
 
 ## Peer coordination
 - **mcp-r1:** #3199 merged and brought into this branch. #2575 (r1 ISS-001, the legacy Copilot agent code) was handed to us 2026-11-26: task 001 (8a92da8751) removes it, so the merge PR body must say "Closes #2575". r1 owns the ISS-010 files and the Decision wizard heading files; message r1 before editing them.

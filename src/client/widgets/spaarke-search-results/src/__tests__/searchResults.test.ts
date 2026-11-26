@@ -226,6 +226,20 @@ describe('noticesFor', () => {
     expect(noticesFor(page({ nextOffset: 1000 }), false, false).ending).toBe(ASK_FOR_MORE); // at the bound it is still a page the tools accept
   });
 
+  it('says paging stopped, not "search inside one record", when the tools advised no offset because the next page passes the bound', () => {
+    // The server caps: a full page at offset 990 (limit 20) would continue at 1010, so it advises no offset.
+    const capped = page({
+      kind: 'records',
+      hits: Array.from({ length: 20 }, (_, i) => ({ id: `r${i}`, title: 'R', excerpt: '' })),
+      offset: 990,
+    });
+    expect(noticesFor(capped, false, false, 3).ending).toBe(PAGING_LIMIT);
+    expect(noticesFor(page({ truncated: true, offset: 980, limit: 50 }), false, false, 2).ending).toBe(PAGING_LIMIT);
+    // A page that ends exactly at the bound still had an advised offset, and a whole-scope document page (offset 0) still says to narrow.
+    expect(noticesFor(page({ limit: 1, offset: 999 }), false, false, 2).ending).toBe(NARROW_ADVICE);
+    expect(noticesFor(page({ limit: 1 }), false, false).ending).toBe(NARROW_ADVICE);
+  });
+
   it('ends a list the reader paged into when the newest page is empty, and never calls an empty first page an end', () => {
     expect(noticesFor(page({ hits: [], offset: 20 }), false, false, 2).ending).toBe(NO_MORE_AFTER_THESE);
     expect(noticesFor(page({ hits: [] }), false, false, 1).ending).toBeNull();

@@ -37,7 +37,7 @@
 | 034 | `spaarke_get_briefing` + Daily Briefing widget | 2 | ✅ [done] | 010, 020, 021 | Group H | sonnet / xhigh | FULL |
 | 036 | Task write tools: `spaarke_create_task`, `spaarke_complete_task` | 2 | 🔲 [open] | 006, 020, 025 | Group H | sonnet / high | FULL |
 | 032 | `spaarke_get_matter_summary` (cached, else start a run) | 2 | 🔲 [open] | 012, 020, 030 | Group I | sonnet / high | FULL |
-| 035 | Search results widget | 2 | 🔲 [open] | 021, 022, 034 | Group I | sonnet / high | FULL |
+| 035 | Search results widget | 2 | ✅ [done] | 021, 022, 034 | Group I | sonnet / high | FULL |
 | 039 | Deploy Phase 2 to dev; FR-13 restart check; routing-eval run B | 2 | 🔲 [open] | 029, 030–036 | Group J (alone) | sonnet / high | STANDARD |
 | 040 | Email: compose widget, `spaarke_compose_email`, app-only `spaarke_send_email` | 3 | 🔲 [open] | 011, 021, 023, 035, 039 | Group K (alone) | opus / high | FULL |
 | 041 | Routing eval runs A/B/C and description fixes | 3 | 🔲 [open] | 029 (runs B, C wait for 039, 049) | Group L (spans phases) | sonnet / high | STANDARD |

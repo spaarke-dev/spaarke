@@ -149,4 +149,13 @@ Results: widget `npm run build` passes, bundle **905,979 bytes (0.86 MB)**; widg
 - The two tools do not set `_meta.ui.visibility`; the spec default is the same.
 - `parentType` is shown exactly as the index stores it (022's data).
 
-rework: none task 035
+### Main-session re-check of the fix diff (2026-11-26)
+
+One gap in fix 2: once the server stops advising an offset at the bound, the widget saw "a full page with no offset" and fell through to
+`NARROW_ADVICE` ("search inside one matter, project or invoice"), which is wrong for a search already inside one record and for a record search.
+`noticesFor` now returns `PAGING_LIMIT` for a full or cut page with no offset when `offset + limit > MAX_OFFSET` (a whole-scope document search
+always starts at 0, so it keeps `NARROW_ADVICE`). Test: `searchResults.test.ts` "says paging stopped ..." (fails with the rule removed: 1 failed).
+Widget jest 132 pass; `SearchTools*` server tests 84 pass. Merged-tree gates at 4f56fbbe54 (before the fixes): ArchTests 2859, `Mcp|Search` unit
+tests 1538, widget jest Decisions 400 / Briefing 130 / Search results 117. Issues filed: D-035-1 #3234, D-035-2 #3235.
+
+rework: review fixes 550e4bcb71 (7 findings) + main-session re-check fix, task 035

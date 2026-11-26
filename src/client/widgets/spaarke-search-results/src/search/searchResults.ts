@@ -227,6 +227,9 @@ export function noticesFor(
   // The tool advised a next page but the widget cannot ask for it (the host sent no arguments): point at the chat instead of a dead button.
   if (page.nextOffset !== null) return { incomplete, ending: ASK_FOR_MORE };
   const full = page.hits.length >= page.limit || page.truncated;
+  // A full or cut page with no offset is either a document search over every record (always from offset 0) or a list the tools stopped
+  // paging at their bound (they advise no offset above MAX_OFFSET). Only the first needs "search inside one record"; the second may already be.
+  if (full && page.offset + page.limit > MAX_OFFSET) return { incomplete, ending: PAGING_LIMIT };
   return { incomplete, ending: full ? NARROW_ADVICE : MAY_BE_MORE };
 }
 
