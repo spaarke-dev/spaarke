@@ -10,7 +10,8 @@
  *    (McpToolResults.cs) and that `reasonCode` lifted to the top level;
  *  - the host call rejecting (host not connected, transport error, the SDK's own request timeout), the host not answering within
  *    `timeoutMs`, or an answer that is not a result: `{ isError: true, reasonCode: TransportReason.*, content: [text] }` with NO
- *    `structuredContent`. That is the "no domain answer" shape, so the outcome is unknown: task 011's email host reads it as
+ *    `structuredContent`. `content` is always fixed, user-safe text (a caller may show it); the bridge's own error text, which can read
+ *    like "MCP error -32001: Request timed out", is kept in `diagnostic` for logs and is never put in `content`. That is the "no domain answer" shape, so the outcome is unknown: task 011's email host reads it as
  *    `SendCommunicationError(0, 'NETWORK')` ("may not have been sent"), never as a refusal. A late answer after the timeout is dropped.
  *
  * Use it where a widget calls tools itself. A widget that runs a shared `@spaarke/ui-components` service over an injected `fetch` uses
@@ -45,8 +46,10 @@ export interface WidgetToolResult {
   isError?: boolean;
   /** The failure's `reasonCode`: the tool's own, or a `TransportReason` value when there was no tool answer. */
   reasonCode?: string;
-  /** The tool's content blocks; for a transport failure, one text block that says what happened. */
+  /** The tool's content blocks; for a transport failure, one fixed, user-safe text block (never the bridge's own error text). */
   content?: ReadonlyArray<{ type: string; text?: string }>;
+  /** Transport failures only: the host call's own error text, for diagnosis. Nothing displays it; it is never copied into `content`. */
+  diagnostic?: string;
 }
 
 export interface WidgetMcpTransport {
@@ -67,8 +70,14 @@ function isContentBlock(value: unknown): value is { type: string; text?: string 
   return isRecord(value) && typeof value.type === 'string';
 }
 
-function noAnswer(reasonCode: string, text: string): WidgetToolResult {
-  return { isError: true, reasonCode, content: [{ type: 'text', text }] };
+function noAnswer(reasonCode: string, text: string, diagnostic?: string): WidgetToolResult {
+  return { isError: true, reasonCode, content: [{ type: 'text', text }], ...(diagnostic ? { diagnostic } : {}) };
+}
+
+/** The wait in whole seconds, rounded up, as a phrase (a timeout under a second is "1 second", never "0 seconds"). */
+function secondsPhrase(timeoutMs: number): string {
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  return `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
 }
 
 /** The transport result for what the host answered. */
@@ -110,20 +119,23 @@ export function createWidgetMcpTransport(
       try {
         // A synchronous throw from the bridge is a rejection like any other.
         const call = Promise.resolve().then(() => callServerTool(name, args));
-        // A rejection that arrives after the timeout has nobody waiting for it: mark it handled so it is not reported as unhandled.
+        // A rejection that arrives after the timeout has nobody waiting for it. `Promise.race` below already subscribes to `call`, so it
+        // is never reported as unhandled; this line states that intent and keeps it true if the race is ever restructured.
         call.catch(() => undefined);
         const answer = await Promise.race([call, timedOut]);
         if (answer === TIMED_OUT) {
           return noAnswer(
             TransportReason.Timeout,
-            `The host did not answer within ${Math.round(timeoutMs / 1000)} seconds, so the outcome is unknown.`
+            `The host did not answer within ${secondsPhrase(timeoutMs)}, so the outcome is unknown.`
           );
         }
         return readResult(answer);
       } catch (error) {
+        // The bridge's own text is for diagnosis only: it is not written for the people who read `content`.
         return noAnswer(
           TransportReason.HostUnavailable,
-          error instanceof Error && error.message ? error.message : 'The host did not answer.'
+          'The host did not answer.',
+          error instanceof Error && error.message ? error.message : undefined
         );
       } finally {
         clearTimeout(timer);

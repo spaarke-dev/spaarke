@@ -10,8 +10,11 @@
  *   bridge that never answers reaches the email host as an outcome-unknown `NETWORK` error (status 0), the reason the timeout exists.
  * - `createMcpFetch`'s `title` option: without it a failure carries the standard phrase (the Decisions widget's own titles are covered by
  *   its unchanged `mcpFetch.test.ts`).
- * - Source guard: no file under src/client/widgets/shared/ calls fetch, XHR, sockets or beacons, reads a token or MSAL, or uses browser
- *   storage, reads the page's colour scheme or writes a raw colour, with must-fire controls.
+ * - A transport failure's `content` is fixed, user-safe text; the bridge's own error text goes to `diagnostic` only. The timeout and the
+ *   late-answer behaviour are tested with fake timers (a late rejection is not unhandled, no timer is left behind).
+ * - Source guard: no source file under src/client/widgets/ (the shared folder and every widget; `node_modules`, `dist`, `__tests__` and
+ *   test files excluded) calls fetch, XHR, sockets or beacons, reads a token or MSAL, or uses browser storage, reads the page's colour
+ *   scheme or writes a raw colour, with must-fire controls.
  *
  * The host bridge (`callServerTool`) is replaced by a plain function: it is the module boundary.
  */
@@ -72,8 +75,25 @@ describe('createWidgetMcpTransport.callTool', () => {
     expect(result).toEqual({
       isError: true,
       reasonCode: TransportReason.HostUnavailable,
-      content: [{ type: 'text', text: 'The host is not connected.' }],
+      content: [{ type: 'text', text: 'The host did not answer.' }],
+      diagnostic: 'The host is not connected.',
     });
+  });
+
+  it("never puts the bridge's own error text in content, which a caller may show to a person", async () => {
+    const raw = 'MCP error -32001: Request timed out';
+    const result = await createWidgetMcpTransport(() => Promise.reject(new Error(raw))).callTool('x', {});
+
+    expect(JSON.stringify(result.content)).not.toContain('MCP error');
+    expect(JSON.stringify(result.content)).not.toContain('-32001');
+    expect(result.content).toEqual([{ type: 'text', text: 'The host did not answer.' }]);
+    expect(result.diagnostic).toBe(raw);
+  });
+
+  it('a rejection that is not an Error also gets the fixed text and no diagnostic', async () => {
+    const result = await createWidgetMcpTransport(() => Promise.reject('plain string')).callTool('x', {});
+    expect(result.content).toEqual([{ type: 'text', text: 'The host did not answer.' }]);
+    expect(result.diagnostic).toBeUndefined();
   });
 
   it('a bridge that throws synchronously is a rejection like any other', async () => {
@@ -118,6 +138,78 @@ describe('createWidgetMcpTransport.callTool', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('timeout handling (fake timers)', () => {
+  beforeEach(() => {
+    // setImmediate stays real so a test can let the runtime run its unhandled-rejection check.
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+  const realTick = () => new Promise<void>(resolve => setImmediate(resolve));
+
+  it('a bridge that resolves after the timeout does not change the timeout result', async () => {
+    let answer: (value: Awaited<ReturnType<CallServerTool>>) => void = () => undefined;
+    const bridge: CallServerTool = () => new Promise(resolve => (answer = resolve));
+    const pending = createWidgetMcpTransport(bridge, { timeoutMs: 1000 }).callTool('x', {});
+
+    await jest.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+    answer({ structuredContent: { late: true } });
+    await realTick();
+
+    expect(result.reasonCode).toBe(TransportReason.Timeout);
+    expect(result.structuredContent).toBeUndefined();
+    expect(result.isError).toBe(true);
+  });
+
+  // A `process.on('unhandledRejection')` spy cannot work here (jest gives the test a copy of `process`, and the listener never fires),
+  // but jest-circus itself fails the running test on an unhandled rejection. With the `call.catch(...)` in the transport removed, this
+  // test fails with the bridge's error.
+  it('a bridge that rejects after the timeout raises no unhandled rejection', async () => {
+    let fail: (reason: unknown) => void = () => undefined;
+    const bridge: CallServerTool = () => new Promise((_resolve, reject) => (fail = reject));
+    const pending = createWidgetMcpTransport(bridge, { timeoutMs: 1000 }).callTool('x', {});
+
+    await jest.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+    fail(new Error('MCP error -32001: Request timed out'));
+    // Let the runtime run its unhandled-rejection check (it runs after the microtask queue drains).
+    await realTick();
+    await realTick();
+
+    expect(result.reasonCode).toBe(TransportReason.Timeout);
+  });
+
+  it('leaves no timer behind after a successful call, a rejected call or a timeout', async () => {
+    await createWidgetMcpTransport(async () => ({ structuredContent: {} })).callTool('x', {});
+    expect(jest.getTimerCount()).toBe(0);
+
+    await createWidgetMcpTransport(() => Promise.reject(new Error('gone'))).callTool('x', {});
+    expect(jest.getTimerCount()).toBe(0);
+
+    const pending = createWidgetMcpTransport(never, { timeoutMs: 50 }).callTool('x', {});
+    expect(jest.getTimerCount()).toBe(1);
+    await jest.advanceTimersByTimeAsync(50);
+    await pending;
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    [1, 'within 1 second,'],
+    [250, 'within 1 second,'],
+    [1000, 'within 1 second,'],
+    [1001, 'within 2 seconds,'],
+    [90_000, 'within 90 seconds,'],
+  ])('a %i ms timeout says how long it waited, never 0 seconds', async (timeoutMs, phrase) => {
+    const pending = createWidgetMcpTransport(never, { timeoutMs }).callTool('x', {});
+    await jest.advanceTimersByTimeAsync(timeoutMs);
+    const text = (await pending).content?.[0].text ?? '';
+    expect(text).toContain(phrase);
+    expect(text).not.toMatch(/within 0 /);
   });
 });
 
@@ -174,14 +266,18 @@ describe('createMcpFetch title option', () => {
   });
 });
 
-/** The guard over every source file of the shared widget folder. */
-const SHARED = resolve(__dirname, '../..');
+/**
+ * The guard over every source file of every widget: this shared folder and each widget beside it. Skipped: `node_modules`, `dist`,
+ * `__tests__` folders and `*.test.ts(x)` files.
+ */
+const WIDGETS = resolve(__dirname, '../../..');
+const SKIPPED_DIRS = new Set(['node_modules', 'dist', '__tests__']);
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap(name => {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) return name === '__tests__' ? [] : sourceFiles(full);
-    return /\.(ts|tsx)$/.test(name) ? [full] : [];
+    if (statSync(full).isDirectory()) return SKIPPED_DIRS.has(name) ? [] : sourceFiles(full);
+    return /\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name) ? [full] : [];
   });
 }
 
@@ -200,19 +296,28 @@ const PAGE_THEME = /detectDarkModeFromNavbar|matchMedia|prefers-color-scheme/;
 const RAW_COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
 
 describe('shared widget source guard', () => {
-  const files = sourceFiles(SHARED);
-  const label = (f: string) => relative(SHARED, f).replace(/\\/g, '/');
+  const files = sourceFiles(WIDGETS);
+  const label = (f: string) => relative(WIDGETS, f).replace(/\\/g, '/');
   const offending = (pattern: RegExp) => files.filter(f => pattern.test(code(readFileSync(f, 'utf8')))).map(label);
 
   it('scans the real source files (not an empty set)', () => {
     expect(files.map(label)).toEqual(
       expect.arrayContaining([
-        'mcp/widgetMcpTransport.ts',
-        'mcp/mcpFetch.ts',
-        'mcp/mcpHost.ts',
-        'mcp/mcpHostContext.ts',
+        'shared/mcp/widgetMcpTransport.ts',
+        'shared/mcp/mcpFetch.ts',
+        'shared/mcp/mcpHost.ts',
+        'shared/mcp/mcpHostContext.ts',
+        // The widgets beside the shared folder are scanned too: a file in the Decisions widget is covered by this guard.
+        'spaarke-decisions/src/main.tsx',
+        'spaarke-decisions/src/App.tsx',
+        'spaarke-decisions/src/lane/DecideLane.tsx',
+        'spaarke-decisions/src/wizard/WizardDialog.tsx',
       ])
     );
+  });
+
+  it('skips installed packages, build output and tests', () => {
+    expect(files.map(label).filter(f => /(^|\/)(node_modules|dist|__tests__)\/|\.test\.tsx?$/.test(f))).toEqual([]);
   });
 
   it('calls fetch, XMLHttpRequest, sockets or beacons nowhere', () => {
