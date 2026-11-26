@@ -2,17 +2,21 @@
 <!--
   Ribbon Customization: "+ Add KPI" Button
 
-  Purpose: Adds a button to the KPI Assessments subgrid command bar
-           that opens the Quick Create form for sprk_kpiassessment.
+  Purpose: Adds a button to the KPI Assessments subgrid command bar that creates a KPI assessment through the BFF (filed under
+           the matter or project the form shows) and opens it. The button lives on the sprk_kpiassessment ribbon (its Location is that
+           table's subgrid), so ONE button serves a matter, a project and a report card form: the script is host-agnostic. The
+           repo has no separate project command; sprk.project.subgrid.kpi.AddKpiButton.Command was never authored or deployed.
 
   Task: 045 - Add "Add KPI" Ribbon Button
   Project: matter-performance-KPI-r1
   Spec: FR-10
 
   Registration:
-    - Entity: sprk_matter
+    - Entity: sprk_kpiassessment (this fragment is merged into the sprk_kpiassessment RibbonDiff; SpaarkeMaster carries the merged copy)
     - Location: SubGrid ribbon (subgrid_kpiassessments)
-    - Action: Xrm.Navigation.openForm with Quick Create
+    - Action: Spaarke.KpiRibbon.openQuickCreate -> Spaarke.SecureChild.Ribbon.newChild (BFF create, then open)
+    - Libraries: bff_auth.js, assignedaccess_postsave.js, secure_child_ribbon.js (in that order), then sprk_kpi_ribbon_actions.js - the
+      web resource's name on dev (NOT sprk_/scripts/kpi_ribbon_actions.js, which does not exist)
 
   Note: This XML follows the Spaarke ribbon-edit skill conventions.
   The Alt attribute is REQUIRED on all Button elements.
@@ -40,15 +44,13 @@
   <CommandDefinitions>
     <CommandDefinition Id="sprk.matter.subgrid.kpi.AddKpiButton.Command">
       <!--
-        unified-access-control-r2 task 147 r1c (owner round 28 item 2, "E2"): this button opens the KPI assessment QUICK
-        CREATE with the matter prefilled - a create AS THE USER, owned by the user. Under a SECURE matter (or one whose flag
-        cannot be read) it is hidden, and the BFF-backed "New KPI Assessment" (SecureChildRibbons) shows instead. The rule
-        is the secure-child template's (Spaarke.SecureChild.Ribbon.nativeNewAllowed); the script itself refuses too
-        (Spaarke.KpiRibbon, defence in depth).
+        No native-New enable rule (task 051 r1). Task 147 r1c gave this button the secure-child template's rule
+        (sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule) because the button then opened the KPI assessment QUICK
+        CREATE, a create as the user. It no longer does: it creates through the BFF for a secure host and an ordinary one alike, so
+        that rule is not needed. It would also be wrong: with the table parameter (the redirected sprk_kpiassessment answers false on
+        every host) it would disable "+ Add KPI" for good. Only the Create privilege decides whether the button shows.
       -->
-      <EnableRules>
-        <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule" />
-      </EnableRules>
+      <EnableRules />
       <DisplayRules>
         <DisplayRule Id="sprk.CreatePrivilege.sprk_kpiassessment.DisplayRule" />
       </DisplayRules>
@@ -56,14 +58,13 @@
         field-mapping-server-write-path-r1 task 051 (FR-24): the script no longer opens a quick create; it creates the KPI
         assessment through the BFF and opens it (Spaarke.SecureChild.Ribbon.newChild). The three helper libraries load first,
         in order, the established ribbon idiom (the leading two as FunctionName="isNaN"): bff_auth.js, assignedaccess_postsave.js,
-        secure_child_ribbon.js. The native-New rule above now closes this button on a core-record host (the subgrid's BFF
-        "New KPI Assessment" is the one create there).
+        secure_child_ribbon.js. Both this button and the subgrid's "New KPI Assessment" create server-side.
       -->
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
         <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
         <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/kpi_ribbon_actions.js"
+        <JavaScriptFunction Library="$webresource:sprk_kpi_ribbon_actions.js"
                             FunctionName="Spaarke.KpiRibbon.openQuickCreate">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
@@ -77,15 +78,7 @@
         <EntityPrivilegeRule EntityName="sprk_kpiassessment" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
-    <EnableRules>
-      <!-- Task 147 r1c: the secure-child template's rule, verbatim (infrastructure/dataverse/ribbon/SecureChildRibbons). -->
-      <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule">
-        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js"
-                    FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
-          <CrmParameter Value="PrimaryControl" />
-        </CustomRule>
-      </EnableRule>
-    </EnableRules>
+    <EnableRules />
   </RuleDefinitions>
   <LocLabels>
     <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.LabelText">
@@ -105,7 +98,7 @@
     </LocLabel>
     <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.ToolTipDescription">
       <Titles>
-        <Title description="Open Quick Create form to add a new KPI assessment for this matter" languagecode="1033" />
+        <Title description="Create a new KPI assessment for this matter or project, filed and owned by Spaarke" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

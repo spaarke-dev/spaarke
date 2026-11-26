@@ -2,8 +2,10 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    -Verify: reports, per mapping-target table, whether the native create surfaces are closed - quick create off, the OOB Assign
-    hidden, the platform New redirected where the table is user-creatable (field-mapping-server-write-path-r1 task 051, FR-24).
+    -Verify: reports, per mapping-target table, whether the native create surfaces steer users to the product's create surface -
+    quick create off, the OOB Assign hidden, the platform New hidden and replaced by the product's launcher where the table is
+    user-creatable (field-mapping-server-write-path-r1 task 051, FR-24). Hiding a command is a UX steer, not enforcement: the
+    server write path and the repair pass own every invariant (ADR-002).
     READ-ONLY, idempotent, no secrets (the operator's own az CLI identity).
 
 .DESCRIPTION
@@ -18,9 +20,24 @@
                      must be ABSENT and the Spaarke button sprk.NativeCreate.<t>.Form.New PRESENT.
                      nativeNew = hidden-outright: the five platform New buttons (those three plus Mscrm.SubGrid.<t>.AddNewStandard and
                      Mscrm.SubGrid.<t>.NewRecord) must be ABSENT.
-                     nativeNew = kept: reported, never a failure (an owner decision, see the config's ownerQuestion).
+                     nativeNew = redirected also requires the table's HOME-grid replacement button (the config's gridButtonId, where it
+                     has one) PRESENT: the platform home-grid New is hidden, so that button is the home grid's one New. A table with
+                     gridButton = none (the report card, created only in its matter's context) has no home-grid New at all.
+                     nativeNew = kept: the form and subgrid New are reported, never a failure (an owner decision, see the config's
+                     ownerQuestion). With homeGridNew = hidden (budget, KPI assessment: created only in a matter's context, owner OQ-1)
+                     Mscrm.HomepageGrid.<t>.NewRecord must be ABSENT.
+      ALSO PRESENT   A table whose config entry has alsoPresent (the Event form's Add Memo, the KPI subgrid's + Add KPI: both create through
+                     the BFF) must show those buttons; a missing one FAILS and is named.
+      SUBGRID NEW RULE  A table the secure-child script serves (the config's subgridRule = true) carries the enable rule
+                     sprk.SecureChild.<t>.NativeNewAllowed.EnableRule on the platform subgrid "+ New". The rule must PASS THE TABLE as a
+                     StringParameter: without it the script gets table = undefined and never consults its redirect (NATIVE_NEW_REDIRECTED),
+                     so the platform "+ New" is never steered. The effective ribbon does show the rule's parameters, so this IS checked here
+                     (a table whose rule is missing or passes no table FAILS and is named). The repo-side check is the ArchTest
+                     SecureChildNewCommandAgreementTests (every SpaarkeMaster secure-child rule passes its own table).
 
     DETECTION LIMITS (what a PASS does and does not prove):
+      - It checks that the subgrid rule passes the table, not what the script then does with it (the Jest suite secureChildRibbonScript
+        runs the script).
       - It reads the classic ribbon as the platform computes it. The model-driven app's modern command bar honours a hidden
         classic button, but a modern command (an appaction row) that names Assign is not visible here: confirm in the app (UI test
         plan in notes/task-051-notes.md).
@@ -41,8 +58,10 @@
 
 .PARAMETER InputJson
     Offline mode: judge a captured observation instead of reading an environment (no network, no token). Shape:
-    { "tables": { "<t>": { "quickCreate": "off"|"on", "present": [ "<ribbon button id found in the effective ribbon>", ... ] } } }
-    "present" lists which of the checked button ids exist. A table missing from the file is UNKNOWN. Used by the Pester tests
+    { "tables": { "<t>": { "quickCreate": "off"|"on", "present": [ "<ribbon button id found in the effective ribbon>", ... ],
+                           "newRule": "table"|"no-table"|"absent" } } }
+    "present" lists which of the checked button ids exist; "newRule" is the state of the subgrid New rule (read only for a table with
+    subgridRule = true). A table missing from the file is UNKNOWN. Used by the Pester tests
     (a passing fixture and failing fixtures) and to re-judge a saved capture.
 
 .PARAMETER Config
@@ -75,14 +94,21 @@ function Get-CheckedIds {
     $mustBeAbsent = @("Mscrm.Form.$t.Assign", "Mscrm.HomepageGrid.$t.Assign", "Mscrm.SubGrid.$t.Assign")
     $mustBePresent = @()
     $newIds = @("Mscrm.HomepageGrid.$t.NewRecord", "Mscrm.Form.$t.NewRecord", "Mscrm.Form.$t.SaveAndNew")
+    $reported = $newIds
+    if ($Entry.alsoPresent) { $mustBePresent += @($Entry.alsoPresent | ForEach-Object { [string]$_ }) }
     if ($Entry.nativeNew -eq 'redirected') {
         $mustBeAbsent += $newIds
         $mustBePresent += "sprk.NativeCreate.$t.Form.New"
+        if ($Entry.gridButtonId) { $mustBePresent += [string]$Entry.gridButtonId }
+    }
+    elseif ($Entry.nativeNew -eq 'kept' -and $Entry.homeGridNew -eq 'hidden') {
+        $mustBeAbsent += "Mscrm.HomepageGrid.$t.NewRecord"
+        $reported = @("Mscrm.Form.$t.NewRecord", "Mscrm.Form.$t.SaveAndNew")
     }
     elseif ($Entry.nativeNew -eq 'hidden-outright') {
         $mustBeAbsent += $newIds + @("Mscrm.SubGrid.$t.AddNewStandard", "Mscrm.SubGrid.$t.NewRecord")
     }
-    [pscustomobject]@{ MustBeAbsent = $mustBeAbsent; MustBePresent = $mustBePresent; Reported = $newIds }
+    [pscustomobject]@{ MustBeAbsent = $mustBeAbsent; MustBePresent = $mustBePresent; Reported = $reported; NewIds = $newIds }
 }
 
 function Get-TableVerdict {
@@ -108,6 +134,12 @@ function Get-TableVerdict {
     }
     foreach ($id in $ids.MustBePresent) {
         if ($present -notcontains $id) { $problems += "the redirect button is missing: $id" }
+    }
+    if ($Entry.subgridRule -eq $true) {
+        $rule = [string]$Observation.newRule
+        if ($rule -eq 'no-table') { $problems += "the subgrid New rule sprk.SecureChild.$($Entry.table).NativeNewAllowed.EnableRule passes no table (the script never consults its redirect)" }
+        elseif ($rule -eq 'absent') { $problems += "the subgrid New rule sprk.SecureChild.$($Entry.table).NativeNewAllowed.EnableRule is missing" }
+        elseif ($rule -ne 'table') { $problems += 'the subgrid New rule was not observed' }
     }
     if ($Entry.nativeNew -eq 'kept') {
         $row.New = "kept ($($Entry.ownerQuestion): " + $(if (@($ids.Reported | Where-Object { $present -contains $_ }).Count) { 'platform New shown' } else { 'platform New hidden' }) + ')'
@@ -151,18 +183,24 @@ else {
         $bytes = [Convert]::FromBase64String($r.CompressedEntityXml)
         $zip = [System.IO.Compression.ZipArchive]::new([System.IO.MemoryStream]::new($bytes))
         $found = New-Object System.Collections.Generic.HashSet[string]
+        $newRule = 'absent'
         try {
             foreach ($entry in $zip.Entries) {
                 $reader = [System.IO.StreamReader]::new($entry.Open())
                 try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
                 if ($text.TrimStart().StartsWith('<')) {
                     foreach ($m in [regex]::Matches($text, 'Id="([^"]+)"')) { [void] $found.Add($m.Groups[1].Value) }
+                    # The subgrid New rule's definition (not the self-closing reference on the command): does it pass the table?
+                    $rule = [regex]::Match($text, '<EnableRule Id="sprk\.SecureChild\.' + [regex]::Escape($table) + '\.NativeNewAllowed\.EnableRule">(?<body>.*?)</EnableRule>', 'Singleline')
+                    if ($rule.Success) {
+                        $newRule = if ($rule.Groups['body'].Value -match ('<StringParameter\s+Value="' + [regex]::Escape($table) + '"')) { 'table' } else { 'no-table' }
+                    }
                 }
             }
         }
         finally { $zip.Dispose() }
         if ($found.Count -eq 0) { throw "the ribbon for $table came back empty" }
-        return $found
+        return [pscustomobject]@{ Ids = $found; NewRule = $newRule }
     }
 
     foreach ($entry in $cfg.tables) {
@@ -170,10 +208,10 @@ else {
         try {
             $meta = Invoke-RestMethod -Headers $headers -Method Get -Uri "$api/EntityDefinitions(LogicalName='$t')?`$select=IsQuickCreateEnabled"
             $qc = if ($meta.IsQuickCreateEnabled -eq $false) { 'off' } elseif ($meta.IsQuickCreateEnabled -eq $true) { 'on' } else { '' }
-            $ids = Get-RibbonIds $t
+            $ribbon = Get-RibbonIds $t
             $checked = Get-CheckedIds $entry
-            $present = @(($checked.MustBeAbsent + $checked.MustBePresent + $checked.Reported) | Select-Object -Unique | Where-Object { $ids.Contains($_) })
-            $observations[$t] = [pscustomobject]@{ quickCreate = $qc; present = $present }
+            $present = @(($checked.MustBeAbsent + $checked.MustBePresent + $checked.Reported) | Select-Object -Unique | Where-Object { $ribbon.Ids.Contains($_) })
+            $observations[$t] = [pscustomobject]@{ quickCreate = $qc; present = $present; newRule = $ribbon.NewRule }
         }
         catch {
             Write-Warning "$t : read failed ($($_.Exception.Message)); reported UNKNOWN."

@@ -72,11 +72,6 @@
         <Button Id="sprk.Navigator.Document.Grid.Button" Command="sprk.Navigator.Document.Open.Command" LabelText="$LocLabels:sprk.Navigator.Document.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Document.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Document.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Document.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
       </CommandUIDefinition>
     </CustomAction>
-    <CustomAction Id="sprk.SecureChild.sprk_document.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="4">
-      <CommandUIDefinition>
-        <Button Id="sprk.SecureChild.sprk_document.SubGrid.New" Command="sprk.SecureChild.sprk_document.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_document.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
-      </CommandUIDefinition>
-    </CustomAction>
     <CustomAction Id="sprk.Spaarke.Document.AddMultiple.Button.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="5">
       <CommandUIDefinition>
         <Button Alt="$LocLabels:Spaarke.Document.AddMultiple.Button.Alt" Command="Spaarke.Document.AddMultiple.Command" Id="Spaarke.Document.AddMultiple.Button" Image32by32="sprk_/icons/cmd/add.svg" Image16by16="sprk_/icons/cmd/add.svg" LabelText="$LocLabels:Spaarke.Document.AddMultiple.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipDescription" ModernImage="sprk_/icons/cmd/add.svg" />
@@ -107,6 +102,11 @@
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_document.Assign.Hide" Location="Mscrm.SubGrid.sprk_document.Assign" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_document.NewRecord.Hide" Location="Mscrm.Form.sprk_document.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_document.SaveAndNew.Hide" Location="Mscrm.Form.sprk_document.SaveAndNew" />
+    <CustomAction Id="sprk.SecureChild.sprk_document.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_document.SubGrid.New" Command="sprk.SecureChild.sprk_document.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_document.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_document.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
     <CustomAction Id="sprk.NativeCreate.sprk_document.Form.New.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Actions.Controls._children" Sequence="1">
       <CommandUIDefinition>
         <Button Id="sprk.NativeCreate.sprk_document.Form.New" Command="sprk.NativeCreate.sprk_document.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_document.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_document.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_document.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_document.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
@@ -313,23 +313,6 @@
         <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
       </Actions>
     </CommandDefinition>
-    <CommandDefinition Id="sprk.SecureChild.sprk_document.New.Command">
-      <EnableRules>
-        <EnableRule Id="sprk.SecureChild.sprk_document.NewAvailable.EnableRule" />
-      </EnableRules>
-      <DisplayRules>
-        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
-      </DisplayRules>
-      <Actions>
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
-          <CrmParameter Value="PrimaryControl" />
-          <CrmParameter Value="SelectedControl" />
-          <StringParameter Value="sprk_document" />
-        </JavaScriptFunction>
-      </Actions>
-    </CommandDefinition>
     <CommandDefinition Id="sprk.SpaarkeAi.Document.OpenInCompose.Command">
       <EnableRules>
         <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule" />
@@ -374,6 +357,23 @@
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
           <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_document.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_document.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_document" />
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
@@ -440,9 +440,16 @@
       <EnableRule Id="sprk.Navigator.Document.Open.EnableRule">
         <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
       </EnableRule>
+      <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule">
+        <FormStateRule State="Existing" Default="true" />
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_document.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_document" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_document.NewAvailable.EnableRule">
@@ -450,13 +457,8 @@
         <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_document" />
         </CustomRule>
-      </EnableRule>
-      <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule">
-        <FormStateRule State="Existing" Default="true" />
-      </EnableRule>
-      <EnableRule Id="sprk.ThemeMenu.EnableRule">
-        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
@@ -736,16 +738,6 @@
         <Title description="Open or focus the Navigator (Recent, Bookmarks, Monitored, Views). Its enable rule also registers the pane on load." languagecode="1033" />
       </Titles>
     </LocLabel>
-    <LocLabel Id="sprk.SecureChild.sprk_document.New.LabelText">
-      <Titles>
-        <Title description="New Document" languagecode="1033" />
-      </Titles>
-    </LocLabel>
-    <LocLabel Id="sprk.SecureChild.sprk_document.New.ToolTipDescription">
-      <Titles>
-        <Title description="Add a Document to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
-      </Titles>
-    </LocLabel>
     <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.Label">
       <Titles>
         <Title description="Open in Compose" languagecode="1033" />
@@ -824,6 +816,16 @@
     <LocLabel Id="sprk.ThemeMenu.MenuSection.Title">
       <Titles>
         <Title description="Color Theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_document.New.LabelText">
+      <Titles>
+        <Title description="New Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SecureChild.sprk_document.New.ToolTipDescription">
+      <Titles>
+        <Title description="Add a Document to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
       </Titles>
     </LocLabel>
     <LocLabel Id="sprk.NativeCreate.sprk_document.New.Alt">

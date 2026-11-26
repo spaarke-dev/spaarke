@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Merges the native-create surface rules (native-create-surfaces.json) into ONE table's RibbonDiff.xml: hides the OOB Assign
-    command and redirects the platform "New" (field-mapping-server-write-path-r1 task 051, FR-24).
+    command and steers the platform "New" to the product's create surface (field-mapping-server-write-path-r1 task 051, FR-24).
+    Hiding a command is a UX steer, not enforcement: the server write path and the repair pass own every invariant (ADR-002).
 
 .DESCRIPTION
     Pure file transformation: reads the config and a RibbonDiff.xml (a FRESH export, or the SpaarkeMaster copy), writes -Out, calls
@@ -17,11 +18,15 @@
          sprk.CreatePrivilege.<t>.DisplayRule (task 180). An existing grid wizard button is left as it is.
       3. NEW, nativeNew = "hidden-outright". Ensures the five platform New hides an invoice-family table carries (form New, form
          Save & New, grid New, subgrid Add New Standard, subgrid New). No replacement button.
-      4. nativeNew = "kept": no New change (the entry's reason and ownerQuestion say why).
+      4. nativeNew = "kept": no form or subgrid New change (the entry's reason and ownerQuestion say why). With homeGridNew = "hidden"
+         (owner OQ-1, 2026-11-26: a budget / KPI assessment is created only in its parent matter's context) the platform HOME-grid New
+         (Mscrm.HomepageGrid.<t>.NewRecord) is hidden, with no replacement.
+      Where a redirected table has gridButton = "none" (the report card) the home grid has no New at all; the form button opens the
+      table's wizard filed under the parent the form names.
 
     Idempotent: every earlier sprk.NativeCreate.* node is removed first and a hide whose Location is already hidden is not added
-    twice, so a second run yields the same file. THROWS, writing nothing useful to import, if an earlier command id is missing
-    afterwards.
+    twice, so a second run yields the same file. The merged file is written to a temporary file beside -Out, checked, and only then
+    moved into place: a failed check THROWS and leaves -Out exactly as it was (it is never half-written or left unchecked).
 
 .PARAMETER RibbonDiff
     The table's RibbonDiff.xml.
@@ -151,6 +156,9 @@ if ($entry.nativeNew -eq 'redirected') {
         Add-Fragment $locLabels "<LocLabel Id=`"sprk.NativeCreate.$t.New.$key`"><Titles><Title description=`"$(Esc $text[$key])`" languagecode=`"1033`" /></Titles></LocLabel>"
     }
 }
+elseif ($entry.nativeNew -eq 'kept' -and $entry.homeGridNew -eq 'hidden') {
+    Add-Hide "Mscrm.HomepageGrid.$t.NewRecord"
+}
 elseif ($entry.nativeNew -eq 'hidden-outright') {
     foreach ($location in "Mscrm.Form.$t.NewRecord", "Mscrm.Form.$t.SaveAndNew", "Mscrm.HomepageGrid.$t.NewRecord",
         "Mscrm.SubGrid.$t.AddNewStandard", "Mscrm.SubGrid.$t.NewRecord") { Add-Hide $location }
@@ -159,17 +167,28 @@ elseif ($entry.nativeNew -eq 'hidden-outright') {
 $settings = New-Object System.Xml.XmlWriterSettings
 $settings.Indent = $true
 $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
-$writer = [System.Xml.XmlWriter]::Create($Out, $settings)
-try { $ribbon.Save($writer) } finally { $writer.Dispose() }
+# Write beside -Out, check, then move into place: -Out is never replaced by a file that failed its checks.
+$temp = "$Out.$([guid]::NewGuid().ToString('N')).tmp"
+try {
+    $writer = [System.Xml.XmlWriter]::Create($temp, $settings)
+    try { $ribbon.Save($writer) } finally { $writer.Dispose() }
 
-[xml] $merged = Get-Content -Raw -LiteralPath $Out
-$after = Get-CommandIds $merged
-$lost = @($before | Where-Object { $_ -notlike 'sprk.NativeCreate.*' -and $after -notcontains $_ })
-if ($lost.Count -gt 0) { throw "The merge dropped existing command(s): $($lost -join ', '). Nothing should be imported." }
-foreach ($surface in 'Form', 'HomepageGrid', 'SubGrid') {
-    if (-not $merged.SelectSingleNode("//*[local-name()='HideCustomAction' and @Location='Mscrm.$surface.$t.Assign']")) {
-        throw "The merged file does not hide Mscrm.$surface.$t.Assign. Nothing should be imported."
+    [xml] $merged = Get-Content -Raw -LiteralPath $temp
+    $after = Get-CommandIds $merged
+    $lost = @($before | Where-Object { $_ -notlike 'sprk.NativeCreate.*' -and $after -notcontains $_ })
+    if ($lost.Count -gt 0) { throw "The merge dropped existing command(s): $($lost -join ', '). Nothing was written; -Out is unchanged." }
+    foreach ($surface in 'Form', 'HomepageGrid', 'SubGrid') {
+        if (-not $merged.SelectSingleNode("//*[local-name()='HideCustomAction' and @Location='Mscrm.$surface.$t.Assign']")) {
+            throw "The merged file does not hide Mscrm.$surface.$t.Assign. Nothing was written; -Out is unchanged."
+        }
     }
+    if ($entry.nativeNew -eq 'redirected' -and -not $merged.SelectSingleNode("//*[local-name()='CommandDefinition' and @Id='sprk.NativeCreate.$t.New.Command']")) {
+        throw "The merged file does not carry sprk.NativeCreate.$t.New.Command. Nothing was written; -Out is unchanged."
+    }
+    Move-Item -LiteralPath $temp -Destination $Out -Force
+}
+finally {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
 }
 
 Write-Host "$Entity -> $Out : nativeNew=$($entry.nativeNew); hides added: $(if ($hidden.Count) { $hidden -join ', ' } else { 'none (already present)' }); buttons: $(if ($added) { $added -join ', ' } else { 'none' })"

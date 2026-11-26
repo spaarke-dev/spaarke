@@ -17,11 +17,6 @@
         <Button Id="sprk.Navigator.Event.Grid.Button" Command="sprk.Navigator.Event.Open.Command" LabelText="$LocLabels:sprk.Navigator.Event.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Event.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Event.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Event.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
       </CommandUIDefinition>
     </CustomAction>
-    <CustomAction Id="sprk.SecureChild.sprk_event.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_event.MainTab.Management.Controls._children" Sequence="4">
-      <CommandUIDefinition>
-        <Button Id="sprk.SecureChild.sprk_event.SubGrid.New" Command="sprk.SecureChild.sprk_event.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_event.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
-      </CommandUIDefinition>
-    </CustomAction>
     <CustomAction Id="sprk.ThemeMenu.Event.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="900">
       <CommandUIDefinition>
         <FlyoutAnchor Id="sprk.ThemeMenu.Event.Flyout" Command="sprk.ThemeMenu.Event.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
@@ -57,9 +52,19 @@
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_event.Assign.Hide" Location="Mscrm.SubGrid.sprk_event.Assign" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.NewRecord.Hide" Location="Mscrm.Form.sprk_event.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_event.SaveAndNew.Hide" Location="Mscrm.Form.sprk_event.SaveAndNew" />
+    <CustomAction Id="sprk.SecureChild.sprk_event.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_event.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_event.SubGrid.New" Command="sprk.SecureChild.sprk_event.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_event.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_event.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
     <CustomAction Id="sprk.NativeCreate.sprk_event.Form.New.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="1">
       <CommandUIDefinition>
         <Button Id="sprk.NativeCreate.sprk_event.Form.New" Command="sprk.NativeCreate.sprk_event.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_event.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_event.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_event.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_event.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="Spaarke.Event.AddMemo.CustomAction" Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children" Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.AddMemo.Button" Command="Spaarke.Event.AddMemo.Command" LabelText="$LocLabels:Spaarke.Event.AddMemo.LabelText" Alt="$LocLabels:Spaarke.Event.AddMemo.Alt" ToolTipTitle="$LocLabels:Spaarke.Event.AddMemo.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Event.AddMemo.ToolTipDescription" TemplateAlias="o1" ModernImage="EditNote" />
       </CommandUIDefinition>
     </CustomAction>
   </CustomActions>
@@ -109,23 +114,6 @@
         <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
       </Actions>
     </CommandDefinition>
-    <CommandDefinition Id="sprk.SecureChild.sprk_event.New.Command">
-      <EnableRules>
-        <EnableRule Id="sprk.SecureChild.sprk_event.NewAvailable.EnableRule" />
-      </EnableRules>
-      <DisplayRules>
-        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
-      </DisplayRules>
-      <Actions>
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
-          <CrmParameter Value="PrimaryControl" />
-          <CrmParameter Value="SelectedControl" />
-          <StringParameter Value="sprk_event" />
-        </JavaScriptFunction>
-      </Actions>
-    </CommandDefinition>
     <CommandDefinition Id="sprk.ThemeMenu.Event.Command">
       <EnableRules>
         <EnableRule Id="sprk.ThemeMenu.Event.EnableRule" />
@@ -160,6 +148,23 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_event.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_event.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_event" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
     <CommandDefinition Id="sprk.NativeCreate.sprk_event.New.Command">
       <EnableRules />
       <DisplayRules>
@@ -169,6 +174,20 @@
         <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventStandalone" Library="$webresource:sprk_wizard_commands" />
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="Spaarke.Event.AddMemo.Command">
+      <EnableRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands.js" FunctionName="Spaarke.Event.AddMemo">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
@@ -176,14 +195,21 @@
       <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule">
         <EntityPrivilegeRule EntityName="sprk_event" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_memo" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
     </DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.Navigator.Event.Open.EnableRule">
         <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
       </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.Event.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_event.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_event" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_event.NewAvailable.EnableRule">
@@ -191,10 +217,8 @@
         <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_event" />
         </CustomRule>
-      </EnableRule>
-      <EnableRule Id="sprk.ThemeMenu.Event.EnableRule">
-        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
@@ -262,6 +286,26 @@
     <LocLabel Id="sprk.NativeCreate.sprk_event.New.ToolTipDescription">
       <Titles>
         <Title description="Create a new Event in Spaarke, so it is filed, owned and mapped by the server" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Event.AddMemo.Alt">
+      <Titles>
+        <Title description="Add Memo" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Event.AddMemo.LabelText">
+      <Titles>
+        <Title description="Add Memo" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Event.AddMemo.ToolTipDescription">
+      <Titles>
+        <Title description="Add a memo or note to this event" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Event.AddMemo.ToolTipTitle">
+      <Titles>
+        <Title description="Add Memo" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

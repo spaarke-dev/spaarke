@@ -9,7 +9,7 @@ import { loadRibbon } from './ribbonHarness.mjs';
 const EVENT_ID = 'a1510000-0000-4000-8000-000000000001';
 const MEMO_ID = 'b1510000-0000-4000-8000-000000000002';
 
-function setup({ createResult = { id: MEMO_ID }, withHelper = true } = {}) {
+function setup({ createResult = { id: MEMO_ID }, withHelper = true, saveFails = false } = {}) {
   const calls = { forms: [], alerts: [], notifications: [], creates: [], saves: 0, webApiCreates: 0 };
   const xrm = {
     WebApi: {
@@ -58,7 +58,7 @@ function setup({ createResult = { id: MEMO_ID }, withHelper = true } = {}) {
       entity: { getId: () => `{${EVENT_ID.toUpperCase()}}`, getEntityName: () => 'sprk_event' },
       save: () => {
         calls.saves++;
-        return Promise.resolve();
+        return saveFails ? Promise.reject(new Error("save refused")) : Promise.resolve();
       },
     },
     getAttribute: name => (name === 'sprk_eventhistory' ? { getValue: () => history, setValue: v => (history = v) } : null),
@@ -108,4 +108,23 @@ test('Add Memo when the BFF create did not happen (refused) saves nothing and op
   assert.equal(calls.saves, 0);
   assert.equal(calls.forms.length, 0);
   assert.equal(getHistory(), '[]');
+});
+
+test("Add Memo when the event save fails still opens the memo and tells the user the memo was created but the event was not saved", async () => {
+  const { Spaarke, formContext, calls } = setup({ saveFails: true });
+  await Spaarke.Event.AddMemo(formContext);
+
+  assert.equal(calls.creates.length, 1);
+  assert.equal(calls.saves, 1);
+  assert.deepEqual(calls.forms, [{ entityName: "sprk_memo", entityId: MEMO_ID }]);
+  assert.equal(calls.alerts.length, 1);
+  assert.equal(calls.alerts[0].text, "The memo was created, but the event could not be saved.");
+  assert.equal(calls.notifications.length, 0);
+});
+
+test("Add Memo when the event save succeeds shows no save-failure message (must not fire)", async () => {
+  const { Spaarke, formContext, calls } = setup();
+  await Spaarke.Event.AddMemo(formContext);
+
+  assert.equal(calls.alerts.length, 0);
 });

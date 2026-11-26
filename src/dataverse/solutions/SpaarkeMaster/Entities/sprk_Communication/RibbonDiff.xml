@@ -11,11 +11,6 @@
         <Button Id="sprk.Navigator.Communication.Grid.Button" Command="sprk.Navigator.Communication.Open.Command" LabelText="$LocLabels:sprk.Navigator.Communication.Button.LabelText" Alt="$LocLabels:sprk.Navigator.Communication.Button.Alt" ToolTipTitle="$LocLabels:sprk.Navigator.Communication.Button.LabelText" ToolTipDescription="$LocLabels:sprk.Navigator.Communication.Button.ToolTipDescription" TemplateAlias="o1" ModernImage="$webresource:sprk_navigatorstar.svg" />
       </CommandUIDefinition>
     </CustomAction>
-    <CustomAction Id="sprk.SecureChild.sprk_communication.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_communication.MainTab.Management.Controls._children" Sequence="4">
-      <CommandUIDefinition>
-        <Button Id="sprk.SecureChild.sprk_communication.SubGrid.New" Command="sprk.SecureChild.sprk_communication.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_communication.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_communication.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_communication.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_communication.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
-      </CommandUIDefinition>
-    </CustomAction>
     <CustomAction Id="sprk.ThemeMenu.Communication.CustomAction" Location="Mscrm.HomepageGrid.sprk_communication.MainTab.Actions.Controls._children" Sequence="900">
       <CommandUIDefinition>
         <FlyoutAnchor Id="sprk.ThemeMenu.Communication.Flyout" Command="sprk.ThemeMenu.Communication.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
@@ -52,6 +47,11 @@
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_communication.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_communication.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_communication.NewRecord.Hide" Location="Mscrm.Form.sprk_communication.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_communication.SaveAndNew.Hide" Location="Mscrm.Form.sprk_communication.SaveAndNew" />
+    <CustomAction Id="sprk.SecureChild.sprk_communication.SubGrid.New.CustomAction" Location="Mscrm.SubGrid.sprk_communication.MainTab.Management.Controls._children" Sequence="4">
+      <CommandUIDefinition>
+        <Button Id="sprk.SecureChild.sprk_communication.SubGrid.New" Command="sprk.SecureChild.sprk_communication.New.Command" LabelText="$LocLabels:sprk.SecureChild.sprk_communication.New.LabelText" Alt="$LocLabels:sprk.SecureChild.sprk_communication.New.LabelText" ToolTipTitle="$LocLabels:sprk.SecureChild.sprk_communication.New.LabelText" ToolTipDescription="$LocLabels:sprk.SecureChild.sprk_communication.New.ToolTipDescription" ModernImage="Add" Sequence="4" TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
     <CustomAction Id="sprk.NativeCreate.sprk_communication.Form.New.CustomAction" Location="Mscrm.Form.sprk_communication.MainTab.Actions.Controls._children" Sequence="1">
       <CommandUIDefinition>
         <Button Id="sprk.NativeCreate.sprk_communication.Form.New" Command="sprk.NativeCreate.sprk_communication.New.Command" Alt="$LocLabels:sprk.NativeCreate.sprk_communication.New.Alt" LabelText="$LocLabels:sprk.NativeCreate.sprk_communication.New.LabelText" ToolTipTitle="$LocLabels:sprk.NativeCreate.sprk_communication.New.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.NativeCreate.sprk_communication.New.ToolTipDescription" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" ModernImage="CommandBarNewIcon" Sequence="1" TemplateAlias="o1" />
@@ -100,23 +100,6 @@
         <JavaScriptFunction Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.openPane" />
       </Actions>
     </CommandDefinition>
-    <CommandDefinition Id="sprk.SecureChild.sprk_communication.New.Command">
-      <EnableRules>
-        <EnableRule Id="sprk.SecureChild.sprk_communication.NewAvailable.EnableRule" />
-      </EnableRules>
-      <DisplayRules>
-        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
-      </DisplayRules>
-      <Actions>
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
-          <CrmParameter Value="PrimaryControl" />
-          <CrmParameter Value="SelectedControl" />
-          <StringParameter Value="sprk_communication" />
-        </JavaScriptFunction>
-      </Actions>
-    </CommandDefinition>
     <CommandDefinition Id="sprk.ThemeMenu.Communication.Command">
       <EnableRules>
         <EnableRule Id="sprk.ThemeMenu.Communication.EnableRule" />
@@ -151,6 +134,23 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <CommandDefinition Id="sprk.SecureChild.sprk_communication.New.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_communication.NewAvailable.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Mscrm.CreateSelectedEntityPermission" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChild">
+          <CrmParameter Value="PrimaryControl" />
+          <CrmParameter Value="SelectedControl" />
+          <StringParameter Value="sprk_communication" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
     <CommandDefinition Id="sprk.NativeCreate.sprk_communication.New.Command">
       <EnableRules />
       <DisplayRules>
@@ -172,9 +172,13 @@
       <EnableRule Id="sprk.Navigator.Communication.Open.EnableRule">
         <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />
       </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.Communication.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_communication.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_communication" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_communication.NewAvailable.EnableRule">
@@ -182,10 +186,8 @@
         <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_communication" />
         </CustomRule>
-      </EnableRule>
-      <EnableRule Id="sprk.ThemeMenu.Communication.EnableRule">
-        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
