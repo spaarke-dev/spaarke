@@ -245,7 +245,8 @@ public class KnowledgeDocument
 
     /// <summary>
     /// Record id of the matter type (<c>sprk_mattertype</c>) of the matter or project this document belongs to.
-    /// Null when that record has no type or the type is not resolved yet.
+    /// Null when the type is not resolved yet; empty string when resolved and there is none (the record has no type, or the
+    /// document belongs to no matter or project). The empty string is written, not omitted, so a re-index overwrites a previous type.
     /// </summary>
     /// <remarks>
     /// Backs the Matter Type search filter. Suppressed from JSON when null (session-files index lacks this field).

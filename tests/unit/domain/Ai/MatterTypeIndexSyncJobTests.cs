@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using System.Text.RegularExpressions;
 using Azure;
 using Azure.Search.Documents;
@@ -57,7 +58,10 @@ public sealed class MatterTypeIndexSyncJobTests
     private readonly IDistributedCache _cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
     private readonly FakeTimeProvider _time = new(DateTimeOffset.Parse("2026-11-25T10:00:00Z"));
     private readonly MatterTypeIndexSyncOptions _options = new();
+    private readonly Dictionary<string, KnowledgeDocument> _byId = new(StringComparer.Ordinal);
     private Func<string, Guid, bool> _failRead = (_, _) => false;
+    private Func<string, Guid, bool> _rowGone = (_, _) => false;
+    private int _recordMergeStatus = 200;
     private bool _failChangeQuery;
     private string? _tenantConfigured = Tenant;
     private bool _aiAvailable = true;
@@ -69,7 +73,8 @@ public sealed class MatterTypeIndexSyncJobTests
             .ReturnsAsync((string _, SearchOptions options, CancellationToken _) =>
             {
                 _fileQueries.Add(options);
-                var matching = _chunks.Where(c => Matches(c, options.Filter)).ToList();
+                var matches = Predicate(options.Filter);
+                var matching = _chunks.Where(matches).ToList();
                 var page = matching.Skip(options.Skip ?? 0).Take(options.Size ?? 50)
                     .Select(c => SearchModelFactory.SearchResult(c, 1.0, null)).ToList();
                 return Response.FromValue(SearchModelFactory.SearchResults(page, matching.Count, null, null, null!), null!);
@@ -82,7 +87,7 @@ public sealed class MatterTypeIndexSyncJobTests
                 var results = new List<Azure.Search.Documents.Models.IndexingResult>();
                 foreach (var doc in docs)
                 {
-                    var chunk = _chunks.Single(c => c.Id == (string)doc["id"]);
+                    var chunk = _byId[(string)doc["id"]];
                     if (doc.ContainsKey("matterTypeId")) chunk.MatterTypeId = (string?)doc["matterTypeId"];
                     if (doc.ContainsKey("matterTypeSourceId")) chunk.MatterTypeSourceId = (string?)doc["matterTypeSourceId"];
                     results.Add(SearchModelFactory.IndexingResult(chunk.Id, null, true, 200));
@@ -98,7 +103,9 @@ public sealed class MatterTypeIndexSyncJobTests
                 var batch = docs.ToList();
                 _recordMerges.AddRange(batch);
                 return Response.FromValue(
-                    SearchModelFactory.IndexDocumentsResult(batch.Select(d => SearchModelFactory.IndexingResult((string)d["id"], null, true, 200)).ToList()), null!);
+                    SearchModelFactory.IndexDocumentsResult(
+                        batch.Select(d => SearchModelFactory.IndexingResult((string)d["id"], null, _recordMergeStatus < 300, _recordMergeStatus)).ToList()),
+                    null!);
             });
 
         _dataverse
@@ -123,6 +130,12 @@ public sealed class MatterTypeIndexSyncJobTests
                     throw new TimeoutException("Dataverse did not answer");
                 }
 
+                if (_rowGone(table, id))
+                {
+                    // What the live service does for a deleted row: the SDK throws 0x80040217; it never answers null.
+                    throw new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist"));
+                }
+
                 return _rows.TryGetValue((table, id), out var row) ? row : null!;
             });
     }
@@ -130,59 +143,56 @@ public sealed class MatterTypeIndexSyncJobTests
     // ── the fake files index ──────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>Answers the filters the job issues; a filter shape it does not know fails the test rather than matching everything.</summary>
-    private static bool Matches(KnowledgeDocument chunk, string? filter)
+    private static Func<KnowledgeDocument, bool> Predicate(string? filter)
     {
         filter.Should().NotBeNull();
         var f = filter!;
         var match = Regex.Match(f, "tenantId eq '([^']*)'");
         match.Success.Should().BeTrue("every files-index query carries the tenant filter");
-        if (chunk.TenantId != match.Groups[1].Value)
-        {
-            return false;
-        }
+        var tenant = match.Groups[1].Value;
 
-        var remaining = f;
-        var matched = false;
-        if (remaining.Contains("matterTypeSourceId eq null"))
+        var checks = new List<Func<KnowledgeDocument, bool>> { c => c.TenantId == tenant };
+        if (f.Contains("matterTypeSourceId eq null"))
         {
-            matched = true;
-            if (chunk.MatterTypeSourceId is not null) return false;
+            checks.Add(c => c.MatterTypeSourceId is null);
         }
 
         if (Regex.Match(f, "matterTypeSourceId eq '([^']*)'") is { Success: true } source)
         {
-            matched = true;
-            if (chunk.MatterTypeSourceId != source.Groups[1].Value) return false;
+            var sourceId = source.Groups[1].Value;
+            checks.Add(c => c.MatterTypeSourceId == sourceId);
         }
 
         if (Regex.Match(f, @"\(matterTypeId ne '([^']*)' or matterTypeId eq null\)") is { Success: true } differs)
         {
-            matched = true;
-            if (chunk.MatterTypeId == differs.Groups[1].Value) return false;
+            var typeId = differs.Groups[1].Value;
+            checks.Add(c => c.MatterTypeId != typeId);
         }
 
-        if (f.Contains("matterTypeId ne null"))
+        if (f.Contains("(matterTypeId ne null and matterTypeId ne '')"))
         {
-            matched = true;
-            if (chunk.MatterTypeId is null) return false;
+            checks.Add(c => !string.IsNullOrEmpty(c.MatterTypeId));
+        }
+        else if (f.Contains("matterTypeId ne null"))
+        {
+            checks.Add(c => c.MatterTypeId is not null);
         }
 
         if (Regex.Match(f, "documentId eq '([^']*)'") is { Success: true } document)
         {
-            matched = true;
-            if (chunk.DocumentId != document.Groups[1].Value) return false;
+            var documentId = document.Groups[1].Value;
+            checks.Add(c => c.DocumentId == documentId);
         }
 
         if (Regex.Match(f, "speFileId eq '([^']*)'") is { Success: true } file)
         {
-            matched = true;
-            if (chunk.SpeFileId != file.Groups[1].Value) return false;
+            var speFileId = file.Groups[1].Value;
+            checks.Add(c => c.SpeFileId == speFileId);
         }
 
-        matched.Should().BeTrue($"the fake index does not know the filter '{f}'");
-        return true;
+        checks.Count.Should().BeGreaterThan(1, $"the fake index does not know the filter '{f}'");
+        return c => checks.All(check => check(c));
     }
-
     // ── scenario helpers ──────────────────────────────────────────────────────────────────────────────────────
 
     private static string Id(Guid id) => id.ToString("D");
@@ -202,6 +212,7 @@ public sealed class MatterTypeIndexSyncJobTests
             ParentEntityId = parentId is null ? null : Id(parentId.Value),
         };
         _chunks.Add(chunk);
+        _byId[id] = chunk;
         return chunk;
     }
 
@@ -226,7 +237,7 @@ public sealed class MatterTypeIndexSyncJobTests
         }
     }
 
-    private MatterTypeIndexSyncJob CreateJob()
+    private MatterTypeIndexSyncJob CreateJob(int? maxMergeRounds = null)
     {
         var deployments = new Mock<IKnowledgeDeploymentService>();
         deployments.Setup(d => d.GetSearchClientAsync(Tenant, It.IsAny<CancellationToken>())).ReturnsAsync(_files.Object);
@@ -237,7 +248,7 @@ public sealed class MatterTypeIndexSyncJobTests
         var services = new ServiceCollection();
         services.AddSingleton(_dataverse.Object);
         services.AddSingleton(indexClient.Object);
-        services.AddSingleton(new DocumentMatterTypeResolver(_dataverse.Object, NullLogger<DocumentMatterTypeResolver>.Instance));
+        services.AddSingleton(new DocumentMatterTypeResolver(_dataverse.Object, TestDocumentIndexParentResolver.Over(_dataverse.Object), NullLogger<DocumentMatterTypeResolver>.Instance));
         if (_aiAvailable)
         {
             services.AddSingleton(deployments.Object);
@@ -253,7 +264,10 @@ public sealed class MatterTypeIndexSyncJobTests
             configuration,
             Mock.Of<IOptionsMonitor<MatterTypeIndexSyncOptions>>(o => o.CurrentValue == _options),
             _time,
-            NullLogger<MatterTypeIndexSyncJob>.Instance);
+            NullLogger<MatterTypeIndexSyncJob>.Instance)
+        {
+            MaxMergeRounds = maxMergeRounds ?? MatterTypeIndexSyncJob.DefaultMaxMergeRounds,
+        };
     }
 
     private static JobRunContext Context() =>
@@ -425,6 +439,157 @@ public sealed class MatterTypeIndexSyncJobTests
 
         await job.ExecuteAsync(Context(), CancellationToken.None);
         _chunks.Should().OnlyContain(c => c.MatterTypeSourceId == Id(ProjectP), "the next run drains the rest");
+    }
+
+    // ── completeness, record merges ───────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_MoreChunksThanTheOldTwentyRoundCap_UpdatesEveryOneAndAdvancesTheWatermark()
+    {
+        Source("sprk_matter", MatterM, NewType, modified: DateTime.Parse("2026-11-25T09:00:00Z").ToUniversalTime());
+        for (var i = 0; i < 20_500; i++)
+        {
+            Chunk($"m{i}", documentId: "d1", sourceId: Id(MatterM), typeId: OldType);
+        }
+
+        var job = CreateJob();
+        var result = await job.ExecuteAsync(Context(), CancellationToken.None);
+        _changeQueries.Clear();
+        await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        _chunks.Should().OnlyContain(c => c.MatterTypeId == Id(NewType), "a matter with more chunks than one run's old bound must not keep the old type");
+        result.ErrorMessage.Should().BeNull();
+        _changeQueries.Single(q => q.EntityName == "sprk_matter").Criteria.Conditions
+            .Should().ContainSingle(c => c.AttributeName == "modifiedon", "the whole record was processed, so the watermark moved");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenTheRoundBoundIsReachedWithChunksLeft_FaultsAndHoldsTheWatermark()
+    {
+        Source("sprk_matter", MatterM, NewType, modified: DateTime.Parse("2026-11-25T09:00:00Z").ToUniversalTime());
+        for (var i = 0; i < 2_500; i++)
+        {
+            Chunk($"m{i}", documentId: "d1", sourceId: Id(MatterM), typeId: OldType);
+        }
+
+        var job = CreateJob(maxMergeRounds: 2);
+        var result = await job.ExecuteAsync(Context(), CancellationToken.None);
+        _changeQueries.Clear();
+        await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ErrorMessage.Should().Contain("faulted", "stopping with chunks left is a fault, not a clean finish");
+        _changeQueries.Single(q => q.EntityName == "sprk_matter").Criteria.Conditions
+            .Should().NotContain(c => c.AttributeName == "modifiedon", "the record must be read again");
+        _chunks.Should().OnlyContain(c => c.MatterTypeId == Id(NewType), "the second run finishes the remainder");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenTheRecordsIndexMergeIsRejected_FaultsAndHoldsTheWatermark()
+    {
+        Source("sprk_matter", MatterM, NewType, modified: DateTime.Parse("2026-11-25T09:00:00Z").ToUniversalTime());
+        _recordMergeStatus = 503;
+        var job = CreateJob();
+
+        var result = await job.ExecuteAsync(Context(), CancellationToken.None);
+        _changeQueries.Clear();
+        await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ErrorMessage.Should().Contain("faulted");
+        _changeQueries.Single(q => q.EntityName == "sprk_matter").Criteria.Conditions
+            .Should().NotContain(c => c.AttributeName == "modifiedon");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenTheRecordWasNeverIndexed_TheRecordsMergeIs404AndIsNotAFault()
+    {
+        Source("sprk_matter", MatterM, NewType, modified: DateTime.Parse("2026-11-25T09:00:00Z").ToUniversalTime());
+        _recordMergeStatus = 404;
+
+        var result = await CreateJob().ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MatterWithoutAType_LeavesChunksThatHoldTheEmptyMarkerAlone()
+    {
+        Source("sprk_matter", MatterM, type: null, modified: DateTime.Parse("2026-11-25T09:00:00Z").ToUniversalTime());
+        Chunk("m1", documentId: "d1", sourceId: Id(MatterM)).MatterTypeId = string.Empty;
+        Chunk("m2", documentId: "d1", sourceId: Id(MatterM), typeId: OldType);
+
+        await CreateJob().ExecuteAsync(Context(), CancellationToken.None);
+
+        Stored("m1").MatterTypeId.Should().Be(string.Empty, "'' is the same answer as null: already correct, nothing to write");
+        Stored("m2").MatterTypeId.Should().BeNull("a chunk still holding the removed type is cleared");
+        _files.Invocations.Where(i => i.Method.Name == "MergeDocumentsAsync")
+            .SelectMany(i => ((IEnumerable<SearchDocument>)i.Arguments[0]).Select(d => (string)d["id"]))
+            .Should().BeEquivalentTo(["m2"]);
+    }
+
+    // ── backfill of chunks stored without a parent, and of rows that are gone ─────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_Backfill_ChunksWithoutAParentTakeTheTypeOfTheRecordTheirDocumentNames()
+    {
+        Source("sprk_project", ProjectP, NewType);
+        var doc = Guid.Parse("3165e000-0000-4000-8000-0000000000d3");
+        _rows[("sprk_document", doc)] = new Entity("sprk_document", doc) { ["sprk_project"] = new EntityReference("sprk_project", ProjectP) };
+        Chunk("a1", documentId: Id(doc));
+        Chunk("a2", documentId: Id(doc));
+
+        await CreateJob().ExecuteAsync(Context(), CancellationToken.None);
+
+        new[] { "a1", "a2" }.Select(Stored).Should().OnlyContain(c => c.MatterTypeId == Id(NewType) && c.MatterTypeSourceId == Id(ProjectP));
+        new[] { "a1", "a2" }.Select(Stored).Should().OnlyContain(c => c.ParentEntityType == null && c.ParentEntityId == null,
+            "the parent is used to derive the type only; no parent field is written");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Backfill_AParentlessDocumentWhoseRowCannotBeReadIsNotSealedAndIsRetried()
+    {
+        var doc = Guid.Parse("3165e000-0000-4000-8000-0000000000d4");
+        Source("sprk_project", ProjectP, NewType);
+        _rows[("sprk_document", doc)] = new Entity("sprk_document", doc) { ["sprk_project"] = new EntityReference("sprk_project", ProjectP) };
+        Chunk("a1", documentId: Id(doc));
+        _failRead = (table, _) => table == "sprk_document";
+        var job = CreateJob();
+
+        var first = await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        first.Success.Should().BeTrue();
+        Stored("a1").MatterTypeSourceId.Should().BeNull("an undecided parent must not be sealed as 'belongs to nothing'");
+
+        _failRead = (_, _) => false;
+        await job.ExecuteAsync(Context(), CancellationToken.None);
+
+        Stored("a1").MatterTypeSourceId.Should().Be(Id(ProjectP));
+        Stored("a1").MatterTypeId.Should().Be(Id(NewType));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Backfill_ADeletedDocumentIsResolvedAsBelongingToNothing()
+    {
+        var doc = Guid.Parse("3165e000-0000-4000-8000-0000000000d5");
+        Chunk("a1", documentId: Id(doc));
+        _rowGone = (table, id) => table == "sprk_document" && id == doc;
+
+        var result = await CreateJob().ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ErrorMessage.Should().BeNull();
+        Stored("a1").MatterTypeSourceId.Should().Be(string.Empty, "a deleted row is an answer; leaving it unresolved would re-read it every run");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Backfill_AChunkWhoseParentMatterWasDeletedIsResolvedAsBelongingToNothing()
+    {
+        Chunk("a1", documentId: "doc-a", parentType: "matter", parentId: MatterM);
+        _rowGone = (table, id) => table == "sprk_matter" && id == MatterM;
+
+        var result = await CreateJob().ExecuteAsync(Context(), CancellationToken.None);
+
+        result.ErrorMessage.Should().BeNull();
+        Stored("a1").MatterTypeSourceId.Should().Be(string.Empty);
+        Stored("a1").MatterTypeId.Should().BeNull();
     }
 
     // ── tenant isolation, skips ───────────────────────────────────────────────────────────────────────────────

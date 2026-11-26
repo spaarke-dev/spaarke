@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -37,7 +38,7 @@ public sealed class DocumentMatterTypeResolverTests
                 _rows.TryGetValue((table, id), out var row) ? row : null!);
     }
 
-    private DocumentMatterTypeResolver Sut() => new(_dataverse.Object, NullLogger<DocumentMatterTypeResolver>.Instance);
+    private DocumentMatterTypeResolver Sut() => new(_dataverse.Object, TestDocumentIndexParentResolver.Over(_dataverse.Object), NullLogger<DocumentMatterTypeResolver>.Instance);
 
     private void Row(string table, Guid id, params (string Column, string Target, Guid Target_Id)[] links)
     {
@@ -192,6 +193,71 @@ public sealed class DocumentMatterTypeResolverTests
 
         result.Should().Be(MatterTypeResolution.Unresolved);
         result.IsResolved.Should().BeFalse("an unresolved document is retried by the sync job, never stamped as 'no source'");
+    }
+
+    /// <summary>What the Dataverse SDK throws for a row that does not exist (0x80040217), not the null the other doubles return.</summary>
+    private static FaultException<OrganizationServiceFault> NotFound() =>
+        new(new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist"));
+
+    [Fact]
+    public async Task ResolveAsync_NoParentButTheDocumentNamesAProject_ReturnsTheProjectsTypeFromTheDecidedParent()
+    {
+        Row("sprk_document", Document, ("sprk_project", "sprk_project", Project));
+        TypedProject(Project, TypeB);
+
+        var result = await Sut().ResolveAsync(Id(Document), parent: null, CancellationToken.None);
+
+        result.Should().Be(new MatterTypeResolution(Id(TypeB), Id(Project)),
+            "a chunk indexed without a stored parent still belongs to the record its document names");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_NoParentAndTheDocumentRowCannotBeRead_IsUnresolvedNotSealedAsNoSource()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveAsync("sprk_document", Document, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse did not answer"));
+
+        var result = await Sut().ResolveAsync(Id(Document), parent: null, CancellationToken.None);
+
+        result.Should().Be(MatterTypeResolution.Unresolved, "an undecided parent must be asked again, not sealed");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_NoParentAndTheDocumentWasDeleted_IsResolvedWithNoSource()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveAsync("sprk_document", Document, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NotFound());
+
+        var result = await Sut().ResolveAsync(Id(Document), parent: null, CancellationToken.None);
+
+        result.Should().Be(MatterTypeResolution.NoSource, "a deleted document has nothing to resolve; leaving it unresolved would re-read it forever");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ParentMatterWasDeleted_IsResolvedWithNoSource()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveAsync("sprk_matter", Matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NotFound());
+
+        var result = await Sut().ResolveAsync(Id(Document), Parent("matter", Matter), CancellationToken.None);
+
+        result.Should().Be(MatterTypeResolution.NoSource);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WorkAssignmentParentWasDeleted_FallsBackToTheEmailThenResolvesNoSource()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveAsync("sprk_workassignment", WorkAssignment, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NotFound());
+        Row("sprk_document", Document);
+
+        var result = await Sut().ResolveAsync(Id(Document), Parent("workassignment", WorkAssignment), CancellationToken.None);
+
+        result.Should().Be(MatterTypeResolution.NoSource);
     }
 
     [Fact]

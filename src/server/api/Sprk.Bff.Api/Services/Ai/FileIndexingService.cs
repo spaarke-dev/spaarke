@@ -377,7 +377,10 @@ public sealed class FileIndexingService : IFileIndexingService
             ParentEntityType = parentEntity?.EntityType,
             ParentEntityId = parentEntity?.EntityId,
             ParentEntityName = parentEntity?.EntityName,
-            MatterTypeId = matterType.MatterTypeId,
+            // A resolved document with no type writes the empty marker, not null: the index write is merge-or-upload, which omits a null,
+            // so a null would leave the previous type on the chunk when a re-index finds the matter's type cleared. The Matter Type filter
+            // (search.in over record ids) never matches an empty string. Unresolved leaves both fields unset (null, omitted).
+            MatterTypeId = matterType.IsResolved ? matterType.MatterTypeId ?? string.Empty : null,
             MatterTypeSourceId = matterType.SourceId
         }).ToList();
 

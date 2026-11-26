@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -48,7 +49,7 @@ public sealed class FileIndexingServiceMatterTypeTests
             _rag.Object,
             NullLogger<FileIndexingService>.Instance,
             TestRecordContainerResolver.ForBusinessUnitContainers("drive"),
-            new DocumentMatterTypeResolver(_dataverse.Object, NullLogger<DocumentMatterTypeResolver>.Instance));
+            new DocumentMatterTypeResolver(_dataverse.Object, TestDocumentIndexParentResolver.Over(_dataverse.Object), NullLogger<DocumentMatterTypeResolver>.Instance));
     }
 
     private void MatterWithType(Guid? type)
@@ -88,14 +89,17 @@ public sealed class FileIndexingServiceMatterTypeTests
     }
 
     [Fact]
-    public async Task IndexContentAsync_MatterWithoutAType_StampsTheSourceOnlySoALaterTypeFindsTheChunks()
+    public async Task IndexContentAsync_MatterWithoutAType_StampsTheSourceAndAnExplicitEmptyTypeSoAReindexOverwritesAnOldOne()
     {
         MatterWithType(type: null);
         var service = CreateService(chunkCount: 2);
 
         await service.IndexContentAsync(Request(new ParentEntityContext("matter", Matter.ToString(), "M")));
 
-        _written.Should().OnlyContain(d => d.MatterTypeId == null && d.MatterTypeSourceId == Matter.ToString("D"));
+        // "" and not null: the index write is merge-or-upload, which omits a null and so would keep the previous type on the chunk.
+        _written.Should().OnlyContain(d => d.MatterTypeId == string.Empty && d.MatterTypeSourceId == Matter.ToString("D"));
+        _written.Select(d => JsonSerializer.Serialize(d)).Should().OnlyContain(json => json.Contains("\"matterTypeId\":\"\""),
+            "the empty marker must reach the wire, not be dropped like a null");
     }
 
     [Fact]
@@ -108,8 +112,23 @@ public sealed class FileIndexingServiceMatterTypeTests
 
         await service.IndexContentAsync(Request(parent: null));
 
-        _written.Should().OnlyContain(d => d.MatterTypeId == null && d.MatterTypeSourceId == string.Empty,
+        _written.Should().OnlyContain(d => d.MatterTypeId == string.Empty && d.MatterTypeSourceId == string.Empty,
             "an empty source id says 'resolved: belongs to no matter', so the backfill leaves the document alone");
+    }
+
+    [Fact]
+    public async Task IndexContentAsync_NoParentAndTheDocumentsParentCannotBeDecided_LeavesBothFieldsUnsetSoTheJobRetries()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveAsync("sprk_document", Guid.Parse(DocumentId), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse did not answer"));
+        var service = CreateService(chunkCount: 2);
+
+        var result = await service.IndexContentAsync(Request(parent: null));
+
+        result.Success.Should().BeTrue();
+        _written.Should().OnlyContain(d => d.MatterTypeId == null && d.MatterTypeSourceId == null,
+            "an undecided parent must not be sealed as 'belongs to no matter'");
     }
 
     [Fact]

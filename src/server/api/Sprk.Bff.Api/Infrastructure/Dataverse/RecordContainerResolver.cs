@@ -2895,6 +2895,20 @@ public sealed partial class RecordContainerResolver
         => ex is FaultException<OrganizationServiceFault> fault
            && fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode;
 
+    /// <summary><see cref="IsRecordNotFound"/> for the exception or any exception it wraps (a service layer may wrap the fault).</summary>
+    internal static bool IsRecordNotFoundInChain(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (IsRecordNotFound(current))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Escapes the LIKE-significant characters so a container id cannot behave as a pattern.
     ///

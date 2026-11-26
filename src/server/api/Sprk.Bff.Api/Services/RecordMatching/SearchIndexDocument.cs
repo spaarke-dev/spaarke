@@ -94,8 +94,10 @@ public class SearchIndexDocument
     /// Record id of the matter type (<c>sprk_mattertype</c>) of a matter or project; null for other record types or
     /// when the record has no type. Backs the Matter Type filter of record search.
     /// </summary>
+    /// <remarks>Omitted from JSON when null so a BFF writing this document does not fail an index that predates the field.</remarks>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
     [JsonPropertyName("matterTypeId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MatterTypeId { get; set; }
 
     /// <summary>

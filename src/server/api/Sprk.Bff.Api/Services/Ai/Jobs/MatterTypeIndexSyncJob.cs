@@ -82,6 +82,11 @@ public sealed class MatterTypeIndexSyncJob : IScheduledJob
     private const int SearchPageSize = 1000;
     private const int MaxMergePagesPerSource = 20;
 
+    /// <summary>Most query-and-merge rounds (of up to 1,000 chunks) for one matter or project in one run; 1,000 rounds is a million chunks. A test may lower it.</summary>
+    internal int MaxMergeRounds { get; init; } = DefaultMaxMergeRounds;
+
+    internal const int DefaultMaxMergeRounds = 1000;
+
     /// <summary>Records per Dataverse page (a test may lower it).</summary>
     internal int PageSize { get; init; } = 500;
 
@@ -263,15 +268,23 @@ public sealed class MatterTypeIndexSyncJob : IScheduledJob
         var sourceId = recordId.ToString("D");
         try
         {
-            // Chunks filed under this record whose stored type is not the current one (a null current type matches any stored value).
-            var differs = typeId is null ? "matterTypeId ne null" : $"(matterTypeId ne '{Escape(typeId)}' or matterTypeId eq null)";
+            // Chunks filed under this record whose stored type is not the current one. A chunk's "no type" is null or the empty marker
+            // indexing writes (a cleared type is overwritten with "" because a merge-or-upload omits null), and the two are the same
+            // answer: with no current type, only a chunk that still holds a real type differs.
+            var differs = typeId is null
+                ? "(matterTypeId ne null and matterTypeId ne '')"
+                : $"(matterTypeId ne '{Escape(typeId)}' or matterTypeId eq null)";
             var filter = $"tenantId eq '{Escape(tenantId)}' and matterTypeSourceId eq '{Escape(sourceId)}' and {differs}";
 
-            for (var round = 0; round < MaxMergePagesPerSource; round++)
+            // Every merged chunk leaves the filter, so the loop ends when a query finds none. It is bounded only as a safety net against
+            // a merge that does not take effect; reaching the bound is a fault (the watermark holds, the next run continues).
+            var drained = false;
+            for (var round = 0; round < MaxMergeRounds && !drained; round++)
             {
                 var keys = await SearchKeysAsync(files, filter, ct).ConfigureAwait(false);
                 if (keys.Count == 0)
                 {
+                    drained = true;
                     break;
                 }
 
@@ -280,19 +293,31 @@ public sealed class MatterTypeIndexSyncJob : IScheduledJob
                 if (failed > 0)
                 {
                     counts.UnitFaults++;
-                    break;
+                    drained = true;
                 }
-
-                if (keys.Count < SearchPageSize)
+                else if (keys.Count < SearchPageSize)
                 {
-                    break;
+                    drained = true;
                 }
+            }
+
+            if (!drained)
+            {
+                counts.UnitFaults++;
+                _logger.LogWarning(
+                    "Matter type sync: {Table} {RecordId} still had chunks needing the change after {Rounds} rounds; kept for the next run.",
+                    table, sourceId, MaxMergeRounds);
             }
 
             if (records is not null)
             {
-                // A record that was never indexed has no document to merge into: not an error.
-                await MergeAsync(records, [Merge($"{table}_{sourceId}", ("matterTypeId", typeId))], ct).ConfigureAwait(false);
+                // A record that was never indexed has no document to merge into (404): not an error. Any other rejection is a fault.
+                var recordFailed = await MergeAsync(records, [Merge($"{table}_{sourceId}", ("matterTypeId", typeId))], ct).ConfigureAwait(false);
+                if (recordFailed > 0)
+                {
+                    counts.UnitFaults++;
+                    _logger.LogWarning("Matter type sync: the records-index merge for {Table} {RecordId} was rejected; kept for the next run.", table, sourceId);
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

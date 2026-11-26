@@ -48,7 +48,7 @@ public class FileIndexingServiceTests
             _ragServiceMock.Object,
             _loggerMock.Object,
             containerResolver ?? TestRecordContainerResolver.ForBusinessUnitContainers(TestDriveId),
-            new DocumentMatterTypeResolver(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), NullLogger<DocumentMatterTypeResolver>.Instance));
+            new DocumentMatterTypeResolver(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), TestDocumentIndexParentResolver.Over(), NullLogger<DocumentMatterTypeResolver>.Instance));
     }
 
     private static FileIndexRequest CreateFileIndexRequest() => new()
