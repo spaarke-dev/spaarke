@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Remove the legacy agent outside the BFF</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deletes a solution, CI workflow, scripts and infra and edits docs; explicit constraints; no .cs/.ts code changes</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deletions and doc edits with an explicit file list and a grep-based acceptance</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only non-BFF files (src/solutions/CopilotAgent, workflow, scripts, infrastructure/bot-service, docs); no overlap with 001 or the other Group A tasks. SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md is task 004's, not this task's</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-cd, infrastructure, documentation, deletion</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Delete the legacy "Spaarke AI" agent's non-BFF artifacts (the CopilotAgent solution, its publish workflow, scripts, script tests, bot-service infrastructure and the AI Foundry function-tool file that points at /api/agent) and update the docs that describe the agent, so nothing outside the BFF still builds, deploys or documents it.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in GitHub Actions, Bicep and Spaarke documentation conventions.</role>
+  <goal>The listed agent artifacts are deleted; CI no longer references them; docs no longer describe the agent as a live surface (or say it was retired on 2026-11-25 with a pointer to the MCP tools); out-of-scope references owned by other projects are filed as a coordination issue, not edited.</goal>
+
+  <context>
+    <background>Spec FR-01 ("delete src/solutions/CopilotAgent/, infrastructure/bot-service/, the publish-copilot-agent-template.yml workflow, scripts/copilot-agent/ and their tests; update or delete the docs and skills"). .claude/ files are task 003's. Tenant resources (Registry rows, Azure Bot, Entra app) are the owner's runbook E1/E2, not code.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/CopilotAgent/ (delete the folder)</file>
+      <file role="modify">.github/workflows/publish-copilot-agent-template.yml (delete)</file>
+      <file role="modify">scripts/copilot-agent/ (delete: CopilotAgentPackage.psm1, Render-CopilotAgentPackage.ps1, test_rendered_package.py)</file>
+      <file role="modify">scripts/Deploy-CopilotAgent.ps1 (delete)</file>
+      <file role="modify">tests/scripts/CopilotAgentPackage.Tests.ps1 (delete)</file>
+      <file role="modify">infrastructure/bot-service/ (delete: main.bicep, parameters.dev.json)</file>
+      <file role="modify">infrastructure/ai-foundry/agents/bff-function-tools.yaml (:14 /api/agent reference: remove the entry or the file if it only serves the agent)</file>
+      <file role="modify">scripts/master-deploy/build-all-vite-solutions.mjs (:16 CopilotAgent mention)</file>
+      <file role="modify">docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md, docs/guides/M365-COPILOT-ADMIN-GUIDE.md, docs/guides/DECLARATIVE-AGENT-BUILD-AND-DEPLOY-GUIDE.md (delete if agent-only, else mark the agent sections retired with a pointer to docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md)</file>
+      <file role="modify">docs/architecture/AI-ARCHITECTURE.md, ai-architecture-playbook-runtime.md, sdap-bff-api-patterns.md, sdap-component-interactions.md, client-resources-inventory.md, SPAARKE-AI-SURFACES-AND-PACKAGING.md</file>
+      <file role="modify">docs/guides/INDEX.md, CONFIGURATION-MATRIX.md, COPILOT-KNOWLEDGE-CONFIGURATION-GUIDE.md, GITHUB-ACTIONS-AZURE-OIDC-SETUP.md, REPOSITORY-NAVIGATION-GUIDE.md; docs/procedures/ci-cd-workflow.md, production-release.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r2/notes/legacy-agent-inventory-2026-11-25.md</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do not edit src/server/**, tests/ other than tests/scripts/CopilotAgentPackage.Tests.ps1, .claude/**, or docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (task 004 owns that file in Phase 0).</constraint>
+    <constraint source="project">Do not edit infrastructure/bicep/** (platform-controlplane.bicep, controlplane-worker-app-service.bicep, platform-controlplane-dev.bicepparam, platform-controlplane.json) or scripts/provisioning-prereqs/prereqs.yaml: the "shared Spaarke Copilot Agent app" (T257) belongs to customer-provisioning-orchestration-r1. Record the references in notes/002-out-of-scope-references.md and file one coordination issue with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue).</constraint>
+    <constraint source="project">docs/assessments/** are dated history: leave their text unchanged (they are "history notes" under the FR-01 grep acceptance).</constraint>
+    <constraint source="project">docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md is r1's document and does not describe the agent; do not edit it in this task.</constraint>
+    <constraint source="project">A doc that only describes the agent is deleted and its entry removed from docs/guides/INDEX.md or docs/INDEX.md; a doc that describes the agent among other things keeps the other content and replaces agent sections with one dated line: "Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2); Copilot reaches Spaarke through the Spaarke MCP connector".</constraint>
+    <constraint source="project">If any other workflow under .github/workflows/ triggers on src/solutions/CopilotAgent/** or calls the deleted scripts, remove that trigger or step in this task; no workflow may reference a deleted path afterwards.</constraint>
+    <constraint source="project">Never `git stash`; never `python3` in Bash.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/architecture/SPAARKE-AI-SURFACES-AND-PACKAGING.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/legacy-agent-inventory-2026-11-25.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/reuse-scan.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run git grep -lI -i "api/agent\|CopilotAgent\|copilot-agent\|bot-service\|AgentTokenService\|Spaarke AI agent" -- . ':!src/server' ':!tests' ':!.claude' ':!projects' and save the list to notes/002-blast-radius.md, classifying each hit: delete, edit, history (leave), or out of scope (other project).</step>
+    <step order="2">Delete the solution, workflow, scripts, script test and bot-service infrastructure; fix any workflow or script that references them.</step>
+    <step order="3">Edit or delete the docs per the constraint; update docs/guides/INDEX.md and docs/INDEX.md entries.</step>
+    <step order="4">Record out-of-scope references (customer-provisioning T257, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §7.12) in notes/002-out-of-scope-references.md and file the coordination issue.</step>
+    <step order="5">Re-run the step 1 grep; confirm only history, out-of-scope and .claude/ hits remain; run pwsh -c "Invoke-Pester tests/scripts" if any remaining Pester test referenced the deleted module.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a production or customer deployment path (master-deploy, provisioning, release workflow) still deploys the agent package at runtime, STOP and escalate rather than editing that path: it may be another project's live pipeline.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">git grep, git rm</tool>
+    <tool name="pwsh">Invoke-Pester for remaining script tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Deletions listed in relevant-files</output>
+    <output type="docs">Edited docs listed in relevant-files</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/002-blast-radius.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r2/notes/002-out-of-scope-references.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">src/solutions/CopilotAgent/, .github/workflows/publish-copilot-agent-template.yml, scripts/copilot-agent/, scripts/Deploy-CopilotAgent.ps1, tests/scripts/CopilotAgentPackage.Tests.ps1 and infrastructure/bot-service/ no longer exist.</criterion>
+    <criterion testable="true">git grep -i "api/agent\|CopilotAgent" -- .github scripts infrastructure docs returns only docs/assessments/** (history) and the out-of-scope files recorded in notes/002-out-of-scope-references.md.</criterion>
+    <criterion testable="true">No workflow under .github/workflows/ references a deleted path (grep for each deleted path returns nothing).</criterion>
+    <criterion testable="true">Every edited doc that still mentions the agent carries the dated "Retired 2026-11-25" line; docs/guides/INDEX.md has no link to a deleted guide.</criterion>
+    <criterion testable="true">Negative: no file under infrastructure/bicep/**, scripts/provisioning-prereqs/**, src/server/**, .claude/** or docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md is modified by this task.</criterion>
+    <criterion testable="true">notes/defer-issues.md has the coordination entry with its GitHub issue URL.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-11-25. Deleted the agent solution, workflow, scripts, bot-service infra and bff-function-tools.yaml; edited or deleted the docs (see notes/002-blast-radius.md, 002-decisions.md). Out-of-scope T257 references: notes/002-out-of-scope-references.md; coordination issue drafted in notes/defer-issues.md (not yet filed; main session files it). rework: none task 002
+  Spec FR-01..claude/skills (declarative-agent, mcp-tool-handler, adr-check references) and ADR-028:810 are task 003's (main session).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

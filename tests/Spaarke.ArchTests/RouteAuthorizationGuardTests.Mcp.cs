@@ -31,7 +31,8 @@ namespace Spaarke.ArchTests;
 /// credited by a waiver.</para>
 /// <para>The route counts as declared for Rule A only while BOTH ledgers are clean (<see cref="McpCreditedRoutes"/>). A tool that
 /// breaks its rule therefore turns the route itself red.</para>
-/// <para><b>Maintenance.</b> Adding a tool: add its class to <see cref="McpTools"/> with its policy (one of
+/// <para><b>Maintenance.</b> Adding a tool: add its class to <see cref="McpTools"/> — in its area's partial,
+/// <c>RouteAuthorizationGuardTests.Mcp.{Area}.cs</c> (spaarkeai-mcp-bff-api-r2 task 020), never in this file — with its policy (one of
 /// <c>McpToolAuthorization.AllowedToolPolicies</c>: "" for the default or "SystemAdmin"; widening that set is a production change
 /// with its own review), the seam it calls as the caller (e.g. <c>IDecisionCapability</c>) and a reason of 60+ characters.
 /// Adding an area: add its route to <see cref="McpRoutes"/> with the same chain. Never credit an MCP route with a waiver.
@@ -60,34 +61,33 @@ public partial class RouteAuthorizationGuardTests
             + "tool runs). It takes no record id; each tool reads as the caller through the seam McpTools names."),
     };
 
-    // Tasks 022-024 add spaarke_show_decisions, spaarke_list_decision_page, spaarke_get_decision_plan, spaarke_search_decision_lookup and
-    // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
-    private static readonly IReadOnlyList<McpTool> McpTools = new[]
-    {
-        // --- task 024 (spaarke_complete_decision) ---
-        new McpTool("CompleteDecisionTool", "", "IDecisionCapability",
-            "The one write tool, app-only (task 024, FR-08): a thin adapter that calls IDecisionCapability.CommitAsync with exactly "
-            + "IHttpContextAccessor.HttpContext and returns the commit result; DecisionCommitService stays the single owner of Confirm, "
-            + "idempotency, the invoice-review refusal and the caller's rights, so the tool adds no check of its own."),
-        // --- end task 024 ---
-        // spaarkeai-mcp-bff-api-r1 task 023 (one contiguous block; tasks 022 and 024 add their own entries beside it).
-        new McpTool("GetDecisionPlanTool", "", "IDecisionCapability",
-            "FR-06, app-only and read-only: the Signal's decision plan, suppression and full row as the caller through IDecisionCapability "
-            + "(GetPlanAndSuppressionAsync: the REST plan and suppression routes' answers with one Signal access check, NFR-01; it also writes "
-            + "the plan-read stamp), then the row through GetWorkItemAsync (the caller's lanes read narrowed to that Signal). Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
-        new McpTool("SearchDecisionLookupTool", "", "IDecisionLookupSearch",
-            "FR-07, app-only and read-only: the wizard's person, budget and firm search as the caller through IDecisionLookupSearch (the REST "
-            + "lookup route's service); the plan names the table and scope. Bare [Authorize]: an A10 workforce user, like the REST Signals group."),
-        // ── task 022 ──
-        new McpTool("ShowDecisionsTool", "", "IDecisionCapability",
-            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecidePageAsync (one "
-            + "read; the counts come from the lanes response the page carries, NFR-01) with IHttpContextAccessor.HttpContext's User; "
-            + "privileged rows reduced to a count before the model sees them."),
-        new McpTool("ListDecisionPageTool", "", "IDecisionCapability",
-            "spaarke_list_decision_page (FR-05, app-only, read-only): one page of the caller's Decide lane through ListDecidePageAsync "
-            + "with IHttpContextAccessor.HttpContext's User; the cursor is the only input."),
-        // ── end task 022 ──
-    };
+    /// <summary>
+    /// Every MCP tool row: the concatenation of the per-area ledger partials (spaarkeai-mcp-bff-api-r2 task 020), one file per area,
+    /// <c>RouteAuthorizationGuardTests.Mcp.{Area}.cs</c>, so parallel tool tasks each edit their own list and never this file. A tool
+    /// added in a new area needs its partial and its line here; a tool whose partial is not concatenated here is "missing from McpTools"
+    /// and fails the guard. Built on first use (after the type initializer), so the partials' initialization order across files does not
+    /// matter.
+    /// </summary>
+    private static IReadOnlyList<McpTool> McpTools => McpToolLedger.Value;
+
+    private static readonly Lazy<IReadOnlyList<McpTool>> McpToolLedger = new(() => McpToolPartials.SelectMany(p => p.Rows).ToArray(),
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
+    /// <summary>The per-area ledger partials, by area name.</summary>
+    private static IEnumerable<(string Area, IReadOnlyList<McpTool> Rows)> McpToolPartials =>
+    [
+        ("Decisions", McpToolsDecisions),
+        ("Search", McpToolsSearch),
+        ("Documents", McpToolsDocuments),
+        ("Playbooks", McpToolsPlaybooks),
+        ("Analysis", McpToolsAnalysis),
+        ("Tasks", McpToolsTasks),
+        ("Portfolio", McpToolsPortfolio),
+        ("Briefing", McpToolsBriefing),
+        ("MatterSummary", McpToolsMatterSummary),
+        ("Finance", McpToolsFinance),
+        ("Email", McpToolsEmail),
+    ];
 
     private static readonly Regex McpToolClass = new(
         @"(?<attrs>(?:\[[^\[\]]*\]\s*)+)(?:(?:public|internal|private|protected|sealed|static|partial|file)\s+)*class\s+(?<name>[A-Za-z_]\w*)",
@@ -997,6 +997,72 @@ public partial class RouteAuthorizationGuardTests
 
         var anonymous = typeof(McpReflectionAnonymousTool);
         Fires(McpToolReflectionViolations(new[] { anonymous }, Seen(anonymous), new[] { McpReflectionEntry(anonymous) }), "carries anonymity metadata");
+    }
+
+    // ── the per-area ledger split (spaarkeai-mcp-bff-api-r2 task 020) ─────────────────────────────────────────────────────────────────
+
+    /// <summary>Every tool class listed more than once across <paramref name="partials"/> (the guard reads only the first row of a
+    /// class, so a second row with another policy or seam would be silently ignored).</summary>
+    private static List<string> McpToolLedgerDuplicates(IEnumerable<(string Area, IReadOnlyList<McpTool> Rows)> partials) =>
+        partials
+            .SelectMany(p => p.Rows.Select(r => (p.Area, r.Class)))
+            .GroupBy(x => x.Class, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"{g.Key}: listed {g.Count()} times ({string.Join(", ", g.Select(x => x.Area))}); keep one row in its area's partial.")
+            .ToList();
+
+    [Fact(DisplayName = "r2 task 020: every MCP tool class is in exactly one ledger partial, once")]
+    public void McpToolLedger_EachClassIsInExactlyOnePartial()
+    {
+        Assert.Empty(McpToolLedgerDuplicates(McpToolPartials));
+        Assert.Equal(McpToolPartials.Sum(p => p.Rows.Count), McpTools.Count);
+    }
+
+    [Fact(DisplayName = "r2 task 020 controls: a class listed twice (across partials or in one) is named; distinct classes are not")]
+    public void McpToolLedgerDuplicates_Controls()
+    {
+        static McpTool Row(string cls) => new(cls, "", "IActionSeam", "Seeded by the ledger-split controls: a fixture row, never a real tool.");
+
+        // MUST NOT FIRE: distinct classes in distinct partials.
+        Assert.Empty(McpToolLedgerDuplicates(new (string, IReadOnlyList<McpTool>)[] { ("Search", new[] { Row("A") }), ("Email", new[] { Row("B") }) }));
+
+        // MUST FIRE: the same class in two partials, and twice in one.
+        var across = McpToolLedgerDuplicates(new (string, IReadOnlyList<McpTool>)[] { ("Search", new[] { Row("A") }), ("Email", new[] { Row("A") }) });
+        Assert.Equal("A: listed 2 times (Search, Email); keep one row in its area's partial.", Assert.Single(across));
+        Assert.Single(McpToolLedgerDuplicates(new (string, IReadOnlyList<McpTool>)[] { ("Tasks", new[] { Row("A"), Row("A") }) }));
+    }
+
+    [Theory(DisplayName = "r2 task 020 must-fire: a real r1 tool absent from every ledger partial fails the guard, text and reflection")]
+    [InlineData("CompleteDecisionTool")]
+    [InlineData("GetDecisionPlanTool")]
+    [InlineData("SearchDecisionLookupTool")]
+    [InlineData("ShowDecisionsTool")]
+    [InlineData("ListDecisionPageTool")]
+    public void McpToolLedger_ARealToolInNoPartial_FailsTheGuard(string toolClass)
+    {
+        Assert.Contains(McpToolsDecisions, t => t.Class == toolClass);
+        var withoutIt = McpToolPartials.SelectMany(p => p.Rows).Where(t => t.Class != toolClass).ToList();
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var text = McpToolViolations(Real.Set.Units, withoutIt, AiInternalTypeNames(Real.Set.Units), seen);
+        var reflection = McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), seen, withoutIt);
+
+        Assert.Single(text);
+        Assert.Contains($" {toolClass}: an MCP tool missing from McpTools", text[0], StringComparison.Ordinal);
+        Assert.Single(reflection);
+        Assert.EndsWith($".{toolClass} (reflection): an MCP tool missing from McpTools.", reflection[0], StringComparison.Ordinal);
+    }
+
+    [Fact(DisplayName = "r2 task 020 must-not-fire: with every partial concatenated, every r1 tool passes the guard, text and reflection")]
+    public void McpToolLedger_EveryPartialConcatenated_EveryR1ToolPasses()
+    {
+        var r1Tools = new[] { "CompleteDecisionTool", "GetDecisionPlanTool", "SearchDecisionLookupTool", "ShowDecisionsTool", "ListDecisionPageTool" };
+        Assert.All(r1Tools, c => Assert.Contains(McpTools, t => t.Class == c));
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        Assert.Empty(McpToolViolations(Real.Set.Units, McpTools, AiInternalTypeNames(Real.Set.Units), seen));
+        Assert.Empty(McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), seen, McpTools));
+        Assert.Superset(r1Tools.ToHashSet(StringComparer.Ordinal), seen);
     }
 
     [Fact(DisplayName = "task 021 fix round 1 controls: a MapMcp route missing from McpRoutes is named, a listed one is not")]

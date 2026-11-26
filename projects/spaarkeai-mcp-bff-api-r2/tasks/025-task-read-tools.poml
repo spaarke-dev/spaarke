@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Task read tools: spaarke_list_tasks, spaarke_get_task</title>
+    <phase>1 Read tools</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF surface over events read with the BFF identity plus a BFF-applied filter (FR-15 caller scope)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Thin adapters over task 006's IEventsCapability, whose must-not-leak proofs already exist</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Tasks/{List,Get}TaskTool.cs and the Tasks ledger partial</parallel-reason>
+    <deps>006, 020</deps>
+    <tags>bff-api, api, tenant-isolation, integration-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two read-only MCP tools over task 006's IEventsCapability: spaarke_list_tasks (the caller's to-dos/events with the GET /api/v1/events filters) and spaarke_get_task (GET /api/v1/events/{id}). Run as the caller; a caller never sees another user's private event.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool handlers and the events (sprk_event) model.</role>
+  <goal>Both tools call IEventsCapability with the request context, return what REST returns for the same caller (slimmed), and pass must-not-leak tests; 200 tasks fit under 64 KiB.</goal>
+
+  <context>
+    <background>Spec FR-07 (read half), FR-15, NFR-02. Task 006 extracted get/list/create/complete from Api/Events/EventEndpoints.cs (group /api/v1/events: GET "/" :105, GET "/{id}" :117) into Services/Events/IEventsCapability with frozen REST bytes and must-not-leak proofs (tests/integration/auth/Events/EventCallerScopeTests.cs). IEventDataverseService reads with the BFF identity plus a BFF-applied filter.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/ListTasksTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/GetTaskTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Tasks.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Tasks/TaskReadToolsContractTests.cs</file>
+      <file role="new">tests/integration/auth/Mcp/Tasks/TaskReadToolsMustNotLeakTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Events/IEventsCapability.cs (task 006)</file>
+      <file role="canonical-reference">tests/integration/auth/Events/EventCallerScopeTests.cs (task 006)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">Events capability and caller-scope proofs</dependency>
+      <dependency task="020" status="pending">General McpToolResults, ledger partials</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback). The tools call IEventsCapability only, never IEventDataverseService directly, and add no filter of their own (spec MUST NOT copy authorization).</constraint>
+    <constraint source="project">[McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, description ≤ 1,024 characters ("to-dos and tasks (Spaarke events)"; not calendar meetings). Ledger rows in RouteAuthorizationGuardTests.Mcp.Tasks.cs.</constraint>
+    <constraint source="ADR-015">Slim rows: id, subject, due date, status, priority, regarding record name, open link; no description body in model-visible text. 200 tasks &lt; 64 KiB. Logs: tool name, latency, row count, outcome, correlation id.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate, 006 and 020; read IEventsCapability and EventCallerScopeTests.</step>
+    <step order="2">Write the two tools and ledger rows; write contract and must-not-leak tests (reuse 006's seeded users and events).</step>
+    <step order="3">Run MCP suites, ArchTests, conformance and the events contract tests; measure the publish-size delta.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a must-not-leak test fails through the capability (not the tool), STOP and report it as a found security defect in 006's capability; fix there with uac-r2 review.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>IEventsCapability (task 006) extracted from EventEndpoints statics; notes/reuse-scan.md row "Tasks (events)".</existing>
+    <extension>The capability is reused unchanged; the tools are thin adapters on r1's host.</extension>
+    <cost-of-doing-nothing>Copilot users cannot see their Spaarke to-dos (FR-07 read half fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/ListTasksTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/GetTaskTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Tasks/TaskReadToolsContractTests.cs</output>
+    <output type="test">tests/integration/auth/Mcp/Tasks/TaskReadToolsMustNotLeakTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For the same caller and filters, list ids equal GET /api/v1/events; get equals GET /api/v1/events/{id} (slimmed).</criterion>
+    <criterion testable="true">Negative (must-not-leak): user B's private event never appears in A's list, and get on it returns a not-found isError.</criterion>
+    <criterion testable="true">Negative: no caller context returns UserContextRequired.</criterion>
+    <criterion testable="true">200 tasks serialise under 64 KiB.</criterion>
+    <criterion testable="true">Events REST contract tests from 006 pass unchanged; ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07, FR-15. Two adversarial-verifier passes (tenant-isolation tag). uac-r2 reviews.
+Completion summary (2026-11-25): spaarke_list_tasks and spaarke_get_task are thin adapters over IEventsCapability (no filter or check of their own), with the slim rows, the byte budget and the open link in Api/Mcp/LegalOperations/Tasks/. Decisions, deviations (no per-row link in the list; the byte budget), the outcome mapping, tests and results: notes/025-decisions.md. The main session runs the two adversarial passes and applies the TASK-INDEX row (the wave rules reserve both).
+rework: none task 025</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

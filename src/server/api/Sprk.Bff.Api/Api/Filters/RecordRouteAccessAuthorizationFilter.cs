@@ -361,6 +361,59 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
             return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
         }
 
+        var decision = await DecideRouteRecordAsync(
+            httpContext, probe, operation, entitySetName, recordId, logger, httpContext.RequestAborted);
+        switch (decision.Access)
+        {
+            case RouteRecordAccess.Allowed:
+                break;
+            case RouteRecordAccess.InsufficientRights:
+                return ProblemDetailsHelper.Forbidden(
+                    InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+            default:
+                // NoRead, and any answer not known to allow: the uniform 404 (fail closed).
+                return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+
+        // Task 064: the handler may need the caller's FULL rights on this record (the per-record No Access read shows the
+        // entries only to a caller who also holds Write). Published here so it reuses this probe's answer instead of
+        // asking Dataverse a second time; keyed by the record, so it can only ever answer for the record just checked.
+        httpContext.Items[AuthorizedRightsItemKey] = new AuthorizedRouteRecord(entitySetName, recordId, decision.Rights);
+
+        return await next(context);
+    }
+
+    /// <summary>What the fixed-entity-set decision answered (<see cref="DecideRouteRecordAsync"/>).</summary>
+    internal enum RouteRecordAccess
+    {
+        /// <summary>The caller holds Read and the operation's rights.</summary>
+        Allowed,
+
+        /// <summary>No Read (also an absent record and every probe fault): the uniform 404.</summary>
+        NoRead,
+
+        /// <summary>Read without the operation's rights: the 403 <see cref="InsufficientRightsReasonCode"/>.</summary>
+        InsufficientRights,
+    }
+
+    /// <summary>The fixed-entity-set decision and the caller's rights as the probe answered them (None unless allowed).</summary>
+    internal readonly record struct RouteRecordDecision(RouteRecordAccess Access, AccessRights Rights);
+
+    /// <summary>
+    /// The ONE fixed-entity-set decision: what the CALLER (the request's own bearer token) may do to
+    /// <paramref name="entitySetName"/>(<paramref name="recordId"/>) for <paramref name="operation"/>, asked through the gate form
+    /// of the probe. The route filter maps it to its answers (<see cref="AuthorizeRouteRecordAsync"/>); the events capability asks
+    /// it for an MCP tool, which carries no filter (spaarkeai-mcp-bff-api-r2 task 006, ADR-008: one implementation, two callers).
+    /// </summary>
+    internal static async Task<RouteRecordDecision> DecideRouteRecordAsync(
+        HttpContext httpContext,
+        CallerRecordAccessProbe probe,
+        string operation,
+        string entitySetName,
+        Guid recordId,
+        ILogger? logger,
+        CancellationToken ct)
+    {
         AccessRights rights;
         try
         {
@@ -370,7 +423,7 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 TokenHelper.ExtractBearerTokenOrNull(httpContext),
                 entitySetName,
                 recordId,
-                httpContext.RequestAborted);
+                ct);
         }
         catch (Exception ex)
         {
@@ -388,7 +441,7 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 "[RECORD-ROUTE-AUTH] Denied (uniform 404): caller holds no Read on {EntitySet}({RecordId}) for "
                 + "'{Operation}'. Holds {Rights}. CorrelationId: {CorrelationId}",
                 entitySetName, recordId, operation, rights, httpContext.TraceIdentifier);
-            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            return new RouteRecordDecision(RouteRecordAccess.NoRead, AccessRights.None);
         }
 
         if (!OperationAccessPolicy.HasRequiredRights(rights, operation))
@@ -398,16 +451,10 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 + "requires {Required}. CorrelationId: {CorrelationId}",
                 operation, entitySetName, recordId, rights,
                 OperationAccessPolicy.GetRequiredRights(operation), httpContext.TraceIdentifier);
-            return ProblemDetailsHelper.Forbidden(
-                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+            return new RouteRecordDecision(RouteRecordAccess.InsufficientRights, AccessRights.None);
         }
 
-        // Task 064: the handler may need the caller's FULL rights on this record (the per-record No Access read shows the
-        // entries only to a caller who also holds Write). Published here so it reuses this probe's answer instead of
-        // asking Dataverse a second time; keyed by the record, so it can only ever answer for the record just checked.
-        httpContext.Items[AuthorizedRightsItemKey] = new AuthorizedRouteRecord(entitySetName, recordId, rights);
-
-        return await next(context);
+        return new RouteRecordDecision(RouteRecordAccess.Allowed, rights);
     }
 
     /// <summary>The <see cref="HttpContext.Items"/> key of the rights the fixed-entity-set decision just allowed (task 064).</summary>
@@ -448,8 +495,49 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
         ILogger? logger)
     {
         var httpContext = context.HttpContext;
+        var access = await DecideDeclaredTargetAsync(
+            httpContext, probe, operation, () => resolveTarget(context), requiredPrivilege, logger, httpContext.RequestAborted);
+        return access switch
+        {
+            DeclaredTargetAccess.Allowed => await next(context),
+            DeclaredTargetAccess.InsufficientPrivilege => ProblemDetailsHelper.Forbidden(
+                InsufficientPrivilegeReasonCode, InsufficientPrivilegeDetail, httpContext.TraceIdentifier),
+            // InsufficientRights, and any answer not known to allow (fail closed).
+            _ => ProblemDetailsHelper.Forbidden(
+                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier),
+        };
+    }
+
+    /// <summary>What the declared-target decision answered (<see cref="DecideDeclaredTargetAsync"/>).</summary>
+    internal enum DeclaredTargetAccess
+    {
+        /// <summary>The caller holds the privilege (when one is asked) and the rights on the target (when there is one).</summary>
+        Allowed,
+
+        /// <summary>The table privilege is not held (or its check faulted): the 403 <see cref="InsufficientPrivilegeReasonCode"/>.</summary>
+        InsufficientPrivilege,
+
+        /// <summary>The target's rights are not held, the target does not exist, or the resolver or probe faulted: the ONE 403
+        /// <see cref="InsufficientRightsReasonCode"/>.</summary>
+        InsufficientRights,
+    }
+
+    /// <summary>
+    /// The ONE declared-target decision: the optional table privilege, then the rights on the record
+    /// <paramref name="resolveTarget"/> names, both asked AS THE CALLER (the request's own bearer token). The route filter maps it
+    /// to its answers (<see cref="AuthorizeDeclaredTargetAsync"/>); the events capability asks it for an MCP tool, which carries no
+    /// filter (spaarkeai-mcp-bff-api-r2 task 006, ADR-008: one implementation, two callers).
+    /// </summary>
+    internal static async Task<DeclaredTargetAccess> DecideDeclaredTargetAsync(
+        HttpContext httpContext,
+        CallerRecordAccessProbe probe,
+        string operation,
+        Func<ValueTask<(string EntitySet, Guid RecordId)?>> resolveTarget,
+        string? requiredPrivilege,
+        ILogger? logger,
+        CancellationToken ct)
+    {
         var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
-        var ct = httpContext.RequestAborted;
 
         if (!string.IsNullOrWhiteSpace(requiredPrivilege))
         {
@@ -471,8 +559,7 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 logger?.LogWarning(
                     "[RECORD-ROUTE-AUTH] Denied: caller does not hold {Privilege}. CorrelationId: {CorrelationId}",
                     requiredPrivilege, httpContext.TraceIdentifier);
-                return ProblemDetailsHelper.Forbidden(
-                    InsufficientPrivilegeReasonCode, InsufficientPrivilegeDetail, httpContext.TraceIdentifier);
+                return DeclaredTargetAccess.InsufficientPrivilege;
             }
         }
 
@@ -480,7 +567,7 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
         AccessRights rights = AccessRights.None;
         try
         {
-            target = await resolveTarget(context);
+            target = await resolveTarget();
             if (target is { } named)
             {
                 if (string.IsNullOrWhiteSpace(named.EntitySet) || named.RecordId == Guid.Empty)
@@ -500,8 +587,7 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 "[RECORD-ROUTE-AUTH] The declared-target check for '{Operation}' faulted; denying. "
                 + "CorrelationId: {CorrelationId}",
                 operation, httpContext.TraceIdentifier);
-            return ProblemDetailsHelper.Forbidden(
-                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+            return DeclaredTargetAccess.InsufficientRights;
         }
 
         if (target is { } checkedTarget && !OperationAccessPolicy.HasRequiredRights(rights, operation))
@@ -511,10 +597,9 @@ public class RecordRouteAccessAuthorizationFilter : IEndpointFilter
                 + "requires {Required}. CorrelationId: {CorrelationId}",
                 operation, checkedTarget.EntitySet, checkedTarget.RecordId, rights,
                 OperationAccessPolicy.GetRequiredRights(operation), httpContext.TraceIdentifier);
-            return ProblemDetailsHelper.Forbidden(
-                InsufficientRightsReasonCode, InsufficientRightsDetail, httpContext.TraceIdentifier);
+            return DeclaredTargetAccess.InsufficientRights;
         }
 
-        return await next(context);
+        return DeclaredTargetAccess.Allowed;
     }
 }
