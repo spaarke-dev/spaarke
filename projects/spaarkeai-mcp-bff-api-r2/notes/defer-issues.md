@@ -201,3 +201,11 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 ## D-027-3 — `useRecordSearch.ts:182` `hasMore` can never be true → #3219
 - **Status**: deferred (client, not this project's surface). Since uac-r2 task 077 `TotalCount` is the page's row count, so `hasMore = totalCount > results.length` is always false and `loadMore` never loads. Found by the 027 pass-2 review.
 - **Labels**: Type=Bug.
+
+## D-022-1 — PARTIAL_RESULTS warning derived from unfiltered index counts → #3220
+- **Status**: deferred (fix with #1533). On scope=all, `poolWasSaturated` compares the unfiltered index count with the pool size. REST and `spaarke_search_documents` relay it as a 1-bit signal about documents the caller cannot open. Found by the 022 pass-1 review (K2).
+- **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## D-022-2 — SemanticSearchEndpoints logs full exceptions; client abort → 500 → #3221
+- **Status**: deferred (pre-existing REST route, outside 022's diff). Log the exception type only; return 499 at Debug on `RequestAborted`, as 024 did for playbook lists.
+- **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
