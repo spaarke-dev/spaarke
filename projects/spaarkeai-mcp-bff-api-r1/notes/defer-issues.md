@@ -306,7 +306,7 @@ Owner and ontology choose: (1) amend the spec text (the stamp sets the review st
 
 | Field | Value |
 |---|---|
-| **Status** | Fix in review: PR #2622, updated from master 2026-11-26 (`605438d64f`, no conflicts, defect still on master, 5/5 regression tests pass and fail without the fix). No reviewer yet; owner checklist item H. |
+| **Status** | Done 2026-11-26: PR #2622 merged as `24d53fb333` after an independent Opus review (approve, no fix-now; K1–K4 accepted, see the PR comment); #2620 closed. Pre-existing finding filed as ISS-011 (#3240). |
 | **Urgency** | now |
 | **Filed** | 2026-11-07 |
 | **Source** | Read-only investigation for task 010 (option C analysis), 2026-11-06 |
@@ -347,3 +347,26 @@ Reproduce it with a test first. If it is real, never mutate the shared holder in
 - IDs are sequential per kind: DEF-001, DEF-002, ... ISS-001, ISS-002, ...
 - ID never gets reused after closure — preserves traceability.
 - **Already filed elsewhere, not duplicated here:** the "DEBUG" token logger (`MiddlewarePipelineExtensions.cs:121-158`) is #1574 (labels `unified-access-control-r2`, `spaarke-auth-system-of-record-r1`).
+
+### ISS-011 — Compose profile AI calls run with no metering tenant (AiMeteringContext never opened on the save path)
+
+| Field | Value |
+|---|---|
+| **Status** | Open; for the Compose owners (labelled here until one takes it) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-26 |
+| **Source** | Independent Opus review of PR #2622 (ISS-002), "pre-existing, outside this diff" |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3240 |
+
+**Description**
+
+The Compose save path never opens an `AiMeteringContext` scope, so the detached profile's AI calls are metered with a null tenant, both before and after #2622. Concrete failure: per-tenant AI spend under-counts Compose, and any per-tenant limit that reads the context misses these calls. Also unverified: `IncludeScopes` is never set, so whether `ILogger` scopes (the audit scope) reach Azure Monitor is unknown.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeProfileDispatcher.cs` (`RunAsync`)
+- `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs` ~:2300-2365
+
+**Suggested fix**: open the metering scope for the captured tenant around the profile run, with a test.
+**Estimated effort**: about 2 hours plus the Azure Monitor check.
+**Blockers**: none. **Related**: #2620, #2622.
