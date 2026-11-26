@@ -224,7 +224,7 @@ internal sealed class DecisionAccessWindow : IDisposable
     /// any other client is returned as it is.
     /// </summary>
     internal IDataverseUserClient CallerClient(IDataverseUserClient user) =>
-        user is DataverseUserClient ? new DecisionAccessWindowCallerClient(this, user) : user;
+        user is DataverseUserClient caller ? DecisionAccessWindowCallerClient.Over(this, caller) : user;
 
     /// <summary>
     /// A route-core GET through <paramref name="inner"/>: a kept answer for a path the window keeps (keyed on the window's caller
@@ -290,16 +290,22 @@ internal sealed class DecisionAccessWindow : IDisposable
 /// today). A top-level type, as <c>CallerMetadataReadMemo</c> is: an <see cref="IDataverseUserClient"/> decorator chooses no table and
 /// no column, and the write-path ArchTests recognise it as the API, not a caller.
 /// </summary>
-internal sealed class DecisionAccessWindowCallerClient : IDataverseUserClient
+internal sealed class DecisionAccessWindowCallerClient : IDataverseUserClient, ICallerClientView
 {
     private readonly DecisionAccessWindow _window;
-    private readonly IDataverseUserClient _inner;
+    private readonly DataverseUserClient _inner;
 
-    internal DecisionAccessWindowCallerClient(DecisionAccessWindow window, IDataverseUserClient inner)
+    // Private: the only way to a view is Over(), whose parameter is the DataverseUserClient itself, so a view over an app-only or any
+    // other client cannot be built (CallerMetadataReadMemo.For shares the request's metadata store on that guarantee).
+    private DecisionAccessWindowCallerClient(DecisionAccessWindow window, DataverseUserClient inner)
     {
         _window = window;
         _inner = inner;
     }
+
+    internal static DecisionAccessWindowCallerClient Over(DecisionAccessWindow window, DataverseUserClient inner) => new(window, inner);
+
+    IDataverseUserClient ICallerClientView.Inner => _inner;
 
     public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
         _window.RouteGetAsync(_inner, relativePath, cancellationToken);
