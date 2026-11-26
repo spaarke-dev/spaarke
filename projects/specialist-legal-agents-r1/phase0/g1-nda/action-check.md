@@ -91,3 +91,11 @@ After the create: wait about 45 minutes before a test agent uses a changed actio
 
 - No row was created, updated or deleted in DEV. `Deploy-AnalysisAction.ps1` was not run.
 - The spike row's prompt addition has not been tested against the model. Task 011/021 tune the wording if the pilot shows a profile position is not applied.
+
+## Result (2026-11-26)
+
+- Owner go in chat 2026-11-26 ("Yes go"). The command above was run once with `$apply = $true` from a scratch copy; the file keeps `$apply = $false`.
+- Created: `sprk_analysisactions(17285c7b-98e9-f111-84ea-00224829aef9)`, `sprk_actioncode` `agreement-review-spike`, active, tier 100000002 (Reasoning).
+- Read back: declared inputs `documentText, term, residuals, nonSolicit, governingLaw, uncappedIndemnityFlag`; exactly one row with this action code.
+- The production `agreement-review` row (`34c9ecf2-…`) was not touched.
+- Removal: task 031.

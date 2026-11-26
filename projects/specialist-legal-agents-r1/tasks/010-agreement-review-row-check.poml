@@ -4,7 +4,7 @@
     <title>Check the agreement-review Action row and its input schema in DEV</title>
     <phase>2 Spike tools and dev deploy</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Explicit ADR constraint (ADR-043 declared inputs); may lead to a DEV data write</rigor-reason>
     <model-tier>sonnet</model-tier>
