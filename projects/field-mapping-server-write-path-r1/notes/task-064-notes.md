@@ -255,3 +255,90 @@ committed on its own. Proposed split, one branch each, in this order:
    the `FieldMapping|Push|RecordCreation` filter (Office, the chat create tool, the child-record route) need checking: an
    unfiltered run or a census of the doubles. Seam tests (f)-(h) belong here. `FieldSecuredSourceRuleGuardTests` then names the
    new shared reader as the required call.
+
+## 9. 064c: task 064 review fixes
+
+Branch `task/fm-064c`, cut from `e35a400a00`. Rigor FULL (security). Nothing pushed; no GitHub write; no live write; nothing
+under `.claude/`; none of the files the brief fences off was edited. `M` = `RecordCreationService.Mapping.cs`, `S` =
+`RecordCreationService.cs`, `C` = `Services/Dataverse/CallerWriteAuthorization.cs`.
+
+### 9.1 Rules and where they are enforced
+
+| Rule | Where |
+|---|---|
+| An explicit mapping source is the filing parent only when its table and id both match a record the caller's row is filed under (a filing lookup, or the regarding pair as `MappingSourceResolver` resolves it from its record type, read as the caller). A pair whose table cannot be told is no match (fail closed) | `SourceIsCallersFilingRecordAsync` (`M` ~616), asked for step 5's skip only (`M` ~462), after step 3 has values; the record-type read happens only when the pair's id equals the source's id |
+| The step-3 secure-source gate keeps its own question (`SourceIsCallersFilingParent`, id match on the pair) | unchanged; the owner check before the create (`EnforceMappingSourceOwnerAsync`) is that gate's invariant. `MappingSourceRuleTests` line 55 unchanged |
+| The Assigned-To class of a mapped column is the shared prefix (`InheritedAccessPermission.AssignedToColumnPrefix`) united with the canonical and bound access-conferring registries (the push's classifier, `PushRuleSelection.AssignedToColumnsOf`, as Repair's `ColumnsRepairNeverMaps` unites them); a registry that cannot be read classes every column as Assigned-To (every mapped value keeps the caller's checks) | `CopyInvariantPrefixes` (`M` ~485), `IsCopyInvariantColumn` (`M` ~495), `AssignedToColumnsOfRegistries` (`M` ~512), asked at step 5 (`M` ~1355) |
+| The caller-checks step trace names how many mapped values were copied without the caller's checks | `MappingStep.CopiedWithoutCallerChecks` (`M` ~104, set `M` ~1419), trace `S` ~762 |
+| A target column whose `IsSecured` is anything but an explicit false counts as field-secured in the caller's create check | `C` `SecuredColumnIn` (~855), asking `FieldSecuredSourceRule.CountsAsSecured` |
+| A source column asked for that the caller's metadata read does not answer counts as field-secured | `SecuredColumnsAsync` (`M` ~1099) |
+
+### 9.2 Decision (C path): one secured-source reader, no app-only metadata read
+
+The 064d proposal (section 8.5, item 2: move the secured-source read onto `MappingColumnMetadata`) is not built. The shared
+`FieldSecuredSourceRule`, asked by create and push, stays the single definition, over each writer's caller-read catalog.
+Reasons: an app-only read would change create's fail-closed scope (an unstated `IsSecured` would map nothing from the source
+instead of skipping only the rule that reads it), and every host whose app-only double does not answer the metadata call
+(the create seam fixture's is strict) would map nothing. The push already skips a rule whose source column its catalog does
+not list (the column is never selected), so the "not answered counts as secured" rule needs no push change.
+
+### 9.3 Tests
+
+New: `tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests.Task064c.cs` (13). Updated fakes (the live
+catalog shape, no assertion changed): `SecureChildOwnershipAiToolTests.ScriptedUserClient` answers every column asked with its
+`IsSecured` stated (it listed only the secured ones); `OfficeCallerDataverseDouble` declares the source columns the Office suites'
+rules read (`sprk_project`: `sprk_mattertype`, `sprk_notonsource`, `sprk_feearrangement`; `sprk_matter`: `sprk_primarycontact`).
+Six Office tests failed with the new rule and the old double, and pass with the double declaring them. No test deleted.
+
+Rule consequence (for the owner): a Concat or Template placeholder, or a Copy source, naming a column the source table does not
+have is now not applied (the column's security cannot be told); the column the rule targets is named in a warning when the
+rule would have filled it. Before,
+the placeholder was left blank and the rest of the template written.
+
+| Test | Old code | New |
+|---|---|---|
+| (a) AFilingLookupMappedFromTheFilingParent_TheCallerCannotAppendTo_IsRefused | pass | pass |
+| (b) AnOrdinaryValueFromTheRegardingPairSource_TheCallerCannotAppendTo_IsWritten | pass | pass |
+| (c) AnExplicitSourceThatIsTheFilingParent_ByTableAndId_IsWritten (pair: Office shape; lookup: child-route shape) | pass ×2 | pass ×2 |
+| (d) AnExplicitSourceWithThePairsIdButAnotherTable_KeepsTheCallersChecks (item 1) | FAIL | pass |
+| (e) AnOrdinaryAdapterDefaultTheCallerCannotAppendTo_IsDroppedAsADefault | pass | pass |
+| (f) ATemplateRuleWithAFieldSecuredPlaceholder_IsDropped | pass | pass |
+| (g) ASourceColumnWhoseSecurityIsNotStated_IsTreatedAsSecured (answered without `IsSecured` / not answered) | pass / FAIL | pass / pass |
+| (h) WhenTheSourceSecurityReadThrows_NothingIsMapped_WithAWarning | pass | pass |
+| AnAccessConferringRegistryColumnWithoutThePrefix_KeepsTheCallersChecks (item 2) | FAIL | pass |
+| TheCallerChecksStep_CountsTheValuesCopiedWithoutTheCallersChecks (item 3) | FAIL | pass |
+| ACallersTargetColumnWhoseSecurityIsNotStated_IsCheckedAsFieldSecured_AndRefuses (item 4) | FAIL | pass |
+
+Mutation proof for (e): with the `defaultColumns?.Contains(c)` argument replaced by `false`, (e) fails (the default is copied
+unchecked); restored, it passes. (c) with the pair shape passes only because the pair's table is resolved: dropping the pair
+arm from the skip decision would fail it.
+
+### 9.4 Known limits (recorded, not changed here)
+
+- K1: a profile Default rule's constant (not an adapter default) mapped from the filing parent is copied without the caller's
+  checks like a copied value. Whether a profile constant counts as "from the filing parent" is an owner question.
+- K2: when values are copied unchecked, step 5 still asks the whole row once more without them (the final check); it is
+  redundant with the per-value checks on that path. Kept: it is the row-as-written guard.
+- K3: when a copyable rule and a secured-source rule share a target column, the copyable rule's value is written and the
+  secured-source rule is not named in a warning (the naming probe runs after the copyable rules, fill-only).
+- K4: a mapped value dropped by step 5 whose column an adapter default then fills is named as "not written", while the column
+  holds the default.
+
+### 9.5 Gates
+
+- Build `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- Filtered tests (`RecordCreation|FieldMapping|Push|CallerWriteAuthorization|CallerChecks|MappedCopyRights|MappingSourceRule|
+  SecureChildOwnership|OfficeQuickCreate|OfficeTodo|OfficeCallerDataverseDouble|ChildRecord|ChatCreated|CrossSurfaceOwner|
+  RecordCreatorPerson|SecureRootCreateRoute|SecureRootInheritanceWriter|AssignedAccess`): 4012 run, 4004 pass, 3 skipped, 5
+  failed; the 3 Office ones pass after the double declares the source columns (re-run of the Office and timing set: 473 run,
+  469 pass, 3 skipped, 1 timing test failed), and the timing tests (`CreatePath_*`, `CallerChecksConcurrencyTests`) pass alone (49/49); they fail only under machine load
+  (K2, pre-existing).
+- ArchTests (`dotnet test tests/Spaarke.ArchTests`, no `--no-build`): 2855/2855 pass.
+- ADR-002 (no plugin) ✓; ADR-008 path A (checks stay in `CallerWriteAuthorization`, asked by the
+service) ✓; ADR-010 (no DI registration; the registry is read through the existing scope factory, as Repair does) ✓; ADR-019
+(warnings name the column only) ✓; ADR-028 (record-type and metadata reads as the caller) ✓; ADR-038 (tests at KEEP paths) ✓.
+§11: `SourceIsCallersFilingRecordAsync` — Existing: `SourceIsCallersFilingParent`, `MappingSourceResolver`; Extension: reuses
+the resolver's pair resolution and the same filing-lookup arm; Cost of doing nothing: a source on another table with the pair's
+id is copied without the caller's checks. `AssignedToColumnsOfRegistries` — Existing: `PushRuleSelection.AssignedToColumnsOf`,
+`ColumnsRepairNeverMaps`; Extension: calls the push classifier; Cost of doing nothing: a registry Assigned-To column without the
+prefix is copied without the caller's checks.
