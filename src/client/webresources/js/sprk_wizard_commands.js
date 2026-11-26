@@ -369,6 +369,22 @@ Spaarke.Commands.Wizards = (function () {
 
     openCreateWorkAssignmentStandalone: function () {
       openWizardWithBff(null, "sprk_createworkassignmentwizard", "", "Assign Work");
+    },
+
+    // field-mapping-server-write-path-r1 task 051 (FR-24): the To Do and Communication "New" (grid and form) open the
+    // product's create surface instead of the platform's blank form, which would create a row with no field mapping, owner
+    // rule or stamp. The To Do wizard opens with no launch record when none is passed (the Daily Briefing does the same).
+    openCreateTodoStandalone: function () {
+      openWizardWithBff(null, "sprk_createtodowizard", "", "Create New To Do");
+    },
+
+    // The email composer (sprk_emailpage), unfiled; it saves and sends through the BFF. Same size as the OOB create form.
+    openNewEmailStandalone: function () {
+      openWizardWithBff(null, "sprk_emailpage", "compose=new", "New Email", {
+        target: 2,
+        width: { value: 70, unit: "%" },
+        height: { value: 80, unit: "%" }
+      });
     }
   };
 })();

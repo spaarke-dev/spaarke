@@ -9,6 +9,8 @@
     "Spaarke.Commands.Wizards.openCreateEventWizard": "sprk_event",
     "Spaarke.Commands.Wizards.openCreateEventStandalone": "sprk_event",
     "Spaarke.Commands.Wizards.openCreateTodoWizard": "sprk_todo",
+    "Spaarke.Commands.Wizards.openCreateTodoStandalone": "sprk_todo",
+    "Spaarke.Commands.Wizards.openNewEmailStandalone": "sprk_communication",
     "Spaarke.Commands.Wizards.openCreateWorkAssignmentStandalone": "sprk_workassignment",
     "Spaarke.Commands.Wizards.openDocumentUploadWizard": "sprk_document",
     "Spaarke.Commands.Wizards.openPlaybookLibrary": "sprk_analysis",

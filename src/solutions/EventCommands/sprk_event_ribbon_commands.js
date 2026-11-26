@@ -546,45 +546,56 @@ Spaarke.Event._executeReassign = function(formContext, newOwner) {
 
 /**
  * Add Memo to Event
- * Opens Quick Create form for Memo entity pre-populated with event reference
+ * Creates the memo through the BFF (POST /api/v1/child-records/sprk_memo: filed under this event, owned by the team the
+ * ownership rule names, mapped and stamped by the server), then opens it. Never opens a quick create form and never creates
+ * through Xrm.WebApi: a row created that way would bypass the server's field mapping, owner rule and stamp
+ * (field-mapping-server-write-path-r1 task 051, FR-24).
+ *
+ * The command must load, in order: sprk_/scripts/bff_auth.js, sprk_/scripts/assignedaccess_postsave.js and
+ * sprk_/scripts/secure_child_ribbon.js (the shared BFF create, Spaarke.SecureChild.Ribbon.createChild). Without them
+ * nothing is created and the user is told so.
  * @param {Object} formContext - The form context (PrimaryControl)
  */
 Spaarke.Event.AddMemo = function(formContext) {
-    var eventId = formContext.data.entity.getId().replace(/[{}]/g, '');
-    var eventNameAttr = formContext.getAttribute("sprk_name");
-    var eventName = eventNameAttr ? eventNameAttr.getValue() : "";
+    var ribbon = typeof Spaarke.SecureChild !== "undefined" ? Spaarke.SecureChild.Ribbon : null;
+    if (!ribbon || !ribbon.createChild || !ribbon.hostOf) {
+        Xrm.Navigation.openAlertDialog({
+            title: "Add Memo",
+            text: "The create helper for this command is not loaded on this form. Reload the page and try again; if it " +
+                "persists, ask an administrator to check the command's libraries. Nothing was created."
+        });
+        return Promise.resolve(null);
+    }
 
-    // Open Quick Create form for Memo entity
-    Xrm.Navigation.openForm({
-        entityName: "sprk_memo",
-        useQuickCreateForm: true,
-        formId: null, // Use default quick create form
-        createFromEntity: {
-            entityType: "sprk_event",
-            id: eventId,
-            name: eventName
+    var host = ribbon.hostOf(formContext);
+    if (!host) {
+        Xrm.Navigation.openAlertDialog({ title: "Add Memo", text: "Save this event first, then add a memo to it." });
+        return Promise.resolve(null);
+    }
+
+    return ribbon.createChild("sprk_memo", host, null).then(function(created) {
+        if (!created) {
+            return null; // createChild already told the user why nothing was created
         }
-    }).then(function(result) {
-        if (result.savedEntityReference && result.savedEntityReference.length > 0) {
-            // Memo was created - add history entry
-            Spaarke.Event._appendHistoryEntry(
-                formContext,
-                Spaarke.Event.ActionType.MEMO_ADDED,
-                "Memo: " + (result.savedEntityReference[0].name || "New memo")
-            );
 
-            // Save to persist the history entry
-            formContext.data.save().then(function() {
-                Xrm.App.addGlobalNotification({
-                    type: 2,
-                    level: 1,
-                    message: "Memo added to event",
-                    showCloseButton: true
-                });
+        // Memo was created - add history entry, save to persist it, then open the new memo
+        Spaarke.Event._appendHistoryEntry(
+            formContext,
+            Spaarke.Event.ActionType.MEMO_ADDED,
+            "Memo: New memo"
+        );
+        return formContext.data.save().then(function() {
+            Xrm.App.addGlobalNotification({
+                type: 2,
+                level: 1,
+                message: "Memo added to event",
+                showCloseButton: true
             });
-        }
+            return Xrm.Navigation.openForm({ entityName: "sprk_memo", entityId: created.id });
+        });
     }).catch(function(error) {
-        console.error("[Event Commands] Add Memo form failed:", error);
+        console.error("[Event Commands] Add Memo failed:", error);
+        return null;
     });
 };
 
