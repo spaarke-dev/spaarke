@@ -52,6 +52,11 @@ function problemBody(err: unknown): Record<string, unknown> | null {
 export interface RegistrationPrefill {
   givenName: string;
   familyName: string;
+  /**
+   * The email the registration would use: the BFF applies the registration route's own rule (the token's email claim,
+   * exactly one value; never the UPN), R4 FR-27 (#2449). Empty means the registration could only refuse
+   * `registration_email_missing`, so `RegistrationPage` opens on that screen.
+   */
   email: string;
   /**
    * R4 FR-25 (#2192): the BFF's routing hint that the caller's own token email belongs to a licensed Spaarke user, so the
