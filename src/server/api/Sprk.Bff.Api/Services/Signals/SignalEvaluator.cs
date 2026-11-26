@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -104,14 +105,15 @@ public sealed class SignalEvaluator
     /// <summary>Days each Date Only relative bound is widened by before the per-item judgement (zones span UTC-12..UTC+14).</summary>
     internal const int DateOnlyWideningDays = 2;
 
-    /// <summary>The contact column naming who an item is FOR (D-25), on the Do-lane subjects that have one (verified live,
-    /// task 031: To Do, event and work assignment all carry <c>sprk_assignedto</c>).</summary>
+    /// <summary>The contact column naming who an item is FOR (D-25), on the Do-lane subjects that have one. To Do and event carry
+    /// <c>sprk_assignedto</c>; a work assignment's individual is its Assigned To Internal (D-129, task 227), read from
+    /// <see cref="OwnedChildWrite.ForPersonColumns"/> so the evaluator and the worklist's "mine" test cannot diverge.</summary>
     internal static readonly FrozenDictionary<string, string> AssigneeColumnBySubject =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["sprk_todo"] = "sprk_assignedto",
             ["sprk_event"] = "sprk_assignedto",
-            ["sprk_workassignment"] = "sprk_assignedto",
+            ["sprk_workassignment"] = OwnedChildWrite.ForPersonColumns["sprk_workassignment"].Column,
         }.ToFrozenDictionary();
 
     /// <summary>The witness row's display text and source columns per related table (FR-48). A table not listed gives a
