@@ -6,7 +6,7 @@ Date: 2026-11-25. Branch: agent worktree (wave F, merged into `work/spaarkeai-mc
 
 - `Api/Ai/PlaybookEndpoints.cs`: the rules of `ListUserPlaybooks` and `ListPublicPlaybooks` moved into one `public static PlaybookEndpoints.ListPlaybooksForCallerAsync(HttpContext?, PlaybookListScope, page, pageSize, nameFilter, outputTypeId, sortBy, sortDescending, CancellationToken)`. It reads the caller from the context (never a token parameter), applies the owned route's oid test, resolves the owner through `PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync`, returns the empty page when that fails (fail closed), sets `PublicOnly` for the public scope, builds the routes' `PlaybookQueryParameters`, and logs as the routes logged.
 - New types in the same file (namespace `Sprk.Bff.Api.Api.Ai`): `PlaybookListScope` (Owned, Public), `PlaybookListOutcome` (UserContextRequired = 0, Listed, OwnerUnresolved, Failed) and `PlaybookListResult` (Outcome, Status, ReasonCode, Page, Items). No `IResult`, no ProblemDetails. The page is the route's own `PlaybookListResponse` (`Models/Ai`, not `Services/Ai`): mapping it to a new DTO would have made the REST handlers map it back, risking the bytes.
-- Both handlers are now one-liners over `ListForRouteAsync`, which maps the result to the responses they always gave: 200 with the page (Listed, OwnerUnresolved), 401 "User identity not found" (UserContextRequired), 500 with the route's own detail (Failed, and a cancelled request, as the old catch-all did). The handlers no longer take `IPlaybookService` / `ILoggerFactory` parameters; the method resolves both from `RequestServices` (the same scoped instances).
+- Both handlers are now one-liners over `ListForRouteAsync`, which maps the result to the responses they always gave: 200 with the page (Listed, OwnerUnresolved), 401 "User identity not found" (UserContextRequired), 500 with the route's own detail (Failed, and a cancellation the request did not cause); 499 for an aborted request (verifier fix). The handlers no longer take `IPlaybookService` / `ILoggerFactory` parameters; the method resolves both from `RequestServices` (the same scoped instances).
 - `Api/Mcp/LegalOperations/Playbooks/ListPlaybooksTool.cs` (new): `spaarke_list_playbooks`, read-only, idempotent, model-visible, no widget. Inputs `nameFilter` (≤ 100 chars) and `page` (≥ 1), schema stated with `additionalProperties: false`. Calls the method for Owned, then Public, at the routes' defaults (20 per page, `modifiedon` desc) for the same page and filter; unions, de-duplicates by id (owned first, the legacy agent's order: `git show 37f0864afe:…/AgentEndpoints.cs` :334-:388), and slims each row to `{id, name, description, ownerKind, format}`. Logs through `DecisionToolCall.LogAroundAsync` (tool, outcome, rows, ms, correlation id).
 - Ledger row in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Playbooks.cs` (seam `PlaybookEndpoints`).
 - `McpHostContractTests.RealBffHost_ToolsList_…_IsExactlyTheFiveV1Tools`: `spaarke_list_playbooks` added; count 5 → 6 (method name kept to avoid churn for the other wave tasks that edit the same list — expect a merge conflict on this list with 023/026).
@@ -27,7 +27,7 @@ Date: 2026-11-25. Branch: agent worktree (wave F, merged into `work/spaarkeai-mc
 - **Name clipped to 200 characters** (the POML caps only the description). Needed for the size bound; real names are far shorter.
 - **Byte budget (`RowBudgetBytes` = 56 KiB) instead of a smaller page.** With escape-heavy text (`"é<` → 6 bytes per character under the default encoder) 40 rows of 200 + 200 characters exceed 64 KiB, so no page size that keeps the routes' 20 per list fits by caps alone. Rows are kept while their measured cost fits; a cut list says `truncated: true` and asks for `nameFilter`. Realistic long text (200-char names, 2,000-char descriptions clipped to 200) keeps all 40 rows (test). Over-engineering check: ~15 lines, no setting, no new type beyond the row.
 - **Text content lists name, owner kind and id per row** (no description), unlike the plan/lookup tools' count-only text: the model needs the ids to use the list, and some hosts read `content` only. Names are catalogue names, not record content (ADR-015: no definition, prompt or scope is ever read — `PlaybookSummary` carries none).
-- **Service now receives the request's cancellation token** (before: `default`). Only an aborted request behaves differently (it was and still is a 500 to a client that has gone). Existing mocks use `It.IsAny<CancellationToken>()`.
+- **Service now receives the request's cancellation token** (before: `default`). Only an aborted request behaves differently. Verifier fix: `ListForRouteAsync` answers an aborted request `499` (logged at Debug, no stack), as `ChatDocumentEndpoints` / `VisualizationEndpoints` do; before the fix it was a 500 with an Error log and stack. A cancellation the request did not cause (an HttpClient timeout) is still the routes' 500. Existing mocks use `It.IsAny<CancellationToken>()`.
 - **Plugin skill not updated** (`src/solutions/CopilotPlugins/spaarke/skills/`, guide Step 4): outside this task's file list; routing is task 041's eval. Listed for the main session.
 
 ## Placement (ADR-013 / ADR-029, `.claude/constraints/bff-extensions.md` §A)
@@ -60,7 +60,7 @@ Date: 2026-11-25. Branch: agent worktree (wave F, merged into `work/spaarkeai-mc
 - Inline code-review:
   - No F-class finding is open.
   - Three items are accepted as K-class:
-    - (K) A playbook that is the caller's own and public can show up twice across pages, or carry the wrong ownerKind, when the two lists page differently. REST paging has the same property.
+    - (fixed after verification) A public playbook the caller owns used to show as "public" on one page and "owned" on another when the two lists paged differently. The owned result now carries the resolved owner systemuserid (PlaybookListResult.OwnerSystemUserId, not serialized by REST) and the tool drops public rows the caller owns, so it appears once, as owned, on its page of the owned list.
     - (K) User-authored names and descriptions are model-visible, as they are in REST and in the legacy agent.
     - (K) The kill switch maps to a 500, not a 503. This is D-024-1 and pre-existing.
 - Inline adr-check:
@@ -72,3 +72,11 @@ Date: 2026-11-25. Branch: agent worktree (wave F, merged into `work/spaarkeai-mc
   - ADR-052: not applicable.
 
 rework: none task 024
+
+## Verifier fixes (2026-11-25)
+
+1. Client abort on the REST list routes: 499 at Debug (no stack) when RequestAborted is set; any other cancellation keeps the 500 and body. Tests: PlaybookListRoutesFrozenBytesTests (abort for both routes; non-abort cancellation stays 500 and logs at Error).
+2. The UserContextRequired text of the list tool now covers "no systemuser row" and a transient WhoAmI fault: "Spaarke could not confirm your Spaarke user account. If you are signed in with a licensed Spaarke account, try again shortly." Reason code and shared resolver unchanged.
+3. Owned+public across pages: see the fixed item under Results (PlaybookSummary.OwnerId is mapped from _ownerid_value; no Services/Ai change).
+4. K2 hardening: control characters, CR/LF/tab and Unicode line/paragraph separators in a playbook name become spaces in the text lines only; structuredContent keeps the name.
+5. Tests added: strict-service double for the unauthenticated-context case, owned-list fault (playbook.list-failed), 101-character nameFilter (playbook.invalid-argument).
