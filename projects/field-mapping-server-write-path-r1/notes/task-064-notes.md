@@ -342,3 +342,21 @@ the resolver's pair resolution and the same filing-lookup arm; Cost of doing not
 id is copied without the caller's checks. `AssignedToColumnsOfRegistries` — Existing: `PushRuleSelection.AssignedToColumnsOf`,
 `ColumnsRepairNeverMaps`; Extension: calls the push classifier; Cost of doing nothing: a registry Assigned-To column without the
 prefix is copied without the caller's checks.
+
+## 10. 064d: re-check of the 064c fixes
+
+A scoped re-check of `e35a400a00..1ccf73a503` found no defect on a real path. It found two fallbacks that no test pinned, and one point to confirm on dev. 064d (64e61f88a8, merged as fd8172ea32):
+
+- **Tests for the fail-closed fallbacks.**
+  - An access-conferring registry that cannot be read keeps the caller's checks on every mapped value, and the create still succeeds.
+  - A regarding pair whose record type is not resolved (null or a fault) is not the filing record.
+  - A control test: an explicit source carrying the pair's id is the filing record only when the record type's table is the source's table.
+  - Each test fails when the production line it pins is reverted.
+- **Source column names.** A rule's source field is trimmed and lower-cased with the rule (`NormalizedRule`), as the target already was. The field-security read asks for and compares that name. A rule spelled in mixed case is found on the source row and is checked like any other. A column the read does not answer still counts as secured. `SourceField` is used only as a Copy rule's column name; Template and Concat text lives in `Expression` and is not changed.
+- **Doc comment.** `SourceIsCallersFilingParent` matches the regarding pair by id for step 3's owner gate. `SourceIsCallersFilingRecordAsync` (step 5) also requires the table to match. The two differ on purpose.
+- **Dev checks (read-only, 2026-11-26).**
+  - Every column on `sprk_matter`, `sprk_event`, `sprk_project` and `contact` returns a boolean `IsSecured`, including virtual and `*name` columns. So the target-side rule (anything but an explicit false counts as secured) changes nothing for real columns.
+  - All 57 dev mapping rules are Copy rules (no Template or Concat).
+  - No dev rule has a mixed-case or padded column name.
+- **Gates.** Build 0 warnings. Filtered tests (`RecordCreationServiceMappingSeamTests`, `FieldSecuredSource`, `CallerWriteAuthorization`, `MappedCopyRights`) 372/372. ArchTests 2855/2855. Format clean. Publish delta for 064 as a whole, against 3e0268349a: +5,482 bytes, 194 files on both sides, 41.64 MB, no vulnerable packages.
+- **Kept as is.** The target-side check in `CallerWriteAuthorization` is unchanged.
