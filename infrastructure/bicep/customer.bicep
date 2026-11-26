@@ -138,6 +138,20 @@ param redisSkuName string = 'Balanced_B0'
 @allowed(['Enabled', 'Disabled'])
 param redisHighAvailability string = 'Enabled'
 
+// --- Intake engine (spaarke-intake-pipeline-r1 task 002, FR-01) ---
+
+@description('Deploy the intake engine: a Container Apps environment + event-triggered Job (KEDA Service Bus, stamp UAMI), the stamp-private `intake-staging` blob container with a 7-day lifecycle delete rule, and the `intake-engine-requests` queue. Default false: existing stamps are unchanged until provisioning opts in (customer-provisioning-orchestration-r1 owes the call).')
+param deployIntakeEngine bool = false
+
+@description('Engine image reference ({registry}.azurecr.io/sprk-intake-engine:{tag}). Required when deployIntakeEngine is true; the tag comes from the image build workflow (task 003).')
+param intakeEngineImage string = ''
+
+@description('Name of an EXISTING Azure Container Registry in the stamp resource group that holds the engine image. Required when deployIntakeEngine is true. Never created here: the registry choice belongs to the owner and customer-provisioning-orchestration-r1.')
+param intakeEngineRegistryName string = ''
+
+@description('Grant the stamp UAMI AcrPull on intakeEngineRegistryName. Set false when the registry is elsewhere and the grant is made there (controlplane-acr.bicep).')
+param intakeEngineGrantAcrPull bool = true
+
 // --- Tags ---
 
 // task 249 (D19, 2026-10-02): `createdDate: utcNow(...)` was dropped from the default. A `utcNow()`
@@ -790,6 +804,51 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //   coverage preserved unchanged.
 
 // ============================================================================
+// INTAKE ENGINE (spaarke-intake-pipeline-r1 task 002, FR-01; ADR-052, ADR-004 A2)
+// The NDA redline engines run as an event-triggered Container Apps Job. The Job runs as the stamp UAMI
+// above (no new identity), is triggered by a KEDA Service Bus scaler on `intake-engine-requests` (created
+// by the module with maxDeliveryCount 5), reads and writes the stamp-private `intake-staging` container
+// (7-day lifecycle) and sends its completion Job Contract to the EXISTING `sdap-jobs` queue. Gated on
+// deployIntakeEngine (default false): nothing here deploys until it is true. The BFF identity is the same
+// UAMI, so the staging grant is made once for both.
+// ============================================================================
+
+module intakeStagingStorage 'modules/intake-staging-storage.bicep' = if (deployIntakeEngine) {
+  scope: rg
+  name: 'intake-staging-${baseName}'
+  params: {
+    storageAccountName: storage.outputs.storageAccountName
+    jobPrincipalId: uami.outputs.principalId
+    bffPrincipalId: uami.outputs.principalId
+  }
+}
+
+module intakeEngineJob 'modules/intake-engine-job.bicep' = if (deployIntakeEngine) {
+  scope: rg
+  name: 'intake-engine-${baseName}'
+  params: {
+    environmentName: 'sprk-${customerId}-${environmentName}-cae'
+    jobName: 'sprk-${customerId}-${environmentName}-intake-job'
+    location: location
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsId
+    serviceBusNamespaceName: serviceBus.outputs.serviceBusName
+    // The BFF jobs queue (the one ServiceBusJobProcessor consumes); service-bus.bicep creates it from serviceBusQueues.
+    jobsQueueName: 'sdap-jobs'
+    identityResourceId: uami.outputs.id
+    identityPrincipalId: uami.outputs.principalId
+    identityClientId: uami.outputs.clientId
+    registryName: intakeEngineRegistryName
+    grantAcrPull: intakeEngineGrantAcrPull
+    image: intakeEngineImage
+    stagingStorageAccountName: storage.outputs.storageAccountName
+    stagingContainerName: intakeStagingStorage!.outputs.containerName
+    // Same source and value the BFF gets as its APPLICATIONINSIGHTS_CONNECTION_STRING app setting.
+    appInsightsConnectionString: monitoring.outputs.connectionString
+    tags: tags
+  }
+}
+
+// ============================================================================
 // KEY VAULT SECRETS (canonical secret catalog) — Phase C — customer-provisioning-
 // orchestration-r1, task 129. Invokes scripts/canonical-secret-catalog/generated/
 // kv-secrets.generated.bicep (task 084 -- DO NOT EDIT BY HAND; generated from
@@ -954,3 +1013,10 @@ output ontologyWriterIdentityClientId string = uamiOntologyWriter.outputs.client
 // (task 123) reads these exact names to populate BicepDeployOutputs.AppServiceName / AppServiceStagingSlotName. ---
 output appServiceName string = bffApi.outputs.appServiceName
 output appServiceStagingSlotName string = bffApiSlot.outputs.slotName
+
+// --- Intake engine (task 002). Empty strings when deployIntakeEngine is false. ---
+output intakeEngineDeployed bool = deployIntakeEngine
+output intakeEngineJobName string = intakeEngineJob.?outputs.jobName ?? ''
+output intakeEngineEnvironmentName string = intakeEngineJob.?outputs.environmentName ?? ''
+output intakeEngineRequestQueueName string = intakeEngineJob.?outputs.requestQueueName ?? ''
+output intakeStagingContainerName string = intakeStagingStorage.?outputs.containerName ?? ''

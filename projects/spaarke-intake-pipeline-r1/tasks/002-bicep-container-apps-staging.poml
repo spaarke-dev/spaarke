@@ -4,7 +4,7 @@
     <title>FR-01 infra: Bicep for Container Apps environment + engine Job (KEDA Service Bus, UAMI, RBAC), stamp-private staging container with 7-day lifecycle, engine request queue</title>
     <phase>0 Foundations and cleanup</phase>
     <gate>startable (authoring); dev deployment needs owner OK (task 008)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates new infrastructure files with explicit ADR constraints; no BFF/PCF code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -112,7 +112,7 @@
     <criterion testable="true">The job MI has exactly: Receiver on the request queue, Sender on the BFF jobs queue, Blob Data Contributor on the staging container, AcrPull on the registry — no namespace- or account-wide roles.</criterion>
   </acceptance-criteria>
 
-  <notes>Brief deviation: the main session's brief said "engine request/completion queues"; this task creates only the request queue because `ServiceBusJobProcessor` is single-queue (completion as a Job Contract on the existing BFF jobs queue keeps the BFF side to one more `IJobHandler`, task 014). If the owner prefers a dedicated completion queue, the escalation trigger applies.</notes>
+  <notes>Completed 2026-11-25. Names, env vars, deviations and the open registry decision: notes/002-intake-infra-names.md. Added per main-session brief: Data Sender on the request queue (retry copy) and APPLICATIONINSIGHTS_CONNECTION_STRING from monitoring.outputs.connectionString (same source as the BFF app setting); job uses the existing stamp uami. rework: none task 002. Brief deviation: the main session's brief said "engine request/completion queues"; this task creates only the request queue because `ServiceBusJobProcessor` is single-queue (completion as a Job Contract on the existing BFF jobs queue keeps the BFF side to one more `IJobHandler`, task 014). If the owner prefers a dedicated completion queue, the escalation trigger applies.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
