@@ -32,18 +32,20 @@ Administrators interact with jobs through the `/api/admin/jobs/*` endpoints
 
 ### Why not extend `sprk_processingjob`?
 
-There is an EXISTING `sprk_processingjob` entity in the org. It is scoped to **Office
-document operations** (`DocumentSave`, `EmailSave`, `ShareLinks`, `QuickCreate`,
-`ProfileSummary`, `Indexing`, `DeepAnalysis`) and tracks individual job RUN instances
-with stages, progress, idempotency keys, and a `DocumentId` lookup. R3's design
+There is an EXISTING `sprk_processingjob` entity in the org. It holds **run records**: Office
+document operations (`DocumentSave`, `EmailSave`, `ShareLinks`, `QuickCreate`,
+`ProfileSummary`, `Indexing`, `DeepAnalysis`) and, since spaarke-intake-pipeline-r1, intake
+pipeline runs (`Intake run`). It tracks individual job RUN instances
+with stages, progress, idempotency keys, and a `DocumentId` lookup
+([`sprk_processingjob.md`](sprk_processingjob.md)). R3's design
 [explicitly rejects](../../projects/spaarke-platform-foundations-r3/design.md) overloading
 that entity:
 
 | Aspect | `sprk_processingjob` (existing) | `sprk_backgroundjob` (new) |
 |---|---|---|
-| Scope | Office document operations | Scheduled-job framework (junction recon, playbook scheduler, cache warming, etc.) |
+| Scope | Run records: Office document operations and intake pipeline runs | Scheduled-job framework (junction recon, playbook scheduler, cache warming, etc.) |
 | Granularity | One row per **run instance** | One row per **job definition** (run history lives in `sprk_backgroundjobrun`) |
-| Office coupling | Has `DocumentId` lookup (meaningless for non-Office jobs) | None |
+| Run-record coupling | Has `DocumentId`, request and output-document lookups (meaningless for a job definition) | None |
 | Trigger model | Event-driven (file save, email send) | Cron + manual admin trigger |
 | Status fields | Stage/progress/idempotency | Last-run denormalized fields |
 

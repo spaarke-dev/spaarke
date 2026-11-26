@@ -218,8 +218,9 @@ public class OfficeJobStatusService
         try
         {
             var row = await _jobService.GetCallersProcessingJobByIdempotencyKeyAsync(idempotencyKey, callerObjectId, ct);
-            if (row is null)
+            if (row is null || IsIntakeRun(row))
             {
+                // An intake run is no Office save, so it is never an Office save's duplicate (FR-06b).
                 return null;
             }
 
@@ -262,6 +263,15 @@ public class OfficeJobStatusService
             return null;
         }
 
+        // FR-06b: one table, two record kinds. An intake run belongs to the intake status surface, so the Office read
+        // answers it as not found, whoever asks and whatever its creator (the Office ownership check would pass the
+        // submitter of the request, whose id the run records as its initiator).
+        if (IsIntakeRun(row))
+        {
+            _logger.LogDebug("Job {JobId} is an intake run, not an Office job; treating as not found", jobId);
+            return null;
+        }
+
         var job = ToEffectiveView(row, _time.GetUtcNow());
 
         if (userId is not null && !string.Equals(job.CreatedBy, userId, StringComparison.OrdinalIgnoreCase))
@@ -274,6 +284,13 @@ public class OfficeJobStatusService
 
         return job;
     }
+
+    /// <summary>
+    /// Whether a <c>sprk_processingjob</c> row is an intake pipeline run (<c>sprk_jobtype</c> = Intake run) rather than an
+    /// Office job. The Office reads exclude it (FR-06b); intake status reads select it.
+    /// </summary>
+    internal static bool IsIntakeRun(ProcessingJobRecord row) =>
+        row.JobType == (int)Sprk.Bff.Api.Models.ProcessingJobType.IntakeRun;
 
     /// <summary>
     /// The job's effective state, from its row. ONE rule for both readers (notes §3).
