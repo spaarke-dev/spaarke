@@ -70,6 +70,7 @@ public sealed class AnalysisToolsAuthTests
         result.IsError.Should().BeTrue();
         ReasonOf(result).Should().Be("sdap.access.deny.insufficient_rights");
         StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        ((TextContentBlock)result.Content.Single()).Text.Should().Contain("may not start an analysis", "a real refusal keeps the refusal text (control)");
         host.VerifyCreateWroteNothing();
     }
 
@@ -104,6 +105,10 @@ public sealed class AnalysisToolsAuthTests
 
         result.IsError.Should().BeTrue();
         ReasonOf(result).Should().Be("sdap.access.error.system_failure");
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        // A system fault is not a refusal of the caller: its own text, never "may not start".
+        result.StructuredContent!.Value.GetProperty("message").GetString().Should().Be("Spaarke could not check access right now. Try again shortly.");
+        ((TextContentBlock)result.Content.Single()).Text.Should().Be("Spaarke could not check access right now. Try again shortly.").And.NotContain("may not");
         JsonSerializer.Serialize(result).Should().NotContain("secret detail");
         host.VerifyCreateWroteNothing();
     }

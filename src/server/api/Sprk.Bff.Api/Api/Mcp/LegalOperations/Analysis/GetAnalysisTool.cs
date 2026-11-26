@@ -34,9 +34,16 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Analysis;
 /// <para><b>One decision, one answer.</b> The tool calls <see cref="AnalysisEndpoints.ReadAnalysisAsCallerAsync"/> with exactly
 /// <c>IHttpContextAccessor.HttpContext</c> and copies no check. An analysis the caller may not read, one the external narrowing hides,
 /// and one that does not exist give the same <c>isError</c> not-found (<see cref="DocumentToolSupport.NotFound"/>, REST's uniform 404).</para>
-/// <para><b>Result.</b> <c>structuredContent</c> is <c>{ analysisId, status, documentId, documentName, actionName, startedOn, completedOn,
-/// summary, link }</c>. ADR-015: of the analysis output, only <c>summary</c> (at most <see cref="SummaryMaxChars"/> characters of the
-/// final output, or of the working document when there is none, on one line); no chat history, no token usage.</para>
+/// <para><b>Result.</b> <c>structuredContent</c> is <c>{ analysisId, documentId, actionName, startedOn, summary, link }</c>. ADR-015: of the
+/// analysis output, only <c>summary</c> (at most <see cref="SummaryMaxChars"/> characters of the final output, or of the working document
+/// when there is none, on one line); no chat history, no token usage.</para>
+/// <para><b>No status, no completion time, no document name (verifier fix F1; D-031-2).</b> The route's read, on an uncached analysis,
+/// answers <c>Status = "Completed"</c> for EVERY row (a row that was never run included), the analysis's own name as <c>DocumentName</c>
+/// and its last-modified time as <c>CompletedOn</c> (<c>AnalysisDocumentLoader.GetOrReloadFromDataverseAsync</c>; a REST contract this
+/// task does not change). The tool cannot get the real status instead: nothing in the server writes a status to <c>sprk_analysis</c> after
+/// the create (it stays Active), and the repo defines no Draft, In progress, Completed or Failed value for it. So the tool says none of
+/// the three, and says so in its text: the model must not tell a user that an analysis is complete. The link opens it, and the Analysis
+/// Workspace shows its real state. <c>startedOn</c> is the row's creation time.</para>
 /// </remarks>
 [McpArea(McpEndpoints.LegalOperationsArea)]
 [Authorize]
@@ -60,11 +67,11 @@ internal sealed class GetAnalysisTool : McpToolDefinition
 
     /// <summary>The description the model reads (at most 1,024 characters, "use for / not for").</summary>
     internal const string Description =
-        "Use for: checking one Spaarke analysis the signed-in user may read, by its id: its status, the document it analyses, the action "
-        + "it ran, when it started and completed, a short summary of its output, and a link that opens it in the Spaarke Analysis "
-        + "Workspace. Needs the analysis id, from spaarke_start_analysis. Not for: starting an analysis (use spaarke_start_analysis); "
-        + "the full analysis output (open the link); documents. An analysis that does not exist and one the user may not read return "
-        + "the same not-found answer.";
+        "Use for: looking up one Spaarke analysis the signed-in user may read, by its id: the document it analyses, the action it ran, "
+        + "when it was created, a short summary of its output, and a link that opens it in the Spaarke Analysis Workspace. It does not "
+        + "report whether the analysis has run or finished; the link shows that. Needs the analysis id, from spaarke_start_analysis. "
+        + "Not for: starting an analysis (use spaarke_start_analysis); the full analysis output (open the link); documents. An analysis "
+        + "that does not exist and one the user may not read return the same not-found answer.";
 
     private static readonly JsonElement InputSchema = JsonSerializer.SerializeToElement(new JsonObject
     {
@@ -162,22 +169,18 @@ internal sealed class GetAnalysisTool : McpToolDefinition
     /// <summary>The success result for the route's analysis: the slim analysis, its text lines and its link. Pure.</summary>
     internal static CallToolResult ResultOf(AnalysisDetailResult analysis, string? consoleBaseUrl)
     {
-        var documentName = Short(analysis.DocumentName, NameMaxChars);
+        // Status, CompletedOn and DocumentName are NOT read: the route's loader fabricates them for an uncached row (class remarks, D-031-2).
         var actionName = Short(analysis.Action?.Name, NameMaxChars);
         var summary = Short(string.IsNullOrWhiteSpace(analysis.FinalOutput) ? analysis.WorkingDocument : analysis.FinalOutput, SummaryMaxChars);
         var body = new GetBody(
             analysis.Id.ToString("D"),
-            McpText.SingleLine(analysis.Status),
             analysis.DocumentId == Guid.Empty ? null : analysis.DocumentId.ToString("D"),
-            documentName,
             actionName,
             Timestamp(analysis.StartedOn),
-            Timestamp(analysis.CompletedOn),
             summary,
             AnalysisEndpoints.AnalysisWorkspaceLink(consoleBaseUrl, analysis.Id, analysis.DocumentId));
 
-        var text = $"Analysis {body.AnalysisId}: {(string.IsNullOrEmpty(body.Status) ? "status unknown" : body.Status)}"
-                   + (documentName is { } document ? $"\nDocument: {document}" : string.Empty)
+        var text = $"Analysis {body.AnalysisId}. Its status is not reported here: open it to see whether it has run."
                    + (actionName is { } action ? $"\nAction: {action}" : string.Empty)
                    + (summary is { } text1 ? $"\nSummary: {text1}" : string.Empty)
                    + (body.Link is { } link ? $"\nOpen in the Spaarke Analysis Workspace: {link}" : string.Empty);
@@ -197,6 +200,5 @@ internal sealed class GetAnalysisTool : McpToolDefinition
 
     /// <summary><c>structuredContent</c> of <c>spaarke_get_analysis</c>: the slim analysis and its link.</summary>
     internal sealed record GetBody(
-        string AnalysisId, string Status, string? DocumentId, string? DocumentName, string? ActionName,
-        string? StartedOn, string? CompletedOn, string? Summary, string? Link);
+        string AnalysisId, string? DocumentId, string? ActionName, string? StartedOn, string? Summary, string? Link);
 }

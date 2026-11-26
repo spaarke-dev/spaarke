@@ -362,6 +362,8 @@ public sealed class McpAuthTests
         // required key, the key optional, the key not a string, destructive, not idempotent, or the hints left unset.
         ToolShapes.ReversibleWriteNoKey, ToolShapes.ReversibleWriteKeyOptional, ToolShapes.ReversibleWriteKeyNotString,
         ToolShapes.ReversibleWriteDestructive, ToolShapes.ReversibleWriteNotIdempotent, ToolShapes.ReversibleWriteHintsUnset,
+        // Verifier fix F2 (closed list): a PERFECT reversible-write shape under a name that is not in ModelCallableWrites still refuses.
+        ToolShapes.ReversibleWriteUnlisted,
     };
 
     [Theory]
@@ -372,7 +374,34 @@ public sealed class McpAuthTests
 
         var act = () => McpToolAuthorization.ValidateTool(tool, definition);
 
-        act.Should().Throw<InvalidOperationException>().WithMessage($"*'{shape}'*");
+        // The tool's own name: the NFR-06 shapes carry the listed name, so each refuses for its own reason, not for being unlisted.
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*'{tool.ProtocolTool.Name}'*");
+    }
+
+    [Fact(DisplayName = "031 fix F2: the unlisted reversible write is refused FOR being unlisted, and the listed one is not (must-fire / must-not-fire)")]
+    public void ValidateTool_ReversibleWrite_MustBeNamedInTheClosedList()
+    {
+        var (unlisted, unlistedDefinition) = ToolShapes.Build(ToolShapes.ReversibleWriteUnlisted);
+        var (listed, listedDefinition) = ToolShapes.Build(ToolShapes.ReversibleWrite);
+
+        var refuse = () => McpToolAuthorization.ValidateTool(unlisted, unlistedDefinition);
+        var accept = () => McpToolAuthorization.ValidateTool(listed, listedDefinition);
+
+        refuse.Should().Throw<InvalidOperationException>().WithMessage("*ModelCallableWrites*");
+        accept.Should().NotThrow();
+        McpToolAuthorization.ModelCallableWrites.Should().Contain(listed.ProtocolTool.Name);
+        McpToolAuthorization.ModelCallableWrites.Should().NotContain(unlisted.ProtocolTool.Name);
+    }
+
+    [Fact(DisplayName = "031 fix F2: an app-only write needs no entry in the closed list (r1's gating is unchanged)")]
+    public void ValidateTool_AppOnlyWrite_IsNotInTheClosedList_AndPasses()
+    {
+        var (tool, definition) = ToolShapes.Build(ToolShapes.WriteAppOnly);
+
+        McpToolAuthorization.ModelCallableWrites.Should().NotContain(tool.ProtocolTool.Name);
+        var act = () => McpToolAuthorization.ValidateTool(tool, definition);
+
+        act.Should().NotThrow();
     }
 
     [Theory]
@@ -455,6 +484,10 @@ public sealed class McpAuthTests
         public const string ReversibleWriteDestructive = nameof(ReversibleWriteDestructive);
         public const string ReversibleWriteNotIdempotent = nameof(ReversibleWriteNotIdempotent);
         public const string ReversibleWriteHintsUnset = nameof(ReversibleWriteHintsUnset);
+        public const string ReversibleWriteUnlisted = nameof(ReversibleWriteUnlisted);
+
+        /// <summary>The one name in <c>McpToolAuthorization.ModelCallableWrites</c> today: the accept shapes and each refuse shape's own fault use it.</summary>
+        private const string Listed = Sprk.Bff.Api.Api.Mcp.LegalOperations.Analysis.StartAnalysisTool.ToolName;
 
         /// <summary>An input schema with an <c>idempotencyKey</c> property of <paramref name="keyType"/>, required when <paramref name="required"/>.</summary>
         private static JsonElement KeySchema(bool required = true, string keyType = "string", bool hasKey = true) =>
@@ -487,14 +520,15 @@ public sealed class McpAuthTests
 
         public static (McpServerTool Tool, Type Definition) Build(string shape) => shape switch
         {
-            ReversibleWrite => (Reversible(shape, KeySchema()), typeof(Sanctioned)),
-            ReversibleWriteModelAndApp => (Reversible(shape, KeySchema(), visibility: ["model", "app"]), typeof(Sanctioned)),
-            ReversibleWriteNoKey => (Reversible(shape, KeySchema(hasKey: false)), typeof(Sanctioned)),
-            ReversibleWriteKeyOptional => (Reversible(shape, KeySchema(required: false)), typeof(Sanctioned)),
-            ReversibleWriteKeyNotString => (Reversible(shape, KeySchema(keyType: "integer")), typeof(Sanctioned)),
-            ReversibleWriteDestructive => (Reversible(shape, KeySchema(), destructive: true), typeof(Sanctioned)),
-            ReversibleWriteNotIdempotent => (Reversible(shape, KeySchema(), idempotent: false), typeof(Sanctioned)),
-            ReversibleWriteHintsUnset => (Reversible(shape, KeySchema(), destructive: null, idempotent: null), typeof(Sanctioned)),
+            ReversibleWrite => (Reversible(Listed, KeySchema()), typeof(Sanctioned)),
+            ReversibleWriteModelAndApp => (Reversible(Listed, KeySchema(), visibility: ["model", "app"]), typeof(Sanctioned)),
+            ReversibleWriteUnlisted => (Reversible(shape, KeySchema()), typeof(Sanctioned)),
+            ReversibleWriteNoKey => (Reversible(Listed, KeySchema(hasKey: false)), typeof(Sanctioned)),
+            ReversibleWriteKeyOptional => (Reversible(Listed, KeySchema(required: false)), typeof(Sanctioned)),
+            ReversibleWriteKeyNotString => (Reversible(Listed, KeySchema(keyType: "integer")), typeof(Sanctioned)),
+            ReversibleWriteDestructive => (Reversible(Listed, KeySchema(), destructive: true), typeof(Sanctioned)),
+            ReversibleWriteNotIdempotent => (Reversible(Listed, KeySchema(), idempotent: false), typeof(Sanctioned)),
+            ReversibleWriteHintsUnset => (Reversible(Listed, KeySchema(), destructive: null, idempotent: null), typeof(Sanctioned)),
             nameof(NoAuthorizeTool) => (Make(NoAuthorizeTool.Run, shape), typeof(NoAuthorizeTool)),
             nameof(ExternalPolicyTool) => (Make(ExternalPolicyTool.Run, shape), typeof(ExternalPolicyTool)),
             nameof(NamedSchemeTool) => (Make(NamedSchemeTool.Run, shape), typeof(NamedSchemeTool)),
