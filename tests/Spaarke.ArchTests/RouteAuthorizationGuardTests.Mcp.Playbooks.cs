@@ -7,5 +7,14 @@ namespace Spaarke.ArchTests;
 /// </summary>
 public partial class RouteAuthorizationGuardTests
 {
-    private static readonly IReadOnlyList<McpTool> McpToolsPlaybooks = Array.Empty<McpTool>();
+    private static readonly IReadOnlyList<McpTool> McpToolsPlaybooks = new[]
+    {
+        // --- task 024 (spaarke_list_playbooks) ---
+        new McpTool("ListPlaybooksTool", "", "PlaybookEndpoints",
+            "spaarke_list_playbooks (FR-04, model-visible, read-only): the owned and public JPS playbook lists through "
+            + "PlaybookEndpoints.ListPlaybooksForCallerAsync, the two list routes' own rules (owner = the caller's systemuserid by WhoAmI "
+            + "over OBO, PublicOnly, paging), with exactly IHttpContextAccessor.HttpContext; no caller or no systemuser is "
+            + "UserContextRequired. Bare [Authorize]: an A10 workforce user, like the REST playbook group."),
+        // --- end task 024 ---
+    };
 }

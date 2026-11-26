@@ -68,7 +68,7 @@ Architecture: `docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md`. Step-by-st
 
 | Resource | Purpose |
 |---|---|
-| `src/server/api/Sprk.Bff.Api/Api/Mcp/` | The host, catalog, authorization, result helpers and the five legal-operations tools |
+| `src/server/api/Sprk.Bff.Api/Api/Mcp/` | The host, catalog, authorization, result helpers and the legal-operations tools (one folder per area under `LegalOperations/`) |
 | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs` | DI, stateless transport, kill switch |
 | `projects/spaarkeai-mcp-bff-api-r1/spec.md` | FR-01–FR-12, NFR-01–NFR-09 (the requirements these rules come from) |
 | `.claude/adr/ADR-028-spaarke-auth-architecture.md` (A10) | The connector auth plane |
