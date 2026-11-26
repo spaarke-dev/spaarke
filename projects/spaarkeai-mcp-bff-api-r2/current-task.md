@@ -1,38 +1,25 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (checkpoint: Phase 1 wave 5 closing; 025 under review, 027 pass-2 fixes pending)
-> **Phase**: Phase 0 code complete; its owner-gated items are listed below. Phase 1 is running under D-r1-gate.
+> **Last Updated**: 2026-11-26 (checkpoint: Phase 1 code complete; Phase 2 Wave 7 launching)
+> **Phase**: Phase 0 and Phase 1 code complete (owner-gated items below). Phase 2 Wave 7: 030, 031, 034 launching; 033 and 036 blocked on owner decisions.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
-| **Active work** | `/project-pipeline` Step 5, Phase 1. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers, applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **Running now** | The two 025 verifiers: pass 1 (tenant isolation) and pass 2 (parity and shape). A background rerun of a sample of failed Office/Search tests (see below). |
-| **Next** | (1) Launch an implementer for the 027 pass-2 follow-ups (list below), merge it, then mark 027 done. (2) Launch 022 (search tools; deps 009, 020, 027). Its brief must say: fix #3212 (search 500s echo ex.Message) with a regression test; bound `limit`; catch shared-method exceptions; never expose TotalResults or count until #1533 is fixed. (3) Fix the 025 verifier findings, then mark 025 done. (4) After Phase 1 code: full build, full ArchTests, push, devops-project-sync, append to the shared notes status file. (5) 029 deploy waits on the owner gates. |
-| **Uncommitted** | None. HEAD c25c884ea5 is pushed. |
-| **Branch state** | origin/master merged at 3b5c87fbe1 (includes r1 #3199). The BFF builds. ArchTests 2848–2853 green on agent runs. The decisions widget passes tsc and jest (392). |
-
-## 027 pass-2 follow-ups (no F1; to fix in scope)
-- **ArchTest gaps** in `tests/Spaarke.ArchTests/SearchAuthorizationPhaseCallerGuardTests.cs:73-75`: the regex must allow `global using`, add a `global using static` must-fire control, and seal both filter classes (or flag derivation).
-- **Golden tests:** add one theory pinning the REST status, title, detail, code and errorCode for every Semantic/Record refusal and for the count 403. No test pins titles today.
-- **D-027-2 regression test:** file a GitHub issue and move or rename the test to `tests/integration/regression/Issue{N}_*`.
-- **Notes correction:** the entity total does leak, under the already-filed #1533; correct notes/027-decisions.md.
-- **Pre-existing, check and file if new:** `useRecordSearch.ts:182` `hasMore` can never be true.
-- Leftover export folder `C:\wt027r`: a guard blocked its deletion; remove it by hand or leave it.
-
-## Wider test run after the 027 merge
-About 20 failures, mostly Office/DataMutation tests that 027 doesn't touch. Each took 3–4 minutes, so suspected timeouts under machine load. Rerunning a sample on its own (background). If they pass alone, record the failures as load; if they fail, investigate.
+| **Active work** | `/project-pipeline` Step 5, Phase 2 Wave 7. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
+| **Running now** | Wave 7 implementers: 030 (playbook run tools, ADR-039 check passed as Path C, see notes/decisions.md D-030-adr039), 031 (analysis tools), 034 (briefing tool and widget). |
+| **Next** | On each completion: merge, run two reviews, fix, re-check, mark done. Then Wave 8: 032 (after 030; its dev data needs the 012 go, code does not) and 035 (after 034). 033 waits on the 008 owner decision; 036 waits on the #3181 owner choice. Deploys (019, 029, 039) wait on owner gates. Then devops-project-sync and the shared notes status file. |
+| **Uncommitted** | None. HEAD 71f7c02e46 is pushed. |
+| **Branch state** | Master merged at 3b5c87fbe1 + agent-worktree master pickups (#3203, #3204, InvoiceReview/Office PRs). Build clean; full ArchTests 2858; Search/Mcp/Tenant/Regression unit tests 2593 passed. |
 
 ## Status (TASK-INDEX is authoritative)
 - ✅ **Phase 0:** 001, 002, 003, 004, 006, 007, 009, 010, 011.
-- ✅ **Phase 1:** 020, 021, 023, 024, 026.
-- 🔄 **Merged, under review:** 025 (two passes running) and 027 (pass-2 follow-ups pending).
-- 🔲 **Waiting:** 022 (after 027).
+- ✅ **Phase 1 code:** 020, 021, 022, 023, 024, 025, 026, 027. 029 (deploy) waits on 019 and the owner's go.
 - 🔄 **Owner-gated:**
   - 005: code and widened script merged; the dev schema go is not given;
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
-- **030:** keeps its ADR-039 check. The run-record decision is made (D-run-record-decided), and the one-writer rule holds: `PlaybookRunRecordStore` is the only writer.
+- 🔲 **Blocked on owner:** 033 (008), 036 (#3181).
 
 ## Open owner questions
 1. **005:** the go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev. Also the earlier §4 acceptance-criterion-3 question in notes/005-schema.md.
@@ -55,7 +42,7 @@ About 20 failures, mostly Office/DataMutation tests that 027 doesn't touch. Each
 13. **Cowork review skill pairing (recorded 2026-11-26, for accelerator-r1):** `notes/cross-project-cowork-review-skill.md`. A Spaarke Cowork skill (for example `nda-review`) sits on top of this project's tools. Gaps for accelerator-r1 to decide: getting the document file into the sandbox, and matter email through `spaarke_compose_email`, not Outlook. No r2 action.
 
 ## Issues filed this wave
-#3205 #3206 #3207 #3208 #3209 #3212 #3215 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
+#3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
 
 ## Peer coordination
 - **mcp-r1:** #3199 merged and brought into this branch. #2575 (r1 ISS-001, the legacy Copilot agent code) was handed to us 2026-11-26: task 001 (8a92da8751) removes it, so the merge PR body must say "Closes #2575". r1 owns the ISS-010 files and the Decision wizard heading files; message r1 before editing them.
@@ -66,6 +53,7 @@ About 20 failures, mostly Office/DataMutation tests that 027 doesn't touch. Each
 
 ## Decided
 - D-r1-gate.
+- D-030-adr039 (2026-11-26): 030 passes the ADR-039 check as Path C; see notes/decisions.md.
 - D-run-record-decided, which replaces D-run-record-hold.
 - D-024-extract.
 - Task 027 added.

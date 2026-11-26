@@ -94,3 +94,21 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
   - the owner's explicit go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev (root §5; this decision is a design choice, not that go);
   - task 030 keeps its ADR-039 check (the node engine stays frozen);
   - check specialist-legal-agents-r1's docs/ADR PR (ADR-039 + AI architecture doc) against 005's column list when it arrives.
+
+## D-030-adr039 — task 030 passes the ADR-039 check (Path C, comply) — 2026-11-26
+
+- **Check:** the 030 POML's ADR-039 HOLD asks whether exposing existing node-engine playbooks to Copilot is "new capability on the frozen node-graph engine".
+- **Result: no.**
+  - `spaarke_run_playbook` / `spaarke_get_playbook_run` are thin MCP adapters over the existing playbook execute path.
+  - Authorization goes through task 007's `PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync`, a shared method.
+  - Runs are recorded through task 005's `PlaybookRunRecordStore`.
+  - They add no node types, no executors and no change to `PlaybookOrchestrationService` or the `sprk_playbooknode` graphs.
+  - The freeze is on the engine, not on invoking its existing playbooks from another host.
+- **The ADR-039 amendment (PR #3213, open, owner-approved Path B):** it states this directly. The freeze "applies to the node-graph *engine* only; playbooks as a concept ... are the live model". Every run is written through `PlaybookRunRecordStore`, the one writer.
+- **Constraints carried into 030's brief:**
+  - no edit to the engine, its executors or the node graphs;
+  - the run goes through the same entry path and budget as REST;
+  - Kind = Engine on the run record;
+  - no second run store or writer;
+  - if the implementation would need any engine change, stop and report: that would fail the check, and the 🔔 ADR Conflict goes to the owner.
+- **Peer:** specialist-legal-agents-r1 raised the HOLD. This result is reported to it in the shared notes status file.
