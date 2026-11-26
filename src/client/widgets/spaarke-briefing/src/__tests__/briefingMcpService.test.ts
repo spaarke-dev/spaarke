@@ -10,6 +10,7 @@ import {
   OpeningResult,
   createBriefingMcpService,
   mapBriefingResult,
+  omittedHighlightsOf,
 } from '../briefing/briefingMcpService';
 import type { WidgetToolResult } from '../../../shared/mcp/widgetMcpTransport';
 
@@ -84,6 +85,24 @@ describe('mapBriefingResult', () => {
   it('does not report success for an error result even if it carries a channelNarratives array', () => {
     const result = mapBriefingResult(BRIEFING, { isError: true, message: 'failed' });
     expect(result.status).toBe('error');
+  });
+});
+
+describe('omittedHighlightsOf', () => {
+  it('reads the count of highlights the tool left out', () => {
+    expect(omittedHighlightsOf({ ...BRIEFING, omittedHighlights: 7 })).toBe(7);
+  });
+
+  it.each([
+    ['absent', BRIEFING],
+    ['zero', { ...BRIEFING, omittedHighlights: 0 }],
+    ['negative', { ...BRIEFING, omittedHighlights: -2 }],
+    ['fractional', { ...BRIEFING, omittedHighlights: 1.5 }],
+    ['a string', { ...BRIEFING, omittedHighlights: '7' }],
+    ['not an object', 'text'],
+    ['null', null],
+  ])('is 0 when it is %s', (_name, value) => {
+    expect(omittedHighlightsOf(value)).toBe(0);
   });
 });
 
@@ -189,6 +208,30 @@ describe('createBriefingMcpService', () => {
     const service = createBriefingMcpService({ transport, opening: new OpeningResult(), openingWaitMs: 1 });
 
     expect(await service.renderBriefing()).toEqual({ status: 'error', message: 'The host did not answer.' });
+  });
+
+  it('reports the omitted highlights of every read, 0 for an untrimmed or failed one', async () => {
+    const transport = transportReturning(
+      { structuredContent: { ...BRIEFING, omittedHighlights: 3 } },
+      { structuredContent: BRIEFING },
+      { isError: true, structuredContent: { reasonCode: 'briefing.failed', message: 'no', status: 500 } }
+    );
+    const opening = new OpeningResult();
+    opening.offer({ ...BRIEFING, omittedHighlights: 9 });
+    const seen: number[] = [];
+    const service = createBriefingMcpService({
+      transport,
+      opening,
+      openingWaitMs: 10,
+      onOmittedHighlights: n => seen.push(n),
+    });
+
+    await service.renderBriefing(); // the opening result
+    await service.renderBriefing(); // Refresh: trimmed
+    await service.renderBriefing(); // Refresh: not trimmed
+    await service.renderBriefing(); // Refresh: failed
+
+    expect(seen).toEqual([9, 3, 0, 0]);
   });
 
   it('exposes only renderBriefing: no preferences, so the Preferences menu is hidden', () => {

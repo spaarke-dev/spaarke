@@ -40,7 +40,7 @@ const RAW_COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
  * defect, wherever the code came from.
  */
 const BUILT_FORBIDDEN =
-  /(?<![\w.])fetch\s*\(|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB|document\.cookie|acquireToken|\bBearer\b|\bmsal\b/;
+  /(?<![\w.])fetch\s*\(|\.fetch\s*\(|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|indexedDB|document\.cookie|acquireToken|\bBearer\b|\bmsal\b/;
 const BUILT = resolve(__dirname, '../../dist/index.html');
 
 const files = sourceFiles(SRC);
@@ -118,6 +118,8 @@ describe('guard controls (each pattern fires on what it is meant to catch)', () 
 
   it.each([
     ['a fetch call', 'a=await fetch(u)'],
+    ['a fetch method call', 'await window.fetch(u)'],
+    ['a fetch method call on a stored reference', 'const r = await ref.current .fetch (u)'],
     ['XHR', 'new XMLHttpRequest'],
     ['a beacon', 'navigator.sendBeacon(u)'],
     ['localStorage', 'localStorage.getItem(k)'],
