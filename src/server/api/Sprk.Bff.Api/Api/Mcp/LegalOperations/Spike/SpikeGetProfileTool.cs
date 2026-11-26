@@ -29,10 +29,13 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Spike;
 /// </summary>
 /// <remarks>
 /// <para><b>Fail closed (FR-02).</b> No signed-in caller, or a caller <see cref="ISpecialistProfileSpikeAi.ResolveCallerAsync"/> cannot
-/// resolve, is <c>CALLER_UNRESOLVED</c>; a resolved caller with no profile keyed to their <c>systemuserid</c> is <c>NO_PROFILE</c>.
-/// Neither returns any profile; there is no default or fallback profile.</para>
-/// <para><b>Logging (FR-03, NFR-05).</b> One line of request header NAMES and one telemetry line per call; no header value, token,
-/// claim, systemuserid or profile text is logged.</para>
+/// match to a Spaarke user, is <c>CALLER_UNRESOLVED</c>; a caller lookup that failed (a Dataverse error) is the retryable
+/// <c>CALLER_LOOKUP_FAILED</c>; AI switched off (the Null facade) is <c>AI_DISABLED</c>; a resolved caller with no profile keyed to their
+/// <c>systemuserid</c> is <c>NO_PROFILE</c>. None returns any profile; there is no default or fallback profile.</para>
+/// <para><b>Logging (FR-03, NFR-05).</b> These tools write one line of request header NAMES and one telemetry line per call (with the
+/// identifier-only resolver reason on a fail-closed call); neither line carries a header value, token, claim, systemuserid or profile
+/// text. The pre-existing <c>CallerSystemUserResolver</c> behind the facade (unchanged by the spike) does log the caller's <c>oid</c>
+/// claim when no active systemuser matches it or when its Dataverse lookup fails.</para>
 /// </remarks>
 [McpArea(McpEndpoints.LegalOperationsArea)]
 [Authorize]
@@ -85,34 +88,45 @@ internal sealed class SpikeGetProfileTool : McpToolDefinition
         return tool;
     }
 
-    private static async Task<CallToolResult> GetAsync(
+    private static Task<CallToolResult> GetAsync(
         RequestContext<CallToolRequestParams> request,
         IHttpContextAccessor accessor,
         ISpecialistProfileSpikeAi spike,
         TimeProvider time,
         ILogger<SpikeGetProfileTool> logger,
+        CancellationToken cancellationToken) =>
+        InvokeAsync(request.Params?.Arguments, accessor.HttpContext, spike, SpikeTestProfiles.Default, time, logger, cancellationToken);
+
+    /// <summary>One call with its two log lines (header names first, the telemetry line last, however the call ends).</summary>
+    internal static async Task<CallToolResult> InvokeAsync(
+        IDictionary<string, JsonElement>? arguments,
+        HttpContext? http,
+        ISpecialistProfileSpikeAi spike,
+        SpikeTestProfileSet profiles,
+        TimeProvider time,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         var started = time.GetTimestamp();
-        var http = accessor.HttpContext;
         SpikeToolCall.LogHeaderNames(logger, Name, http);
         var outcome = SpikeToolCall.Exception;
-        string? version = null;
+        SpikeToolRun? run = null;
         try
         {
-            var (result, profile) = await RunAsync(request.Params?.Arguments, http, spike, SpikeTestProfiles.Default, cancellationToken);
-            version = profile?.ProfileVersion;
-            outcome = SpikeToolCall.OutcomeOf(result);
-            return result;
+            run = await RunAsync(arguments, http, spike, profiles, cancellationToken);
+            outcome = SpikeToolCall.OutcomeOf(run.Result);
+            return run.Result;
         }
         finally
         {
-            SpikeToolCall.LogCompleted(logger, Name, outcome, version, time.GetElapsedTime(started), http?.TraceIdentifier);
+            SpikeToolCall.LogCompleted(
+                logger, Name, SpikeToolCall.FinalOutcome(outcome, cancellationToken), run?.Reason, run?.Profile?.ProfileVersion, null,
+                time.GetElapsedTime(started), http?.TraceIdentifier);
         }
     }
 
     /// <summary>The tool's work, with the profile set passed in (production: the embedded set).</summary>
-    internal static async Task<(CallToolResult Result, SpikeTestProfile? Profile)> RunAsync(
+    internal static async Task<SpikeToolRun> RunAsync(
         IDictionary<string, JsonElement>? arguments,
         HttpContext? http,
         ISpecialistProfileSpikeAi spike,
@@ -122,19 +136,19 @@ internal sealed class SpikeGetProfileTool : McpToolDefinition
         var correlation = http?.TraceIdentifier;
         if (!SpikeToolCall.TryReadRequiredString(arguments, Name, FunctionArgument, 16, correlation, out var function, out var argumentError))
         {
-            return (argumentError!, null);
+            return new SpikeToolRun(argumentError!, null);
         }
 
         if (!SpikeTestProfiles.Functions.Contains(function, StringComparer.Ordinal))
         {
-            return (SpikeToolCall.Error(SpikeToolCall.InvalidArgument,
+            return new SpikeToolRun(SpikeToolCall.Error(SpikeToolCall.InvalidArgument,
                 $"'{FunctionArgument}' must be one of: {string.Join(", ", SpikeTestProfiles.Functions)}.", 400, correlation), null);
         }
 
-        var (callerError, profile) = await ResolveProfileAsync(http, spike, profiles, function, cancellationToken);
+        var (callerError, profile, reason) = await ResolveProfileAsync(http, spike, profiles, function, cancellationToken);
         if (callerError != null)
         {
-            return (callerError, null);
+            return new SpikeToolRun(callerError, null, reason);
         }
 
         var structured = new SpikeProfileContent(
@@ -145,38 +159,57 @@ internal sealed class SpikeGetProfileTool : McpToolDefinition
             profile.ModelTier,
             profile.Served,
             profile.Instructions);
-        return (SpikeToolCall.Success(profile.RenderBlock(), structured), profile);
+        return new SpikeToolRun(SpikeToolCall.Success(profile.RenderBlock(), structured), profile);
     }
 
     /// <summary>
     /// The caller's own profile for <paramref name="function"/>, or the FR-02 error: <c>CALLER_UNRESOLVED</c> (no signed-in caller, or
-    /// the resolver could not resolve one) or <c>NO_PROFILE</c>. Shared with <see cref="SpikeReviewNdaTool"/> so both tools fail closed
-    /// the same way.
+    /// the caller matches no Spaarke user), <c>CALLER_LOOKUP_FAILED</c> (the lookup itself failed; retryable), <c>AI_DISABLED</c> (the
+    /// Null facade) or <c>NO_PROFILE</c>, with the identifier-only reason for the telemetry line. Shared with
+    /// <see cref="SpikeReviewNdaTool"/> so both tools fail closed the same way.
     /// </summary>
-    internal static async Task<(CallToolResult? Error, SpikeTestProfile? Profile)> ResolveProfileAsync(
+    internal static async Task<(CallToolResult? Error, SpikeTestProfile? Profile, string? Reason)> ResolveProfileAsync(
         HttpContext? http, ISpecialistProfileSpikeAi spike, SpikeTestProfileSet profiles, string function, CancellationToken cancellationToken)
     {
         var correlation = http?.TraceIdentifier;
         if (http == null || http.User?.Identity?.IsAuthenticated != true)
         {
-            return (CallerUnresolved(correlation), null);
+            return (CallerUnresolved(correlation), null, "not-authenticated");
         }
 
         var caller = await spike.ResolveCallerAsync(http.User, cancellationToken);
         if (!caller.IsResolved || string.IsNullOrWhiteSpace(caller.SystemUserId))
         {
-            return (CallerUnresolved(correlation), null);
+            var reason = caller.IsResolved ? "blank-systemuserid" : caller.UnresolvedReason ?? "unresolved";
+            return (UnresolvedError(reason, correlation), null, reason);
         }
 
         var profile = profiles.Find(function, caller.SystemUserId);
         if (profile == null)
         {
             return (SpikeToolCall.Error(SpikeToolCall.NoProfile,
-                $"No {function} test profile is set up for the signed-in user. Stop: do not use a default profile or anyone else's.", 404, correlation), null);
+                $"No {function} test profile is set up for the signed-in user. Stop: do not use a default profile or anyone else's.", 404, correlation), null, null);
         }
 
-        return (null, profile);
+        return (null, profile, null);
     }
+
+    /// <summary>
+    /// The error for an unresolved caller, by the resolver's reason: a failed lookup and AI switched off are not "this user is unknown",
+    /// so they get their own codes and tell the tester to retry or report; anything else is <c>CALLER_UNRESOLVED</c>.
+    /// </summary>
+    private static CallToolResult UnresolvedError(string reason, string? correlation) => reason switch
+    {
+        SpikeCallerResult.LookupFailedReason => SpikeToolCall.Error(SpikeToolCall.CallerLookupFailed,
+            "Spaarke could not look up the signed-in user just now (a temporary lookup failure, not a missing user). Try the call again; "
+            + $"if it keeps failing, report it with the reference {correlation ?? "none"}. Do not use a default profile or anyone else's meanwhile.",
+            503, correlation),
+        SpikeCallerResult.AiDisabledReason => SpikeToolCall.Error(SpikeToolCall.AiDisabled,
+            "AI features are switched off in this Spaarke environment, so no profile can be served. Report this to the Spaarke team with "
+            + $"the reference {correlation ?? "none"}. Do not use a default profile or anyone else's meanwhile.",
+            503, correlation),
+        _ => CallerUnresolved(correlation),
+    };
 
     private static CallToolResult CallerUnresolved(string? correlation) =>
         SpikeToolCall.Error(SpikeToolCall.CallerUnresolved,

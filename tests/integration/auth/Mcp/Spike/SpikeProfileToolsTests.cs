@@ -204,6 +204,131 @@ public sealed class SpikeProfileToolsTests
         result.GetProperty("structuredContent").TryGetProperty("review", out _).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ReviewNda_AFailedRun_PutsTheReferenceInTheTextTheModelReads()
+    {
+        var spike = new SpikeAiDouble { ReviewFailure = new InvalidOperationException("The model call failed.") };
+        await using var host = await SpikeToolsTestHost.StartAsync(spike);
+
+        var result = await host.CallAsync(SpikeReviewNdaTool.Name, new { documentText = Nda }, OwnerToken);
+
+        var reference = result.GetProperty("structuredContent").GetProperty("correlationId").GetString();
+        reference.Should().NotBeNullOrWhiteSpace();
+        Text(result).Should().Contain($"Reference: {reference}.", "the model reads the content text, so the reference must be there");
+    }
+
+    // ---- unresolved callers: why, not just "unresolved" ----------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(SpikeGetProfileTool.Name)]
+    [InlineData(SpikeReviewNdaTool.Name)]
+    public async Task ACallerLookupThatFailed_IsTheRetryableCallerLookupFailed_NotCallerUnresolved_AndReceivesNoProfile(string tool)
+    {
+        var spike = new SpikeAiDouble { UnresolvedReason = "lookup-failed" };
+        await using var host = await SpikeToolsTestHost.StartAsync(spike);
+
+        var result = await CallWithValidArgumentsAsync(host, tool, UnresolvedToken);
+
+        AssertFailedClosed(result, "CALLER_LOOKUP_FAILED");
+        Text(result).Should().Contain("Try the call again").And.Contain("report it").And.NotContain("Stop");
+        Text(result).Should().Contain(result.GetProperty("structuredContent").GetProperty("correlationId").GetString()!);
+        host.Spike.Reviews.Should().BeEmpty();
+        CompletedLine(host, tool).State["Reason"].Should().Be("lookup-failed");
+    }
+
+    [Theory]
+    [InlineData(SpikeGetProfileTool.Name)]
+    [InlineData(SpikeReviewNdaTool.Name)]
+    public async Task WithAiSwitchedOff_TheNullFacade_IsAiDisabled_NotCallerUnresolved_AndReceivesNoProfile(string tool)
+    {
+        await using var host = await SpikeToolsTestHost.StartAsync(facade: new NullSpecialistProfileSpikeAi());
+
+        var result = await CallWithValidArgumentsAsync(host, tool, OwnerToken);
+
+        AssertFailedClosed(result, "AI_DISABLED");
+        Text(result).Should().Contain("switched off").And.Contain("Report this").And.NotContain("Stop");
+        CompletedLine(host, tool).State["Reason"].Should().Be("ai-disabled");
+    }
+
+    [Theory]
+    [InlineData(SpikeGetProfileTool.Name)]
+    [InlineData(SpikeReviewNdaTool.Name)]
+    public async Task AGenuinelyUnmatchedCaller_StaysCallerUnresolved_AndTheReasonIsLogged(string tool)
+    {
+        await using var host = await SpikeToolsTestHost.StartAsync();
+
+        var result = await CallWithValidArgumentsAsync(host, tool, UnresolvedToken);
+
+        AssertFailedClosed(result, "CALLER_UNRESOLVED");
+        CompletedLine(host, tool).State["Reason"].Should().Be("no-matching-systemuser");
+    }
+
+    // ---- the model actually used, and the input actually received --------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReviewNda_ReturnsTheDeploymentUsed_AndTheDocumentLengthReceived_InTheResultAndTheLogLine()
+    {
+        await using var host = await SpikeToolsTestHost.StartAsync();
+
+        var result = await host.CallAsync(SpikeReviewNdaTool.Name, new { documentText = Nda }, OwnerToken);
+
+        IsError(result).Should().BeFalse(result.GetRawText());
+        var structured = result.GetProperty("structuredContent");
+        structured.GetProperty("modelTier").GetString().Should().Be("Reasoning");
+        structured.GetProperty("modelDeployment").GetString().Should().Be(SpikeAiDouble.Deployment);
+        structured.GetProperty("documentChars").GetInt32().Should().Be(Nda.Length);
+        Text(result).Should().Contain($"deployment {SpikeAiDouble.Deployment}").And.Contain($"{Nda.Length} document characters received");
+        CompletedLine(host, SpikeReviewNdaTool.Name).State["DocumentChars"].Should().Be(Nda.Length);
+    }
+
+    [Fact]
+    public async Task ReviewNda_AnUnconfiguredModelTier_IsModelTierUnavailable_WithNoReview()
+    {
+        var spike = new SpikeAiDouble { ReviewFailure = new SpikeModelTierUnavailableException("Reasoning") };
+        await using var host = await SpikeToolsTestHost.StartAsync(spike);
+
+        var result = await host.CallAsync(SpikeReviewNdaTool.Name, new { documentText = Nda }, OwnerToken);
+
+        IsError(result).Should().BeTrue();
+        var structured = result.GetProperty("structuredContent");
+        structured.GetProperty("reasonCode").GetString().Should().Be("MODEL_TIER_UNAVAILABLE");
+        structured.TryGetProperty("review", out _).Should().BeFalse();
+        Text(result).Should().Contain("Reasoning").And.Contain(structured.GetProperty("correlationId").GetString()!);
+    }
+
+    // ---- the telemetry line on failure and cancellation ------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ReviewNda_AFailedRun_LogsTheExceptionObject_SoTheStackTraceIsKept()
+    {
+        var failure = new InvalidOperationException("The model call failed.");
+        var logger = new ExceptionCapturingLogger();
+
+        var result = await SpikeReviewNdaTool.InvokeAsync(
+            ReviewArguments(), OwnerHttp(), new SpikeAiDouble { ReviewFailure = failure }, SpikeTestProfiles.Default, TimeProvider.System, logger, default);
+
+        result.IsError.Should().BeTrue();
+        logger.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && ReferenceEquals(e.Exception, failure));
+        logger.Entries.Last().Message.Should().Contain("outcome REVIEW_FAILED");
+    }
+
+    [Fact]
+    public async Task ReviewNda_WhenTheCallIsCancelled_TheTelemetryLineSaysCancelled_NotException()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var logger = new ExceptionCapturingLogger();
+
+        await FluentActions.Invoking(() => SpikeReviewNdaTool.InvokeAsync(
+                ReviewArguments(), OwnerHttp(), new SpikeAiDouble { ReviewFailure = new OperationCanceledException(cts.Token) },
+                SpikeTestProfiles.Default, TimeProvider.System, logger, cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        var completed = logger.Entries.Last();
+        completed.Message.Should().Contain("completed: outcome cancelled").And.NotContain("outcome exception");
+        completed.Message.Should().Contain($"documentChars {Nda.Length}");
+    }
+
     [Theory]
     [InlineData("""{ }""")]
     [InlineData("""{ "function": "employment" }""")]
@@ -274,6 +399,42 @@ public sealed class SpikeProfileToolsTests
     }
 
     // ---- helpers ----------------------------------------------------------------------------------------------------------------------
+
+    private static Task<JsonElement> CallWithValidArgumentsAsync(SpikeToolsTestHost host, string tool, string token) =>
+        tool == SpikeGetProfileTool.Name
+            ? host.CallAsync(tool, new { function = "nda" }, token)
+            : host.CallAsync(tool, new { documentText = Nda }, token);
+
+    /// <summary>The one telemetry ("completed") line the tool wrote.</summary>
+    private static global::Sprk.Bff.Api.Tests.Api.Mcp.DecisionToolsTestHost.CapturingLoggerProvider.Entry CompletedLine(SpikeToolsTestHost host, string tool) =>
+        host.Logs.Entries.Single(e => e.Message.StartsWith($"MCP spike tool {tool} completed:", StringComparison.Ordinal));
+
+    private static Dictionary<string, JsonElement> ReviewArguments() =>
+        new() { [SpikeReviewNdaTool.DocumentTextArgument] = JsonSerializer.SerializeToElement(Nda) };
+
+    private static Microsoft.AspNetCore.Http.DefaultHttpContext OwnerHttp() =>
+        new()
+        {
+            TraceIdentifier = "trace-spike-1",
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("oid", SpikeToolsTestHost.OwnerOid.ToString())], "test")),
+        };
+
+    /// <summary>Records each entry's level, formatted message and exception object.</summary>
+    private sealed class ExceptionCapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception), exception));
+    }
 
     private static void AssertOnlyOwnProfile(JsonElement result, string function, string mine, string other)
     {

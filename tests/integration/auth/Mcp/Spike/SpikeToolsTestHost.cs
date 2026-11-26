@@ -63,7 +63,8 @@ internal sealed class SpikeToolsTestHost : IAsyncDisposable
 
     public SpikeAiDouble Spike { get; }
 
-    public static async Task<SpikeToolsTestHost> StartAsync(SpikeAiDouble? spike = null)
+    /// <summary>Starts the host over <paramref name="spike"/>, or over <paramref name="facade"/> when given (for example the AI-off Null facade).</summary>
+    public static async Task<SpikeToolsTestHost> StartAsync(SpikeAiDouble? spike = null, ISpecialistProfileSpikeAi? facade = null)
     {
         spike ??= new SpikeAiDouble();
         var builder = WebApplication.CreateBuilder();
@@ -80,7 +81,7 @@ internal sealed class SpikeToolsTestHost : IAsyncDisposable
         });
 
         builder.Services.AddHttpContextAccessor();
-        builder.Services.AddSingleton<ISpecialistProfileSpikeAi>(spike);
+        builder.Services.AddSingleton(facade ?? spike);
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services
             .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -192,6 +193,12 @@ internal sealed class SpikeAiDouble : ISpecialistProfileSpikeAi
 
     public int Resolutions;
 
+    /// <summary>The resolver reason for a caller the map does not know (the real resolver's identifiers, e.g. <c>lookup-failed</c>).</summary>
+    public string UnresolvedReason { get; set; } = "no-matching-systemuser";
+
+    /// <summary>The deployment a review reports (the facade resolves it from the tier).</summary>
+    public const string Deployment = "test-reasoning-deployment";
+
     /// <summary>When set, a review throws this instead of answering.</summary>
     public Exception? ReviewFailure { get; set; }
 
@@ -201,7 +208,7 @@ internal sealed class SpikeAiDouble : ISpecialistProfileSpikeAi
         var oid = caller?.FindFirst("oid")?.Value ?? caller?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         return Task.FromResult(Guid.TryParse(oid, out var id) && _systemUsers.TryGetValue(id, out var user)
             ? SpikeCallerResult.Resolved(user.ToString("D"))
-            : SpikeCallerResult.Unresolved("no-matching-systemuser"));
+            : SpikeCallerResult.Unresolved(UnresolvedReason));
     }
 
     public Task<SpikeReviewResult> RunAgreementReviewAsync(SpikeReviewRequest request, CancellationToken cancellationToken)
@@ -216,6 +223,6 @@ internal sealed class SpikeAiDouble : ISpecialistProfileSpikeAi
         {
             findings = request.Positions.Select(p => new { topic = p.Key, position = p.Value }).ToArray(),
         });
-        return Task.FromResult(new SpikeReviewResult(review, SpecialistProfileSpike.ActionCode, request.ModelTier, [.. request.Positions.Keys]));
+        return Task.FromResult(new SpikeReviewResult(review, SpecialistProfileSpike.ActionCode, request.ModelTier, Deployment, [.. request.Positions.Keys]));
     }
 }

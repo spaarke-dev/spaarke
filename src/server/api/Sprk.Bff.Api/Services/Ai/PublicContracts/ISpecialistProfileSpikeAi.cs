@@ -34,8 +34,11 @@ public interface ISpecialistProfileSpikeAi
 
     /// <summary>
     /// Runs <see cref="SpecialistProfileSpike.ActionCode"/> over the document with the five positions as declared inputs and the
-    /// profile's model tier applied to the Action explicitly. Throws when the Action is missing, a position is missing or did not reach
-    /// the model input, the tier is unknown, or the run fails; the caller turns that into an <c>isError</c> tool result.
+    /// profile's model tier applied to the Action explicitly. The caller's own user context (stated profile, org, memory, preferences)
+    /// is replaced by <see cref="SpecialistProfileSpike.NeutralUserFragment"/>, so the positions are the only per-user difference.
+    /// Throws <see cref="SpikeModelTierUnavailableException"/> when the tier has no configured deployment (never a fallback model), and
+    /// throws when the Action is missing, a position is missing or did not reach the model input, the tier is unknown, or the run
+    /// fails; the caller turns that into an <c>isError</c> tool result.
     /// </summary>
     Task<SpikeReviewResult> RunAgreementReviewAsync(SpikeReviewRequest request, CancellationToken cancellationToken);
 }
@@ -43,9 +46,26 @@ public interface ISpecialistProfileSpikeAi
 /// <summary>The caller resolution: the <c>systemuserid</c> ("D" GUID) or an identifier-only reason.</summary>
 public sealed record SpikeCallerResult(bool IsResolved, string? SystemUserId, string? UnresolvedReason)
 {
+    /// <summary>The resolver's reason when the Dataverse lookup threw (a transient failure, not an unmatched user).</summary>
+    public const string LookupFailedReason = "lookup-failed";
+
+    /// <summary>The Null facade's reason: AI is switched off in this environment.</summary>
+    public const string AiDisabledReason = "ai-disabled";
+
     public static SpikeCallerResult Resolved(string systemUserId) => new(true, systemUserId, null);
 
     public static SpikeCallerResult Unresolved(string reason) => new(false, null, reason);
+}
+
+/// <summary>
+/// The profile's model tier has no configured deployment (for example <c>Reasoning</c> with <c>DocumentIntelligence:ReasoningModel</c>
+/// empty). The review is refused rather than run on the resolver's fallback model while reporting the requested tier.
+/// </summary>
+public sealed class SpikeModelTierUnavailableException(string modelTier)
+    : InvalidOperationException($"The model tier '{modelTier}' has no configured deployment in this environment; the review was not run.")
+{
+    /// <summary>The tier that was requested (a name such as <c>Reasoning</c>).</summary>
+    public string ModelTier { get; } = modelTier;
 }
 
 /// <summary>One review: the caller (for the binder's user slice and the tenant), the document text, the five positions by declared
@@ -57,8 +77,12 @@ public sealed record SpikeReviewRequest(
     string ModelTier,
     string? CorrelationId);
 
-/// <summary>The structured review, the Action code run, the tier applied and the input names that reached the model.</summary>
-public sealed record SpikeReviewResult(JsonElement Review, string ActionCode, string AppliedModelTier, IReadOnlyList<string> BoundInputNames);
+/// <summary>
+/// The structured review, the Action code run, the tier the profile requested, the deployment that tier resolved to (the model actually
+/// called) and the input names that reached the model.
+/// </summary>
+public sealed record SpikeReviewResult(
+    JsonElement Review, string ActionCode, string RequestedModelTier, string ModelDeployment, IReadOnlyList<string> BoundInputNames);
 
 /// <summary>The spike's fixed contract with the DEV <c>agreement-review-spike</c> row (task 010).</summary>
 public static class SpecialistProfileSpike
@@ -71,6 +95,14 @@ public static class SpecialistProfileSpike
 
     /// <summary>The operand input.</summary>
     public const string DocumentTextInput = "documentText";
+
+    /// <summary>
+    /// The explicit User-slice fragment for every spike review. An explicit fragment wins over the binder's self-produced one, so the
+    /// caller's own stated profile, org (business unit and teams), memory recall and preference hints never reach the review prompt:
+    /// the five positions are the only per-user difference between two testers' runs.
+    /// </summary>
+    public const string NeutralUserFragment =
+        "### Reviewer context\nNo personal profile, memory or preferences apply to this review. Apply only the positions given as inputs.";
 
     /// <summary>The largest document the row's input schema accepts.</summary>
     public const int MaxDocumentTextChars = 60000;
@@ -88,13 +120,13 @@ public static class SpecialistProfileSpike
 }
 
 /// <summary>
-/// ADR-032 P3 peer for the compound-AI-OFF path: the caller never resolves (so the tools answer <c>CALLER_UNRESOLVED</c>, never a
-/// profile) and a review throws <see cref="Sprk.Bff.Api.Configuration.FeatureDisabledException"/>.
+/// ADR-032 P3 peer for the compound-AI-OFF path: the caller never resolves (reason <see cref="SpikeCallerResult.AiDisabledReason"/>, so
+/// the tools answer <c>AI_DISABLED</c>, never a profile) and a review throws <see cref="Sprk.Bff.Api.Configuration.FeatureDisabledException"/>.
 /// </summary>
 public sealed class NullSpecialistProfileSpikeAi : ISpecialistProfileSpikeAi
 {
     public Task<SpikeCallerResult> ResolveCallerAsync(ClaimsPrincipal? caller, CancellationToken cancellationToken) =>
-        Task.FromResult(SpikeCallerResult.Unresolved("ai-disabled"));
+        Task.FromResult(SpikeCallerResult.Unresolved(SpikeCallerResult.AiDisabledReason));
 
     public Task<SpikeReviewResult> RunAgreementReviewAsync(SpikeReviewRequest request, CancellationToken cancellationToken) =>
         throw new Sprk.Bff.Api.Configuration.FeatureDisabledException("ai.disabled", "AI is not enabled in this environment.");

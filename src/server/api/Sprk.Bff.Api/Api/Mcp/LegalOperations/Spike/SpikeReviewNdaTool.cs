@@ -20,8 +20,10 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Spike;
 /// Read-only and model-visible.
 /// </summary>
 /// <remarks>
-/// Fails closed exactly as <see cref="SpikeGetProfileTool"/> (<c>CALLER_UNRESOLVED</c>, <c>NO_PROFILE</c>), before any Action is read or
-/// run. A run that cannot complete is <c>REVIEW_FAILED</c>, never a review against another profile or the generic standard.
+/// Fails closed exactly as <see cref="SpikeGetProfileTool"/> (<c>CALLER_UNRESOLVED</c>, <c>CALLER_LOOKUP_FAILED</c>, <c>AI_DISABLED</c>,
+/// <c>NO_PROFILE</c>), before any Action is read or run. A profile tier with no configured deployment is <c>MODEL_TIER_UNAVAILABLE</c>
+/// (never a run on a fallback model). A run that cannot complete is <c>REVIEW_FAILED</c> with the reference in its text, never a review
+/// against another profile or the generic standard.
 /// </remarks>
 [McpArea(McpEndpoints.LegalOperationsArea)]
 [Authorize]
@@ -74,34 +76,45 @@ internal sealed class SpikeReviewNdaTool : McpToolDefinition
         return tool;
     }
 
-    private static async Task<CallToolResult> ReviewAsync(
+    private static Task<CallToolResult> ReviewAsync(
         RequestContext<CallToolRequestParams> request,
         IHttpContextAccessor accessor,
         ISpecialistProfileSpikeAi spike,
         TimeProvider time,
         ILogger<SpikeReviewNdaTool> logger,
+        CancellationToken cancellationToken) =>
+        InvokeAsync(request.Params?.Arguments, accessor.HttpContext, spike, SpikeTestProfiles.Default, time, logger, cancellationToken);
+
+    /// <summary>One call with its two log lines (header names first, the telemetry line last, however the call ends).</summary>
+    internal static async Task<CallToolResult> InvokeAsync(
+        IDictionary<string, JsonElement>? arguments,
+        HttpContext? http,
+        ISpecialistProfileSpikeAi spike,
+        SpikeTestProfileSet profiles,
+        TimeProvider time,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         var started = time.GetTimestamp();
-        var http = accessor.HttpContext;
         SpikeToolCall.LogHeaderNames(logger, Name, http);
         var outcome = SpikeToolCall.Exception;
-        string? version = null;
+        SpikeToolRun? run = null;
         try
         {
-            var (result, profile) = await RunAsync(request.Params?.Arguments, http, spike, SpikeTestProfiles.Default, time, logger, cancellationToken);
-            version = profile?.ProfileVersion;
-            outcome = SpikeToolCall.OutcomeOf(result);
-            return result;
+            run = await RunAsync(arguments, http, spike, profiles, time, logger, cancellationToken);
+            outcome = SpikeToolCall.OutcomeOf(run.Result);
+            return run.Result;
         }
         finally
         {
-            SpikeToolCall.LogCompleted(logger, Name, outcome, version, time.GetElapsedTime(started), http?.TraceIdentifier);
+            SpikeToolCall.LogCompleted(
+                logger, Name, SpikeToolCall.FinalOutcome(outcome, cancellationToken), run?.Reason, run?.Profile?.ProfileVersion,
+                run?.DocumentChars ?? DocumentCharsOf(arguments), time.GetElapsedTime(started), http?.TraceIdentifier);
         }
     }
 
     /// <summary>The tool's work, with the profile set passed in (production: the embedded set).</summary>
-    internal static async Task<(CallToolResult Result, SpikeTestProfile? Profile)> RunAsync(
+    internal static async Task<SpikeToolRun> RunAsync(
         IDictionary<string, JsonElement>? arguments,
         HttpContext? http,
         ISpecialistProfileSpikeAi spike,
@@ -111,16 +124,17 @@ internal sealed class SpikeReviewNdaTool : McpToolDefinition
         CancellationToken cancellationToken)
     {
         var correlation = http?.TraceIdentifier;
+        var documentChars = DocumentCharsOf(arguments);
         if (!SpikeToolCall.TryReadRequiredString(
                 arguments, Name, DocumentTextArgument, SpecialistProfileSpike.MaxDocumentTextChars, correlation, out var documentText, out var argumentError))
         {
-            return (argumentError!, null);
+            return new SpikeToolRun(argumentError!, null, null, documentChars);
         }
 
-        var (callerError, profile) = await SpikeGetProfileTool.ResolveProfileAsync(http, spike, profiles, SpikeTestProfiles.Nda, cancellationToken);
+        var (callerError, profile, reason) = await SpikeGetProfileTool.ResolveProfileAsync(http, spike, profiles, SpikeTestProfiles.Nda, cancellationToken);
         if (callerError != null)
         {
-            return (callerError, null);
+            return new SpikeToolRun(callerError, null, reason, documentChars);
         }
 
         var runStarted = time.GetTimestamp();
@@ -135,23 +149,49 @@ internal sealed class SpikeReviewNdaTool : McpToolDefinition
         {
             throw;
         }
+        catch (SpikeModelTierUnavailableException ex)
+        {
+            logger.LogWarning(ex,
+                "MCP spike tool {ToolName}: the review did not run, model tier {ModelTier} has no configured deployment; correlation {CorrelationId}.",
+                Name, ex.ModelTier, correlation);
+            return new SpikeToolRun(SpikeToolCall.Error(SpikeToolCall.ModelTierUnavailable,
+                $"The review was not run: the profile's model tier '{ex.ModelTier}' is not configured in this Spaarke environment, and the spike "
+                + $"never runs on a substitute model. Tell the user, and report it with the reference {correlation ?? "none"}; do not review the "
+                + "document another way.", 503, correlation), profile, ex.ModelTier, documentChars);
+        }
         catch (Exception ex)
         {
-            // The exception's type and message only (they name the Action, an input or the failing call; never the document or a token).
-            logger.LogWarning(
-                "MCP spike tool {ToolName}: the review did not run ({ExceptionType}: {ExceptionMessage}); correlation {CorrelationId}.",
-                Name, ex.GetType().Name, ex.Message, correlation);
-            return (SpikeToolCall.Error(SpikeToolCall.ReviewFailed,
-                "The review could not be run. Tell the user it failed and give the reference; do not review the document another way.", 502, correlation), profile);
+            // The exception object, so the stack trace is kept. Its message names the Action, an input or the failing call; the facade
+            // never puts the document or a token in one.
+            logger.LogWarning(ex,
+                "MCP spike tool {ToolName}: the review did not run ({ExceptionType}); correlation {CorrelationId}.",
+                Name, ex.GetType().Name, correlation);
+            return new SpikeToolRun(SpikeToolCall.Error(SpikeToolCall.ReviewFailed,
+                "The review could not be run. Tell the user it failed and give the reference; do not review the document another way. "
+                + $"Reference: {correlation ?? "none"}.", 502, correlation), profile, ex.GetType().Name, documentChars);
         }
 
         var latencyMs = (long)time.GetElapsedTime(runStarted).TotalMilliseconds;
-        var text = $"NDA review against your profile {profile.ProfileVersion} (Action {run.ActionCode}, model tier {run.AppliedModelTier}, "
-                   + $"{latencyMs} ms). The structured review follows as JSON.\n{run.Review.GetRawText()}";
-        var structured = new SpikeReviewContent(profile.ProfileVersion, run.ActionCode, run.AppliedModelTier, latencyMs, run.Review);
-        return (SpikeToolCall.Success(text, structured), profile);
+        var text = $"NDA review against your profile {profile.ProfileVersion} (Action {run.ActionCode}, model tier {run.RequestedModelTier}, "
+                   + $"deployment {run.ModelDeployment}, {latencyMs} ms, {documentChars} document characters received). "
+                   + $"The structured review follows as JSON.\n{run.Review.GetRawText()}";
+        var structured = new SpikeReviewContent(
+            profile.ProfileVersion, run.ActionCode, run.RequestedModelTier, run.ModelDeployment, latencyMs, documentChars ?? 0, run.Review);
+        return new SpikeToolRun(SpikeToolCall.Success(text, structured), profile, null, documentChars);
     }
+
+    /// <summary>The length of the <c>documentText</c> argument as received (before any check), or null when it is absent or not a string.</summary>
+    internal static int? DocumentCharsOf(IDictionary<string, JsonElement>? arguments) =>
+        arguments is not null
+        && arguments.TryGetValue(DocumentTextArgument, out var element)
+        && element.ValueKind == JsonValueKind.String
+            ? element.GetString()!.Length
+            : null;
 }
 
-/// <summary><c>structuredContent</c> of <c>spike_review_nda</c>.</summary>
-internal sealed record SpikeReviewContent(string ProfileVersion, string ActionCode, string ModelTier, long LatencyMs, JsonElement Review);
+/// <summary>
+/// <c>structuredContent</c> of <c>spike_review_nda</c>: the profile's requested tier, the deployment actually called, and the document
+/// length received (so a tester can spot truncated input).
+/// </summary>
+internal sealed record SpikeReviewContent(
+    string ProfileVersion, string ActionCode, string ModelTier, string ModelDeployment, long LatencyMs, int DocumentChars, JsonElement Review);

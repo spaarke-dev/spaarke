@@ -12,6 +12,12 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Spike;
 //     decision slice's reason codes, while the spike needs one REQUIRED argument and the FR-02 codes NO_PROFILE / CALLER_UNRESOLVED.
 //   Cost of doing nothing: FR-02's fail-closed codes and FR-03's header-name record would not exist.
 
+/// <summary>
+/// One spike tool call's result plus what its telemetry line records: the profile served or used (its version only is logged), the
+/// identifier-only reason behind a fail-closed result, and the document length received (the review tool only).
+/// </summary>
+internal sealed record SpikeToolRun(CallToolResult Result, SpikeTestProfile? Profile, string? Reason = null, int? DocumentChars = null);
+
 /// <summary>What the two spike tools share: their reason codes, the closed one-argument check, the header-name line and the telemetry line.</summary>
 internal static class SpikeToolCall
 {
@@ -24,11 +30,21 @@ internal static class SpikeToolCall
     /// <summary>The call's arguments are not the tool's one argument.</summary>
     public const string InvalidArgument = "INVALID_ARGUMENT";
 
+    /// <summary>The caller lookup itself failed (a Dataverse error, not an unmatched user). Retryable; never a profile.</summary>
+    public const string CallerLookupFailed = "CALLER_LOOKUP_FAILED";
+
+    /// <summary>AI is switched off in this environment (the Null facade). Report it; never a profile.</summary>
+    public const string AiDisabled = "AI_DISABLED";
+
+    /// <summary>The profile's model tier has no configured deployment; the review was not run on a fallback model.</summary>
+    public const string ModelTierUnavailable = "MODEL_TIER_UNAVAILABLE";
+
     /// <summary>The review could not run (Action missing, a position not bound, the model call failed, AI switched off).</summary>
     public const string ReviewFailed = "REVIEW_FAILED";
 
     public const string Ok = "ok";
     public const string Exception = "exception";
+    public const string Cancelled = "cancelled";
 
     /// <summary>Most header names one line records; the rest are counted, not named.</summary>
     public const int MaxHeaderNames = 64;
@@ -116,11 +132,23 @@ internal static class SpikeToolCall
             http?.TraceIdentifier);
     }
 
-    /// <summary>The one telemetry line per call: tool, outcome, profileVersion (a test label, not an identity), latency, correlation.</summary>
-    public static void LogCompleted(ILogger logger, string toolName, string outcome, string? profileVersion, TimeSpan elapsed, string? correlationId) =>
+    /// <summary>
+    /// The one telemetry line per call: tool, outcome, the identifier-only reason behind it (for example the caller resolver's
+    /// <c>lookup-failed</c>; never a value), profileVersion (a test label, not an identity), the document length received (the review
+    /// tool only), latency, correlation.
+    /// </summary>
+    public static void LogCompleted(
+        ILogger logger, string toolName, string outcome, string? reason, string? profileVersion, int? documentChars, TimeSpan elapsed, string? correlationId) =>
         logger.LogInformation(
-            "MCP spike tool {ToolName} completed: outcome {Outcome}, profileVersion {ProfileVersion}, {ElapsedMs} ms, correlation {CorrelationId}.",
-            toolName, outcome, profileVersion ?? "none", (long)elapsed.TotalMilliseconds, correlationId);
+            "MCP spike tool {ToolName} completed: outcome {Outcome}, reason {Reason}, profileVersion {ProfileVersion}, documentChars {DocumentChars}, {ElapsedMs} ms, correlation {CorrelationId}.",
+            toolName, outcome, reason ?? "none", profileVersion ?? "none", (object?)documentChars ?? "n/a", (long)elapsed.TotalMilliseconds, correlationId);
+
+    /// <summary>
+    /// The outcome to log once the call has ended: <see cref="Cancelled"/> when it ended by an exception after
+    /// <paramref name="cancellationToken"/> fired (the client went away), otherwise <paramref name="outcome"/> unchanged.
+    /// </summary>
+    public static string FinalOutcome(string outcome, CancellationToken cancellationToken) =>
+        outcome == Exception && cancellationToken.IsCancellationRequested ? Cancelled : outcome;
 
     /// <summary>The <c>outcome</c> of <paramref name="result"/>: <see cref="Ok"/> or the error's <c>reasonCode</c>.</summary>
     public static string OutcomeOf(CallToolResult result) =>

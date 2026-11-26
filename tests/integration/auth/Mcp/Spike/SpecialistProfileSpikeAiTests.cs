@@ -10,10 +10,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Spike;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
@@ -48,7 +50,8 @@ public sealed class SpecialistProfileSpikeAiTests
             input.GetProperty(name).GetRawText().Should().Be(positions[name].GetRawText(), $"{name} reached the model input unchanged");
         }
 
-        result.AppliedModelTier.Should().Be("Reasoning");
+        result.RequestedModelTier.Should().Be("Reasoning");
+        result.ModelDeployment.Should().Be("test-reasoning-deployment");
         result.ActionCode.Should().Be("agreement-review-spike");
         result.BoundInputNames.Should().BeEquivalentTo(SpecialistProfileSpike.PositionInputs.Prepend("documentText"));
         result.Review.GetProperty("ok").GetBoolean().Should().BeTrue();
@@ -116,10 +119,120 @@ public sealed class SpecialistProfileSpikeAiTests
         result.SystemUserId.Should().Be(expected ? id : null);
     }
 
+    // ---- F1: the caller's own user context never reaches the review ------------------------------------------------------------------
+
+    [Fact]
+    public async Task Review_TheCallersOwnStatedProfileOrgAndMemory_NeverReachTheBoundPrompt_OnlyTheNeutralUserFragment()
+    {
+        // A REAL binder whose user-context services DO return data for this caller.
+        var binder = UserContextBinder(out var reader, out var org, out var store);
+
+        // Must-fire control: the same binder, bound for this caller with no explicit fragment, does put the data in the prompt.
+        var control = await binder.BindAsync(new ContextBindingRequest { Caller = Caller }, CancellationToken.None);
+        var controlPrefix = ContextEnvelopeRenderer.RenderStablePrefixAdditions(control.Context);
+        controlPrefix.Should().Contain(StatedMarker).And.Contain(OrgMarker).And.Contain(MemoryMarker);
+
+        var rig = new Rig(rowTier: AiModelTier.Standard, binder: binder);
+        var positions = SpikeTestProfiles.Default.Find("nda", SpikeToolsTestHost.OwnerSystemUserId.ToString("D"))!.ToReviewInputs();
+
+        await rig.Facade.RunAgreementReviewAsync(new SpikeReviewRequest(Caller, "The NDA text.", positions, "Reasoning", "corr-1"), default);
+
+        var bound = rig.RanInputs!;
+        bound.Context.User!.Fragment.Should().Be(SpecialistProfileSpike.NeutralUserFragment);
+        var prefix = ContextEnvelopeRenderer.RenderStablePrefixAdditions(bound.Context);
+        prefix.Should().Be(SpecialistProfileSpike.NeutralUserFragment, "the user slice of the prompt is the neutral fragment and nothing else");
+        var everything = prefix + "\n" + bound.RecordMemoryFragment + "\n" + ContextEnvelopeRenderer.RenderEnvironmentSuffix(bound.Context)
+                         + "\n" + bound.Operand.Input!.Value.GetRawText();
+        everything.Should().NotContain(StatedMarker).And.NotContain(OrgMarker).And.NotContain(MemoryMarker);
+        reader.Verify(r => r.ReadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once, "read for the control bind only");
+        org.Verify(r => r.ReadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once, "read for the control bind only");
+        store.Verify(s => s.ToUserPromptFragmentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once, "read for the control bind only");
+    }
+
+    [Fact]
+    public async Task Review_ProfileBsFalseUncappedIndemnityFlag_SurvivesTheRealBinder_AsAJsonFalse()
+    {
+        var rig = new Rig(rowTier: AiModelTier.Standard);
+        var positions = SpikeTestProfiles.Default.Find("nda", SpikeToolsTestHost.TestUserSystemUserId.ToString("D"))!.ToReviewInputs();
+        positions["uncappedIndemnityFlag"].ValueKind.Should().Be(JsonValueKind.False, "profile B does not raise the flag");
+
+        var result = await rig.Facade.RunAgreementReviewAsync(new SpikeReviewRequest(Caller, "The NDA text.", positions, "Reasoning", null), default);
+
+        var input = rig.RanInputs!.Operand.Input!.Value;
+        input.TryGetProperty("uncappedIndemnityFlag", out var flag).Should().BeTrue("a false position is still a position, not a missing one");
+        flag.ValueKind.Should().Be(JsonValueKind.False);
+        result.BoundInputNames.Should().Contain("uncappedIndemnityFlag");
+    }
+
+    // ---- F2: the model actually used ---------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Review_ReportsTheResolvedDeployment_AndTheRequestedTier()
+    {
+        var rig = new Rig(rowTier: AiModelTier.Standard, reasoningModel: "o3-mini-dev");
+        var positions = SpikeTestProfiles.Default.Find("nda", SpikeToolsTestHost.OwnerSystemUserId.ToString("D"))!.ToReviewInputs();
+
+        var result = await rig.Facade.RunAgreementReviewAsync(new SpikeReviewRequest(Caller, "text", positions, "Reasoning", null), default);
+
+        result.RequestedModelTier.Should().Be("Reasoning");
+        result.ModelDeployment.Should().Be("o3-mini-dev", "the deployment the runner calls for the Reasoning tier");
+        ModelTierDeploymentResolver.Resolve(rig.RanAction!.ModelTier, rig.Options).Should().Be(result.ModelDeployment,
+            "the reported deployment is the one ActionRunner resolves for the Action it was given");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Review_ReasoningWithNoReasoningDeployment_IsModelTierUnavailable_AndNeverRunsOnTheFallbackModel(string? reasoningModel)
+    {
+        var rig = new Rig(rowTier: AiModelTier.Standard, reasoningModel: reasoningModel);
+        var positions = SpikeTestProfiles.Default.Find("nda", SpikeToolsTestHost.OwnerSystemUserId.ToString("D"))!.ToReviewInputs();
+
+        var thrown = await rig.Invoking(r => r.Facade.RunAgreementReviewAsync(new SpikeReviewRequest(Caller, "text", positions, "Reasoning", null), default))
+            .Should().ThrowAsync<SpikeModelTierUnavailableException>();
+
+        thrown.Which.ModelTier.Should().Be("Reasoning");
+        rig.RanInputs.Should().BeNull("the Standard fallback is never called while Reasoning is reported");
+        rig.RanAction.Should().BeNull();
+    }
+
+    private const string StatedMarker = "STATED-FOCUS-MARKER-41c9";
+    private const string OrgMarker = "ORG-UNIT-MARKER-7d2e";
+    private const string MemoryMarker = "MEMORY-RECALL-MARKER-93ab";
+
+    /// <summary>A real ContextBinder whose caller resolver, stated-profile reader, org reader and memory store all return data.</summary>
+    private static ContextBinder UserContextBinder(
+        out Mock<IStatedProfileReader> reader, out Mock<IUserOrgContextReader> org, out Mock<IMemoryItemStore> store)
+    {
+        var callers = new Mock<ICallerSystemUserResolver>();
+        callers.Setup(c => c.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CallerSystemUserResolution { IsResolved = true, SystemUserId = SpikeToolsTestHost.OwnerSystemUserId.ToString("D") });
+        reader = new Mock<IStatedProfileReader>();
+        reader.Setup(r => r.ReadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StatedProfile { RoleLabel = "Partner", FocusAreas = StatedMarker, AssistantPreferences = "Always side with the discloser" });
+        org = new Mock<IUserOrgContextReader>();
+        org.Setup(r => r.ReadAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UserOrgContext { BusinessUnitName = OrgMarker, TeamNames = ["Deal team"] });
+        store = new Mock<IMemoryItemStore>();
+        store.Setup(s => s.ToUserPromptFragmentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("### About You (from prior sessions)\n- " + MemoryMarker);
+
+        var sessions = new ChatSessionManager(new InMemoryTenantCache(), Mock.Of<IChatDataverseRepository>(), Mock.Of<ILogger<ChatSessionManager>>());
+        return new ContextBinder(
+            sessions,
+            Mock.Of<ILogger<ContextBinder>>(),
+            memoryItemStore: store.Object,
+            callerSystemUserResolver: callers.Object,
+            statedProfileReader: reader.Object,
+            userOrgContextReader: org.Object);
+    }
+
     private sealed class Rig
     {
-        public Rig(AiModelTier? rowTier, IContextBinder? binder = null)
+        public Rig(AiModelTier? rowTier, IContextBinder? binder = null, string? reasoningModel = "test-reasoning-deployment")
         {
+            Options = new DocumentIntelligenceOptions { ReasoningModel = reasoningModel };
             Actions = new Mock<AnalysisActionService>(
                 MockBehavior.Loose,
                 new HttpClient { BaseAddress = new Uri("https://example.crm.dynamics.com/api/data/v9.2/") },
@@ -150,8 +263,11 @@ public sealed class SpecialistProfileSpikeAiTests
                 Actions.Object,
                 binder ?? new ContextBinder(sessions, Mock.Of<ILogger<ContextBinder>>()),
                 runner.Object,
+                Microsoft.Extensions.Options.Options.Create(Options),
                 NullLogger<SpecialistProfileSpikeAi>.Instance);
         }
+
+        public DocumentIntelligenceOptions Options { get; }
 
         public Mock<ICallerSystemUserResolver> Callers { get; } = new();
 

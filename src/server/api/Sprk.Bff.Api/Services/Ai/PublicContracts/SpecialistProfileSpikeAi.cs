@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
@@ -18,6 +20,7 @@ public sealed class SpecialistProfileSpikeAi : ISpecialistProfileSpikeAi
     private readonly AnalysisActionService _actions;
     private readonly IContextBinder _binder;
     private readonly IActionRunner _runner;
+    private readonly DocumentIntelligenceOptions _modelOptions;
     private readonly ILogger<SpecialistProfileSpikeAi> _logger;
 
     public SpecialistProfileSpikeAi(
@@ -25,12 +28,14 @@ public sealed class SpecialistProfileSpikeAi : ISpecialistProfileSpikeAi
         AnalysisActionService actions,
         IContextBinder binder,
         IActionRunner runner,
+        IOptions<DocumentIntelligenceOptions> modelOptions,
         ILogger<SpecialistProfileSpikeAi> logger)
     {
         _callers = callers ?? throw new ArgumentNullException(nameof(callers));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _binder = binder ?? throw new ArgumentNullException(nameof(binder));
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
+        _modelOptions = modelOptions?.Value ?? throw new ArgumentNullException(nameof(modelOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -77,6 +82,20 @@ public sealed class SpecialistProfileSpikeAi : ISpecialistProfileSpikeAi
 
         var tier = Enum.Parse<AiModelTier>(request.ModelTier);
 
+        // The deployment the runner will call: the SAME resolver and options ActionRunner uses. That resolver silently falls back to the
+        // Standard deployment when ReasoningModel is empty, so a Reasoning request with no Reasoning deployment is refused here: the spike
+        // never runs on the fallback model while reporting Reasoning.
+        if (tier == AiModelTier.Reasoning && string.IsNullOrWhiteSpace(_modelOptions.ReasoningModel))
+        {
+            throw new SpikeModelTierUnavailableException(request.ModelTier);
+        }
+
+        var deployment = ModelTierDeploymentResolver.Resolve(tier, _modelOptions);
+        if (string.IsNullOrWhiteSpace(deployment))
+        {
+            throw new SpikeModelTierUnavailableException(request.ModelTier);
+        }
+
         var action = await _actions.GetActionByCodeAsync(SpecialistProfileSpike.ActionCode, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"The Action '{SpecialistProfileSpike.ActionCode}' was not found in Dataverse.");
 
@@ -92,6 +111,9 @@ public sealed class SpecialistProfileSpikeAi : ISpecialistProfileSpikeAi
                 InputSchemaJson = SpecialistProfileSpike.DeclaredInputSchemaJson,
                 Args = JsonSerializer.SerializeToElement(args),
                 Caller = request.Caller,
+                // Explicit and neutral: without it the binder self-produces the caller's own stated profile, org, memory recall and
+                // preference hints ahead of the prompt, so two testers' runs would differ by more than their positions.
+                UserFragment = SpecialistProfileSpike.NeutralUserFragment,
                 // No TenantId/SessionId: the fingerprint writer needs a session, and this run has none (nothing is written).
             },
             cancellationToken).ConfigureAwait(false);
@@ -121,9 +143,9 @@ public sealed class SpecialistProfileSpikeAi : ISpecialistProfileSpikeAi
             cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "Specialist spike review ran: action {ActionCode}, tier {ModelTier} (row {RowTier}), {InputCount} inputs bound, correlation {CorrelationId}.",
-            SpecialistProfileSpike.ActionCode, tier, action.ModelTier, boundNames.Count, request.CorrelationId);
+            "Specialist spike review ran: action {ActionCode}, tier {ModelTier} (row {RowTier}), deployment {ModelDeployment}, {InputCount} inputs bound, correlation {CorrelationId}.",
+            SpecialistProfileSpike.ActionCode, tier, action.ModelTier, deployment, boundNames.Count, request.CorrelationId);
 
-        return new SpikeReviewResult(review.Clone(), SpecialistProfileSpike.ActionCode, tier.ToString(), boundNames);
+        return new SpikeReviewResult(review.Clone(), SpecialistProfileSpike.ActionCode, tier.ToString(), deployment, boundNames);
     }
 }
