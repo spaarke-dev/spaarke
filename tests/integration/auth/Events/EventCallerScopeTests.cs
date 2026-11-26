@@ -469,7 +469,7 @@ public sealed class EventCallerScopeTests
     }
 
     /// <summary>The real <see cref="DataverseWebApiService"/> over <see cref="FakeDataverse"/>, through its test constructor.</summary>
-    private sealed class OfflineDataverseService(FakeDataverse dataverse) : DataverseWebApiService(
+    internal sealed class OfflineDataverseService(FakeDataverse dataverse) : DataverseWebApiService(
         new HttpClient(dataverse),
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {

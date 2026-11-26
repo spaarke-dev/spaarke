@@ -110,7 +110,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-07, FR-15. Two adversarial-verifier passes (tenant-isolation tag). uac-r2 reviews.</notes>
+  <notes>Spec FR-07, FR-15. Two adversarial-verifier passes (tenant-isolation tag). uac-r2 reviews.
+Completion summary (2026-11-25): spaarke_list_tasks and spaarke_get_task are thin adapters over IEventsCapability (no filter or check of their own), with the slim rows, the byte budget and the open link in Api/Mcp/LegalOperations/Tasks/. Decisions, deviations (no per-row link in the list; the byte budget), the outcome mapping, tests and results: notes/025-decisions.md. The main session runs the two adversarial passes and applies the TASK-INDEX row (the wave rules reserve both).
+rework: none task 025</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
