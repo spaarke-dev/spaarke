@@ -62,6 +62,10 @@ Rigor FULL (BFF `.cs` + `.tsx`); the POML's sonnet tier ran on the Opus session 
   - **K4, kept:** `WorkforceCallerClaimsTokenEmail_KeepsItsUpnFallback` passes before the fix. It is the acceptance criterion "WorkforceCallerClaims.TokenEmail unchanged", not a regression test; it guards the blast-radius constraint, so it stays.
   - **K4, kept:** the claim-shape table mocks the resolver (it only answers `registration_required`). The two host tests use the real resolver and route.
 
+## UAC review (uac-r2, 2026-11-26) — no objection
+
+uac-r2 read the PR #3203 BFF hunk. The new rule is stricter than the `preferred_username`/`upn` fallback, and the email goes only to the caller, in their own 403 body. The licensed-user hint gets the same email as before. Identity is still keyed on (tid, oid), never on email. No new surface. After the merge it rides the next dev BFF candidate, on the owner's SHA go in uac-r2's session.
+
 ## Known limits
 
 - **In Teams** there is no Sign out. After the admin's fix, the new token (with the email) arrives when the cached one expires, up to about an hour. The guide row says so.
