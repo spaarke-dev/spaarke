@@ -358,6 +358,10 @@ public sealed class McpAuthTests
         nameof(ToolShapes.UnlistedPolicyTool), nameof(ToolShapes.MethodLevelAuthorizeTool),
         // O-14: a tool that is not read-only must be app-only (_meta.ui.visibility exactly ["app"]): none, model+app, model and empty all refuse.
         ToolShapes.WriteNoVisibility, ToolShapes.WriteModelAndApp, ToolShapes.WriteModelOnly, ToolShapes.WriteEmptyVisibility,
+        // r2 NFR-06 (task 031): a model-visible write passes only as a declared reversible write. One part missing refuses: no
+        // required key, the key optional, the key not a string, destructive, not idempotent, or the hints left unset.
+        ToolShapes.ReversibleWriteNoKey, ToolShapes.ReversibleWriteKeyOptional, ToolShapes.ReversibleWriteKeyNotString,
+        ToolShapes.ReversibleWriteDestructive, ToolShapes.ReversibleWriteNotIdempotent, ToolShapes.ReversibleWriteHintsUnset,
     };
 
     [Theory]
@@ -375,6 +379,8 @@ public sealed class McpAuthTests
     [InlineData(nameof(ToolShapes.Sanctioned))]
     [InlineData(nameof(ToolShapes.AdminTool))]
     [InlineData(ToolShapes.WriteAppOnly)]
+    [InlineData(ToolShapes.ReversibleWrite)]
+    [InlineData(ToolShapes.ReversibleWriteModelAndApp)]
     public void ValidateTool_AuthorizedReadOnlyTitledTool_IsAccepted(string shape)
     {
         var (tool, definition) = ToolShapes.Build(shape);
@@ -441,9 +447,54 @@ public sealed class McpAuthTests
         public const string WriteModelOnly = nameof(WriteModelOnly);
         public const string WriteEmptyVisibility = nameof(WriteEmptyVisibility);
         public const string WriteAppOnly = nameof(WriteAppOnly);
+        public const string ReversibleWrite = nameof(ReversibleWrite);
+        public const string ReversibleWriteModelAndApp = nameof(ReversibleWriteModelAndApp);
+        public const string ReversibleWriteNoKey = nameof(ReversibleWriteNoKey);
+        public const string ReversibleWriteKeyOptional = nameof(ReversibleWriteKeyOptional);
+        public const string ReversibleWriteKeyNotString = nameof(ReversibleWriteKeyNotString);
+        public const string ReversibleWriteDestructive = nameof(ReversibleWriteDestructive);
+        public const string ReversibleWriteNotIdempotent = nameof(ReversibleWriteNotIdempotent);
+        public const string ReversibleWriteHintsUnset = nameof(ReversibleWriteHintsUnset);
+
+        /// <summary>An input schema with an <c>idempotencyKey</c> property of <paramref name="keyType"/>, required when <paramref name="required"/>.</summary>
+        private static JsonElement KeySchema(bool required = true, string keyType = "string", bool hasKey = true) =>
+            JsonSerializer.SerializeToElement(new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = hasKey
+                    ? new JsonObject { [McpToolAuthorization.IdempotencyKeyArgument] = new JsonObject { ["type"] = keyType } }
+                    : new JsonObject { ["other"] = new JsonObject { ["type"] = "string" } },
+                ["required"] = required ? new JsonArray(hasKey ? McpToolAuthorization.IdempotencyKeyArgument : "other") : new JsonArray(),
+            });
+
+        private static McpServerTool Reversible(
+            string name, JsonElement schema, bool? destructive = false, bool? idempotent = true, string[]? visibility = null)
+        {
+            var tool = McpServerTool.Create(
+                Sanctioned.Run,
+                new McpServerToolCreateOptions
+                {
+                    Name = name,
+                    Title = "A title",
+                    ReadOnly = false,
+                    Destructive = destructive,
+                    Idempotent = idempotent,
+                    Meta = visibility is null ? null : new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray(visibility.Select(v => (JsonNode)JsonValue.Create(v)!).ToArray()) } },
+                });
+            tool.ProtocolTool.InputSchema = schema;
+            return tool;
+        }
 
         public static (McpServerTool Tool, Type Definition) Build(string shape) => shape switch
         {
+            ReversibleWrite => (Reversible(shape, KeySchema()), typeof(Sanctioned)),
+            ReversibleWriteModelAndApp => (Reversible(shape, KeySchema(), visibility: ["model", "app"]), typeof(Sanctioned)),
+            ReversibleWriteNoKey => (Reversible(shape, KeySchema(hasKey: false)), typeof(Sanctioned)),
+            ReversibleWriteKeyOptional => (Reversible(shape, KeySchema(required: false)), typeof(Sanctioned)),
+            ReversibleWriteKeyNotString => (Reversible(shape, KeySchema(keyType: "integer")), typeof(Sanctioned)),
+            ReversibleWriteDestructive => (Reversible(shape, KeySchema(), destructive: true), typeof(Sanctioned)),
+            ReversibleWriteNotIdempotent => (Reversible(shape, KeySchema(), idempotent: false), typeof(Sanctioned)),
+            ReversibleWriteHintsUnset => (Reversible(shape, KeySchema(), destructive: null, idempotent: null), typeof(Sanctioned)),
             nameof(NoAuthorizeTool) => (Make(NoAuthorizeTool.Run, shape), typeof(NoAuthorizeTool)),
             nameof(ExternalPolicyTool) => (Make(ExternalPolicyTool.Run, shape), typeof(ExternalPolicyTool)),
             nameof(NamedSchemeTool) => (Make(NamedSchemeTool.Run, shape), typeof(NamedSchemeTool)),
