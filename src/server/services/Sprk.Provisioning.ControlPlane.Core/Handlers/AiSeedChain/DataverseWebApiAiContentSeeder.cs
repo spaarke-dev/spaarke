@@ -147,7 +147,7 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
             return new AiContentSeedOutcome.Failed($"AI content seed: token acquisition failed: {ex.GetType().Name}: {ex.Message}");
         }
 
-        var run = new SeedRun(envUri, token);
+        var run = new SeedRun(envUri);
         var step = "start";
         try
         {
@@ -157,19 +157,19 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
                 {
                     case AiContentPhase.Rows rows:
                         step = rows.Table;
-                        await SeedRowsAsync(run, content.Tables[rows.Table], cancellationToken).ConfigureAwait(false);
+                        await SeedRowsAsync(run, token, content.Tables[rows.Table], cancellationToken).ConfigureAwait(false);
                         break;
                     case AiContentPhase.Links links:
                         foreach (var association in content.Associations.Where(a => a.Source == links.SourceTable))
                         {
                             step = association.Relationship;
-                            await SeedLinksAsync(run, content, association, cancellationToken).ConfigureAwait(false);
+                            await SeedLinksAsync(run, token, content, association, cancellationToken).ConfigureAwait(false);
                         }
 
                         break;
                     case AiContentPhase.Canvas when content.Canvas is { } canvas:
                         step = "canvas";
-                        await SeedCanvasAsync(run, content.Tables[canvas.Table], canvas, cancellationToken).ConfigureAwait(false);
+                        await SeedCanvasAsync(run, token, content.Tables[canvas.Table], canvas, cancellationToken).ConfigureAwait(false);
                         break;
                 }
             }
@@ -203,10 +203,9 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
     }
 
     /// <summary>State of one seed: per-table source-id → environment-id map and counters.</summary>
-    private sealed class SeedRun(Uri envUri, string token)
+    private sealed class SeedRun(Uri envUri)
     {
         public Uri EnvUri { get; } = envUri;
-        public string Token { get; } = token;
         public Dictionary<string, Dictionary<Guid, Guid>> IdMap { get; } = new(StringComparer.Ordinal);
         public Dictionary<string, string> EntitySets { get; } = new(StringComparer.Ordinal);
         public int Created { get; set; }
@@ -217,14 +216,14 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
         public List<string> Reported { get; } = [];
     }
 
-    private async Task SeedRowsAsync(SeedRun run, AiContentTable table, CancellationToken cancellationToken)
+    private async Task SeedRowsAsync(SeedRun run, string token, AiContentTable table, CancellationToken cancellationToken)
     {
         run.EntitySets[table.Table] = table.EntitySet;
         var map = new Dictionary<Guid, Guid>();
         run.IdMap[table.Table] = map;
 
         var select = string.Join(",", new[] { table.PrimaryKey }.Concat(table.Columns).Append("statecode").Distinct(StringComparer.Ordinal));
-        var existing = await ReadAllAsync(run, $"{table.EntitySet}?$select={select}", cancellationToken).ConfigureAwait(false);
+        var existing = await ReadAllAsync(run, token, $"{table.EntitySet}?$select={select}", cancellationToken).ConfigureAwait(false);
         var byId = new Dictionary<Guid, JsonElement>();
         foreach (var row in existing)
         {
@@ -318,13 +317,13 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
                 continue;
             }
 
-            await CreateAsync(run, table, row, cancellationToken).ConfigureAwait(false);
+            await CreateAsync(run, token, table, row, cancellationToken).ConfigureAwait(false);
             map[row.Id] = row.Id;
             run.Created++;
         }
     }
 
-    private async Task CreateAsync(SeedRun run, AiContentTable table, AiContentRow row, CancellationToken cancellationToken)
+    private async Task CreateAsync(SeedRun run, string token, AiContentTable table, AiContentRow row, CancellationToken cancellationToken)
     {
         var body = new Dictionary<string, object?> { [table.PrimaryKey] = row.Id.ToString() };
         foreach (var column in table.Columns)
@@ -352,12 +351,12 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
             body[$"{lookup.NavigationProperty}@odata.bind"] = $"/{run.EntitySets[lookup.Target]}({mapped})";
         }
 
-        using var request = BuildRequest(HttpMethod.Post, new Uri(run.EnvUri, $"/api/data/v9.2/{table.EntitySet}"), run.Token);
+        using var request = BuildRequest(HttpMethod.Post, new Uri(run.EnvUri, $"/api/data/v9.2/{table.EntitySet}"), token);
         request.Content = JsonContent.Create(body);
         await SendAsync(request, $"POST {table.EntitySet} ({row.Id} '{row.DisplayName}')", cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task SeedLinksAsync(SeedRun run, AiContentSet content, AiContentAssociation association, CancellationToken cancellationToken)
+    private async Task SeedLinksAsync(SeedRun run, string token, AiContentSet content, AiContentAssociation association, CancellationToken cancellationToken)
     {
         var sourceTable = content.Tables[association.Source];
         var targetTable = content.Tables[association.Target];
@@ -374,7 +373,7 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
             }
 
             var linked = await ReadAllAsync(
-                run, $"{sourceTable.EntitySet}({group.Key})/{association.NavigationProperty}?$select={targetTable.PrimaryKey}", cancellationToken)
+                run, token, $"{sourceTable.EntitySet}({group.Key})/{association.NavigationProperty}?$select={targetTable.PrimaryKey}", cancellationToken)
                 .ConfigureAwait(false);
             var present = linked.Select(l => Guid.Parse(l.GetProperty(targetTable.PrimaryKey).GetString()!, CultureInfo.InvariantCulture)).ToHashSet();
 
@@ -390,7 +389,7 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
                 using var request = BuildRequest(
                     HttpMethod.Post,
                     new Uri(run.EnvUri, $"/api/data/v9.2/{sourceTable.EntitySet}({group.Key})/{association.NavigationProperty}/$ref"),
-                    run.Token);
+                    token);
                 request.Content = JsonContent.Create(new Dictionary<string, string>
                 {
                     ["@odata.id"] = new Uri(run.EnvUri, $"/api/data/v9.2/{targetTable.EntitySet}({mapped})").ToString(),
@@ -401,7 +400,7 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
         }
     }
 
-    private async Task SeedCanvasAsync(SeedRun run, AiContentTable table, AiContentCanvas canvas, CancellationToken cancellationToken)
+    private async Task SeedCanvasAsync(SeedRun run, string token, AiContentTable table, AiContentCanvas canvas, CancellationToken cancellationToken)
     {
         var map = run.IdMap[canvas.Table];
         foreach (var (id, value) in canvas.Rows)
@@ -412,14 +411,14 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
             }
 
             var current = await ReadAllAsync(
-                run, $"{table.EntitySet}?$select={canvas.Column}&$filter={table.PrimaryKey} eq {id}", cancellationToken).ConfigureAwait(false);
+                run, token, $"{table.EntitySet}?$select={canvas.Column}&$filter={table.PrimaryKey} eq {id}", cancellationToken).ConfigureAwait(false);
             if (current.Count == 1 && current[0].TryGetProperty(canvas.Column, out var existing)
                 && existing.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(existing.GetString()))
             {
                 continue;
             }
 
-            using var request = BuildRequest(HttpMethod.Patch, new Uri(run.EnvUri, $"/api/data/v9.2/{table.EntitySet}({id})"), run.Token);
+            using var request = BuildRequest(HttpMethod.Patch, new Uri(run.EnvUri, $"/api/data/v9.2/{table.EntitySet}({id})"), token);
             request.Headers.Add("If-Match", "*"); // update only; never upsert-create a playbook here
             request.Content = JsonContent.Create(new Dictionary<string, string> { [canvas.Column] = value });
             await SendAsync(request, $"PATCH {table.EntitySet}({id}) {canvas.Column}", cancellationToken).ConfigureAwait(false);
@@ -427,13 +426,13 @@ public sealed class DataverseWebApiAiContentSeeder : IAiContentSeeder
         }
     }
 
-    private async Task<List<JsonElement>> ReadAllAsync(SeedRun run, string relative, CancellationToken cancellationToken)
+    private async Task<List<JsonElement>> ReadAllAsync(SeedRun run, string token, string relative, CancellationToken cancellationToken)
     {
         var rows = new List<JsonElement>();
         Uri? next = new(run.EnvUri, $"/api/data/v9.2/{relative}");
         while (next is not null)
         {
-            using var request = BuildRequest(HttpMethod.Get, next, run.Token);
+            using var request = BuildRequest(HttpMethod.Get, next, token);
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

@@ -49,6 +49,10 @@
       - System, audit, owner and state/status columns. Every row is created Active on the stamp.
     A lookup that is neither exported nor listed as left out stops the export when it holds a value.
 
+    WHAT IS CORRECTED ON EXPORT
+      - $ContentCorrections: a dev row that still binds a retired contract is rewritten to the current one (each
+        entry says which and why). The dev row itself is fixed separately, with the owner's OK.
+
 .PARAMETER EnvironmentUrl
     Dataverse environment to read. Default: https://spaarkedev1.crm.dynamics.com
 
@@ -169,9 +173,31 @@ function Write-Utf8Lf([string]$Path, [string]$Text) {
 }
 
 # Blanks the authoring environment's model-deployment id inside canvas / node-config JSON text (see "left out").
-# NodeService reads that key only when the de-scoped PlaybookBuilder saves a canvas; no executor reads it.
+# An empty pin means the configured default deployment.
 function Clear-ModelPin([string]$Json) {
     return [regex]::Replace($Json, '"modelDeploymentId"\s*:\s*"[0-9a-fA-F-]{36}"', '"modelDeploymentId":null')
+}
+
+# Content corrections: dev rows that still carry a retired contract, rewritten on export so a stamp gets the current one.
+# Each entry names the row, the column, the JPS output field and the corrected $choices binding; the pattern must match
+# exactly once (a miss stops the export, so a correction never silently stops applying). Remove an entry once dev
+# itself is corrected (then the rewrite is a no-op and the re-export diff is empty).
+#   - ACT-004 Invoice Processing: invoiceStatus bound to the retired invoice-status choice column; since ebilling-r1
+#     D-41 the invoice status is statuscode (FinanceBaseValues.InvoiceStatusCodeColumn). The downstream node's
+#     fieldMappings supply the statuscode options (PromptSchemaRenderer.ResolveChoices).
+$ContentCorrections = @(
+    @{ Table = 'sprk_analysisaction'; Id = '38c9ecf2-cb10-f111-8342-7ced8d1dc988'; Column = 'sprk_systemprompt'
+       Field = 'invoiceStatus'; Choices = 'downstream:update_doc.statuscode' }
+)
+
+function Set-CorrectedChoices([string]$Table, [string]$Id, [string]$Column, [string]$Value) {
+    foreach ($c in $ContentCorrections | Where-Object { $_.Table -eq $Table -and $_.Id -eq $Id -and $_.Column -eq $Column }) {
+        $pattern = '("name"\s*:\s*"' + [regex]::Escape($c.Field) + '"\s*,[^{}]*?"\$choices"\s*:\s*")[^"]*(")'
+        $hits = [regex]::Matches($Value, $pattern).Count
+        if ($hits -ne 1) { throw "Content correction for $Table/$Id ($($c.Field)) matched $hits time(s); expected exactly 1." }
+        $Value = [regex]::Replace($Value, $pattern, { param($m) $m.Groups[1].Value + $c.Choices + $m.Groups[2].Value })
+    }
+    return $Value
 }
 
 function Format-Guid($Value) { if ($null -eq $Value) { return $null } return ([string]$Value).ToLowerInvariant() }
@@ -315,6 +341,7 @@ foreach ($table in $Specs.Keys) {
             else {
                 $value = $source.$column
                 if ($table -eq 'sprk_playbooknode' -and $column -eq 'sprk_configjson' -and $value) { $value = Clear-ModelPin $value }
+                if ($value -is [string]) { $value = Set-CorrectedChoices $table (Format-Guid $source.$pk) $column $value }
                 $lines.Add("      $(ConvertTo-JsonString $column): $(ConvertTo-JsonValue $value '      ')")
             }
         }

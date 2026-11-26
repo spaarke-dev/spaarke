@@ -1630,7 +1630,7 @@
         "        \"name\": \"invoiceStatus\",",
         "        \"type\": \"string\",",
         "        \"description\": \"Validation status based on mathematical verification and completeness checks\",",
-        "        \"$choices\": \"downstream:update_doc.sprk_invoicestatus\"",
+        "        \"$choices\": \"downstream:update_doc.statuscode\"",
         "      },",
         "      {",
         "        \"name\": \"issues\",",
