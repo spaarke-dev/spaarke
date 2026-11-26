@@ -4,7 +4,7 @@
     <title>spaarke_run_playbook: optional `instructions` argument (user focus for the run)</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
     <gate>Owner decision 2026-11-26 (notes/decisions.md D-owner-answers-2026-11-26 #18: "yes add this feature but make easy for user to use and do not add many other steps"). Needs 030 (done). Before starting, merge origin/work/spaarkeai-mcp-bff-api-r2 and origin/master into the branch (merge, never rebase).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a model-callable write tool's input contract, its idempotency fingerprint and the detached-run helper's contract</rigor-reason>
     <model-tier>sonnet</model-tier>

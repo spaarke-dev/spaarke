@@ -332,4 +332,10 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   - 038's `instructions` argument has no effect.
 - **Fix:** needs an engine edit (ADR-039), so the owner decides: (a) append a "User focus" block in PromptContextHelper / GenericAnalysisHandler, or (b) withdraw the claims.
 - Task 038 is merged but NOT marked done until this is decided.
+- **Resolved in r2 (2026-11-26):** the owner chose (a) (D-3268-user-focus). Merged on the work branch at cd12bb4c2f; task 038 is done. The master merge PR must say "Closes #3268". Remaining builders: #3281.
 - Issue: https://github.com/spaarke-dev/spaarke/issues/3268
+
+## #3281 — user focus not applied by AiCompletion node or the extraction handlers (filed 2026-11-26)
+
+- Found by the #3268 adversarial review (K3). The #3268 fix wires the "User focus" block into the main analysis builders. `AiCompletionNodeExecutor`, `ClauseAnalyzer`/`EntityExtractor`/`RiskDetector` (they cache by input), `InvoiceExtraction` and `ActionRunner` still ignore it, so a rerun "with additional instructions" over those nodes does not use them.
+- Options: (a) wire each, under the same ADR-039 Path C exception; (b) say so in the reply when no node reads the focus. Owner choice; not in r2 scope.

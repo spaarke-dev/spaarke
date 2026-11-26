@@ -60,3 +60,10 @@ Row 50 needs a one-line signature edit: `notes/capability-index-pending.md` "Tas
 - CVE: no package added or changed, so no new `dotnet list package --vulnerable` finding is possible from this task (not re-run).
 - Out-of-scope defects found: none.
 - rework: none task 038
+
+## Close-out (2026-11-26)
+
+- **The review's F4 is resolved by #3268.** No prompt builder read `UserContext`, so the `instructions` argument did nothing. Under the owner's approval (D-3268-user-focus, ADR-039 Path C) the run's `UserContext` now reaches the prompt as a fenced "User focus" block. Merged at cd12bb4c2f from `9aa3357eb9`, after one opus adversarial pass: no F in the code, one F2 test deleted, and K1/K2/K4 hardened (escaping, a 2,000-character cap in the helper, the malformed-JPS fallback). The builders that still ignore the focus are #3281.
+- **The pre-existing chat-rerun claim is fixed by the same change.** "Reran with additional instructions" (`AnalysisExecutionHandler.cs:376-378`) is now true on the main analysis builders.
+- **Four internal callers no longer put system text in `UserContext`.** They are the matter and project pre-fill, the workspace summary and the scheduler. Their prompts are unchanged; see notes/3268-decisions.md.
+- Merged-tree run (cd12bb4c2f): `Sprk.Bff.Api.Tests` filtered over the AI prompt builders, playbook runs, MCP and finance gives 10,815 passed, 0 failed, 7 skipped (existing). The ArchTests gave 2,867 passed on the fix branch; the merge added docs only.
