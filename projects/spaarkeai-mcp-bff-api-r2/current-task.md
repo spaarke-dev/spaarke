@@ -1,27 +1,23 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (checkpoint at 85%: 038 F4 needs owner; 033 has 4 F to fix; file-probe rebuilt on dev SHA)
-> **Phase**: Phase 0 code complete except 012 live check. Phase 1 code complete. Phase 2: 030, 031, 034, 035 done; 033, 038 running; 037 next; 032 escalated; 036 waits on #3181.
+> **Last Updated**: 2026-11-26 (033 and 038 done; #3268 merged; 037 running)
+> **Phase**: Phase 0 code complete except 012 live check. Phase 1 code complete. Phase 2: 030, 031, 033, 034, 035, 038 done; 037 running; 032 escalated; 036 waits on #3181.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
-| **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **State** | Done: 005, 008, 030 (board 23). Merged, not yet marked done: **038** (d6074501e7) and **033** (ac0ea5fe34). **038 review: F4.** The `instructions` reach PlaybookRunRequest.UserContext, but NO prompt builder reads UserContext (GenericAnalysisHandler and PromptContextHelper ignore it), so the feature does nothing. Fixing it needs an engine edit (ADR-039, owner): (a) approve one edit appending a "User focus" block in PromptContextHelper/GenericAnalysisHandler, or (b) withdraw the argument. Also a pre-existing F: chat "rerun with additional instructions" (AnalysisExecutionHandler.cs:268-278,376-378) claims instructions it ignores; file an issue. **033 review pass 1: no F** (K1 audience test refused by JwtBearer, not A10; K2 non-GUID 400 vs REST 404). **033 pass 2: 4 F**, all to fix: F1 "under budget" when no budget (GetMatterFinanceTool.cs:245); F4 FinanceSummaryService.cs:267-270 logs CurrentSpend (pre-existing, on the tool path: remove); F2 EB-D-194 scan misses InvoiceLineDecisionService etc. and its control proves nothing (switch to an allowlist plus a seeded must-fire); F2 no test of signal severity/time. File-probe spike: `spike/spe-file-probe` e05c209fda (master-based) and **`spike/spe-file-probe-on-specialist` 9e8f0ca8e0** (on dev's current SHA d307d67e36, keeps the specialist spike tools; 277/277 MCP tests). Worktree C:\tmp\wtprobe (remove with Remove-WorktreeSafe.ps1). Draft PR #3259 (CI). |
-| **Next (exact)** | (1) Launch an implementer to fix 033's 4 F findings on the work branch, then re-check. (2) Owner: 038 option (a) engine edit or (b) withdraw; file the rerun-instructions issue. (3) Owner: deploy go for file-probe 9e8f0ca8e0 through uac-r2 (tell uac-r2 it layers on d307d67e36). (4) 037 waits until 038 settles. (5) Still open: #3181 a/b, E1, NFR-05 wording, 032 option. |
+| **Active work** | `/project-pipeline` Step 5, Phase 2. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (opus adversarial passes: two for auth/security tasks, one otherwise; a scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
+| **State** | Done: 005, 008, 030, 033, 038 (board 25 of 38). **033:** review fixes merged (c696b857ca → 5f7adf0290), CAPABILITY-INDEX row 53. **038 + #3268:** the owner approved fix (a). UserContext now reaches the prompt as a fenced "User focus" block (escaped, 2,000-character cap in `PromptContextHelper.BuildUserFocusBlock`, absent means byte-identical). Merged at cd12bb4c2f after one opus pass (no F in the code; one F2 test deleted; K1/K2/K4 hardened). The builders that still ignore the focus are filed as #3281. **037 running** (implementer, opus/high). Step 1 is a spike that STOPS with options if outputs are not caller-readable by run id. File-probe spike: **`spike/spe-file-probe-on-specialist` 9e8f0ca8e0** (on dev's SHA d307d67e36); the master-based `spike/spe-file-probe` e05c209fda is unused. Worktree C:\tmp\wtprobe (remove with Remove-WorktreeSafe.ps1 after the test). Draft PR #3259 (consumer typecheck CI, not for merge). |
+| **Next (exact)** | (1) When 037 reports: if it escalates, send the options to the owner; otherwise merge it, run two opus passes (`security` tag), fix, close it, and apply its CAPABILITY-INDEX row. (2) Owner: deploy go for file-probe 9e8f0ca8e0 through uac-r2 (tell uac-r2 it layers on d307d67e36). (3) Still open: #3181 a/b, E1, NFR-05 wording, 032 option, the process-guard card. (4) Read the PR #3259 typecheck result. |
 | **Uncommitted** | None. |
-| **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
+| **Branch state** | The 033 fix branch brought in master's provisioning commits (#3244, #3251). Full ArchTests on the merged tree: 2867 at 5f7adf0290. Merged-tree unit filter: 10,815 passed at cd12bb4c2f. |
 
 ## Status (TASK-INDEX is authoritative)
-- ✅ **Phase 0:** 001, 002, 003, 004, 006, 007, 009, 010, 011.
+- ✅ **Phase 0:** 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011. 012: the registry PATCH is applied; the live check is still owed.
 - ✅ **Phase 1 code:** 020, 021, 022, 023, 024, 025, 026, 027. 029 (deploy) waits on 019 and the owner's go.
-- 🔄 **Owner-gated:**
-  - 005: code and widened script merged; the dev schema go is not given;
-  - 008: A10 Path A or C;
-  - 012: registry PATCH go.
-- ✅ **Phase 2 done:** 031, 034, 035 (publish about 42 MB; 035 adds +0.23 MB).
-- ✅ **030:** done 2026-11-26 (amendment awaits the owner's security sign-off).
-- 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 040 waits on 039.
+- ✅ **Phase 2 done:** 030, 031, 033, 034, 035, 038.
+- 🔄 **Running:** 037.
+- 🔲 **Blocked on owner:** 032 (option), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions
 Answered 2026-11-26: see notes/decisions.md D-owner-answers-2026-11-26 (1, 2, 3, 6, 7, 8, 9, 11, 12, 13, 15, 16, 17, 18 and the amendment sign-off). Still open:
@@ -32,7 +28,7 @@ Answered 2026-11-26: see notes/decisions.md D-owner-answers-2026-11-26 (1, 2, 3,
 5. **Stray-process prevention:** a watchdog plus a Bash pre-check (proposal sent to the owner).
 
 ## Issues filed this wave
-#3234 #3235 #3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
+#3268 #3281 #3234 #3235 #3205 #3206 #3207 #3208 #3209 #3212 #3215 #3218 #3219 #3220 #3221 #3224 #3226 #3227 #3228 #3229 #3230 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
 
 ## Peer coordination
 - **mcp-r1 (2026-11-26):** r1 builds ISS-007 #2835 (Origin/Host filter on /mcp/legal-operations, own file + one wiring line, from master) and DEF-001 #2832 (closedToday on spaarke_show_decisions); r2 reviews both and is messaged before each PR opens and merges.
@@ -44,6 +40,7 @@ Answered 2026-11-26: see notes/decisions.md D-owner-answers-2026-11-26 (1, 2, 3,
 
 ## Decided
 - D-r1-gate.
+- D-3268-user-focus (2026-11-26): the owner approved one prompt-builder edit (ADR-039 Path C); see notes/decisions.md.
 - D-030-adr039 (2026-11-26): 030 passes the ADR-039 check as Path C; see notes/decisions.md.
 - D-run-record-decided, which replaces D-run-record-hold.
 - D-024-extract.
