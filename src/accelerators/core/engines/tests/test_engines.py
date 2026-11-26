@@ -769,14 +769,42 @@ class SkipUnplaceableTests(Base):
             self.assertEqual(ctx.exception.code, code)
         self.assertEqual({c for *_, c in cases} - set(ooxml_redline.EDIT_REFUSAL_CODES), set())
 
-    def test_existing_bookmark_name_is_refused_with_its_code(self):
+    def test_existing_bookmark_name_is_refused_and_the_package_still_passes(self):
         bm = '<w:bookmarkStart w:id="5" w:name="NDA_Sec9"/>'
         src = fx.build_raw(self.path("bm.docx"), fx.P(bm, fx.R("1. Definitions. Stuff."), '<w:bookmarkEnd w:id="5"/>')
                            + fx.P(fx.R("9. Law. New York.")))
-        res = ooxml_redline.run(dict(MIN, bookmarks={"9. Law.": "NDA_Sec9"}, edits=[LAW]), src, self.path("r.docx"),
-                                dry_run=True, skip_unplaceable=True)
-        self.assertEqual(res["report"]["bookmarks_refused"], [{"bookmark": "NDA_Sec9", "code": "bookmark_exists"}])
-        self.assertEqual(res["report"]["refused"], [])
+        plan = dict(MIN, bookmarks={"9. Law.": "NDA_Sec9"}, edits=[LAW])
+        rc, report, _, _ = self.skip_run(plan, src)
+        self.assertEqual(rc, 0)
+        self.assertEqual(report["bookmarks_refused"], [{"bookmark": "NDA_Sec9", "code": "bookmark_exists"}])
+        self.assertEqual(report["refused"], [])
+        internal = self.path("internal.docx")
+        self.assertEqual(summary_table.main([self.write_plan(plan), self.path("redline.docx"), "--out", internal,
+                                             "--refused", self.path("report.json")]), 0)
+        args = (plan, internal, self.path("clean.docx"), src, self.path("external.docx"), report)
+        self.assertEqual(failed(check_outputs.check(*args)), {})
+        # must fire: the engine placed the refused name after all (a second NDA_Sec9 in the redline)
+        fx.edit_part(internal, "word/document.xml", lambda b: b.replace(
+            b"</w:p>", b'<w:bookmarkStart w:id="98" w:name="NDA_Sec9"/><w:bookmarkEnd w:id="98"/></w:p>', 1))
+        self.assertIn("NDA_Sec9", failed(check_outputs.check(*args)).get("summary", ""))
+
+    def test_blank_find_after_old_or_para_breaks_the_contract_even_in_skip_mode(self):
+        for edit in ({"para": "7. Term.", "find": "", "replace": "x"},
+                     {"para": "7. Term.", "after": " ", "insert": "x"},
+                     {"para": "7. Term.", "find": "three", "old": "", "replace": "x"},
+                     {"para": "  ", "find": "three", "replace": "x"}):
+            rc, report, _, _ = self.skip_run(dict(MIN, edits=[edit]))
+            self.assertEqual(rc, 3, msg=edit)
+            self.assertIsNone(report, msg=edit)
+        self.skip_run(dict(MIN, edits=[{"para": "7. Term.", "find": "*", "replace": "x"}]))  # "*" stays legal
+
+    def test_a_failed_run_removes_an_earlier_report(self):
+        rc, report, _, _ = self.skip_run()
+        self.assertEqual(rc, 0)
+        typo = dict(SKIP_PLAN, edits=[{"para": "x", "find": "y", "replacment": "z"}])
+        rc, report, _, _ = self.skip_run(typo)
+        self.assertEqual(rc, 3)
+        self.assertIsNone(report)
 
     def test_a_contract_break_still_exits_3_and_writes_no_report(self):
         typo = dict(SKIP_PLAN, edits=SKIP_PLAN["edits"] + [{"para": "x", "find": "y", "replacment": "z"}])
@@ -854,6 +882,10 @@ class SkipUnplaceableTests(Base):
             dict(SKIP_REPORT, bookmarks_refused=[{"bookmark": "NDA_Sec9", "code": "not_found"}]),
             dict(SKIP_REPORT, extra=1),
             dict(SKIP_REPORT, engine="other"),
+            dict(SKIP_REPORT, report_version=True),
+            dict(SKIP_REPORT, edits_applied=4.0),
+            dict(SKIP_REPORT, refused=[{"edit": 2, "code": ["not_found"]}], edits_applied=6),
+            dict(SKIP_REPORT, bookmarks_refused=[{"bookmark": ["NDA_Sec9"], "code": "para_not_unique"}]),
         ]
         for bad in bad_reports:
             with self.assertRaises(ValueError, msg=bad):

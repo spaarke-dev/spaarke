@@ -163,15 +163,18 @@ def read_refusals(report, plan):
     """
     if not isinstance(report, dict) or set(report) != REPORT_KEYS:
         raise ValueError(f"refusal report needs exactly {sorted(REPORT_KEYS)}")
-    if report["engine"] != "ooxml_redline" or report["report_version"] != 1:
+    if report["engine"] != "ooxml_redline" or type(report["report_version"]) is not int or report["report_version"] != 1:
         raise ValueError("refusal report is not an ooxml_redline version 1 report")
+    if any(type(report[k]) is not int for k in ("edits_total", "edits_applied")):  # True == 1 and 1.0 == 1
+        raise ValueError("refusal report: edits_total and edits_applied must be integers")
     edits = plan.get("edits") or []
     if report["edits_total"] != len(edits):
         raise ValueError(f"refusal report counts {report['edits_total']} edits; the plan has {len(edits)}")
     edits_refused, marks_refused = {}, {}
     for r in report["refused"] if isinstance(report["refused"], list) else [None]:
-        if not isinstance(r, dict) or set(r) != {"edit", "code"} or type(r["edit"]) is not int:
-            raise ValueError("each refused edit needs exactly an integer 'edit' and a 'code'")
+        if not isinstance(r, dict) or set(r) != {"edit", "code"} or type(r["edit"]) is not int \
+                or not isinstance(r["code"], str):
+            raise ValueError("each refused edit needs exactly an integer 'edit' and a string 'code'")
         if not 0 <= r["edit"] < len(edits) or r["edit"] in edits_refused:
             raise ValueError(f"refused edit {r['edit']} is out of range or listed twice")
         if r["code"] not in EDIT_REFUSAL_CODES:
@@ -181,8 +184,9 @@ def read_refusals(report, plan):
         raise ValueError("refusal report: edits_applied does not equal edits_total minus refused")
     names = set((plan.get("bookmarks") or {}).values())
     for r in report["bookmarks_refused"] if isinstance(report["bookmarks_refused"], list) else [None]:
-        if not isinstance(r, dict) or set(r) != {"bookmark", "code"}:
-            raise ValueError("each refused bookmark needs exactly a 'bookmark' and a 'code'")
+        if not isinstance(r, dict) or set(r) != {"bookmark", "code"} or not isinstance(r["bookmark"], str) \
+                or not isinstance(r["code"], str):
+            raise ValueError("each refused bookmark needs exactly a string 'bookmark' and a string 'code'")
         if r["bookmark"] not in names or r["bookmark"] in marks_refused:
             raise ValueError(f"refused bookmark {r['bookmark']!r} is not in the plan or is listed twice")
         if r["code"] not in BOOKMARK_REFUSAL_CODES:
@@ -233,6 +237,10 @@ def validate_plan(plan):
                 errors.append(f"edit {i}: {k!r} must be a string")
         if not e.get("para"):
             errors.append(f"edit {i}: 'para' is required")
+        # blank text can never be located; refused here so skip mode can't mistake a broken plan for a refusal
+        for k in ("para", "find", "old", "after"):
+            if k in e and isinstance(e[k], str) and not e[k].strip():
+                errors.append(f"edit {i}: {k!r} must not be blank")
         has_find, has_after = "find" in e, "after" in e
         if has_find == has_after:
             errors.append(f"edit {i}: exactly one of 'find' or 'after' is required")
@@ -847,6 +855,8 @@ def main(argv=None):
         return 2
     skip = a.skip_unplaceable is not None
     try:
+        if skip and os.path.exists(a.skip_unplaceable):  # a failed run must not leave an earlier run's report
+            os.remove(a.skip_unplaceable)
         result = run(plan, a.original, a.redline, a.external, a.clean, a.dry_run, skip_unplaceable=skip)
         if skip:
             with open(a.skip_unplaceable, "w", encoding="utf-8") as f:

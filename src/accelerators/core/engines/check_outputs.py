@@ -392,7 +392,10 @@ def check(plan, internal, clean, original, external=None, refused=None):
         a = h.get(q("anchor"))
         if a and a not in names:
             s_problems.append(f"link to missing bookmark {a}")
-    placed = sorted(set(refused_marks) & set(names))
+    # a refused bookmark must not have been added: absent, or (bookmark_exists) only the original's own copies
+    org_names = [b.get(q("name")) for b in org.doc.iter(q("bookmarkStart"))]
+    placed = sorted(n for n, code in refused_marks.items()
+                    if names.count(n) != (org_names.count(n) if code == "bookmark_exists" else 0))
     if placed:
         s_problems.append(f"bookmarks reported as refused are in the document: {placed}")
     add("summary", not s_problems, "; ".join(sorted(set(s_problems))) or "summary present, linked and legible")
