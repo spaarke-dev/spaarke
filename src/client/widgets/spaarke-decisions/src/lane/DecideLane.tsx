@@ -333,12 +333,13 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     const line = composeIssueLine(item, today);
     return (
       <div className={styles.finding} data-testid="billing-finding" data-signal-id={item.signalId}>
-        <Text className={styles.headline} size={300} title={line.headline}>
-          {line.headline}
+        {/* D-227 (owner: "all surfaces"): the finding leads, the subject follows, as on the shared row (IssueLine). */}
+        <Text className={styles.headline} size={300} title={line.finding} data-testid="billing-finding-text">
+          {line.finding}
         </Text>
-        {line.ruleShortName && (
-          <Caption1 className={styles.reason} data-testid="billing-finding-reason">
-            {line.ruleShortName}
+        {line.headline !== line.finding && (
+          <Caption1 className={styles.reason} data-testid="billing-finding-subject">
+            {line.headline}
           </Caption1>
         )}
         <Badge appearance="tint" color="informative" size="small" data-testid="billing-finding-label">

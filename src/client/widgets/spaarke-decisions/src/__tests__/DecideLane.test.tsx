@@ -651,8 +651,8 @@ describe('the wizard event carries the core record id only (review finding F4)',
   });
 });
 
-describe('a billing row shows its reason and a link a screen reader can tell apart (review finding F1)', () => {
-  it('renders the rule short name as the reason and names the link after the row', async () => {
+describe('a billing row leads with the finding and names its link after the row (review finding F1, D-227)', () => {
+  it('shows the rule short name first, the subject second, and names the link after the subject', async () => {
     const rows = [
       row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }),
       row(2, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: guid('b', 2) } }),
@@ -661,19 +661,26 @@ describe('a billing row shows its reason and a link a screen reader can tell apa
     await ready();
 
     const [first, second] = within(lane()).getAllByTestId('billing-finding');
-    expect(within(first).getByTestId('billing-finding-reason')).toHaveTextContent('Rule 1');
-    expect(within(second).getByTestId('billing-finding-reason')).toHaveTextContent('Rule 2');
+    expect(within(first).getByTestId('billing-finding-text')).toHaveTextContent('Rule 1');
+    expect(within(first).getByTestId('billing-finding-subject')).toHaveTextContent('Subject 1');
+    expect(within(second).getByTestId('billing-finding-text')).toHaveTextContent('Rule 2');
+    expect(within(second).getByTestId('billing-finding-subject')).toHaveTextContent('Subject 2');
+    // The finding comes before the subject in reading order.
+    const text = within(first).getByTestId('billing-finding-text');
+    const subject = within(first).getByTestId('billing-finding-subject');
+    expect(text.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const firstLink = within(first).getByRole('link', { name: 'Open in Invoice Review: Subject 1' });
     const secondLink = within(second).getByRole('link', { name: 'Open in Invoice Review: Subject 2' });
     expect(firstLink).not.toBe(secondLink);
   });
 
-  it('shows no reason element when the rule has no short name', async () => {
+  it('with no rule short name the subject is the finding, shown once', async () => {
     const noRule = { ...row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }) };
     delete noRule.ruleShortName;
     renderLane(pagingHost([noRule]).callTool);
     await ready();
-    expect(within(lane()).queryByTestId('billing-finding-reason')).not.toBeInTheDocument();
+    expect(within(lane()).getByTestId('billing-finding-text')).toHaveTextContent('Subject 1');
+    expect(within(lane()).queryByTestId('billing-finding-subject')).not.toBeInTheDocument();
   });
 });
 
