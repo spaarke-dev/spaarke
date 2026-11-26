@@ -200,6 +200,38 @@ public static class SearchFilterBuilder
     }
 
     /// <summary>
+    /// Builds filter for matter types using search.in(). Only GUID values are kept (record ids, matched
+    /// case-insensitively to the stored lower-case form); anything else is dropped. A request that names matter types
+    /// but no valid id matches nothing, so a malformed filter never widens a search to every matter type.
+    /// </summary>
+    /// <param name="matterTypes">Matter type record ids to filter by.</param>
+    /// <returns>OData filter clause, or null if the request names no matter types.</returns>
+    public static string? BuildMatterTypesFilter(IReadOnlyList<string>? matterTypes)
+    {
+        if (matterTypes is null || matterTypes.Count == 0)
+        {
+            return null;
+        }
+
+        var ids = matterTypes
+            .Select(NormalizeMatterTypeId)
+            .Where(id => id is not null)
+            .Distinct(StringComparer.Ordinal)
+            .Select(id => EscapeODataValue(id!))
+            .ToList();
+
+        return ids.Count == 0
+            ? $"matterTypeId eq '{Guid.Empty:D}'"
+            : $"search.in(matterTypeId, '{string.Join(",", ids)}', ',')";
+    }
+
+    /// <summary>
+    /// The canonical stored form of a matter type id (lower-case, no braces), or null when the value is not a GUID.
+    /// </summary>
+    public static string? NormalizeMatterTypeId(string? value) =>
+        Guid.TryParse(value, out var id) && id != Guid.Empty ? id.ToString("D") : null;
+
+    /// <summary>
     /// Builds filter for tags using any() operator.
     /// </summary>
     /// <param name="tags">List of tags to filter by (matches any).</param>
@@ -289,6 +321,12 @@ public static class SearchFilterBuilder
         if (fileTypesFilter is not null)
         {
             filterParts.Add(fileTypesFilter);
+        }
+
+        var matterTypesFilter = BuildMatterTypesFilter(filters.MatterTypes);
+        if (matterTypesFilter is not null)
+        {
+            filterParts.Add(matterTypesFilter);
         }
 
         var tagsFilter = BuildTagsFilter(filters.Tags);

@@ -220,6 +220,48 @@ public class SearchFilterBuilderTests
         Assert.DoesNotContain("parentEntityType", filter);
     }
 
+    // Issue #3165: the Matter Type filter matches the matterTypeId the indexers stamp (lower-case, no braces).
+
+    [Fact]
+    public void BuildFilter_MatterTypes_AddsSearchInOverTheStoredFormAndKeepsTheTenantFilter()
+    {
+        var filters = new SearchFilters
+        {
+            MatterTypes = new List<string> { "{3165B000-0000-4000-8000-0000000000A1}", "3165b000-0000-4000-8000-0000000000b2" }
+        };
+
+        var filter = SearchFilterBuilder.BuildFilter(TestTenantId, "all", null, null, null, filters);
+
+        Assert.Contains($"tenantId eq '{TestTenantId}'", filter);
+        Assert.Contains(
+            "search.in(matterTypeId, '3165b000-0000-4000-8000-0000000000a1,3165b000-0000-4000-8000-0000000000b2', ',')",
+            filter);
+    }
+
+    [Fact]
+    public void BuildMatterTypesFilter_DropsValuesThatAreNotGuids_SoNothingIsInjected()
+    {
+        var clause = SearchFilterBuilder.BuildMatterTypesFilter(
+            new List<string> { "3165b000-0000-4000-8000-0000000000a1", "x') or (tenantId ne 'y", "" });
+
+        Assert.Equal("search.in(matterTypeId, '3165b000-0000-4000-8000-0000000000a1', ',')", clause);
+    }
+
+    [Fact]
+    public void BuildMatterTypesFilter_NamingOnlyInvalidIds_MatchesNothingRatherThanEverything()
+    {
+        var clause = SearchFilterBuilder.BuildMatterTypesFilter(new List<string> { "not-a-guid" });
+
+        Assert.Equal("matterTypeId eq '00000000-0000-0000-0000-000000000000'", clause);
+    }
+
+    [Fact]
+    public void BuildMatterTypesFilter_NoMatterTypes_AddsNoClause()
+    {
+        Assert.Null(SearchFilterBuilder.BuildMatterTypesFilter(null));
+        Assert.Null(SearchFilterBuilder.BuildMatterTypesFilter(new List<string>()));
+    }
+
     [Fact]
     public void BuildScopeFilter_AllScope_ReturnsNull()
     {
