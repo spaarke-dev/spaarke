@@ -786,28 +786,63 @@ public sealed class IncomingAssociationResolver
 
     /// <summary>
     /// Serialize the provenance to JSON, bounded to the <c>sprk_associationprovenance</c> column length.
-    /// If the (rare) full document would exceed the cap, fall back to a compact decision-only document so
-    /// the record still carries the essential audit trail.
+    /// If the full document would exceed the cap, the decision trace and the rungs fired are kept, then as many candidates as
+    /// fit in review priority — every written one first, then the conflicting ones, then by reinforced confidence — then as
+    /// many signals as fit. A candidate or signal that does not fit is left out; the rest keep their original order.
     /// </summary>
-    private static string SerializeProvenance(AssociationProvenance provenance)
+    /// <remarks>Task 140 (ISS-043 #3194): this fallback used to drop EVERY candidate and signal at once. The review surface
+    /// reads the candidates (and their <c>written</c> flag) as what the row is filed under and what it may be filed under, so a
+    /// row whose trail ran long — many name matches, long contributor reasons — showed "No confident match" although a record
+    /// was written to it.</remarks>
+    internal static string SerializeProvenance(AssociationProvenance provenance)
     {
         var json = JsonSerializer.Serialize(provenance, ProvenanceJsonOptions);
         if (json.Length <= ProvenanceMaxLength)
             return json;
 
-        var compact = new AssociationProvenance
+        var compact = provenance with
         {
-            Version = provenance.Version,
-            Direction = provenance.Direction,
-            Decision = provenance.Decision,
-            RungsFired = provenance.RungsFired,
             Candidates = Array.Empty<CandidateTrace>(),
             Signals = Array.Empty<SignalTrace>(),
         };
         var compactJson = JsonSerializer.Serialize(compact, ProvenanceJsonOptions);
-        return compactJson.Length <= ProvenanceMaxLength
-            ? compactJson
-            : compactJson[..ProvenanceMaxLength];
+        if (compactJson.Length > ProvenanceMaxLength)
+            return compactJson[..ProvenanceMaxLength];
+
+        var keptCandidates = KeepWhatFits(
+            provenance.Candidates,
+            provenance.Candidates
+                .Select((candidate, index) => (candidate, index))
+                .OrderByDescending(c => c.candidate.Written)
+                .ThenByDescending(c => c.candidate.Conflict)
+                .ThenByDescending(c => c.candidate.ReinforcedConfidence)
+                .ThenBy(c => c.index)
+                .Select(c => c.index),
+            kept => compact with { Candidates = kept });
+        var withCandidates = compact with { Candidates = keptCandidates };
+        var keptSignals = KeepWhatFits(
+            provenance.Signals,
+            Enumerable.Range(0, provenance.Signals.Count),
+            kept => withCandidates with { Signals = kept });
+
+        return JsonSerializer.Serialize(withCandidates with { Signals = keptSignals }, ProvenanceJsonOptions);
+    }
+
+    /// <summary>The items of <paramref name="items"/> taken in <paramref name="priority"/> order (indexes) while the document
+    /// <paramref name="documentWith"/> builds from them still fits the column; returned in their original order.</summary>
+    private static IReadOnlyList<T> KeepWhatFits<T>(
+        IReadOnlyList<T> items, IEnumerable<int> priority, Func<IReadOnlyList<T>, AssociationProvenance> documentWith)
+    {
+        var keptIndexes = new SortedSet<int>();
+        foreach (var index in priority)
+        {
+            keptIndexes.Add(index);
+            var trial = keptIndexes.Select(i => items[i]).ToList();
+            if (JsonSerializer.Serialize(documentWith(trial), ProvenanceJsonOptions).Length > ProvenanceMaxLength)
+                keptIndexes.Remove(index);
+        }
+
+        return keptIndexes.Select(i => items[i]).ToList();
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
