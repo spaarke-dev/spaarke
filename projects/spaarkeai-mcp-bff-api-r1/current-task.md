@@ -1,18 +1,37 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-25 ~22:45Z (mcp-r1: NFR-01 fixes merged; 042 run 3 recorded; ISS-010 #3184 being fixed here)
+> **Last Updated**: 2026-11-26 ~01:00Z (mcp-r1: ISS-010 parts 1/C/E in flight; heading change building; r2 Phase 1 started)
 > **Recovery**: Read "Quick Recovery" first. History: commit messages and `notes/wave{6,7,8}-review.md`, `notes/merge-review-2026-11-15.md`.
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-**NOW (2026-11-25): ISS-010 #3184, the decision commit takes ~27 s live. The owner said fix it here if faster; ontology-r1 agreed (we fix, they do an Opus review, uac-r2 reviews if caller-access changes).** Everything is in `notes/iss-010-commit-latency.md`: the measurements, the code map, ontology's constraints and candidate fixes 1-4.
-- **Exact next action:** cut a branch from `origin/master` (at or after `feef9a9c72`), for example `perf/decision-commit-latency`, in a NEW worktree, so the project branch stays clean. Then profile `RecordCreationService` (the 113 SDK calls) with a call-counting fake on the same four-action decision, and build the fixes. Fix 1 (commit-scoped metadata memo) and fix 2 (pre-write access memo, uac-r2 reviews) are the safe first steps. Fix 4 (email send off the request) needs an OWNER DECISION first: the `assignee_email_not_sent` warning comes from the send step, so queuing the send drops it from the response. PR to master, auto-merge off, send it to ontology-r1, and to uac-r2 if access code changed.
-- **NFR-01 read fixes are all MERGED:** #3146 `d6c607faf3`, #3152 `9ce92b3104` (ontology task 222 done), #3161 `75e01f35f1` (the plan tool reads one row via `IDecisionCapability.GetWorkItemAsync`). Dev now runs **`aa933c09e6`** (live 21:49:11Z, 30-minute gate PASSED 22:20Z, rollback `a1b7db1def`): it has #3146 and #3152 but NOT #3161. uac-r2 lists #3161 for the next candidate (owner per-SHA go). NFR-01 windows to exclude: 15:54:00-15:59:30Z and 21:43:30-21:50:00Z (2026-11-25). Measure show, plan and worklist p95 after #3161 is deployed.
-- **Peer: mcp-r2** (session "mcp-r2: project-pipeline and Phase 0", branch `work/spaarkeai-mcp-bff-api-r2`) runs the next MCP project. No file overlap with ISS-010. **r2 Phase 1 waits for 042 to MERGE**, so tell r2 when it does. Its task 021 will move the Decisions widget onto a shared transport; tell r2 before touching `spaarke-decisions/` and when the UX change merges. r2 owns none of r1's items.
-- **Open OWNER question:** the UX change in the shared `DecisionItemWizard` and the Worklist row card (lead with the finding, drop the title-level "What was found"; row line 1 = the finding, line 2 = record name and number). Does it apply to the Console too (shared component) or to Copilot only? Not started.
-- **Uncommitted:** `notes/iss-010-commit-latency.md` (new) and this file. Commit them on the project branch.
+**NOW (2026-11-25 late): ISS-010 #3184 (decision commit ~27 s; target 15 s) is split into parts, each with its own reviewer. Also the owner's heading UX change (D-227). r2 Phase 1 has STARTED (gate released by agreement, terms in `notes/decisions.md` "r2's Phase 1 gate"); r2 now owns `Api/Mcp/**`, McpModule, the catalog, the ledger and the widget transport/build files.**
+- **Part 1 (metadata memo):** PR **#3193**, branch `perf/decision-commit-latency`, worktree `C:\wt3184`, auto-merge OFF. uac-r2 cleared the first version. ontology's Opus review found **F4**: production makes a new transient `DataverseUserClient` per create, so the per-client store never shares (real saving ~0.27 s).
+  - **Fix agent RUNNING**, briefed:
+    - one store per request;
+    - TYPE-GATED to a concrete `DataverseUserClient` (uac-r2 condition (i));
+    - transient harness with a real DataverseUserClient over a counting handler;
+    - must-fire across instances, must-not-fire across requests and for non-DataverseUserClient;
+    - re-profile; correct the notes and PR body ("does not reach 15 s"); name K1 `BudgetInquiryExecutor.cs:344`.
+  - **When it reports:** send the fix diff to ontology-r1 (re-check only), uac-r2 (keying and type gate only) and **field-mapping-r1** (the memo and RecordCreationService are theirs, task 049). Merge = owner.
+- **Part C (access window):** design `notes/iss-010-part-c-design.md`. uac-r2 APPROVED it WITH AMENDMENTS:
+  - C2 rejected; A1 audit done (no Dataverse write in window 0); A4 is Path C;
+  - A2 = pinned exemption of the 4 role-association reads in `SecureRootInheritance.Cascade.cs` `PlatformReadableTablesAsync`;
+  - the decorator is per request, type-gated, keyed (caller systemuserid, path) for every shape.
+  - Branch `perf/decision-commit-access-window`, worktree `C:\wt3184c`, head `642b52f0bc`. Run 1 done: design copy, A4, D candidate, step-12 guard, ArchTests 2,841.
+  - **Next:** after the part 1 fix lands, merge it into C's branch (merge, never rebase). Then run 2 (Opus): core code + the A2 pinned guard + the main tests. Then run 3 (fault/scope tests), run 4 (verify, size, CVE), an Opus adversarial review here, then uac-r2's access gate. Then PR.
+- **Part E (email post-send work off the request):** design `notes/iss-010-part-e-design.md` (committed `3bda80c81b`), SENT to **field-mapping-r1** for review, then ontology-r1.
+  - Saves ~3.5–6.5 s per decision email.
+  - Owner decision: an archive failure is reported where the user can fix it, via a bell to the communication record's "Save to SharePoint" (`decisions.md`). ontology amended D-216.
+  - **Q0 blocker:** our spec forbids background work, so field-mapping-r1 is asked to own and build the handler. Also open: Q1-Q6 in §9.
+- **Part D scoping:** `notes/iss-010-commit-latency.md` "Part D scoping". D1 (BU/team config memo) is not started.
+- **Heading change (D-227, owner "Apply to both"):** an implementer agent is building `ux/decision-finding-first` (worktree `C:\wtux`, from master): FoundStep h2 = finding; IssueLine line 1 = finding (ruleShortName → title → subject), line 2 = subject; new `IssueLineView.finding`; `headline` unchanged.
+  - When it reports: check, send to ontology-r1 with the host deploy list, tell mcp-r2 at open and merge. No auto-merge.
+- **Owner rules from today:** a failed email send must surface on every surface (the send stays inline); the email bell on the final fallback failure is agreed with ontology.
+- **042 open items:** Chat resolve, the because-rationale check (read the run-3 Decision Record read-only), the billing link-out check, the runbook re-run by a second admin, and NFR-01 50 calls after #3161 is deployed. 042 no longer gates r2.
+- **Uncommitted:** none. Worktrees `C:\wt3184`, `C:\wt3184c` and `C:\wtux` hold the agents' branches; remove them only via `Remove-WorktreeSafe.ps1` after the owner approves.
 
 **Task 042 (live E2E as the test user), IN PROGRESS, started 2026-11-24 — PAUSED (see below).** POML `tasks/042-connector-runbooks-live-e2e.poml` (STANDARD, prescriptive, sonnet@high; Step 9.5 runs because of the `integration-test` tag).
 - **Dev:** BFF `3067fb3bdc` (master: MCP on, no spike; + ebilling #3073, nothing in MCP/Signals/widget/auth), new process 00:09:50Z 2026-11-25, healthz 00:10:40Z (uac-r2, owner go "BFF deploy 3067fb3bdc", which lifted the earlier "after the 042 run" hold; 5 tools, 41.99 MB, widget SHA 9B64821C…BA1D unchanged). Rollback `20129e985c` (live 2026-11-24 21:36:18Z, #3068 admin-account warning), before it `0362599b94`. NFR-01 restart windows to exclude (report with and without): ~21:36Z 2026-11-24 and 00:09:00–00:09:50Z 2026-11-25 (uac-r2 exact: old process stopped 00:09:00Z, new started 00:09:50Z). 30-minute gate for `3067fb3bdc` PASSED (00:09:50–00:40Z; only the known /healthz/catalog drift). The "Spaarke MCP" Dev Portal connector points at `/mcp/legal-operations`, and the 040 skills-only package "Spaarke" is uploaded. So POML step 1 is already in place, from 040/041.
