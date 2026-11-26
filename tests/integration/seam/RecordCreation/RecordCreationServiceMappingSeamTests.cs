@@ -253,9 +253,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     // =====================================================================================
-    // #1617 — a mapped value the caller may not set is dropped, named; the create proceeds
+    // #1617 — a mapped value the caller may not set is dropped, named; the create proceeds.
+    // Task 064 (owner 4b/4c, 2026-10-27 / 2026-11-26): an ORDINARY mapped lookup or value from the record the row is filed
+    // under is now WRITTEN whatever the caller's AppendTo or field security — those cases are in the .Task064.cs partial
+    // (CreateAsync_AnOrdinaryMappedLookupFromTheFilingParent_..._IsWritten). The drop stays for a BFF-owned invariant column
+    // (the Assigned-To lookup below), a field-secured source column (sprk_location below is secured on both tables), a
+    // source that is not the filing parent, and an adapter's default.
     // =====================================================================================
 
+    /// <summary>Task 064: the Assigned-To column is a BFF-owned invariant (it confers access), so it keeps the drop.</summary>
     [Fact]
     public async Task CreateAsync_AMappedLookupTheCallerCannotAppendTo_IsDroppedWithAWarningNamingTheColumn_AndTheRowIsCreated()
     {
