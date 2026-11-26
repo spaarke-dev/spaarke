@@ -163,3 +163,95 @@ And §3 "A mapped value failing AppendTo or field security is skipped with a war
 filing parent is copied regardless of the caller's rights (4b/4c); the exceptions are in §2 FR-08."
 
 Out-of-scope defects: push declassification (section 3), for the main session to file. rework: none task 064
+
+## 8. 064b push follow-on (DI-051, #3258)
+
+Branch `task/fm-064b`, cut from `ff44742744`. Rigor FULL (security). Nothing pushed; no GitHub write; no live write; nothing
+under `.claude/`; none of the files the brief fences off was edited.
+
+### 8.1 The rule on push
+
+A push applies create's field-secured SOURCE rule (section 1, boundary 3). `M` = `RecordCreationService.Mapping.cs`,
+`E` = `Api/FieldMappings/FieldMappingEndpoints.cs`, `L` = `Api/FieldMappings/FieldMappingPushLookups.cs`,
+`R` = `Services/Dataverse/FieldMapping/FieldSecuredSourceRule.cs`.
+
+| Rule | Where |
+|---|---|
+| ONE predicate: anything but an explicit `IsSecured == false` counts as secured | `R` `CountsAsSecured` (~33); create asks it in `SecuredColumnsAsync` (`M` ~1005), push in `SecuredColumns` (`L` ~74) |
+| ONE split: a rule reading a secured source column (Copy source, or any Concat/Template placeholder) is not applied | `R` `Split` (~42), moved from create's `SplitFieldSecuredSourceRules` (not copied); create `M` ~394, push `E` ~606 |
+| Push reads the source catalog once, as the caller, with `IsSecured` | `L` `SourceAttributeMetadataQuery` (~67), read at step 2a (`E` ~600); the same rows feed `RetrieveSourceRecordValuesAsCallerAsync` (no second read). The target catalog query is unchanged |
+| A skipped rule's target column is named; the rule is counted with the skipped rules | `E` `SecuredSourceWarnings` (~867); `Warnings` + `SkippedRuleCount` on the apply, the no-child answer and the preview (appended to the preview's own warnings) |
+| A secured column is not even read for the push | the source `$select` is built from the remaining rules only |
+| Every rule secured: nothing is read or written | `E` ~614-634, the "no rule" answer with the warnings |
+| Security that cannot be told | per column: no `IsSecured`, or not a boolean → secured (skipped, warned). Whole catalog read faults → the push fails before anything is read or written (unchanged: 500) |
+
+Unchanged on push: writes as the caller (`MSCRMCallerID`), FR-23 re-file (`ReparentAsync`, root filing gate, restamp,
+`AfterRefileAsync`), the invoice-family path, `MappingSourceCopyGate`, Assigned-To selection (an Assigned-To rule from a secured
+source column is skipped too, fail closed).
+
+### 8.2 Save path for mapping rules (finding)
+
+The BFF has no endpoint that saves a mapping rule: `FieldMappingEndpoints` maps only `GET profiles`, `POST validate` (type
+compatibility; writes nothing), `GET profiles/{source}/{target}` and `POST push`; no BFF source names `sprk_fieldmappingrule`
+outside the shared read in `Spaarke.Dataverse`. Rules are configured on the native Dataverse forms (the project's configuration
+surface). The generic caller-OBO record tools (chat create/update, Update Record node) are not a rule-save surface: they write
+any table only with the caller's own Dataverse rights, the same as the native form. So no save-time refusal was added, and no
+plugin, business rule or flow (ADR-002). Enforcement is at use: create (`M` step 3) and push (`E` step 2a) both skip a rule whose
+source column is field-secured, so a rule saved by any path cannot copy a secured value.
+
+### 8.3 Tests
+
+New: `tests/integration/contract/Api/FieldMappings/FieldMappingPushAuthorizationContractTests.FieldSecuredSource.cs` (4),
+`tests/Spaarke.ArchTests/FieldSecuredSourceRuleGuardTests.cs` (6). Updated (fakes only, the live catalog shape): the push hosts'
+source catalog rows carry `IsSecured: false` (`FieldMappingPushAuthorizationContractTests.cs` `Attribute`, its `FakeDataverse`
+rows and a `SourceColumnSecurity` knob; `FieldMappingPushDocumentSourceTests.cs`), and the expected source-catalog query string
+(`Push_ToATargetWhoseLookupIsNotTheRegardingConvention_...`) gained `,IsSecured`. No test deleted.
+
+| Test | Old push code | New |
+|---|---|---|
+| Push_ARuleWhoseSourceColumnIsFieldSecured_IsSkippedWithAWarningNamingItsTarget_AndTheOtherRulesPush | FAIL | pass |
+| Push_ARuleWhoseSourceColumnSecurityCannotBeTold_MapsNothingFromIt_AndWarns | FAIL | pass |
+| Push_WhenEveryRuleReadsAFieldSecuredColumn_NothingIsReadOrWritten_AndEachTargetIsNamed | FAIL | pass |
+| Push_ARuleWhoseSourceColumnIsExplicitlyNotSecured_PushesAsBefore_WithNoWarning (must not regress) | pass | pass |
+| ArchTest EachWriter_UsesTheSharedRule_AndKeepsNoPrivateCopy (×3: create, push endpoint, push catalog) | FAIL ×3 | pass |
+| ArchTest NoOtherFieldMappingSource_ReadsIsSecuredItself | FAIL (create's private reading) | pass |
+| ArchTest controls: must-fire (private reading; missing shared call) / must-not-fire (shared calls) | pass | pass |
+
+Gates: `dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings, 0 errors. Filtered tests (`FieldMapping|Push|RecordCreation`):
+1769/1769 pass (1765 before; the 36 push tests that failed with the new code and the old fakes passed once the fakes stated
+`IsSecured: false`, which is the point: an unstated security now fails closed). ArchTests (`dotnet test tests/Spaarke.ArchTests`,
+no `--no-build`): 2855/2855 pass.
+
+### 8.4 Self code-review and adr-check
+
+- No F-class finding open. K1: a catalog read that faults still answers 500 (unchanged), not a warning; nothing is written.
+- NFR-02: no new round trip (the `IsSecured` column rides the existing source catalog read).
+- §11 justification for `FieldSecuredSourceRule` (new file, moved surface): Existing — create's `SplitFieldSecuredSourceRules` and
+  its inline `IsSecured` reading; Extension — moved, not duplicated, to the field-mapping engine folder both writers already use;
+  Cost of doing nothing — the push copies a secured value into an unsecured child column (#3258). `SourceAttributeMetadataQuery`,
+  `SecuredColumns`, `SecuredSourceWarnings`: extensions of the existing push catalog read and answer.
+- ADR-002 (no plugin; no save-time hook) ✓. ADR-008 path A ✓: route authorization unchanged (endpoint filters); the payload rule
+  is decided by the endpoint's service-side step, as on create — cite "ADR-008 path A — payload-dependent mapping checks are
+  decided server-side in the write path, not in an endpoint filter (project CLAUDE.md §2, spec ADR Tensions)". ADR-010 (no DI
+  registration) ✓. ADR-019 (warnings name the column, never a value) ✓. ADR-028 (catalog read as the caller) ✓. ADR-038 (tests at
+  KEEP paths; nothing deleted) ✓. BFF hygiene: no package; publish-size delta not measured here (main session).
+
+### 8.5 Coordinator's widened scope (task-064 review findings): not on this branch
+
+The main session asked, mid-task, for the task-064 review findings to be fixed here too (F1: the pair arm of
+`SourceIsCallersFilingParent`; F2: Assigned-To classification through the shared prefix constant plus the bound registry; F2: one
+metadata reader through `MappingColumnMetadata`; F2: the step-trace text; seam tests (a)-(h)). They are not on this branch:
+together they exceed one implementer pass, and one of them needs a decision first. The push follow-on above is complete and
+committed on its own. Proposed split, one branch each, in this order:
+
+1. **064c: F1, F2 classification, trace text** (`RecordCreationService.Mapping.cs`, the trace in `RecordCreationService.cs`;
+   seam tests (a)-(e), with the `defaultColumns` mutation note). Small and self-contained.
+2. **064d: one metadata reader** (decide first). Moving create and push from the caller-read `IsSecured` predicate
+   (`FieldSecuredSourceRule.CountsAsSecured`) to `MappingColumnMetadata.ReadAsync` / `CopyableSourceColumns` changes three things:
+   (i) the read becomes app-only `IGenericEntityService.GetColumnMetadataAsync` instead of the caller's metadata read (metadata
+   only, so probably acceptable); (ii) an unstated `IsSecured` maps nothing from the source (that gate's rule) instead of
+   skipping only the rule that reads it; (iii) every host of `RecordCreationService` whose `IGenericEntityService` double does not
+   answer `GetColumnMetadataAsync` (the create seam fixture's is `MockBehavior.Strict`) would then map nothing, so suites outside
+   the `FieldMapping|Push|RecordCreation` filter (Office, the chat create tool, the child-record route) need checking: an
+   unfiltered run or a census of the doubles. Seam tests (f)-(h) belong here. `FieldSecuredSourceRuleGuardTests` then names the
+   new shared reader as the required call.

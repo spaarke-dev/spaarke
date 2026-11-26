@@ -114,8 +114,8 @@ public class FieldMappingPushDocumentSourceTests
                 {
                     "EntityDefinitions(LogicalName='sprk_document')/Attributes" =>
                     [
-                        Row(("LogicalName", "sprk_documentid"), ("AttributeType", "Uniqueidentifier"), ("IsValidODataAttribute", true)),
-                        Row(("LogicalName", "sprk_documentdescription"), ("AttributeType", "Memo"), ("IsValidODataAttribute", true)),
+                        Row(("LogicalName", "sprk_documentid"), ("AttributeType", "Uniqueidentifier"), ("IsValidODataAttribute", true), ("IsSecured", false)),
+                        Row(("LogicalName", "sprk_documentdescription"), ("AttributeType", "Memo"), ("IsValidODataAttribute", true), ("IsSecured", false)),
                     ],
                     "EntityDefinitions(LogicalName='sprk_analysis')/ManyToOneRelationships" =>
                     [

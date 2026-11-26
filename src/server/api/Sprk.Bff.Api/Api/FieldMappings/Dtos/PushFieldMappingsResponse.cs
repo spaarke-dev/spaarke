@@ -91,6 +91,8 @@ public record PushFieldMappingsResponse
     /// Task 040 (FR-23): how many of the profile's rules a push did not apply (Default, Concat, Template, or not set to
     /// Manual Refresh). Skipped and counted, never an error.
     /// </summary>
+    /// <remarks>DI-051 (#3258): a rule whose source column is field-secured (or whose security cannot be told) is not applied
+    /// either; it is counted here and the column it would have filled is named in <see cref="Warnings"/>.</remarks>
     public int? SkippedRuleCount { get; init; }
 
     /// <summary>
