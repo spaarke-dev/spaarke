@@ -2,11 +2,14 @@ using System.Globalization;
 using System.Text.Json;
 using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
@@ -92,10 +95,13 @@ internal sealed partial class RecordCreationService
         /// the create (<see cref="EnforceMappingSourceOwnerAsync"/>). Set whenever a value was mapped.</summary>
         public MappedSourceGate? Gate { get; init; }
 
-        /// <summary>Task 064: the values were mapped from the record the caller's own row is filed under
-        /// (<see cref="SourceIsCallersFilingParent"/>), so step 5 may write an ordinary one without the caller's checks
+        /// <summary>Task 064: the values were mapped from the record the caller's own row is filed under, by table and id
+        /// (<see cref="SourceIsCallersFilingRecordAsync"/>), so step 5 may write an ordinary one without the caller's checks
         /// (<see cref="MayCopyWithoutCallerChecks"/>).</summary>
         public bool FromFilingParent { get; init; }
+
+        /// <summary>Task 064c: how many mapped values step 5 wrote without the caller's checks (for the step trace).</summary>
+        public int CopiedWithoutCallerChecks { get; init; }
 
         public static MappingStep Unmapped(DataverseWriteItemMapper.MappedItem caller) => new(caller, NoMappedValues, null);
 
@@ -363,6 +369,7 @@ internal sealed partial class RecordCreationService
         // nothing (fail closed). The owner is checked again before the create, on every path (EnforceMappingSourceOwnerAsync).
         var gate = new MappedSourceGate(source.EntityLogicalName, reads.AppRead);
         var fromFilingParent = SourceIsCallersFilingParent(table, resolution, target);
+        var callersOwnRow = CopyOf(target); // the caller's row before any rule fills it (never a mapped lookup)
         var early = await DecideMappingSourceAsync(gate, rowOwner: null, secureOwnerTeam, ct).ConfigureAwait(false);
         if (!SourceMapsBeforeOwner(early.Verdict, request.SecureFromCreation, fromFilingParent))
         {
@@ -448,11 +455,17 @@ internal sealed partial class RecordCreationService
                 warnings.Add(Dropped(column, notWritten));
         }
 
-        return values.Count == 0
-            ? unmapped
-            : (await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false))
-                with
-            { Gate = gate, FromFilingParent = fromFilingParent };
+        if (values.Count == 0)
+            return unmapped;
+
+        // Task 064c: step 5's skip asks for the filing parent by table AND id (the gate above keeps its own question).
+        var copiesFromFilingParent = fromFilingParent
+            && await SourceIsCallersFilingRecordAsync(
+                    table, resolution, callersOwnRow, (typeId, token) => RecordTypeTableAsync(user, typeId, token), ct)
+                .ConfigureAwait(false);
+        return (await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false))
+            with
+        { Gate = gate, FromFilingParent = copiesFromFilingParent };
     }
 
     /// <summary>A copy of <paramref name="row"/> (its name, id and values), so a probe of the engine leaves the row as it is.</summary>
@@ -469,20 +482,50 @@ internal sealed partial class RecordCreationService
     /// every Assigned-To column (it confers access on the row), every regarding / core-ancestor stamp, every related filing
     /// lookup (a filing one is still refused as the caller's own at step 5, <see cref="IsFilingLookup(string, string)"/>).
     /// </summary>
-    internal static readonly IReadOnlyList<string> CopyInvariantPrefixes = ["sprk_assigned", "sprk_regarding", "sprk_related"];
+    internal static readonly IReadOnlyList<string> CopyInvariantPrefixes =
+        [InheritedAccessPermission.AssignedToColumnPrefix, "sprk_regarding", "sprk_related"];
 
     /// <summary>
     /// Task 064: whether <paramref name="column"/> of <paramref name="table"/> is a BFF-owned invariant column
-    /// (<see cref="CopyInvariantColumns"/>, <see cref="CopyInvariantPrefixes"/>, or a column an app-only write of the table is
-    /// refused: owner, creator, a secure root's access columns, contact identity and binding, an access table such as the No
-    /// Access list). Pure.
+    /// (<see cref="CopyInvariantColumns"/>, <see cref="CopyInvariantPrefixes"/>, an access-conferring (Assigned-To) column of the
+    /// registry, or a column an app-only write of the table is refused: owner, creator, a secure root's access columns, contact
+    /// identity and binding, an access table such as the No Access list). Task 064c: the Assigned-To class is the prefix
+    /// family united with <paramref name="isAssignedToColumn"/> (<see cref="AssignedToColumnsOfRegistries"/>: the canonical and
+    /// the bound access-conferring registries), so a registry column without the prefix keeps the caller's checks. Pure.
     /// </summary>
-    internal static bool IsCopyInvariantColumn(string table, string column)
+    internal static bool IsCopyInvariantColumn(string table, string column, Func<string, string, bool>? isAssignedToColumn = null)
     {
         var name = column.Trim();
         return CopyInvariantColumns.Contains(name)
                || CopyInvariantPrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+               || isAssignedToColumn?.Invoke(table, name) == true
                || InheritedAccessPermission.RefuseAppOnlyWrite(table, [name], InheritedAccessPermission.WriteIdentity.AppOnly) is not null;
+    }
+
+    /// <summary>
+    /// Task 064c: the Assigned-To columns of the access-conferring registries, for any table — the canonical one
+    /// (<see cref="MembershipOptionsDefaults.CanonicalAccessConferringRegistry"/>) united with the bound one
+    /// (<see cref="MembershipOptions.AccessConferringRoles"/>), each read by the push's classifier
+    /// (<see cref="Api.FieldMappings.PushRuleSelection.AssignedToColumnsOf"/>), so neither can be narrowed past the other (as
+    /// Repair's <see cref="ColumnsRepairNeverMaps"/>). A fault reading the bound registry classes every column as Assigned-To,
+    /// so every mapped value keeps the caller's checks (fail closed).
+    /// </summary>
+    private Func<string, string, bool> AssignedToColumnsOfRegistries()
+    {
+        try
+        {
+            var canonical = Api.FieldMappings.PushRuleSelection.AssignedToColumnsOf(null);
+            AccessConferringRegistry? bound;
+            using (var scope = _scopes.CreateScope())
+                bound = scope.ServiceProvider.GetService<IOptions<MembershipOptions>>()?.Value.AccessConferringRoles;
+            var boundColumns = Api.FieldMappings.PushRuleSelection.AssignedToColumnsOf(bound);
+            return (table, column) => canonical(table, column) || boundColumns(table, column);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] the access-conferring registry could not be read; every mapped value keeps the caller's checks");
+            return (_, _) => true;
+        }
     }
 
     /// <summary>
@@ -495,8 +538,9 @@ internal sealed partial class RecordCreationService
     /// (<see cref="FieldSecuredSourceRule.Split"/>). Pure.
     /// </summary>
     internal static bool MayCopyWithoutCallerChecks(
-        string table, string column, bool fromFilingParent, bool isDefault, bool isFilingLookup) =>
-        fromFilingParent && !isDefault && !isFilingLookup && !IsCopyInvariantColumn(table, column);
+        string table, string column, bool fromFilingParent, bool isDefault, bool isFilingLookup,
+        Func<string, string, bool>? isAssignedToColumn = null) =>
+        fromFilingParent && !isDefault && !isFilingLookup && !IsCopyInvariantColumn(table, column, isAssignedToColumn);
 
     /// <summary>
     /// Task 022 fix round 2: the 032b copy gate (<see cref="MappingSourceCopyGate.DecideAsync"/>) over a mapping source's gate
@@ -560,6 +604,44 @@ internal sealed partial class RecordCreationService
 
         return callerRow.Attributes.TryGetValue(SecureRootInheritance.PairIdColumn, out var pairId)
                && pairId is string text && Guid.TryParse(text.Trim(), out var id) && id == source.RecordId;
+    }
+
+    /// <summary>
+    /// Task 064c: whether the mapping source is the record the caller's row is filed under, for step 5's skip
+    /// (<see cref="MayCopyWithoutCallerChecks"/>). An explicit mapping source is the filing parent only when its table and id
+    /// both match a record the caller's row is filed under: one of the row's filing lookups, or the regarding pair as
+    /// <see cref="MappingSourceResolver"/> resolves it (its record type names the table, read as the caller). A pair whose
+    /// table cannot be told is no match (fail closed). A source resolved from the pair or the typed parent is the filing
+    /// parent by construction. <paramref name="callerRow"/> is the caller's row before any rule filled it, so a mapped lookup
+    /// never makes a source the filing parent. Never throws except a cancellation of <paramref name="ct"/>.
+    /// </summary>
+    internal static async Task<bool> SourceIsCallersFilingRecordAsync(
+        string table, MappingSourceResolution resolution, Entity callerRow,
+        Func<Guid, CancellationToken, Task<string?>> recordTypeTable, CancellationToken ct)
+    {
+        if (resolution.Origin is MappingSourceOrigin.RegardingPair or MappingSourceOrigin.TypedParent)
+            return true;
+        if (resolution is not { Origin: MappingSourceOrigin.Explicit, Source: { } source })
+            return false;
+
+        var row = callerRow.Attributes.Where(a => a.Value is not null).ToArray();
+        if (RecordOwnershipContext.ParentsOf(row, table).Any(p =>
+                p.RecordId == source.RecordId
+                && string.Equals(p.EntityLogicalName, source.EntityLogicalName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // The pair: asked only when its id is the source's, then matched by the table its record type names.
+        var pairNamesSourceId = callerRow.Attributes.TryGetValue(SecureRootInheritance.PairIdColumn, out var pairId)
+            && (pairId is string text && Guid.TryParse(text.Trim(), out var id) ? id : pairId as Guid?) == source.RecordId;
+        if (!pairNamesSourceId)
+            return false;
+
+        var pair = await MappingSourceResolver.ResolveAsync(table, null, null, row, recordTypeTable, ct).ConfigureAwait(false);
+        return pair is { Origin: MappingSourceOrigin.RegardingPair, Source: { } named }
+               && named.RecordId == source.RecordId
+               && string.Equals(named.EntityLogicalName, source.EntityLogicalName, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -982,7 +1064,8 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// Task 064: the columns of <paramref name="columns"/> that <paramref name="table"/>'s metadata marks <c>IsSecured</c>, read AS
     /// THE CALLER (the request shape <see cref="CallerWriteAuthorization"/>'s field-security check reads); <c>null</c> when
-    /// Dataverse did not answer. A column the table does not have holds no value and is not listed.
+    /// Dataverse did not answer. Task 064c: a column asked for that the answer does not name counts as secured (fail closed),
+    /// as does one whose <c>IsSecured</c> is anything but an explicit false (<see cref="FieldSecuredSourceRule.CountsAsSecured"/>).
     /// </summary>
     private static async Task<IReadOnlySet<string>?> SecuredColumnsAsync(
         IDataverseUserClient user, string table, IReadOnlyCollection<string> columns, CancellationToken ct)
@@ -998,17 +1081,24 @@ internal sealed partial class RecordCreationService
         }
 
         var secured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var answered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var attribute in list.EnumerateArray())
         {
-            // Anything but an explicit false is secured (fail closed): the one predicate, shared with the push.
-            if (attribute.TryGetProperty("LogicalName", out var name) && name.ValueKind == JsonValueKind.String
-                && FieldSecuredSourceRule.CountsAsSecured(
-                    attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
+            if (attribute.TryGetProperty("LogicalName", out var name) && name.ValueKind == JsonValueKind.String)
             {
-                secured.Add(name.GetString()!);
+                answered.Add(name.GetString()!);
+
+                // Anything but an explicit false is secured (fail closed): the one predicate, shared with the push.
+                if (FieldSecuredSourceRule.CountsAsSecured(
+                        attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
+                {
+                    secured.Add(name.GetString()!);
+                }
             }
         }
 
+        // A column asked for and not answered: its security cannot be told, so it counts as secured.
+        secured.UnionWith(columns.Where(c => !answered.Contains(c)));
         return secured;
     }
 
@@ -1264,9 +1354,10 @@ internal sealed partial class RecordCreationService
         // without the caller's AppendTo or field-security check (MayCopyWithoutCallerChecks). Every other mapped value on its
         // own: one that fails, or whose check faults, is dropped — never written.
         var filingColumns = filing.Select(l => l.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var isAssignedToColumn = fromFilingParent ? AssignedToColumnsOfRegistries() : null;
         var copied = mappedValues.Keys
             .Where(c => MayCopyWithoutCallerChecks(
-                table, c, fromFilingParent, defaultColumns?.Contains(c) == true, filingColumns.Contains(c)))
+                table, c, fromFilingParent, defaultColumns?.Contains(c) == true, filingColumns.Contains(c), isAssignedToColumn))
             .ToHashSet(StringComparer.Ordinal);
         var kept = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (var (column, value) in mappedValues.OrderBy(kv => kv.Key, StringComparer.Ordinal))
@@ -1326,7 +1417,9 @@ internal sealed partial class RecordCreationService
 
         var finalCheck = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, asked, serverSetLookupColumns, ct)
             .ConfigureAwait(false);
-        return finalCheck.Succeeded ? final : MappingStep.Refused(CallerCheckRefused(finalCheck, noun));
+        return finalCheck.Succeeded
+            ? final with { CopiedWithoutCallerChecks = copied.Count }
+            : MappingStep.Refused(CallerCheckRefused(finalCheck, noun));
     }
 
     /// <summary>

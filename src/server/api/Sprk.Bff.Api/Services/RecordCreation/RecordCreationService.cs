@@ -758,7 +758,10 @@ internal sealed partial class RecordCreationService
                 mappedValues = checkedMerge.Values;
                 trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
                     "Create/Append, AppendTo on every record named, no field-secured column — on the merged payload" +
-                    (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped"));
+                    (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped") +
+                    (checkedMerge.CopiedWithoutCallerChecks == 0
+                        ? string.Empty
+                        : $"; {checkedMerge.CopiedWithoutCallerChecks} mapped value(s) copied without the caller's checks"));
             }
         }
 
