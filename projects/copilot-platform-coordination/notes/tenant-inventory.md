@@ -16,6 +16,12 @@ Status values: **KEEP** (stays, has an owner) · **REPLACE** (stays until a name
 | C1 | **Spaarke MCP** | Federated Copilot connector (admin center › Copilot › Connectors), OAuth, URL `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations` | spaarkeai-mcp-bff-api-r1 | The **single** tenant registration of the BFF MCP server (rule R1) | **KEEP** | — | mcp-r1 `notes/phase0-registration-facts.md` (linked 2026-11-10); T0/T5 |
 | C3 | **Spaarke** (slug `spaarke`), plugin package v1.0.0, manifest 1.30, app id `68427ffa-ce23-4bed-9cdf-f1d6ed16eec4` | Plugin package with **one skill, `spaarke-decisions`; no `agentConnectors`, no agents**. Uses C1 for `spaarke_show_decisions`. Install: owner + test user only (R7), admin center › Agents › Tools › Registry | spaarkeai-mcp-bff-api-r1 (task 040; source `src/solutions/CopilotPlugins/spaarke/`, PR #3025 draft) | The product package. First install runs T10 (= S-2: can a packaged skill call a tool from a connector registered elsewhere? decides R2) and S-1 in the same session | **KEEP** — uploaded to Registry by the owner 2026-11-24 ~03:15Z (ship date). ❓ install scope (R7: owner + test user) not yet confirmed | — | mcp-r1 R4 row 2026-11-23/24 |
 
+**Server-side test tools reachable through C1** (not tenant uploads, so not R4 rows; listed because every dev Copilot/Cowork user of C1 can see them):
+
+| # | Tools | Where | Owner project | Behaviour | Removal | Evidence |
+|---|---|---|---|---|---|---|
+| T1 | `spike_get_profile` (returns the caller's own test profile) and `spike_review_nda` (runs the DEV-only Action `agreement-review-spike`, row `17285c7b-98e9-f111-84ea-00224829aef9`) | Dev BFF `/mcp/legal-operations`, build `d307d67e36` (deployed by uac-r2 on the owner's go, ~18:00Z 2026-11-25). C1 now lists 7 tools | specialist-legal-agents-r1 (Phase 0) | Read-only, fail closed. Only the owner and demo@ have test profiles; any other user gets `NO_PROFILE`. **Side effect:** an NDA-review prompt in dev Copilot/Cowork may now be routed to `spike_review_nda` | Tools go at the next master deploy of the dev BFF; the Action row goes at specialist task 031. The specialist reports both | specialist message 2026-11-25; `projects/specialist-legal-agents-r1/phase0/README.md` |
+
 ## 2. OAuth and app registrations
 
 | # | Artifact | Kind | Owner project | Purpose | Status | Removal trigger / who | Evidence |
