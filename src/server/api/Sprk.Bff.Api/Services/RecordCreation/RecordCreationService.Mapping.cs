@@ -68,7 +68,7 @@ internal sealed partial class RecordCreationService
     private const string NotUsable = "it was not found, or you do not have permission to use it";
 
     /// <summary>Task 064 (owner 2026-10-27 boundary 3): why a value copied from a field-secured source column is not written.</summary>
-    internal const string SourceColumnFieldSecured = "the column it would be copied from is field-secured";
+    internal const string SourceColumnFieldSecured = FieldSecuredSourceRule.NotCopiedReason;
 
     /// <summary>Task 064: the words when whether the source's columns are field-secured could not be read: nothing is mapped.</summary>
     internal const string MappingSourceColumnsUnreadable =
@@ -391,7 +391,7 @@ internal sealed partial class RecordCreationService
             return unmapped;
         }
 
-        var (copyable, securedSourced) = SplitFieldSecuredSourceRules(rules, reads.SecuredSourceColumns);
+        var (copyable, securedSourced) = FieldSecuredSourceRule.Split(rules, reads.SecuredSourceColumns);
         var protectedColumns = ProtectedFromMapping(table, rule, request.ServerSetLookupColumns);
         var moneyAttributes = attributes.Where(a => a.Value.Type == "Money").Select(a => a.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -455,29 +455,6 @@ internal sealed partial class RecordCreationService
             { Gate = gate, FromFilingParent = fromFilingParent };
     }
 
-    /// <summary>
-    /// Task 064 (owner 2026-10-27 boundary 3): <paramref name="rules"/> split into the rules field mapping may apply and the rules
-    /// that read a field-secured column of the source (<paramref name="securedSourceColumns"/>), which are never applied. Pure.
-    /// </summary>
-    internal static (List<FieldMappingRuleEntity> Copyable, List<FieldMappingRuleEntity> SecuredSourced) SplitFieldSecuredSourceRules(
-        List<FieldMappingRuleEntity> rules, IReadOnlySet<string>? securedSourceColumns)
-    {
-        if (securedSourceColumns is not { Count: > 0 })
-            return (rules, []);
-
-        var copyable = new List<FieldMappingRuleEntity>(rules.Count);
-        var securedSourced = new List<FieldMappingRuleEntity>();
-        foreach (var candidate in rules)
-        {
-            if (CreateTimeFieldMapping.CollectSourceColumns([candidate]).Any(securedSourceColumns.Contains))
-                securedSourced.Add(candidate);
-            else
-                copyable.Add(candidate);
-        }
-
-        return (copyable, securedSourced);
-    }
-
     /// <summary>A copy of <paramref name="row"/> (its name, id and values), so a probe of the engine leaves the row as it is.</summary>
     private static Entity CopyOf(Entity row)
     {
@@ -515,7 +492,7 @@ internal sealed partial class RecordCreationService
     /// (<paramref name="fromFilingParent"/>), an adapter's default (<paramref name="isDefault"/>), a filing lookup
     /// (<paramref name="isFilingLookup"/>: refused as the caller's own when it fails), and a BFF-owned invariant column
     /// (<see cref="IsCopyInvariantColumn"/>). A value from a field-secured source column never reaches step 5
-    /// (<see cref="SplitFieldSecuredSourceRules"/>). Pure.
+    /// (<see cref="FieldSecuredSourceRule.Split"/>). Pure.
     /// </summary>
     internal static bool MayCopyWithoutCallerChecks(
         string table, string column, bool fromFilingParent, bool isDefault, bool isFilingLookup) =>
@@ -1023,9 +1000,10 @@ internal sealed partial class RecordCreationService
         var secured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var attribute in list.EnumerateArray())
         {
-            // Anything but an explicit false is secured (fail closed).
+            // Anything but an explicit false is secured (fail closed): the one predicate, shared with the push.
             if (attribute.TryGetProperty("LogicalName", out var name) && name.ValueKind == JsonValueKind.String
-                && !(attribute.TryGetProperty("IsSecured", out var isSecured) && isSecured.ValueKind == JsonValueKind.False))
+                && FieldSecuredSourceRule.CountsAsSecured(
+                    attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
             {
                 secured.Add(name.GetString()!);
             }
