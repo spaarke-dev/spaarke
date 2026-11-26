@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-01g / FR-09f: Engine changes in src/accelerators — skip-and-report mode, reproducible .docx output, closed reason codes on refusals</title>
+    <phase>0 Engine hosting and cleanup</phase>
+    <gate>after the accelerator PR from branch work/accelerator-redline-skip-unplaceable (commit 2759ef3a7d) merges to master, or earlier against that branch; this project changes the engines itself only for a gap that PR leaves (owner directive 2026-11-26)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes shared engine code that writes legal documents (OOXML tracked changes); a defect corrupts redlines for both this pipeline and the accelerator's interactive skills.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>OOXML surgery (per-edit snapshot/restore of paragraph XML), a contract shared with another project, and byte-level reproducibility; high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none (master has the engines since #3163)</deps>
+    <tags>accelerator, engines, python, ooxml, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The accelerator session implemented this contract (commit 2759ef3a7d, branch work/accelerator-redline-skip-unplaceable: ooxml_redline.py, summary_table.py, check_outputs.py, safe_docx.write_parts with sorted parts and fixed dates, 16 new tests). First verify that implementation against every acceptance criterion below on this branch after merging master; where a criterion fails, fix it in `src/accelerators/core/engines/` here and tell the accelerator session. Do not re-implement what passes. The target: change the accelerator NDA engines so an unattended pipeline gets a correct result: (1) a skip-and-report mode in `ooxml_redline.py` that applies every edit that fits, leaves nothing partial for an edit that does not, and writes a codes-only REPORT.json; (2) `summary_table.py` and `check_outputs.py` accept that report (by-hand rows; checks expect only applied edits); (3) every .docx the engines write is byte-reproducible (fixed zip entry dates); (4) default-mode refusals carry the same closed reason code and edit index in the exit-3 error. Default behaviour without the new flags is unchanged for the accelerator's interactive skills.</prompt>
+  <role>SPAARKE engineer. Expert in Python 3.11, lxml and WordprocessingML (w:ins, w:del, w:comment, bookmarks), and in keeping a shared CLI contract stable.</role>
+  <goal>The contract agreed with the accelerator session on 2026-11-26 is implemented in `src/accelerators/core/engines/` with tests in `src/accelerators/core/engines/tests/`: `ooxml_redline.py ... --skip-unplaceable REPORT.json` (exit 0 when outputs are written even if every edit is refused; 2 bad input; 3 plan breaks the contract; stdout gains "refused"; --dry-run writes only REPORT.json); REPORT.json = {"engine":"ooxml_redline","report_version":1,"edits_total","edits_applied","refused":[{"edit":i,"code":c}],"bookmarks_refused":[{"bookmark":name,"code":c}]} with codes from the closed set; `summary_table.py --refused REPORT.json`; `check_outputs.py --refused REPORT.json`; fixed ZipInfo date_time (1980,1,1,0,0,0) on every written entry; default-mode exit-3 error JSON adds "edit" and "code". The existing engine tests and `run_local_e2e.py` on the synthetic corpus pass unchanged in default mode.</goal>
+
+  <context>
+    <background>Owner decisions 2026-11-26 (notes/decisions.md): refused edits "Both: A, with B as backup"; clean copy accepts all revisions from all sides, redline/external never lose an edit or auto-accept; clause anchoring deterministic; and "if the engine or other Accelerator owned code needs changing because it's not meeting requirements then we need to make those changes". Task 001 found (notes/001-engine-container.md): on master `ooxml_redline.py` refuses the whole plan (exit 3) when one edit cannot be placed, and `ooxml_redline.py:593-596` / `summary_table.py:276-278` write zip entries with `ZipFile.writestr(str, data)`, stamping the wall clock, so two runs never produce identical .docx files. The accelerator session (`acclerator-r1`) proposed the skip-and-report contract and the closed code set: para_not_found, para_not_unique, not_found, not_unique, in_existing_markup, word_boundary, old_not_in_find, crosses_markup, crosses_field_or_drawing, in_field_result, nothing_after_heading, bookmark_exists. Their behavioural notes: a refused edit restores its paragraph from a snapshot taken before the try; bookmarks that cannot be placed are skipped and reported; plan-shape errors (validate_plan) still exit 3; in skip mode stderr says nothing about refusals; summary_table keeps a refused edit's summary row with "Not applied – make this change by hand" and adds a "Changes to make by hand" table on the summary page (internal document only); check_outputs validates the report (indexes in range, no repeats, known codes) and expects revision_text/comments for applied edits only and summary rows = plan rows + one by-hand row per refused edit.</background>
+    <relevant-files>
+      <file role="modify">src/accelerators/core/engines/ooxml_redline.py</file>
+      <file role="modify">src/accelerators/core/engines/summary_table.py</file>
+      <file role="modify">src/accelerators/core/engines/check_outputs.py</file>
+      <file role="modify">src/accelerators/core/engines/tests/test_engines.py</file>
+      <file role="modify">src/accelerators/practices/nda/skills/nda-review/SKILL.md (document the new flags only if the skill text lists engine options; interactive flow stays default mode)</file>
+      <file role="canonical-reference">src/accelerators/practices/nda/evals/run_local_e2e.py (default-mode end-to-end run on the synthetic corpus)</file>
+      <file role="canonical-reference">projects/spaarke-intake-pipeline-r1/notes/001-engine-container.md (contract as recorded, both escalations)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Task 001 consumes the result (skip mode option, whole-file parity); task 015 uses the report for by-hand rows.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope: engine code. Change the single copy under `src/accelerators/`; never copy or fork it into this project, and never patch it at runtime from the wrapper.</constraint>
+    <constraint source="owner">Scope: default mode. Without the new flags every existing behaviour, exit code and output is unchanged, except that .docx zip entry dates are fixed and the exit-3 error JSON gains "edit" and "code" keys (the "error" text stays).</constraint>
+    <constraint source="owner">Scope: prior markup and Clean. The redline and external outputs never lose an edit and never accept or reject existing markup; the Clean copy accepts all revisions from all sides (unchanged).</constraint>
+    <constraint source="ADR-015">Scope: REPORT.json and skip-mode stderr. Codes, indexes and generated bookmark names only; no clause text, find/replace strings or paragraph keys.</constraint>
+    <constraint source="project">Scope: anchoring. Placement stays exact-match and exactly-once; no fuzzy, approximate or "closest" matching is added anywhere.</constraint>
+    <constraint source="project">Scope: dependencies. Python stdlib + lxml only, as today.</constraint>
+    <constraint source="project">Scope: test data. Synthetic corpus only; never read or reference any `answer-key/` folder or a real NDA.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/accelerators/README.md</file>
+      <file>src/accelerators/core/schemas/edit-plan.schema.json</file>
+      <file>src/accelerators/practices/nda/skills/nda-review/SKILL.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/001-engine-container.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/decisions.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Engine CLI and tests" location="src/accelerators/core/engines/tests/test_engines.py">Existing stdlib unittest tests that run the engines on generated .docx fixtures; extend them.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the three engines and their tests; run the existing tests and `run_local_e2e.py` (default mode) to get a green baseline.</step>
+    <step order="2">Fixed zip dates: write every entry through a ZipInfo with date_time (1980,1,1,0,0,0) and the same compress_type; prove two runs give identical sha256.</step>
+    <step order="3">Map each PlanError site to a closed code; default-mode exit-3 error JSON gains "edit" (0-based, when known) and "code".</step>
+    <step order="4">Skip-and-report: per-edit paragraph snapshot and restore on refusal; bookmarks skipped and reported; REPORT.json; exit codes and stdout as specified; --dry-run writes only the report.</step>
+    <step order="5">summary_table.py --refused and check_outputs.py --refused as specified.</step>
+    <step order="6">Tests (must-fire and must-not-fire): a plan with one non-unique find in skip mode → the other edits applied, report lists that index with not_unique, no partial change in that paragraph, check_outputs passes with --refused; every-edit-refused → exit 0 and outputs written; plan-shape error → exit 3 in both modes; default mode on the synthetic corpus byte-identical to the pre-change outputs apart from zip dates; reproducibility (two runs, same sha256); report has no clause text.</step>
+    <step order="7">Record the contract as built (flags, report schema, codes, exit codes) in `projects/spaarke-intake-pipeline-r1/notes/009-engine-changes.md` for task 001 and the accelerator session.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If restoring a refused edit's paragraph cannot be made exact (the snapshot restore changes anything else in the document), STOP and report the case.</trigger>
+    <trigger>If any default-mode output changes beyond zip entry dates and the two added error keys, STOP and report the diff.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The engines under `src/accelerators/core/engines/` (single copy, on master since #3163); no other component writes OOXML redlines for this pipeline.</existing>
+    <extension>Yes — extends the existing engines with opt-in flags; no new engine or wrapper logic.</extension>
+    <cost-of-doing-nothing>One unplaceable edit fails the whole NDA in an unattended run (no redline reaches the attorney), and engine outputs cannot be proven identical between the container and a local run.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="python">`py -3.11` through the PowerShell tool only; never a heredoc or stdin into an interpreter</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/accelerators/core/engines/ooxml_redline.py</output>
+    <output type="code">src/accelerators/core/engines/summary_table.py</output>
+    <output type="code">src/accelerators/core/engines/check_outputs.py</output>
+    <output type="test">src/accelerators/core/engines/tests/test_engines.py</output>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/009-engine-changes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With --skip-unplaceable, a plan with one unplaceable edit produces all outputs with every other edit applied, REPORT.json lists that edit's index and closed code, and the refused edit's paragraph is unchanged (FR-01g, FR-09f).</criterion>
+    <criterion testable="true">summary_table.py --refused adds one by-hand row per refused edit; check_outputs.py --refused passes on that output and fails on a report with an out-of-range index, a repeated index or an unknown code.</criterion>
+    <criterion testable="true">Two runs on the same input produce byte-identical .docx files (same sha256).</criterion>
+    <criterion testable="true">Default mode: the existing engine tests pass unchanged and `run_local_e2e.py` on the synthetic corpus passes; outputs differ from pre-change outputs only in zip entry dates; exit-3 errors carry "edit" and "code".</criterion>
+    <criterion testable="true">Negative: a plan-shape error exits 3 in both modes; REPORT.json and skip-mode stderr contain no clause text, find/replace strings or paragraph keys (asserted by a test).</criterion>
+    <criterion testable="true">No fuzzy or approximate matching is introduced (code review of the diff); dependencies remain stdlib + lxml.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-11-26 from the owner's directive that this project changes accelerator-owned code that does not meet its requirements. Contract proposed by the accelerator session and accepted; the accelerator session had already built it (2759ef3a7d, adversarial review running, PR to follow), so this task became verify-then-fix-gaps on 2026-11-26 and the duplicate implementation was stopped before it changed any file.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

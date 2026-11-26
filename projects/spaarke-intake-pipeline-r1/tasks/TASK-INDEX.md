@@ -15,6 +15,7 @@
 | 006 | Cleanup PR part 2: item 7 threaded reply (createReply) + item 8 docs (FR-03) | 0 | ✅ [done] | 005 | P0-A2 | sonnet / high |
 | 007 | Review and merge ADR-004 Amendment A2 (FR-04) — **main session only** (`.claude/`) | 0 | ✅ [done] | none | SERIAL | opus / high |
 | 008 | Phase 0 dev deploy + engine-hosting spike report (latency, golden, Clean-copy finding) | 0 | 🔲 [open] | 001–006 | P0-C | sonnet / high |
+| 009 | Engine changes in `src/accelerators`: skip-and-report mode, reproducible .docx, closed reason codes (FR-01g, FR-09f): verify the accelerator's PR (2759ef3a7d), fix gaps | 0 | 🔲 [open] | accelerator PR merged | P0-B | opus / high |
 | 010 | `sprk_servicerequest` intake columns (FR-05) | 1 | 🔲 [open] | none (coordinate ontology first) | P1-A | sonnet / high |
 | 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | ✅ [done] | none | P1-A | sonnet / high |
 | 012 | `requestType` on RoutingContext + intake harness registry (FR-08) | 1 | ✅ [done] | 005 | P1-A | opus / high |
