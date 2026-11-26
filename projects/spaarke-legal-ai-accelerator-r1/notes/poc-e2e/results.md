@@ -735,3 +735,8 @@ runs on the BFF. So this confirms two things for Word desktop: it follows an ins
 and it calls a Spaarke MCP tool (the WP-3 question, answered on desktop). It says nothing about Python: WP-1 is still
 open. `/nda-review` builds its redline, summary page and checks with Python scripts, so packaging it as a plugin would
 reach Word only if WP-1 passes, or if the engines run on the server as MCP tools.
+
+**WP-1 first try (owner, Word desktop, 2026-11-26):** answer `Spaarke Word probe · instructions loaded · WPI-1112-A`.
+That is the *instructions* skill's line, not the script skill's: no `WPS-1112-A`. Either the instructions probe was
+asked for, or Word sent "script probe" to the wrong skill. **Inconclusive**; retry with the
+`spaarke-word-probe-script` chip picked from **+** (WP-1 b).
