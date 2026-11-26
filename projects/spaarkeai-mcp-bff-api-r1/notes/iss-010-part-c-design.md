@@ -156,3 +156,34 @@ C2 needs `RightsOnAsync` (`CallerWriteAuthorization.cs:777`) to read the window,
 - Tests.
 
 No package or DI registration is added.
+
+## uac-r2 decision (2026-11-25): APPROVED WITH AMENDMENTS
+
+**Build with the changes below.** After mcp-r1's Opus adversarial review, the diff goes back to uac-r2 as the access gate.
+
+**Stays as written**
+- Clear (c) after every step.
+- Suspend the window for non-child executors.
+- `sealed override` on the child-create base.
+- Store only non-null answers; keep a 403 only within its window; never store a fault.
+- Only DecisionCommitService opens the window (ArchTest).
+- Close it on replay and before the Decision Record write.
+- No edits to CallerRecordAccessProbe, CallerWriteAuthorization or RecordCreationService.
+
+**The three points**
+1. One mask per (caller, table, record): **approved**.
+2. C2: **rejected**. The probe (OBO token) and the route core (impersonated client) reach Dataverse by different identity paths, so they keep separate stores.
+3. Caching the "table not supported" 400: **not in this PR**. File it as a D item. If it is ever done: request-scoped, keyed on table only, for that one error code only.
+
+**Amendments (required)**
+- **A1.** List every write between Open and step 1's ExecuteAsync, with file:line: the commit claim, lease, idempotency or ledger rows, and Signal markers. For each, show it cannot change the caller's access, or clear (c) after it.
+- **A2.** Add a source-scan ArchTest (with a must-fire control) over Services/Signals, Services/RecordCreation and the step-12 services. It fails on:
+  - `systemuserroles_association`, `teammembership_association`, `teamroles_association`;
+  - AddMembersTeam / RemoveMembersTeam;
+  - any reference to ExternalCollaboratorPlacement.
+- **A3.**
+  - The step-12 ArchTest also covers RecordCreationService's own code after step 11.
+  - The profile rig asserts, in wire order and for each child-create step, that no window-served (c) answer is given after that step's create POST.
+- **A4.** Record it as ADR-003/ADR-009 **Path C (comply)**: a per-request snapshot ("cache UAC snapshots per-request only"). Every allow and deny is computed fresh from it, and it clears every step.
+
+**Tests:** §6, plus the A2 and A3 guards. The restamp must-fire runs on BOTH wires.
