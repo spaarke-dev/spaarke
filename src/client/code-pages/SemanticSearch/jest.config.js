@@ -42,6 +42,13 @@ module.exports = {
     // dependency is @spaarke/auth, mapped above.
     '^@spaarke/ui-components/hooks/useDocumentActions$':
       '<rootDir>/../../shared/Spaarke.UI.Components/src/hooks/useDocumentActions',
+    // Same file-scoped pattern for the shared search filters (#3093): FilterDropdown + DateRangeFilter.
+    // Their dependencies are Fluent (mapped below to this page's copy) and utils/dateLocal (none).
+    '^@spaarke/ui-components/components/SearchFilters$':
+      '<rootDir>/../../shared/Spaarke.UI.Components/src/components/SearchFilters',
+    // One Fluent instance, so the shared filters read this page's FluentProvider (and resolve in CI,
+    // where the shared lib has no node_modules).
+    '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components',
     // Force a single React instance — mirror webpack.config.js. Without this,
     // jest resolves a second react copy from the shared lib's node_modules
     // and React-19 hooks throw "Cannot read properties of null (reading 'useState')".

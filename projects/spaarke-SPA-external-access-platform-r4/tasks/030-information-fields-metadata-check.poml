@@ -4,7 +4,7 @@
     <title>Live-metadata check of the §5 candidate Information columns (owner-approved read-only commands) (FR-18a)</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 028 — owner sees and approves the read-only commands before any runs</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Live read-only verification feeding task 031; produces a notes file, no code</rigor-reason>
     <model-tier>sonnet</model-tier>

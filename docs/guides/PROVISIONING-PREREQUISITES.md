@@ -242,7 +242,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 |---|---|---|---|
 | PRQ-C-01 | OpenAI regional TPM headroom for the pinned deployments (gpt-4o 150, gpt4.1-mini 200, text-embedding-3-large 350 — DataZoneStandard) | Spaarke admin | `InsufficientQuota - <model> - DataZoneStandard` on a subscription without the grant |
 | PRQ-C-02 | OpenAI model GA per region for pinned versions | Spaarke admin | `ServiceModelDeprecated` at H2a deploy |
-| PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
+| PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage). A name Azure reports unavailable that exists in the stamp's own `rg-spaarke-{customerId}-{env}` is this stamp's resource and passes (`OWNED`), so the check is safe on upgrade and resume runs; one absent there is a real collision and fails (ISS-030) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
 | ~~PRQ-C-04~~ | **Retired 2026-10-06 (T228).** Dataverse environment-creation rate — L2 no longer creates environments (PRQ-C-09). | — | — |
 | ~~PRQ-C-05~~ | **Retired 2026-10-06 (T227a).** Model 2 only (out of scope, D-12), and the customer's BFF app registration does not exist before the run (H3 creates it), so no pre-run check could hold its id. | — | — |
 | ~~PRQ-C-06~~ | **Retired 2026-10-14 (T186).** Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) — H6 applies it itself before every import (Dataverse Web API `organization` PATCH, T253; `H6SolutionImportHandler` step 7.6), so a pre-run check would fail on every new environment for a value the run sets anyway. | — | — |

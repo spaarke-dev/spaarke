@@ -51,6 +51,10 @@ export {
   EMAIL_RECORD_LOOKUP_CATALOG,
 } from './createXrmEmailComposeHandlers';
 export type { XrmEmailComposeHandlers } from './createXrmEmailComposeHandlers';
+// The whole Xrm-backed host wiring for an Email surface mount (adapters + compose handlers + From + org URL), so
+// the widget, the LegalWorkspace section and the code page cannot drift (#2973).
+export { useXrmEmailHostProps } from './useXrmEmailHostProps';
+export type { XrmEmailHostProps, UseXrmEmailHostPropsOptions } from './useXrmEmailHostProps';
 
 // Pattern B launcher — opens the standalone Email code page (`sprk_emailpage`)
 // as a centered modal dialog for a specific `sprk_communication` record.
@@ -90,12 +94,15 @@ export {
   EMAIL_NOT_SENT_NO_SERVER,
   EMPTY_COMPOSED_EMAIL,
   composedEmailFromState,
+  discardComposedEmailUploads,
   pendingAttachments,
   invalidRecipients,
   isComposedEmailReady,
   joinRecipientAddresses,
   sendComposedEmail,
 } from './composeOnlySend';
+// Task 220 (#2813): a compose-only wizard deletes its Send Email step's unsent uploads when it closes.
+export { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from './uploadDiscard';
 export type {
   IComposedEmail,
   IEmailComposeHandlers,
@@ -151,4 +158,5 @@ export type {
   IEmailComposerProps,
   IEmailComposerHandle,
   EmailComposerRef,
+  IUploadedLocalAttachment,
 } from './EmailComposer.types';

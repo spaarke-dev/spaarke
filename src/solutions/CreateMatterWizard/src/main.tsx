@@ -1,132 +1,39 @@
 import * as React from "react";
-import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
-import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 import { launchAssociationFromParams } from "@spaarke/ui-components/utils/launchAssociation";
-import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
-import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
-import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
-import { createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
+import { useWizardPageBootstrap } from "@spaarke/ui-components/utils/useWizardPageBootstrap";
+import { mountWizardPage, WizardPageInitializing } from "@spaarke/ui-components/utils/mountWizardPage";
 import { CreateMatterWizard, mapMatterHandoffSeed } from "@spaarke/ui-components/components/CreateMatterWizard";
 import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services/EntityCreationService";
-import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
-import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  const params = React.useMemo(() => parseDataParams(), []);
-  const [isAuthReady, setIsAuthReady] = React.useState(false);
-  const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
-  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>("");
+  const b = useWizardPageBootstrap("CreateMatterWizard");
 
-  React.useEffect(() => {
-    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
-  }, []);
+  // Assistant → surface hand-off pre-seed (spaarkeai-assistant-enhancements-r1 task 013): map the drafted
+  // seed onto the wizard's initial form values. `undefined` when opened directly — the wizard opens empty.
+  const initialFormValues = React.useMemo(() => mapMatterHandoffSeed(b.handoffSeed), [b.handoffSeed]);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    async function initialize(): Promise<void> {
-      try {
-        const config = await resolveRuntimeConfig();
-        await initAuth({
-          clientId: config.msalClientId,
-          bffBaseUrl: config.bffBaseUrl,
-          bffApiScope: config.bffOAuthScope,
-          tenantId: config.tenantId || undefined,
-          proactiveRefresh: true,
-        });
-        if (!cancelled) {
-          setResolvedBffBaseUrl(config.bffBaseUrl);
-          setResolvedTenantId(config.tenantId ?? "");
-          setIsAuthReady(true);
-        }
-      } catch (err) {
-        console.error("[CreateMatterWizard] Failed to initialize auth:", err);
-        if (!cancelled) setIsAuthReady(true);
-      }
-    }
-    void initialize();
-    return () => { cancelled = true; };
-  }, []);
-
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const uploadService = React.useMemo(() => createXrmUploadService(resolvedBffBaseUrl), [resolvedBffBaseUrl]);
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
-  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
-  const emailComposeHandlers = React.useMemo(
-    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: resolvedBffBaseUrl || undefined }),
-    [resolvedBffBaseUrl]
-  );
-
-  // Assistant → surface hand-off pre-seed (spaarkeai-assistant-enhancements-r1
-  // task 013): when this wizard was launched from the Assistant's surface_launch
-  // create flow (task 012 `launchSurface`), read this page's own hand-off envelope
-  // from the launch URL and map the drafted seed onto the wizard's initial form
-  // values. `undefined` when opened directly (no `handoffId` on the URL) — the
-  // wizard opens empty exactly as before. Read once (URL is static per mount).
-  // Read this page's own hand-off context once (URL is static per mount).
-  const handoff = React.useMemo(() => readHandoffFromUrl(), []);
-  const initialFormValues = React.useMemo(
-    () => mapMatterHandoffSeed(computeHandoffSeed(handoff)),
-    [handoff]
-  );
-
-  // UAT W-2/W-5 (the create-flow file leg): pass the hand-off's session file
-  // references so the wizard fetches the drafted-from document(s) and attaches
-  // them to the new matter. `undefined` when there's no session file to carry
-  // (direct open, or a draft with no source file) — the files step stays empty.
+  // UAT W-2/W-5 (the create-flow file leg): pass the hand-off's session file references so the wizard
+  // fetches the drafted-from document(s) and attaches them to the new matter. `undefined` when there is none.
   const initialFileRefs = React.useMemo(() => {
-    const seed = computeHandoffSeed(handoff);
+    const seed = b.handoffSeed;
     if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
-  }, [handoff]);
+  }, [b.handoffSeed]);
 
   // Task 195 (#2352): opened from a project's form command or its "New" on the Project <-> Matter subgrid
   // (sprk_wizard_commands), the launch envelope names that project — pre-select it and lock the Associate-To step.
   // Only the project table is taken; any other launch record, or none, leaves the step as it was.
   const { initialAssociation, lockAssociation } = React.useMemo(
-    () => launchAssociationFromParams(params, "sprk_project"),
-    [params]
+    () => launchAssociationFromParams(b.params, "sprk_project"),
+    [b.params]
   );
 
-  const handleClose = React.useCallback(() => {
-    navigationService.closeDialog({ confirmed: true });
-  }, [navigationService]);
-
-  // D-013-04 honest-ack: on a SUCCESSFUL create, write the committed
-  // SurfaceHandoffResult (record id) for the active hand-off, then close. No-op
-  // (just closes) when opened directly (no hand-off) — mirrors
-  // `useWizardPageBootstrap.completeHandoff`. Cancellation is INFERRED by the
-  // orchestrator from the absence of a written result, so the cancel path
-  // (handleClose) intentionally writes nothing.
-  const handleComplete = React.useCallback((recordId?: string) => {
-    if (handoff?.handoffId) writeCompleteHandoff(handoff.handoffId, recordId);
-    navigationService.closeDialog({ confirmed: true });
-  }, [handoff, navigationService]);
-
-  const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
-    // Shared cross-frame walker (task 081 / C-8).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(['webApi', 'utility']);
-    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
-    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
-    const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
-    const buId = user["_businessunitid_value"] as string;
-    if (!buId) throw new Error("Could not resolve business unit");
-    const bu = await xrm.WebApi.retrieveRecord("businessunit", buId, "?$select=sprk_containerid");
-    return (bu["sprk_containerid"] as string) || "";
-  }, []);
-
   // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): resolve BU cascade defaults
-  // (sprk_containerid + sprk_searchindexname) from the current user's owning BU. Since task 021 the wizard passes
+  // (the BU id and sprk_containerid) from the current user's owning BU. Since task 021 the wizard passes
   // them to MatterService but nothing reads them (the matter's index and container columns are the server's,
-  // FR-38/FR-40; the uploaded files are indexed without naming an index); the callback stays as the host's contract.
-  // Matches CreateProjectWizard / CreateEventWizard / CreateWorkAssignmentWizard
-  // solution wiring exactly — Xrm.Utility.getGlobalContext().userSettings.userId is
-  // the correct documented API in the Code Page host (Xrm.Utility.getUserId does NOT
-  // exist; the previous inline matterService implementation silently returned null).
+  // FR-38/FR-40); the callback stays as the host's contract.
   const resolveUserBuDefaults = React.useCallback(async (): Promise<IUserBuCascadeDefaults> => {
     // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -136,32 +43,24 @@ function App() {
     return await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
   }, []);
 
-  if (!isAuthReady) {
-    return (
-      <FluentProvider theme={theme} style={{ height: "100%" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-          <span>Initializing...</span>
-        </div>
-      </FluentProvider>
-    );
-  }
+  if (!b.isAuthReady) return <WizardPageInitializing theme={b.theme} />;
 
   return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
+    <FluentProvider theme={b.theme} style={{ height: "100%" }}>
       <CreateMatterWizard
         open={true}
-        dataService={dataService}
-        uploadService={uploadService}
-        navigationService={navigationService}
-        emailComposeHandlers={emailComposeHandlers}
+        dataService={b.dataService}
+        uploadService={b.uploadService}
+        navigationService={b.navigationService}
+        emailComposeHandlers={b.emailComposeHandlers}
         embedded={true}
-        onClose={handleClose}
-        onComplete={handleComplete}
-        authenticatedFetch={authenticatedFetch}
-        bffBaseUrl={resolvedBffBaseUrl}
-        resolveSpeContainerId={resolveSpeContainerId}
+        onClose={b.closeDialog}
+        onComplete={b.completeHandoff}
+        authenticatedFetch={b.authenticatedFetch}
+        bffBaseUrl={b.bffBaseUrl}
+        resolveSpeContainerId={b.resolveSpeContainerId}
         resolveUserBuDefaults={resolveUserBuDefaults}
-        tenantId={resolvedTenantId}
+        tenantId={b.tenantId}
         initialFormValues={initialFormValues}
         initialFileRefs={initialFileRefs}
         initialAssociation={initialAssociation}
@@ -171,13 +70,4 @@ function App() {
   );
 }
 
-const rootElement = document.getElementById("root");
-if (rootElement) {
-  createRoot(rootElement).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  console.error("[CreateMatterWizard] Root element not found");
-}
+mountWizardPage("CreateMatterWizard", App);

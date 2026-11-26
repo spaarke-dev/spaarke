@@ -10,6 +10,8 @@
  *   - While Processing, the 202's provisional warning (`submittedWarning`) is a quiet caption; the terminal view drops it.
  *   - Rejected: the reason code and a report slot the host renders (`renderReport`); a placeholder until task 134.
  *   - Failed: retry guidance.
+ *   - iss052: "Open invoice" (an Accepted view with an `invoiceId`) and "Open {matter|project|work assignment}" (a known
+ *     `coreRecord`), each only when the host passes its callback (`onOpenInvoice`, `onOpenRecord`); without them, nothing changes.
  *
  * Everything shown comes from the server, so leaving the page and returning (the host mounts this with the same
  * submission id) shows the same answer. No SPA auth, Xrm or BFF URL import (ADR-012); Fluent v9 tokens only (ADR-021).
@@ -18,6 +20,7 @@ import * as React from 'react';
 import {
   makeStyles,
   tokens,
+  Button,
   Text,
   Spinner,
   MessageBar,
@@ -27,8 +30,18 @@ import {
 import { StatusBadge } from '../StatusBadge';
 import type { StatusBadgeTone } from '../StatusBadge';
 import { invoiceSubmissionErrorMessage } from './messages';
-import { InvoiceSubmissionError, isTerminalStatus } from './types';
-import type { InvoiceSubmissionStatusView, InvoiceSubmissionWarning } from './types';
+import {
+  InvoiceSubmissionError,
+  invoiceSubmissionInvoiceIdOf,
+  invoiceSubmissionRecordOf,
+  isTerminalStatus,
+} from './types';
+import type {
+  InvoiceCoreRecordKind,
+  InvoiceSubmissionRecordRef,
+  InvoiceSubmissionStatusView,
+  InvoiceSubmissionWarning,
+} from './types';
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 
@@ -90,7 +103,19 @@ const useStyles = makeStyles({
     borderLeftColor: tokens.colorNeutralStroke2,
     color: tokens.colorNeutralForeground3,
   },
+  links: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
+  },
 });
+
+/** The noun of each core record kind, for "Open {record}". */
+const RECORD_NOUN: Readonly<Record<InvoiceCoreRecordKind, string>> = {
+  matter: 'matter',
+  project: 'project',
+  workassignment: 'work assignment',
+};
 
 export interface InvoiceSubmissionOutcomeProps {
   /** The submission to show. */
@@ -120,10 +145,32 @@ export interface InvoiceSubmissionOutcomeProps {
   keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
   /** Optional (task 052): extra content under the Accepted message (the internal host notes an override here). */
   renderAccepted?: (status: InvoiceSubmissionStatusView) => React.ReactNode;
+  /**
+   * Optional (iss048): called with every status read, so a host that shows something else about this submission (the wizard's
+   * result heading and icon) follows the SAME poll instead of starting a second one. Absent: nothing changes.
+   */
+  onStatusChange?: (status: InvoiceSubmissionStatusView) => void;
+  /**
+   * Optional (iss052): opens the invoice. With it, an Accepted view whose `invoiceId` is a GUID shows "Open invoice" (the server
+   * sends the id only for an invoice the caller may see). Absent: no such action, the screen is unchanged.
+   */
+  onOpenInvoice?: (invoiceId: string) => void;
+  /**
+   * Optional (iss052): opens the matter, project or work assignment the invoice was filed against. With it, any view whose
+   * `coreRecord` is a known kind and a GUID shows "Open {matter|project|work assignment}". Absent: no such action.
+   */
+  onOpenRecord?: (record: InvoiceSubmissionRecordRef) => void;
+  /**
+   * Optional (iss052 fix round 1): whether the Rejected bar names the stored reason code ("Reason: {code}"). Default true (the
+   * internal host, unchanged). A firm-facing host passes false: the bar then says "The invoice was rejected." and the code is
+   * never shown as text (EB-D-210: a firm sees a code only with its firm-safe description, which the host's report carries).
+   * Only the rendering changes; every decision that reads the code (the record-setup refusal, the result heading) is the same.
+   */
+  showReasonCode?: boolean;
 }
 
 /** The warning when it carries a sentence to show; null for a missing, null or blank one (nothing renders). */
-function nonBlank(warning: InvoiceSubmissionWarning | null | undefined): InvoiceSubmissionWarning | null {
+export function nonBlank(warning: InvoiceSubmissionWarning | null | undefined): InvoiceSubmissionWarning | null {
   // The wire is untrusted: a non-string message (a number, null) renders nothing rather than throwing.
   return warning && typeof warning.message === 'string' && warning.message.trim() !== '' ? warning : null;
 }
@@ -133,6 +180,15 @@ function toneFor(status: string | null | undefined): StatusBadgeTone {
   if (status === 'Rejected') return 'critical';
   if (status === 'Failed') return 'warning';
   return 'info';
+}
+
+/** A Failed submission refused by the record's ownership setup (a `record_owner_*` reason): resubmitting cannot fix it. */
+export function isRecordSetupRefusal(view: InvoiceSubmissionStatusView | null | undefined): boolean {
+  return (
+    view?.status === 'Failed' &&
+    typeof view.outcomeReasonCode === 'string' &&
+    view.outcomeReasonCode.startsWith('record_owner_')
+  );
 }
 
 /** Received and Processing (and a status the BFF could not name) all read as Processing. */
@@ -149,6 +205,10 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   renderReport,
   keepPolling,
   renderAccepted,
+  onStatusChange,
+  onOpenInvoice,
+  onOpenRecord,
+  showReasonCode = true,
 }) => {
   const styles = useStyles();
   const [view, setView] = React.useState<InvoiceSubmissionStatusView | null>(null);
@@ -162,6 +222,8 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   getStatusRef.current = getStatus;
   const keepPollingRef = React.useRef(keepPolling);
   keepPollingRef.current = keepPolling;
+  const onStatusChangeRef = React.useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -172,6 +234,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
         const next = await getStatusRef.current(submissionId);
         if (cancelled) return;
         setView(next);
+        onStatusChangeRef.current?.(next);
         setLoadError(null);
         setStale(false);
         if (isTerminalStatus(next.status) && !keepPollingRef.current?.(next)) return;
@@ -215,6 +278,12 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   const held = heldWarning !== null;
   const badgeLabel = held ? IN_REVIEW_LABEL : labelFor(status);
   const badgeTone: StatusBadgeTone = held ? 'warning' : toneFor(status);
+  // iss048: every RecordOwnershipResolver refusal (`record_owner_*`) is about the chosen record's setup, so it refuses a resubmission the
+  // same way; "Submit it again" would send the firm in a loop. The reason code itself is not shown to the user.
+  const recordSetupRefusal = isRecordSetupRefusal(view);
+  // iss052: the links, each only when the host can open it and the server named it. No id is ever shown as text.
+  const openableInvoice = onOpenInvoice ? invoiceSubmissionInvoiceIdOf(view) : null;
+  const openableRecord = onOpenRecord ? invoiceSubmissionRecordOf(view) : null;
 
   return (
     <div className={styles.root} data-testid="invoice-submission-outcome">
@@ -286,7 +355,9 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
           <MessageBar intent="error" role="alert">
             <MessageBarBody>
               <MessageBarTitle>Rejected</MessageBarTitle>
-              {view.outcomeReasonCode ? `Reason: ${view.outcomeReasonCode}` : 'The invoice was rejected.'}
+              {showReasonCode && view.outcomeReasonCode
+                ? `Reason: ${view.outcomeReasonCode}`
+                : 'The invoice was rejected.'}
             </MessageBarBody>
           </MessageBar>
           {renderReport ? (
@@ -303,10 +374,30 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
         <MessageBar intent="warning" role="alert">
           <MessageBarBody>
             <MessageBarTitle>We could not process this invoice</MessageBarTitle>
-            Submit it again. If it keeps failing, contact the team
-            {tracking ? ` and quote tracking number ${tracking}` : ''}.
+            {recordSetupRefusal
+              ? ` because of how the record you chose is set up. Submitting it again will not help until that is fixed. Contact the team${
+                  tracking ? ` and quote tracking number ${tracking}` : ''
+                }.`
+              : `Submit it again. If it keeps failing, contact the team${
+                  tracking ? ` and quote tracking number ${tracking}` : ''
+                }.`}
           </MessageBarBody>
         </MessageBar>
+      )}
+
+      {(openableInvoice || openableRecord) && (
+        <div className={styles.links} data-testid="invoice-submission-links">
+          {openableInvoice && (
+            <Button appearance="secondary" onClick={() => onOpenInvoice?.(openableInvoice)}>
+              Open invoice
+            </Button>
+          )}
+          {openableRecord && (
+            <Button appearance="secondary" onClick={() => onOpenRecord?.(openableRecord)}>
+              Open {RECORD_NOUN[openableRecord.kind]}
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

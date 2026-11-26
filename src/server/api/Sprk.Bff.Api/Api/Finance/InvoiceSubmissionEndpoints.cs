@@ -1345,21 +1345,7 @@ internal static class InvoiceSubmissionCorrectionFields
     internal static FormCorrection ReadForm(IFormCollection form)
     {
         var errors = new Dictionary<string, string[]>();
-        string? Single(string name)
-        {
-            if (!form.TryGetValue(name, out var values) || values.Count == 0)
-            {
-                return null;
-            }
-
-            if (values.Count > 1)
-            {
-                errors[name] = [$"{name} is sent at most once."];
-                return null;
-            }
-
-            return values[0] ?? string.Empty;
-        }
+        string? Single(string name) => InvoiceSubmissionHttp.SingleFormValue(form, name, errors);
 
         var mode = Single(ModeField);
         var rawInvoiceId = Single(InvoiceIdField);

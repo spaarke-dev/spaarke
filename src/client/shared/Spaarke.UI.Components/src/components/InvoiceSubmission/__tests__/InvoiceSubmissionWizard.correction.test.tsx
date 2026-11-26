@@ -187,7 +187,8 @@ describe('InvoiceSubmissionWizard — correction: one request at a time (095f-2e
     expect(screen.getByRole('button', { name: /submitting/i })).toBeDisabled();
 
     await act(async () => accept({ submissionId: SUBMISSION_ID, trackingNumber: 'INV-9.2' }));
-    expect(await screen.findByText('Invoice received')).toBeInTheDocument();
+    // iss048: the result heading follows the polled status; this mount's getStatus answers Accepted within the act.
+    expect(await screen.findByText('Invoice accepted')).toBeInTheDocument();
     expect(submit).toHaveBeenCalledTimes(1);
   });
 

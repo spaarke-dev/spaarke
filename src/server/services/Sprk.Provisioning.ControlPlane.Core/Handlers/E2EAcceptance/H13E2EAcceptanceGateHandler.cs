@@ -1113,11 +1113,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[$"h13-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h13-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
@@ -1162,6 +1158,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
+
+        // ISS-035: H13 completes the run itself, so it must still record its own success the way every handler does --
+        // otherwise a failed-then-resumed H13 stayed in FailedHandlers (and its failure-marker gates Pending) on a
+        // Completed run. The terminal status below overrides the Running status this call sets.
+        run.MarkPhaseSucceeded(HandlerIdentifier, completedAt);
 
         run.Status = RunStatus.Completed;
         run.CurrentPhase = HandlerIdentifier;

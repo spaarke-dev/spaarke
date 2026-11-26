@@ -800,6 +800,205 @@ Describe 'Invoke-ScopedSolutionImport guards' {
     }
 }
 
+Describe 'nothing to publish is a successful import (DEF-063)' {
+    BeforeAll {
+        $script:Ctx063 = @{ Api = 'https://x/api/data/v9.2'; Headers = @{} }
+        $script:EmptyPlan = [pscustomobject]@{ Entities = @(); WebResources = @(); OptionSets = @(); SiteMaps = @(); Dashboards = @(); AppModules = @(); AppSettings = @(); ApplicationRibbon = $false }
+        function Set-Mock063([int[]]$Types) {
+            $script:Types063 = $Types
+            Mock Invoke-RestMethod {
+                $script:Calls += [pscustomobject]@{ Method = $Method; Uri = "$Uri" }
+                switch -Wildcard ("$Uri") {
+                    '*/solutions?*' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = 's1' }) } }
+                    '*/solutioncomponents?*' { return [pscustomobject]@{ value = @($script:Types063 | ForEach-Object { [pscustomobject]@{ componenttype = $_; objectid = '11111111-1111-1111-1111-111111111111' } }) } }
+                    default { return $null }
+                }
+            }
+        }
+    }
+    BeforeEach { $script:Calls = @() }
+
+    Context 'the ParameterXml builders keep refusing an empty set (must never widen)' {
+        It 'New-PublishParameterXml throws when called directly with nothing' {
+            { New-PublishParameterXml } | Should -Throw '*Nothing to publish*'
+        }
+        It 'New-PublishParameterXmlFromPlan throws for a plan with nothing publishable' {
+            { New-PublishParameterXmlFromPlan -Plan $script:EmptyPlan } | Should -Throw '*Nothing to publish*'
+        }
+        It 'Test-PublishPlanEmpty is true for an empty plan and false for each kind of publishable component' {
+            Test-PublishPlanEmpty -Plan $script:EmptyPlan | Should -BeTrue
+            foreach ($k in 'Entities', 'WebResources', 'OptionSets', 'SiteMaps', 'Dashboards', 'AppModules', 'AppSettings') {
+                $p = $script:EmptyPlan.PSObject.Copy(); $p.$k = @('x')
+                Test-PublishPlanEmpty -Plan $p | Should -BeFalse -Because $k
+            }
+            $r = $script:EmptyPlan.PSObject.Copy(); $r.ApplicationRibbon = $true
+            Test-PublishPlanEmpty -Plan $r | Should -BeFalse
+        }
+    }
+
+    Context 'Publish-SolutionComponents' {
+        It 'a role-only solution still throws by default (callers that expected to publish keep failing loudly)' {
+            Set-Mock063 @(20)
+            { Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -SkipCollateralCheck | Out-Null } | Should -Throw '*Nothing to publish*'
+        }
+        It 'a role-only solution with -AllowNothingToPublish sends no publish request and reports NothingToPublish' {
+            Set-Mock063 @(20)
+            $plan = Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -AllowNothingToPublish 6>&1 | Where-Object { $_ -is [pscustomobject] }
+            @($script:Calls | Where-Object { $_.Method -eq 'Post' }).Count | Should -Be 0
+            @($plan)[-1].NothingToPublish | Should -BeTrue
+        }
+        It 'a role-only solution prints the explicit nothing-to-publish line' {
+            Set-Mock063 @(20)
+            $out = Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -AllowNothingToPublish 6>&1 | Out-String
+            $out | Should -Match 'Nothing to publish for S'
+        }
+        It 'an unmapped component type still blocks even with -AllowNothingToPublish' {
+            Set-Mock063 @(20, 9999)
+            { Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -AllowNothingToPublish | Out-Null } | Should -Throw '*unmapped*'
+            @($script:Calls | Where-Object { $_.Method -eq 'Post' }).Count | Should -Be 0
+        }
+        It 'a plan holding ONLY app settings is not "nothing to publish": it still throws with -AllowNothingToPublish (F2, nothing silently skipped)' {
+            Mock Get-SolutionPublishPlan { [pscustomobject]@{ Entities = @(); WebResources = @(); OptionSets = @(); SiteMaps = @(); Dashboards = @(); AppModules = @(); AppSettings = @('{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}'); Workflows = @(); ApplicationRibbon = $false; Skipped = @(); Unmapped = @() } }
+            Set-Mock063 @()
+            { Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -SkipCollateralCheck -AllowNothingToPublish | Out-Null } | Should -Throw '*Nothing to publish*'
+            { Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -SkipCollateralCheck | Out-Null } | Should -Throw '*Nothing to publish*'
+            @($script:Calls | Where-Object { $_.Method -eq 'Post' }).Count | Should -Be 0
+        }
+        It 'a solution with a publishable component still publishes (one request) and reports NothingToPublish = false' {
+            Set-Mock063 @(20, 61)
+            $plan = Publish-SolutionComponents -Context $script:Ctx063 -SolutionUniqueName S -SkipCollateralCheck -AllowNothingToPublish 6>&1 | Where-Object { $_ -is [pscustomobject] }
+            @($script:Calls | Where-Object { $_.Method -eq 'Post' }).Count | Should -Be 1
+            @($plan)[-1].NothingToPublish | Should -BeFalse
+        }
+    }
+
+    Context 'Invoke-ScopedSolutionImport' {
+        It 'a role-only import runs pac, sends no publish request and returns a plan flagged NothingToPublish' {
+            Mock Invoke-ImportPreflight { }
+            $script:PacRan = $false
+            function global:pac-def063 { $script:PacRan = $true; $global:LASTEXITCODE = 0 }
+            try {
+                Set-Mock063 @(20)
+                $r = Invoke-ScopedSolutionImport -EnvironmentUrl 'https://x' -ZipPath 'a.zip' -SolutionUniqueName S -PacExe 'pac-def063' -Context $script:Ctx063 6>&1 | Where-Object { $_ -is [pscustomobject] }
+                $script:PacRan | Should -BeTrue
+                @($script:Calls | Where-Object { $_.Method -eq 'Post' }).Count | Should -Be 0
+                @($r)[-1].NothingToPublish | Should -BeTrue
+            } finally { Remove-Item function:global:pac-def063 -ErrorAction SilentlyContinue }
+        }
+    }
+
+    Context 'Import-SolutionScoped.ps1 end to end (copy of the real script next to a stub lib; no Dataverse, no pac)' {
+        BeforeAll {
+            $script:ScriptPath063 = Join-Path $script:RepoRoot 'scripts' 'Import-SolutionScoped.ps1'
+            $script:Dir063 = Join-Path ([IO.Path]::GetTempPath()) ("iss063-" + [guid]::NewGuid())
+            New-Item -ItemType Directory -Path (Join-Path $script:Dir063 'lib') | Out-Null
+            Copy-Item -LiteralPath $script:ScriptPath063 -Destination (Join-Path $script:Dir063 'Import-SolutionScoped.ps1')
+            $real = Join-Path $script:RepoRoot 'scripts' 'lib' 'Publish-SolutionComponents.ps1'
+            # The stub loads the real module, then replaces what reaches Dataverse or pac: REST (components come from $env:ISS_TYPES,
+            # every POST is appended to $env:ISS_POSTS), the pre-flight, and the pac executable.
+            Set-Content -LiteralPath (Join-Path $script:Dir063 'lib' 'Publish-SolutionComponents.ps1') -Value @(
+                ". '$real'",
+                'function Get-DataverseApiContext { @{ Api = ''https://x/api/data/v9.2''; Headers = @{} } }',
+                'function Invoke-ImportPreflight { }',
+                '$script:RealPlan = ${function:Get-SolutionPublishPlan}',
+                'function Get-SolutionPublishPlan { param($Context, $SolutionUniqueName, [switch]$IncludeControlHostEntities, [switch]$AllowWorkflows)',
+                '  if ($env:ISS_APPSETTINGS_ONLY) { return [pscustomobject]@{ Entities = @(); WebResources = @(); OptionSets = @(); SiteMaps = @(); Dashboards = @(); AppModules = @(); AppSettings = @(''{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}''); Workflows = @(); ApplicationRibbon = $false; Skipped = @(); Unmapped = @() } }',
+                '  & $script:RealPlan -Context $Context -SolutionUniqueName $SolutionUniqueName -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows }',
+                'function pac-stub { $global:LASTEXITCODE = 0 }',
+                '$script:RealImport = ${function:Invoke-ScopedSolutionImport}',
+                'function Invoke-ScopedSolutionImport { param($EnvironmentUrl, $ZipPath, $SolutionUniqueName, $ImportArgs, $Context, $ExtraWebResources, $ExtraEntities, [switch]$IncludeControlHostEntities, [switch]$AllowWorkflows, [switch]$AllowPendingCollateral)',
+                '  & $script:RealImport -EnvironmentUrl $EnvironmentUrl -ZipPath $ZipPath -SolutionUniqueName $SolutionUniqueName -ImportArgs $ImportArgs -Context $Context -ExtraWebResources $ExtraWebResources -ExtraEntities $ExtraEntities -IncludeControlHostEntities:$IncludeControlHostEntities -AllowWorkflows:$AllowWorkflows -AllowPendingCollateral:$AllowPendingCollateral -PacExe ''pac-stub'' }',
+                'function Invoke-RestMethod {',
+                '  param([string]$Method = ''Get'', $Headers, $Uri, $Body, $ContentType)',
+                '  if ("$Method" -eq ''Post'') { Add-Content -LiteralPath $env:ISS_POSTS -Value "$Uri"; return $null }',
+                '  switch -Wildcard ("$Uri") {',
+                '    ''*/solutions?*'' { return [pscustomobject]@{ value = @([pscustomobject]@{ solutionid = ''s1'' }) } }',
+                '    ''*/solutioncomponents?*'' { return [pscustomobject]@{ value = @($env:ISS_TYPES -split '','' | ForEach-Object { [pscustomobject]@{ componenttype = [int]$_; objectid = ''11111111-1111-1111-1111-111111111111'' } }) } }',
+                '    default { return $null }',
+                '  }',
+                '}')
+            $script:Zip063 = Join-Path $script:Dir063 'a.zip'; Set-Content -LiteralPath $script:Zip063 -Value 'x'
+            $script:Posts063 = Join-Path $script:Dir063 'posts.txt'
+            function Invoke-Script063([string]$Types, [string[]]$ScriptArgs) {
+                $env:ISS_TYPES = $Types; $env:ISS_POSTS = $script:Posts063
+                Remove-Item -LiteralPath $script:Posts063 -ErrorAction SilentlyContinue
+                $out = & pwsh -NoProfile -File (Join-Path $script:Dir063 'Import-SolutionScoped.ps1') -EnvironmentUrl https://x -SolutionUniqueName S @ScriptArgs 2>&1
+                [pscustomobject]@{ Exit = $LASTEXITCODE; Out = ($out | Out-String); Posts = @(if (Test-Path -LiteralPath $script:Posts063) { Get-Content -LiteralPath $script:Posts063 }) }
+            }
+        }
+        AfterAll {
+            Remove-Item Env:\ISS_TYPES, Env:\ISS_POSTS, Env:\ISS_APPSETTINGS_ONLY -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $script:Dir063 -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        It 'role-only import: exit 0, prints the nothing-to-publish line, sends no publish request' {
+            $r = Invoke-Script063 '20' @('-ZipPath', $script:Zip063)
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Nothing to publish; import complete\.'
+            $r.Out | Should -Not -Match 'Imported and scoped-published'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'import with a publishable component: exit 0, publishes (one request), no nothing-to-publish line' {
+            $r = Invoke-Script063 '20,61' @('-ZipPath', $script:Zip063)
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Imported and scoped-published S'
+            $r.Out | Should -Not -Match 'Nothing to publish'
+            $r.Posts.Count | Should -Be 1
+            $r.Posts[0] | Should -Match '/PublishXml$'
+        }
+        It 'an unmapped component type still fails the script (non-zero exit) and publishes nothing' {
+            $r = Invoke-Script063 '20,9999' @('-ZipPath', $script:Zip063)
+            $r.Exit | Should -Not -Be 0
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-PlanOnly on a role-only solution: exit 0, says nothing to publish, prints no ParameterXml, sends nothing' {
+            $r = Invoke-Script063 '20' @('-PlanOnly')
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Nothing to publish for S'
+            $r.Out | Should -Not -Match 'importexportxml'
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-PlanOnly with a publishable component still prints the ParameterXml' {
+            $r = Invoke-Script063 '20,61' @('-PlanOnly')
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match '<importexportxml><webresources>'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'a plan holding only app settings is not nothing-to-publish: import exits non-zero, -PublishOnly exits non-zero, -PlanOnly does not say nothing to publish' {
+            $env:ISS_APPSETTINGS_ONLY = '1'
+            try {
+                $r = Invoke-Script063 '20' @('-ZipPath', $script:Zip063)
+                $r.Exit | Should -Not -Be 0
+                $r.Out | Should -Not -Match 'import complete'
+                $r.Posts.Count | Should -Be 0
+                $r = Invoke-Script063 '20' @('-PublishOnly')
+                $r.Exit | Should -Not -Be 0
+                $r.Out | Should -Not -Match 'Nothing to publish;'
+                $r = Invoke-Script063 '20' @('-PlanOnly')
+                $r.Out | Should -Not -Match 'Nothing to publish for S'
+            } finally { Remove-Item Env:\ISS_APPSETTINGS_ONLY -ErrorAction SilentlyContinue }
+        }
+        It '-PlanOnly counts -ExtraEntities / -ExtraWebResources like the real path: with extras the plan is not empty and shows them' {
+            $r = Invoke-Script063 '20' @('-PlanOnly', '-ExtraEntities', 'sprk_event', '-ExtraWebResources', '22222222-2222-2222-2222-222222222222')
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Not -Match 'Nothing to publish'
+            $r.Out | Should -Match '<entity>sprk_event</entity>'
+            $r.Out | Should -Match '<webresource>\{22222222-2222-2222-2222-222222222222\}</webresource>'
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-PlanOnly on a role-only solution without extras still says nothing to publish (control for the extras case)' {
+            $r = Invoke-Script063 '20' @('-PlanOnly', '-ExtraEntities', '')
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Nothing to publish for S'
+        }
+        It '-PublishOnly on a role-only solution: exit 0 with the nothing-to-publish line, no request' {
+            $r = Invoke-Script063 '20' @('-PublishOnly')
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Nothing to publish; S needs no publish step'
+            $r.Posts.Count | Should -Be 0
+        }
+    }
+}
+
 Describe 'banned-pattern coverage' {
     It 'matches every known bypass form' {
         $samples = @(

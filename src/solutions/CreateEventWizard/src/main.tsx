@@ -1,7 +1,7 @@
 import * as React from "react";
-import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
 import { useWizardPageBootstrap } from "@spaarke/ui-components/utils/useWizardPageBootstrap";
+import { mountWizardPage, WizardPageInitializing } from "@spaarke/ui-components/utils/mountWizardPage";
 import { CreateEventWizard, mapEventHandoffSeed } from "@spaarke/ui-components/components/CreateEventWizard";
 
 function App() {
@@ -22,15 +22,7 @@ function App() {
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
   }, [b.handoffSeed]);
 
-  if (!b.isAuthReady) {
-    return (
-      <FluentProvider theme={b.theme} style={{ height: "100%" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-          <span>Initializing...</span>
-        </div>
-      </FluentProvider>
-    );
-  }
+  if (!b.isAuthReady) return <WizardPageInitializing theme={b.theme} />;
 
   return (
     <FluentProvider theme={b.theme} style={{ height: "100%" }}>
@@ -56,13 +48,4 @@ function App() {
   );
 }
 
-const rootElement = document.getElementById("root");
-if (rootElement) {
-  createRoot(rootElement).render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  console.error("[CreateEventWizard] Root element not found");
-}
+mountWizardPage("CreateEventWizard", App);

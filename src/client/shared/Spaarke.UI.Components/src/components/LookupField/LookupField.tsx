@@ -140,6 +140,17 @@ export interface ILookupFieldProps {
    * form-field look would make the lookup the odd one out.
    */
   appearance?: InputProps['appearance'];
+  /**
+   * Optional seam: what to say when a search FAILS (a rejected `onSearch`: throttled, offline, refused). Absent: a failed search shows
+   * "No results found", as it always has (the failure is only logged). Present: that text replaces "No results found" until the next
+   * search, so a failure is never read as "there are none". Say what to do: "Search could not be completed. Try again."
+   */
+  searchErrorText?: string;
+  /**
+   * Optional seam: shown as the field's hint while the typed text is shorter than `minSearchLength` (and not empty), so a short query says
+   * why nothing happens instead of showing "No results found". Absent: no such hint, as before. Pass with a `minSearchLength` above 1.
+   */
+  shortQueryHint?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +283,16 @@ const useStyles = makeStyles({
   resultItemHighlighted: {
     backgroundColor: tokens.colorNeutralBackground1Hover,
   },
+  /** An option with a secondary line: the name and the line stacked (task 211). Used only when `secondaryText` is set. */
+  resultItemText: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+  },
+  resultItemSecondary: {
+    color: tokens.colorNeutralForeground3,
+    overflowWrap: 'anywhere',
+  },
 
   selectedChip: {
     display: 'inline-flex',
@@ -348,6 +369,9 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalS,
     textAlign: 'center',
   },
+  errorText: {
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -369,6 +393,8 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   onAdvanced,
   span,
   appearance = 'outline',
+  searchErrorText,
+  shortQueryHint,
 }) => {
   const styles = useStyles();
 
@@ -382,6 +408,16 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [showResults, setShowResults] = React.useState(false);
   const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  /** True when the latest search was rejected (see `searchErrorText`); cleared when the next one starts. */
+  const [searchFailed, setSearchFailed] = React.useState(false);
+  /**
+   * Counts the searches started (typing, browse, focus). Only the NEWEST one's answer is applied: an older search that is answered late
+   * (a slow request, or a host that resolves a superseded one with nothing) must not replace the results of the one the user is
+   * waiting for, nor turn the spinner off under it.
+   */
+  const searchSeq = React.useRef(0);
+  /** The short (below `minSearchLength`) term whose stale search was already dropped; null while the term is searchable. */
+  const shortTermHandled = React.useRef<string | null>(null);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   /**
@@ -396,6 +432,42 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
    */
   const inputRef = React.useRef<HTMLInputElement>(null);
 
+  // ── One search, whoever started it ────────────────────────────────────
+  // Typing, the browse button and focus all start a search here. Only the newest search's answer is applied (see `searchSeq`).
+  const startSearch = React.useCallback(
+    (query: string, failureLog: string) => {
+      searchSeq.current += 1;
+      const mine = searchSeq.current;
+      setLoading(true);
+      setSearchFailed(false);
+      let pending: Promise<ILookupItem[]>;
+      try {
+        pending = onSearch(query);
+      } catch (err) {
+        pending = Promise.reject(err);
+      }
+      pending.then(
+        items => {
+          if (mine !== searchSeq.current) return; // a newer search has started: this answer is stale
+          setResults(items);
+          setShowResults(items.length > 0);
+          setHighlightedIndex(-1);
+          setLoading(false);
+        },
+        err => {
+          if (mine !== searchSeq.current) return;
+          // eslint-disable-next-line no-console
+          console.error(failureLog, label, err);
+          setResults([]);
+          setShowResults(false);
+          setSearchFailed(true);
+          setLoading(false);
+        }
+      );
+    },
+    [onSearch, label]
+  );
+
   // ── Debounced search ──────────────────────────────────────────────────
   React.useEffect(() => {
     if (debounceRef.current) {
@@ -403,33 +475,29 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
     }
 
     if (searchTerm.trim().length < minSearchLength) {
-      setResults([]);
-      setShowResults(false);
-      return;
-    }
-
-    debounceRef.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const items = await onSearch(searchTerm.trim());
-        setResults(items);
-        setShowResults(items.length > 0);
-        setHighlightedIndex(-1);
-      } catch (err) {
-        console.error('[LookupField] Search error:', label, err);
+      // Too short to search: anything still out for an earlier, longer term is stale, and its spinner and error go with it.
+      // Only when the TERM changed into (or within) the short range: this effect also re-runs when `onSearch` changes identity (a parent
+      // that passes an inline function), and that must not drop a browse started at this very term or close the list it opened.
+      if (shortTermHandled.current !== searchTerm) {
+        shortTermHandled.current = searchTerm;
+        searchSeq.current += 1;
+        setLoading(false);
+        setSearchFailed(false);
         setResults([]);
         setShowResults(false);
-      } finally {
-        setLoading(false);
       }
-    }, 300);
+      return;
+    }
+    shortTermHandled.current = null;
+
+    debounceRef.current = setTimeout(() => startSearch(searchTerm.trim(), '[LookupField] Search error:'), 300);
 
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
       }
     };
-  }, [searchTerm, onSearch, minSearchLength]);
+  }, [searchTerm, startSearch, minSearchLength]);
 
   // ── Close results on outside click ────────────────────────────────────
   React.useEffect(() => {
@@ -502,22 +570,8 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
    * "No results found" state until the user types.
    */
   const runBrowse = React.useCallback(() => {
-    const query = searchTerm.trim();
-    setLoading(true);
-    onSearch(query)
-      .then(items => {
-        setResults(items);
-        setShowResults(items.length > 0);
-        setHighlightedIndex(-1);
-      })
-      .catch(err => {
-        // eslint-disable-next-line no-console
-        console.error('[LookupField] browse search error:', label, err);
-        setResults([]);
-        setShowResults(false);
-      })
-      .finally(() => setLoading(false));
-  }, [searchTerm, onSearch, label]);
+    startSearch(searchTerm.trim(), '[LookupField] browse search error:');
+  }, [searchTerm, startSearch]);
 
   /**
    * The search icon is a real button (OOB parity): clicking it drops the full
@@ -557,23 +611,9 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
     // (e.g. top N unfiltered rows). Failures are surfaced to the console —
     // the empty-state message covers the UX so there's no thrown error.
     if (openOnFocus) {
-      const query = searchTerm.trim();
-      setLoading(true);
-      onSearch(query)
-        .then(items => {
-          setResults(items);
-          setShowResults(items.length > 0);
-          setHighlightedIndex(-1);
-        })
-        .catch(err => {
-          // eslint-disable-next-line no-console
-          console.error('[LookupField] openOnFocus search error:', label, err);
-          setResults([]);
-          setShowResults(false);
-        })
-        .finally(() => setLoading(false));
+      startSearch(searchTerm.trim(), '[LookupField] openOnFocus search error:');
     }
-  }, [value, results.length, openOnFocus, searchTerm, onSearch, label]);
+  }, [value, results.length, openOnFocus, searchTerm, startSearch]);
 
   // ── Render label ──────────────────────────────────────────────────────
   const renderLabel = (): React.ReactElement => (
@@ -588,11 +628,23 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
     </span>
   );
 
-  const showEmpty = !loading && !value && results.length === 0 && searchTerm.trim().length >= minSearchLength;
+  const typedLength = searchTerm.trim().length;
+  const reportFailure = searchFailed && !!searchErrorText;
+  // A failed search is not "no results": with `searchErrorText` it says so instead (see the prop).
+  const showEmpty = !loading && !value && results.length === 0 && typedLength >= minSearchLength && !reportFailure;
+  const showError = !loading && !value && reportFailure;
+  // `shortQueryHint` explains why a short query does nothing (see the prop); otherwise the field's own hint.
+  const fieldHint = shortQueryHint && typedLength > 0 && typedLength < minSearchLength ? shortQueryHint : hint;
 
   return (
-    <div className={styles.wrapper} ref={wrapperRef} style={gridColumnStyle}>
-      <Field label={renderLabel()} required={required} hint={hint}>
+    // `data-results-open`: a host that closes on Escape (the decision wizard) leaves the key to the list while it is open.
+    <div
+      className={styles.wrapper}
+      ref={wrapperRef}
+      style={gridColumnStyle}
+      data-results-open={showResults && !value ? 'true' : undefined}
+    >
+      <Field label={renderLabel()} required={required} hint={fieldHint}>
         {value ? (
           <div className={styles.selectedChip}>
             {chipIcon ? (
@@ -681,7 +733,17 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
                   }
                 }}
               >
-                <Text size={200}>{item.name}</Text>
+                {item.secondaryText ? (
+                  // Task 211 (#3062): the second line tells same-name options apart (a person's email).
+                  <div className={styles.resultItemText}>
+                    <Text size={200}>{item.name}</Text>
+                    <Text size={100} className={styles.resultItemSecondary}>
+                      {item.secondaryText}
+                    </Text>
+                  </div>
+                ) : (
+                  <Text size={200}>{item.name}</Text>
+                )}
               </div>
             ))}
           </div>
@@ -716,6 +778,17 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
       {showEmpty && (
         <Text size={100} className={mergeClasses(styles.overlayBelowField, styles.panelSurface, styles.emptyText)}>
           No results found
+        </Text>
+      )}
+
+      {/* A failed search (opt-in via `searchErrorText`): never worded as "no results". */}
+      {showError && (
+        <Text
+          size={100}
+          role="alert"
+          className={mergeClasses(styles.overlayBelowField, styles.panelSurface, styles.emptyText, styles.errorText)}
+        >
+          {searchErrorText}
         </Text>
       )}
     </div>

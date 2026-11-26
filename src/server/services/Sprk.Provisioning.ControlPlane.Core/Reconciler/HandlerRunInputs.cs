@@ -155,6 +155,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.ContentSafetyEndpoint)),   // T246: AiSafety__ContentSafety__Endpoint
                 RunInput.Output(nameof(InterStepState.StorageBlobEndpoint)),   // T186 follow-up: SessionFileStore__BlobEndpoint
                 RunInput.Output(nameof(InterStepState.OntologyWriterClientId)),   // T266: Ontology__Writer__ManagedIdentityClientId
+                RunInput.Output(nameof(InterStepState.SignalRHostName), required: false),   // ISS-022: Notifications__SignalR__* (only when SignalR deployed)
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId
@@ -260,7 +261,13 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
             ],
             [HandlerIds.H12a] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
-            [HandlerIds.H12b] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
+            [HandlerIds.H12b] =
+            [
+                Tenant,
+                // Data-setup plan D4: legal-standard (default, stored at CreateRun) | none — the starter taxonomy pack.
+                RunInput.Intake(IntakeParameterCatalog.ReferenceDataPack, required: false),
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
+            ],
             [HandlerIds.H12c] =
             [
                 Tenant,

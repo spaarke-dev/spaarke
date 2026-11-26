@@ -4,7 +4,7 @@
     <title>Email to AP and Mark Sent to AP: UI (modal step, Billing Export form buttons, Sent to AP Date on the views)</title>
     <phase>6 Export and index (WP6) — wave W6-2 (split from 151c, EB-D-181 / EB-D-182)</phase>
     <gate>startable after 151c-1a (the two routes and both columns)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Client-side only (code page, ribbon script, RibbonDiff, view definitions); no BFF, schema or auth change. The server stays the authority for every right and every refusal. Tags include frontend, ribbon and dataverse-views.</rigor-reason>
     <model-tier>sonnet</model-tier>

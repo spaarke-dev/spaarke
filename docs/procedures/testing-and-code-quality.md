@@ -401,8 +401,8 @@ The adr-check skill validates code against Architecture Decision Records:
 ### 🔴 Violations Found
 
 **ADR-002: No Dataverse Plugins / Server-Side Write Path**
-- File: `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` *(illustrative — a known master-today gap, registry I-3)*
-- Violation: record invariant (creation-time field mapping via `applyFieldMappings`) enforced only in client wizard code
+- File: `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` *(illustrative)*
+- Violation: record invariant (creation-time field mapping, formerly done by the client engine deleted in task 035) enforced only in client wizard code
 - Constraint: "Client code MAY preview an invariant but MUST NOT be its only enforcement" (WP-2)
 - Fix: Apply the invariant in the BFF write path (single server owner, WP-1) and create via a BFF endpoint (WP-3)
 
@@ -643,7 +643,7 @@ dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 One shared, **type-aware** ESLint 9 toolchain lints the client packages against each package's own tsconfig and blocks only **new** violations. It lives in `scripts/quality/client-lint/` (own `package.json`; packages do not get their own ESLint setups).
 
 - **Rule (P2):** `@typescript-eslint/no-unnecessary-condition` at `error`, on non-test `src/**`. It flags a dead `if (!res.ok)` / `res.status === 404` after `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Nothing else is enabled; existing rules are untouched.
-- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
+- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, the five eBilling code pages `src/solutions/{InvoiceFiles,InvoiceReview,CreateInvoiceWizard,RuleReview,RecordProcedures}` (their `npm run lint` runs `client-lint check --package <id>`), `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
 - **Type resolution:** the runner generates a lint tsconfig per package (`.generated/`, gitignored) that extends the package tsconfig and points every `@spaarke/*` at sibling **source**, so nothing has to be built first. Third-party types come from each package's own `node_modules`, hence the `install` step.
 
 ### Run it
@@ -1900,7 +1900,7 @@ claude --chrome
 ## Related Documentation
 
 - [CI/CD Workflow Guide](ci-cd-workflow.md) - GitHub Actions, commits, PRs, deployments
-- [Code Quality Onboarding Guide](../guides/code-quality-onboarding.md) - **Future:** Quick-start guide for new developers (task 042)
+- Code Quality Onboarding Guide - **Future:** Quick-start guide for new developers (task 042)
 - [Parallel Claude Code Sessions](parallel-claude-sessions.md) - Multi-session workflow
 - [Context Recovery Procedure](context-recovery.md) - Resuming work
 - [code-review Skill](../../.claude/skills/code-review/SKILL.md) - Full skill documentation

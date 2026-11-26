@@ -52,6 +52,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <summary>The distributed-cache key holding the last successful run (ISO 8601 UTC), shared across instances.</summary>
     internal const string LastSuccessCacheKey = "sprk:ontology:evaluator:last-success";
 
+    /// <summary>Task 224 (#2085): the distributed-cache key holding the id of the last Signal with no policy lookup that the deleted-rule
+    /// redaction read in a run cut short by its bound; the next run continues after it. Absent: read from the start.</summary>
+    internal const string DeletedPolicyRedactionCursorKey = "sprk:ontology:evaluator:deleted-policy-redaction-cursor";
+
+    /// <summary>Task 224: how long an unused cursor is kept. Losing it only restarts the pass from the start (nothing is skipped).</summary>
+    private static readonly TimeSpan DeletedPolicyRedactionCursorLifetime = TimeSpan.FromDays(7);
+
     private static readonly JsonSerializerOptions ResultJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly SignalEvaluator _evaluator;
@@ -104,7 +111,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
         IReadOnlyList<PolicyRow> policies;
         try
         {
-            policies = await ReadEnabledPoliciesAsync(cancellationToken).ConfigureAwait(false);
+            var enabled = await ReadEnabledPoliciesAsync(cancellationToken).ConfigureAwait(false);
+            policies = enabled.Policies;
+            if (!enabled.IsComplete)
+            {
+                // #2982: a read cut short (a page fault, or past the page bound; logged at Error with the counts) is not a clean run. The policies
+                // read ARE evaluated (a retry only has the rest to do) and the run is reported failed, as for any policy it could not evaluate.
+                counts.PolicyFailures++;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -526,20 +540,27 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// evidence forever. This sweeps the codes <see cref="SignalClosureService.DeletedPolicyCodesWithSignalsAsync"/> finds by the same rule
     /// as the other sweeps (<see cref="SweepStoredEvidenceAsync"/>, which reads by prefix across every status and skips a code this run
     /// already attempted). Fail closed: no policy list (<paramref name="existing"/> null, already counted and logged) or a read fault
-    /// redacts nothing extra; a fault fails the run (visible) and the run continues. A bound reached is a failed run too, after the codes
-    /// read are swept: the remaining codes' evidence was not checked.
+    /// redacts nothing extra; a fault fails the run (visible) and the run continues.
+    /// <para>Task 224 (#2085): nothing deletes Signals, so the Signals with no policy lookup only grow. A run cut short by the read's bound
+    /// records the last Signal it read (<see cref="DeletedPolicyRedactionCursorKey"/>, the distributed cache) and the next run continues after
+    /// it; a run that reaches the end clears it, so the next pass starts at the start. Over successive runs every Signal is read. A cursor
+    /// that is missing, unreadable or expired reads from the start: it repeats work, never skips a row. Reaching the bound is a Warning with
+    /// the counts; it fails the run only when the place cannot be recorded (the next run would read the same Signals again) or a finished
+    /// pass's cursor cannot be cleared (the next runs would not start at the start).</para>
     /// </summary>
     private async Task RedactSignalsOfDeletedPoliciesAsync(ExistingPolicyCodes? existing, RunCounts counts, CancellationToken ct)
     {
         if (existing is null) return;
 
+        var after = await ReadDeletedPolicyRedactionCursorAsync(ct).ConfigureAwait(false);
         DeletedPolicyCodes deleted;
         try
         {
-            deleted = await _closure.DeletedPolicyCodesWithSignalsAsync(existing, ct).ConfigureAwait(false);
+            deleted = await _closure.DeletedPolicyCodesWithSignalsAsync(existing, ct, after).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // The cursor stays: the next run reads the same Signals again.
             counts.PolicyFailures++;
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                 "Signals of deleted policies could not be read ({ExceptionType}); their stored evidence was not checked this run.", ex.GetType().Name);
@@ -547,12 +568,90 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         await SweepStoredEvidenceAsync(deleted.Codes, "was deleted", counts, ct).ConfigureAwait(false);
+        var from = after is { } start ? $"after Signal {start:D}" : "from the start";
         if (deleted.MoreRemain)
         {
-            counts.PolicyFailures++;
-            _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
-                "More Signals with no policy lookup exist than one run reads ({MaxPages} pages); the stored evidence of the deleted policies " +
-                "beyond them was not checked this run.", SignalEvaluator.MaxPages);
+            if (deleted.ResumeAfter is { } resumeAfter && await SaveDeletedPolicyRedactionCursorAsync(resumeAfter, ct).ConfigureAwait(false))
+            {
+                // Progress is recorded: the Signals beyond the bound are the next run's, so this is reported, not a failed run.
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More Signals with no policy lookup exist than one run reads ({MaxPages} pages of {PageSize}): this run read {SignalsRead} Signal(s) " +
+                    "{From} and found {Codes} deleted policy code(s); the next run continues after Signal {ResumeAfter}.",
+                    SignalEvaluator.MaxPages, SignalEvaluator.PageSize, deleted.SignalsRead, from, deleted.Codes.Count, resumeAfter);
+            }
+            else
+            {
+                counts.PolicyFailures++;
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "More Signals with no policy lookup exist than one run reads ({MaxPages} pages of {PageSize}): this run read {SignalsRead} Signal(s) " +
+                    "{From}, and where it stopped could not be recorded, so the next run reads the same Signals again; the stored evidence of the " +
+                    "deleted policies beyond them was not checked this run.",
+                    SignalEvaluator.MaxPages, SignalEvaluator.PageSize, deleted.SignalsRead, from);
+            }
+        }
+        else if (after is { } finishedAfter)
+        {
+            if (await ClearDeletedPolicyRedactionCursorAsync(ct).ConfigureAwait(false))
+            {
+                _logger.LogInformation(
+                    "The deleted-policy redaction reached the last Signal with no policy lookup ({SignalsRead} read {From}, {Codes} deleted policy " +
+                    "code(s)); the next run starts at the start.", deleted.SignalsRead, from, deleted.Codes.Count);
+            }
+            else
+            {
+                counts.PolicyFailures++;
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "The deleted-policy redaction reached the last Signal with no policy lookup, but its cursor could not be cleared, so the next " +
+                    "runs read only the Signals after Signal {After} until it is cleared or expires (within {Lifetime}).",
+                    finishedAfter, DeletedPolicyRedactionCursorLifetime);
+            }
+        }
+    }
+
+    /// <summary>Task 224: where an earlier run's deleted-policy redaction read stopped, or null (start at the start). A missing, unparseable or
+    /// unreadable value is null: a lost cursor repeats work and never skips a Signal.</summary>
+    private async Task<Guid?> ReadDeletedPolicyRedactionCursorAsync(CancellationToken ct)
+    {
+        try
+        {
+            var raw = await _cache.GetStringAsync(DeletedPolicyRedactionCursorKey, ct).ConfigureAwait(false);
+            return Guid.TryParse(raw, out var id) && id != Guid.Empty ? id : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "The deleted-policy redaction cursor could not be read; this run starts at the start.");
+            return null;
+        }
+    }
+
+    /// <summary>Task 224: records the last Signal this run read; false (logged) when the cache refuses it.</summary>
+    private async Task<bool> SaveDeletedPolicyRedactionCursorAsync(Guid lastRead, CancellationToken ct)
+    {
+        try
+        {
+            await _cache.SetStringAsync(DeletedPolicyRedactionCursorKey, lastRead.ToString("D", CultureInfo.InvariantCulture),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = DeletedPolicyRedactionCursorLifetime }, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "The deleted-policy redaction cursor could not be saved.");
+            return false;
+        }
+    }
+
+    /// <summary>Task 224: ends a pass, so the next run reads from the start; false (logged) when the cache refuses it.</summary>
+    private async Task<bool> ClearDeletedPolicyRedactionCursorAsync(CancellationToken ct)
+    {
+        try
+        {
+            await _cache.RemoveAsync(DeletedPolicyRedactionCursorKey, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "The deleted-policy redaction cursor could not be cleared.");
+            return false;
         }
     }
 
@@ -931,7 +1030,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 153 (adversarial pass 1 F2): of the closed Signals that link a Decision Record, those whose link is NOT their own closure record
     /// and that record existed before the close (a D-128 reminder or inquiry the item carried while it was open): their closure still needs
     /// its record, and the link replaces exactly that record. One read per <see cref="LinkedRecordReadChunk"/> linked records. Adversarial pass
-    /// 2: the read returns only records the writer created (<c>createdby</c>), and a record is replaced only when it took nothing but actions
+    /// 2: the read returns only records the writer created (<see cref="WriterCreatedRecord"/>, task 223), and a record is replaced only when it took nothing but actions
     /// that leave the item open (<see cref="DecisionRecordWriter.IsNonResolvingReviewRecord"/>). A record that is this closure's own is left alone; one that was created
     /// after the close, was created by a person, is any other decision, or cannot be found is left alone, logged at Warning and metered
     /// (<see cref="OntologyWriterFailureReason.ClosureRecordSkippedUnrecognisedPriorLink"/>). A read fault (the writer's identity
@@ -951,8 +1050,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
             };
             query.Criteria.AddCondition("sprk_decisionrecordid", ConditionOperator.In, chunk.Cast<object>().ToArray());
             // Adversarial pass 2: only records the writer itself created. A record a person created is never a link this job replaces.
+            // Task 223 (DI-144): the one rule, WriterCreatedRecord (createdby the writer AND createdonbehalfby empty).
             writerUserId ??= await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
-            query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId.Value);
+            WriterCreatedRecord.AddConditions(query.Criteria, writerUserId.Value);
             var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
             foreach (var row in rows?.Entities ?? Enumerable.Empty<Entity>())
             {
@@ -1184,7 +1284,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
         IReadOnlyList<PolicyRow> policies;
         try
         {
-            policies = await ReadEnabledPoliciesAsync(ct).ConfigureAwait(false);
+            var enabled = await ReadEnabledPoliciesAsync(ct).ConfigureAwait(false);
+            policies = enabled.Policies;
+            // #2982: a read cut short (logged at Error with the counts) is reported in the result's PolicyFailures; the policies read are evaluated.
+            if (!enabled.IsComplete) counts.PolicyFailures++;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1236,21 +1339,38 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.
     /// Ontology policies only (ebilling-r1 task 070): <c>sprk_domain</c> empty or Ontology, in the query and again per row
     /// (<see cref="RuleDomains"/>), so a Billing policy is neither evaluated nor counted as invalid.</summary>
-    private async Task<IReadOnlyList<PolicyRow>> ReadEnabledPoliciesAsync(CancellationToken ct)
+    /// <remarks>
+    /// <b>Complete or reported (#2982).</b> Read by the shared id-cursor reader (<see cref="SignalClosureService.ReadPolicyPagesAsync"/>): one
+    /// <c>RetrieveMultipleAsync</c> is one Dataverse page (5,000 rows), so the unpaged read evaluated only the first 5,000 enabled policies and
+    /// reported success. A read that faults or runs past <paramref name="maxPages"/> pages comes back incomplete, with the policies read so far
+    /// (logged at Error with the counts); the callers count a policy failure. The result is sorted by policy code in memory, ordinal and
+    /// case-insensitive (<see cref="StringComparer.OrdinalIgnoreCase"/>; task 204), because the cursor reads in id order. That is not Dataverse's
+    /// collation, so codes with punctuation can come out in a different order than before; nothing depends on the order.
+    /// </remarks>
+    /// <param name="pageSize">Policies per read; a test lowers it. Production uses <see cref="SignalClosureService.NotInForcePageSize"/> (5,000).</param>
+    /// <param name="maxPages">Pages before the read is reported truncated; a test lowers it.</param>
+    internal async Task<EnabledPolicies> ReadEnabledPoliciesAsync(
+        CancellationToken ct, int pageSize = SignalClosureService.NotInForcePageSize, int maxPages = SignalEvaluator.MaxPages)
     {
-        var query = new QueryExpression("sprk_policy")
-        {
-            ColumnSet = new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
+        var read = await SignalClosureService.ReadPolicyPagesAsync(
+            _entities, _logger, "enabled policies",
+            new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
                 "sprk_currentversion", "sprk_tenant", "sprk_matter", "sprk_countstowardsuppression", RuleDomains.PolicyDomainColumn),
-        };
-        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-        RuleDomains.AddOntologyPolicyAllowlist(query);
-        query.AddOrder("sprk_policycode", OrderType.Ascending);
-        var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            query =>
+            {
+                query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+                RuleDomains.AddOntologyPolicyAllowlist(query);
+            },
+            pageSize, maxPages, ct).ConfigureAwait(false);
 
-        return rows.Entities.Where(RuleDomains.IsOntologyPolicy).Select(ToPolicyRow).ToList();
+        var policies = read.Rows.Where(RuleDomains.IsOntologyPolicy).Select(ToPolicyRow)
+            .OrderBy(p => p.Code, StringComparer.OrdinalIgnoreCase).ToList();
+        return new EnabledPolicies(policies, read.IsComplete);
     }
+
+    /// <summary>The enabled policies read, and whether the read reached the end (false: a page faulted or the page bound was hit).</summary>
+    internal sealed record EnabledPolicies(IReadOnlyList<PolicyRow> Policies, bool IsComplete);
 
     private static readonly string[] PolicyColumns =
     {
@@ -1342,7 +1462,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
             return;
         }
 
-        await SweepStoredEvidenceAsync(policies.Values, "is not in force", counts, ct).ConfigureAwait(false);
+        // Task 217 (#3091, DI-172): only the policies that still have a Signal whose stored evidence may carry detail are read, so the sweep's
+        // Signal reads grow with what is left to redact, not with every Off or Retired policy (a Signal whose detail is gone never changes
+        // again). The policies are swept in the same order, by the same per-policy read and rule. When that read is incomplete (logged), every
+        // policy is swept, as before, so a fault or the bound never leaves evidence unredacted.
+        var withDetail = await _closure.PoliciesNotInForceWithStoredDetailAsync(policies, ct).ConfigureAwait(false);
+        var codes = withDetail.IsComplete ? policies.Values.Where(withDetail.Codes.Contains) : policies.Values;
+        await SweepStoredEvidenceAsync(codes, "is not in force", counts, ct).ConfigureAwait(false);
     }
 
     /// <summary>

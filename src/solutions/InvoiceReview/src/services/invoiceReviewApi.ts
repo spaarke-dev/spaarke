@@ -88,6 +88,10 @@ export interface ReviewCode {
   code: string | null;
   firmCode: string | null;
   mismatch: boolean;
+  /** The UTBMS description of `code` in the code set the line was coded with; absent or null when not known. */
+  description?: string | null;
+  /** The same for `firmCode`. */
+  firmDescription?: string | null;
 }
 
 export interface ReviewCodes {

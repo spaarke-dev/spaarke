@@ -155,8 +155,11 @@ public static class InvoiceApprovalCodes
     /// <see cref="CompletionRefused"/>. A missing currency is the R1 default, USD (D-115), and is not refused.</summary>
     public const string CurrencyUnsupported = "ebilling.approve.currency_unsupported";
 
-    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision no
-    /// writer-created record was found for, so the record it names is not one the writer created under the completion's filter.</summary>
+    /// <summary>The log reason code of a <see cref="CompletionRefused"/> (K3): the writer answered "already recorded" for a decision the
+    /// completion's read found no writer-created record for. Since ontology task 223 (DI-144) both reads apply <see cref="WriterCreatedRecord"/>,
+    /// so the record the writer names is a writer-created one that landed after the completion's read: a concurrent approve of the same
+    /// decision (a double-click, a retry racing the first request), not a forged row. The name predates that and overstates it; it is kept
+    /// because logs and tests key on it.</summary>
     public const string CompletionRecordNotWriterCreated = "ebilling.approve.completion.record_not_writer_created";
 
     /// <summary>409 (task 165b-2, EB-D-200 item 3): a stored total of the invoice differs from what <see cref="InvoiceTotalsCalculator"/> derives from
@@ -255,7 +258,8 @@ public sealed record ApprovalResult(
 /// or policy version is taken from the request.</para>
 /// <para><b>Exactly once (074 K-1 / K-4), three layers.</b> (1) Two processing locks, the invoice-decision lock shared with 104 / 105
 /// (<see cref="SubmissionOverrideService.LockKey"/>) and the line-decision lock (<see cref="InvoiceLineDecisionService.LockKeyFor"/>, the
-/// per-invoice <see cref="InvoiceLineDecisionService.LockKeyPrefix"/> key every line decision takes), so one decision runs per invoice. (2) The
+/// per-invoice <see cref="InvoiceLineDecisionService.LockKeyPrefix"/> key every line decision takes), so one decision runs per invoice. The bulk
+/// accepts renew the line-decision lock (at <see cref="LockDuration"/>) while they write and stop when it is lost (ISS-050). (2) The
 /// CLAIM: before the transition, the portion's decider, time and approved amount are written conditional on the portion's row version as read,
 /// and only when the portion names no decider or the caller's own contact (K1); a concurrent approve that read the same version gets 409
 /// <c>ebilling.approval.changed</c>, another person's unfinished claim 409 <c>ebilling.approval.claimed</c>, and nothing else is written. A
@@ -623,7 +627,7 @@ public sealed class InvoiceApprovalService
 
             try
             {
-                return await ApproveHeldAsync(invoiceId, callerSystemUserId, checkedNote.Value, callerBearerToken, ct).ConfigureAwait(false);
+                return await ApproveHeldAsync(invoiceId, callerSystemUserId, checkedNote.Value, callerBearerToken, owner, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -636,7 +640,8 @@ public sealed class InvoiceApprovalService
         }
     }
 
-    private async Task<ApprovalResult> ApproveHeldAsync(Guid invoiceId, Guid caller, string? note, string? callerBearerToken, CancellationToken ct)
+    /// <param name="lockOwner">ISS-050: the owner id under which this approve holds the line-decision lock; its bulk accepts renew that lock.</param>
+    private async Task<ApprovalResult> ApproveHeldAsync(Guid invoiceId, Guid caller, string? note, string? callerBearerToken, string lockOwner, CancellationToken ct)
     {
         Entity? invoice;
         IReadOnlyList<Entity> portions;
@@ -752,30 +757,40 @@ public sealed class InvoiceApprovalService
         }
 
         // ── F2: an earlier attempt's bulk accept whose lines were written but not recorded is completed first (never skipped). ──
-        if (await CompleteEarlierBulkAcceptAsync(invoiceId, approvalId, caller, callerBearerToken, lineRows, ct).ConfigureAwait(false) is { } bulkIncomplete)
+        // ISS-050 fix round 1: whether THIS approve has written anything yet, so a later refusal never says "nothing was changed".
+        var (bulkIncomplete, approveWrote) =
+            await CompleteEarlierBulkAcceptAsync(invoiceId, approvalId, caller, callerBearerToken, lockOwner, lineRows, ct).ConfigureAwait(false);
+        if (bulkIncomplete is not null)
         {
             return bulkIncomplete;
         }
 
-        // ── D-72 (F-2): undecided Clean lines are accepted in bulk ("Accepted in bulk" rows, not labels). The caller holds the line lock. ──
+        // ── D-72 (F-2): undecided Clean lines are accepted in bulk ("Accepted in bulk" rows, not labels). The caller holds the line lock, which the
+        //    bulk accept renews (ISS-050) and stops on losing: Unavailable before its line write, Incomplete after it (FromLineResult). ──
         if (CleanCount(lineRows) > 0)
         {
             var lineDecisionId = AcceptCleanDecisionIdFor(approvalId);
-            var accepted = await _lines.AcceptCleanHeldAsync(invoiceId, lineDecisionId, caller, callerBearerToken, ct).ConfigureAwait(false);
+            var accepted = await _lines.AcceptCleanHeldAsync(invoiceId, lineDecisionId, caller, callerBearerToken, lockOwner, LockDuration, ct).ConfigureAwait(false);
             if (!accepted.IsApplied)
             {
-                return FromLineResult(accepted, invoiceId, "accept-clean", lineDecisionId);
+                return FromLineResult(accepted, invoiceId, "accept-clean", lineDecisionId, approveWrote);
             }
+
+            approveWrote = true;
         }
 
         // ── D-72: Unreviewed rows for the AI-sourced fields of individually decided lines that no reviewer touched. ──
-        var unreviewed = await _lines.WriteUnreviewedAsync(invoiceId, approvalId, caller, ApproverRole, decidedOn.UtcDateTime, ct).ConfigureAwait(false);
+        var unreviewed = await _lines.WriteUnreviewedAsync(invoiceId, approvalId, caller, ApproverRole, decidedOn.UtcDateTime, lockOwner, LockDuration, ct)
+            .ConfigureAwait(false);
         if (!unreviewed.IsApplied)
         {
-            return FromLineResult(unreviewed, invoiceId, "unreviewed", lineDecisionId: null);
+            return FromLineResult(unreviewed, invoiceId, "unreviewed", lineDecisionId: null, approveWrote);
         }
 
+        approveWrote |= unreviewed.CommittedLineIds is { Count: > 0 };
+
         // ── The approved total to freeze (016 recomputes it from the decided lines). ──
+        // ISS-050 fix round 2: from here on a refusal after this approve wrote says so (ApproveNotFinishedText), never "nothing was changed".
         InvoiceTotalsCalculation totals;
         try
         {
@@ -783,7 +798,7 @@ public sealed class InvoiceApprovalService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Unavailable(invoiceId, "totals", ex);
+            return Unavailable(invoiceId, "totals", ex, approveWrote);
         }
 
         if (totals.IsRefused)
@@ -807,7 +822,8 @@ public sealed class InvoiceApprovalService
         var version = portion.TryGetAttributeValue<long>("versionnumber", out var v) ? v : 0L;
         if (version <= 0)
         {
-            return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, "The approval version could not be read; nothing was changed.");
+            return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable,
+                approveWrote ? ApproveNotFinishedText : "The approval version could not be read; nothing was changed.");
         }
 
         try
@@ -822,7 +838,7 @@ public sealed class InvoiceApprovalService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Unavailable(invoiceId, "claim", ex);
+            return Unavailable(invoiceId, "claim", ex, approveWrote);
         }
 
         // ── 014: the only status writer. Only Transitioned records. 095f-2a (EB-D-240): a note goes to the decision note column in the same
@@ -1007,8 +1023,9 @@ public sealed class InvoiceApprovalService
     }
 
     /// <summary>After the transition: the portion as Approved (re-asserting the decider), the record, the Signals, the link. Each step is idempotent.
-    /// <paramref name="refuseAlreadyRecorded"/> (task 165b-3 fix round, K3): the completion found no writer-created record, so the writer's
-    /// "already recorded" answer names a record that is not one under the completion's filter; it is refused, not linked or closed against.</summary>
+    /// <paramref name="refuseAlreadyRecorded"/> (task 165b-3 fix round, K3): the completion found no writer-created record, so a writer's
+    /// "already recorded" answer names a record that landed after that read (both reads apply <see cref="WriterCreatedRecord"/> since ontology
+    /// task 223: a concurrent approve of the same decision); it is refused, not linked or closed against.</summary>
     private async Task<ApprovalResult> FinishAsync(
         Guid invoiceId, Guid approvalId, BillingDecision decision, int? portionStatus, Guid? recordId, Guid deciderContactId,
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signals, CancellationToken ct, bool refuseAlreadyRecorded = false, Guid? storedDeciderUserId = null)
@@ -1055,6 +1072,8 @@ public sealed class InvoiceApprovalService
 
         if (refuseAlreadyRecorded && recorded.AlreadyRecorded)
         {
+            // K3: a writer-created record the completion's read did not see, so one that landed after it (a concurrent approve; ontology task
+            // 223 made both reads WriterCreatedRecord). Refused rather than linked or closed against; the reason code keeps its older name.
             return CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionRecordNotWriterCreated);
         }
 
@@ -1632,10 +1651,11 @@ public sealed class InvoiceApprovalService
     /// Decision Record. Those the CALLER decided (<c>sprk_reviewedby</c>) are completed now under the approval's bulk decision id
     /// (<see cref="AcceptCleanDecisionIdFor"/>): same values, the "Accepted in bulk" correction rows, the missing records. One decided by
     /// another person is theirs to repeat: 409 until it is recorded. A line with no reviewer is not a decision this service can complete
-    /// and is left alone. Null when nothing is outstanding.
+    /// and is left alone. Failure null when nothing is outstanding or it completed;
+    /// Wrote tells whether this call wrote anything (ISS-050 fix round 1: a later refusal then never says "nothing was changed").
     /// </summary>
-    private async Task<ApprovalResult?> CompleteEarlierBulkAcceptAsync(
-        Guid invoiceId, Guid approvalId, Guid caller, string? callerBearerToken, IReadOnlyList<Entity> lineRows, CancellationToken ct)
+    private async Task<(ApprovalResult? Failure, bool Wrote)> CompleteEarlierBulkAcceptAsync(
+        Guid invoiceId, Guid approvalId, Guid caller, string? callerBearerToken, string lockOwner, IReadOnlyList<Entity> lineRows, CancellationToken ct)
     {
         var accepted = lineRows
             .Where(l => l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value == (int)InvoiceLineStatus.Accepted
@@ -1644,7 +1664,7 @@ public sealed class InvoiceApprovalService
             .ToList();
         if (accepted.Count == 0)
         {
-            return null;
+            return (null, false);
         }
 
         HashSet<Guid> recorded;
@@ -1654,21 +1674,21 @@ public sealed class InvoiceApprovalService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Unavailable(invoiceId, "read", ex);
+            return (Unavailable(invoiceId, "read", ex), false);
         }
 
         var unrecorded = accepted.Where(l => !recorded.Contains(l.Id)).ToList();
         if (unrecorded.Count == 0)
         {
-            return null;
+            return (null, false);
         }
 
         var others = unrecorded.Where(l => l.GetAttributeValue<EntityReference>(InvoiceReviewReadService.LineReviewedBy).Id != caller).Select(l => l.Id).ToList();
         if (others.Count > 0)
         {
             _logger.LogWarning("Approve of invoice {InvoiceId}: {Count} lines were decided by another person and not recorded; nothing changed.", invoiceId, others.Count);
-            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.LineDecisionIncomplete,
-                "A line decision on this invoice has not finished. Its reviewer repeats it, then the invoice can be approved.", CommittedLineIds: others);
+            return (new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.LineDecisionIncomplete,
+                "A line decision on this invoice has not finished. Its reviewer repeats it, then the invoice can be approved.", CommittedLineIds: others), false);
         }
 
         var lineDecisionId = AcceptCleanDecisionIdFor(approvalId);
@@ -1677,14 +1697,14 @@ public sealed class InvoiceApprovalService
         for (var offset = 0; offset < ids.Count; offset += InvoiceLineDecisionService.MaxLinesPerRequest)
         {
             var chunk = ids.Skip(offset).Take(InvoiceLineDecisionService.MaxLinesPerRequest).ToList();
-            var result = await _lines.CompleteBulkAcceptHeldAsync(invoiceId, lineDecisionId, chunk, caller, callerBearerToken, ct).ConfigureAwait(false);
+            var result = await _lines.CompleteBulkAcceptHeldAsync(invoiceId, lineDecisionId, chunk, caller, callerBearerToken, lockOwner, LockDuration, ct).ConfigureAwait(false);
             if (!result.IsApplied)
             {
-                return FromLineResult(result, invoiceId, "accept-clean", lineDecisionId);
+                return (FromLineResult(result, invoiceId, "accept-clean", lineDecisionId, approveWrote: offset > 0), offset > 0);
             }
         }
 
-        return null;
+        return (null, ids.Count > 0);
     }
 
     /// <summary>The lines among <paramref name="lineIds"/> that have a line-decision record (accept, reduce or disallow; any decision id).</summary>
@@ -1846,10 +1866,13 @@ public sealed class InvoiceApprovalService
 
     // ── Results ──
 
-    private ApprovalResult Unavailable(Guid invoiceId, string step, Exception ex)
+    /// <param name="approveWrote">ISS-050 fix round 2: this approve already wrote (the bulk accept or the Unreviewed rows), so the text is
+    /// <see cref="ApproveNotFinishedText"/>, never "nothing was changed". The outcome and code are the same either way.</param>
+    private ApprovalResult Unavailable(Guid invoiceId, string step, Exception ex, bool approveWrote = false)
     {
         _logger.LogWarning("Approve of invoice {InvoiceId}: the {Step} step failed ({ExceptionType}); nothing was changed by this step.", invoiceId, step, ex.GetType().Name);
-        return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable, "The approval could not be completed; nothing was changed. Try again.", FailedStep: step);
+        return new ApprovalResult(ApprovalOutcome.Unavailable, InvoiceApprovalCodes.Unavailable,
+            approveWrote ? ApproveNotFinishedText : "The approval could not be completed; nothing was changed. Try again.", FailedStep: step);
     }
 
     private ApprovalResult Incomplete(Guid invoiceId, Guid decisionId, string step, string detail)
@@ -1860,12 +1883,26 @@ public sealed class InvoiceApprovalService
             "The invoice was approved but a later step did not finish. Approve again to complete it.", DecisionId: decisionId, FailedStep: step);
     }
 
+    /// <summary>ISS-050 fix round 1: the text of a refusal after this approve already wrote (the line service's "nothing was changed" is then false).</summary>
+    internal const string ApproveNotFinishedText = "The approval did not finish; part of it was saved. Approve again to complete it.";
+
     /// <summary>A refusal of the bulk accept or the Unreviewed rows: nothing was approved.</summary>
-    private static ApprovalResult FromLineResult(LineDecisionResult result, Guid invoiceId, string step, Guid? lineDecisionId) => result.Status switch
+    /// <param name="approveWrote">ISS-050 fix round 1: this approve already wrote (an earlier chunk, the completion of an earlier bulk accept, or
+    /// the bulk accept itself). Every answer but Incomplete (whose text already says the lines were updated) and not-found then gets
+    /// <see cref="ApproveNotFinishedText"/>, never the line service's "nothing was changed".</param>
+    private static ApprovalResult FromLineResult(LineDecisionResult result, Guid invoiceId, string step, Guid? lineDecisionId, bool approveWrote = false)
+    {
+        var mapped = MapLineResult(result, step, lineDecisionId);
+        return approveWrote && mapped.Outcome is not (ApprovalOutcome.Incomplete or ApprovalOutcome.InvoiceNotFound) ? mapped with { Detail = ApproveNotFinishedText } : mapped;
+    }
+
+    private static ApprovalResult MapLineResult(LineDecisionResult result, string step, Guid? lineDecisionId) => result.Status switch
     {
         LineDecisionStatus.Forbidden => new(ApprovalOutcome.Forbidden, result.Code, result.Detail, FailedStep: step),
         LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.TotalsRefused or LineDecisionStatus.NotInReview
             or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.FirmRequired => new(ApprovalOutcome.Conflict, result.Code, result.Detail, FailedStep: step),
+        // The approver's decision id is derived, not chosen, so the line route's "use a new decision id" does not apply: a neutral text, same code.
+        LineDecisionStatus.IdReused => new(ApprovalOutcome.Conflict, result.Code, "This decision was already recorded with other content; nothing was changed. Reload the invoice.", FailedStep: step),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => new(ApprovalOutcome.InvoiceNotFound, result.Code),
         LineDecisionStatus.OwnerUnresolved or LineDecisionStatus.InvalidRequest => new(ApprovalOutcome.Failed, result.Code, result.Detail, FailedStep: step),
         // The lines were written and a later line step failed: the caller's next approve completes the bulk accept (F2) before anything

@@ -9,8 +9,8 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 //
 // WHAT THIS IS: a versioned, tolerant-reader PROJECTION over the EXISTING Spaarke
 // job pipeline — Sprk.Bff.Api.Services.Jobs.JobContract + JobStatus (JobOutcome.cs)
-// + the disposition ServiceBusJobProcessor already makes (Complete → Abandon(retry)
-// → DeadLetter(poison)). It introduces NO new job model. It exists so OutcomeCards
+// + the disposition ServiceBusJobProcessor already makes (Complete → retry later
+// (a copy scheduled with back-off, ISS-025) → DeadLetter(poison)). It introduces NO new job model. It exists so OutcomeCards
 // can show durable multi-step progress and so the core can enforce the R-2
 // ingestion-parity invariant (NFR-12): a bare `sprk_document` row is NOT, by itself,
 // a successful document operation — "record created" must be distinguishable from
@@ -75,7 +75,7 @@ public enum JobAwareState
 
     /// <summary>
     /// Non-terminal: a transient <see cref="JobStatus.Failed"/> with attempts remaining —
-    /// the processor abandons the message for automatic redelivery.
+    /// the processor retries it automatically after a back-off (a scheduled copy of the message).
     /// </summary>
     RetryPending,
 
@@ -250,7 +250,7 @@ public static class JobAwareCompletionStateProjector
     /// <summary>
     /// Projects one stored step signal into a per-step <see cref="JobAwareState"/>.
     /// The mapping mirrors ServiceBusJobProcessor.ProcessMessageAsync:
-    /// Completed → Completed; Failed with attempts remaining → RetryPending (abandon/redeliver);
+    /// Completed → Completed; Failed with attempts remaining → RetryPending (retried after a back-off);
     /// Failed at max attempts → Failed; Poisoned → Poisoned; no stored outcome → Running/Queued.
     /// </summary>
     public static JobAwareState ProjectStep(StoredStepSignal signal)
@@ -271,7 +271,7 @@ public static class JobAwareCompletionStateProjector
         {
             JobStatus.Completed => JobAwareState.Completed,
             JobStatus.Poisoned => JobAwareState.Poisoned,
-            // Mirrors the processor: attempts remaining → abandon (retry); otherwise give up.
+            // Mirrors the processor: attempts remaining → retry after a back-off; otherwise give up.
             JobStatus.Failed => signal.Attempt < signal.MaxAttempts
                 ? JobAwareState.RetryPending
                 : JobAwareState.Failed,

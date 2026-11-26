@@ -52,6 +52,7 @@ vi.mock('../src/api/web-api-client', async () => {
 
 import { InvoiceSubmissionError } from '@spaarke/ui-components/components/InvoiceSubmission';
 import { ApiError } from '../src/types';
+import { activateBackend, clearActiveBackend } from '../src/auth/backend-selection';
 import { RECORD_DETAIL_ENTITIES } from '../src/components/detail/RecordDetailFields';
 import { RECORD_TEMPLATES, recordActionIdsOf } from '../src/components/record/recordTemplates';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
@@ -355,6 +356,33 @@ describe('Submit invoice: hidden (not rendered, never disabled)', () => {
     SLOW
   );
 
+  it.each(OFFERING)(
+    '$label: the workforce plane hides it even when the firm lists the record, and reads no firm records (SPA-r4 task 040)',
+    async ({ entity, id, list }) => {
+      // One-variable twin of the "offered" case: only the signed-in plane differs.
+      activateBackend('workforce', {
+        customerKey: 'contoso',
+        displayName: 'Contoso',
+        bffBaseUrl: 'https://contoso-bff.test',
+        bffAppId: 'aaaaaaaa-0000-0000-0000-00000000000a',
+      });
+      try {
+        install({ me: meOf({ firms: [FIRM_A] }), firmRecords: { [FIRM_A.firmId]: listing(list, id) } });
+        const dialog = await openRecord({ entity, ids: [id] });
+        await waitFor(() => expect(h.getExternalUserContext).toHaveBeenCalled(), SLOW);
+        await settle();
+
+        expect(submitButton(dialog)).toBeNull();
+        expect(toolbarOf(dialog)).not.toContain('submitInvoice');
+        expect(invoicesHeaderOf(dialog)).toEqual([]);
+        expect(firmRecordReads()).toEqual([]);
+      } finally {
+        clearActiveBackend();
+      }
+    },
+    SLOW
+  );
+
   it(
     'firms but the record is not listed for any of them',
     async () => {
@@ -501,14 +529,17 @@ interface Opened {
  * firm-records answer that lists the matter; `wizardAnswer` is what the same firm answers when the wizard asks afterwards
  * (the wizard's check reads afresh), to test a record the button offered but the wizard's check does not.
  */
-async function openWizard(opts: { wizardAnswer?: FirmAnswer } = {}): Promise<Opened> {
+async function openWizard(
+  opts: { wizardAnswer?: FirmAnswer; record?: (typeof OFFERING)[number] } = {}
+): Promise<Opened> {
+  const record = opts.record ?? MATTER;
   const net: Net = {
     me: meOf({ firms: [FIRM_A] }),
-    firmRecords: { [FIRM_A.firmId]: listing('matters', MATTER.id) },
+    firmRecords: { [FIRM_A.firmId]: listing(record.list, record.id) },
   };
   install(net);
   const onClose = vi.fn();
-  const dialog = await openRecord({ onClose });
+  const dialog = await openRecord({ onClose, entity: record.entity, ids: [record.id] });
   await waitFor(() => expect(submitButton(dialog)).not.toBeNull(), SLOW);
   // tabster's aria-hidden pass over the record settles first (project gotcha, D-8 #2704).
   await settle(350);
@@ -705,6 +736,129 @@ describe('Submit invoice: the click opens a modal over the record', () => {
   );
 });
 
+describe('Submit invoice: the result screen links (ebilling-r1 iss052)', () => {
+  const INVOICE_ID = guid(901);
+
+  /** An Accepted result on this matter, naming its invoice (the server sends the id only for an invoice the caller may see). */
+  function acceptedWithLinks(over: Record<string, unknown> = {}): void {
+    installWizard();
+    h.getInvoiceSubmission.mockResolvedValue({
+      submissionId: SUBMISSION_ID,
+      status: 'Accepted',
+      trackingNumber: 'TRK-1',
+      invoiceId: INVOICE_ID.toUpperCase(),
+      coreRecord: { kind: 0, recordId: MATTER.id },
+      ...over,
+    });
+  }
+
+  /** The record reads of `entity` the network seam answered, by the id each asked for. */
+  const recordReadsOf = (entity: string): string[] =>
+    h.bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/v1/external/api/dataverse/fetch'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
+      .filter(body => body.entityName === entity)
+      .map(body => /operator="eq" value="([^"]+)"/.exec(body.fetchXml)?.[1] ?? '');
+
+  it(
+    '"Open matter" for the record the modal shows closes the dialog back to it: no second copy, the record stays open',
+    async () => {
+      acceptedWithLinks();
+      const { dialog, child, onClose } = await openWizard();
+      const before = signalOf(dialog);
+      const matterReads = recordReadsOf('sprk_matter').length;
+      await submitThroughWizard(child);
+
+      fireEvent.click(await within(child).findByRole('button', { name: 'Open matter' }, WAIT));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);
+      await waitFor(() => expect(signalOf(dialog)).toBe(before + 1), SLOW);
+      await settle();
+      expect(screen.getAllByRole('dialog')).toHaveLength(1);
+      expect(recordReadsOf('sprk_matter')).toHaveLength(matterReads);
+      expect(onClose).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it(
+    '"Open invoice" closes the dialog and opens that invoice as a child record over the matter, as an Invoices row does',
+    async () => {
+      acceptedWithLinks();
+      const { dialog, child, onClose } = await openWizard();
+      const before = signalOf(dialog);
+      await submitThroughWizard(child);
+
+      fireEvent.click(await within(child).findByRole('button', { name: 'Open invoice' }, WAIT));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);
+      await waitFor(() => expect(recordReadsOf('sprk_invoice')).toEqual([INVOICE_ID]), SLOW);
+      await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(2), SLOW);
+      await waitFor(() => expect(signalOf(dialog)).toBe(before + 1), SLOW);
+      expect(onClose).not.toHaveBeenCalled();
+    },
+    SLOW
+  );
+
+  it.each([
+    ['a work assignment (no Invoices section: the child finds no row to refocus)', OFFERING[2], 2],
+    ['a matter', MATTER, 0],
+  ] as const)(
+    'fix round 1: on %s, closing the invoice opened by "Open invoice" puts focus back on the record\'s Submit invoice button',
+    async (_label, record, kindNumber) => {
+      acceptedWithLinks({ coreRecord: { kind: kindNumber, recordId: record.id } });
+      const { dialog, button, child } = await openWizard({ record });
+      await submitThroughWizard(child);
+
+      fireEvent.click(await within(child).findByRole('button', { name: 'Open invoice' }, WAIT));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);
+      // The record dialog goes aria-hidden under the invoice, so count every dialog on the page.
+      const otherDialogs = (): HTMLElement[] =>
+        screen.queryAllByRole('dialog', { hidden: true }).filter(d => d !== dialog);
+      await waitFor(() => expect(otherDialogs()).toHaveLength(1), SLOW);
+      await settle();
+      const invoice = otherDialogs()[0];
+      await waitFor(() => expect(recordReadsOf('sprk_invoice')).toEqual([INVOICE_ID]), SLOW);
+      // The Submit dialog's own focus restore ran before the invoice opened: focus is not left behind the invoice.
+      expect(invoice.contains(document.activeElement)).toBe(true);
+
+      fireEvent.click(within(invoice).getAllByRole('button', { name: 'Close', hidden: true })[0]);
+      await waitFor(() => expect(otherDialogs()).toHaveLength(0), SLOW);
+      await waitFor(() => expect(document.activeElement).toBe(button), WAIT);
+      await settle(350);
+      expect(document.activeElement).toBe(button);
+    },
+    SLOW
+  );
+
+  it(
+    'a Rejected result offers no "Open invoice"; "Open matter" is still offered',
+    async () => {
+      acceptedWithLinks({ status: 'Rejected', outcomeReasonCode: 'duplicate_invoice' });
+      const { child } = await openWizard();
+      const base = h.bffApiCall.getMockImplementation()!;
+      h.bffApiCall.mockImplementation(async (path: string, options?: RequestInit) =>
+        /\/ebilling\/submissions\/[^/]+\/outcome$/.test(path) ? REJECTED_OUTCOME : base(path, options)
+      );
+      await waitFor(() => expect(fileInputOf(child)).not.toBeNull(), SLOW);
+      fireEvent.change(fileInputOf(child)!, { target: { files: [pdf()] } });
+      const next = await within(child).findByRole('button', { name: /^next$/i });
+      await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false), SLOW);
+      fireEvent.click(next);
+      fireEvent.change(await within(child).findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+      fireEvent.click(within(child).getByRole('button', { name: /^submit invoice$/i }));
+
+      expect(await within(child).findByRole('button', { name: 'Open matter' }, { timeout: 20000 })).toBeTruthy();
+      expect(within(child).queryByRole('button', { name: 'Open invoice' })).toBeNull();
+      // Fix round 1: the modal says it was rejected and shows the firm no internal reason code.
+      expect(within(child).getByText('The invoice was rejected.')).toBeTruthy();
+      expect(child.textContent).not.toContain('duplicate_invoice');
+      expect(child.textContent).not.toContain('Reason:');
+    },
+    SLOW
+  );
+});
+
 describe('Submit invoice: closing the modal', () => {
   it(
     'Done closes it, refreshes the Invoices section once, and puts focus back on the section button; the record stays open',
@@ -855,7 +1009,8 @@ describe('Submit invoice: closing the modal', () => {
       expect(screen.getByRole('dialog', { name: 'Submit invoice' })).toBeTruthy();
 
       await act(async () => accept({ submissionId: SUBMISSION_ID, trackingNumber: 'TRK-1' }));
-      await within(child).findByText('Invoice received', undefined, { timeout: 20000 });
+      // iss048: the result heading follows the polled status; the status answers Accepted within the act above.
+      await within(child).findByText('Invoice accepted', undefined, { timeout: 20000 });
       expect(signalOf(dialog)).toBe(before);
       fireEvent.click(within(child).getByRole('button', { name: /^done$/i }));
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), SLOW);

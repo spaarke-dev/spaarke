@@ -12,7 +12,7 @@
  *   fail-safe) rather than silently rendering blank fields.
  * - A network/API failure renders an error state, not blank fields or an unhandled throw.
  * - Generate Profile (task 022): busy state while in flight; on 202 the displayed status moves to
- *   Pending and the record is re-read; no confirmation dialog ever appears, including when the current
+ *   Pending and the record is followed until the job ends (task 137); no confirmation dialog ever appears, including when the current
  *   profile is Completed; a trigger failure surfaces an error without corrupting the read outcome.
  */
 
@@ -217,7 +217,7 @@ describe('DocumentProfileSection', () => {
   });
 
   describe('Generate Profile (task 022, FR-08)', () => {
-    it('shows a busy state while in flight, then moves the displayed status to Pending and re-reads', async () => {
+    it('shows a busy state while in flight, then moves the displayed status to Pending', async () => {
       mockGet
         .mockResolvedValueOnce(
           envelope({
@@ -255,9 +255,10 @@ describe('DocumentProfileSection', () => {
       });
 
       // On 202, the displayed status moves to Pending immediately (task 021's SAME status mapping —
-      // no second status table) and the hook re-reads the record.
+      // no second status table). The hook then follows the job with timed re-reads (task 137, #1090; covered by
+      // useDocumentProfile.polling.test.tsx), not one read at once, so none has happened yet.
       await waitFor(() => expect(screen.getByText(/in progress/i)).toBeTruthy());
-      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(mockGet).toHaveBeenCalledTimes(1);
       expect(generateProfileButton()).toBeEnabled();
     });
 

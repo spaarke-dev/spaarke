@@ -94,7 +94,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     /// ebilling-r1 task 092 (review F1): the waits between reads of an upload whose malware scan has no verdict yet, within ONE delivery.
     /// Their sum (<see cref="ScanWaitBudget"/>, 3 min 50 s) stays inside the processor's 10-minute message-lock renewal and
     /// <see cref="LockDuration"/>, leaving room for the extraction and the commit. Over all <see cref="JobContract.MaxDeliveryCount"/>
-    /// deliveries a scan gets about 19 minutes before the submission is Failed with <see cref="SubmissionReasonCodes.FileScanTimeout"/>.
+    /// deliveries a scan gets about 34 minutes (19 minutes of waits plus the processor's 15-minute <see cref="JobContract.RetryWindow"/>
+    /// between deliveries, ISS-025) before the submission is Failed with <see cref="SubmissionReasonCodes.FileScanTimeout"/>.
     /// </summary>
     internal static readonly TimeSpan[] ScanWaits =
     [
@@ -750,9 +751,17 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
         // Task 118b-1: the read itself is the shared one (SourceDocumentFileRead), moved from here unchanged, so the intake's supporting
         // copies read a document through the same rule. The outcomes keep their codes, permanence and logs.
-        var file = await SourceDocumentFileRead.ReadAsync(_entities, _spe, _containerResolver, documentId, ct).ConfigureAwait(false);
+        // DEF-052: the upload routes' per-file limit applies to this copy too: a row recording more than it is refused before the download,
+        // and a stream that delivers more stops the copy there (the read never holds more than the limit).
+        var file = await SourceDocumentFileRead.ReadAsync(
+            _entities, _spe, _containerResolver, documentId, ct,
+            InvoiceSubmissionService.MaxFileBytesOf(_ebilling.CurrentValue)).ConfigureAwait(false);
         switch (file.Outcome)
         {
+            case SourceDocumentFileOutcome.TooLarge:
+                // Permanent: a retry reads the same file. Nothing was staged or committed (the same ids and codes as the upload route's 413).
+                _logger.LogWarning("Invoice submission {SubmissionId}: source document {DocumentId} is over the per-file size limit; not copied", snapshot.SubmissionId, documentId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.FileTooLarge, permanent: true);
             case SourceDocumentFileOutcome.Gone:
                 _logger.LogError("Invoice submission {SubmissionId}: its source document {DocumentId} no longer exists", snapshot.SubmissionId, documentId);
                 throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);

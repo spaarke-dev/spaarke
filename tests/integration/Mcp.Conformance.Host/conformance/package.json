@@ -1,0 +1,9 @@
+{
+  "name": "spaarke-mcp-conformance-runner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pins the published MCP conformance suite for the mcp-conformance CI job (spaarkeai-mcp-bff-api-r1 task 025, NFR-09). Nothing here ships.",
+  "devDependencies": {
+    "@modelcontextprotocol/conformance": "0.2.0-alpha.12"
+  }
+}

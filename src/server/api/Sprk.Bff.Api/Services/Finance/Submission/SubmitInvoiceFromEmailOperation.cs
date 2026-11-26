@@ -145,11 +145,19 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
         // ── 3. The marked parts, out of the saved .eml: read-only, so before step A (review round 5, pass-2 F1-2 / uac-r2 K2-b: a refused
         //       submission never leaves a filing behind). A part that is gone or differs from its mark is permanent (a retry reads the same
         //       .eml), so it is a 422, never a 503 the client would retry. ──
-        var read = await _reader.ReadAsync(submissionId, input.SourceEmlDocumentId, input.MarkedParts, ct);
+        var read = await _reader.ReadAsync(submissionId, input.SourceEmlDocumentId, input.MarkedParts, ct, _submissions.MaxFileBytes);
         switch (read.Outcome)
         {
             case EmlMarkedPartReadOutcome.Read when read.RowVersion is not null:
                 break;
+            case EmlMarkedPartReadOutcome.TooLarge:
+                // DEF-052 backstop: the route refuses an over-limit marked file in step 1 (FromEmailMarkRules.Check), before the .eml is saved,
+                // so this is reached only when the saved .eml's part differs from what step 1 saw. Same answer (413, the same code and
+                // sentence), before step A. Permanent: a retry reads the same part.
+                _logger.LogWarning("From-email submission {SubmissionId}: a marked part of .eml {EmlDocumentId} is over the per-file size limit; refused (413)",
+                    submissionId, input.SourceEmlDocumentId);
+                return Refused(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+                    FromEmailMarkRules.TooLargeDetail(_submissions.MaxFileBytes), filed: false);
             case EmlMarkedPartReadOutcome.Transient:
                 return Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
                     "The saved email could not be read right now. Nothing was submitted; try again shortly.", filed: false);

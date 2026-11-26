@@ -4,12 +4,13 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2025-09-27 |
-| Updated | 2026-09-12 (Amendment A1) |
+| Updated | 2026-11-25 (Amendment A2); 2026-09-12 (Amendment A1) |
 | Authors | Spaarke Engineering |
 
-> ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-12-queue-driven-scope-orchestration-hosting-atomic-idempotency) FIRST.**
-> It scopes this ADR to **queue-driven** work (schedule-driven → ADR-036; where either runs → ADR-052), moves
-> orchestration hosting to ADR-052 §7, and makes receive-side idempotency atomic.
+> ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-12-queue-driven-scope-orchestration-hosting-atomic-idempotency) AND [Amendment A2](#amendment-a2-2026-11-25-queue-consumers-outside-the-bff) FIRST.**
+> A1 scopes this ADR to **queue-driven** work (schedule-driven → ADR-036; where either runs → ADR-052), moves
+> orchestration hosting to ADR-052 §7, and makes receive-side idempotency atomic. A2 says how a queue consumer
+> **outside the BFF** (a Function or Container Apps Job) meets this ADR without the BFF's `IJobHandler`.
 
 ## Context
 
@@ -183,3 +184,45 @@ The three Office workers and the membership topic consumer use bespoke message s
 permitted exceptions to "a consumer is ADR-004 work", until migrated (#977). Two defects found in the same
 inventory: `IndexingWorkerHostedService` completes messages on failure (#978), and the `office-profile` queue has
 no sender (#979).
+
+---
+
+## Amendment A2 (2026-11-25): queue consumers outside the BFF
+
+> **Status**: Accepted (path **B**, root CLAUDE.md §6.5; owner decision 2026-11-25). **Driver**:
+> `spaarke-intake-pipeline-r1` design §5, where a Container Apps Job runs the NDA redline engines from a Service Bus
+> queue. **Evidence**: that project's design review, 2026-11-25 (design §11).
+
+### 1. The gap
+
+A1 §1 makes **every** Service Bus queue or topic consumer ADR-004 work, wherever it runs. A1 §3 and the concise
+ADR's MUST require the handler to be `IJobHandler`. That interface, `JobContract` and `JobOutcome` live only in
+`Sprk.Bff.Api`, and ADR-052 forbids a Function or Container Apps Job from referencing `Sprk.Bff.Api`. So no consumer
+outside the BFF could satisfy the rule as written: not this project's Container Apps Job, and not any future Function.
+
+### 2. Rule
+
+- **Inside the BFF: unchanged.** Handlers implement the non-generic `IJobHandler`, dispatched by
+  `ServiceBusJobProcessor` on `JobType` (A1 §3).
+- **Outside the BFF** (a consumer an ADR-052 host runs): the consumer MUST provide the same guarantees in its own
+  runtime:
+  1. **Envelope:** accept the Job Contract JSON envelope above (camelCase) as the wire format. A message that is
+     not a valid envelope goes to the dead-letter queue, not into the work.
+  2. **Idempotency:** use the producer's deterministic `idempotencyKey`. Take an **atomic** per-message marker
+     before the side effect (A1 §4). For example, a conditional create (`If-None-Match: *`) of a marker keyed by the
+     `idempotencyKey`, or a conditional upsert on a natural key. Write outputs to deterministic locations, so
+     a replay overwrites rather than duplicates.
+  3. **Correlation:** carry `correlationId` into its logs and telemetry, and into any message it sends.
+  4. **Outcome:** report `Completed`, `Failed` (retryable or permanent) or `Poisoned` to telemetry. When the
+     producer waits on the result, also send a completion message in Job Contract form.
+  5. **Retries:** bounded by `MaxDeliveryCount`, then a monitored dead-letter queue (ADR-052, Events row).
+- **Shared types are not required.** For a non-.NET consumer, the JSON envelope is the contract. A .NET host MAY
+  later share the envelope types through `src/server/shared`. That is optional, and never a reference to
+  `Sprk.Bff.Api`.
+
+### 3. Unchanged for every consumer
+
+The payload rules apply wherever the consumer runs: no document bytes, attachment bytes or email bodies; ids and
+flags only. A consumer that needs content fetches it at processing time from where the producer stored it (the
+claim-check pattern). Content staged for that purpose is private to the stamp, readable only by the stamp's
+managed identity, and deleted by a lifecycle rule once it is past any retry or dead-letter window.

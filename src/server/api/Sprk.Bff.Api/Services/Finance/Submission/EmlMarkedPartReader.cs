@@ -19,6 +19,12 @@ internal enum EmlMarkedPartReadOutcome
     /// ends Failed <see cref="SubmissionReasonCodes.DocumentUnavailable"/>; the <c>.eml</c> is left as it is.</summary>
     DocumentUnavailable,
 
+    /// <summary>
+    /// DEF-052 (only when the caller passed <c>maxPartBytes</c>): a marked part, at its mark's ordinal and name, is over the per-file limit.
+    /// Permanent (a retry reads the same file); the route answers it as an over-limit upload (413 <see cref="InvoiceSubmissionErrors.TooLarge"/>).
+    /// </summary>
+    TooLarge,
+
     /// <summary>Dataverse or SPE faulted: retry the delivery (nothing was decided).</summary>
     Transient,
 }
@@ -61,9 +67,15 @@ internal sealed class EmlMarkedPartReader
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>Reads the <paramref name="marks"/> of submission <paramref name="submissionId"/> out of <c>.eml</c> <paramref name="emlDocumentId"/>.</summary>
+    /// <summary>
+    /// Reads the <paramref name="marks"/> of submission <paramref name="submissionId"/> out of <c>.eml</c> <paramref name="emlDocumentId"/>.
+    /// DEF-052: <paramref name="maxPartBytes"/> (<c>null</c>, the default, is no limit) is the per-file limit each part is decoded under (a
+    /// part over it is not decoded to the end; the parsed <c>.eml</c> is still held); a marked part over it, at its mark's ordinal and name, is
+    /// <see cref="EmlMarkedPartReadOutcome.TooLarge"/>. An unmarked part over it is skipped. The route refuses an over-limit marked file earlier
+    /// (<see cref="FromEmailMarkRules.Check"/>, before the <c>.eml</c> is saved); this is the backstop.
+    /// </summary>
     public async Task<EmlMarkedPartRead> ReadAsync(
-        Guid submissionId, Guid emlDocumentId, IReadOnlyList<FromEmailMarkedPart> marks, CancellationToken ct)
+        Guid submissionId, Guid emlDocumentId, IReadOnlyList<FromEmailMarkedPart> marks, CancellationToken ct, long? maxPartBytes = null)
     {
         ArgumentNullException.ThrowIfNull(marks);
 
@@ -92,7 +104,7 @@ internal sealed class EmlMarkedPartReader
 
         var version = row.GetAttributeValue<long?>("versionnumber");
 
-        IReadOnlyList<(EmlPart Part, byte[] Content)> parts;
+        IReadOnlyList<(EmlPart Part, byte[] Content, bool Oversize)> parts;
         try
         {
             await using var stream = await _spe.DownloadFileAsync(driveId, itemId, ct);
@@ -102,7 +114,7 @@ internal sealed class EmlMarkedPartReader
                 return EmlMarkedPartRead.Of(EmlMarkedPartReadOutcome.EmailSaveFailed);
             }
 
-            parts = EmlMimeParts.ReadWithContent(stream, ct);
+            parts = EmlMimeParts.ReadWithContent(stream, ct, maxPartBytes);
         }
         catch (FormatException)
         {
@@ -120,7 +132,15 @@ internal sealed class EmlMarkedPartReader
         foreach (var mark in marks)
         {
             var found = mark.Ordinal >= 0 && mark.Ordinal < parts.Count ? parts[mark.Ordinal] : default;
-            if (found.Part is null
+            if (found.Oversize && string.Equals(found.Part.FileName, mark.FileName, StringComparison.Ordinal))
+            {
+                // Its decode stopped at the limit, so its hash is unknown; the name is what ties it to the mark.
+                _logger.LogWarning("Submission {SubmissionId}: part {Ordinal} of .eml {DocumentId} is over the per-file size limit",
+                    submissionId, mark.Ordinal, emlDocumentId);
+                return EmlMarkedPartRead.Of(EmlMarkedPartReadOutcome.TooLarge);
+            }
+
+            if (found.Part is null || found.Oversize
                 || !string.Equals(found.Part.FileName, mark.FileName, StringComparison.Ordinal)
                 || !string.Equals(found.Part.Sha256, mark.Sha256, StringComparison.OrdinalIgnoreCase))
             {

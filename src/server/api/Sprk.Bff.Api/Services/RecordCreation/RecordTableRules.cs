@@ -990,8 +990,9 @@ internal static partial class RecordTableRules
     /// writes either column), or <c>null</c> on an update, where the value is "unchanged" and so never equal. Equal means:
     /// both none, the same id, or the same name compared trimmed and ordinal-ignore-case. The text column's entry also carries
     /// the dropped and applied index NAME (catalog configuration, not personal data); nothing else textual is logged.
-    /// Information level until the clients stop sending the columns (task 041, UAC-r2: every create that sends one now logs);
-    /// task 035 returns it to Warning.
+    /// Warning level (task 035, UAC-r2 condition): no client sends either column on a create, an index-file call or an update,
+    /// so any entry means a client regression (or a caller that is not one of ours) and is worth an alert. The server still
+    /// drops the value and carries on; the log is the only trace.
     /// </summary>
     internal static void LogSearchIndexDropped(
         ILogger logger, string table, Guid? recordId, IEnumerable<DroppedSearchIndexValue> dropped,
@@ -1012,14 +1013,14 @@ internal static partial class RecordTableRules
             const string unchanged = "unchanged";
             if (isLookup)
             {
-                logger.LogInformation(
+                logger.LogWarning(
                     "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
                     "droppedIndexId={DroppedIndexId} appliedIndexId={AppliedIndexId} correlationId={CorrelationId}",
                     table, recordId, drop.Column, drop.Origin, drop.IndexId, applied is { } a ? a.IndexId : unchanged, correlationId);
             }
             else
             {
-                logger.LogInformation(
+                logger.LogWarning(
                     "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
                     "droppedIndexName={DroppedIndexName} appliedIndexName={AppliedIndexName} correlationId={CorrelationId}",
                     table, recordId, drop.Column, drop.Origin, LoggableIndexName(drop.IndexName),

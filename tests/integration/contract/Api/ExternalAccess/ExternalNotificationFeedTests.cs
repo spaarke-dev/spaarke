@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -1410,6 +1411,16 @@ public class ExternalNotificationFeedTests
         doc.RootElement.GetProperty("value")[0].EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "kind", "id", "recordType", "recordId", "recordTitle", "occurredOn", "senderName", "isUnread");
         json.Should().NotContain(sender.ToString()).And.NotContain("Body").And.NotContain("Subject");
+    }
+
+    [Fact]
+    public void ExternalNotificationDto_PropertySet_IsPinned_SoAThreadIdCanNeverLeakIntoTheFeedSilently()
+    {
+        // Task 035 (FR-22) gave ThreadMessageDto a ThreadId that ExternalNotificationFeedEndpoints reads its messages through.
+        // The feed's wire shape is unchanged by it: a property added here (a thread id among them) must be added on purpose.
+        typeof(ExternalNotificationDto).GetProperties()
+            .Select(p => ((JsonPropertyNameAttribute?)Attribute.GetCustomAttribute(p, typeof(JsonPropertyNameAttribute)))?.Name ?? p.Name)
+            .Should().BeEquivalentTo("kind", "id", "recordType", "recordId", "recordTitle", "occurredOn", "senderName", "isUnread");
     }
 
     // =====================================================================

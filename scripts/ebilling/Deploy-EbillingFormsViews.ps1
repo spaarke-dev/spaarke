@@ -16,15 +16,27 @@
               rate card form gets a rates subgrid, the code set form a codes subgrid, the approval form an "Eligible approvers" (N:N
               contact) subgrid.
               On the EXISTING sprk_timekeeper, sprk_invoice and sprk_billingevent main forms only the section "section_ebilling" is
-              added or refreshed (everything else on those forms is left byte for byte). Read-only (task 014/016 constraint):
+              added or refreshed (everything else on those forms is left byte for byte). The section is MERGED, not replaced (ISS-046):
+              a field cell the spec lists is added when missing and updated when it differs; every other cell in the section (a quick view,
+              a subgrid, a web resource) stays where it is. A control the spec no longer lists is NOT removed by this script: retiring one
+              is its own guarded script (Remove-EbillingInvoiceExtractionFormControls.ps1). Read-only (task 014/016 constraint):
               the five invoice totals and sprk_billingevent.sprk_amount (the Adjustment line amount is computed by
               IInvoiceTotalsService; Fee / Expense lines are written by the extraction pipeline, not typed) are disabled controls.
+              Task 079: the sprk_matter, sprk_project and sprk_workassignment main forms get section_ebilling (sprk_billingfirm,
+              sprk_billingresponsible) on their tab_billing; a form without that tab (Work Assignment) gets it appended.
               Forms carry no script and no business rule (ADR-002).
       Views   Replaces the columns of each table's "Active ..." view; creates "Invoices to review" on sprk_invoice (In Review
               invoices with a Pending sprk_invoiceapproval that lists the current user's contact as an eligible approver:
               contact.sprk_systemuser equals the current user).
-      Sitemap sprk_SpaarkeAdministration gets an eBilling area (settings, timekeeper, rate card, code set, rule set);
-              sprk_MatterManagement gets the invoice submission and billing export entries after the sprk_invoice entry.
+      Sitemap sprk_SpaarkeAdministration gets an eBilling area (settings, timekeeper, rate card, code set, rule set, and, once the
+              sprk_rulereviewpage web resource exists, "Rule Review" (task 079, D-114));
+              sprk_MatterManagement gets the invoice submission and billing export entries in the Invoice navigation group (DEF-046): when
+              sprk_invoice is listed in several areas, the group that also holds an invoice approval / correction / submission / export
+              entry (area_finance/group_c6c6d7dd on dev); the submission goes after the invoice entry, the export after the submission. An
+              entity the sitemap already lists anywhere is left where it is (WARN when that is outside the Invoice group). A sitemap it
+              cannot place them in is refused, naming the areas and groups.
+              Both sitemap edits are first run on copies of the live sitemaps (step 0b, read only) before any form is written, and step 3
+              evaluates both before it PATCHes either, so a refusal leaves dev untouched.
       Publish PublishXml for the touched entities, the two sitemaps and the two app modules only. Never a tenant-wide publish.
 
     Pending collateral (D-103): publishing an entity also publishes pending forms / views of that entity. The script lists any pending
@@ -40,11 +52,17 @@
 .PARAMETER AllowPendingCollateral
     Continue when another pending (unpublished) form / view of a touched entity would be published too.
 .PARAMETER FormsOnly
-    Run step 1 (forms) and the entity-scoped publish only; skip views, navigation and app tables. Added by task 122 (#2235) to take
-    sprk_findingsjson off the live sprk_invoicesubmission form: on spaarkedev1 (2026-10-23) step 3 throws in the
-    sprk_MatterManagement sitemap (sprk_invoice is listed in two areas and sprk_invoicesubmission sits in area_finance), after step 1
-    has already written the form and before step 4 publishes it.
+    Run step 1 (forms) and the entity-scoped publish only; skip views, navigation (step 3) and app tables, and the navigation preflight
+    (step 0b). Added by task 122 (#2235) to take sprk_findingsjson off the live sprk_invoicesubmission form, when step 3 threw on
+    spaarkedev1 (2026-10-23) in the sprk_MatterManagement sitemap (sprk_invoice is listed in two areas) after step 1 had written the form
+    and before step 4 published it. That crash is fixed by DEF-046 (#2312); the switch stays as the narrow way to touch forms only.
+.PARAMETER Tables
+    Sync only these spec tables' forms and views (unknown names refuse); the sitemaps still run, app tables are skipped. Added by
+    task 079 to apply the core-record Billing-tab entries and the Rule Review entry without rebuilding other forms: on spaarkedev1
+    (2026-11-25) a full run would also rebuild the sprk_ratecard, sprk_ruleset and sprk_invoicesubmission forms, which differ from
+    the spec on dev.
 .EXAMPLE
+    pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -Tables sprk_matter,sprk_project,sprk_workassignment -WhatIf
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -WhatIf
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1
     pwsh scripts/ebilling/Deploy-EbillingFormsViews.ps1 -FormsOnly -WhatIf
@@ -55,12 +73,17 @@ param(
     [string]$EnvironmentUrl = $(if ($env:DATAVERSE_URL) { $env:DATAVERSE_URL } else { 'https://spaarkedev1.crm.dynamics.com' }),
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [switch]$AllowPendingCollateral,
-    [switch]$FormsOnly
+    [switch]$FormsOnly,
+    [string[]]$Tables = @()
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 if ($EnvironmentUrl -notmatch 'spaarkedev1') { throw "Dev only in R1: $EnvironmentUrl" }
+# 'a,b' arrives as one string under pwsh -File: split, trim, drop empties.
+$Tables = @($Tables | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# A caller that passes -Tables with nothing in it meant a narrow run: refuse, never widen it to the whole spec.
+if ($PSBoundParameters.ContainsKey('Tables') -and $Tables.Count -eq 0) { throw '-Tables was given but names no table; omit it for a full run.' }
 $State = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName $SolutionUniqueName -DryRun:$WhatIfPreference
 . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $Ctx = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
@@ -175,7 +198,7 @@ $Spec = [ordered]@{
     sprk_invoice           = @{
         Form = 'Section'; FormName = 'Invoice main form'
         Sections = @(@{ Name = 'ebilling'; Label = 'eBilling'
-                Cols = 'sprk_matter', 'sprk_project', 'sprk_regardingworkassignment', 'sprk_supersedesinvoice', 'sprk_billingperiodstart', 'sprk_billingperiodend', 'sprk_invoiceduedate', 'sprk_currency', 'sprk_extractionstatus', 'sprk_confidence', 'sprk_billingapproverrole', 'sprk_billingexport',
+                Cols = 'sprk_matter', 'sprk_project', 'sprk_regardingworkassignment', 'sprk_supersedesinvoice', 'sprk_billingperiodstart', 'sprk_billingperiodend', 'sprk_invoiceduedate', 'sprk_currency', 'sprk_confidence', 'sprk_billingapproverrole', 'sprk_billingexport',
                 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal'
                 ReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal' })
         # IInvoiceTotalsService is the one owner of the five totals (I-1): disabled, never editable on a form.
@@ -192,6 +215,29 @@ $Spec = [ordered]@{
         # Adjustment-line amount: computed by IInvoiceTotalsService; Fee / Expense lines are written by the pipeline (no manual typing).
         ForceReadOnly = 'sprk_amount'
     }
+    # Task 079 step 5: the billing firm and the responsible person (task 080's lookups, every FilingCores table) on the Billing tab of
+    # each core record's main form. Matter and Project already have tab_billing; the Work Assignment main form has none, so the
+    # script adds one (Tab.Name / Tab.Label). Only these two fields: no Rule Set subgrid on a core-record form (uac-r2 081.2).
+    sprk_matter            = @{
+        Form = 'Section'; FormName = 'Matter main form'; Tab = @{ Name = 'tab_billing'; Label = 'Billing' }
+        Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
+    }
+    sprk_project           = @{
+        Form = 'Section'; FormName = 'Project main form'; Tab = @{ Name = 'tab_billing'; Label = 'Billing' }
+        Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
+    }
+    sprk_workassignment    = @{
+        Form = 'Section'; FormName = 'Work Assignment main form'; Tab = @{ Name = 'tab_billing'; Label = 'Billing' }
+        Sections = @(@{ Name = 'ebilling'; Label = 'Billing firm'; Cols = 'sprk_billingfirm', 'sprk_billingresponsible' })
+    }
+}
+if ($Tables.Count -gt 0) {
+    # Task 079: touch only the named tables' forms and views; the sitemaps still run (their edits are idempotent), app tables do not.
+    $unknown = @($Tables | Where-Object { -not $Spec.Contains($_) })
+    if ($unknown.Count -gt 0) { throw "-Tables: not in the spec: $($unknown -join ', ')" }
+    $kept = [ordered]@{}
+    foreach ($k in $Spec.Keys) { if ($Tables -contains $k) { $kept[$k] = $Spec[$k] } }
+    $Spec = $kept
 }
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -257,24 +303,41 @@ function New-CellXml($meta, [string]$Col, [bool]$Disabled, [string]$Seed, [bool]
     return "<cell id=""$(Get-DetGuid "$Seed/cell/$Col")""$span><labels><label description=""$label"" languagecode=""1033"" /></labels><control id=""$Col"" classid=""$cls"" datafieldname=""$Col""$dis /></cell>"
 }
 
-function New-SectionXml($meta, $Section, [bool]$AllReadOnly, [string[]]$ForceReadOnly, [string]$SectionName) {
+# The field cells a spec section owns, in spec order: Col, Wide (a Memo takes its own row) and Xml (the <cell>). One place computes them, so a
+# Replace-mode rebuild and a Section-mode merge cannot disagree about a cell.
+function Get-SpecCells($meta, $Section, [bool]$AllReadOnly, [string[]]$ForceReadOnly, [string]$SectionName) {
     $seed = "$($meta.Table)/$SectionName"
-    $rows = [System.Text.StringBuilder]::new()
-    $pending = $null
+    $cells = [System.Collections.Generic.List[object]]::new()
     foreach ($col in $Section.Cols) {
         if ($col -eq 'ownerid' -and -not $meta.Attrs.ContainsKey('ownerid')) { continue }   # organization-owned table (no owner column)
         [void](Get-Label $meta $col)   # fails with a clear message when a WP1 column is missing in dev
         $ro = $AllReadOnly -or ($Section.ContainsKey('ReadOnly') -and ($Section.ReadOnly -contains $col)) -or ($ForceReadOnly -contains $col)
         $wide = ($meta.Attrs[$col].AttributeType -eq 'Memo')
-        if ($wide) {
+        $cells.Add([pscustomobject]@{ Col = $col; Wide = $wide; Xml = (New-CellXml $meta $col $ro $seed $wide) })
+    }
+    return , $cells.ToArray()
+}
+
+# <row> elements for the cells, two plain cells to a row and a wide cell alone (the layout every section here uses).
+function New-RowsXml($Cells) {
+    $rows = [System.Text.StringBuilder]::new()
+    $pending = $null
+    foreach ($c in $Cells) {
+        if ($c.Wide) {
             if ($pending) { [void]$rows.Append("<row>$pending</row>"); $pending = $null }
-            [void]$rows.Append("<row>$(New-CellXml $meta $col $ro $seed $true)</row>")
+            [void]$rows.Append("<row>$($c.Xml)</row>")
             continue
         }
-        $cell = New-CellXml $meta $col $ro $seed $false
-        if ($null -eq $pending) { $pending = $cell } else { [void]$rows.Append("<row>$pending$cell</row>"); $pending = $null }
+        if ($null -eq $pending) { $pending = $c.Xml } else { [void]$rows.Append("<row>$pending$($c.Xml)</row>"); $pending = $null }
     }
     if ($pending) { [void]$rows.Append("<row>$pending</row>") }
+    return $rows.ToString()
+}
+
+function New-SectionXml($meta, $Section, [bool]$AllReadOnly, [string[]]$ForceReadOnly, [string]$SectionName) {
+    $seed = "$($meta.Table)/$SectionName"
+    $rows = [System.Text.StringBuilder]::new()
+    [void]$rows.Append((New-RowsXml (Get-SpecCells $meta $Section $AllReadOnly $ForceReadOnly $SectionName)))
     $label = Esc $Section.Label
     return "<section name=""$SectionName"" id=""$(Get-DetGuid "$seed/section")"" IsUserDefined=""1"" showlabel=""true"" showbar=""false"" columns=""11"" celllabelposition=""Top"" labelwidth=""115"" celllabelalignment=""Left"" layout=""varwidth""><labels><label description=""$label"" languagecode=""1033"" /></labels><rows>$($rows.ToString())</rows></section>"
 }
@@ -332,6 +395,47 @@ function Write-Form([string]$Table, $Form, [string]$NewXml, [string]$What) {
     $Changes.Add("$What ($Table form $($Form.formid))"); Write-Host "  CHANGED  $What" -ForegroundColor Green
 }
 
+# The cell of a section that holds the plain field control for $Col (control id and datafieldname both the column). A quick view bound to
+# the same column (id qv_..., datafieldname = the lookup) or a subgrid is NOT a field cell: the script does not own it and never matches it.
+function Get-FieldCells($Section, [string]$Col) {
+    return @($Section.SelectNodes("rows/row/cell[control[@id='$Col' and @datafieldname='$Col']]"))
+}
+
+# True when the existing field cell already says what the spec says: control class, disabled flag, label and span. Compared on those
+# attributes (not on the whole text), so a form Dataverse re-serialised on save still counts as in step. Label compare is case-strict.
+function Test-FieldCellInStep($Have, $Want) {
+    $hc = $Have.SelectSingleNode('control'); $wc = $Want.SelectSingleNode('control')
+    if ($hc.GetAttribute('classid') -ne $wc.GetAttribute('classid')) { return $false }
+    if (($hc.GetAttribute('disabled') -eq 'true') -ne ($wc.GetAttribute('disabled') -eq 'true')) { return $false }
+    foreach ($a in 'colspan', 'rowspan') { if ($Have.GetAttribute($a) -ne $Want.GetAttribute($a)) { return $false } }
+    $hl = $Have.SelectSingleNode("labels/label[@languagecode='1033']"); $wl = $Want.SelectSingleNode("labels/label[@languagecode='1033']")
+    $hd = if ($hl) { $hl.GetAttribute('description') } else { '' }
+    return $hd -ceq $wl.GetAttribute('description')
+}
+
+# Merges the spec's field cells into an existing section, in place. A spec field already in the section as a field cell is left alone
+# (or, when it differs, replaced where it stands); one that is missing is appended in new rows at the end. Nothing else in the section is
+# touched. Returns true when the section changed.
+function Merge-SpecCells($Doc, $Section, $Cells) {
+    $rowsNode = $Section.SelectSingleNode('rows')
+    if (-not $rowsNode) { throw "section '$($Section.GetAttribute('name'))' has no <rows> node" }
+    $dirty = $false
+    $missing = [System.Collections.Generic.List[object]]::new()
+    foreach ($c in $Cells) {
+        $want = ([xml]$c.Xml).DocumentElement
+        $have = @(Get-FieldCells $Section $c.Col)
+        if ($have.Count -eq 0) { $missing.Add($c); continue }
+        if (Test-FieldCellInStep $have[0] $want) { continue }
+        [void]$have[0].ParentNode.ReplaceChild($Doc.ImportNode($want, $true), $have[0]); $dirty = $true
+    }
+    if ($missing.Count -gt 0) {
+        $frag = $Doc.CreateDocumentFragment()
+        $frag.InnerXml = New-RowsXml $missing.ToArray()
+        [void]$rowsNode.AppendChild($frag); $dirty = $true
+    }
+    return $dirty
+}
+
 function Sync-Form([string]$Table, $S) {
     $meta = $script:Metas[$Table]
     $form = Get-MainForm $Table $S.FormName
@@ -352,16 +456,36 @@ function Sync-Form([string]$Table, $S) {
     $oldSec = $doc.SelectSingleNode("//section[@name='$secName']")
     $dirty = $false
     if ($oldSec) {
-        if ($oldSec.OuterXml -ne $wantSec.OuterXml) { [void]$oldSec.ParentNode.ReplaceChild($doc.ImportNode($wantSec, $true), $oldSec); $dirty = $true }
+        # ISS-046: the section is MERGED, never replaced. Every cell the spec does not own (a quick view, a subgrid, a web resource, the
+        # rows that hold them) stays where it is; only the spec's own field cells are added or brought up to date.
+        if (Merge-SpecCells $doc $oldSec (Get-SpecCells $meta $sec $false $force $secName)) { $dirty = $true }
     } else {
-        $host_ = $doc.SelectSingleNode('//tabs/tab[1]/columns/column[1]/sections')
-        if (-not $host_) { throw "$Table '$($S.FormName)': no first tab / column / sections node" }
+        if ($S.ContainsKey('Tab')) {
+            # Task 079: the section goes on a named tab. A missing tab is appended (last) with one full-width column; an existing
+            # tab is used as it is (its first column).
+            $tabName = $S.Tab.Name
+            $tab = $doc.SelectSingleNode("//tabs/tab[@name='$tabName']")
+            if (-not $tab) {
+                $tabs = $doc.SelectSingleNode('//tabs')
+                if (-not $tabs) { throw "$Table '$($S.FormName)': no tabs node" }
+                $frag = $doc.CreateDocumentFragment()
+                $frag.InnerXml = "<tab name=""$tabName"" id=""$(Get-DetGuid "$Table/$tabName")"" IsUserDefined=""1"" verticallayout=""true"" expanded=""true"" showlabel=""true""><labels><label description=""$(Esc $S.Tab.Label)"" languagecode=""1033"" /></labels><columns><column width=""100%""><sections /></column></columns></tab>"
+                [void]$tabs.AppendChild($frag)
+                $tab = $doc.SelectSingleNode("//tabs/tab[@name='$tabName']")
+            }
+            $host_ = $tab.SelectSingleNode('columns/column[1]/sections')
+            if (-not $host_) { throw "$Table '$($S.FormName)': tab '$tabName' has no first column / sections node" }
+        } else {
+            $host_ = $doc.SelectSingleNode('//tabs/tab[1]/columns/column[1]/sections')
+            if (-not $host_) { throw "$Table '$($S.FormName)': no first tab / column / sections node" }
+        }
         [void]$host_.AppendChild($doc.ImportNode($wantSec, $true)); $dirty = $true
     }
-    # Existing controls (outside section_ebilling) that must be read-only.
+    # Existing controls that must be read-only, anywhere on the form, section_ebilling included: the section is merged now, so a forced
+    # column that sits there without being in the spec's Cols must still be disabled. The spec's own cells are already disabled
+    # (Get-SpecCells), so the sweep finds nothing to change for them.
     foreach ($col in $force) {
         foreach ($c in @($doc.SelectNodes("//control[@datafieldname='$col']"))) {
-            if ($c.ParentNode.ParentNode.ParentNode.ParentNode.GetAttribute('name') -eq $secName) { continue }
             if ($c.GetAttribute('disabled') -ne 'true') { $c.SetAttribute('disabled', 'true'); $dirty = $true }
         }
     }
@@ -439,9 +563,13 @@ function Sync-InvoicesToReview {
 function New-SubAreaXml([string]$Id, [string]$Entity) {
     return "<SubArea Id=""$Id"" Icon=""/_imgs/imagestrips/transparent_spacer.gif"" Entity=""$Entity"" Client=""All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web"" AvailableOffline=""true"" PassParams=""false"" Sku=""All,OnPremise,Live,SPLA"" />"
 }
-function Sync-SiteMap([string]$UniqueName, [scriptblock]$Edit) {
+function Get-SiteMapRow([string]$UniqueName) {
     $sm = @((Invoke-Dv -Path "sitemaps?`$select=sitemapid,sitemapxml&`$filter=sitemapnameunique eq '$UniqueName'").value)
     if ($sm.Count -ne 1) { throw "Expected one sitemap $UniqueName, found $($sm.Count)" }
+    return $sm[0]
+}
+function Sync-SiteMap([string]$UniqueName, [scriptblock]$Edit) {
+    $sm = @(Get-SiteMapRow $UniqueName)
     $doc = [xml]$sm[0].sitemapxml
     $dirty = [bool](& $Edit $doc)
     $Evidence["sitemap:$UniqueName"] = $sm[0].sitemapid
@@ -451,13 +579,110 @@ function Sync-SiteMap([string]$UniqueName, [scriptblock]$Edit) {
     $script:SiteMapsTouched += $sm[0].sitemapid
     $Changes.Add("updated sitemap $UniqueName ($($sm[0].sitemapid))"); Write-Host "  CHANGED  sitemap $UniqueName" -ForegroundColor Green
 }
-function Add-SubArea($doc, $parentXPath, [string]$Id, [string]$Entity, $afterXPath) {
-    if ($doc.SelectSingleNode("//SubArea[@Entity='$Entity']")) { return $false }
-    $parent = $doc.SelectSingleNode($parentXPath)
+# DEF-046 (#2312): the anchor is looked up INSIDE the parent group only (a child SubArea of that node), never document-wide. A sitemap can
+# list one entity in several areas (sprk_invoice is in two on dev), and a document-wide anchor then belongs to another group and
+# InsertAfter throws "The reference node is not a child of this node". An entity already listed anywhere in the sitemap is left alone
+# (no second entry, no write). No anchor in the group: the entry is appended to the group.
+function Add-SubAreaToGroup($doc, $parent, [string]$Id, [string]$Entity, [string]$AfterEntity, [switch]$Quiet) {
+    $existing = $doc.SelectSingleNode("//SubArea[@Entity='$Entity']")
+    if ($existing) {
+        if ($parent -and -not [object]::ReferenceEquals($existing.ParentNode, $parent) -and -not $Quiet) {
+            $g = $existing.ParentNode
+            Write-Host "  WARN  '$Entity' is already listed in $($g.ParentNode.GetAttribute('Id'))/$($g.GetAttribute('Id')), outside the target group '$($parent.GetAttribute('Id'))': left where it is, no second entry added" -ForegroundColor Yellow
+        }
+        return $false
+    }
+    if (-not $parent) { throw "Cannot add the '$Entity' navigation entry: its target group does not exist in the sitemap. Nothing was written." }
+    $other = $doc.SelectSingleNode("//SubArea[@Id='$Id']")
+    if ($other) { throw "Cannot add the '$Entity' navigation entry: the sitemap already has a SubArea with Id '$Id' for entity '$($other.GetAttribute('Entity'))'. Nothing was written." }
     $frag = $doc.CreateDocumentFragment(); $frag.InnerXml = New-SubAreaXml $Id $Entity
-    $after = if ($afterXPath) { $doc.SelectSingleNode($afterXPath) } else { $null }
+    $after = if ($AfterEntity) { $parent.SelectSingleNode("SubArea[@Entity='$AfterEntity']") } else { $null }
     if ($after) { [void]$parent.InsertAfter($frag, $after) } else { [void]$parent.AppendChild($frag) }
     return $true
+}
+function Add-SubArea($doc, $parentXPath, [string]$Id, [string]$Entity, [string]$AfterEntity, [switch]$Quiet) {
+    return Add-SubAreaToGroup $doc $doc.SelectSingleNode($parentXPath) $Id $Entity $AfterEntity -Quiet:$Quiet
+}
+
+# The group that holds the Invoice entries in the sprk_MatterManagement sitemap, where the invoice submission and billing export entries
+# go. One sprk_invoice entry: its group. Several (the dev sitemap lists sprk_invoice under area_mattermanagement/group_work AND under
+# area_finance/group_c6c6d7dd): the group that also holds an eBilling sibling of the invoice (approval, correction, submission, export),
+# which is the Invoice group of the Finance area. None, or still more than one, is refused with the areas and groups named.
+function Get-InvoiceNavGroup($doc) {
+    $inv = @($doc.SelectNodes("//SubArea[@Entity='sprk_invoice']"))
+    if ($inv.Count -eq 0) { throw 'sprk_MatterManagement has no sprk_invoice subarea: cannot place the invoice submission / billing export entries. Nothing was written.' }
+    $groups = [System.Collections.Generic.List[object]]::new(); foreach ($i in $inv) { if (-not $groups.Contains($i.ParentNode)) { $groups.Add($i.ParentNode) } }; $groups = @($groups)
+    if ($groups.Count -gt 1) {
+        $siblings = 'sprk_invoiceapproval', 'sprk_invoicecorrection', 'sprk_invoicesubmission', 'sprk_billingexport'
+        $groups = @($groups | Where-Object { $g = $_; @($siblings | Where-Object { $g.SelectSingleNode("SubArea[@Entity='$_']") }).Count -gt 0 })
+    }
+    if ($groups.Count -ne 1) {
+        $where = (@($inv | ForEach-Object { "$($_.ParentNode.ParentNode.GetAttribute('Id'))/$($_.ParentNode.GetAttribute('Id'))" }) -join ', ')
+        throw "sprk_MatterManagement lists sprk_invoice in $($inv.Count) places ($where) and the target group cannot be told apart (none, or more than one, holds an invoice approval / correction / submission / export entry). Fix the sitemap or name the group; nothing was written."
+    }
+    return $groups[0]
+}
+
+# The sprk_MatterManagement edit: invoice submission after the invoice entry, billing export after the submission, both inside the one Invoice
+# group. Pure XML: the preflight runs it on a copy before any form is written, Sync-SiteMap runs it for real. Returns true when it changed $doc.
+function Update-MatterManagementSiteMap($doc, [switch]$Quiet) {
+    $dirty = $false
+    $group = Get-InvoiceNavGroup $doc
+    if (Add-SubAreaToGroup $doc $group 'subarea_eb_submission' 'sprk_invoicesubmission' 'sprk_invoice' -Quiet:$Quiet) { $dirty = $true }
+    # The submission may sit in another group (then the export goes after the invoice entry of this group).
+    $anchor = if ($group.SelectSingleNode("SubArea[@Entity='sprk_invoicesubmission']")) { 'sprk_invoicesubmission' } else { 'sprk_invoice' }
+    if (Add-SubAreaToGroup $doc $group 'subarea_eb_export' 'sprk_billingexport' $anchor -Quiet:$Quiet) { $dirty = $true }
+    return $dirty
+}
+
+# The sprk_SpaarkeAdministration edit: the eBilling area / group, its five entries and, once the code page exists, Rule Review. Reads one
+# web resource (read only); changes only $doc. Returns true when it changed $doc.
+function Update-AdministrationSiteMap($doc, [switch]$Quiet) {
+    $dirty = $false
+    $siteMap = $doc.SelectSingleNode('/SiteMap')
+    if (-not $doc.SelectSingleNode("//Area[@Id='area_ebilling']")) {
+        $frag = $doc.CreateDocumentFragment()
+        $frag.InnerXml = '<Area Id="area_ebilling" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0"><Titles><Title LCID="1033" Title="eBilling" /></Titles><Group Id="group_ebilling" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown"><Titles><Title LCID="1033" Title="Billing administration" /></Titles></Group></Area>'
+        [void]$siteMap.AppendChild($frag); $dirty = $true
+    }
+    foreach ($e in @(@('subarea_eb_setting', 'sprk_ebillingsetting'), @('subarea_eb_timekeeper', 'sprk_timekeeper'), @('subarea_eb_ratecard', 'sprk_ratecard'), @('subarea_eb_codeset', 'sprk_billingcodeset'), @('subarea_eb_ruleset', 'sprk_ruleset'))) {
+        # sprk_timekeeper is also on the Matter Management sitemap; the entity check is per sitemap document.
+        if (Add-SubArea $doc "//Area[@Id='area_ebilling']/Group[@Id='group_ebilling']" $e[0] $e[1] $null -Quiet:$Quiet) { $dirty = $true }
+    }
+    # Task 079 (D-114): "Rule Review" opens the sprk_rulereviewpage code page (its own rule set list), after the Rule Sets entry.
+    # Added only once the web resource exists, so the entry never points at nothing.
+    if (-not $doc.SelectSingleNode("//SubArea[@Id='subarea_eb_rulereview']")) {
+        $wr = @((Invoke-Dv -Path "webresourceset?`$select=webresourceid&`$filter=name eq 'sprk_rulereviewpage'").value)
+        if ($wr.Count -eq 1) {
+            $grp = $doc.SelectSingleNode("//Area[@Id='area_ebilling']/Group[@Id='group_ebilling']")
+            if (-not $grp) { throw 'sprk_SpaarkeAdministration has no area_ebilling/group_ebilling group: cannot add the Rule Review entry. Nothing was written.' }
+            $frag = $doc.CreateDocumentFragment()
+            $frag.InnerXml = '<SubArea Id="subarea_eb_rulereview" Icon="/_imgs/imagestrips/transparent_spacer.gif" Url="$webresource:sprk_rulereviewpage" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="false" PassParams="false" Sku="All,OnPremise,Live,SPLA"><Titles><Title LCID="1033" Title="Rule Review" /></Titles></SubArea>'
+            $after = $grp.SelectSingleNode("SubArea[@Id='subarea_eb_ruleset']")
+            if ($after) { [void]$grp.InsertAfter($frag, $after) } else { [void]$grp.AppendChild($frag) }
+            $dirty = $true
+        } elseif (-not $Quiet) {
+            Write-Host '  WARN  sprk_rulereviewpage is not on this environment: Rule Review entry not added (deploy the page, then re-run)' -ForegroundColor Yellow
+        }
+    }
+    return $dirty
+}
+
+# Read only: both sitemap edits on copies of the live sitemaps. A refusal (a missing group, an ambiguous Invoice group, a SubArea Id taken by
+# another entity) throws here. Step 0b calls it before any form is written; Sync-Navigation calls it again before its first PATCH, so the order
+# of the two sitemaps in step 3 cannot leave one of them written and the other refused.
+function Test-NavigationEdits {
+    $adm = [xml](Get-SiteMapRow 'sprk_SpaarkeAdministration').sitemapxml
+    [void](Update-AdministrationSiteMap $adm -Quiet)
+    $mm = [xml](Get-SiteMapRow 'sprk_MatterManagement').sitemapxml
+    [void](Update-MatterManagementSiteMap $mm -Quiet)
+}
+
+# Step 3: evaluate both edits first (Test-NavigationEdits), then PATCH each sitemap that changed.
+function Sync-Navigation {
+    Test-NavigationEdits
+    Sync-SiteMap 'sprk_SpaarkeAdministration' { param($doc) return (Update-AdministrationSiteMap $doc) }
+    Sync-SiteMap 'sprk_MatterManagement' { param($doc) return (Update-MatterManagementSiteMap $doc) }
 }
 
 # A sitemap entry only shows when the table is a component of the app module (type 1). AddAppComponents can answer 204 and add
@@ -510,6 +735,14 @@ foreach ($t in $Spec.Keys) {
     if ($Spec[$t].ContainsKey('Subgrids')) { foreach ($sub in $Spec[$t].Subgrids) { Assert-SubgridRelationship $sub } }
 }
 
+# DEF-046: the navigation edit is checked on a copy of the live sitemap BEFORE any form is written, so a sitemap it cannot place the entries in
+# refuses here (nothing written) and not in step 3 after the forms are already written and before they are published. Read only.
+if (-not $FormsOnly) {
+    Write-Host "`n0b. Navigation preflight (read only)"
+    Test-NavigationEdits
+    Write-Host '  sprk_SpaarkeAdministration and sprk_MatterManagement: the navigation entries can be placed' -ForegroundColor DarkGray
+}
+
 Write-Host "`n1. Forms"
 foreach ($t in $Spec.Keys) { Write-Host " $t"; Sync-Form $t $Spec[$t] }
 
@@ -518,37 +751,15 @@ if ($FormsOnly) {
 } else {
 Write-Host "`n2. Views"
 foreach ($t in $Spec.Keys) { Sync-ActiveView $t $Spec[$t] }
-Sync-InvoicesToReview
+if ($Tables.Count -eq 0 -or $Tables -contains 'sprk_invoice') { Sync-InvoicesToReview }
 
 Write-Host "`n3. Navigation"
-Sync-SiteMap 'sprk_SpaarkeAdministration' {
-    param($doc)
-    $dirty = $false
-    $siteMap = $doc.SelectSingleNode('/SiteMap')
-    if (-not $doc.SelectSingleNode("//Area[@Id='area_ebilling']")) {
-        $frag = $doc.CreateDocumentFragment()
-        $frag.InnerXml = '<Area Id="area_ebilling" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0"><Titles><Title LCID="1033" Title="eBilling" /></Titles><Group Id="group_ebilling" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown"><Titles><Title LCID="1033" Title="Billing administration" /></Titles></Group></Area>'
-        [void]$siteMap.AppendChild($frag); $dirty = $true
-    }
-    foreach ($e in @(@('subarea_eb_setting', 'sprk_ebillingsetting'), @('subarea_eb_timekeeper', 'sprk_timekeeper'), @('subarea_eb_ratecard', 'sprk_ratecard'), @('subarea_eb_codeset', 'sprk_billingcodeset'), @('subarea_eb_ruleset', 'sprk_ruleset'))) {
-        # sprk_timekeeper is also on the Matter Management sitemap; the entity check is per sitemap document.
-        if (Add-SubArea $doc "//Area[@Id='area_ebilling']/Group[@Id='group_ebilling']" $e[0] $e[1] $null) { $dirty = $true }
-    }
-    return $dirty
-}
-Sync-SiteMap 'sprk_MatterManagement' {
-    param($doc)
-    $dirty = $false
-    $inv = "//SubArea[@Entity='sprk_invoice']"
-    if (-not $doc.SelectSingleNode($inv)) { throw 'sprk_MatterManagement has no sprk_invoice subarea' }
-    $group = $doc.SelectSingleNode($inv).ParentNode.GetAttribute('Id')
-    if (Add-SubArea $doc "//Group[@Id='$group']" 'subarea_eb_submission' 'sprk_invoicesubmission' $inv) { $dirty = $true }
-    if (Add-SubArea $doc "//Group[@Id='$group']" 'subarea_eb_export' 'sprk_billingexport' "//SubArea[@Entity='sprk_invoicesubmission']") { $dirty = $true }
-    return $dirty
-}
+Sync-Navigation
 
-Sync-AppTables 'sprk_SpaarkeAdministration' @('sprk_ebillingsetting', 'sprk_timekeeper', 'sprk_ratecard', 'sprk_billingcodeset', 'sprk_ruleset')
-Sync-AppTables 'sprk_MatterManagement' @('sprk_invoicesubmission', 'sprk_billingexport')
+if ($Tables.Count -eq 0) {
+    Sync-AppTables 'sprk_SpaarkeAdministration' @('sprk_ebillingsetting', 'sprk_timekeeper', 'sprk_ratecard', 'sprk_billingcodeset', 'sprk_ruleset')
+    Sync-AppTables 'sprk_MatterManagement' @('sprk_invoicesubmission', 'sprk_billingexport')
+} else { Write-Host '  app tables skipped (-Tables)' -ForegroundColor DarkGray }
 }
 
 Write-Host "`n4. Publish (entity-scoped; never a tenant-wide publish)"

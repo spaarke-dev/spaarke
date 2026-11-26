@@ -52,7 +52,19 @@ function problemBody(err: unknown): Record<string, unknown> | null {
 export interface RegistrationPrefill {
   givenName: string;
   familyName: string;
+  /**
+   * The email the registration would use: the BFF applies the registration route's own rule (the token's email claim,
+   * exactly one value; never the UPN), R4 FR-27 (#2449). Empty means the registration could only refuse
+   * `registration_email_missing`, so `RegistrationPage` opens on that screen.
+   */
   email: string;
+  /**
+   * R4 FR-25 (#2192): the BFF's routing hint that the caller's own token email belongs to a licensed Spaarke user, so the
+   * page opens on the "Link my account" step instead of a profile form that could never register them. `true` ONLY when
+   * the body says `licensedUser: true`; absent (an older BFF) or anything else is `false` (the form, as before). Routing
+   * only: it links nothing and grants nothing; the link route still proves the Spaarke-tenant account server-side.
+   */
+  licensedUser: boolean;
 }
 
 /**
@@ -64,7 +76,12 @@ export function parseRegistrationRequired(err: unknown): RegistrationPrefill | n
   const body = problemBody(err);
   if (!body || body.reasonCode !== REGISTRATION_REQUIRED_REASON) return null;
   const text = (value: unknown) => (typeof value === 'string' ? value : '');
-  return { givenName: text(body.givenName), familyName: text(body.familyName), email: text(body.email) };
+  return {
+    givenName: text(body.givenName),
+    familyName: text(body.familyName),
+    email: text(body.email),
+    licensedUser: body.licensedUser === true,
+  };
 }
 
 // ---------------------------------------------------------------------------

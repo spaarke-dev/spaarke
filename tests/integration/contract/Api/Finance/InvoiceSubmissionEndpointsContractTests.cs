@@ -78,6 +78,12 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceHidingStub? _invoiceDecisionOverride;
     private HttpClient _client = null!;
 
+    /// <summary>ISS-043: replaces the request body and token before the route runs (<see cref="MalformedMultipartBodies.Apply"/>).</summary>
+    private Action<Microsoft.AspNetCore.Http.HttpContext>? _onRequest;
+
+    /// <summary>ISS-043 fix round 1 (F1): what the host logged.</summary>
+    private readonly MalformedMultipartBodies.LogCapture _warnings = new();
+
     public InvoiceSubmissionEndpointsContractTests()
     {
         // The submission service reads the firm links through the SAME double the filter and the picker use, so one set of links
@@ -95,6 +101,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(_warnings);
         builder.Services
             .AddAuthentication(o =>
             {
@@ -150,6 +157,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
                 context.Request.Body = new ReadRecordingStream(context.Request.Body, () => Interlocked.Increment(ref _bodyReads));
             }
 
+            _onRequest?.Invoke(context);
             await next();
         });
         _app.UseRouting();
@@ -266,6 +274,127 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         allocation.FirmId.Should().Be(FirmId);
         ((OptionSetValue)allocation.Fields!["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Spa);
         _h.JobsSent.Should().ContainSingle().Which.JobType.Should().Be(InvoiceSubmissionService.JobType);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ISS-043 (#2978): a malformed multipart body is the route's 400 (not a 500); ISS-035 (#2889): a repeated field is a field error
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private Task<HttpResponseMessage> PostAsync(bool external, HttpContent content)
+    {
+        if (!external)
+        {
+            GrantInternalSubmit();
+        }
+
+        return external ? PostExternalAsync(content) : PostInternalAsync(content);
+    }
+
+    [Theory(DisplayName = "ISS-043 must-fire: a multipart body with no closing boundary is 400 file_required on both channels, not a 500; nothing written")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_body_with_no_closing_boundary_is_400_not_500(bool external)
+    {
+        var response = await PostAsync(external, MalformedMultipartBodies.NoClosingBoundary());
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FileRequired);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-043 must-fire: a body stream that fails with an IOException (token not cancelled) is 400 file_required on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_body_stream_that_fails_is_400(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.Apply(abandoned: false);
+
+        var response = await PostAsync(external, Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.FileRequired);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-043 fix round 1 (F1): the 400 for a body stream fault is logged at Warning with the exception type and HResult, never the message, on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_body_stream_fault_logs_a_warning_without_the_exception_message(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.Apply(abandoned: false);
+
+        var response = await PostAsync(external, Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        var entry = _warnings.Entries.Where(e => e.Message.Contains("multipart request body could not be read")).Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(nameof(IOException)).And.Contain("HResult");
+        entry.Message.Should().NotContain(MalformedMultipartBodies.FaultMessage, "the parser's message can echo request content");
+        entry.Exception.Should().BeNull("the exception object (and so its message) is not logged");
+    }
+
+    [Theory(DisplayName = "ISS-043 fix round 1 (K2) must-not-fire: a body that fails with a ConnectionResetException (token not cancelled) is not answered as a 400, on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_connection_reset_is_not_a_400(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.ApplyConnectionReset();
+
+        var act = async () => await PostAsync(external, Form());
+
+        await act.Should().ThrowAsync<Microsoft.AspNetCore.Connections.ConnectionResetException>();
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-043 must-not-fire: a body that fails because the client abandoned the request (token cancelled) is not answered as a 400")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_abandoned_request_is_not_a_400(bool external)
+    {
+        _onRequest = MalformedMultipartBodies.Apply(abandoned: true);
+
+        var act = async () => await PostAsync(external, Form());
+
+        (await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is OperationCanceledException);
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-035 must-fire: a firmInvoiceNumber or poNumber sent twice is a 400 field error naming the field, on both channels; nothing written")]
+    [InlineData(true, "firmInvoiceNumber")]
+    [InlineData(false, "firmInvoiceNumber")]
+    [InlineData(true, "poNumber")]
+    [InlineData(false, "poNumber")]
+    public async Task A_repeated_number_field_is_a_400_field_error(bool external, string field)
+    {
+        var form = Form();
+        form.Add(new StringContent(field == "poNumber" ? "PO-1" : "INV-2"), field);
+        if (field == "poNumber")
+        {
+            form.Add(new StringContent("PO-2"), field);
+        }
+
+        var response = await PostAsync(external, form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errors").GetProperty(field).EnumerateArray().Single().GetString().Should().Be($"{field} is sent at most once.");
+        NothingWritten();
+    }
+
+    [Theory(DisplayName = "ISS-035 must-not-fire: a firmInvoiceNumber and a poNumber sent once are used as sent (202), on both channels")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_single_number_and_po_are_unchanged(bool external)
+    {
+        var form = Form(number: "INV-5");
+        form.Add(new StringContent("PO-9"), "poNumber");
+
+        var response = await PostAsync(external, form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        var allocation = _h.Allocations.Should().ContainSingle().Subject;
+        allocation.Number.Should().Be("INV-5");
+        allocation.Fields!["sprk_ponumber"].Should().Be("PO-9");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1500,6 +1629,91 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         var body = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}")).Content.ReadAsStringAsync();
 
         body.Should().NotContain(invoice.ToString(), "the invoice link is read for the predicate only");
+    }
+
+    // ── ebilling-r1 iss052 (#3082): the external single read names the invoice of an Accepted submission the caller may see ──
+
+    /// <summary>A stored submission of the caller's firm with <paramref name="status"/>, on an invoice whose own source is visible (D-70: no other firm).</summary>
+    private (Entity Row, Guid Invoice) VisibleSubmissionWith(InvoiceSubmissionStatus status)
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(invoiceFirm: null);
+        var row = SubmissionRow("INV-ISS052", Spa, invoice: invoice, status: status, id: id);
+        _h.Submission = row;
+        return (row, invoice);
+    }
+
+    [Fact(DisplayName = "iss052 (must fire): the external single read of an Accepted submission whose invoice the caller may see carries invoiceId, beside coreRecord")]
+    public async Task Iss052_get_of_an_accepted_visible_submission_carries_the_invoice_id()
+    {
+        var (row, invoice) = VisibleSubmissionWith(InvoiceSubmissionStatus.Accepted);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("status").GetString().Should().Be("Accepted");
+        body.RootElement.GetProperty("invoiceId").GetGuid().Should().Be(invoice);
+        body.RootElement.GetProperty("coreRecord").GetProperty("recordId").GetGuid().Should().Be(MatterId);
+        _invoiceDecisions.Should().ContainSingle("the route's own invoice decision, no second check")
+            .Which.Should().Equal(invoice);
+    }
+
+    [Theory(DisplayName = "iss052 (must not fire): a Received, Processing, Rejected or Failed submission carries no invoiceId, even when its invoice is visible")]
+    [InlineData(InvoiceSubmissionStatus.Received)]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Rejected)]
+    [InlineData(InvoiceSubmissionStatus.Failed)]
+    public async Task Iss052_get_of_a_submission_that_is_not_accepted_carries_no_invoice_id(InvoiceSubmissionStatus status)
+    {
+        var (row, invoice) = VisibleSubmissionWith(status);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "control: the submission itself is served");
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.TryGetProperty("invoiceId", out _).Should().BeFalse();
+        text.Should().NotContain(invoice.ToString());
+        body.RootElement.GetProperty("coreRecord").GetProperty("recordId").GetGuid().Should().Be(MatterId, "the record link does not depend on the status");
+    }
+
+    [Fact(DisplayName = "iss052 (must not fire): an Accepted submission whose invoice is another firm's is the uniform 404 and names no invoice")]
+    public async Task Iss052_get_of_an_accepted_submission_whose_invoice_is_hidden_names_no_invoice()
+    {
+        var (id, invoice) = OwnFirmSubmissionOn(OtherFirmId);
+        _h.Submission = SubmissionRow("INV-ISS052", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(invoice.ToString()).And.NotContain("invoiceId");
+    }
+
+    [Fact(DisplayName = "iss052 (must not fire): an Accepted submission whose invoice decision read faults is the retryable 503 and names no invoice")]
+    public async Task Iss052_get_of_an_accepted_submission_whose_decision_faults_names_no_invoice()
+    {
+        _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+        var (row, invoice) = VisibleSubmissionWith(InvoiceSubmissionStatus.Accepted);
+
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{row.Id}");
+
+        await ShouldBeRetryable503Async(response, invoice.ToString(), "invoiceId");
+    }
+
+    [Fact(DisplayName = "iss052 (scope): the internal single read and the external list of the same Accepted submission carry no invoiceId (contracts unchanged)")]
+    public async Task Iss052_the_internal_read_and_the_external_list_carry_no_invoice_id()
+    {
+        var (row, invoice) = VisibleSubmissionWith(InvoiceSubmissionStatus.Accepted);
+        _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, row.Id, AccessRights.Read);
+
+        var internalResponse = await SendAsync(HttpMethod.Get, $"/api/finance/invoice-submissions/{row.Id}");
+        var list = await ListBodyAsync(row);
+
+        internalResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var internalText = await internalResponse.Content.ReadAsStringAsync();
+        internalText.Should().Contain("INV-ISS052", "control: the row is answered").And.NotContain("invoiceId").And.NotContain(invoice.ToString());
+        list.Should().Contain("INV-ISS052", "control: the row is listed").And.NotContain("invoiceId").And.NotContain(invoice.ToString());
     }
 
     [Fact]

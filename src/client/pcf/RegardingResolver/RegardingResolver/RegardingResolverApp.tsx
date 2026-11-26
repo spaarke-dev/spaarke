@@ -70,8 +70,8 @@
  * subgrid — is ported here. AssociationResolver is retired in this same
  * task; both PCFs did essentially the same job. Key differences that
  * disqualified AssociationResolver: field-mapping cascade is now driven
- * from the parent side (SRFR-062 push ribbon), so the write-time
- * FieldMappingHandler is redundant.
+ * from the parent side (SRFR-062 push ribbon), so the former write-time
+ * FieldMappingHandler (deleted in field-mapping-server-write-path-r1 task 035) was redundant.
  *
  * Behavior on mount (React useEffect):
  *   - Iterate `sprk_regarding{entityName}` field names derived from the
@@ -259,6 +259,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { regardingRowStyles } from '@spaarke/ui-components/dist/theme/regardingRowStyles';
 import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 // Deep (per-module) imports — NOT the root '@spaarke/ui-components' barrel.
 // The barrel maps to dist/index (tsconfig paths), which re-exports SprkChat →
@@ -417,55 +418,13 @@ const useStyles = makeStyles({
   },
   // Row-2 — v1.3.4 (SRFR-039): two-column grid. Number cell = 1/3 width
   // (left), Name cell = 2/3 width (right). Empty cells hide entirely.
-  row2: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 2fr',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
-    minHeight: '24px',
-    alignItems: 'start',
-  },
-  // Per-cell wrapper: label above, value below (flex column).
-  numberCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    minWidth: 0,
-  },
-  nameCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    minWidth: 0,
-  },
-  // Row-2 field label — OOB-parity styling (SRFR-039 Path A extension).
-  // Small font (12px), regular weight (400), gray color (#616161), Segoe UI
-  // stack. Left-aligned inherently via flex column. Documented exception
-  // to ADR-021 semantic tokens for OOB parity.
-  fieldLabel: {
-    fontFamily:
-      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
-    fontSize: '12px',
-    fontWeight: 400,
-    color: '#616161',
-    lineHeight: '16px',
-  },
-  recordNumber: {
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  // Row-2 record-name value — plain text (NOT a Link). Segoe UI 14px, weight
-  // 400, color #242424 — matches OOB body-text on the same form. Truncate
-  // with ellipsis on overflow so long names don't blow out the cell.
-  recordName: {
-    fontFamily:
-      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
-    fontSize: '14px',
-    fontWeight: 400,
-    color: '#242424',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
+  // Row-2 grid + OOB-parity label/value text: shared with the sibling control (#2967).
+  row2: { ...regardingRowStyles.row2 },
+  numberCell: { ...regardingRowStyles.numberCell },
+  nameCell: { ...regardingRowStyles.nameCell },
+  fieldLabel: { ...regardingRowStyles.fieldLabel },
+  recordNumber: { ...regardingRowStyles.recordNumber },
+  recordName: { ...regardingRowStyles.recordName },
   footer: {
     marginTop: 'auto',
     paddingTop: tokens.spacingVerticalS,

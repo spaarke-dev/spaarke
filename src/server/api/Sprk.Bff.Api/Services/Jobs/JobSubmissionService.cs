@@ -94,9 +94,12 @@ public class JobSubmissionService
                 WriteIndented = false
             });
 
-            // Use IdempotencyKey as MessageId when available so that Service Bus
-            // duplicate detection rejects messages for the same logical operation
-            // (e.g., same email processed by multiple webhook subscriptions or instances).
+            // Use IdempotencyKey as MessageId when available (ADR-004 A1 §5). Duplicate detection is OFF on the
+            // BFF queues (service-bus.bicep; a create-time property), so the broker does NOT de-duplicate on it:
+            // receive-side idempotency in each handler is the guarantee. The processors' retry copy reuses this
+            // MessageId (ISS-025), which depends on duplicate detection staying off — with it on, the broker would
+            // silently drop the copy inside the detection window.
+            // Enforced by: JobQueueDuplicateDetectionOffGuardTests (tests/Spaarke.ArchTests; scans the bicep queue resources).
             // Falls back to JobId for jobs without an idempotency key.
             // Service Bus MessageId has a 128-character limit; hash if needed.
             var sbMessageId = !string.IsNullOrWhiteSpace(job.IdempotencyKey)

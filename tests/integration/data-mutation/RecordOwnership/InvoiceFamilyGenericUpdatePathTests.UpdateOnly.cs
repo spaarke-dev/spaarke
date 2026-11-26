@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// The three generic update paths — the playbook update (<see cref="Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore"/>),
-/// the output orchestrator (<see cref="DataverseUpdateHandler"/>) and the field-mapping push — update existing records only,
+/// the update handler (<see cref="DataverseUpdateHandler"/>) and the field-mapping push — update existing records only,
 /// on every table: the write is <see cref="IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync(string, Guid, Dictionary{string, object?}, Guid?, CancellationToken)"/>
 /// (<c>If-Match: *</c>), never the create-if-missing <see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/>. An id
 /// that names no row is refused (<see cref="RecordOwnerRefusal.RecordMissing"/>) and nothing is written. The invoice family's
@@ -90,7 +90,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         // The core and the push turn this lookup into an "@odata.bind" key; the orchestrator is given the key itself.
         var lookups = Lookups(("sprk_matter", MatterRef(Matter)));
         PathOutcome outcome;
-        if (path == GenericPath.OutputOrchestrator)
+        if (path == GenericPath.UpdateHandler)
         {
             try
             {
@@ -147,7 +147,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         // FIXED string (task 040, #1437 / ADR-019): the fault's text is logged, never returned.
         var core = () => RunAsync(GenericPath.PlaybookUpdate, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
         await core.Should().ThrowAsync<HttpRequestException>();
-        var orchestrator = () => RunAsync(GenericPath.OutputOrchestrator, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
+        var orchestrator = () => RunAsync(GenericPath.UpdateHandler, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
         await orchestrator.Should().ThrowAsync<HttpRequestException>();
         var push = await RunAsync(GenericPath.FieldMappingPush, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
         push.Message.Should().Be(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ChildUpdateFailedMessage)
@@ -155,7 +155,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Fact]
-    public async Task TheOutputOrchestrator_OnItsOptimisticPath_WritesUpdateOnly_OnEveryTable()
+    public async Task TheUpdateHandler_OnItsOptimisticPath_WritesUpdateOnly_OnEveryTable()
     {
         var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
         app.Setup(a => a.RetrieveAsync(PlainTable, Event, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))

@@ -28,7 +28,6 @@ module.exports = {
     alias: {
       'react/jsx-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
-      '@spaarke/sdap-client$': false,
       // Loud stubs, not `false` — see pdfjsDistUnreachable.js for why.
       'pdfjs-dist$': path.resolve(__dirname, '../shared/stubs/pdfjsDistUnreachable.js'),
       'mammoth$': path.resolve(__dirname, '../shared/stubs/mammothUnreachable.js'),

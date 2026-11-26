@@ -1,5 +1,5 @@
 /**
- * FileUploadService over the SHARED `@spaarke/sdap-client` client.
+ * FileUploadService over the SHARED SDAP client (`services/sdap`; the `@spaarke/sdap-client` package until 2026-11-24).
  *
  * This is the seam that changed on 2026-09-03: `FileUploadService` used to hold this package's own
  * parallel `SdapApiClient` (deleted) and now holds the shared one. The seam matters because the
@@ -14,7 +14,7 @@
  * choice after crossing three layers of translation.
  */
 
-import { SdapApiClient } from '@spaarke/sdap-client';
+import { SdapApiClient } from '../../sdap';
 import { FileUploadService } from '../FileUploadService';
 import type { ILogger, UploadTarget } from '../types';
 
@@ -49,7 +49,7 @@ const RECORD_TARGET: UploadTarget = {
   recordId: '11111111-1111-1111-1111-111111111111',
 };
 
-describe('FileUploadService over @spaarke/sdap-client', () => {
+describe('FileUploadService over the shared SDAP client', () => {
   it('reports a 409 as a recoverable nameConflict, not as a plain error', async () => {
     const service = serviceOver(async () => {
       throw new FakeApiError('nameAlreadyExists', 409);

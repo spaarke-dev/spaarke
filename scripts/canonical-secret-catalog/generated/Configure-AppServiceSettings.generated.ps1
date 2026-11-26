@@ -89,6 +89,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ServiceBusFqns,
 
+    [Parameter(Mandatory = $false)]
+    [string]$SignalrEnabled = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$SignalrMsiConnectionString = '',
+
     [Parameter(Mandatory = $true)]
     [string]$SpeContainerId,
 
@@ -183,6 +189,10 @@ $settings = @(
 )
 
 if (-not [string]::IsNullOrWhiteSpace($OpenaiMonthlyLimitUsd)) { $settings += "AiSpendLimit__MonthlyLimitUsd=$OpenaiMonthlyLimitUsd" }
+
+if (-not [string]::IsNullOrWhiteSpace($SignalrMsiConnectionString)) { $settings += "Notifications__SignalR__ConnectionString=$SignalrMsiConnectionString" }
+
+if (-not [string]::IsNullOrWhiteSpace($SignalrEnabled)) { $settings += "Notifications__SignalR__Enabled=$SignalrEnabled" }
 
 for ($i = 0; $i -lt $AiSearchIndexNames.Count; $i++) { $settings += "AiSearch__AllowedIndexes__$i=$($AiSearchIndexNames[$i])" }
 

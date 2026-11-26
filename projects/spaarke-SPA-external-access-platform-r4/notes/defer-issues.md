@@ -397,3 +397,111 @@ This under-lists, which fails closed.
 **Why it matters.** The same "no items" state looks different from page to page in the external SPA, and some of these do not announce the state to assistive tech (no role="status"), so a screen-reader user is not told a list is empty. The local copy in OutsideCounselDashboard.tsx duplicates a shared component and drifts from it.
 
 **Fix.** Replace each with EmptyState (size compact for lists and panels), keeping wording and any action-conditional hint; delete the local copy and its emptyState* styles. Keep loading, error and truncated states as they are. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/2975 (board Type=Idea).
+
+## D-31 — Shared DataGrid: column minimums cut short header labels at narrow widths (#3008)
+
+**What.** The shared DataGrid's column minimum is `max(80, 0.5 x configured width)`, applied to the border box. That leaves about 30px for the label once padding and the sort chevron are taken off. With the 128px row-actions column, or in a narrow container, every column sits at its minimum. In the external record Documents grid at 1000px, the headers read "Ty…"/"D…" and dates are cut. The fitting only started running with task 028's PR #3000, so every host now shows this squeeze at narrow widths.
+
+**Why it matters.** Users can't read the narrow columns' header names or dates without dragging them wider.
+
+**Fix.** Base the minimum on the header label (about label width + 56px). Give wide free-text columns a lower floor (e.g. 0.35 x width). Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3008 (board Type=Bug).
+
+## D-32 — External record Documents grid: empty band above the grid header (#3009)
+
+**What.** In the record modal, an empty rounded band is drawn above the Documents section's grid header (shared DataGrid with host row source). It was seen in the task 028 E2E on 2026-11-23. Not investigated yet. The likely cause is an empty toolbar or message wrapper rendered when the host turns the command bar off.
+
+**Why it matters.** It looks broken and wastes height in the record modal.
+
+**Fix.** Don't render the wrapper when it has no content, and add a test that nothing empty is drawn above the header. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3009 (board Type=Bug).
+
+## D-33 — FetchService comment says the client normalizes SDK values; it does not (#3010)
+
+**What.** The comment above `FetchService.ProjectEntity` (about lines 141-144) says `BffDataverseClient` normalizes SDK values. `BffDataverseClient.ts` (~:403) returns the JSON as is. So module-fetch rows carry option-set and Money values as `{ value: n, extensionData: null }`.
+
+**Why it matters.** The comment led task 020 to read bare numbers, which was the cause of the Review detail and closed-request Delete defects fixed in PR #3000. The next reader could repeat the mistake.
+
+**Fix.** Correct the comment and point it to `rawWholeNumberOf`. It's comment-only, so make it part of the next R4 BFF PR. Status: Done (task 031, 2026-11-23: the `ProjectEntity` remarks now state the wire shape and point to `rawWholeNumberOf`; its summary's wrong key name, `FormattedValues` for `@formattedValues`, is fixed too. The issue is closed by the main session). Issue: https://github.com/spaarke-dev/spaarke/issues/3010 (board Type=Bug).
+
+## D-34 — Shared DataGrid: CSV export writes option-set and nameless lookup cells as JSON (#3045)
+
+**What.** The shared DataGrid's export writes an option-set cell, and a lookup with no name, as raw JSON (`{"value":1,"extensionData":null}`). Module-fetch rows carry SDK objects; the grid shows the `@formattedValues` label, but `csvExport.ts`'s object fallback (~:80) stringifies the value. Task 033 fixed Money only (FR-20 scope); its render test pins the current behaviour.
+
+**Why it matters.** An exported status or type column holds JSON instead of the label the user sees.
+
+**Fix.** Extend the grid's `exportCellText` (added in task 033) to return the `@formattedValues` label, else the lookup name, for every column with one; update the pinned test. Needs the dataset-grid owners' OK. Status: **Done** (PR #3055, merged 2026-11-24 `8dd44cf528`: every cell exports the text it shows, dates as shown, export text hardening). Issue: https://github.com/spaarke-dev/spaarke/issues/3045 (board Type=Bug).
+
+## D-35 — Shared DataGrid: currency cells without a server label are always shown as USD (#3046)
+
+**What.** `renderCellValue`'s `currency` case (`DataGrid.tsx` ~:772-776) formats every amount that has no server label with `currency: 'USD'`. Since task 033 the CSV export reuses that text, so the "$" also reaches exported files.
+
+**Why it matters.** A euro or pound amount without a formatted label is shown and exported as dollars.
+
+**Fix.** Without a label, use the row's currency when known, else show the plain number. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3046 (board Type=Bug).
+
+## D-36 — Shared DataGrid: model-driven hosts may show option-set numbers (OData label annotations not read) (#3050)
+
+**What.** `formattedLabelOf` (`DataGrid.tsx` ~:728) reads labels only from `@formattedValues`. Rows from `XrmDataverseClient` carry `{column}@OData.Community.Display.V1.FormattedValue` annotations, which nothing in the DataGrid path maps, so under model-driven hosts an option set likely shows and exports its integer, and a `_x_value` lookup column may be empty. Found by the #3045 fix review (2026-11-24); medium confidence, not verified live.
+
+**Why it matters.** Model-driven grid users may see numbers instead of labels, in the cell and the export.
+
+**Fix.** Verify on a dev model-driven grid; if confirmed, read the annotation forms in `formattedLabelOf` with tests for both row shapes. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3050 (board Type=Bug).
+
+## D-37 — Shared DataGrid: Export to Excel ignores the on-screen sort (#3129)
+
+**What.** Found in the task 038 E2E (2026-11-25). The export writes rows in the order they were loaded, not the order the user sorted them on screen. On dev, Invoices sorted by Total Amount (Local) exported 10 rows in served order. The grid passes its loaded `records` to the command bar (`DataGrid.tsx` ~:1999). The export (`commandBar/CommandBar.tsx` `records`, ~:163 and ~:447, then `csvExport.ts` `exportCsv`) never sees the sort, which lives in DataGrid's `userSort` and Fluent's `sortState`.
+
+**Why it matters.** A user sorts by amount, exports, and gets a file in another order, so the export no longer matches what they saw.
+
+**Fix.** Pass the records sorted with the same `compare` the column uses (the active sort column and direction) to the command bar, or let the export take a sorted list. Add a test: the menu sort followed by export gives the sorted order. Needs the dataset-grid owners' OK (the shared export API). Effort: about half a day. Status: Open. Issue: https://github.com/spaarke-dev/spaarke/issues/3129 (board Type=Bug).
+
+## D-38 — External SPA: three low-priority browser checks not run in task 038 (#3149)
+
+**What.** Three task 038 ui-test checks were not run on dev (2026-11-25). Each needs an owner-side change: (1) FR-19 with browser storage blocked (a Chrome site-data block for the portal; `services/gridSettingsStore.ts`, `widgets/useGridSettings.ts`); (2) FR-22, a thread message with a remote image does not load it (needs an internal email with a remote image filed to a portal thread; `components/detail/RecordMessages.tsx`); (3) the high-contrast theme (Windows contrast mode). The behaviour is covered by unit tests; only the live browser check is missing. The owner rated them low priority and closed 038 with them filed ("we can close these three issues (and these are really low priority)").
+
+**Why it matters.** A real-browser regression would not show in the unit tests: a grid that fails to load for a user who blocks site data, or a remote image loading in a portal thread.
+
+**Fix.** Run the three at the next SPA E2E or the R4 closing task, with the owner's OK for the storage block, the test email and contrast mode; file a Bug for any failure. Effort: about an hour. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3149 (board Type=Idea).
+
+## D-39 — External SPA: one entitlement code gates five record tabs against one Workforce-role table (#3153)
+
+**What.** Since task 040, `assigned-work` opens the five record tabs for CIAM partners and granted workforce contacts.
+
+The Workforce-role ceiling (`WorkforceRoleCeilingGate.cs` `ModuleTables` ~:273-278) maps the code to `sprk_workassignment` only. For a workforce contact this has two effects:
+- A role that reads work assignments but not, for example, invoices still shows the Invoices tab. Its list fetch is refused by the ceiling, and the grid shows its empty state ("No records to display"). The shared DataGrid never renders a row-fetch error, because `useLazyLoad`'s `error` is not read (`DataGrid.tsx` ~:2138).
+- A role without work-assignment Read hides all five tabs, even for a project-only grant.
+
+Security holds: every fetch is ceiling-checked per table and Tier-2-scoped. The case arises only for a misconfigured role; the prerequisite role reads all five tables. uac-r2 reviewed it (2026-11-25) and chose to accept it as a known limit for R4, with per-tab codes as the later fix.
+
+**Why it matters.** A workforce contact on a misconfigured role sees a tab that is silently empty, or loses tabs it could use.
+
+**Fix.**
+- Give each tab its own code, mapped to its own table, under the same grant rule.
+- Optionally, show a row-fetch 403 in the shared grid as "no access" (needs the dataset-grid owners' OK).
+- `WorkforceRoleCeilingGate` is uac-r2's file (task 186).
+
+Effort: about a day plus a UAC review. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3153 (board Type=Idea).
+
+## D-40 — External SPA: a licensed user linked to a WorkforceHome contact gets none of the contact's record grants (K3) (#3154)
+
+**What.** This is known limit K3 from R3 task 090, revisited in task 040 and kept. A licensed user whose systemuser is linked to a WorkforceHome contact's home identity resolves as the systemuser. The contact's grants (and since task 040 its record tabs) don't apply to that person on the external SPA.
+
+The fix would change principal precedence, which is escalation trigger 3 for task 040 (auth plane). uac-r2 agreed (2026-11-25) and asked for a cross-reference to the stored-link rule in ADR-028 A9.
+
+**Why it matters.** Such a person sees fewer records than the contact's grants give. The grants go unused. This fails closed.
+
+**Fix.** The auth plane needs to decide whether a linked licensed user gets the union of both sets of grants or stays on the licensed model. That needs an auth review and an ADR-028 check. Effort: unknown. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3154 (board Type=Idea).
+
+## D-41 — External SPA: decide whether a workforce contact may submit invoices (#3159)
+
+**What.** Since task 040, a workforce contact with record grants sees the Invoices tab. `/me` lists firms for any contact with organization memberships, on either plane, and ebilling never decided whether a workforce contact may submit. The submit routes also apply the Workforce-role ceiling, which `firms` does not reflect, so the command could be offered and then refused. Owner decision 2026-11-25: hide Submit invoice on the workforce plane for now (the Invoices grid command and the record view's action; `callerMaySubmitInvoices` in `src/client/external-spa/src/components/record/recordAccess.ts`).
+
+**Why it matters.** If workforce contacts should submit, they can't from the SPA until this is decided. If they shouldn't, the server should say so (for example `/me` sends no firms on the workforce plane) and the client rule becomes a backstop.
+
+**Fix.** ebilling-r1 decides, with uac-r2 for the ceiling: either (a) workforce contacts don't submit, and `ExternalUserContextEndpoint` sends no firms on the workforce plane; or (b) they do, and the offer also checks the ceiling's Create on the submission table and AppendTo on documents, after which the SPA's plane rule is removed. Effort: under a day either way, plus reviews. Status: Open (urgency: next-round). Issue: https://github.com/spaarke-dev/spaarke/issues/3159 (board Type=Idea).
+## D-42 — External SPA: the email-missing screen offers no account link for a licensed user without an email claim (#3201)
+
+**What.** A licensed Spaarke user whose home token has no `email` claim (only a username) and whose silent link failed lands on "We could not read your email address", which has no "Link my account" action. The licensedUser hint needs an email, so it is false; the link route itself needs none, so linking would work. This predates task 042: before it, the person reached the same screen after submitting the form. Found by task 042's adversarial review (K1).
+
+**Why it matters.** Such a person waits for their admin to set the Email, though they could link now.
+
+**Fix.** A secondary action on the email-missing screen, "I already have a Spaarke account – link it", running the existing link step (popup only from the click; `/workforce/link` still proves the account). Needs a UX decision, since the person may not know whether they have a Spaarke account. Entry-points: `RegistrationPage.tsx` (`emailMissing` view, `link()`), `WorkforceHomeGate.tsx` (`afterSilentLinkFailure`). Effort: about half a day plus tests. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3201 (board Type=Idea).

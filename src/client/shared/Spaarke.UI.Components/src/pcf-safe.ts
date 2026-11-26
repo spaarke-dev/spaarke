@@ -42,10 +42,24 @@ export type { IModalWindowControlsProps } from './components/ModalWindowControls
 export { RelationshipCountCard } from './components/RelationshipCountCard';
 export { MiniGraph } from './components/MiniGraph';
 export { AiSummaryPopover } from './components/AiSummaryPopover';
+// DocumentRelationshipViewer + SemanticSearch shared pieces (#3093): hooks use useState/useMemo/
+// useCallback/useEffect only; the filters use Fluent's useId (its own React 16 fallback), not React's.
+export * from './components/DocumentRelationshipGraph';
+export * from './components/SearchFilters';
 
 // ─── Hooks (PCF-safe — React 16 compatible) ────────────────────────────────
 export { useAiSummary } from './hooks';
 export type { DocumentSummaryState, SummaryStatus, SummaryDocument, ExtractedEntities } from './hooks';
+// Synchronous d3-force layout (useMemo only) — the DocumentRelationshipViewer PCF graph uses it (#3093).
+export { useForceSimulation } from './hooks/useForceSimulation';
+export type {
+  ForceNode,
+  ForceEdge,
+  ForceSimulationOptions,
+  ForceLayoutResult,
+  PositionedNode,
+  PositionedEdge,
+} from './hooks/useForceSimulation';
 // Note: useSseStream is React 18+ only (uses SprkChat internals) — NOT pcf-safe
 
 // ─── Services (no React dependency) ────────────────────────────────────────
@@ -57,9 +71,11 @@ export {
 } from './services/document-upload';
 // `SdapApiClient` + `SdapApiClientOptions` + `OnUnauthorizedCallback` were REMOVED from this
 // surface 2026-09-03. They belonged to this package's parallel upload client, which is deleted —
-// `FileUploadService` now takes the one from `@spaarke/sdap-client`, so consumers construct it as:
+// `FileUploadService` now takes the shared SDAP client. Since 2026-11-24 (DEF-001) that client lives
+// in this package (`services/sdap`, formerly `@spaarke/sdap-client`) and is exported from the MAIN
+// barrel only — not from this PCF-safe entry, because no PCF uses it. Consumers construct it as:
 //
-//     import { SdapApiClient } from '@spaarke/sdap-client';
+//     import { SdapApiClient } from '@spaarke/ui-components';
 //     new FileUploadService(new SdapApiClient({ baseUrl, authenticatedFetch }), logger);
 
 // ─── Types (no React dependency) ────────────────────────────────────────────

@@ -145,7 +145,7 @@ The owner approved consolidating the package into ui-components (`src/services/s
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PRs #2906 (`32cd8411d1`) and #2911 (`bf5a1975ea`) merged 2026-11-19; #2802 closed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 package review §2 (owner-approved); filed by task 034 |
@@ -172,7 +172,7 @@ The owner approved sanctioning this package through one ADR-012 amendment (Path 
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PR #2911 merged 2026-11-19 (`bf5a1975ea`); #2803 closed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 package review §3 (owner-approved); filed by task 034 |
@@ -206,7 +206,7 @@ Failure without it: the most widely shared feature package has no ADR basis, and
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PR #2911 merged 2026-11-19 (`bf5a1975ea`); #2804 closed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 package review §4 (owner-approved); filed by task 034 |
@@ -232,7 +232,7 @@ Sanction under the DEF-002 amendment (Pattern D: the DailyBriefing code page and
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PR #3056 merged 2026-11-24 (`b9b0153d8c`); #2805 closed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 package review §5 (owner-approved); filed by task 034 |
@@ -259,7 +259,7 @@ The package passes all three tests: a distinct editing-model contract (`docxBrid
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PR #3066 merged 2026-11-24 (`a83f5b629d`); #2806 closed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Task 030 package review §7 (owner-approved); filed by task 034 |
@@ -392,7 +392,7 @@ The companion PR folds three private copies of the ManyToOne nav-prop metadata q
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PR #2968 merged 2026-11-22 (`7de6f2c265`); #2931 closed. |
 | **Urgency** | someday |
 | **Filed** | 2026-11-20 |
 | **Source** | Adversarial review of the DEF-009 change (#2909, branch `work/def-009-nav-prop-copies`) |
@@ -454,7 +454,7 @@ The Office add-ins differ on purpose and are out of scope. Failure: the same cli
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed by #2905 (open 2026-11-18). Both projects type-check clean; LegalWorkspace pins 44 shared-lib `noUnusedLocals` findings in `tsc-baseline.json` (ratchet). Gated in each `build` script and in `ci-standalone-checks.yml` `client-typecheck`. |
+| **Status** | Fixed by #2905 (merged 2026-11-19). Both projects type-check clean; LegalWorkspace pins 44 shared-lib `noUnusedLocals` findings in `tsc-baseline.json` (ratchet). Gated in each `build` script and in `ci-standalone-checks.yml` `client-typecheck`. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | Found in passing, tasks 032 and 033 (`notes/032-legal-workspace.md`, `notes/033-document-operations.md`) |
@@ -540,7 +540,7 @@ The BFF URL normalizer is `normalizeBffBaseUrl()` in `src/client/shared/Spaarke.
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Done: PR #3061 merged 2026-11-24 (`525a1dfe10`); #2948 closed. The page logic moved to `sprk_communicationspage/src/hostCommands.ts` and `EmailPage/src/emailLaunch.ts`, each with a jest suite; the nightly `client-tests.yml` discovers both by their `test` script (no PR-time run). |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-22 |
 | **Source** | Code review of #2938 (DEF-008 / #2908), finding 4 |

@@ -245,6 +245,17 @@ public sealed class OntologyWriterDataverseClient : IDisposable
         GetOrganizationService().RetrieveAsync(entityLogicalName, id, new ColumnSet(columns), ct);
 
     /// <summary>
+    /// Ontology task 205 (DI-146): several rows read on this connection with one query, as <see cref="RetrieveAsync"/> reads one. The
+    /// decision commit route reads a row decision's Signals a page at a time (<c>sprk_signalid</c> IN the page) instead of one by one.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="RetrieveAsync"/> (one row on this connection) and the
+    /// BFF identity's <c>IGenericEntityService.RetrieveMultipleAsync</c>. Extension: this is the multi-row form of the existing read on the
+    /// same connection, so the rows the route closes are still read by the identity that closes them. Cost of doing nothing: one Dataverse
+    /// round trip per item for each of the route's two Signal reads (DI-146: about 18 calls and 1.3 s per extra item on dev).</remarks>
+    public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) =>
+        GetOrganizationService().RetrieveMultipleAsync(query, ct);
+
+    /// <summary>
     /// Retrieve-by-alternate-key via the SDK's <c>RetrieveRequest</c> targeted at an
     /// <see cref="EntityReference"/> built from <paramref name="alternateKeyValues"/> — the same pattern
     /// <c>DataverseServiceClientImpl.RetrieveByAlternateKeyAsync</c> uses.

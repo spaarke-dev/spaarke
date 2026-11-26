@@ -53,6 +53,27 @@ export type {
   IEntityMetadataProbe,
 } from './RecordContainerResolver';
 
+// SDAP client — SPE upload, attach and index (the retired `@spaarke/sdap-client`, folded in here
+// 2026-11-24, DEF-001). Main barrel only, never `pcf-safe.ts`. Its `AuthenticatedFetchFn` is not
+// re-exported: `EntityCreationService` exports a type of that name, and the two are structurally
+// the same fetch.
+export {
+  SdapApiClient,
+  UploadNameConflictError,
+  UploadReplaceNotSupportedError,
+  SdapHttpError,
+  describeHttpFailure,
+} from './sdap';
+export type {
+  ConflictBehaviorOption,
+  SdapClientConfig,
+  DriveItem,
+  ParentEntityContext,
+  IndexFileRequest,
+  IndexFileResult,
+  AttachDocumentFileResult,
+} from './sdap';
+
 export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,
@@ -65,12 +86,6 @@ export type {
   IUserBuCascadeDefaults,
   AuthenticatedFetchFn,
 } from './EntityCreationService';
-// Field-mapping engine (context-agnostic, ADR-012). `applyFieldMappings` is the
-// single public entrypoint the Create*Wizard services call (tasks 012+). The
-// former `FieldMappingService` class (PCF-WebApi-bound dead code) was replaced
-// by this injected-dependency function in set-regarding-and-field-mapping-resolver-r2 task 010.
-export { applyFieldMappings } from './FieldMappingService';
-export type { IApplyFieldMappingsArgs } from './FieldMappingService';
 export {
   EventTypeService,
   eventTypeService,
@@ -240,16 +255,6 @@ export type {
   SelectionChangedPayload,
   ContextChangedPayload,
 } from './SprkChatBridge';
-
-// FieldMappingHandler — regarding-selection field-mapping integration surface.
-// Relocated from AssociationResolver PCF for symmetry with PolymorphicResolverService
-// (spec FR-C1b-01, project set-regarding-and-field-mapping-resolver-r1, task 022).
-// Public surface = handler class + factory + application result + config.
-// The handler's internal SyncMode / IFieldMappingProfile / IFieldMappingRule / IMappingResult
-// shapes are intentionally NOT re-exported — those names are already exported from
-// types/FieldMappingTypes.ts with different (configuration-time) shapes.
-export { FieldMappingHandler, createFieldMappingHandler } from './FieldMappingHandler';
-export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from './FieldMappingHandler';
 
 // surfaceHandoff — Assistant → launched-surface entry-payload hand-off (task 012,
 // spaarkeai-assistant-enhancements-r1). The client transport carrying a

@@ -21,6 +21,8 @@
  *   - Navigation state via useReducer (wizardShellReducer), incl. 'skipped' steps
  *   - Dynamic step insertion/removal via imperative handle
  *   - Finish flow with async onFinish, error display, success screen, optional stay-open
+ *     While `onFinish` runs the header ‹ ›, ×, Escape, backdrop and Cancel are held. Known limit: `onFinish` is not cancellable, so a
+ *     promise that never settles leaves no way out of the wizard (the host must make `onFinish` time out).
  *   - Footer button logic, with an optional footer override
  *
  * Domain-specific content is injected via IWizardStepConfig.renderContent
@@ -51,6 +53,7 @@ import {
 
 import { ModalWindowControls } from '../ModalWindowControls';
 import { SprkModal } from '../SprkModal/SprkModal';
+import type { SprkModalNav } from '../SprkModal/SprkModal.types';
 import { WizardStepper } from './WizardStepper';
 import { WizardSuccessScreen } from './WizardSuccessScreen';
 import { wizardShellReducer, buildInitialShellState } from './wizardShellReducer';
@@ -110,6 +113,14 @@ const useStyles = makeStyles({
   },
   // Modal mode: SprkModal's body is a block scroll container, so the sidebar + content row must fill
   // its height explicitly (the content area scrolls; the stepper stays put).
+  // `footerLeftExtra` while finishing: a style-neutral wrapper (a fieldset has a border, padding and min-width by default).
+  extraFinishing: {
+    display: 'contents',
+    border: 'none',
+    padding: 0,
+    margin: 0,
+    minWidth: 0,
+  },
   mainAreaFill: {
     height: '100%',
   },
@@ -171,6 +182,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     // ontology task 056 — additive props (modal-only where noted in wizardShellTypes)
     size = 'wizard',
     dismiss = 'explicit',
+    defaultMaximized,
     uiScale,
     // ontology task 194 — additive, opt-in, modal-only: yield to the host's lookup side pane (SendEmailDialog contract)
     nonBlocking,
@@ -204,6 +216,35 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
 
   // ── Finishing flow state ───────────────────────────────────────────────
   const [isFinishing, setIsFinishing] = React.useState(false);
+  // The same fact as `isFinishing`, readable synchronously by the handlers below (a click can land before the re-render).
+  const finishingRef = React.useRef(false);
+  // Which finish run owns `finishingRef` / `isFinishing`. A reset, a reopen or an unmount bumps it, so a run that was in flight
+  // (it cannot be cancelled) is stale: it may complete, but it shows nothing, closes nothing and clears nothing.
+  const finishRunRef = React.useRef(0);
+  const releaseFinishing = () => {
+    finishRunRef.current += 1;
+    finishingRef.current = false;
+  };
+  // While `onFinish` runs the wizard cannot be closed or moved to another record: a result would land under the wrong item,
+  // and an error from a multi-call save would never be seen. Every user-driven close (×, Escape, backdrop, Cancel, a footer
+  // override's `close`) goes through this; `handleFinish` closes with the raw `onClose` once the save has succeeded.
+  const guardedClose = React.useCallback(() => {
+    if (!finishingRef.current) onClose();
+  }, [onClose]);
+  // Header ‹ › : disabled (visually, in SprkModal) while finishing; `onNavigate` is also guarded for a click that beat the render.
+  const guardedNav = React.useMemo<SprkModalNav | undefined>(
+    () =>
+      nav
+        ? {
+            ...nav,
+            disabled: nav.disabled || isFinishing,
+            onNavigate: dir => {
+              if (!finishingRef.current) nav.onNavigate(dir);
+            },
+          }
+        : undefined,
+    [nav, isFinishing]
+  );
   const [finishError, setFinishError] = React.useState<string | null>(null);
   const [successConfig, setSuccessConfig] = React.useState<IWizardSuccessConfig | null>(null);
 
@@ -257,6 +298,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   if (!Object.is(resetKey, appliedResetKey)) {
     setAppliedResetKey(resetKey);
     dispatch({ type: 'RESET', steps: stepConfigs, initialStepId });
+    releaseFinishing();
     setIsFinishing(false);
     setFinishError(null);
     setSuccessConfig(null);
@@ -289,10 +331,13 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     prevOpenRef.current = open;
 
     if (open && !wasOpen) {
-      // Reset to the first step; a fresh session has nothing skipped yet.
-      dispatch({ type: 'GO_TO_STEP', stepIndex: 0, clearSkipped: true });
+      // Start over on the first step with only the static steps: a fresh session has nothing skipped and none of the
+      // follow-on steps picked last time (DI-155). RESET rebuilds the state a fresh mount would have; no initialStepId, so
+      // a reopen still lands on step 1.
+      dispatch({ type: 'RESET', steps: stepConfigs });
 
       // Clear finishing state
+      releaseFinishing();
       setSuccessConfig(null);
       setFinishError(null);
       setIsFinishing(false);
@@ -338,23 +383,44 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
 
   // ── Handle finish ─────────────────────────────────────────────────────
   const handleFinish = React.useCallback(async () => {
+    // One save at a time: a second Finish while one runs would start a second onFinish.
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    const run = (finishRunRef.current += 1);
+    // A run is stale once a reset, a reopen or an unmount has happened since it started: the wizard is now on another item
+    // (or gone), so a late result must not show there. The save itself still completes; its outcome is dropped silently.
+    const isStale = () => run !== finishRunRef.current;
     setIsFinishing(true);
     setFinishError(null);
 
     try {
       const result = await onFinish();
+      if (isStale()) return;
       if (result) {
         setSuccessConfig(result);
       } else if (!stayOpenOnFinish) {
         onClose();
       }
     } catch (err: unknown) {
+      if (isStale()) return;
       const message = err instanceof Error ? err.message : 'An unknown error occurred.';
       setFinishError(message);
     } finally {
-      setIsFinishing(false);
+      // Only the latest run releases the guard: a stale run's finally must not clear a newer run's flag.
+      if (!isStale()) {
+        finishingRef.current = false;
+        setIsFinishing(false);
+      }
     }
   }, [onFinish, onClose, stayOpenOnFinish]);
+
+  // Unmount: any run still in flight is stale (no state update on an unmounted component).
+  React.useEffect(
+    () => () => {
+      finishRunRef.current += 1;
+    },
+    []
+  );
 
   // ── Primary button click ──────────────────────────────────────────────
   const handlePrimaryButtonClick = React.useCallback(() => {
@@ -446,10 +512,18 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   // Standard footer: Cancel (+ footerLeftExtra) LEFT; [spinner] [step actions] Skip · Back · Next RIGHT.
   const standardFooterStart = (
     <>
-      <Button appearance="secondary" onClick={onClose} disabled={isFinishing}>
+      <Button appearance="secondary" onClick={guardedClose} disabled={isFinishing}>
         Cancel
       </Button>
-      {footerLeftExtra}
+      {footerLeftExtra &&
+        (isFinishing ? (
+          // Natively disables every button / input in the slot while a save runs (the Cancel above is disabled the same way).
+          <fieldset disabled className={styles.extraFinishing}>
+            {footerLeftExtra}
+          </fieldset>
+        ) : (
+          footerLeftExtra
+        ))}
     </>
   );
 
@@ -501,7 +575,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       canAdvance,
       goBack: () => dispatch({ type: 'PREV_STEP' }),
       goNext: () => dispatch({ type: 'NEXT_STEP' }),
-      close: onClose,
+      close: guardedClose,
     };
     const slots = footerOverride(context);
     if (slots) {
@@ -525,7 +599,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
               {title}
             </Text>
             {/* Close only — an embedded mount has no independent viewport to maximize into. */}
-            <ModalWindowControls isMaximized={false} onToggleMaximize={undefined} onClose={onClose} />
+            <ModalWindowControls isMaximized={false} onToggleMaximize={undefined} onClose={guardedClose} />
           </div>
         )}
 
@@ -551,14 +625,15 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   return (
     <SprkModal
       open={open}
-      onClose={onClose}
+      onClose={guardedClose}
       title={title}
       size={size}
       dismiss={dismiss}
+      defaultMaximized={defaultMaximized}
       uiScale={uiScale}
       nonBlocking={nonBlocking}
       yieldToSidePane={yieldToSidePane}
-      nav={nav}
+      nav={guardedNav}
       padded={false}
       footerStart={successConfig ? undefined : footerStart}
       footer={successConfig ? successConfig.actions : footerEnd}

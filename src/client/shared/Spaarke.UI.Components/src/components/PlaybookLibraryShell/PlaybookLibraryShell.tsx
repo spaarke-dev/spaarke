@@ -28,7 +28,7 @@ import { PlaybookCardGrid } from '../Playbook/PlaybookCardGrid';
 import { ScopeConfigurator } from '../Playbook/ScopeConfigurator';
 import { loadAllData, loadPlaybookScopes } from '../Playbook/playbookService';
 import type { IPlaybookData } from '../Playbook/playbookService';
-import { createAndAssociate } from '../Playbook/analysisService';
+import { createAndAssociateWithWarnings } from '../Playbook/analysisService';
 import type { AuthenticatedFetchFn } from '../Playbook/analysisService';
 import type {
   IPlaybook,
@@ -155,6 +155,11 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     flex: 1,
   },
+  warningList: {
+    marginTop: tokens.spacingVerticalXS,
+    marginBottom: 0,
+    paddingLeft: tokens.spacingHorizontalL,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -240,12 +245,15 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
   // --- Execution state ---
   const [isExecuting, setIsExecuting] = React.useState(false);
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
+  // The analysis was created, but the server sent notes about it (task 043: e.g. no fields were copied from the document).
+  // Shown to the user before the shell hands over; null while there is nothing to tell.
+  const [createdWithWarnings, setCreatedWithWarnings] = React.useState<{
+    analysisId: string;
+    warnings: string[];
+  } | null>(null);
 
   // --- Build a webApi-compatible adapter from IDataService (for playbookService reads) ---
-  const webApiAdapter = React.useMemo(
-    () => createWebApiFromDataService(dataService),
-    [dataService]
-  );
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   // --- Load data on mount ---
   React.useEffect(() => {
@@ -391,9 +399,12 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
         throw new Error('authenticatedFetch and bffBaseUrl are required to create an analysis.');
       }
 
-      const analysisId = await createAndAssociate(authenticatedFetch, bffBaseUrl, config);
+      const { analysisId, warnings } = await createAndAssociateWithWarnings(authenticatedFetch, bffBaseUrl, config);
 
-      if (onComplete) {
+      if (warnings.length > 0) {
+        // Tell the user first: the host usually moves on at onComplete, which would lose the notes.
+        setCreatedWithWarnings({ analysisId, warnings });
+      } else if (onComplete) {
         onComplete({ analysisId });
       } else {
         setSuccessMessage('Analysis created successfully.');
@@ -424,6 +435,47 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
       onClose();
     }
   }, [onClose]);
+
+  // --- Render: created, with notes from the server ---
+  if (createdWithWarnings) {
+    const { analysisId, warnings } = createdWithWarnings;
+    const handleContinue = (): void => {
+      setCreatedWithWarnings(null);
+      if (onComplete) {
+        onComplete({ analysisId });
+      } else {
+        setSuccessMessage('Analysis created successfully.');
+      }
+    };
+    return (
+      <div className={styles.root}>
+        {!embedded && (
+          <div className={styles.header}>
+            <Text size={500} weight="semibold">
+              {title}
+            </Text>
+          </div>
+        )}
+        <div className={styles.content} data-testid="playbook-library-create-warnings">
+          <MessageBar intent="warning">
+            <MessageBarBody>
+              <Text weight="semibold">Analysis created, with notes</Text>
+              <ul className={styles.warningList}>
+                {warnings.map((warning, index) => (
+                  <li key={index}>{warning}</li>
+                ))}
+              </ul>
+            </MessageBarBody>
+          </MessageBar>
+        </div>
+        <div className={styles.footer}>
+          <Button appearance="primary" onClick={handleContinue}>
+            Continue
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   // --- Render: success state ---
   if (successMessage) {

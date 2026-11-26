@@ -17,6 +17,8 @@ module.exports = {
     // package specifier to the shared TS source so tests exercise the re-homed
     // code directly (mirrors the CommunicationAttachments task-021 pattern — no
     // dist/ build required).
+    '^@spaarke/communication-components/logic/pcf-host$':
+      '<rootDir>/../../shared/Spaarke.Communication.Components/src/logic/pcf-host/index.ts',
     '^@spaarke/communication-components/logic/actions$':
       '<rootDir>/../../shared/Spaarke.Communication.Components/src/logic/actions/index.ts',
     // task 081 (C-8): `launchCreate.ts` now has a VALUE import of `getXrm`

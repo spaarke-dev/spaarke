@@ -682,6 +682,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         Check(outputs.StorageBlobEndpoint, nameof(BicepDeployOutputs.StorageBlobEndpoint));
         Check(outputs.OntologyWriterClientId, nameof(BicepDeployOutputs.OntologyWriterClientId));
         Check(outputs.OntologyWriterObjectId, nameof(BicepDeployOutputs.OntologyWriterObjectId));
+        // ISS-022: required only when SignalR was deployed — H4b's keyless connection string needs the host.
+        if (outputs.SignalRDeployed) Check(outputs.SignalRHostName, nameof(BicepDeployOutputs.SignalRHostName));
         return missing;
     }
 
@@ -727,11 +729,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
             };
         }
 
-        run.GateStates[$"h2a-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h2a-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
@@ -795,6 +793,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         run.InterStepState.StorageBlobEndpoint = outputs.StorageBlobEndpoint;
         run.InterStepState.OntologyWriterClientId = outputs.OntologyWriterClientId;
         run.InterStepState.OntologyWriterObjectId = outputs.OntologyWriterObjectId;
+        // ISS-022: set only when SignalR was deployed; null otherwise, so H4b writes no SignalR setting.
+        run.InterStepState.SignalRHostName = outputs.SignalRDeployed ? outputs.SignalRHostName : null;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

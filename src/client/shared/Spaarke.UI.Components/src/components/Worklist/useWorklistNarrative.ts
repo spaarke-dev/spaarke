@@ -8,7 +8,12 @@
  */
 
 import * as React from 'react';
-import { buildWorklistNarrativeRequest, cachedNarrative, rememberNarrative } from './worklistNarrative';
+import {
+  buildWorklistNarrativeRequest,
+  cachedNarrative,
+  rememberNarrative,
+  worklistSummaryLine,
+} from './worklistNarrative';
 import type { WorklistNarrativeText } from './worklistNarrative';
 import type { WorklistData, WorklistService } from './worklistService';
 
@@ -19,8 +24,8 @@ export function useWorklistNarrative(
   enabled: boolean
 ): WorklistNarrativeText | null {
   const request = React.useMemo(
-    () => (enabled && service.narrate ? buildWorklistNarrativeRequest(lanes, today) : null),
-    [enabled, service, lanes, today]
+    () => (enabled && service.narrate ? buildWorklistNarrativeRequest(lanes) : null),
+    [enabled, service, lanes]
   );
   const key = request ? JSON.stringify(request) : null;
   const [answer, setAnswer] = React.useState<{ key: string; text: WorklistNarrativeText } | null>(null);
@@ -45,5 +50,9 @@ export function useWorklistNarrative(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, service]);
 
-  return answer && answer.key === key ? answer.text : null;
+  // The summary line is built from the counts (DI-161): the Assistant's own summary says "notifications" and counts its categories, so it
+  // is not shown. The bullets are the Assistant's.
+  if (!answer || answer.key !== key) return null;
+  const summary = worklistSummaryLine(lanes, today);
+  return summary ? { ...answer.text, summary } : null;
 }

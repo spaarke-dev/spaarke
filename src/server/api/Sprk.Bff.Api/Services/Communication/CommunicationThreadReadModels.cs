@@ -59,6 +59,12 @@ public sealed record ThreadAttachmentRef(
 /// record returns it. A record the viewer cannot read, or a read that faults, gives <c>null</c>: never a name the viewer
 /// cannot read.
 /// </param>
+/// <param name="ThreadId">
+/// <c>_sprk_communicationthread_value</c> (spaarke-SPA-external-access-platform-r4 task 035 / FR-22): the thread the message sits
+/// in; null when the row has no thread. Server-side only (<c>JsonIgnore</c>, so the internal thread wire contract is unchanged,
+/// as for <see cref="CreatedByContactId"/>). Read from the same row as every other field, after the access filters; the
+/// external endpoint projects it as the opaque <c>threadId</c> grouping key and nothing else about the thread.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -78,7 +84,8 @@ public sealed record ThreadMessageDto(
     bool IsPrivate,
     IReadOnlyList<ThreadAttachmentRef> Attachments,
     [property: System.Text.Json.Serialization.JsonIgnore] Guid? CreatedByContactId = null,
-    MessagePrivateContext? PrivateContext = null);
+    MessagePrivateContext? PrivateContext = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] Guid? ThreadId = null);
 
 /// <summary>
 /// fm task 056: the core record a private message is about (<see cref="ThreadMessageDto.PrivateContext"/>).
@@ -133,12 +140,20 @@ public sealed record UnreadCountResult(
 /// caller may see the thread) and every message by the IMPERSONATED message query + the shared
 /// <c>CommunicationAccessFilter</c> — private/internal-only content the caller may not see is never present (NFR-03).
 /// </summary>
+/// <param name="Truncated">
+/// Ontology task 221 (#2671): <c>true</c> when a bound of the read (threads, the message scans, the added-thread budget) left
+/// out content the caller could see, so the list is incomplete; <c>false</c> otherwise (additive, defaults to <c>false</c>).
+/// A plain boolean: it says only that the list is incomplete, never how much is missing, and it is raised only from rows the
+/// caller may read (rows hidden by Dataverse security or by the shared access filter never raise it). Known limit: combined
+/// with paging a thread itself, its absence can give away one bit (a hidden row just past a full scan window), never a count.
+/// </param>
 public sealed record RegardingReadResult(
     string EntityType,
     Guid RecordId,
     IReadOnlyList<ThreadReadResult> Threads,
     int ThreadCount,
-    int MessageCount);
+    int MessageCount,
+    bool Truncated = false);
 
 /// <summary>
 /// The app-only by-regarding read for the external plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04):

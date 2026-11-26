@@ -21,6 +21,44 @@ public sealed class ApExportBatchTests
     // The happy path
     // =========================================================================================
 
+    [Fact(DisplayName = "ISS-051: the export's line codes are the resolved codes (the code lookups' rows); the firm's as-billed text only where a line has no resolved code")]
+    public async Task Export_EmitsTheResolvedCode_AndTheAsBilledTextOnlyWithNoResolvedCode()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-C", approved: 1350m, lines: 3);
+        var lines = world.Dataverse.RowsOf("sprk_billingevent")
+            .Where(l => l.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == invoice.Id)
+            .OrderBy(l => l.GetAttributeValue<int>("sprk_linesequence"))
+            .ToList();
+        var l120 = new Entity("sprk_billingcode", Guid.NewGuid()) { ["sprk_code"] = "L120" };
+        var a103 = new Entity("sprk_billingcode", Guid.NewGuid()) { ["sprk_code"] = "A103" };
+        world.Dataverse.Put(l120);
+        world.Dataverse.Put(a103);
+
+        // Line 1: the firm billed L110, the coding resolved L120 (a firm-code mismatch), plus an activity code the firm did not bill.
+        world.Dataverse.Touch("sprk_billingevent", lines[0].Id, new Dictionary<string, object>
+        {
+            ["sprk_taskcode"] = new EntityReference("sprk_billingcode", l120.Id),
+            ["sprk_activitycode"] = new EntityReference("sprk_billingcode", a103.Id),
+        });
+
+        // Line 2: no resolved code (refused or not coded), so the firm's as-billed text. Line 3: no resolved code and nothing billed.
+        world.Dataverse.Touch("sprk_billingevent", lines[2].Id, new Dictionary<string, object> { ["sprk_taskcodeasbilled"] = null! });
+        world.GrantEverything();
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created, result.Detail);
+        var batch = world.Batches().Should().ContainSingle().Subject;
+        using var json = System.Text.Json.JsonDocument.Parse(world.TextOf(world.FileOf(batch.Id, Json)));
+        var exported = json.RootElement.GetProperty("invoices")[0].GetProperty("lines");
+        exported[0].GetProperty("taskCode").GetString().Should().Be("L120", "the resolved code, not the firm's L110");
+        exported[0].GetProperty("activityCode").GetString().Should().Be("A103");
+        exported[1].GetProperty("taskCode").GetString().Should().Be("L110", "no resolved code: the firm's as-billed text");
+        exported[1].GetProperty("activityCode").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+        exported[2].GetProperty("taskCode").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null, "no resolved code and nothing billed");
+    }
+
     [Fact(DisplayName = "150 FR-41: a batch of Approved invoices writes a CSV and a JSON as internal-only Stored Files, snapshots the mapping, sets count and total, and sends every invoice to AP")]
     public async Task Export_WritesBothFiles_Snapshots_AndSendsTheInvoices()
     {

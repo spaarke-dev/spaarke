@@ -16,6 +16,10 @@
 # Stryker 5.0.0 facts (2026-06-01 pilot): `coverage-analysis` and `test-case-filter` are
 # accepted only in a config file, `output-path` is rejected there (use --output), and
 # --skip-version-check avoids the newer-version probe.
+#
+# `ignore-methods: ConfigureAwait`: the boolean mutant `ConfigureAwait(false)` -> `(true)` is equivalent in tests (no
+# synchronization context), so it can only survive; the 2026-11-23 run (#1821) had three such survivors on changed
+# lines of SecureChildReconciliationJob.cs. Stryker's own configuration docs give this exact entry as the example.
 set -euo pipefail
 
 label="$1"; project="$2"; prefix="$3"; files="$4"; since="$5"
@@ -71,8 +75,17 @@ types="$(
 )"
 type_re="($(echo "$types" | paste -sd'|'))"
 
+# Contract tests (tests/integration/contract/**) are left out of the referencing classes. Most
+# boot the whole API host per class, and an access filter is named by many of them: on
+# 2026-11-24 (#1821) EntityAccessFilter selected 42 classes, 28 of them contract classes from
+# 13 files, the initial test run took 42 min instead of ~12 and the night hit the 190-min cap
+# with 135 mutants untested; without them the same night selects 14 classes. The dedicated suites (SEEDS, tests/integration/auth/**) still
+# run. Cost: a mutant only a contract test would kill is reported as surviving, which raises
+# an alert rather than hiding one.
+contract_dir="tests/integration/contract/"
 classes="$(
   { grep -rlwE "$type_re" tests --include='*.cs' || true; } | sort -u | while IFS= read -r tf; do
+    case "$tf" in "$contract_dir"*) continue ;; esac
     tns="$(grep -m1 -oE '^namespace[[:space:]]+[A-Za-z0-9_.]+' "$tf" | awk '{print $2}')"
     case "$tns" in
       Sprk.Bff.Api.Tests|Sprk.Bff.Api.Tests.*) ;;
@@ -87,7 +100,8 @@ while IFS= read -r c; do
   [ -n "$c" ] || continue
   include+="${include:+|}FullyQualifiedName~${c}"
 done <<<"$classes"
-echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count}"
+contract_files="$({ grep -rlwE "$type_re" "$contract_dir" --include='*.cs' 2>/dev/null || true; } | grep -c . || true)"
+echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count} contract-files-left-out=${contract_files}"
 # A selection this large usually means a type name is a common word; the initial test run
 # alone then nears the job cap (#1821: 249 classes, cancelled). Say so where it is visible.
 if [ "$class_count" -gt 150 ]; then
@@ -131,6 +145,7 @@ jq -n \
       "thresholds": { "high": 80, "low": 60, "break": 0 },
       "concurrency": $concurrency,
       "coverage-analysis": "perTest",
+      "ignore-methods": ["ConfigureAwait"],
       "test-case-filter": $filter,
       "since": { "enabled": true, "target": $since },
       "verbosity": "info"

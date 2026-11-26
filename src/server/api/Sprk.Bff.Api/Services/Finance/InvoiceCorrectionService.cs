@@ -213,7 +213,8 @@ public sealed record CorrectionApplied(Guid InvoiceId, Guid? LineId, string Fiel
 /// <para><b>Codes.</b> A code correction is accepted only if the code is in the line's resolved code set, which is the set 047 recorded in the
 /// line's <c>coding.codeSetId</c> (loaded through <see cref="CodeSetResolver.LoadRecordedAsync"/>; no second resolution order). The corrected
 /// code is stored in the line's <c>coding.&lt;kind&gt;.code</c> JSON, which the read model reads (<c>mismatch</c> and <c>firmCodeMismatch</c>
-/// follow it); the firm's billed code columns and the code lookups are not written.</para>
+/// follow it), and (ISS-051) the matching code lookup is set to the code's <c>sprk_billingcode</c> row in that set in the same update, so the AP
+/// export and the invoice index carry the corrected code; the firm's billed code columns are not written.</para>
 /// <para><b>Source and version (EB-D-170).</b> The row names the analyzer id and API version (extracted fields) or the Action code and version
 /// (codes) from the <c>provenance</c> the persister stored. A field whose AI value cannot be attributed to a source version (a line or
 /// submission stored before EB-D-170) answers 409 <c>ebilling.correction.no_provenance</c> rather than writing a blank version (the task's escalation
@@ -524,6 +525,7 @@ public sealed class InvoiceCorrectionService
         // The value stored now, as text, and (for a code) the set it must belong to.
         var current = spec.Kind == Kind.Code ? CodeOf(extraction, spec.CodeMember!) : CurrentText(spec, line);
         string? finalText;
+        Guid? codeId = null;
         if (spec.Kind == Kind.Code)
         {
             if (command.Confirm)
@@ -539,6 +541,7 @@ public sealed class InvoiceCorrectionService
                 }
 
                 finalText = checkedCode.Canonical;
+                codeId = checkedCode.CodeId;
             }
         }
         else if (command.Confirm)
@@ -580,7 +583,7 @@ public sealed class InvoiceCorrectionService
 
         return await ApplyAsync(
             command, spec, invoice, core, line.Id, LineName(spec, line), line, version, InvoiceReviewReadService.LineEntity,
-            current, finalText, source, prior, extraction, ct, derived: derived).ConfigureAwait(false);
+            current, finalText, source, prior, extraction, ct, derived: derived, codeId: codeId).ConfigureAwait(false);
     }
 
     // ── Timekeeper and date: the roster match and the approved rate (B2c) ──
@@ -835,7 +838,7 @@ public sealed class InvoiceCorrectionService
     private async Task<CorrectionResult> ApplyAsync(
         CorrectionCommand command, Spec spec, Entity invoice, (string Entity, Guid Id) core, Guid? lineId, string rowName, Entity target, long version,
         string targetEntity, string? current, string finalText, Source source, List<Entity> prior, JsonNode? extraction, CancellationToken ct,
-        string? headerAiValue = null, Rederived? derived = null)
+        string? headerAiValue = null, Rederived? derived = null, Guid? codeId = null)
     {
         // The AI value: the earliest prior row's, else what the AI read (a header field: the stored header provenance), else the value stored now.
         var ordered = prior.OrderBy(WhenOf).ThenBy(r => r.GetAttributeValue<DateTime?>("createdon")).ToList();
@@ -874,7 +877,7 @@ public sealed class InvoiceCorrectionService
         Dictionary<string, object>? valueFields = null;
         if (writeNeeded)
         {
-            valueFields = ValueFields(spec, finalText, extraction, derived, target);
+            valueFields = ValueFields(spec, finalText, extraction, derived, target, codeId);
             if (valueFields.TryGetValue(InvoiceSubmissionPersister.LineExtractionConfidence, out var json)
                 && json is string text && text.Length > InvoiceSubmissionPersister.ExtractionConfidenceMaxLength)
             {
@@ -1214,8 +1217,10 @@ public sealed class InvoiceCorrectionService
         _ => canonical,
     };
 
-    /// <summary>The value fields of the write: the column, or (a code) the extraction JSON with the corrected code. Never status, approved amount or decision fields.</summary>
-    private static Dictionary<string, object> ValueFields(Spec spec, string finalText, JsonNode? extraction, Rederived? derived = null, Entity? target = null)
+    /// <summary>The value fields of the write: the column, or (a code) the extraction JSON with the corrected code and (ISS-051) the code's lookup set to
+    /// <paramref name="codeId"/>, its row in the line's set, in the same update. Never status, approved amount or decision fields.</summary>
+    private static Dictionary<string, object> ValueFields(
+        Spec spec, string finalText, JsonNode? extraction, Rederived? derived = null, Entity? target = null, Guid? codeId = null)
     {
         if (spec.Kind != Kind.Code)
         {
@@ -1265,7 +1270,26 @@ public sealed class InvoiceCorrectionService
         coding[spec.CodeMember!] = slot;
         coding["firmCodeMismatch"] = new[] { "task", "activity", "expense" }
             .Any(member => coding[member] is JsonObject o && o["mismatch"] is JsonValue m && m.TryGetValue<bool>(out var flag) && flag);
-        return new Dictionary<string, object> { [InvoiceSubmissionPersister.LineExtractionConfidence] = extraction.ToJsonString() };
+
+        // ISS-051: the lookup is the corrected code's row. The code was checked against the line's set (CheckCodeAsync), so the row is in that set; a set
+        // read without its rows gives no id, and then the lookup is cleared rather than left naming the previous code.
+        var kind = spec.CodeMember switch { "task" => BillingCodeKind.Task, "activity" => BillingCodeKind.Activity, _ => BillingCodeKind.Expense };
+        if (codeId is { } codeRow && codeRow != Guid.Empty)
+        {
+            slot[InvoiceSubmissionPersister.CodeIdMember] = codeRow.ToString("D");
+        }
+        else
+        {
+            slot.Remove(InvoiceSubmissionPersister.CodeIdMember);
+        }
+
+        return new Dictionary<string, object>
+        {
+            [InvoiceSubmissionPersister.LineExtractionConfidence] = extraction.ToJsonString(),
+            [InvoiceSubmissionPersister.CodeLookupColumn(kind)] = codeId is { } lookupRow && lookupRow != Guid.Empty
+                ? new EntityReference(CodeSetResolver.CodeEntity, lookupRow)
+                : DBNull.Value,
+        };
     }
 
     /// <summary>The value update conditioned on the row version read in this request (<c>IfRowVersionMatches</c>), the shape the bulk conditional update sends.</summary>
@@ -1282,7 +1306,8 @@ public sealed class InvoiceCorrectionService
 
     // ── Codes (FR-22) ──
 
-    private sealed record CheckedCode(string? Canonical, CorrectionResult? Failure);
+    /// <summary>A checked code: its spelling in the set and (ISS-051) its <c>sprk_billingcode</c> row, or the refusal.</summary>
+    private sealed record CheckedCode(string? Canonical, CorrectionResult? Failure, Guid? CodeId = null);
 
     private async Task<CheckedCode> CheckCodeAsync(
         Spec spec, string raw, JsonNode? extraction, Guid invoiceId, (string Entity, Guid Id) core, CancellationToken ct)
@@ -1327,7 +1352,7 @@ public sealed class InvoiceCorrectionService
     {
         var kind = spec.CodeMember switch { "task" => BillingCodeKind.Task, "activity" => BillingCodeKind.Activity, _ => BillingCodeKind.Expense };
         return set.TryGetCode(kind, raw, out var canonical)
-            ? new CheckedCode(canonical, null)
+            ? new CheckedCode(canonical, null, set.CodeIdOf(kind, canonical))
             : new CheckedCode(null, new CorrectionResult(CorrectionStatus.CodeNotInSet, CorrectionCodes.CodeNotInSet, "The code is not in this line's code set."));
     }
 

@@ -4,7 +4,7 @@
     <title>Migrate Create Invoice wizard to the server write path (FR-16)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>024 complete</gate>
-    <status>not-started</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx in Spaarke.UI.Components; tags include frontend, deploy, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -110,7 +110,10 @@
     <criterion testable="true">`applyFieldMappings` no longer appears in CreateInvoiceWizard/invoiceService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16. Office Invoice quick-create is task 018, not this task.</notes>
+  <notes>Spec FR-16. Office Invoice quick-create is task 018, not this task.
+
+Cancelled 2026-11-24 (owner): superseded. ebilling-r1 task 052 (d763121e5f, 2026-11-03) deleted invoiceService.ts; the wizard submits through internalInvoiceSubmission.ts to /api/finance/{matters|projects|workassignments}/{id}/invoice-submissions under ebilling's single-creator rule, so it has no applyFieldMappings and no client invoice create (re-checked by grep on the shared wizard and its host). Matter mapping into invoices from every submission channel, the wizard included, is task 032b's fill-only step inside InvoiceSubmissionPersister (owner ruling 2026-11-06). The live check "a wizard-submitted invoice carries matter mapping" moves to 032b-3. No code, no deploy.
+rework: none task 025</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

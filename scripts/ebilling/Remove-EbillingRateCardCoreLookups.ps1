@@ -32,7 +32,9 @@
                              grid configuration names a column, a form or view cannot be cleaned, or a relationship is not exactly
                              the expected sprk_ratecard -> core-record one;
                          (d) another pending (unpublished) form or view of sprk_ratecard would go live with the publish (D-83), unless
-                             -AllowPendingCollateral is given.
+                             -AllowPendingCollateral is given;
+                         (e) a form or view this script edits has UNPUBLISHED changes that are not exactly the edit it would write
+                             (publishing would overwrite someone's work; -AllowPendingCollateral does NOT override this).
                        Then: take the three controls off the sprk_ratecard forms and the three cells / attributes off its views, publish
                        sprk_ratecard (entity-scoped, through the shared scripts/lib/Publish-SolutionComponents.ps1 procedure, never
                        tenant-wide); re-read RetrieveDependenciesForDelete until nothing depends on a column; delete the three
@@ -46,21 +48,24 @@
     IDEMPOTENT. A second -Apply after success finds everything gone, does nothing, verifies and exits 0. A run interrupted part way is
     re-run to continue: every step skips work already done.
 
-    RESUME AFTER A STOP BEFORE THE PUBLISH. A run that edited the form and view but stopped before it published leaves those two edits
-    unpublished. What a re-run does depends on which layer the plain read of systemforms / savedqueries returns (the census and
-    Get-EntityPublishCollateral both read that way). The shared procedure and Deploy-ExternalShareExpiryViews.ps1 (run live) treat the plain
-    read as the PUBLISHED layer, so that is the expected case: the re-run reads the published text, which still names the lookups, lists the
-    same form and view again, edits them again (the same result) and excludes them from the collateral check as its own, then publishes.
-    It does NOT refuse and needs no -AllowPendingCollateral. This cannot be proved from the source alone; if the plain read returned the
-    pending text instead, the re-run would find the form and view clean, take their pending edit for foreign collateral and refuse (exit 2)
-    until -AllowPendingCollateral is given after the operator has checked that the pending items are those two. Both outcomes are safe
-    (nothing foreign goes live unannounced); the first dev run, if it is ever stopped before its publish, confirms which one holds.
+    RESUME AFTER A STOP BEFORE THE PUBLISH. A run that edited the form and view but stopped before it published leaves those edits
+    unpublished (pending). The plain read of systemforms / savedqueries is the PUBLISHED layer, so the re-run reads the published text,
+    which still names the lookups, builds the same edit again, and finds the pending edit on the form and view: it is taken as a resume
+    ONLY when the unpublished text (RetrieveUnpublished, XML-normalised) equals the text this run would write.
 
-    KNOWN LIMIT: IT EDITS FROM THE PUBLISHED TEXT. The form and view edits are built from the published text and the script's own two ids
-    are excluded from the pending-collateral check, so someone else's UNPUBLISHED edit on that same form or view is overwritten by the
-    PATCH (and its content is lost, not published). Mitigation: run the report (no switches) or -Apply -WhatIf first and tell whoever
-    works on the sprk_ratecard forms and views, which the report names, before -Apply.
+    UNPUBLISHED EDITS ARE NEVER OVERWRITTEN (F2). The edits are built from the published text. The pending check lists everything
+    unpublished on sprk_ratecard WITHOUT excluding the forms and views this script edits; for each of those with pending changes the
+    unpublished text is read and compared with what this run would write. Anything that differs (someone else's unpublished edit) refuses
+    (exit 2, before the first write) and -AllowPendingCollateral does NOT override it; the report and -Apply -WhatIf show the same
+    line. The check runs again right before each publish (a change that appears during the run is a plain error, exit 1). The comparisons
+    are case-STRICT (a case-only change is someone else's edit).
 
+    IF DATAVERSE NORMALISES THE XML ON SAVE. After each PATCH the script reads the unpublished text back and uses THAT as the text the
+    pre-publish re-check expects, so the first live -Apply is not stopped (exit 1, after the writes) by a harmless normalisation. The
+    pre-WRITE check of a re-run still compares the pending text with the text this run would write (the script cannot know how Dataverse
+    would normalise it): after a stop before the publish, a pending text that Dataverse normalised differently is refused (exit 2,
+    "has unpublished changes that are not the edit this script would write"). That mismatch means the pending text is not byte-for-byte
+    this script's edit; inspect the form or view, and publish the pending edit in the designer, which clears it, then re-run.
     EXIT CODES. 0 = done, report or verified. 1 = an error, or a stop AFTER the first write (the retirement is partly applied: re-run to
     resume). 2 = refused BEFORE the first write (nothing changed): a blocker, a missing approval or attestation, the wrong environment, a
     pending-collateral refusal, or a caller who cannot read every row.
@@ -84,10 +89,10 @@
     A path that does not exist at the commit is refused (a missing path would pass the scan vacuously).
 
     Web API calls: the census, the form and view edits and the relationship deletes go through EbillingSchema.psm1 (Consistency: Strong,
-    #2833). The pending-collateral reads and PublishXml do not: they go through the shared scripts/lib/Publish-SolutionComponents.ps1
-    (Get-EntityPublishCollateral, Invoke-PublishXml), which sends no Consistency header; Invoke-PublishXml has no retry of its own, so this
-    script wraps it in the module's bounded transient retry (Invoke-WithTransientRetry: up to 4 attempts, 5 s / 10 s / 20 s backoff; any
-    other error fails at once).
+    #2833). The pending-collateral reads and PublishXml go through the shared scripts/lib/Publish-SolutionComponents.ps1
+    (Get-EntityPublishCollateral, Invoke-PublishXml), whose context carries no Consistency header of its own: Get-PublishContext sets
+    Consistency: Strong on it (F4). Invoke-PublishXml has no retry of its own, so this script wraps it in the module's bounded transient
+    retry (Invoke-WithTransientRetry: up to 4 attempts, 5 s / 10 s / 20 s backoff; any other error fails at once).
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else dev. -Apply refuses anything but spaarkedev1.crm.dynamics.com.
@@ -144,6 +149,7 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 . (Join-Path $PSScriptRoot '..' 'lib' 'Publish-SolutionComponents.ps1')
 $DryRun = [bool]$WhatIfPreference
 $DevHost = 'spaarkedev1.crm.dynamics.com'
+$script:WriteStarted = $false
 
 $Table = 'sprk_ratecard'
 $EntitySet = 'sprk_ratecards'
@@ -396,7 +402,7 @@ function Test-AlreadyRetired($State) {
 }
 
 # The reasons -Apply must refuse. Empty = READY. Counts only: no row id is ever named.
-function Get-ApplyBlockers($State) {
+function Get-ApplyBlockers($State, $Pending = $null, [bool]$AllowPending = $false) {
     $b = [System.Collections.Generic.List[string]]::new()
     # The forms and views this script cleans are expected dependents of a column; anything else is not.
     $known = @(@($State.Forms | ForEach-Object { $_.Id }) + @($State.Views | ForEach-Object { $_.Id }))
@@ -427,6 +433,11 @@ function Get-ApplyBlockers($State) {
     foreach ($v in @($State.Views)) { if ($v.Remaining -gt 0) { $b.Add("view '$($v.Name)' would still name a core-record lookup after the clean-up ($($v.Remaining) mention(s): a filter, order or link): edit it by hand") } }
     foreach ($p in @($State.PersonalViews)) { $b.Add("personal view '$($p.Name)' names a core-record lookup") }
     foreach ($g in @($State.GridConfigs)) { $b.Add("grid configuration '$($g.Name)' names a core-record lookup") }
+    # D-83 and the unpublished edits of the forms and views this script edits (Get-PendingReport).
+    if ($Pending) {
+        foreach ($x in @($Pending.Own)) { $b.Add($x) }
+        if (-not $AllowPending) { foreach ($x in @($Pending.Foreign)) { $b.Add("pending (unpublished) item would go live with the publish (D-83; -AllowPendingCollateral after the owner agrees): $x") } }
+    }
     return $b.ToArray()
 }
 
@@ -454,15 +465,25 @@ function Edit-FormsAndViews($State) {
     $edited = 0
     foreach ($f in @($State.Forms)) {
         if (-not (Confirm-Write "form '$($f.Name)' ($($f.Id))" "PATCH formxml: remove $($f.Removed -join ', ')")) { continue }
+        $script:WriteStarted = $true
         Invoke-Dv -Path "systemforms($($f.Id))" -Method PATCH -Body @{ formxml = $f.NewXml } | Out-Null
         $edited++; Write-Host "  EDITED   form '$($f.Name)': $($f.Removed -join ', ')" -ForegroundColor Green
+        # K2: read the unpublished text back. It is what the pre-publish re-check expects, so a Dataverse that normalises form XML on
+        # save does not stop the first run (exit 1) after the writes.
+        $back = Read-Dv "systemforms($($f.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
+        if (-not [string]::IsNullOrWhiteSpace($back.formxml)) { $f | Add-Member -NotePropertyName WrittenXml -NotePropertyValue $back.formxml -Force }
     }
     foreach ($v in @($State.Views)) {
         if (-not (Confirm-Write "view '$($v.Name)' ($($v.Id))" "PATCH fetchxml / layoutxml: remove $($v.Changes -join ', ')")) { continue }
         $body = @{ fetchxml = $v.NewFetch }
         if ($v.HasLayout) { $body.layoutxml = $v.NewLayout }
+        $script:WriteStarted = $true
         Invoke-Dv -Path "savedqueries($($v.Id))" -Method PATCH -Body $body | Out-Null
         $edited++; Write-Host "  EDITED   view '$($v.Name)': $($v.Changes -join ', ')" -ForegroundColor Green
+        # K2: the same read-back for the view (fetchxml and layoutxml).
+        $back = Read-Dv "savedqueries($($v.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=fetchxml,layoutxml"
+        if (-not [string]::IsNullOrWhiteSpace($back.fetchxml)) { $v | Add-Member -NotePropertyName WrittenFetch -NotePropertyValue $back.fetchxml -Force }
+        if ($v.HasLayout -and -not [string]::IsNullOrWhiteSpace($back.layoutxml)) { $v | Add-Member -NotePropertyName WrittenLayout -NotePropertyValue $back.layoutxml -Force }
     }
     if (@($State.Forms).Count + @($State.Views).Count -eq 0) { Write-Host '  nothing to edit: no form or view names a column' -ForegroundColor Yellow }
     return $edited
@@ -470,36 +491,94 @@ function Edit-FormsAndViews($State) {
 
 # The token context of the shared procedure (az CLI identity), made on first use.
 function Get-PublishContext {
-    if (-not $script:PublishContext) { $script:PublishContext = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl }
+    if (-not $script:PublishContext) {
+        $script:PublishContext = Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl
+        # The shared context carries no Consistency header of its own: set here, so the pending-collateral reads and the PublishXml POST
+        # are strongly consistent too (F4, #2833).
+        $script:PublishContext.Headers['Consistency'] = 'Strong'
+    }
     return $script:PublishContext
 }
 
-# D-83: an entity publish carries EVERY pending form and view of the table, not only the ones this script edited. Read only. Returns the
-# pending items other than $OwnIds (the form and view ids this script edits itself).
-function Get-PendingCollateral([string[]]$OwnIds) {
-    return @(Get-EntityPublishCollateral -Context (Get-PublishContext) -Entity $Table -ExcludeIds @($OwnIds | Where-Object { $_ }))
+# D-83: an entity publish carries EVERY pending form and view of the table, not only the ones this script edited. Read only.
+function ConvertTo-CanonicalXml([string]$Text) {
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    try { return ([xml]$Text).OuterXml } catch { return $Text }
+}
+
+# The id inside the trailing parentheses of a collateral line ("systemforms: name (id)").
+function Get-CollateralItemId([string]$Line) {
+    if ($Line -match '\(([^()]+)\)\s*$') { return $Matches[1].Trim('{', '}').ToLowerInvariant() }
+    return ''
+}
+
+# Every pending item of sprk_ratecard, the forms and views this script edits NOT excluded:
+#   Own     = a form or view this script edits that has unpublished changes which are NOT exactly the text this run writes (the unpublished
+#             text is read and compared after XML normalisation). Publishing would overwrite them: never overridable.
+#   Foreign = everything else that is pending: it would go live with the publish. -AllowPendingCollateral may accept these.
+# An item whose pending text equals this run's text is a resume (or the edit this run just made): not reported.
+function Get-PendingReport($State) {
+    $own = [System.Collections.Generic.List[string]]::new()
+    $foreign = [System.Collections.Generic.List[string]]::new()
+    $targets = @{}
+    foreach ($f in @($State.Forms)) { $targets[([string]$f.Id).Trim('{', '}').ToLowerInvariant()] = @{ Kind = 'form'; Item = $f } }
+    foreach ($v in @($State.Views)) { $targets[([string]$v.Id).Trim('{', '}').ToLowerInvariant()] = @{ Kind = 'view'; Item = $v } }
+    foreach ($line in @(Get-EntityPublishCollateral -Context (Get-PublishContext) -Entity $Table)) {
+        $id = Get-CollateralItemId $line
+        if (-not $targets.ContainsKey($id)) { $foreign.Add($line); continue }
+        $t = $targets[$id]; $item = $t.Item
+        # What this run expects to find pending: the text read back right after its own PATCH when there is one (K2: Dataverse may
+        # normalise the XML on save), else the text it would write. Every comparison is case-STRICT (-ceq): a case-only change, e.g. of a
+        # label, is someone else's edit, not this run's text.
+        if ($t.Kind -eq 'form') {
+            $u = Read-Dv "systemforms($($item.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=formxml"
+            $expected = if ($item.PSObject.Properties['WrittenXml']) { $item.WrittenXml } else { $item.NewXml }
+            $same = (ConvertTo-CanonicalXml $u.formxml) -ceq (ConvertTo-CanonicalXml $expected)
+        }
+        else {
+            $u = Read-Dv "savedqueries($($item.Id))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?`$select=fetchxml,layoutxml"
+            $expectedFetch = if ($item.PSObject.Properties['WrittenFetch']) { $item.WrittenFetch } else { $item.NewFetch }
+            $expectedLayout = if ($item.PSObject.Properties['WrittenLayout']) { $item.WrittenLayout } else { $item.NewLayout }
+            $same = ((ConvertTo-CanonicalXml $u.fetchxml) -ceq (ConvertTo-CanonicalXml $expectedFetch)) -and
+                    ((-not $item.HasLayout) -or ((ConvertTo-CanonicalXml $u.layoutxml) -ceq (ConvertTo-CanonicalXml $expectedLayout)))
+        }
+        if (-not $same) { $own.Add("$($t.Kind) '$($item.Name)' ($($item.Id)) has unpublished changes that are not the edit this script would write (publishing would overwrite them): $line") }
+    }
+    return [pscustomobject]@{ Own = $own.ToArray(); Foreign = $foreign.ToArray() }
+}
+
+function Write-PendingReport($Pending) {
+    $n = @($Pending.Own).Count + @($Pending.Foreign).Count
+    Write-Host "pending (unpublished) items on ${Table}: $(if ($n -eq 0) { 'none' } else { $n })" -ForegroundColor $(if ($n -eq 0) { 'Cyan' } else { 'Yellow' })
+    foreach ($x in @($Pending.Own)) { Write-Host "  OVERWRITE RISK  $x" -ForegroundColor Red }
+    foreach ($x in @($Pending.Foreign)) { Write-Host "  would go live   $x" -ForegroundColor Yellow }
 }
 
 # The only publish: sprk_ratecard, entity-scoped, through the shared procedure. The core tables are never published (deleting a
-# relationship needs no publish of them). Pending collateral is re-read right before the publish; it was refused up front, so one found
-# here appeared during the run: a plain error (exit 1, partly applied), never an exit-2 "nothing changed".
-function Publish-RateCard([string[]]$OwnIds, [bool]$AllowPending) {
+# relationship needs no publish of them). Pending items are re-read right before the publish; they were checked up front, so one found
+# here appeared during the run: a plain error (exit 1, partly applied), never an exit-2 "nothing changed". The script's own edit (its
+# forms and views pending with exactly this run's text) is not reported.
+function Publish-RateCard($State, [bool]$AllowPending) {
     if (-not (Confirm-Write $Table 'PublishXml (entity-scoped, through scripts/lib/Publish-SolutionComponents.ps1, never tenant-wide)')) { return }
-    $pending = @(Get-PendingCollateral $OwnIds)
-    if ($pending.Count -gt 0 -and -not $AllowPending) {
-        throw "Refusing to publish ${Table}: $($pending.Count) other pending form(s) / view(s) appeared and would go live too: $($pending -join '; '). Nothing was published by this step; the retirement is partly applied, so re-run to resume after the owner of those changes agrees (-AllowPendingCollateral)."
+    $pending = Get-PendingReport $State
+    if (@($pending.Own).Count -gt 0) {
+        throw "Refusing to publish ${Table}: a form or view this script edits changed during the run and publishing would overwrite it: $(@($pending.Own) -join '; '). Nothing was published by this step; the retirement is partly applied, so check it and re-run to resume."
+    }
+    if (@($pending.Foreign).Count -gt 0 -and -not $AllowPending) {
+        throw "Refusing to publish ${Table}: $(@($pending.Foreign).Count) other pending form(s) / view(s) appeared and would go live too: $(@($pending.Foreign) -join '; '). Nothing was published by this step; the retirement is partly applied, so re-run to resume after the owner of those changes agrees (-AllowPendingCollateral)."
     }
     # The shared Invoke-PublishXml has no retry of its own: a publish lock or throttling is retried with the module's transient test and
     # backoff (bounded); any other error fails at once.
+    $script:WriteStarted = $true   # a publish is a write: an error after it must not say "Nothing was written"
     Invoke-WithTransientRetry { Invoke-PublishXml -Context (Get-PublishContext) -ParameterXml "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" }
     Write-Host "  published $Table" -ForegroundColor Green
 }
-
 function Remove-Relationships($State) {
     $deleted = 0
     foreach ($c in @($State.Columns)) {
         if (-not $c.RelationshipPresent) { Write-Host "  skipped  $($c.Relationship) already gone" -ForegroundColor Yellow; continue }
         if (-not (Confirm-Write "relationship $($c.Relationship) ($Table.$($c.Column))" 'DELETE the relationship (the lookup column and its name companion go with it)')) { continue }
+        $script:WriteStarted = $true
         Invoke-WhilePropagating { Invoke-Dv -Path "RelationshipDefinitions($($c.RelationshipId))" -Method DELETE | Out-Null } | Out-Null
         $deleted++; Write-Host "  DELETED  relationship $($c.Relationship)" -ForegroundColor Green
     }
@@ -526,8 +605,11 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
     $readCheck = @{}   # one run's cache of a passed read-all-rows check (see Get-State)
     $state = Get-State $readCheck
     Write-State $state
-    $blockers = @(Get-ApplyBlockers $state)
     $retired = Test-AlreadyRetired $state
+    # The pending items (the forms and views this script edits are NOT excluded; read only), shown in every mode.
+    $pending = [pscustomobject]@{ Own = @(); Foreign = @() }
+    if (-not $retired) { $pending = Get-PendingReport $state; Write-PendingReport $pending }
+    $blockers = @(Get-ApplyBlockers $state $pending $AllowPending)
     Write-Host ''
     if ($retired) { Write-Host "VERDICT: ALREADY RETIRED - no column, no relationship, no form or view names them" -ForegroundColor Yellow }
     elseif ($blockers.Count -eq 0) { Write-Host 'VERDICT: READY' -ForegroundColor Green }
@@ -546,19 +628,14 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
         else {
             if ($blockers.Count -gt 0) { throw [EscalationException]::new("Refusing to apply: $($blockers.Count) reason(s): $($blockers -join '; '). Nothing was changed.") }
 
-            # D-83, before the first write: the publish carries every pending form and view of the table. The form and view this script
-            # edits are its own and are excluded.
-            $ownIds = @(@($state.Forms | ForEach-Object { $_.Id }) + @($state.Views | ForEach-Object { $_.Id }))
-            $pending = @(Get-PendingCollateral $ownIds)
-            if ($pending.Count -gt 0 -and -not $AllowPending) {
-                throw [EscalationException]::new("Refusing to apply: $($pending.Count) other pending (unpublished) form(s) / view(s) of $Table would go live with the publish: $($pending -join '; '). Re-run with -AllowPendingCollateral after the owner of those changes agrees. Nothing was changed.")
-            }
-            if ($pending.Count -gt 0) { Write-Host "  -AllowPendingCollateral: publishing $($pending.Count) other pending item(s) of $Table too" -ForegroundColor Yellow }
+            # D-83, before the first write (the blockers above include the pending items): the publish carries every pending form and view
+            # of the table.
+            if (@($pending.Foreign).Count -gt 0) { Write-Host "  -AllowPendingCollateral: publishing $(@($pending.Foreign).Count) other pending item(s) of $Table too" -ForegroundColor Yellow }
 
             Write-Host '1. Forms and views of sprk_ratecard' -ForegroundColor Cyan
             $null = Edit-FormsAndViews $state
             # Always publish (an earlier run may have edited and stopped before publishing).
-            Publish-RateCard $ownIds $AllowPending
+            Publish-RateCard $state $AllowPending
 
             Write-Host '2. Nothing may depend on a column or relationship any more' -ForegroundColor Cyan
             $after = $null; $left = @()
@@ -576,7 +653,7 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
             Write-Host '3. Delete the relationships (the lookup columns go with them)' -ForegroundColor Cyan
             $deleted = Remove-Relationships $after
             if ($deleted -gt 0) { Wait-ColumnsGone $after }
-            Publish-RateCard $ownIds $AllowPending
+            Publish-RateCard $state $AllowPending
         }
     }
 
@@ -592,6 +669,13 @@ function Invoke-Retirement([bool]$ApplyRequested, [bool]$VerifyRequested, [bool]
         if ($problems.Count -gt 0) { throw "Verification failed: $($problems -join '; ')" }
         Write-Host '  the three attributes and relationships are gone; no sprk_ratecard form or view names them' -ForegroundColor Green
     }
+}
+
+# What the error handler tells the operator: after the first write the run is partly applied (re-run to resume); before it, nothing was
+# written (an error in a read, e.g. the pending read, changes nothing). $script:WriteStarted is set right before each write.
+function Get-ErrorTrailer {
+    if ($script:WriteStarted) { return 'Steps already done stay done; re-run to continue (every step skips work already done).' }
+    return 'Nothing was written (the error happened before the first write).'
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -619,7 +703,7 @@ catch [EscalationException] {
 catch {
     Write-Host ''
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host 'Steps already done stay done; re-run to continue (every step skips work already done).' -ForegroundColor Red
+    Write-Host (Get-ErrorTrailer) -ForegroundColor Red
     exit 1
 }
 

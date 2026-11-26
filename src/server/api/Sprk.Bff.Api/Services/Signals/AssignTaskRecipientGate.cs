@@ -58,6 +58,13 @@ public enum AssignTaskRefusal
 
     /// <summary>A check could not be made (a read fault, an unreadable flag or wall, no answer from Dataverse): fail closed.</summary>
     Unverified,
+
+    /// <summary>
+    /// Task 207 (#3063, DI-171): the one eligible user's account is in Administrative access mode and Dataverse's own answer lacks Read
+    /// on the task, so the account cannot use the app at all. A reason refinement of <see cref="NoAccess"/>, chosen only at the
+    /// "cannot read the task" refusal; never an early refusal on access mode.
+    /// </summary>
+    AdministrativeAccount,
 }
 
 /// <summary>The gate's verdict for one assignee.</summary>
@@ -75,6 +82,9 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
     /// <summary>Commit warning: no email, whether the assignee may see the record could not be checked.</summary>
     internal const string UnverifiedWarning = "assignee_email_not_sent_unverified";
 
+    /// <summary>Commit warning: no email, the assignee's user account is set up for administration only and cannot use the app.</summary>
+    internal const string AdministrativeAccountWarning = "assignee_email_not_sent_admin_account";
+
     internal static AssignTaskRecipient ForInternal(Guid userId) => new(AssignTaskRecipientKind.Internal, AssignTaskRefusal.None, userId);
 
     internal static AssignTaskRecipient ForExternal() => new(AssignTaskRecipientKind.External, AssignTaskRefusal.None, null);
@@ -87,6 +97,7 @@ public sealed record AssignTaskRecipient(AssignTaskRecipientKind Kind, AssignTas
         AssignTaskRefusal.NoAccess => NoAccessWarning,
         AssignTaskRefusal.SeveralUsers => SeveralUsersWarning,
         AssignTaskRefusal.Unverified => UnverifiedWarning,
+        AssignTaskRefusal.AdministrativeAccount => AdministrativeAccountWarning,
         _ => null,
     };
 }
@@ -121,6 +132,9 @@ public class AssignTaskRecipientGate
 {
     /// <summary>The task table's entity set, as <c>RetrievePrincipalAccess</c> names it.</summary>
     internal const string TaskEntitySet = "sprk_events";
+
+    /// <summary>systemuser <c>accessmode</c> Administrative (the same value as <c>FlaggedUserPlacementJob.AdministrativeAccessMode</c>).</summary>
+    private const int AdministrativeAccessMode = 1;
 
     private readonly IContactIdentityStore _identities;
     private readonly AssignedAccessStore _links;
@@ -176,9 +190,10 @@ public class AssignTaskRecipientGate
     {
         // ── Who the contact is and which internal users it represents: uac-r2 task 193's ONE contact -> user rule
         // (ContactUserRepresentation; status-first: a read that failed is "could not tell", never "represents nobody"; an
-        // inactive or missing contact is nobody's, ADR-003; no binding column decides on the link alone). The Restricted bar is
-        // asked below, once, for the one user it can apply to, so eligibility is classified here as on a record that is not
-        // Restricted (as this gate always did). ──────────────────────────────────────────────────────────────────────────
+        // inactive or missing contact is nobody's, ADR-003; no binding column decides on the link alone). Each user's share
+        // eligibility comes with it, classified as on a record that is not Restricted (as this gate always did): the Restricted
+        // bar is asked below, after the count, once, for the one user it can apply to (D-199: several eligible users refuse
+        // whatever the record's Restricted state). ───────────────────────────────────────────────────────────────────────
         var representation = await new ContactUserRepresentation(_identities, _links, _participations)
             .ResolveAsync(contactId, rootIsRestricted: false, BindingColumnMissingPolicy.DecideOnLink, ct).ConfigureAwait(false);
         switch (representation.Status)
@@ -204,17 +219,17 @@ public class AssignTaskRecipientGate
             return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "no internal user is confirmed for the contact");
         }
 
-        return await DecideInternalAsync(contactId, representation.Users.Select(u => u.User).ToList(), core, taskId, ct)
-            .ConfigureAwait(false);
+        return await DecideInternalAsync(contactId, representation.Users, core, taskId, ct).ConfigureAwait(false);
     }
 
     private async Task<AssignTaskRecipient> DecideInternalAsync(
-        Guid contactId, IReadOnlyList<AssignedLinkCandidate> represented, DecisionCoreRecord? core, Guid? taskId, CancellationToken ct)
+        Guid contactId, IReadOnlyList<RepresentedUser> represented, DecisionCoreRecord? core, Guid? taskId, CancellationToken ct)
     {
-        // Enabled interactive people first (the Restricted bar is asked below, once, for the one user it can apply to).
+        // Enabled interactive people first: the eligibility ContactUserRepresentation classified on a record that is not
+        // Restricted (the Restricted bar is asked below, once, for the one user it can apply to).
         var people = represented
-            .Where(u => InternalShareEndpoints.ClassifyEligibility(u.IsDisabled, u.AccessMode, u.ApplicationId, u.IsExternal, rootIsRestricted: false)
-                        == InternalShareEndpoints.ShareEligibility.Eligible)
+            .Where(u => u.Eligibility == InternalShareEndpoints.ShareEligibility.Eligible)
+            .Select(u => u.User)
             .ToList();
         if (people.Count == 0)
             return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "no enabled internal person represents the contact");
@@ -272,7 +287,15 @@ public class AssignTaskRecipientGate
         if (rights is not { } answered)
             return Refuse(AssignTaskRefusal.Unverified, contactId, taskId, "Dataverse gave no answer for the user's Read on the task");
         if (!answered.HasFlag(AccessRights.Read))
-            return Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the user cannot read the task");
+        {
+            // Task 207 (#3063, DI-171): Dataverse's answer is still the decider. For an Administrative-mode account it answers 403
+            // (filtered privileges), which the probe maps to "no rights"; the refusal is right, but "no access to this record" misleads,
+            // so this one reason names the account. Only here: no early refusal on access mode, and who is emailed does not change.
+            return user.AccessMode == AdministrativeAccessMode
+                ? Refuse(AssignTaskRefusal.AdministrativeAccount, contactId, taskId,
+                    "the user cannot read the task, and the user account is in Administrative access mode")
+                : Refuse(AssignTaskRefusal.NoAccess, contactId, taskId, "the user cannot read the task");
+        }
 
         return AssignTaskRecipient.ForInternal(user.SystemUserId);
     }

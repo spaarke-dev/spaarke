@@ -39,6 +39,7 @@ import {
   ToolbarButton,
   Tooltip,
 } from '@fluentui/react-components';
+import { regardingRowStyles } from '@spaarke/ui-components/dist/theme/regardingRowStyles';
 import { ArrowClockwiseRegular, Dismiss24Regular, Search20Regular } from '@fluentui/react-icons';
 import {
   TODO_REGARDING_CATALOG,
@@ -159,51 +160,13 @@ const useStyles = makeStyles({
   },
   // Row-2 — 1fr:2fr grid (RegardingResolver parity). Number cell left (1/3),
   // Name cell right (2/3). Empty cells hide entirely (no em-dash).
-  row2: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 2fr',
-    gap: tokens.spacingHorizontalS,
-    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
-    minHeight: '24px',
-    alignItems: 'start',
-  },
-  numberCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    minWidth: 0,
-  },
-  nameCell: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    minWidth: 0,
-  },
-  // Row-2 field label — OOB-parity (12px / 400 / #616161 / Segoe), copied verbatim
-  // from RegardingResolverApp `fieldLabel`. Documented Path-A exception to ADR-021.
-  fieldLabel: {
-    fontFamily:
-      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
-    fontSize: '12px',
-    fontWeight: 400,
-    color: '#616161',
-    lineHeight: '16px',
-  },
-  recordNumber: {
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  // Row-2 record-name value — plain text (NOT a Link). Segoe UI 14px / 400 / #242424,
-  // ellipsis on overflow. Copied verbatim from RegardingResolverApp `recordName`.
-  recordName: {
-    fontFamily:
-      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
-    fontSize: '14px',
-    fontWeight: 400,
-    color: '#242424',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
+  // Row-2 grid + OOB-parity label/value text: shared with the sibling control (#2967).
+  row2: { ...regardingRowStyles.row2 },
+  numberCell: { ...regardingRowStyles.numberCell },
+  nameCell: { ...regardingRowStyles.nameCell },
+  fieldLabel: { ...regardingRowStyles.fieldLabel },
+  recordNumber: { ...regardingRowStyles.recordNumber },
+  recordName: { ...regardingRowStyles.recordName },
   // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
   // Flex column so the DialogBody fills the full surface height (B11-6) — the
   // content region grows and the footer pins to the bottom (no empty gap below).

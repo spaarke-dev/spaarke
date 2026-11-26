@@ -777,7 +777,7 @@ public sealed class StoredFileReconcileJobTests
     {
         new Harness().Job.JobId.Should().Be("finance-stored-file-reconcile");
         StoredFileReconcileJob.DefaultCronSchedule.Should().Be("23 * * * *");
-        StoredFileRetention.SubmissionRetryHorizon.Should().Be(TimeSpan.FromMinutes(100));
+        StoredFileRetention.SubmissionRetryHorizon.Should().Be(TimeSpan.FromMinutes(115), "5 deliveries x the 20-minute lock + the 15-minute retry back-off (ISS-025)");
     }
 
     internal sealed class CapturingLogger<T> : ILogger<T>

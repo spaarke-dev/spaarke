@@ -105,4 +105,12 @@ public sealed class BicepDeployOutputs
 
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
+
+    /// <summary>
+    /// SignalR Service host name (ARM output <c>signalrHostName</c>, <c>{name}.service.signalr.net</c>) — blank unless
+    /// <see cref="SignalRDeployed"/>. Optional by design (a default stamp deploys no SignalR); H2a requires it only when
+    /// SignalR was deployed, and persists it to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.SignalRHostName"/>
+    /// for H4b's keyless connection string (ISS-022).
+    /// </summary>
+    public string SignalRHostName { get; init; } = string.Empty;
 }

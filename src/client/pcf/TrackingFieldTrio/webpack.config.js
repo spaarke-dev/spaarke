@@ -7,7 +7,8 @@
  * reaches SprkChat's chat-file attachment, whose `import('pdfjs-dist')` / `import('mammoth')` a single-chunk PCF build
  * must still resolve, and pcf-scripts' babel-loader crashes on `pdfjs-dist/build/pdf.mjs` ("Cannot read properties of
  * null (reading 'declarations')"). This control never renders <SprkChat>, so both packages resolve to the shared LOUD
- * stubs (they throw if ever reached), not to `false`. `@spaarke/sdap-client` is NOT stubbed: this control uses it.
+ * stubs (they throw if ever reached), not to `false`. (No `@spaarke/sdap-client` stub either: that
+ * client is part of @spaarke/ui-components since 2026-11-24.)
  */
 const path = require('path');
 

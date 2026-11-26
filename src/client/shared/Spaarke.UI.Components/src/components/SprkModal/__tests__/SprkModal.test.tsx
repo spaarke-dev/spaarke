@@ -57,6 +57,65 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     expect(screen.getByRole('button', { name: /maximize dialog/i })).toBeInTheDocument();
   });
 
+  describe('defaultMaximized', () => {
+    // The surface's inline style carries the named size: 'full' is the only one with maxWidth 100vw / maxHeight 100vh.
+    const isFull = () => {
+      const surface = screen.getByRole('dialog');
+      return surface.style.maxWidth === '100vw' && surface.style.maxHeight === '100vh';
+    };
+
+    it('opens at the full size with the restore control shown; restore returns to size', () => {
+      renderWithProviders(
+        <SprkModal open onClose={noop} title="Starts maximized" size="md" defaultMaximized>
+          <div>x</div>
+        </SprkModal>
+      );
+      expect(isFull()).toBe(true);
+      expect(screen.getByRole('button', { name: /restore dialog size/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /restore dialog size/i }));
+      expect(isFull()).toBe(false);
+      expect(screen.getByRole('button', { name: /maximize dialog/i })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /maximize dialog/i }));
+      expect(isFull()).toBe(true);
+    });
+
+    it('starts maximized again after it is closed and reopened (even after the user restored it)', () => {
+      const ui = (open: boolean) => (
+        <SprkModal open={open} onClose={noop} title="Reopen" size="md" defaultMaximized>
+          <div>x</div>
+        </SprkModal>
+      );
+      const view = renderWithProviders(ui(true));
+      fireEvent.click(screen.getByRole('button', { name: /restore dialog size/i }));
+      expect(isFull()).toBe(false);
+      view.rerender(ui(false));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      view.rerender(ui(true));
+      expect(isFull()).toBe(true);
+      expect(screen.getByRole('button', { name: /restore dialog size/i })).toBeInTheDocument();
+    });
+
+    it('without the prop it opens at size, as before', () => {
+      renderWithProviders(
+        <SprkModal open onClose={noop} title="Normal" size="md">
+          <div>x</div>
+        </SprkModal>
+      );
+      expect(isFull()).toBe(false);
+      expect(screen.getByRole('button', { name: /maximize dialog/i })).toBeInTheDocument();
+    });
+
+    it('is ignored when maximizable=false: the modal stays at size', () => {
+      renderWithProviders(
+        <SprkModal open onClose={noop} title="Fixed" size="md" maximizable={false} defaultMaximized>
+          <div>x</div>
+        </SprkModal>
+      );
+      expect(isFull()).toBe(false);
+      expect(screen.queryByRole('button', { name: /restore dialog size/i })).toBeNull();
+    });
+  });
+
   it('omits the maximize control when maximizable=false', () => {
     renderWithProviders(
       <SprkModal open onClose={noop} title="No max" maximizable={false}>
@@ -102,6 +161,36 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     expect(onNavigate).toHaveBeenCalledWith('next');
   });
 
+  it('nav.disabled turns both ‹ › off and runs neither the guard nor onNavigate; unset leaves them on (ISS-016)', () => {
+    const onNavigate = jest.fn();
+    const onBeforeNavigate = jest.fn(() => true);
+    const { rerender } = renderWithProviders(
+      <SprkModal
+        open
+        onClose={noop}
+        title="Rec"
+        nav={{ index: 1, total: 3, onNavigate, onBeforeNavigate, disabled: true }}
+      >
+        <div>x</div>
+      </SprkModal>
+    );
+    const prev = screen.getByRole('button', { name: /previous record/i });
+    const next = screen.getByRole('button', { name: /next record/i });
+    expect(prev).toBeDisabled();
+    expect(next).toBeDisabled();
+    fireEvent.click(prev);
+    fireEvent.click(next);
+    expect(onBeforeNavigate).not.toHaveBeenCalled();
+    expect(onNavigate).not.toHaveBeenCalled();
+    rerender(
+      <SprkModal open onClose={noop} title="Rec" nav={{ index: 1, total: 3, onNavigate, onBeforeNavigate }}>
+        <div>x</div>
+      </SprkModal>
+    );
+    expect(screen.getByRole('button', { name: /previous record/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /next record/i })).toBeEnabled();
+  });
+
   describe('nav.onBeforeNavigate (browse guard lifted from BrowseModal — ontology task 056)', () => {
     const renderNav = (onBeforeNavigate: NonNullable<SprkModalNav['onBeforeNavigate']>, onNavigate = jest.fn()) => {
       renderWithProviders(
@@ -133,7 +222,9 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
         const rejecting = jest.fn().mockRejectedValue(new Error('boom'));
         const onNavigate = renderNav(rejecting);
         fireEvent.click(screen.getByRole('button', { name: /next record/i }));
-        await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('onBeforeNavigate failed'), expect.any(Error)));
+        await waitFor(() =>
+          expect(warn).toHaveBeenCalledWith(expect.stringContaining('onBeforeNavigate failed'), expect.any(Error))
+        );
         expect(onNavigate).not.toHaveBeenCalled();
       } finally {
         warn.mockRestore();

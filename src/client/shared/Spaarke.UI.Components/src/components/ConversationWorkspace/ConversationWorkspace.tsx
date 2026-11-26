@@ -370,11 +370,14 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   const [allRows, setAllRows] = React.useState<IThreadListItemDto[]>([]);
   const [listStatus, setListStatus] = React.useState<ThreadListStatus>('loading');
   const [errorMessage, setErrorMessage] = React.useState<string | undefined>(undefined);
+  // Ontology task 221: the record's by-regarding read was cut by a bound (record mode only).
+  const [listTruncated, setListTruncated] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
     setListStatus('loading');
     setErrorMessage(undefined);
+    setListTruncated(false);
 
     (async () => {
       try {
@@ -384,6 +387,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
             : await listThreads(messagesView ? { top: pageSize, kind: 'direct' } : { top: pageSize }, client);
         if (cancelled) return;
         setAllRows(result.threads);
+        setListTruncated(result.truncated === true);
         setListStatus('ready');
       } catch (err) {
         if (cancelled) return;
@@ -763,6 +767,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
               onDeleteThread={handleDeleteThread}
               createLabel={messagesView ? 'New message' : 'New thread'}
               emptyText={messagesView ? 'No messages yet.' : undefined}
+              footnote={listTruncated ? 'Some messages may not be shown.' : undefined}
               subHeader={
                 regarding ? undefined : (
                   <TabList

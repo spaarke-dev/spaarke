@@ -31,7 +31,7 @@ const { TextDecoder: NodeTextDecoder } = require('node:util');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).TextDecoder = NodeTextDecoder;
 
-import { exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from '../csvExport';
+import { asSpreadsheetText, exportCsv, escapeCsvField, csvFilename, formatYyyymmdd, UTF8_BOM } from '../csvExport';
 import type { ResolvedColumn } from '../../configResolution';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,10 +139,96 @@ describe('escapeCsvField — RFC 4180 quoting', () => {
     expect(escapeCsvField({ name: 'Smith, John' })).toBe('"Smith, John"');
   });
 
-  it('JSON-stringifies arbitrary objects with no name/label', () => {
-    // The JSON itself contains quotes, so the result must be quoted + escaped.
-    const result = escapeCsvField({ foo: 'bar' });
-    expect(result).toBe('"{""foo"":""bar""}"');
+  it('writes an object with no name/label as an empty field, never JSON (D-34 #3045)', () => {
+    expect(escapeCsvField({ foo: 'bar' })).toBe('');
+    expect(escapeCsvField({ value: 1, extensionData: null })).toBe('');
+  });
+
+  it('reads an AliasedValue through its inner value, and an array as its readable items (shared rule)', () => {
+    expect(escapeCsvField({ attributeLogicalName: 'name', entityLogicalName: 'account', value: 'Acme' })).toBe('Acme');
+    expect(escapeCsvField({ attributeLogicalName: 'name', entityLogicalName: 'account', value: null })).toBe('');
+    expect(escapeCsvField(['a', { name: 'B' }, { value: 1 }])).toBe('"a, B"');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// asSpreadsheetText — text a spreadsheet would evaluate is written as text
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('asSpreadsheetText', () => {
+  it('must-fire: text starting with = + - @ tab or CR gets a leading apostrophe', () => {
+    for (const lead of ['=', '+', '-', '@', '\t', '\r']) {
+      expect(asSpreadsheetText(`${lead}SUM(A1:A2)`)).toBe(`'${lead}SUM(A1:A2)`);
+    }
+    expect(asSpreadsheetText('-1+2')).toBe("'-1+2");
+    expect(asSpreadsheetText('+1e5x')).toBe("'+1e5x");
+  });
+
+  it('must-fire: the full-width forms of = + - @ are treated the same', () => {
+    for (const lead of ['＝', '＋', '－', '＠']) {
+      expect(asSpreadsheetText(`${lead}1+1`)).toBe(`'${lead}1+1`);
+    }
+  });
+
+  it('must-fire: a part after a semicolon, tab or line break is checked as if it began a cell', () => {
+    expect(asSpreadsheetText('Acme;=1+1')).toBe("Acme;'=1+1");
+    expect(asSpreadsheetText('a;b;@x')).toBe("a;b;'@x");
+    expect(asSpreadsheetText('note\t+1+1')).toBe("note\t'+1+1");
+    expect(asSpreadsheetText('line one\r\n=1+1')).toBe("line one\r\n'=1+1");
+    expect(asSpreadsheetText('line one\n-2+3')).toBe("line one\n'-2+3");
+    expect(asSpreadsheetText('=a;=b')).toBe("'=a;'=b");
+  });
+
+  it('must-not-fire: separators followed by ordinary text or a signed amount are unchanged', () => {
+    for (const text of ['Acme; Inc', 'a;b', 'total;-$1,200.00', 'line one\r\nline two', 'x\t-5', 'a;-']) {
+      expect(asSpreadsheetText(text)).toBe(text);
+    }
+  });
+
+  it('must-not-fire: signed amounts, exponent numbers, a lone sign and ordinary text are unchanged', () => {
+    for (const text of [
+      '-$1,200.00',
+      '-1.200,00 €',
+      '-1 200,00 €',
+      '($1,200.00)',
+      '+5%',
+      '-12',
+      '-0.5',
+      '-1e-7',
+      '+2.5E10',
+      '-',
+      '+',
+      'Draft',
+      'a=b',
+      'Smith, Jo',
+      '',
+    ]) {
+      expect(asSpreadsheetText(text)).toBe(text);
+    }
+  });
+});
+
+describe('escapeCsvField — text a spreadsheet would evaluate', () => {
+  it('writes such text with a leading apostrophe, RFC 4180 quoted when needed', () => {
+    expect(escapeCsvField('=1+1')).toBe("'=1+1");
+    expect(escapeCsvField('@A1')).toBe("'@A1");
+    expect(escapeCsvField('=A1,B1')).toBe(`"'=A1,B1"`);
+    expect(escapeCsvField('=say "hi"')).toBe(`"'=say ""hi"""`);
+    // No comma, quote or line break: written unquoted, so the part after ";" must carry its own apostrophe.
+    expect(escapeCsvField('Acme;=1+1')).toBe("Acme;'=1+1");
+    expect(escapeCsvField('a\n=1')).toBe(`"a\n'=1"`);
+  });
+
+  it('applies to an object cell read through its name or label', () => {
+    expect(escapeCsvField({ id: '1', name: '=Acme' })).toBe("'=Acme");
+    expect(escapeCsvField({ value: 1, label: '+Open' })).toBe("'+Open");
+  });
+
+  it('must-not-fire: number and boolean values, including negative and exponent forms, are written as is', () => {
+    expect(escapeCsvField(-5)).toBe('-5');
+    expect(escapeCsvField(-1e-7)).toBe('-1e-7');
+    expect(escapeCsvField(BigInt(-9))).toBe('-9');
+    expect(escapeCsvField(true)).toBe('true');
   });
 });
 
@@ -262,6 +348,41 @@ describe('exportCsv — end-to-end', () => {
   it('produces a Blob with text/csv;charset=utf-8 type', () => {
     const blob = exportCsv([], columns, 'View', 'sprk_event');
     expect(blob.type).toBe('text/csv;charset=utf-8');
+  });
+
+  // Task 033 (FR-20, #2447): the optional cellText hook. Absent, every case above is unchanged.
+  describe('cellText (host-supplied cell text)', () => {
+    const records = [
+      { name: 'Alice', status: 'Open', amount: { value: 1200, extensionData: null } },
+      { name: 'Bob', status: 'Closed', amount: 9 },
+    ];
+    // What the grid supplies for a Money column: the displayed text; nothing for any other column.
+    const displayedMoney = (r: Record<string, unknown>, c: ResolvedColumn): string | undefined =>
+      c.renderer === 'currency' ? (r.amount === 9 ? '$9.00' : '$1,200.00') : undefined;
+
+    it('writes the supplied text for a cell (RFC 4180 quoted), and the default formatting where it returns undefined', async () => {
+      const text = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', displayedMoney));
+      expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,"$1,200.00"\r\nBob,Closed,$9.00`);
+    });
+
+    it('an empty string from the hook is an empty cell, not the raw value', async () => {
+      const text = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', () => ''));
+      expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\n,,\r\n,,`);
+    });
+
+    it('a hook that always returns undefined gives the same file as no hook', async () => {
+      const without = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event'));
+      const declined = await readBlobAsText(exportCsv(records, columns, 'View', 'sprk_event', () => undefined));
+      expect(declined).toBe(without);
+      expect(without).toBe(`${UTF8_BOM}Name,Status,Amount\r\nAlice,Open,\r\nBob,Closed,9`);
+    });
+
+    it('text from the hook goes through the same guard: an evaluated lead gets the apostrophe, an amount does not', async () => {
+      const hook = (r: Record<string, unknown>, c: ResolvedColumn): string | undefined =>
+        c.name === 'status' ? '=HYPERLINK("x")' : c.renderer === 'currency' ? '-$9.00' : undefined;
+      const text = await readBlobAsText(exportCsv(records.slice(1), columns, 'View', 'sprk_event', hook));
+      expect(text).toBe(`${UTF8_BOM}Name,Status,Amount\r\nBob,"'=HYPERLINK(""x"")",-$9.00`);
+    });
   });
 
   it('round-trips UTF-8 characters (non-ASCII payload renders intact)', async () => {

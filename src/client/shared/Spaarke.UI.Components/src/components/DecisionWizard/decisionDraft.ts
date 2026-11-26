@@ -49,6 +49,11 @@ export interface ItemDraft {
   dismissalDetail: string;
   /** Other open Decide items on the same core record this decision also resolves. */
   alsoResolve: string[];
+  /**
+   * The decider's optional "because" (the review's `because`, FR-15). Typed on Confirm only where the host asks for it
+   * (`collectBecause`); absent everywhere else, so a review without it is byte-identical to before.
+   */
+  because?: string;
 }
 
 export function emptyDraft(reviewId: string): ItemDraft {
@@ -100,6 +105,15 @@ export function fieldLabel(draft: ItemDraft, scope: StepScope, parameterCode: st
 }
 
 /**
+ * The name shown for a pick: "Name (secondary)" when the pick carries a secondary line (a person's email, task 211), else the name.
+ * Display only; the committed value is the id.
+ */
+export function pickLabel(item: { name: string; secondaryText?: string | null }): string {
+  const secondary = item.secondaryText?.trim();
+  return secondary ? `${item.name} (${secondary})` : item.name;
+}
+
+/**
  * A Lookup / Person pick. `asDefault` records a pre-selection (a matter with exactly one budget, D-18): a starting value, not
  * a choice, so it does not make the draft dirty. A pick the user makes (`asDefault` false) is a typed value.
  */
@@ -107,11 +121,11 @@ export function withLookup(
   draft: ItemDraft,
   scope: StepScope,
   parameterCode: string,
-  item: { id: string; name: string } | null,
+  item: { id: string; name: string; secondaryText?: string | null } | null,
   asDefault = false
 ): ItemDraft {
   const labels = { ...draft.labels };
-  if (item) labels[labelKey(scope, parameterCode)] = item.name;
+  if (item) labels[labelKey(scope, parameterCode)] = pickLabel(item);
   else delete labels[labelKey(scope, parameterCode)];
   const next = { ...draft, labels };
   return asDefault
@@ -132,6 +146,11 @@ export function withDismissal(draft: ItemDraft, code: string, detail?: string): 
   // Detail belongs to the reason it was typed for: choosing another reason starts with none.
   const kept = code === draft.dismissalCode ? draft.dismissalDetail : '';
   return { ...draft, dismissalCode: code, dismissalDetail: detail ?? kept };
+}
+
+/** The decider's optional "because" (typed on Confirm where the host collects it). */
+export function withBecause(draft: ItemDraft, because: string): ItemDraft {
+  return { ...draft, because };
 }
 
 export function withAlsoResolve(draft: ItemDraft, signalId: string, ticked: boolean): ItemDraft {
@@ -424,6 +443,9 @@ export function buildReview(plan: DecisionPlan, draft: ItemDraft, options: { ret
     const detail = reason?.requiresDetail ? draft.dismissalDetail.trim() : '';
     review.dismissal = detail ? { code: draft.dismissalCode, detail } : { code: draft.dismissalCode };
   }
+  // Sent only when typed (FR-15): a draft without one builds exactly the review it always did.
+  const because = draft.because?.trim();
+  if (because) review.because = because;
   if (options.retry) review.retry = true;
   return review;
 }
@@ -470,6 +492,7 @@ export function hasUnrecordedChoices(draft: ItemDraft): boolean {
     draft.dismissalCode !== '' ||
     draft.dismissalDetail.trim() !== '' ||
     draft.alsoResolve.length > 0 ||
+    (draft.because ?? '').trim() !== '' ||
     Object.values(draft.values).some(group => group && Object.values(group).some(v => !isBlank(v)))
   );
 }

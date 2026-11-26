@@ -1,0 +1,20 @@
+{
+  "@odata.context": "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/$metadata#EntityDefinitions('sprk_workassignment')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata(LogicalName,Targets)",
+  "value": [
+    {
+      "MetadataId": "dd90c22b-5904-4511-8f29-b4738e7de85d",
+      "LogicalName": "sprk_assignedto",
+      "Targets": ["contact"]
+    },
+    {
+      "MetadataId": "90f677d0-62d3-4132-a677-270c490b9f9c",
+      "LogicalName": "sprk_mattertype",
+      "Targets": ["sprk_mattertype_ref"]
+    },
+    {
+      "MetadataId": "05e24414-52ed-47ef-8cbb-172d723b7a4e",
+      "LogicalName": "sprk_regardingmatter",
+      "Targets": ["sprk_matter"]
+    }
+  ]
+}

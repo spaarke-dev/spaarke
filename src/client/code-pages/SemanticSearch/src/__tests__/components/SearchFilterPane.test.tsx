@@ -246,7 +246,10 @@ describe('SearchFilterPane', () => {
       fireEvent.click(screen.getByRole('option', { name: 'All Matters' }));
 
       expect(onSelectSavedSearch).toHaveBeenCalledTimes(1);
-      expect(onSelectSavedSearch.mock.calls[0][0]).toMatchObject({ id: 'default-all-matters', searchDomain: 'matters' });
+      expect(onSelectSavedSearch.mock.calls[0][0]).toMatchObject({
+        id: 'default-all-matters',
+        searchDomain: 'matters',
+      });
     });
 
     it('shows the saved-search loading indicator while saved searches load', () => {
@@ -357,11 +360,33 @@ describe('SearchFilterPane', () => {
   // ---- Date Range ----
 
   describe('date range', () => {
-    it('shows the Off preset and no date inputs when no range is set', () => {
+    it('shows the Off preset and empty date inputs when no range is set', () => {
       renderPane();
 
       expect(screen.getByRole('combobox', { name: 'Date range preset' })).toHaveTextContent('Off');
-      expect(screen.queryByLabelText('From date')).not.toBeInTheDocument();
+      // #3093: the inputs stay visible so a custom range can be typed without picking a preset first.
+      expect(screen.getByLabelText('From date')).toHaveValue('');
+    });
+
+    it('reports a typed custom range, keeping { from, to } with null for the empty end', () => {
+      const onFiltersChange = jest.fn();
+      renderPane({ onFiltersChange });
+
+      fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-02-01' } });
+
+      expect(onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, dateRange: { from: '2026-02-01', to: null } });
+    });
+
+    it('reports an empty range (not null) when the range is cleared', () => {
+      const onFiltersChange = jest.fn();
+      renderPane({
+        onFiltersChange,
+        filters: { ...DEFAULT_FILTERS, dateRange: { from: '2026-01-01', to: '2026-03-31' } },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+      expect(onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, dateRange: { from: null, to: null } });
     });
 
     it('shows the From/To inputs once a range is set', () => {

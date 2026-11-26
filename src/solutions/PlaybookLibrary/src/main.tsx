@@ -36,21 +36,10 @@
  */
 
 import * as React from "react";
-import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import {
-  resolveCodePageTheme,
-  setupCodePageThemeListener,
-} from "@spaarke/ui-components";
-import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
-import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
-import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
+import { useWizardPageBootstrap } from "@spaarke/ui-components/utils/useWizardPageBootstrap";
+import { mountWizardPage, WizardPageInitializing } from "@spaarke/ui-components/utils/mountWizardPage";
 import { PlaybookLibraryShell } from "@spaarke/ui-components/components/PlaybookLibraryShell";
-import {
-  resolveRuntimeConfig,
-  initAuth,
-  authenticatedFetch,
-} from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Close behavior helpers
@@ -83,52 +72,11 @@ function detectIsDialogContext(): boolean {
 // ---------------------------------------------------------------------------
 
 function App() {
-  const [theme, setTheme] = React.useState(resolveCodePageTheme);
-  const params = React.useMemo(() => parseDataParams(), []);
-  const [isAuthReady, setIsAuthReady] = React.useState(false);
-  const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(
-    // Accept both apiBaseUrl (AnalysisBuilder) and bffBaseUrl (PlaybookLibrary)
-    params.apiBaseUrl || params.bffBaseUrl || ""
-  );
-
-  // Theme listener
-  React.useEffect(() => {
-    return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
-  }, []);
-
-  // Auth initialisation
-  React.useEffect(() => {
-    let cancelled = false;
-    async function initialize(): Promise<void> {
-      try {
-        const config = await resolveRuntimeConfig();
-        await initAuth({
-          clientId: config.msalClientId,
-          bffBaseUrl: config.bffBaseUrl,
-          bffApiScope: config.bffOAuthScope,
-          tenantId: config.tenantId || undefined,
-          proactiveRefresh: true,
-        });
-        if (!cancelled) {
-          setResolvedBffBaseUrl(config.bffBaseUrl);
-          setIsAuthReady(true);
-        }
-      } catch (err) {
-        console.error("[PlaybookLibrary] Failed to initialize auth:", err);
-        if (!cancelled) setIsAuthReady(true);
-      }
-    }
-    void initialize();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const dataService = React.useMemo(() => createXrmDataService(), []);
-  const navigationService = React.useMemo(
-    () => createXrmNavigationService(),
-    []
-  );
+  const b = useWizardPageBootstrap("PlaybookLibrary");
+  const { params, theme, dataService, navigationService, authenticatedFetch, isAuthReady } = b;
+  // Accept both apiBaseUrl (AnalysisBuilder) and bffBaseUrl (PlaybookLibrary): the auth-resolved URL
+  // wins; if auth init failed, fall back to whichever the launch envelope carried.
+  const resolvedBffBaseUrl = b.bffBaseUrl || params.apiBaseUrl || "";
 
   // -------------------------------------------------------------------------
   // Resolve merged parameters — union of PlaybookLibrary + AnalysisBuilder
@@ -281,22 +229,7 @@ function App() {
   // Loading gate
   // -------------------------------------------------------------------------
 
-  if (!isAuthReady) {
-    return (
-      <FluentProvider theme={theme} style={{ height: "100%" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            height: "100%",
-          }}
-        >
-          <span>Initializing...</span>
-        </div>
-      </FluentProvider>
-    );
-  }
+  if (!isAuthReady) return <WizardPageInitializing theme={theme} />;
 
   // -------------------------------------------------------------------------
   // Render
@@ -322,19 +255,4 @@ function App() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Mount
-// ---------------------------------------------------------------------------
-
-const rootElement = document.getElementById("root");
-
-if (rootElement) {
-  const root = createRoot(rootElement);
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  console.error("[PlaybookLibrary] Root element not found");
-}
+mountWizardPage("PlaybookLibrary", App);

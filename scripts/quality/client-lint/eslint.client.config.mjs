@@ -26,7 +26,13 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
 const GENERATED = path.join(HERE, ".generated");
 
-/** Covered packages. `id` is the `--package` filter value. */
+/**
+ * Source the e-billing pages import from outside their own `src/` (issue 2965). Linted with each page that imports it, against that
+ * page's tsconfig, so moving code out of a page into the shared folder does not take it out of the lint.
+ */
+const EBILLING_SHARED = ["src/solutions/_ebilling-shared"];
+
+/** Covered packages. `id` is the `--package` filter value; `extraDirs` are repo-relative folders linted along with `<dir>/src`. */
 export const PACKAGES = [
   { id: "ui-components", dir: "src/client/shared/Spaarke.UI.Components" },
   { id: "ai-widgets", dir: "src/client/shared/Spaarke.AI.Widgets" },
@@ -36,6 +42,11 @@ export const PACKAGES = [
   { id: "spaarkeai", dir: "src/solutions/SpaarkeAi" },
   { id: "legal-workspace-app", dir: "src/solutions/LegalWorkspace" },
   { id: "reporting", dir: "src/solutions/Reporting" },
+  { id: "invoice-files", dir: "src/solutions/InvoiceFiles", extraDirs: EBILLING_SHARED },
+  { id: "invoice-review", dir: "src/solutions/InvoiceReview", extraDirs: EBILLING_SHARED },
+  { id: "create-invoice-wizard", dir: "src/solutions/CreateInvoiceWizard" },
+  { id: "rule-review", dir: "src/solutions/RuleReview", extraDirs: EBILLING_SHARED },
+  { id: "record-procedures", dir: "src/solutions/RecordProcedures", extraDirs: EBILLING_SHARED },
   { id: "semantic-search", dir: "src/client/code-pages/SemanticSearch" },
 ];
 
@@ -131,7 +142,11 @@ function generateTsconfig(pkg, extraSources = []) {
       // Default @types discovery walks up from .generated/, missing the package's own @types/node, @types/jest, ...
       ...(raw.compilerOptions?.typeRoots ? {} : { typeRoots: [rel(here, path.join(pkgDir, "node_modules", "@types"))] }),
     },
-    include: [rel(here, path.join(pkgDir, "src")) + "/**/*", ...extraSources],
+    include: [
+      rel(here, path.join(pkgDir, "src")) + "/**/*",
+      ...(pkg.extraDirs ?? []).map((d) => rel(here, path.join(REPO_ROOT, d)) + "/**/*"),
+      ...extraSources,
+    ],
     exclude: [
       rel(here, path.join(pkgDir, "node_modules")),
       rel(here, path.join(pkgDir, "dist")),
@@ -254,7 +269,7 @@ const PLUGINS = {
 function packageBlock(pkg) {
   return {
     name: `client-lint/${pkg.id}`,
-    files: [`${pkg.dir}/src/**/*.{ts,tsx}`],
+    files: [`${pkg.dir}/src/**/*.{ts,tsx}`, ...(pkg.extraDirs ?? []).map((d) => `${d}/**/*.{ts,tsx}`)],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: { project: [generateTsconfig(pkg)], tsconfigRootDir: REPO_ROOT },

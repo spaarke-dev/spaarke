@@ -8,9 +8,10 @@
  *
  * EXTENDED 2026-07-10 (visual-host-version-update VHVU-001): consumers that
  * bundle this package's `src/` directly (e.g. VisualHost) also compile the
- * bare-specifier imports inside those src files — `@spaarke/sdap-client` and
- * `@spaarke/auth` — resolving them against THIS package's node_modules. Those
- * sibling packages ship as `tsc` output too, so their `dist/` must be fresh or
+ * bare-specifier imports inside those src files — `@spaarke/auth` (and, until
+ * 2026-11-24, `@spaarke/sdap-client`, now folded into `src/services/sdap`) —
+ * resolving them against THIS package's node_modules. That sibling package
+ * ships as `tsc` output too, so its `dist/` must be fresh or
  * the consumer build fails with TS2307 (missing type declarations). We now
  * freshen the sibling dists before our own, so the whole chain is deterministic
  * from a clean worktree (given each package's node_modules is installed).
@@ -96,6 +97,5 @@ function ensureFresh(pkgRoot, label) {
 
 // Freshen sibling deps that ui-components imports (needed when a consumer bundles
 // ui-components src) BEFORE ui-components itself, so the whole chain is current.
-ensureFresh(path.join(SHARED_ROOT, 'Spaarke.SdapClient'), '@spaarke/sdap-client');
 ensureFresh(path.join(SHARED_ROOT, 'Spaarke.Auth'), '@spaarke/auth');
 ensureFresh(LIB_ROOT, '@spaarke/ui-components');

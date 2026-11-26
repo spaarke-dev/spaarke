@@ -22,6 +22,9 @@
  *   paragraphs keep the line breaks.
  * - A file still uploading when the step closes (Back, or a restart) is uploaded again when the step opens, because the
  *   composer drops an upload result that arrives after it closed.
+ * - Files this step uploaded carry their own delete (`IAttachmentItem.discard`, task 220): removing one in the step deletes
+ *   its document, and the wizard deletes the rest when it closes (`useDiscardComposedEmailUploadsOnClose`) unless a
+ *   Finish send carried them and it went out or may have.
  * - `headerContent` renders above the composer (the Summarize Files wizard's "short summary" toggle).
  *
  * Fluent v9 tokens only (ADR-021). No Xrm: the host injects the compose handlers (ADR-012).
@@ -33,6 +36,7 @@ import * as React from 'react';
 import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { EmailComposer } from '../../EmailComposer/EmailComposer';
 import { composedEmailFromState, pendingAttachments } from '../../EmailComposer/composeOnlySend';
+import { discardUpload } from '../../EmailComposer/uploadDiscard';
 import { isUnchangedPlainBody, plainTextToHtml } from '../../EmailComposer/composeOnlyText';
 import type { IComposedEmail, IEmailComposeHandlers } from '../../EmailComposer/composeOnlySend';
 import type { EmailComposerState, IAttachmentItem } from '../../EmailComposer/EmailComposer.types';
@@ -61,6 +65,11 @@ export interface ISendEmailFollowOnStepProps {
   subtitle?: string;
   /** Extra content above the composer, e.g. a "short summary" toggle. */
   headerContent?: React.ReactNode;
+  /**
+   * The body is not marked required, because the server fills an empty subject or body at send (task 028, FR-17). Pair it
+   * with `isComposedEmailReady(email, { allowEmptySubjectAndBody: true })` in the wizard's step gate. Default `false`.
+   */
+  allowEmptySubjectAndBody?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +163,7 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
   title = 'Send Notification Email',
   subtitle = DEFAULT_SEND_EMAIL_SUBTITLE,
   headerContent,
+  allowEmptySubjectAndBody = false,
 }) => {
   const styles = useStyles();
 
@@ -210,11 +220,15 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
     for (const item of shown.current.attachments.filter(isStrandedUpload)) {
       if (uploading.current.has(item.id)) continue;
       uploading.current.add(item.id);
-      const settle = (patch: (a: IAttachmentItem) => IAttachmentItem | null) => {
+      const settle = (patch: (a: IAttachmentItem) => IAttachmentItem | null, discard?: () => Promise<void>) => {
         uploading.current.delete(item.id);
-        if (!mountedRef.current) return; // the next opening of the step tries again
         const current = shown.current;
-        if (!current.attachments.some(a => a.id === item.id)) return; // removed meanwhile
+        // Dropped results: the step closed (the next opening uploads the file again) or the file was removed meanwhile.
+        // Their document is referenced by nothing, so it is deleted (task 220).
+        if (!mountedRef.current || !current.attachments.some(a => a.id === item.id)) {
+          discardUpload(discard);
+          return;
+        }
         const next: IComposedEmail = {
           ...current,
           attachments: current.attachments.flatMap(a => {
@@ -229,12 +243,16 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
       };
       upload(item.file as File)
         .then(res =>
-          settle(a => ({
-            ...a,
-            documentId: res.documentId,
-            driveItemId: res.driveItemId ?? a.driveItemId,
-            linkUrl: res.linkUrl ?? a.linkUrl,
-          }))
+          settle(
+            a => ({
+              ...a,
+              documentId: res.documentId,
+              driveItemId: res.driveItemId ?? a.driveItemId,
+              linkUrl: res.linkUrl ?? a.linkUrl,
+              discard: res.discard,
+            }),
+            res.discard
+          )
         )
         .catch((err: unknown) => {
           if (mountedRef.current) {
@@ -279,6 +297,7 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
         fromMailbox={initial.fromMailbox}
         initialAttachments={initial.attachments}
         showAssociations={false}
+        allowEmptyBody={allowEmptySubjectAndBody}
         onStateChange={onStateChange}
         onSearchRecipients={onSearchRecipients}
         onLookupRecipients={handlers.onLookupRecipients}

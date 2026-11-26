@@ -332,7 +332,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (8) Invoke the importer. Long-running (up to 60 min per POML) —
+        // (8) Invoke the importer. Long-running (up to ImportTimeout, 120 min by default) —
         //     reconciler owns keeping the ambient Service Bus lock alive per
         //     FR-22 / R20. Infrastructure exceptions classified Resumable
         //     (except OperationCanceledException which propagates for shutdown).
@@ -521,11 +521,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
 
         // Gate entry — one per failure. Verifier is H6; state is Pending
         // (external precondition to resolve). Parity with H5's FailAsync.
-        run.GateStates[$"h6-{rejectionCode}"] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-        };
+        run.RecordFailureGate($"h6-{rejectionCode}", HandlerIdentifier);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

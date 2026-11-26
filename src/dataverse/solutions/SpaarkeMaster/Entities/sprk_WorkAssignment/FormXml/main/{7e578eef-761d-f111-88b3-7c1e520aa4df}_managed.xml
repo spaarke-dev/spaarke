@@ -349,6 +349,38 @@
             </column>
           </columns>
         </tab>
+        <tab name="tab_billing" id="{8DD5DF41-3F4C-08C1-048E-94FF0BBA077F}" IsUserDefined="1" verticallayout="true" expanded="true" showlabel="true">
+          <labels>
+            <label description="Billing" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_ebilling" id="{1B6AB3A4-4FDB-89D4-C45D-17C21F247E75}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="Billing firm" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{614F875B-D182-EDD0-29BC-7982BDD881D1}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingfirm" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingfirm" />
+                      </cell>
+                      <cell id="{BE650B88-83ED-FF9B-6950-4434E4FA202F}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_billingresponsible" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_billingresponsible" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
       </tabs>
       <header id="{c950025f-5783-4e5b-9390-9a41d3e60c8f}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
         <rows>

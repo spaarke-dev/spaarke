@@ -54,6 +54,7 @@ import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 // contracts differ from the shared AssignWork/CreateEvent follow-on steps
 // (those create *child* records for CreateRecordWizard). See task 023 notes.
 import { FollowOnGrid, SendEmailFollowOnStep, followOnStepId } from '../WizardFollowOns';
+import { holdComposedEmailUploadsDuring, useDiscardComposedEmailUploadsOnClose } from '../EmailComposer/uploadDiscard';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
@@ -124,7 +125,7 @@ export interface IWorkAssignmentWizardDialogProps {
   resolveSpeContainerId?: () => Promise<string>;
   /**
    * AAD tenant ID. Forwarded to `WorkAssignmentService` so post-upload RAG
-   * indexing via `@spaarke/sdap-client` routes to the correct multi-tenant
+   * indexing via the SDAP client (`services/sdap`) routes to the correct multi-tenant
    * index. When omitted, indexing is skipped (files still upload to SPE).
    */
   tenantId?: string;
@@ -198,6 +199,9 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   followOnEventStateRef.current = followOnEventState;
   const emailRef = React.useRef(email);
   emailRef.current = email;
+  // Task 220 (#2813): when the wizard closes (with or without Finish), delete the files the Send Email step uploaded that
+  // no sent email references. On close, never on reopen (the reopen resets the email).
+  useDiscardComposedEmailUploadsOnClose(open, emailRef);
 
   // Refs for pre-fill state (stale closure prevention in renderContent)
   const isPrefillRef = React.useRef(isPrefilling);
@@ -639,9 +643,13 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     // 3. Execute follow-on: Create Event
     if (actions.includes('create-event')) {
-      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current);
+      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current, form.name);
       if (!eventResult.success && eventResult.warning) {
         warnings.push(eventResult.warning);
+      }
+      // The route's non-fatal warnings for the event (a mapped value the server did not write), shown like the work assignment's.
+      if (eventResult.success && eventResult.warnings?.length) {
+        warnings.push(...eventResult.warnings);
       }
     }
 
@@ -696,7 +704,9 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       title="Create Work Assignment"
       steps={steps}
       onClose={onClose}
-      onFinish={handleFinish}
+      // Task 220: the Send Email step's uploads are held from the first moment of Finish (record creation runs before
+      // the send), so closing during "Creating…" cannot delete what the send is about to carry.
+      onFinish={() => holdComposedEmailUploadsDuring(emailRef.current, handleFinish)}
       finishLabel="Create"
       finishingLabel={finishingLabel}
       embedded={embedded}

@@ -6,7 +6,8 @@
     "jsx": "react",
     "paths": {
       "@spaarke/ui-components": ["../../shared/Spaarke.UI.Components/dist/index"],
-      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"],
+      "@spaarke/communication-components/*": ["../../shared/Spaarke.Communication.Components/src/*"]
     },
     "baseUrl": "."
   },

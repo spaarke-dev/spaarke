@@ -224,6 +224,7 @@ const useStyles = makeStyles({
   // Task 091 (UAT-2): the job title, kept as a third, QUIETER line than the email line above it — same
   // color token, smaller text size (the <Text size={100}> below), rather than a new, unproven token.
   lookupMetaQuiet: { color: tokens.colorNeutralForeground3 },
+  contactSearchError: { color: tokens.colorPaletteRedForeground1 },
   selectedContact: {
     display: 'flex',
     alignItems: 'center',
@@ -280,6 +281,8 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
   const [contactQuery, setContactQuery] = useState('');
   const [contactResults, setContactResults] = useState<ContactOption[]>([]);
   const [contactSearching, setContactSearching] = useState(false);
+  // #1571 review F3: a failed search (refused, a server fault, the session ended) — never shown as "no contacts".
+  const [contactSearchError, setContactSearchError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isFiled = savedContext !== undefined;
@@ -310,6 +313,7 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
     }
     if (assignedTo || contactQuery.trim().length < 2) {
       setContactResults([]);
+      setContactSearchError(null);
       return;
     }
     debounceRef.current = setTimeout(() => {
@@ -317,8 +321,10 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
         setContactSearching(true);
         try {
           setContactResults(await onSearchContacts(contactQuery.trim()));
-        } catch {
+          setContactSearchError(null);
+        } catch (err) {
           setContactResults([]);
+          setContactSearchError(err instanceof Error && err.message ? err.message : 'Could not search contacts.');
         } finally {
           setContactSearching(false);
         }
@@ -573,6 +579,11 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
                       );
                     })}
                   </div>
+                )}
+                {contactSearchError && (
+                  <Text size={200} role="alert" className={styles.contactSearchError}>
+                    {contactSearchError}
+                  </Text>
                 )}
               </>
             )}

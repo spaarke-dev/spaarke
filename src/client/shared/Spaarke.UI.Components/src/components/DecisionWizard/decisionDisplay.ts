@@ -113,8 +113,13 @@ export function joinLabels(labels: readonly string[]): string {
 // Failures and warnings, in words a person can act on (no HTTP phrases, codes or ids)
 // ---------------------------------------------------------------------------
 
+/** The commit route's refusal of a billing item (D-207, task 174): decided only in the Invoice Review page. */
+const INVOICE_REVIEW_REASON = 'ontology.decision.decided_in_invoice_review';
+
 /** The heading of a failed attempt: what happened to the decision, not the status line of the request. */
 export function failureHeading(failure: DecisionCommitFailure): string {
+  // Task 175 (D-207): the code says more than the status (the route may answer 409), so it is read first.
+  if (failure.reasonCode === INVOICE_REVIEW_REASON) return 'Decide this in Invoice Review';
   // Task 191: a stored failure returned again (409 + replayed) is the same failure, not a review in progress.
   if (failure.httpStatus === 409 && failure.replayed) return 'The decision was not recorded';
   if (failure.reasonCode === SIGNAL_NOT_OPEN) return 'This item is no longer open';
@@ -174,6 +179,9 @@ export function failureMessage(failure: DecisionCommitFailure): string {
       return 'The earlier attempt cannot be continued. Nothing more was recorded.';
     case 'ontology.decision.review_in_progress':
       return 'This decision is already being recorded. Wait a moment, then try again.';
+    // Task 175 (D-207): a billing item reached the commit route; it is decided only in Invoice Review.
+    case INVOICE_REVIEW_REASON:
+      return 'Invoice items are decided in Invoice Review. Nothing was recorded.';
     case SIGNAL_NOT_OPEN:
       return 'This item was closed in the meantime, so the decision was not recorded on it. Anything listed as already carried out stands.';
     case REVIEW_UNFINISHED:
@@ -245,6 +253,9 @@ const WARNING_TEXT: Record<string, string> = {
     "The task was assigned, but no email was sent: the assignee's contact is linked to more than one user.",
   assignee_email_not_sent_unverified:
     'The task was assigned, but no email was sent: whether the assignee can see this record could not be checked.',
+  // Task 207 (#3063, DI-171): the assignee's user account is Administrative-only, so Dataverse gives it no Read on the task.
+  assignee_email_not_sent_admin_account:
+    "The task was assigned, but no email was sent: the assignee's user account is set up for administration only and cannot use the app.",
 };
 
 /** A warning from the commit answer as a sentence; a code this build does not know reads generically. */

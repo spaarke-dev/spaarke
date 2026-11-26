@@ -993,7 +993,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
   };
 
   /** A signed-in contoso user on the home plane, the gate rendered over a marker child. */
-  async function renderGate(options: { guest?: Behaviour } = {}) {
+  async function renderGate(options: { guest?: Behaviour; onSignOut?: () => void } = {}) {
     stubEnv();
     sessionStorage.setItem(INVITE_CODE_STORAGE_KEY, JSON.stringify({ code: INVITE_CODE, customerKey: null }));
     h.byClient[HOME_CLIENT_ID] = { accounts: [JANE] };
@@ -1016,7 +1016,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
         { theme: webLightTheme },
         React.createElement(
           WorkforceHomeGate,
-          { onReady } as any,
+          { onReady, onSignOut: options.onSignOut } as any,
           React.createElement('div', { 'data-testid': 'workspace' }, 'workspace')
         )
       )
@@ -1154,6 +1154,71 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(h.console.join('\n')).not.toContain('guest-token-popup');
   });
 
+  // R4 task 041 (FR-25, #2192): the BFF's `licensedUser` routing hint on registration_required.
+  const REG_REQUIRED_LICENSED = (licensedUser: unknown): Reply => ({
+    status: 403,
+    json: { ...(REG_REQUIRED.json as Record<string, unknown>), licensedUser },
+  });
+
+  it('licensedUser hint + silent failure: opens on "Link my account" (no form, no popup yet); the click links, then /me', async () => {
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(true), ME_OK], [LINK]: [LINKED] };
+    const g = await renderGate({
+      guest: { popup: async () => ({ accessToken: 'guest-token-popup', account: guestAccount }) },
+    });
+    const button = await g.screen.findByRole('button', { name: /link my account/i });
+    expect(g.screen.getByRole('heading', { name: /link your spaarke account/i })).toBeTruthy();
+    expect(g.screen.queryByLabelText(/first name/i)).toBeNull(); // the profile form is skipped
+    expect(h.requests.filter(r => r.call === 'acquireTokenPopup')).toEqual([]); // no gesture-less popup
+    expect(calls()).toEqual([ME]);
+
+    g.fireEvent.click(button);
+    expect(await g.screen.findByTestId('workspace')).toBeTruthy();
+
+    const popup = h.requests.find(r => r.call === 'acquireTokenPopup')!;
+    expect(popup.request).toStrictEqual({ scopes: [scopeOf(CONTOSO.bffAppId)], loginHint: 'jane@contoso.test' });
+    expect(calls()).toEqual([ME, LINK, ME]); // never a registration POST
+    expect(bodies(LINK)).toEqual([{ guestAccessToken: 'guest-token-popup' }]);
+  });
+
+  it('licensedUser hint alone never reaches the workspace: a cancelled popup keeps the link step and posts nothing', async () => {
+    const { BrowserAuthError, BrowserAuthErrorCodes } = await import('@azure/msal-browser');
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(true)] };
+    const g = await renderGate({
+      guest: {
+        popup: async () => {
+          throw new BrowserAuthError(BrowserAuthErrorCodes.userCancelled);
+        },
+      },
+    });
+    g.fireEvent.click(await g.screen.findByRole('button', { name: /link my account/i }));
+    expect(await g.screen.findByText(/closed before it finished/i)).toBeTruthy();
+    expect(g.screen.queryByTestId('workspace')).toBeNull();
+    expect(g.onReady).not.toHaveBeenCalledWith(true);
+    expect(calls()).toEqual([ME]);
+  });
+
+  it('licensedUser hint + silent link success: the workspace shows; the hint does not replace the stored link', async () => {
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(true), ME_OK], [LINK]: [LINKED] };
+    const g = await renderGate({
+      guest: { sso: async () => ({ accessToken: 'guest-token-xyz', account: guestAccount }) },
+    });
+    expect(await g.screen.findByTestId('workspace')).toBeTruthy();
+    expect(calls()).toEqual([ME, LINK, ME]);
+    expect(h.requests.filter(r => r.call === 'acquireTokenPopup')).toEqual([]);
+  });
+
+  it.each([
+    ['false', false],
+    ['the string "true"', 'true'],
+    ['1', 1],
+  ])('licensedUser %s is not the hint: the profile form shows, as before', async (_label, value) => {
+    h.script = { [ME]: [REG_REQUIRED_LICENSED(value)] };
+    const g = await renderGate();
+    expect(((await g.screen.findByLabelText(/first name/i)) as HTMLInputElement).value).toBe('Jane');
+    expect(g.screen.queryByRole('button', { name: /link my account/i })).toBeNull();
+    expect(calls()).toEqual([ME]);
+  });
+
   it('popup cancelled: the page stays with an explanation, no registration POST and no link POST follow', async () => {
     const { BrowserAuthError, BrowserAuthErrorCodes } = await import('@azure/msal-browser');
     h.script = {
@@ -1233,11 +1298,63 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(calls()).toEqual([ME, REGISTRATION]);
   });
 
-  it('registration_email_missing: tells the person to contact their administrator', async () => {
+  /** R4 FR-26 (#2155): the email-missing screen says who fixes it and what to do next. */
+  async function expectEmailMissingScreen(g: Awaited<ReturnType<typeof renderGate>>) {
+    expect(await g.screen.findByRole('heading', { name: /we could not read your email address/i })).toBeTruthy();
+    expect(
+      g.screen.getByText(
+        /ask your organization's IT administrator to set the Email on your Microsoft Entra account, then sign in again/i
+      )
+    ).toBeTruthy();
+    expect(g.screen.queryByText(/contact your administrator\.$/i)).toBeNull();
+    expect(g.screen.queryByText(/sdap\.access|preferred_username|upn/i)).toBeNull();
+    expect(g.screen.queryByLabelText(/first name/i)).toBeNull();
+    expect(g.screen.queryByRole('button', { name: /continue|try again/i })).toBeNull();
+    expect(g.screen.queryByTestId('workspace')).toBeNull();
+  }
+
+  it('registration_email_missing: asks for the IT administrator to set the Entra Email, then a new sign-in (FR-26)', async () => {
     h.script = { [ME]: [REG_REQUIRED], [REGISTRATION]: [problem(403, 'sdap.access.registration_email_missing')] };
     const g = await renderGate();
     await fillAndSubmit(g, { first: 'Jane', last: 'Doe' });
-    expect(await g.screen.findByText(/did not include an email address/i)).toBeTruthy();
+    await expectEmailMissingScreen(g);
+    expect(calls()).toEqual([ME, REGISTRATION]);
+  });
+
+  it.each([
+    ['an empty email', ''],
+    ['a blank email', '   '],
+    ['a null email', null],
+    ['no email field', undefined],
+  ])(
+    'registration_required with %s: the email-missing screen, never a form that cannot succeed; nothing is posted (FR-27)',
+    async (_label, email) => {
+      const json: Record<string, unknown> = { ...(REG_REQUIRED.json as Record<string, unknown>), email };
+      if (email === undefined) delete json.email;
+      h.script = { [ME]: [{ status: 403, json }] };
+      const g = await renderGate();
+      await expectEmailMissingScreen(g);
+      expect(calls()).toEqual([ME]);
+      expect(calls()).not.toContain(REGISTRATION);
+      expect(g.onReady).toHaveBeenLastCalledWith(false);
+    }
+  );
+
+  it('email missing in the browser: "Sign out" uses the shell sign-out, so the next sign-in gets a new token', async () => {
+    h.script = { [ME]: [{ status: 403, json: { ...(REG_REQUIRED.json as Record<string, unknown>), email: null } }] };
+    const onSignOut = vi.fn();
+    const g = await renderGate({ onSignOut });
+    await expectEmailMissingScreen(g);
+    g.fireEvent.click(g.screen.getByRole('button', { name: /^sign out$/i }));
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+    expect(calls()).toEqual([ME]);
+  });
+
+  it('email missing with no shell sign-out (the Teams tab): no "Sign out" button', async () => {
+    h.script = { [ME]: [{ status: 403, json: { ...(REG_REQUIRED.json as Record<string, unknown>), email: null } }] };
+    const g = await renderGate();
+    await expectEmailMissingScreen(g);
+    expect(g.screen.queryByRole('button', { name: /sign out/i })).toBeNull();
   });
 
   it.each([

@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 045g (owner, EB-D-231, #2794), through the three app-only update paths — the playbook
-/// update, the output orchestrator and the field-mapping push. Rule 1: an invoice's core record is fixed at create. Rule 2: an
+/// update, the update handler and the field-mapping push. Rule 1: an invoice's core record is fixed at create. Rule 2: an
 /// approval, a submission, a correction and an external identifier filed under a core record regard their invoice's core record
 /// (an external identifier filed under its invoice only keeps D-68). Rule 3: a line's invoice is never cleared. On a run as a
 /// person, a refusal of these rules is decided again on the rows as that person reads them, and a row they cannot read is
@@ -123,9 +123,9 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoicesubmission", "sprk_invoice")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoicesubmission", "sprk_invoice")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoicesubmission", "sprk_invoice")]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_externalidentifier", "sprk_regardinginvoice")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_externalidentifier", "sprk_regardinginvoice")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_externalidentifier", "sprk_regardinginvoice")]
     public async Task ARowWhoseInvoiceIsCleared_IsNotRefusedByTheseRules(GenericPath path, string table, string invoiceColumn)
     {
         // Rules 3 and 3b keep the invoice of a line, an approval and a correction. A submission exists before its invoice (its
@@ -145,7 +145,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Rule 3b (owner, 2026-11-13): an approval's and a correction's invoice is never cleared after create.</summary>
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoiceapproval")]
     public async Task AnApprovalWhoseInvoiceIsCleared_IsRefusedInvoiceCleared_AndNothingIsWritten(GenericPath path, string table)
     {
         var outcome = await RunAsync(path, table, FamilyRow, Lookups(("sprk_invoice", null)), NoPlain,
@@ -157,7 +157,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task ALineRePointedToAnotherInvoiceOfItsOwnMatter_IsWritten(GenericPath path)
     {
@@ -174,7 +174,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnInvoiceUpdateTouchingNoCoreLookup_IsWritten(GenericPath path)
     {
@@ -188,7 +188,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task ARowGivenAnInvoiceThatCannotBeRead_IsRefusedReadFailed_AndNothingIsWritten(GenericPath path)
     {
@@ -228,7 +228,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)] // the push always writes as its caller
     public async Task OnAPersonsRun_AnInvoiceMove_IsRefusedCoreRecordFixed_WhenThePersonReadsTheInvoice_AndReadFailedWhenNot(GenericPath path)
     {
@@ -251,7 +251,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatter_IsRefusedLineMismatch_OnlyWhenThePersonReadsThatInvoice(GenericPath path)
     {
@@ -279,7 +279,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     public async Task OnAPersonsRun_ALinesInvoiceCleared_IsRefusedLineInvoiceCleared_WhenThePersonReadsTheLine_AndReadFailedWhenNot(GenericPath path)
     {
         _personRows = (table, id) => table == "sprk_billingevent" && id == Line
@@ -300,7 +300,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
-    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
+    [InlineData(GenericPath.UpdateHandler, "sprk_invoiceapproval")]
     public async Task OnAPersonsRun_AnApprovalsInvoiceCleared_IsRefusedInvoiceCleared_WhenThePersonReadsTheRow_AndReadFailedWhenNot(
         GenericPath path, string table)
     {
@@ -404,7 +404,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_AWriteThatSetsNoInvoice_ReadsNoRowAsThePerson(GenericPath path)
     {
@@ -469,7 +469,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_AnInvoiceGivenASupersededInvoiceOfItsMatterThePersonCannotRead_IsRefusedReadFailed_AndNothingIsWritten(
         GenericPath path)
@@ -489,7 +489,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_AnInvoiceGivenASupersededInvoiceOfItsMatterThePersonReads_IsWritten(GenericPath path)
     {
@@ -510,7 +510,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_WhenThePersonsReadOfTheInvoiceFaults_IsRefusedReadFailed_AndNothingIsWritten(GenericPath path)
     {
@@ -527,7 +527,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_WhenThePersonsReadOfTheOtherInvoiceFaultsWhileTheRefusalIsDecidedAgain_IsRefusedReadFailed_AndNothingIsWritten(
         GenericPath path)
@@ -557,7 +557,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.UpdateHandler)]
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_ACancellationDuringThePersonsReadOfTheInvoice_IsRethrown_AndNothingIsWritten(GenericPath path)
     {

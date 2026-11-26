@@ -35,6 +35,8 @@ export interface EvidenceLineProps {
   asOf?: string | null;
   /** The clause this evidence tested. Absent or empty reads "context, not tested". */
   clause?: string | null;
+  /** Optional seam: something to do with the line (for example an "Open in Spaarke" link), shown under its detail. Absent: nothing, as before. */
+  actions?: React.ReactNode;
   className?: string;
 }
 
@@ -90,6 +92,7 @@ export const EvidenceLine: React.FC<EvidenceLineProps> = ({
   source,
   asOf,
   clause,
+  actions,
   className,
 }) => {
   const styles = useStyles();
@@ -124,6 +127,7 @@ export const EvidenceLine: React.FC<EvidenceLineProps> = ({
       <div className={styles.body}>
         <Text>{bodyText}</Text>
         <Caption1 className={styles.detail}>{detail}</Caption1>
+        {actions}
       </div>
     </div>
   );

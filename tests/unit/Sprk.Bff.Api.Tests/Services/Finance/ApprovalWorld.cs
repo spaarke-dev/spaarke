@@ -639,10 +639,17 @@ internal sealed class ApprovalWorld
             new Dictionary<string, object?> { ["invoiceId"] = factsInvoiceId ?? InvoiceId, ["lineId"] = lineId },
             InvoiceLineAddService.OutcomeAdded, Reason: "Charge the firm left off the invoice"));
 
+    /// <summary>ISS-050: the lock service the approval and its line service use when a test sets it (default: <see cref="Locks"/>).</summary>
+    public IIdempotencyService? LockService { get; set; }
+
+    /// <summary>ISS-050: the line service's own clock when a test sets it (default: the system clock, as before).</summary>
+    public TimeProvider? LineClock { get; set; }
+
     public InvoiceLineDecisionService LineService() => new(
-        Entities.Object, Totals(), Recorder(), Locks, Ownership.Object, Probe.Object,
+        Entities.Object, Totals(), Recorder(), LockService ?? Locks, Ownership.Object, Probe.Object,
         (_, _, _, _, _, _) => Task.FromResult(SignalAutomatedCloseOutcome.Closed),
-        NullLogger<InvoiceLineDecisionService>.Instance);
+        NullLogger<InvoiceLineDecisionService>.Instance,
+        time: LineClock);
 
     /// <summary>F3: the core-ancestor resolver over this world's rows (every invoice root column exists).</summary>
     public CoreAncestorResolver CoreAncestors() => new(
@@ -653,7 +660,7 @@ internal sealed class ApprovalWorld
 
     /// <param name="canDecide">The decide check (F4); the contract host passes the REAL one over its authorization stack. Default: <see cref="CanDecide"/>.</param>
     public InvoiceApprovalService Service(Func<InvoiceContextService.InvoiceCaller, Guid, CancellationToken, Task<bool>>? canDecide = null) => new(
-        Entities.Object, Resolver(), LineService(), Totals(), Lifecycle.Object, Recorder(), Locks, CallerIdentity.Object, CoreAncestors(), Probe.Object,
+        Entities.Object, Resolver(), LineService(), Totals(), Lifecycle.Object, Recorder(), LockService ?? Locks, CallerIdentity.Object, CoreAncestors(), Probe.Object,
         CloseAsync, canDecide ?? ((_, _, _) => Task.FromResult(CanDecide)), Log, Clock);
 
     public readonly ApprovalListLogger<InvoiceRejectReturnService> RejectReturnLog = new();
@@ -1007,6 +1014,10 @@ internal sealed class ApprovalWorld
             _held.TryRemove(eventId, out _);
             return Task.CompletedTask;
         }
+
+        /// <summary>ISS-050: the approval's bulk accept renews the line lock it holds; a held key (or a defeated lock) renews.</summary>
+        public Task<bool> RenewProcessingLockAsync(string eventId, string ownerId, TimeSpan lockDuration, CancellationToken cancellationToken = default) =>
+            Task.FromResult(AlwaysGrant || _held.ContainsKey(eventId));
 
         /// <summary>Holds a key as another caller would.</summary>
         public void Hold(string key) => _held[key] = "other";

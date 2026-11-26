@@ -4,7 +4,7 @@
     <title>Messages shown as threads; HTML through sanitizeEmailHtml, never allowRemoteImages (FR-22, #2453)</title>
     <phase>3 Grids, information, messages</phase>
     <gate>after 028 and 034 — owner chooses the thread-key path at step 1</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Renders partner-visible HTML (sanitizer constraint) and needs an external DTO change on the shared BFF surface</rigor-reason>
     <model-tier>sonnet</model-tier>

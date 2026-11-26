@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Telemetry;
 
@@ -40,8 +41,14 @@ public sealed record RuleDescriptionResult(RuleDescription? Description, string?
 /// A relative date is stated as the filter states it (<c>now-30d</c> is "30 days ago"), never softened into "recently".
 /// A classifier-based clause (a <c>sprk_triagecategory</c> condition) is phrased as a classification, per v4 HANDOFF
 /// section 1.4 (binding). A value with no known label is printed as the filter holds it (for example a choice value
-/// 100000003), not invented. Known gap: choice option labels need a metadata read this task does not make; the formal
-/// form always carries the exact value.</para>
+/// 100000003), not invented. <c>statecode</c>'s two states are the same on every table and are said as "active" / "inactive"
+/// (DI-159). Any other choice value tested for equality (<c>statuscode</c>, a choice column such as <c>sprk_reviewoutcome</c>) is said by
+/// its option label (task 210, DI-165), read from the BFF's shared entity-metadata cache (<see cref="MetadataService"/>: one Dataverse
+/// read per table org-wide per cache lifetime while the shared cache is reachable; if Redis is unavailable, MetadataService reads
+/// Dataverse on each call, its existing behaviour for every caller). That read is made only when the body tests such a value, and a
+/// failure shows the number instead: the description is never refused for it. The formal form always carries the exact value.</para>
+/// <para><b>Column names.</b> A column is said by its Dataverse display name in lower case ("created on"), from the static
+/// <see cref="ColumnDisplayNames"/> (the authorable columns are a closed, reviewed list, so the names need no metadata read).</para>
 /// <para><b>Names.</b> Lookup GUIDs in the closed <see cref="LookupColumns"/> table are resolved by ONE batched read per
 /// reference table, with the BFF's own <see cref="IGenericEntityService"/> (the evaluator's principal: reference rows
 /// are configuration, not matter data). A GUID that does not resolve refuses the description rather than showing an
@@ -50,6 +57,11 @@ public sealed record RuleDescriptionResult(RuleDescription? Description, string?
 /// found no describer; <c>sprk_sentence</c> is the rule's literal template). Extension: no; the compiler's job is FetchXML,
 /// and prose would give it a second reason to change. Cost of doing nothing: the wizard's "How this was determined" and
 /// the admin rule page have no data, or hand-written text that drifts from the filter.</para>
+/// <para><b>Label sources (task 210, CLAUDE.md section 11).</b> Existing: <see cref="MetadataService"/> already reads and caches every
+/// table's option labels (state, status and picklist) org-wide in Redis for 6 hours; the describer reuses it and adds no cache, no
+/// service and no Dataverse call of its own. Column display names extend the existing static label table (as <see cref="EntityLabels"/>
+/// does for tables). Extension: <see cref="MetadataService"/> is used as it is. Cost of doing nothing: a decision says "status is
+/// 659490001" and "where createdon is on or before 5 days ago" (#3020, #3040).</para>
 /// </remarks>
 public sealed class RuleBodyDescriber
 {
@@ -61,7 +73,9 @@ public sealed class RuleBodyDescriber
             [("sprk_event", "sprk_eventtype_ref")] = ("sprk_eventtype_ref", "sprk_name"),
         };
 
-    private static readonly IReadOnlyDictionary<string, string> EntityLabels = new Dictionary<string, string>(StringComparer.Ordinal)
+    /// <summary>One label per table in <see cref="PredicateCompiler.EvaluatorGlobalReadableEntities"/> (pinned by a guard test): a table with none would be
+    /// said by its logical name, "Each sprk_invoice where the sprk_invoice is active".</summary>
+    internal static readonly IReadOnlyDictionary<string, string> EntityLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["sprk_matter"] = "matter",
         ["sprk_project"] = "project",
@@ -71,8 +85,75 @@ public sealed class RuleBodyDescriber
         ["sprk_communication"] = "communication",
         ["sprk_budgetrevision"] = "budget revision",
         ["sprk_budget"] = "budget",
+        ["sprk_invoice"] = "invoice",
+        ["sprk_memo"] = "memo",
     };
 
+    /// <summary>
+    /// Task 210 (DI-169): the Dataverse display name of every column in <see cref="PolicyVersionValidator.AuthorableColumns"/>, exactly as
+    /// the solution source defines it (<c>SpaarkeMaster/Entities/*/Entity.xml</c>). A guard test pins both: every authorable column has one,
+    /// and each equals the solution source. The rule wizard's column lists show these (the authoring catalog carries them); a sentence
+    /// says them in lower case ("created on") unless <see cref="ColumnLabels"/> words the column differently. A column not listed is said
+    /// by its logical name, never guessed.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<(string Entity, string Column), string> ColumnDisplayNames =
+        new Dictionary<(string Entity, string Column), string>
+        {
+            [("sprk_communication", "sprk_triagecategory")] = "Triage Category",
+            [("sprk_communication", "sprk_receiveddate")] = "Received Date",
+            [("sprk_communication", "sprk_reviewoutcome")] = "Review Outcome",
+            [("sprk_communication", "sprk_regardingmatter")] = "Regarding Matter",
+            [("sprk_communication", "statecode")] = "Status",
+            [("sprk_budgetrevision", "sprk_revisedon")] = "Revised On",
+            [("sprk_budgetrevision", "sprk_matter")] = "Matter",
+            [("sprk_budgetrevision", "statecode")] = "Status",
+            [("sprk_budget", "sprk_matter")] = "Matter",
+            [("sprk_budget", "sprk_budgetstartdate")] = "Budget Start Date",
+            [("sprk_budget", "sprk_budgetenddate")] = "Budget End Date",
+            [("sprk_budget", "statecode")] = "Status",
+            [("sprk_event", "sprk_eventtype_ref")] = "Event Type",
+            [("sprk_event", "statuscode")] = "Status Reason",
+            [("sprk_event", "statecode")] = "Status",
+            [("sprk_event", "sprk_approveddate")] = "Approved Date",
+            [("sprk_event", "sprk_basedate")] = "Base Date",
+            [("sprk_event", "sprk_completeddate")] = "Completed Date",
+            [("sprk_event", "sprk_duedate")] = "Due Date",
+            [("sprk_event", "sprk_finalduedate")] = "Final Due Date",
+            [("sprk_event", "sprk_meetingdate")] = "Meeting Date",
+            [("sprk_event", "sprk_tododuedate")] = "To Do Due Date",
+            [("sprk_todo", "statuscode")] = "Status Reason",
+            [("sprk_todo", "statecode")] = "Status",
+            [("sprk_todo", "sprk_duedate")] = "Due Date",
+            [("sprk_workassignment", "statecode")] = "Status",
+            [("sprk_workassignment", "sprk_responseduedate")] = "Response Due Date",
+            [("sprk_workassignment", "sprk_respondedon")] = "Responded On",
+            [("sprk_matter", "createdon")] = "Created On",
+            [("sprk_matter", "statecode")] = "Status",
+            [("sprk_matter", "sprk_matterid")] = "Matter",
+            [("sprk_matter", "sprk_openeddate")] = "Opened Date",
+            [("sprk_matter", "sprk_closeddate")] = "Closed Date",
+            [("sprk_matter", "sprk_lastreviewdate")] = "Last Review Date",
+            [("sprk_matter", "sprk_nextreviewdate")] = "Next Review Date",
+            [("sprk_matter", "sprk_budgetutilizationpercent")] = "Budget Utilization Percent",
+            [("sprk_matter", "sprk_totalbudget")] = "Total Budget",
+            [("sprk_matter", "sprk_totalspendtodate")] = "Total Spend to Date",
+            [("sprk_project", "statecode")] = "Status",
+            [("sprk_project", "sprk_openeddate")] = "Opened Date",
+            [("sprk_project", "sprk_closeddate")] = "Closed Date",
+            [("sprk_project", "sprk_lastreviewdate")] = "Last Review Date",
+            [("sprk_project", "sprk_nextreviewdate")] = "Next Review Date",
+            [("sprk_project", "sprk_budgetutilizationpercent")] = "Budget Utilization Percent",
+            [("sprk_project", "sprk_totalbudget")] = "Total Budget",
+            [("sprk_project", "sprk_totalspendtodate")] = "Total Spend to Date",
+            [("sprk_invoice", "statecode")] = "Status",
+            [("sprk_invoice", "sprk_invoicedate")] = "Invoice Date",
+            [("sprk_invoice", "sprk_invoiceduedate")] = "Invoice Due Date",
+            [("sprk_memo", "statecode")] = "Status",
+        };
+
+    /// <summary>Sentence wording by column, ahead of the lower-cased display name (<see cref="ColumnDisplayNames"/>): a column worded
+    /// differently from its display name ("status", "response recorded"), and the pre-task-210 table, kept so a column of a body written
+    /// outside the BFF (not on the allow-list for its table) still reads as before.</summary>
     private static readonly IReadOnlyDictionary<string, string> ColumnLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["sprk_receiveddate"] = "received date",
@@ -83,6 +164,7 @@ public sealed class RuleBodyDescriber
         // Read as "it has no response recorded" / "it has a response recorded" by a null test (task 061, D-54).
         ["sprk_respondedon"] = "response recorded",
         ["sprk_eventtype_ref"] = "event type",
+        // "status is Open" (task 210), not "status reason is Open".
         ["statuscode"] = "status",
         ["statecode"] = "state",
         // A PERCENT (task 025b, D-122): 85 means 85 percent of the budget spent, 100 means fully spent. Said in the label so a
@@ -92,7 +174,12 @@ public sealed class RuleBodyDescriber
         ["sprk_totalspendtodate"] = "total spend to date",
     };
 
+    /// <summary>(table, column) → (option value → label), for the choice values one body tests (task 210).</summary>
+    private sealed class ChoiceLabels : Dictionary<(string Entity, string Column), IReadOnlyDictionary<int, string>>;
+
     private const string TriageCategoryColumn = "sprk_triagecategory";
+
+    private const string StateCodeColumn = "statecode";
 
     private static readonly Regex RelativeDate = new(@"^now(?:(?<sign>[-+])(?<days>[0-9]{1,4})d)?\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -100,12 +187,23 @@ public sealed class RuleBodyDescriber
     private readonly PolicyVersionValidator _validator;
     private readonly IGenericEntityService _entities;
     private readonly ILogger<RuleBodyDescriber> _logger;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <summary>A describer with no choice-label source: every choice value other than a <c>statecode</c> state is shown as its number.</summary>
     public RuleBodyDescriber(PolicyVersionValidator validator, IGenericEntityService entities, ILogger<RuleBodyDescriber> logger)
+        : this(validator, entities, logger, scopes: null)
+    {
+    }
+
+    /// <param name="scopes">Resolves the scoped <see cref="MetadataService"/> (the shared, cached entity metadata) for choice labels, the
+    /// way <c>UpdateRecordActionCore</c> reaches it from a singleton. Null: no labels, numbers shown.</param>
+    public RuleBodyDescriber(
+        PolicyVersionValidator validator, IGenericEntityService entities, ILogger<RuleBodyDescriber> logger, IServiceScopeFactory? scopes)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _scopes = scopes;
     }
 
     public async Task<RuleDescriptionResult> DescribeAsync(string? ruleBodyJson, CancellationToken ct)
@@ -142,9 +240,11 @@ public sealed class RuleBodyDescriber
                     new RuleDescription(new[] { new RuleClauseDescription("rule", ruleType.ToString(), text, formal) }), null);
             }
 
+            // Task 210 (DI-165): option labels only for the choice values this body tests; none read when it tests none.
+            var choices = await ReadChoiceLabelsAsync(ChoiceCandidates(doc.RootElement), ct).ConfigureAwait(false);
             return ruleType == RuleType.Threshold
-                ? DescribeThreshold(doc.RootElement)
-                : await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
+                ? DescribeThreshold(doc.RootElement, choices)
+                : await DescribeParsedAsync(doc.RootElement, choices, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested)
                                    && ex is not PredicateCompilationException)
@@ -196,7 +296,7 @@ public sealed class RuleBodyDescriber
     /// comparison. No lookup names are read (the compared column is numeric and the shared <c>when</c> grammar is described by
     /// the same phrases as Existence), so nothing here can fail on a reference read.
     /// </summary>
-    private static RuleDescriptionResult DescribeThreshold(JsonElement root)
+    private static RuleDescriptionResult DescribeThreshold(JsonElement root, ChoiceLabels choices)
     {
         var subject = root.GetProperty("subject").GetString()!;
         var subjectLabel = Label(EntityLabels, subject);
@@ -204,7 +304,7 @@ public sealed class RuleBodyDescriber
 
         if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object && when.EnumerateObject().Any())
         {
-            var phrases = Phrases(subject, when, new Dictionary<Guid, string>());
+            var phrases = Phrases(subject, when, new Dictionary<Guid, string>(), choices);
             lines.Add(new RuleClauseDescription("when", "Subject",
                 $"Each {subjectLabel} where {Join(phrases.Words)}.",
                 $"{subject} where {string.Join(" and ", phrases.Formal)}"));
@@ -223,7 +323,7 @@ public sealed class RuleBodyDescriber
             _ => throw new PredicateCompilationException($"threshold.operator: '{op}' has no description."),
         };
         lines.Add(new RuleClauseDescription("threshold", "Threshold",
-            $"The {subjectLabel}'s {Label(ColumnLabels, field)} {comparison} {Raw(value)}.",
+            $"The {subjectLabel}'s {ColumnLabel(subject, field)} {comparison} {Raw(value)}.",
             $"{subject}.{field} {op} {Raw(value)}"));
 
         return new RuleDescriptionResult(new RuleDescription(lines), null);
@@ -239,7 +339,7 @@ public sealed class RuleBodyDescriber
         return new RuleDescriptionResult(null, message);
     }
 
-    private async Task<RuleDescriptionResult> DescribeParsedAsync(JsonElement root, CancellationToken ct)
+    private async Task<RuleDescriptionResult> DescribeParsedAsync(JsonElement root, ChoiceLabels choices, CancellationToken ct)
     {
         var subject = root.GetProperty("subject").GetString()!;
         var ids = new Dictionary<(string Entity, string Column), HashSet<Guid>>();
@@ -269,7 +369,7 @@ public sealed class RuleBodyDescriber
         var lines = new List<RuleClauseDescription>();
         if (whenFilter is { } when)
         {
-            var phrases = Phrases(subject, when, names);
+            var phrases = Phrases(subject, when, names, choices);
             lines.Add(new RuleClauseDescription("when", "Subject",
                 $"Each {Label(EntityLabels, subject)} where {Join(phrases.Words)}.",
                 $"{subject} where {string.Join(" and ", phrases.Formal)}"));
@@ -281,7 +381,7 @@ public sealed class RuleBodyDescriber
             var isExists = clause.TryGetProperty("exists", out var existsEl);
             var related = (isExists ? existsEl : clause.GetProperty("notExists")).GetString()!;
             var path = clause.GetProperty("path").GetString()!;
-            var phrases = Phrases(related, clause.GetProperty("filter"), names);
+            var phrases = Phrases(related, clause.GetProperty("filter"), names, choices);
             var subjectLabel = Label(EntityLabels, subject);
             var relatedLabel = Label(EntityLabels, related);
 
@@ -352,14 +452,16 @@ public sealed class RuleBodyDescriber
         return names;
     }
 
-    private static (List<string> Words, List<string> Formal) Phrases(string entity, JsonElement filter, Dictionary<Guid, string> names)
+    private static (List<string> Words, List<string> Formal) Phrases(
+        string entity, JsonElement filter, Dictionary<Guid, string> names, ChoiceLabels choices)
     {
         var words = new List<string>();
         var formal = new List<string>();
         foreach (var field in filter.EnumerateObject())
         {
-            var label = Label(ColumnLabels, field.Name);
+            var label = ColumnLabel(entity, field.Name);
             var isLookup = LookupColumns.ContainsKey((entity, field.Name));
+            var options = choices.TryGetValue((entity, field.Name), out var known) ? known : null;
             var value = field.Value;
 
             if (value.ValueKind == JsonValueKind.Object)
@@ -370,19 +472,37 @@ public sealed class RuleBodyDescriber
                     // Task 061 (D-54): a null test names no value. "it has no response recorded" / "it has a response recorded";
                     // the formal form is the test itself.
                     var isNull = ops[0].Name == PredicateCompiler.NullTestMember;
-                    words.Add(isNull ? $"it has no {label}" : $"it has a {label}");
+                    words.Add(isNull ? $"it has no {label}" : $"it has {Article(label)} {label}");
                     formal.Add($"{field.Name} is {(isNull ? "null" : "not null")}");
                     continue;
                 }
 
-                words.Add(ops.Count == 2 ? RangeWords(label, ops) : $"{label} {OperatorWords(ops[0].Name, ops[0].Value, field.Name, isLookup, names)}");
+                // DI-159: the object form of a state test ({"=": 0}, {"<>": 1}, which the rule wizard writes) is said by the state's label too.
+                if (field.Name == StateCodeColumn && ops.Count == 1 && ops[0].Name is ("=" or "<>") && StateWord(ops[0].Value) is { } opState)
+                {
+                    words.Add($"the {Label(EntityLabels, entity)} is {(ops[0].Name == "<>" ? "not " : string.Empty)}{opState}");
+                    formal.Add($"{field.Name} {ops[0].Name} {Raw(ops[0].Value)}");
+                    continue;
+                }
+
+                // A choice label only for an equality test: "is at least Open" would compare words, not the option values.
+                words.Add(ops.Count == 2
+                    ? RangeWords(label, ops)
+                    : $"{label} {OperatorWords(ops[0].Name, ops[0].Value, field.Name, isLookup, names, ops[0].Name is "=" or "<>" ? options : null)}");
                 formal.AddRange(ops.Select(o => $"{field.Name} {o.Name} {Raw(o.Value)}"));
                 continue;
             }
 
             if (value.ValueKind == JsonValueKind.Array)
             {
-                var shown = value.EnumerateArray().Select(v => Display(v, isLookup, names)).ToList();
+                var shown = value.EnumerateArray().Select(v => Display(v, isLookup, names, options)).ToList();
+                if (field.Name == StateCodeColumn && value.EnumerateArray().All(v => StateWord(v) is not null))
+                {
+                    words.Add($"the {Label(EntityLabels, entity)} is {OrList(value.EnumerateArray().Select(v => StateWord(v)!).ToList())}");
+                    formal.Add($"{field.Name} in ({string.Join(", ", value.EnumerateArray().Select(Raw))})");
+                    continue;
+                }
+
                 words.Add(field.Name == TriageCategoryColumn
                     ? $"it was classified as {OrList(shown)}"
                     : $"{label} is {OrList(shown)}");
@@ -390,18 +510,34 @@ public sealed class RuleBodyDescriber
                 continue;
             }
 
+            if (field.Name == StateCodeColumn && StateWord(value) is { } stateWord)
+            {
+                // DI-159: statecode is the same two-state choice on every table the rule grammar reads (0 Active, 1 Inactive), so it is
+                // said by its label, never as "state is 0". The formal line below keeps the exact test.
+                words.Add($"the {Label(EntityLabels, entity)} is {stateWord}");
+                formal.Add($"{field.Name} = {Raw(value)}");
+                continue;
+            }
+
             words.Add(field.Name == TriageCategoryColumn
-                ? $"it was classified as {Display(value, isLookup, names)}"
-                : $"{label} is {Display(value, isLookup, names)}");
+                ? $"it was classified as {Display(value, isLookup, names, options)}"
+                : $"{label} is {Display(value, isLookup, names, options)}");
             formal.Add($"{field.Name} = {Raw(value)}");
         }
 
         return (words, formal);
     }
 
-    private static string OperatorWords(string op, JsonElement operand, string column, bool isLookup, Dictionary<Guid, string> names)
+    /// <summary>The label of a <c>statecode</c> value: 0 is "active", 1 is "inactive"; null for any other value (shown as the filter holds it).</summary>
+    private static string? StateWord(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var state)
+            ? state switch { 0 => "active", 1 => "inactive", _ => null }
+            : null;
+
+    private static string OperatorWords(
+        string op, JsonElement operand, string column, bool isLookup, Dictionary<Guid, string> names, IReadOnlyDictionary<int, string>? options = null)
     {
-        var shown = Display(operand, isLookup, names);
+        var shown = Display(operand, isLookup, names, options);
         if (operand.ValueKind == JsonValueKind.Number)
         {
             // A numeric operand is a quantity, never a date: "is at least 5", not "is on or after 5".
@@ -437,8 +573,15 @@ public sealed class RuleBodyDescriber
         return $"{label} {OperatorWords(lower.Name, lower.Value, label, false, [])} and {OperatorWords(upper.Name, upper.Value, label, false, [])}";
     }
 
-    private static string Display(JsonElement value, bool isLookup, Dictionary<Guid, string> names)
+    /// <param name="options">The column's option labels (task 210), or null: a whole-number value with a label is shown by the label.</param>
+    private static string Display(JsonElement value, bool isLookup, Dictionary<Guid, string> names, IReadOnlyDictionary<int, string>? options = null)
     {
+        if (options is not null && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var option)
+            && options.TryGetValue(option, out var optionLabel))
+        {
+            return optionLabel;
+        }
+
         if (value.ValueKind == JsonValueKind.String)
         {
             var text = value.GetString()!;
@@ -478,6 +621,137 @@ public sealed class RuleBodyDescriber
 
     private static string Label(IReadOnlyDictionary<string, string> labels, string logicalName) =>
         labels.TryGetValue(logicalName, out var label) ? label : logicalName;
+
+    /// <summary>The indefinite article for a lower-case column label: "an opened date", "a due date" (task 210 fix round 1). No
+    /// authorable label starts with a silent letter or a "you" sound, so the first letter decides.</summary>
+    internal static string Article(string label) =>
+        label.Length > 0 && "aeiouAEIOU".Contains(label[0]) ? "an" : "a";
+
+    /// <summary>How a sentence names a column (task 210, DI-169): its <see cref="ColumnLabels"/> wording, else its display name in lower
+    /// case ("created on"), else its logical name (a column outside <see cref="ColumnDisplayNames"/>; never guessed).</summary>
+    internal static string ColumnLabel(string entity, string column) =>
+        ColumnLabels.TryGetValue(column, out var phrase) ? phrase
+        : ColumnDisplayNames.TryGetValue((entity, column), out var display) ? display.ToLowerInvariant()
+        : column;
+
+    /// <summary>
+    /// The (table, column) pairs whose option labels the body's words need (task 210, DI-165): a column tested for equality with a whole
+    /// number (a bare value, <c>{"=": n}</c>, <c>{"&lt;&gt;": n}</c>, or a list) that is not <c>statecode</c> (said as "active" /
+    /// "inactive" without a read) and not a lookup. A Threshold's compared column is a quantity and is never one. Empty for most bodies.
+    /// </summary>
+    private static HashSet<(string Entity, string Column)> ChoiceCandidates(JsonElement root)
+    {
+        var wanted = new HashSet<(string Entity, string Column)>();
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("subject", out var subjectEl)
+            || subjectEl.ValueKind != JsonValueKind.String || subjectEl.GetString() is not { } subject)
+        {
+            return wanted;
+        }
+
+        void Scan(string entity, JsonElement filter)
+        {
+            if (filter.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            foreach (var field in filter.EnumerateObject())
+            {
+                if (field.Name == StateCodeColumn || LookupColumns.ContainsKey((entity, field.Name)))
+                {
+                    continue;
+                }
+
+                var value = field.Value;
+                IEnumerable<JsonElement> tested = value.ValueKind switch
+                {
+                    JsonValueKind.Number => [value],
+                    JsonValueKind.Array => value.EnumerateArray(),
+                    JsonValueKind.Object => value.EnumerateObject().Where(o => o.Name is "=" or "<>").Select(o => o.Value),
+                    _ => [],
+                };
+                if (tested.Any(v => v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out _)))
+                {
+                    wanted.Add((entity, field.Name));
+                }
+            }
+        }
+
+        if (root.TryGetProperty("when", out var when))
+        {
+            Scan(subject, when);
+        }
+
+        if (root.TryGetProperty("all", out var all) && all.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var clause in all.EnumerateArray())
+            {
+                if (clause.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var hasRelated = clause.TryGetProperty("exists", out var related) || clause.TryGetProperty("notExists", out related);
+                if (hasRelated && related.ValueKind == JsonValueKind.String && clause.TryGetProperty("filter", out var filter))
+                {
+                    Scan(related.GetString()!, filter);
+                }
+            }
+        }
+
+        return wanted;
+    }
+
+    /// <summary>
+    /// The option labels of the wanted columns, from <see cref="MetadataService"/> (the shared Redis copy of each table's metadata, 6-hour
+    /// lifetime; Dataverse is read only on a miss, once per table org-wide). One call per table, none when nothing is wanted. Fails soft: a
+    /// table whose metadata cannot be read (or a describer with no <see cref="IServiceScopeFactory"/>) gives no labels, so its values are
+    /// shown as numbers; only the CALLER's cancellation propagates.
+    /// </summary>
+    private async Task<ChoiceLabels> ReadChoiceLabelsAsync(HashSet<(string Entity, string Column)> wanted, CancellationToken ct)
+    {
+        var labels = new ChoiceLabels();
+        if (wanted.Count == 0 || _scopes is null)
+        {
+            return labels;
+        }
+
+        foreach (var table in wanted.GroupBy(w => w.Entity, StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested(); // no read for a caller that has gone
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                var metadata = await scope.ServiceProvider.GetRequiredService<MetadataService>()
+                    .GetMetadataAsync(table.Key, ct).ConfigureAwait(false);
+                foreach (var (entity, column) in table)
+                {
+                    var optionSet = metadata.Attributes.FirstOrDefault(a => string.Equals(a.LogicalName, column, StringComparison.Ordinal))?.OptionSet;
+                    if (optionSet is null)
+                    {
+                        continue;
+                    }
+
+                    var byValue = new Dictionary<int, string>();
+                    foreach (var option in optionSet.Options.Where(o => !string.IsNullOrWhiteSpace(o.Label)))
+                    {
+                        byValue.TryAdd(option.Value, option.Label);
+                    }
+
+                    labels[(entity, column)] = byValue;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // The exception TYPE only (its message can echo request detail); the values read as numbers.
+                _logger.LogWarning(OntologyWriterEvents.RuleDescriptionLabelsUnavailable,
+                    "Rule description shows choice values as numbers: the option labels could not be read (entity={Entity}, exceptionType={ExceptionType}).",
+                    table.Key, ex.GetType().Name);
+            }
+        }
+
+        return labels;
+    }
 
     private static string OrList(List<string> items) => string.Join(" or ", items);
 

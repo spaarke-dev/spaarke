@@ -1,0 +1,14 @@
+{
+  "case": "suppression.503.unavailable",
+  "status": 503,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.4\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"The suppression count could not be read. Try again.\",\"reasonCode\":\"ontology.suppression.unavailable\",\"correlationId\":\"<volatile>\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.6.4",
+    "title": "Service Unavailable",
+    "status": 503,
+    "detail": "The suppression count could not be read. Try again.",
+    "reasonCode": "ontology.suppression.unavailable",
+    "correlationId": "<volatile>"
+  }
+}

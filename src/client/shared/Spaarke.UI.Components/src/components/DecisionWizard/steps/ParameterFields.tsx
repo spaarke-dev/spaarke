@@ -77,6 +77,18 @@ interface FieldProps {
   action: DecisionAction;
 }
 
+/**
+ * A Person candidate's second line is its email (task 211, #3062), so same-name contacts can be told apart. A host that already
+ * names the email in `name` (the Console's inline search: "Name (email)") gets no second line, and a candidate with no email keeps
+ * none. A host that sets its own `secondaryText` keeps it.
+ */
+function withEmailLine(item: ILookupItem): ILookupItem {
+  if (item.secondaryText) return item;
+  const email = item.email?.trim();
+  if (!email || item.name.toLowerCase().includes(email.toLowerCase())) return item;
+  return { ...item, secondaryText: email };
+}
+
 const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
   const { draft, update, lookup, openLookup, item, locked } = useDecisionItem();
   const styles = useStyles();
@@ -88,7 +100,9 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
   const search = React.useCallback(
     (query: string) =>
       lookup
-        ? lookup({ kind, entity: parameter.lookupEntity, parameterCode: parameter.code, query })
+        ? lookup({ kind, entity: parameter.lookupEntity, parameterCode: parameter.code, query }).then(found =>
+            kind === 'Person' ? found.map(withEmailLine) : found
+          )
         : Promise.resolve([]),
     [lookup, kind, parameter.lookupEntity, parameter.code]
   );
@@ -122,7 +136,10 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
     try {
       const picked = await openLookup({ kind, entity: paneEntity, parameterCode: parameter.code });
       // Cancelling (null) changes nothing; the pick fills the field exactly as the inline pick does.
-      if (picked?.id) update(d => withLookup(d, scope, parameter.code, { id: picked.id, name: picked.name }));
+      if (picked?.id)
+        update(d =>
+          withLookup(d, scope, parameter.code, { id: picked.id, name: picked.name, secondaryText: picked.email })
+        );
       // eslint-disable-next-line no-restricted-syntax -- a failed pane is a cancel: the field is unchanged and can be retried; the navigation adapter logs the failure
     } catch {
       // A pane that failed is treated as a cancel: the field is unchanged and can be tried again.
@@ -226,6 +243,10 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
         onSearch={search}
         openOnFocus
         placeholder={`Search ${parameter.label.toLowerCase()}`}
+        // The host's optional seams (the MCP widget's search): a minimum length it will search, and the words for a failed search.
+        minSearchLength={lookup.minChars}
+        shortQueryHint={lookup.minChars && lookup.minChars > 1 ? `Type at least ${lookup.minChars} letters` : undefined}
+        searchErrorText={lookup.failureText}
       />
       {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
     </div>

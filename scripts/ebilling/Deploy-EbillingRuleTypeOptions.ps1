@@ -85,12 +85,22 @@ try {
         }
     }
 
-    # Task 049 (D-125) added SubmissionIntegrity = 100000014 to the column (Deploy-EbillingSubmissionIntegrityOption.ps1): tolerated when
-    # present, never inserted here, so this script stays re-runnable after it.
-    $expected = @($Ontology.Keys) + @($Billing.Keys) + 100000014
+    # Values other scripts add to the column, tolerated when present with their own label and never inserted here, so this script stays
+    # re-runnable after them: task 049 (D-125) SubmissionIntegrity = 100000014 (Deploy-EbillingSubmissionIntegrityOption.ps1); task 115
+    # (EB-D-148) AddedFee = 100000015 and Discount = 100000016 (Deploy-EbillingAddedFeeDiscountOptions.ps1). Before 2026-11-24 only 100000014
+    # was listed, so a re-run after task 115 stopped with an escalation on two expected values.
+    # A plain hashtable on purpose: an [ordered] dictionary's int indexer is POSITIONAL, so $t[100000014] would not find the key.
+    $Tolerated = @{ 100000014 = 'SubmissionIntegrity'; 100000015 = 'AddedFee'; 100000016 = 'Discount' }
+    foreach ($t in $Tolerated.Keys) {
+        $cur = $have | Where-Object { $_.Value -eq $t }
+        if ($cur -and $cur.Label -ne $Tolerated[$t]) {
+            throw [EscalationException]::new("Value $t is labelled '$($cur.Label)', expected '$($Tolerated[$t])'. Owner decision needed.")
+        }
+    }
+    $expected = @($Ontology.Keys) + @($Billing.Keys) + @($Tolerated.Keys)
     $foreign = @($have | Where-Object { $_.Value -notin $expected })
     if ($foreign.Count -gt 0) {
-        throw [EscalationException]::new("$Table.$Column holds options outside the 14 expected: $(Format-Options $foreign). Owner decision needed.")
+        throw [EscalationException]::new("$Table.$Column holds options outside the expected set: $(Format-Options $foreign). Owner decision needed.")
     }
 
     foreach ($v in $Billing.Keys) {
@@ -139,7 +149,7 @@ try {
             $o = $after | Where-Object { $_.Value -eq $k }
             if (-not $o -or $o.Label -ne $all[$k]) { $bad += "$k expected '$($all[$k])', got '$($o.Label)'" }
         }
-        $systemPresent = @($after | Where-Object { $_.Value -eq 100000014 -and $_.Label -eq 'SubmissionIntegrity' }).Count
+        $systemPresent = @($after | Where-Object { $Tolerated.Contains($_.Value) -and $_.Label -eq $Tolerated[$_.Value] }).Count
         if ($after.Count -ne ($all.Count + $systemPresent)) { $bad += "expected $($all.Count + $systemPresent) options, found $($after.Count)" }
         if ($bad.Count -gt 0) { throw "Verification failed: $($bad -join '; ')" }
         Write-Host "  verified: $($all.Count) options match RuleType.cs" -ForegroundColor Green

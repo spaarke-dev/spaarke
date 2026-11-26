@@ -37,6 +37,8 @@ public sealed class CommunicationArrivedProducerSeamTests
     private const int DirectionIncoming = 100000000;
     private const int DirectionOutgoing = 100000001;
     private const int PrivacyOpen = 100000000; // ThreadPrivacyState.Open
+    private const int PrivacyPrivate = 100000001; // ThreadPrivacyState.Private
+    private const string ReportCardColumn = "sprk_regardingreportcard"; // on sprk_communication, NOT on sprk_communicationthread
 
     /// <summary>Records the real ping calls + appends "ping:{recipient}" to the shared ordering log.</summary>
     private sealed class RecordingDelivery : SignalRDeliveryService
@@ -67,6 +69,7 @@ public sealed class CommunicationArrivedProducerSeamTests
         public required Guid ThreadId { get; init; }
         public required Guid Recipient { get; init; }
         public required Guid MatterId { get; init; }
+        public required List<string[]> ThreadReadColumns { get; init; }
     }
 
     /// <summary>
@@ -74,7 +77,12 @@ public sealed class CommunicationArrivedProducerSeamTests
     /// The persisted communication is a single-internal-participant, Open-thread, non-internal-only row, so the
     /// fan-out yields exactly one recipient — isolating the producer's own outbox-then-ping behavior.
     /// </summary>
-    private static Harness BuildHarness(int commType, int direction, bool outboxThrows = false)
+    /// <param name="regardingOnThreadOnly">The regarding lookup is on the THREAD, not stamped on the message yet.</param>
+    /// <param name="threadPrivacy">The thread's <c>sprk_privacystate</c>.</param>
+    /// <param name="threadReadFails">A real read failure (transient Dataverse fault) on the thread.</param>
+    private static Harness BuildHarness(
+        int commType, int direction, bool outboxThrows = false,
+        bool regardingOnThreadOnly = false, int threadPrivacy = PrivacyOpen, bool threadReadFails = false)
     {
         var communicationId = Guid.NewGuid();
         var threadId = Guid.NewGuid();
@@ -95,9 +103,12 @@ public sealed class CommunicationArrivedProducerSeamTests
             ["sprk_direction"] = new OptionSetValue(direction),
             ["sprk_isinternalonly"] = false,
             ["createdon"] = DateTime.UtcNow,
-            ["sprk_regardingrecordid"] = matterId.ToString(),
-            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
         };
+        if (!regardingOnThreadOnly)
+        {
+            message["sprk_regardingrecordid"] = matterId.ToString();
+            message["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
+        }
         entity
             .Setup(s => s.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(message);
@@ -105,11 +116,41 @@ public sealed class CommunicationArrivedProducerSeamTests
         // Re-read the thread (Open → fan-out gated only by the internal-only filter, which passes here).
         var thread = new DataverseEntity("sprk_communicationthread", threadId)
         {
-            ["sprk_privacystate"] = new OptionSetValue(PrivacyOpen),
+            ["sprk_privacystate"] = new OptionSetValue(threadPrivacy),
         };
+        if (regardingOnThreadOnly)
+        {
+            thread["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
+        }
+
+        // The fake rejects what Dataverse rejects: asking sprk_communicationthread for a column it does not have
+        // (sprk_regardingreportcard) faults the whole read. A fake that ignored the column list is why this
+        // regression (DI-151 / #2775) was invisible.
+        var threadReadColumns = new List<string[]>();
         entity
             .Setup(s => s.RetrieveAsync("sprk_communicationthread", threadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(thread);
+            .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+            {
+                threadReadColumns.Add(columns);
+                if (threadReadFails)
+                {
+                    throw new InvalidOperationException("transient Dataverse fault");
+                }
+
+                if (columns.Contains(ReportCardColumn, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("sprk_communicationthread has no sprk_regardingreportcard");
+                }
+
+                // Like Dataverse, return only what was asked for.
+                var projected = new DataverseEntity("sprk_communicationthread", threadId);
+                foreach (var column in columns.Where(thread.Contains))
+                {
+                    projected[column] = thread[column];
+                }
+
+                return projected;
+            });
 
         // Junction read (fan-out candidate set) — one resolved internal systemuser participant.
         var junction = new List<DataverseEntity>
@@ -186,6 +227,7 @@ public sealed class CommunicationArrivedProducerSeamTests
             ThreadId = threadId,
             Recipient = recipient,
             MatterId = matterId,
+            ThreadReadColumns = threadReadColumns,
         };
     }
 
@@ -274,5 +316,67 @@ public sealed class CommunicationArrivedProducerSeamTests
             "sprk_openconversation=1 so the CommunicationConversationPanel PCF auto-opens (messaging-r3 round-7 item 11)");
         n.CorrelationId.Should().Be(h.CommunicationId.ToString());
         n.Title.Should().Be("New email", "signal-only channel label — never an address or content (NFR-02/03)");
+    }
+
+    // -- DI-151 / #2775: the thread read asks only for columns sprk_communicationthread has. Before the fix it asked
+    //    for sprk_regardingreportcard (communication only), the read faulted, and every arrival was treated as a
+    //    private thread: no recipients, no notification, no deep link. --
+
+    [Fact]
+    public async Task EmitCommunicationArrived_ThreadRead_DoesNotAskForAColumnTheThreadLacks()
+    {
+        var h = BuildHarness(TypeEmail, DirectionIncoming);
+
+        await h.Producer.EmitCommunicationArrivedAsync(h.CommunicationId);
+
+        h.ThreadReadColumns.Should().ContainSingle();
+        h.ThreadReadColumns[0].Should().NotContain(ReportCardColumn);
+        h.ThreadReadColumns[0].Should().BeEquivalentTo(
+            new[] { "sprk_privacystate", "sprk_name" }.Concat(ThreadResolver.ThreadRegardingColumns),
+            "the thread read is the privacy state, the name and the regarding lookups the thread has: one shared list");
+    }
+
+    [Fact]
+    public async Task EmitCommunicationArrived_ThreadHoldsTheRegarding_FansOutAndDeepLinksToTheRegardingRecord()
+    {
+        var h = BuildHarness(TypeEmail, DirectionIncoming, regardingOnThreadOnly: true);
+
+        await h.Producer.EmitCommunicationArrivedAsync(h.CommunicationId);
+
+        h.OutboxWrites.Should().ContainSingle("an Open thread notifies its normal audience, not the private deny-all");
+        h.Delivery.Pings.Should().ContainSingle().Which.Recipient.Should().Be(h.Recipient);
+        h.Notifications.Should().ContainSingle().Which.ActionUrl.Should().Be(
+            $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={h.MatterId:D}&sprk_openconversation=1",
+            "the message carries no regarding yet, so the link comes from the thread's typed lookup, not the thread record");
+    }
+
+    // Must-not-fire controls: the fix widens nothing for a thread that is genuinely private, and a real read failure
+    // still fails closed.
+
+    [Fact]
+    public async Task EmitCommunicationArrived_GenuinelyPrivateThread_StillNotifiesNobody()
+    {
+        var h = BuildHarness(TypeEmail, DirectionIncoming, regardingOnThreadOnly: true, threadPrivacy: PrivacyPrivate);
+
+        await h.Producer.EmitCommunicationArrivedAsync(h.CommunicationId);
+
+        h.ThreadReadColumns.Should().ContainSingle("the thread was read successfully and judged private");
+        h.OutboxWrites.Should().BeEmpty();
+        h.Delivery.Pings.Should().BeEmpty();
+        h.Notifications.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EmitCommunicationArrived_RealThreadReadFailure_FailsClosedAsPrivate()
+    {
+        var h = BuildHarness(TypeEmail, DirectionIncoming, threadReadFails: true);
+
+        Func<Task> act = () => h.Producer.EmitCommunicationArrivedAsync(h.CommunicationId);
+
+        await act.Should().NotThrowAsync();
+        h.ThreadReadColumns.Should().ContainSingle("the read was attempted and failed");
+        h.OutboxWrites.Should().BeEmpty("an unreadable thread is treated as private: never over-fan");
+        h.Delivery.Pings.Should().BeEmpty();
+        h.Notifications.Should().BeEmpty();
     }
 }

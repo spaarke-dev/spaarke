@@ -18,12 +18,13 @@
  *
  * Layout (task 020 / FR-05 / U-3, 2026-08-16 top-bar redesign; UAT pass 2
  * 2026-08-17 moved the inline search into Header — see below):
- *   TodoProvider (shared state)
+ *   SmartTodoLayout (data: hooks/useSmartTodoBridge — #2907 / #2972)
  *     ├── Header (title + [inline expanding SearchFilter] + Filter pill +
  *     │           + New Task / ⋮ overflow — Settings, Layout, Refresh — or
  *     │           selection-aware actions when a selection is active)
- *     └── SmartToDo (Kanban, with `hideHeader` so inner KanbanHeader is
- *           suppressed — chrome lives in the consolidated Header above)
+ *     └── SmartToDo from @spaarke/smart-todo-components (compact cards, with
+ *           `hideHeader` so its KanbanHeader is suppressed — chrome lives in
+ *           the consolidated Header above)
  *
  * Open triggers (all route to `launchOpenTodoForm` in services/openTodoLauncher.ts;
  * task 033 threads a post-close `handleRefresh` so a Save & Close refreshes the
@@ -49,10 +50,9 @@ import {
   Pin20Regular,
 } from "@fluentui/react-icons";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
-import { TodoProvider, useTodoContext } from "./context/TodoContext";
-import { SmartToDo } from "./components/SmartToDo";
-// ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
-import { Header, useCurrentContactId } from "@spaarke/smart-todo-components";
+// #2907 — the board is the shared `SmartToDo` (compact cards, page-owned chrome); the page's fork is gone.
+import { Header, SmartToDo, useCurrentContactId } from "@spaarke/smart-todo-components";
+import { useSmartTodoBridge } from "./hooks/useSmartTodoBridge";
 // smart-todo-r5 UAT 2026-08-17 — the structured Filter pane (task 021,
 // FR-06 / F-3: Priority / Status / Due-date / Assigned-To) is REPLACED by a
 // single expanding text search, mounted against task 020's
@@ -68,7 +68,6 @@ import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
 import { useLaunchContext } from "./hooks/useLaunchContext";
-import { useUserPreferences } from "./hooks/useUserPreferences";
 import { launchNewTaskCreateForm } from "./services/newTaskLauncher";
 import { launchOpenTodoForm } from "./services/openTodoLauncher";
 // SmartTodoViewMode type import removed 2026-06-19 — see viewMode removal above.
@@ -125,40 +124,41 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Inner layout (needs TodoContext access)
+// Inner layout
 // ---------------------------------------------------------------------------
 
 function SmartTodoLayout(): React.ReactElement {
   const styles = useStyles();
-  const { selectedEventId, refetch, items, selectItem } = useTodoContext();
 
-  // ── R4 task 033 + R4-104 — Persisted view-mode + orientation (FR-09 + FR-28) ──
+  // ── #2907 / #2972 — board data, mutations and preferences ─────────────────
   //
-  // viewMode + orientation both round-trip through `useUserPreferences` — the
-  // hook extends the kanban-prefs JSON envelope so all view-shape preferences
-  // share a single Dataverse record (preference-type 100000000, no new
-  // optionset values). The inner SmartToDo also calls `useUserPreferences` for
-  // its threshold logic; both hook instances read/write the SAME record so the
-  // next fetch on either surface sees the latest persisted state.
-  //
-  // R4-104 (UAT 10): Default viewMode = "kanban" for NEW users (no preference
-  // record). Existing users keep their saved choice — see
-  // `hooks/useUserPreferences.ts::DEFAULT_SMART_TODO_VIEW_MODE`.
-  //
-  // R4-104: Orientation is hoisted to App-level so the consolidated Header
-  // can drive it (now via the overflow "Layout" menu item, task 020 — the
-  // inner KanbanHeader is suppressed via `hideHeader`).
-  const { preferences: viewPrefs, updatePreferences: updateViewPrefs } =
-    useUserPreferences({ webApi: getWebApi(), userId: getUserId() });
-  const orientation = viewPrefs.orientation;
+  // `useSmartTodoBridge` owns the list (assigned to the user's contact, narrowed by an `openTodos` launch), the
+  // BFF-routed create, and the ONE preferences instance for the page: thresholds, orientation and column order all
+  // live in the same `sprk_userpreference` record (type 100000000). Before #2907 the page and its board each ran a
+  // preferences hook and a save from one could overwrite the other's fields.
+  const { todos: items, updatePreferences: updateViewPrefs, ...boardProps } = useSmartTodoBridge({
+    webApi: getWebApi(),
+    userId: getUserId(),
+  });
+  const refetch = boardProps.onRefetch;
+
+  // R4-104: Orientation is page-level so the consolidated Header drives it (overflow "Layout" item, task 020 —
+  // the board's own KanbanHeader is suppressed via `hideHeader`).
+  const orientation = boardProps.preferences.orientation;
+
+  // Single-select highlight for a clicked card (was the never-wired TodoContext's only live state).
+  const [selectedTodoId, setSelectedTodoId] = React.useState<string | null>(null);
+  const handleSelectTodo = React.useCallback((todoId: string) => {
+    setSelectedTodoId((prev) => (prev === todoId ? null : todoId));
+  }, []);
   // task 020 (FR-05 / U-3, 2026-08-16) — the QuickAdd Assigned-To typeahead
   // that consumed `useCurrentContactId` was removed from Header along with
   // the rest of the QuickAdd group; the hook call is removed here as it has
   // no other consumer (was Header-only plumbing).
   // viewMode / handleViewModeChange removed 2026-06-19 per UAT — list view
   // discontinued, kanban is the sole presentation. The preference field
-  // remains in useUserPreferences (back-compat for old user records) but
-  // is no longer surfaced in the chrome.
+  // stays in the stored record (useTodoKanbanPreferences keeps it) but is
+  // no longer surfaced in the chrome.
   const handleOrientationChange = React.useCallback(
     (next: Orientation) => {
       void updateViewPrefs({ orientation: next });
@@ -191,30 +191,14 @@ function SmartTodoLayout(): React.ReactElement {
     settingsOpenerRef.current?.();
   }, []);
 
-  // UAT 2026-06-21 round 8: capture the inner SmartToDo's refetch so the
-  // Header's Refresh button can actually trigger a re-fetch. The
-  // TodoContext.refetch is a no-op placeholder (see TodoContext.tsx — was
-  // never wired to a real data source); the real data lives in SmartToDo's
-  // internal `useTodoItems` hook. SmartToDo exposes its refetch via
-  // `onRefetchReady`; we capture it in a ref + use it in `handleRefresh`.
-  const innerRefetchRef = React.useRef<(() => void) | null>(null);
-  const handleInnerRefetchReady = React.useCallback((fn: () => void) => {
-    innerRefetchRef.current = fn;
-  }, []);
-
-  // Refresh — UAT 2026-06-21 round 8: route to the inner SmartToDo's real
-  // refetch (captured via onRefetchReady). Fall back to the TodoContext
-  // refetch only if the inner one hasn't reported in yet (defensive — would
-  // never happen in normal mount order). Declared here (moved up by task 030,
-  // FR-10) so `handleNewTask` below can call it on save — was previously
-  // defined further down, used only by the Header's Refresh menu item.
+  // Refresh — the bridge's refetch is the board's real data source (#2907: the page now owns the list, so there is
+  // no inner refetch to capture). Declared here (task 030, FR-10) so `handleNewTask` below can call it on save.
+  // Read through a ref so callers captured once on mount (the openTodo launch effect) still reach the latest one.
+  const refetchRef = React.useRef(refetch);
+  refetchRef.current = refetch;
   const handleRefresh = React.useCallback(() => {
-    if (innerRefetchRef.current) {
-      innerRefetchRef.current();
-    } else {
-      refetch();
-    }
-  }, [refetch]);
+    refetchRef.current();
+  }, []);
 
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
@@ -228,17 +212,11 @@ function SmartTodoLayout(): React.ReactElement {
   // operator's UAT decision) — see
   // `projects/smart-todo-r5/notes/uat-filter-text-search.md`.
   // `selectedIds` is the **multi-select** set driving Row 4 of the header
-  // (card affordances — task 060). It is INDEPENDENT of `selectedEventId`
-  // from TodoContext (which, post-R4 task 042, drives only the ListView
-  // highlight — the side-pane is retired per FR-18).
-  //
-  // For task 030 `selectedIds` is initialized empty; the toolbar renders
-  // `null` (zero selection). Task 060 will populate the Set as the user
-  // multi-selects cards in the kanban + list views.
+  // (card affordances — task 060). It is INDEPENDENT of `selectedTodoId`
+  // (the single-card highlight above).
   const [searchQuery, setSearchQuery] = React.useState<string>("");
-  // `setSelectedIds` is consumed by task 032 Delete's `onClearSelection`
-  // callback. Task 060 will additionally populate the Set as the user
-  // multi-selects cards in the kanban + list views.
+  // Populated by the cards' selection checkboxes; cleared by Delete's
+  // `onClearSelection` (task 032).
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(
     () => new Set<string>(),
   );
@@ -346,7 +324,8 @@ function SmartTodoLayout(): React.ReactElement {
   // routes uniformly regardless of the launcher (toolbar / card / future
   // keyboard shortcut). We dispatch on `window` so the listener above
   // (registered in this same component) receives it.
-  const handleCardOpen = React.useCallback((todoId: string) => {
+  const handleCardOpen = React.useCallback((todoId?: string) => {
+    if (!todoId) return;
     const detail: OpenTodosEventDetail = {
       selectedIds: [todoId],
       firstId: todoId,
@@ -385,8 +364,8 @@ function SmartTodoLayout(): React.ReactElement {
   //         the OOB sprk_todo main form via `Xrm.Navigation.navigateTo` at
   //         Layout 1 (85% × 85%). (Was: R4-040 iframe-hosted `<SmartTodoModal>`,
   //         retired per FR-14.)
-  // Delete — confirms via window.confirm, deletes selected, refetches via
-  //          TodoContext.
+  // Delete — confirms via window.confirm, deletes selected, refetches the
+  //          board's list.
   // Email  — composes a mailto: with selected todo names + due dates.
   // Pin    — toggles `sprk_todopinned`; any-unpinned ⇒ pin all; all-pinned ⇒
   //          unpin all (mirrors M365 "Mark as read" UX).
@@ -394,6 +373,9 @@ function SmartTodoLayout(): React.ReactElement {
   // Per `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` Delete + Pin use
   // `Xrm.WebApi` directly from this Code Page host (no BFF needed for simple
   // per-record CRUD).
+  //
+  // #2907 — `items` and `refetch` now come from the bridge (the board's real list). They used to come from the
+  // never-wired TodoContext, whose `items` was always empty, so Open / Delete / Email / Pin acted on nothing.
   const itemsRef = React.useRef(items);
   itemsRef.current = items;
   const selectedIdsRef = React.useRef(selectedIds);
@@ -410,10 +392,10 @@ function SmartTodoLayout(): React.ReactElement {
         itemsRef.current.filter((t) =>
           selectedIdsRef.current.has(t.sprk_todoid),
         ),
-      onAfterMutate: () => refetch(),
+      onAfterMutate: () => handleRefresh(),
       onClearSelection: () => setSelectedIds(new Set<string>()),
     });
-  }, [refetch]);
+  }, [handleRefresh]);
 
   const toolbarActions: ToolbarAction[] = React.useMemo(
     () => [
@@ -473,8 +455,8 @@ function SmartTodoLayout(): React.ReactElement {
     [actionHandlers],
   );
 
-  // task 020 (FR-05 / U-3, 2026-08-16) — The QuickAdd inline input (title →
-  // QUICK_ADD_TODO_EVENT → SmartToDo's handleAdd) and its Header-side
+  // task 020 (FR-05 / U-3, 2026-08-16) — The QuickAdd inline input (and its
+  // window-event route to the board, removed with the fork in #2907) and its Header-side
   // "+ New" wizard button (`onOpenWizard`) were removed along with the rest
   // of the QuickAdd group. The Header's new primary add path is the
   // "+ New Task" button (`handleNewTask`, wired to the OOB create form by
@@ -526,27 +508,29 @@ function SmartTodoLayout(): React.ReactElement {
             per user feedback; kanban is the sole presentation.) ── */}
       <div className={styles.primaryPanel}>
         <SmartToDo
-          webApi={getWebApi()}
-          userId={getUserId()}
-          // smart-todo-r5 UAT 2026-08-17 — `searchQuery` is now produced by
-          // the `<SearchFilter>` expanding text search above (task 021's
-          // structured Filter pane + its `filter` prop below are removed).
+          {...boardProps}
+          // The page's widget-style compact cards (checkbox, Open icon, double-click open).
+          cardAppearance="compact"
+          // Fill the page below the Header; every column starts expanded; drag order persists per user.
+          fillContainer
+          defaultCollapsedColumns={[]}
+          persistColumnOrder
+          // smart-todo-r5 UAT 2026-08-17 — `searchQuery` is produced by the
+          // `<SearchFilter>` expanding text search in the Header.
           searchQuery={searchQuery}
           // R4 task 060 — Card affordances plumbing (FR-25/26/27)
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}
+          selectedTodoId={selectedTodoId}
+          onSelectTodo={handleSelectTodo}
           onOpenTodo={handleCardOpen}
-          // R4-104 (Wave E-3) — Suppress inner KanbanHeader (chrome lives
-          // in the consolidated <Header /> above) + expose Settings opener
-          // so the Header's gear button can trigger the threshold popover
-          // that's still anchored inside SmartToDo.
+          // R4-104 (Wave E-3) — Suppress the board's KanbanHeader (chrome lives
+          // in the consolidated <Header /> above) + expose the Settings opener
+          // so the Header's gear button opens the threshold popover that stays
+          // anchored inside SmartToDo.
           hideHeader
           onSettingsOpenerReady={handleSettingsOpenerReady}
-          onRefetchReady={handleInnerRefetchReady}
-          // UAT 2026-06-19 — single-source-of-truth for orientation.
-          // Without this prop, SmartToDo's internal useUserPreferences
-          // instance held its own copy that didn't react to Header toggle
-          // clicks; the kanban stayed stuck regardless of persisted state.
+          // UAT 2026-06-19 — single source of truth for orientation (the Header toggle).
           orientation={orientation}
         />
       </div>
@@ -687,14 +671,14 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
 }
 
 // ---------------------------------------------------------------------------
-// Exported component (wraps in TodoProvider)
+// Exported component
 // ---------------------------------------------------------------------------
 
 export function SmartTodoApp(): React.ReactElement {
   return (
-    <TodoProvider>
+    <>
       <SmartTodoLayout />
       <LaunchCreateTodoWizardHost />
-    </TodoProvider>
+    </>
   );
 }

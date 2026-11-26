@@ -48,13 +48,14 @@ import {
   noticeKindOf,
   noticeLockOf,
   noticeToSend,
-  subjectSuffixOf,
+  settleNoticeEntries,
   type NoticeEntry,
 } from '../../services/noticeModel';
 import { money } from '../../services/reviewModel';
 import type { InvoiceReview } from '../../services/invoiceReviewApi';
 import { createDecisionLocks, type DecisionLocks } from './decisionLocks';
 import { NotifyStep } from './NotifyStep';
+import { useNoticeDrafts } from './useNoticeDrafts';
 import { AdjustStep, ConfirmStep, OutcomeStep, ReasonStep } from './steps';
 import { EMPTY_FORM, WizardContext, adjustmentFormDirty, type WizardCtx, type WizardForm } from './wizardContext';
 
@@ -135,34 +136,20 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
       })),
     []
   );
-  // The kinds already asked for in this opened wizard: a kind is asked for once (the step may mount again, or twice under StrictMode).
-  const noticeAsked = React.useRef<Set<FirmNoticeKind>>(new Set());
-  const loadNotice = React.useCallback(
-    (kind: FirmNoticeKind, retry = false) => {
-      if (!retry && noticeAsked.current.has(kind)) return;
-      noticeAsked.current.add(kind);
-      patchNotice(kind, { status: 'loading', failure: null });
-      // The answer lands only on an entry still waiting for it: a decision that came back unsure has fixed the entry as it was sent, and a late
-      // draft must not change what the repeat will carry.
-      const settle = (patch: Partial<NoticeEntry>) =>
-        setForm(f => (f.notices[kind].status === 'loading' ? { ...f, notices: { ...f.notices, [kind]: { ...f.notices[kind], ...patch } } } : f));
-      void api.getFirmNoticeDraft(invoiceId, kind).then(r => {
-        if (r.ok) {
-          // On by default once a draft has loaded; the reviewer turns it off, or skips the step, to send the decision alone.
-          settle({ status: 'ready', draft: r.value, subjectSuffix: subjectSuffixOf(r.value.subject), subject: r.value.subject, prose: r.value.prose, send: true, failure: null });
-        } else {
-          // Never blocks the decision: the message and code are shown with Retry, and nothing is sent for this kind.
-          // The server's message with its code (the disabled answer is the one sentence that carries no code of its own).
-          const text = decisionFailureMessage(r.failure);
-          const code = r.failure.errorCode;
-          // Review round 1 K2: an answer with no code of its own (a 429 from the rate limiter) shows its HTTP status instead.
-          const tag = code ?? (r.failure.status > 0 && !r.failure.signInFailed ? `HTTP ${r.failure.status}` : null);
-          settle({ status: 'failed', draft: null, send: false, failure: tag && !text.includes(tag) ? `${text} (${tag})` : text });
-        }
-      });
-    },
-    [api, invoiceId, patchNotice]
+  // The draft call, its once-per-kind rule and the failure wording are shared with the Finish form (`useNoticeDrafts`); here the entries live in
+  // the form, and an answer lands only on an entry still waiting for it.
+  const noticeWriter = React.useMemo(
+    () => ({
+      patch: (kind: FirmNoticeKind, patch: Partial<NoticeEntry>) => patchNotice(kind, patch),
+      settle: (kind: FirmNoticeKind, patch: Partial<NoticeEntry>) =>
+        setForm(f => {
+          const notices = settleNoticeEntries(f.notices, kind, patch);
+          return notices === f.notices ? f : { ...f, notices };
+        }),
+    }),
+    [patchNotice]
   );
+  const { loadNotice } = useNoticeDrafts(api, invoiceId, noticeWriter);
   // The shell's handle as the Confirm step last rendered it: Skip is the shell's own, so whether the Notify step was skipped is read from its state.
   const shell = React.useRef<IWizardShellHandle | null>(null);
   const notifySkipped = () => shell.current?.state.steps.some(x => x.id === NOTIFY_STEP && x.status === 'skipped') === true;

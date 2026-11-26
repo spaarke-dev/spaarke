@@ -17,7 +17,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import {
   REASON_COLUMN_NOT_AUTHORABLE,
@@ -42,6 +42,7 @@ const maybe = (id: string) => screen.queryByTestId(id);
 const change = (id: string, value: string) => fireEvent.change(byId(id), { target: { value } });
 const click = (id: string) => fireEvent.click(byId(id));
 const optionValues = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.value);
+const optionTexts = (id: string) => Array.from((byId(id) as HTMLSelectElement).options).map(o => o.text);
 const valueOf = (id: string) => (byId(id) as HTMLInputElement).value;
 /** How many times `text` is rendered anywhere on the page, hidden or not. */
 const occurrencesOf = (text: string) => (document.body.textContent ?? '').split(text).length - 1;
@@ -233,11 +234,71 @@ describe('RuleWizard - the condition is built only from the catalog', () => {
     expect(screen.queryByLabelText(/json/i)).toBeNull();
   });
 
+  it('shows each table by its display name and keeps the logical name as the value (DI-157)', async () => {
+    // A catalog of the real tables: the wizard names them for a person, and sends the logical name.
+    const real = {
+      ...catalog,
+      subjects: [
+        {
+          ...catalog.subjects[0],
+          entity: 'sprk_matter',
+          joins: [{ ...catalog.subjects[0].joins[0], related: 'sprk_budgetrevision' }],
+        },
+        { ...catalog.subjects[1], entity: 'sprk_invoice' },
+        { ...catalog.subjects[1], entity: 'sprk_workassignment' },
+      ],
+    };
+    cleanup();
+    setup({ service: makeAuthoringService({ getCatalog: jest.fn(async () => ({ ok: true as const, data: real })) }) });
+    await fillBasics();
+    await next('rule-wizard-condition');
+
+    expect(optionTexts('rule-wizard-subject')).toEqual(['Choose a table', 'Matter', 'Invoice', 'Work Assignment']);
+    expect(optionValues('rule-wizard-subject')).toEqual(['', 'sprk_matter', 'sprk_invoice', 'sprk_workassignment']);
+
+    change('rule-wizard-subject', 'sprk_matter');
+    click('rule-wizard-add-clause');
+    expect(optionTexts('rule-wizard-clause-0-related')).toEqual(['Choose related records', 'Budget Revision']);
+    expect(optionValues('rule-wizard-clause-0-related')).toEqual(['', 'sprk_budgetrevision']);
+    expect(document.body.textContent).not.toMatch(/sprk_(matter|invoice|workassignment|budgetrevision)/);
+  });
+
+  it('shows each column by its display name and keeps the logical name as the value (DI-169)', () => {
+    change('rule-wizard-subject', 'zz_widget');
+    click('rule-wizard-when-row-add');
+    expect(optionTexts('rule-wizard-when-row-0-field')).toEqual([
+      'Choose a column',
+      'Widget State',
+      'Due On',
+      'Colour',
+    ]);
+    expect(optionValues('rule-wizard-when-row-0-field')).toEqual(['', 'zz_state', 'zz_due', 'zz_colour']);
+
+    // The rule body written from the choice names the column by its logical name.
+    change('rule-wizard-when-row-0-field', 'zz_state');
+    change('rule-wizard-when-row-0-value', 'open');
+    const preview = byId('rule-wizard-body-preview').textContent as string;
+    expect(preview).toContain('"zz_state"');
+    expect(preview).not.toContain('Widget State');
+
+    click('rule-wizard-add-clause');
+    change('rule-wizard-clause-0-related', 'zz_note');
+    expect(optionTexts('rule-wizard-clause-0-row-0-field')).toEqual(['Choose a column', 'Note Kind', 'Noted On']);
+    expect(optionValues('rule-wizard-clause-0-row-0-field')).toEqual(['', 'zz_kind', 'zz_noted']);
+  });
+
+  it('shows a column by its logical name when the catalog names it no display name (an older BFF)', () => {
+    change('rule-wizard-subject', 'zz_gadget');
+    click('rule-wizard-when-row-add');
+    expect(optionTexts('rule-wizard-when-row-0-field')).toEqual(['Choose a column', 'zz_size']);
+  });
+
   it("offers a Threshold only the tables that have a measure, and only that table's measures", () => {
     change('rule-wizard-rule-type', 'Threshold');
     expect(optionValues('rule-wizard-subject')).toEqual(['', 'zz_widget']);
     change('rule-wizard-subject', 'zz_widget');
     expect(optionValues('rule-wizard-threshold-field')).toEqual(['', 'zz_load']);
+    expect(optionTexts('rule-wizard-threshold-field')).toEqual(['Choose a measure', 'Load (percent)']);
     expect(optionValues('rule-wizard-threshold-operator')).toEqual(['>=', '<=']);
     change('rule-wizard-threshold-field', 'zz_load');
     expect(byId('rule-wizard-threshold-range')).toHaveTextContent('0 to 250');
@@ -479,6 +540,11 @@ describe('RuleWizard - wording', () => {
     // An authorable column of the table that the BFF did not return is not offered.
     expect(maybe('rule-wizard-eligible-zz_colour')).toBeNull();
 
+    // Task 210 (DI-169): offered by the column's display name; the token inserted is still the logical name.
+    expect(byId('rule-wizard-eligible-zz_state')).toHaveTextContent('Widget State');
+    expect(byId('rule-wizard-eligible-zz_due')).toHaveTextContent('Due On');
+    expect(byId('rule-wizard-eligible-zz_state')).not.toHaveTextContent('zz_state');
+
     click('rule-wizard-eligible-zz_state');
     expect(valueOf('rule-wizard-message')).toBe('{{zz_state}}');
 
@@ -649,7 +715,7 @@ describe('RuleWizard - a new rule', () => {
 
   it('refuses a save the BFF refuses (400): the message is on the field, the banner leads to its step, and nothing is closed', async () => {
     const message =
-      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.';
     const savePolicy = jest.fn(async () =>
       failure({
         status: 400,
@@ -709,7 +775,7 @@ describe('RuleWizard - a new rule', () => {
 
   it("shows a refused save (400) once: in the banner, not again as the shell's own error", async () => {
     const message =
-      'Each code may appear once, in actions or in next steps, never twice in one list and never in both.';
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.';
     const savePolicy = jest.fn(async () =>
       failure({ status: 400, reasonCode: REASON_DUPLICATE_ACTION, fieldErrors: { decisionPlan: [message] }, message })
     );

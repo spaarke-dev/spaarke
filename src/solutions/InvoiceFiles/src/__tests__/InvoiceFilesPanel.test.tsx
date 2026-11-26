@@ -179,6 +179,19 @@ describe('InvoiceFilesPanel source email', () => {
     expect(openDocument).toHaveBeenCalledWith(DOC_ID);
   });
 
+  it('shows a plain message when the source email cannot be opened', async () => {
+    const openDocument = jest.fn().mockRejectedValue(new Error('Xrm.Navigation.openForm failed: 0x80040217'));
+    renderPanel(ok(files()), { openDocument });
+    await screen.findByTestId('invoicefiles-list');
+    expect(screen.queryByTestId('invoicefiles-action-error')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId(`invoicefile-source-${PDF_ID}`));
+
+    const bar = await screen.findByTestId('invoicefiles-action-error');
+    expect(bar).toHaveTextContent('The source email could not be opened.');
+    expect(bar).not.toHaveTextContent('0x80040217');
+  });
+
   it('a file with no source email shows no link', async () => {
     renderPanel(ok(files()));
     await screen.findByTestId('invoicefiles-list');
@@ -203,6 +216,8 @@ describe('InvoiceFilesPanel dark mode', () => {
 
     expect(colour.test(read('components/InvoiceFilesPanel.tsx'))).toBe(false);
     expect(colour.test(read('main.tsx'))).toBe(false);
+    // The surface and the message states now live in the e-billing pages' shared chrome (issue 2965).
+    expect(colour.test(read('../../_ebilling-shared/codePageChrome.tsx'))).toBe(false);
     expect(colour.test('color: #fff;')).toBe(true);
     expect(colour.test('background: rgb(0, 0, 0)')).toBe(true);
     expect(colour.test('color: tokens.colorNeutralForeground1')).toBe(false);

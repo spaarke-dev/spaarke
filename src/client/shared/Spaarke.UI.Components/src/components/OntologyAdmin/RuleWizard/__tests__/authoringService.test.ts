@@ -175,6 +175,10 @@ describe('createOntologyAuthoringService - failures are results', () => {
     });
     const answer = await service.publishVersion('p', { draft });
     expect(!answer.ok && Object.keys(answer.fieldErrors)).toEqual(['decisionPlan']);
+    // The server's own sentence (OntologyAdminAuthoringService.ValidateDraft; pinned equal by the endpoint tests), no internal word like "code".
+    expect(!answer.ok && answer.fieldErrors.decisionPlan).toEqual([
+      'Each action can be listed only once: not twice in one list, and not in both Actions and Next steps.',
+    ]);
   });
 
   it('puts a scope_subject_mismatch refusal on matterId, the scope field, even when the body names only the code (task 102b)', async () => {

@@ -101,17 +101,19 @@ public static class ExternalAccessEndpoints
         // GET /api/v1/external/me/entitlements — Tier-1 MODULE entitlement context (task 072, Option B).
         // Returns the module-code list the external-spa widget registry gates tab visibility on: default
         // modules by server-resolved principal kind (A8: workforce → legal-front-door + policy-library; CIAM →
-        // assigned-work, + legal-front-door when the partner switch is on), plus sprk_approlemodulemap extras. Distinct from
-        // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
+        // assigned-work, + legal-front-door when the partner switch is on), plus sprk_approlemodulemap extras; a workforce
+        // contact that can read a record also gets assigned-work (R4 task 040, FR-24). Distinct from /me above (Tier-2
+        // record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
             .WithName("GetExternalUserEntitlements")
             .WorkforceCeilingInHandler("Module codes and intake types are intersected with the ceiling in the handler (review round 1 F2).")
             .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
             .WithDescription(
                 "Returns the caller's entitled module codes (Tier-1): default modules by server-resolved " +
-                "principal kind (workforce: legal-front-door + policy-library; CIAM: assigned-work, plus " +
-                "legal-front-door when the partner service-request switch is on), plus App-Role→module map " +
-                "(sprk_approlemodulemap) extras. Consumed by the external-spa widget registry " +
+                "principal kind (workforce: legal-front-door + policy-library, plus assigned-work for a workforce " +
+                "contact that can read at least one record; CIAM: assigned-work, plus legal-front-door when the " +
+                "partner service-request switch is on), plus App-Role→module map (sprk_approlemodulemap) extras. " +
+                "Consumed by the external-spa widget registry " +
                 "to gate tab visibility. Record visibility within a module is governed by Tier-2 grants.")
             .Produces<MeEntitlementsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

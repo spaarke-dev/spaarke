@@ -109,6 +109,59 @@ public sealed partial class DecisionCommitServiceTests
         public Dictionary<string, FakeExecutor> Executors { get; } = new(StringComparer.Ordinal);
         public Exception? FailRecordWith { get; set; }
         public Action<Guid>? BeforeSignalUpdate { get; set; }
+
+        /// <summary>Task 205: when it answers true, the writer's paged read of a decision's Signals faults (asked at each read).</summary>
+        public Func<bool>? SignalPageFaults { get; set; }
+
+        /// <summary>Task 205: when set, each row-version update first waits this long (per item) off the caller's thread, so the
+        /// route's closes really overlap; the rig's state is then changed under one lock.</summary>
+        public Func<Guid, TimeSpan>? SignalUpdateDelay { get; set; }
+
+        /// <summary>Task 205: the most row-version updates that were waiting at the same time.</summary>
+        public int PeakSignalUpdatesInFlight => Volatile.Read(ref _peakUpdatesInFlight);
+
+        private readonly object _signalGate = new();
+        private int _updatesInFlight;
+        private int _peakUpdatesInFlight;
+
+        private async Task<OrganizationResponse> DelayedUpdateAsync(Entity target, TimeSpan delay)
+        {
+            var now = Interlocked.Increment(ref _updatesInFlight);
+            for (var peak = Volatile.Read(ref _peakUpdatesInFlight); now > peak; peak = Volatile.Read(ref _peakUpdatesInFlight))
+            {
+                if (Interlocked.CompareExchange(ref _peakUpdatesInFlight, now, peak) == peak) break;
+            }
+
+            try
+            {
+                await Task.Delay(delay).ConfigureAwait(false);
+                return ApplyUpdate(target);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _updatesInFlight);
+            }
+        }
+
+        private OrganizationResponse ApplyUpdate(Entity target)
+        {
+            lock (_signalGate)
+            {
+                BeforeSignalUpdate?.Invoke(target.Id);
+                if (target.RowVersion != Versions[target.Id].ToString())
+                {
+                    throw new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = unchecked((int)0x80060882), Message = "ConcurrencyVersionMismatch" });
+                }
+
+                Log.Add($"close:{target.Id}");
+                var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value);
+                SignalUpdates.Add((target.Id, fields));
+                foreach (var (k, v) in fields) Signals[target.Id][k] = v;
+                Versions[target.Id]++;
+                return new OrganizationResponse();
+            }
+        }
         public List<Entity> ExistingRecords { get; } = new();
 
         /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
@@ -265,8 +318,16 @@ public sealed partial class DecisionCommitServiceTests
                     }
 
                     var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
+                    // Task 174: like Dataverse, honour the review-id condition (sprk_steps LIKE %"reviewId":"{id}"%), so a record stored for
+                    // ANOTHER review is not found by this one.
+                    var reviewIdLike = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like);
+                    // Task 223 (DI-144): and, like Dataverse, the createdonbehalfby-is-empty half of WriterCreatedRecord.
+                    var onBehalfOfEmpty = query.Criteria.Conditions.Any(c => c.AttributeName == "createdonbehalfby" && c.Operator == ConditionOperator.Null);
                     return new EntityCollection(ExistingRecords
                         .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                        .Where(r => !onBehalfOfEmpty || r.GetAttributeValue<EntityReference>("createdonbehalfby") is null)
+                        .Where(r => reviewIdLike is null
+                            || (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(((string)reviewIdLike.Values.Single()).Trim('%'), StringComparison.Ordinal))
                         .ToList());
                 });
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -285,7 +346,20 @@ public sealed partial class DecisionCommitServiceTests
                 .ReturnsAsync((string path, CancellationToken _) => AnswerAsCaller(path));
 
             Org.Setup(o => o.RetrieveAsync("sprk_signal", It.IsAny<Guid>(), It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string _, Guid id, ColumnSet _, CancellationToken _) => Snapshot(id));
+                .ReturnsAsync((string _, Guid id, ColumnSet _, CancellationToken _) =>
+                {
+                    lock (_signalGate) return Snapshot(id);
+                });
+            // Task 205: the writer's paged read of a decision's Signals (sprk_signalid IN the page), answered like Dataverse: the rows
+            // that exist, each with its row version.
+            Org.Setup(o => o.RetrieveMultipleAsync(It.Is<QueryBase>(q => q is QueryExpression && ((QueryExpression)q).EntityName == "sprk_signal"), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryBase query, CancellationToken _) =>
+                {
+                    if (SignalPageFaults?.Invoke() == true)
+                        throw new TimeoutException("no answer");
+                    var page = ((QueryExpression)query).Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalid" && c.Operator == ConditionOperator.In);
+                    return new EntityCollection(page.Values.Cast<Guid>().Where(Signals.ContainsKey).Select(Snapshot).ToList());
+                });
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Returns((Entity e, CancellationToken _) =>
                 {
@@ -307,19 +381,7 @@ public sealed partial class DecisionCommitServiceTests
                 .Returns((OrganizationRequest request, CancellationToken _) =>
                 {
                     var target = ((UpdateRequest)request).Target;
-                    BeforeSignalUpdate?.Invoke(target.Id);
-                    if (target.RowVersion != Versions[target.Id].ToString())
-                    {
-                        throw new FaultException<OrganizationServiceFault>(
-                            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80060882), Message = "ConcurrencyVersionMismatch" });
-                    }
-
-                    Log.Add($"close:{target.Id}");
-                    var fields = target.Attributes.ToDictionary(a => a.Key, a => a.Value);
-                    SignalUpdates.Add((target.Id, fields));
-                    foreach (var (k, v) in fields) Signals[target.Id][k] = v;
-                    Versions[target.Id]++;
-                    return Task.FromResult(new OrganizationResponse());
+                    return SignalUpdateDelay is { } delay ? DelayedUpdateAsync(target, delay(target.Id)) : Task.FromResult(ApplyUpdate(target));
                 });
 
             PlanReads = new DecisionPlanReadStamp(Ledger, Clock, NullLogger<DecisionPlanReadStamp>.Instance);
@@ -1457,7 +1519,7 @@ public sealed partial class DecisionCommitServiceTests
     private static async Task<DecisionCommitResult> ThroughTheRoute(Rig rig, DecisionReview review)
     {
         var http = Http();
-        var reply = await DecisionCommitEndpoints.CommitDecisionAsync(Primary, review, http, rig.Service(), CancellationToken.None);
+        var reply = await DecisionCommitEndpoints.CommitDecisionAsync(Primary, review, http, DecisionCapabilityFixtures.Capability(commits: rig.Service()), CancellationToken.None);
         reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<DecisionCommitResult>>();
         return ((Microsoft.AspNetCore.Http.HttpResults.Ok<DecisionCommitResult>)reply).Value!;
     }
@@ -3984,7 +4046,7 @@ public sealed partial class DecisionCommitServiceTests
     [InlineData(DecisionCommitStatus.Failed, 500)]
     public void EachOutcome_IsOneHttpStatus(DecisionCommitStatus status, int http)
     {
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult { Status = status, ReviewId = Guid.NewGuid() }, Http());
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult { Status = status, ReviewId = Guid.NewGuid() }, Http());
 
         ((Microsoft.AspNetCore.Http.IStatusCodeHttpResult)reply).StatusCode.Should().Be(http);
     }
@@ -3993,7 +4055,7 @@ public sealed partial class DecisionCommitServiceTests
     public void AFailure_TellsTheUserWhichWritesLanded()
     {
         var landed = new DecisionCommitRef("sprk_budgetrevision", RevisionId);
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult
         {
             Status = DecisionCommitStatus.Failed,
             ReviewId = Guid.NewGuid(),
@@ -4013,7 +4075,7 @@ public sealed partial class DecisionCommitServiceTests
     [Fact]
     public void ANotFound_IsTheUniform404_WithNothingAboutTheReview()
     {
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = Guid.NewGuid(), Detail = "secret" }, Http());
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = Guid.NewGuid(), Detail = "secret" }, Http());
 
         var problem = reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject.ProblemDetails;
         problem.Detail.Should().NotContain("secret");

@@ -45,6 +45,12 @@ declare module '@spaarke/ui-components/lookup-field' {
     onSearch: (query: string) => Promise<ILookupItem[]>;
     /** Minimum characters before search fires. Default: 1. */
     minSearchLength?: number;
+    /**
+     * Optional seam: what to say when a search FAILS (a rejected `onSearch`: throttled, offline, refused). Absent: a failed search shows
+     * "No results found", as it always has (the failure is only logged). Present: that text replaces "No results found" until the next
+     * search, so a failure is never read as "there are none". Say what to do: "Search could not be completed. Try again."
+     */
+    searchErrorText?: string;
   }
 
   export const LookupField: React.FC<ILookupFieldProps>;

@@ -218,6 +218,8 @@ export const launchDecisionWizard: (...args: any[]) => Promise<any> = async () =
   opened: false,
   reason: 'no-host',
 });
+// `openInvoiceReview` (ontology task 175): the Worklist's billing-item opener, passed through by `worklist.registration.ts`; inert here.
+export const openInvoiceReview: (...args: unknown[]) => Promise<void> = async () => undefined;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const DataGridViewSelector: React.FC<any> = () => null;
 // `EntityCreationService` / `cleanGuid` (task 092, 2026-10-04) —
@@ -232,10 +234,13 @@ export class EntityCreationService {
 }
 export const cleanGuid = realCleanGuid;
 
-// `email.registration.ts` (another LegalWorkspace section, task 092,
-// 2026-10-04) imports these 6. `resolveCurrentUserEmail` typed to return
-// `Promise<string>` specifically — the registration's own
-// `.then((email) => ...)` needs that contextual type to avoid TS7006.
+// Xrm adapter stand-ins. `email.registration.ts` (another LegalWorkspace
+// section) now imports only `useXrmEmailHostProps` and `getXrm` (#2973); the
+// others stay for the modules that still import them. `resolveCurrentUserEmail`
+// is typed to return `Promise<string>` so a `.then((email) => ...)` caller gets
+// that contextual type (TS7006).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const useXrmEmailHostProps: (...args: any[]) => any = () => ({});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const XrmDataverseClient: any = class {};
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -495,6 +500,7 @@ const _driftGuard = {
   DecisionRecordsWidget,
   createWorklistService,
   launchDecisionWizard,
+  openInvoiceReview,
   EntityCreationService,
   cleanGuid,
   XrmDataverseClient,

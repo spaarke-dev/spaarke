@@ -22,6 +22,12 @@ export interface SprkModalNav {
    * Lifted from `BrowseModal` into the shell so every `nav` consumer (`BrowseModal`, `WizardShell`) gets it.
    */
   onBeforeNavigate?: (dir: 'prev' | 'next') => boolean | Promise<boolean>;
+  /**
+   * When `true` both ‹ › buttons are disabled and a navigation request does nothing (neither the guard nor `onNavigate` runs).
+   * For a host that must not move to another record while work on the current one is in flight (`WizardShell` sets it while
+   * `onFinish` runs). Default `false`: the buttons follow `index` / `total` only.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -85,6 +91,12 @@ export interface SprkModalProps {
   uiScale?: number;
   /** Whether the maximize/restore control is shown (default true). */
   maximizable?: boolean;
+  /**
+   * Opens the modal MAXIMIZED (the `full` size), with the restore control still shown so the user can return to {@link size}. It
+   * applies on every open: closing and reopening starts maximized again. Ignored when {@link maximizable} is `false` (the modal stays
+   * at `size`). Default `false`.
+   */
+  defaultMaximized?: boolean;
   /** Optional browse navigation ("N of M") in the header-left. */
   nav?: SprkModalNav;
   /** Optional header-right actions (rendered before the window controls). */

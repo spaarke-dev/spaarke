@@ -282,23 +282,24 @@ public sealed class CodeSetResolver
         }
 
         var codes = await LoadCodesAsync(setId, ct).ConfigureAwait(false);
-        var task = ToOptions(codes, BillingCodeKind.Task);
+        var ids = new Dictionary<(BillingCodeKind Kind, string Code), Guid>(); // ISS-051: the row of each allowed code, for the line's code lookups
+        var task = ToOptions(codes, BillingCodeKind.Task, ids);
         if (task.Count == 0)
         {
             _logger.LogWarning("Line coding: code set {CodeSetId} from {Source} has no active task codes; skipping", setId, source);
             return null;
         }
 
-        var activity = ToOptions(codes, BillingCodeKind.Activity);
+        var activity = ToOptions(codes, BillingCodeKind.Activity, ids);
         if (activity.Count == 0)
         {
-            activity = await LoadSharedAsync(ActivitySetName, BillingCodeKind.Activity, ct).ConfigureAwait(false);
+            activity = await LoadSharedAsync(ActivitySetName, BillingCodeKind.Activity, ids, ct).ConfigureAwait(false);
         }
 
-        var expense = ToOptions(codes, BillingCodeKind.Expense);
+        var expense = ToOptions(codes, BillingCodeKind.Expense, ids);
         if (expense.Count == 0)
         {
-            expense = await LoadSharedAsync(ExpenseSetName, BillingCodeKind.Expense, ct).ConfigureAwait(false);
+            expense = await LoadSharedAsync(ExpenseSetName, BillingCodeKind.Expense, ids, ct).ConfigureAwait(false);
         }
 
         var name = setRow.GetAttributeValue<string>("sprk_name") ?? string.Empty;
@@ -309,10 +310,11 @@ public sealed class CodeSetResolver
             task.Count,
             activity.Count,
             expense.Count);
-        return new ResolvedCodeSet(setId, name, source, task, activity, expense);
+        return new ResolvedCodeSet(setId, name, source, task, activity, expense, ids);
     }
 
-    private async Task<List<InvoiceCodeOption>> LoadSharedAsync(string setName, BillingCodeKind kind, CancellationToken ct)
+    private async Task<List<InvoiceCodeOption>> LoadSharedAsync(
+        string setName, BillingCodeKind kind, Dictionary<(BillingCodeKind Kind, string Code), Guid> ids, CancellationToken ct)
     {
         var setId = await FindSetByNameAsync(setName, ct).ConfigureAwait(false);
         if (setId is null)
@@ -322,7 +324,7 @@ public sealed class CodeSetResolver
             return [];
         }
 
-        return ToOptions(await LoadCodesAsync(setId.Value, ct).ConfigureAwait(false), kind);
+        return ToOptions(await LoadCodesAsync(setId.Value, ct).ConfigureAwait(false), kind, ids);
     }
 
     private async Task<Guid?> FindSetByNameAsync(string name, CancellationToken ct)
@@ -354,7 +356,8 @@ public sealed class CodeSetResolver
         return await RetrieveAllAsync(query, ct).ConfigureAwait(false);
     }
 
-    private static List<InvoiceCodeOption> ToOptions(IEnumerable<Entity> codes, BillingCodeKind kind)
+    /// <summary>The allowed codes of <paramref name="kind"/> (first row per code wins); each kept code's row id goes into <paramref name="ids"/> (ISS-051).</summary>
+    private static List<InvoiceCodeOption> ToOptions(IEnumerable<Entity> codes, BillingCodeKind kind, Dictionary<(BillingCodeKind Kind, string Code), Guid> ids)
     {
         var options = new List<InvoiceCodeOption>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -369,6 +372,11 @@ public sealed class CodeSetResolver
             if (string.IsNullOrEmpty(code) || !seen.Add(code))
             {
                 continue;
+            }
+
+            if (row.Id != Guid.Empty)
+            {
+                ids.TryAdd((kind, code), row.Id);
             }
 
             var guidance = row.GetAttributeValue<string>("sprk_guidancetext");

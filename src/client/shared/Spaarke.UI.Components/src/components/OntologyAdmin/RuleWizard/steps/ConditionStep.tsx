@@ -17,9 +17,10 @@
 import * as React from 'react';
 import { Button, Input, Select, Text } from '@fluentui/react-components';
 import { AddRegular, DeleteRegular } from '@fluentui/react-icons';
+import { tableLabel } from '../../../../utils/tableLabels';
 import { buildDraftBody, emptyClause, emptyRow, RULE_TYPE_THRESHOLD, subjectOf } from '../ruleDraft';
 import type { ClauseDraft, ClauseKind, ConditionDraft, FilterRow } from '../ruleDraft';
-import { errorMessage, RefusableField, useStepStyles } from '../stepCommon';
+import { errorMessage, fieldLabel, RefusableField, useStepStyles } from '../stepCommon';
 import type { StepBaseProps } from '../stepCommon';
 import { FilterRowsEditor } from './FilterRowsEditor';
 
@@ -109,7 +110,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
           <option value="">Choose a table</option>
           {subjects.map(s => (
             <option key={s.entity} value={s.entity}>
-              {s.entity}
+              {tableLabel(s.entity)}
             </option>
           ))}
         </Select>
@@ -123,6 +124,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
               catalog={catalog}
               entity={subject.entity}
               columns={subject.authorableFields}
+              columnLabels={subject.fieldLabels}
               rows={condition.when}
               onChange={rows => setCondition(c => ({ ...c, when: rows }))}
               issues={visibleIssues(condition.when, built.issues)}
@@ -147,7 +149,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                   <option value="">Choose a measure</option>
                   {subject.thresholdFields.map(t => (
                     <option key={t.field} value={t.field}>
-                      {t.field}
+                      {fieldLabel(subject.fieldLabels, t.field)}
                     </option>
                   ))}
                 </Select>
@@ -225,7 +227,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                         <option value="">Choose related records</option>
                         {subject.joins.map(j => (
                           <option key={j.related} value={j.related}>
-                            {j.related}
+                            {tableLabel(j.related)}
                           </option>
                         ))}
                       </Select>
@@ -251,6 +253,7 @@ export const ConditionStep: React.FC<StepBaseProps> = ({ catalog, draft, onChang
                         catalog={catalog}
                         entity={join.related}
                         columns={join.authorableFields}
+                        columnLabels={join.fieldLabels}
                         rows={clause.filter}
                         onChange={rows => setClause(clause.id, c => ({ ...c, filter: rows }))}
                         issues={visibleIssues(clause.filter, built.issues)}

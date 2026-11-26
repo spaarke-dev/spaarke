@@ -5,7 +5,7 @@
 // imports, type mismatches) in surface-owned files (src/**) before Vite/Webpack
 // bundling, without blocking on pre-existing errors in shared libs at ../../client/shared.
 //
-// Why scoped: shared libs (@spaarke/ai-outputs, @spaarke/ai-widgets,
+// Why scoped: shared libs (@spaarke/ai-widgets,
 // @spaarke/events-components, @spaarke/ui-components) have ~30+ pre-existing
 // hygiene + import-path issues. Fixing those is Phase B follow-up. Until then,
 // this gate fails ONLY on errors in the surface's own src/** so the bug class
@@ -26,6 +26,9 @@
 //     build only warns, so a shared-lib cleanup elsewhere never breaks a deploy build).
 // `--update-baseline` rewrites the file from the current errors (it refuses while src/**
 // has errors). Without `--baseline` the gate behaves as it always has.
+//
+// `--owned <folder>` (issue 2965, repeatable) adds a folder outside src/** to the files that count as surface-owned (see below).
+// Without the flag nothing changes, in either mode.
 //
 // Fails closed: tsc exiting non-zero without printing an `error TS` line means tsc did
 // not run (missing install, bad tsconfig), which is a broken gate, not a clean tree.
@@ -50,6 +53,29 @@ if ((updateBaseline || failOnStale) && !baselinePath) {
   process.exit(2);
 }
 
+// `--owned <folder>` (repeatable): a folder outside this package's src/** whose files the package's own code depends on and that no
+// other gate checks (e.g. `_ebilling-shared`, the e-billing pages' shared bootstrap). Its errors count as surface-owned: they fail the
+// gate and are never baselined. tsc prints such a file as `..\_ebilling-shared\x.ts`; the path is normalised (`\` -> `/`, leading `../`
+// dropped) and matched on whole folder names, so `--owned _ebilling-shared` never matches `_ebilling-shared-other`.
+const ownedFolders = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] !== '--owned') continue;
+  const folder = args[i + 1];
+  if (!folder || folder.startsWith('--')) {
+    console.error('✗ tsc-surface-gate: --owned needs a folder name, e.g. --owned _ebilling-shared.');
+    process.exit(2);
+  }
+  ownedFolders.push(folder.replace(/\\/g, '/').replace(/^(\.\.\/)+/, '').replace(/\/+$/, ''));
+}
+
+function isInOwnedFolder(line) {
+  if (ownedFolders.length === 0) return false;
+  const m = /^(.*?)\(\d+,\d+\): error TS\d+:/.exec(line.trim());
+  if (!m) return false;
+  const file = m[1].replace(/\\/g, '/').replace(/^(\.\.\/)+/, '');
+  return ownedFolders.some((f) => file === f || file.startsWith(`${f}/`));
+}
+
 function runTsc() {
   try {
     execSync('npx tsc --noEmit', { stdio: 'pipe', maxBuffer: 64 * 1024 * 1024 });
@@ -68,8 +94,10 @@ if (!result.ok && lines.length === 0) {
   process.exit(1);
 }
 
-const ownedErrors = lines.filter((l) => /^src[\\/]/.test(l));
-const otherErrors = lines.filter((l) => !/^src[\\/]/.test(l));
+// A diagnostic is surface-owned when its file is under this package's src/**, or under a folder named with --owned.
+const isOwned = (line) => /^src[\\/]/.test(line) || isInOwnedFolder(line);
+const ownedErrors = lines.filter(isOwned);
+const otherErrors = lines.filter((l) => !isOwned(l));
 
 // ---------------------------------------------------------------------------
 // Default (scoped) mode — unchanged behaviour.
@@ -83,7 +111,7 @@ if (!baselinePath) {
     console.warn(`⚠ tsc-surface-gate: ${otherErrors.length} pre-existing error(s) in shared libs (deferred to Phase B). Surface-owned: 0. ✓`);
     process.exit(0);
   }
-  console.error(`✗ tsc-surface-gate: ${ownedErrors.length} error(s) in surface-owned files (src/**):`);
+  console.error(`✗ tsc-surface-gate: ${ownedErrors.length} error(s) in surface-owned files (src/** and any --owned folder):`);
   console.error('');
   for (const err of ownedErrors) console.error(err);
   console.error('');
@@ -153,7 +181,7 @@ const stale = Object.entries(baseline).filter(([, n]) => n > 0);
 let failed = false;
 if (ownedErrors.length > 0) {
   failed = true;
-  console.error(`✗ tsc-surface-gate: ${ownedErrors.length} error(s) in surface-owned files (src/**):`);
+  console.error(`✗ tsc-surface-gate: ${ownedErrors.length} error(s) in surface-owned files (src/** and any --owned folder):`);
   for (const err of ownedErrors) console.error(err);
   console.error('');
 }

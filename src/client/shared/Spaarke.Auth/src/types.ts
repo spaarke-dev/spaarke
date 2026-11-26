@@ -53,6 +53,10 @@ export interface IAuthConfig {
    * state (BFF calls may 401 once until the silent path succeeds) in
    * exchange for no involuntary sign-in popups.
    *
+   * `OfficeNaaStrategy.acquire()` honours it the same way (#1571): no
+   * `acquireTokenPopup` (and no broker prompt under NAA); its interactive path is
+   * then only `acquireInteractive()`, called from a user's click.
+   *
    * Default: false (existing behavior — popup fallback is enabled).
    */
   requireSilentOnly?: boolean;
@@ -130,7 +134,7 @@ export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<
  * add-ins' `authenticatedJsonFetch`. An {@link AuthenticatedFetchFn} is
  * assignable to it, so a helper typed with it accepts either kind of fetch;
  * such a helper must handle BOTH failure shapes: a returned `!res.ok` and a
- * thrown `ApiError`/`AuthError` (pattern: `Spaarke.SdapClient`
+ * thrown `ApiError`/`AuthError` (pattern: `Spaarke.UI.Components/src/services/sdap/`
  * `operations/httpFailure.ts` `requestOrThrow`).
  *
  * Prefer {@link AuthenticatedFetchFn} wherever only the real

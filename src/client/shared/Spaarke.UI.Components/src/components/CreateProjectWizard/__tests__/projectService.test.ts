@@ -9,14 +9,14 @@
  *
  *   - `sprk_searchindexname`, the `sprk_ai_search_index` bind and `sprk_containerid` never appear, whatever the BU has;
  *   - `sprk_issecure` never appears (task 150: field-secured; a secure project is asked for in the query string);
- *   - `ProjectService` no longer calls `EntityCreationService.applyUserBuDefaults`;
+ *   - `IUserBuCascadeDefaults` has no search-index member, so a host cannot hand one to `ProjectService` (task 035, FR-40);
  *   - the error path is unchanged by the cascade: a refused create is a failed create.
  *
  * The payload is read from the POST body to the route.
  */
 
 import { ProjectService } from '../projectService';
-import { EntityCreationService, type IUserBuCascadeDefaults } from '../../../services/EntityCreationService';
+import type { IUserBuCascadeDefaults } from '../../../services/EntityCreationService';
 import type { ICreateProjectFormState } from '../projectFormTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { _resetNavPropCacheForTests } from '../../../services/PolymorphicResolverService';
@@ -103,15 +103,13 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("ProjectService.createProject — the BU cascade is the server's (task 022, FR-38/FR-40)", () => {
-  it('writes neither sprk_searchindexname, the AI search index bind nor sprk_containerid when the BU has all three', async () => {
+  it('writes neither sprk_searchindexname, the AI search index bind nor sprk_containerid, whatever the BU defaults carry', async () => {
     const { service, createSpy } = makeDataService();
     const bff = makeBff();
 
     const defaults: IUserBuCascadeDefaults = {
       businessUnitId: 'bu-guid-1',
       containerId: 'bu-container-abc',
-      searchIndexName: 'spaarke-knowledge-index-v2',
-      searchIndexId: 'bu-index-guid',
     };
 
     const result = await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, defaults);
@@ -120,20 +118,7 @@ describe("ProjectService.createProject — the BU cascade is the server's (task 
 
     const payload = sentBody(bff);
     expect(Object.keys(payload).filter(k => CASCADE_KEYS.test(k))).toEqual([]);
-    expect(JSON.stringify(payload)).not.toMatch(/spaarke-knowledge-index-v2|bu-index-guid|bu-container-abc/);
-  });
-
-  it('writes neither field when BU has containerId but no searchIndexName (Spaarke Dev 1 / Test 1 scenario)', async () => {
-    const { service } = makeDataService();
-    const bff = makeBff();
-
-    await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, {
-      businessUnitId: 'bu-guid-1',
-      containerId: 'bu-container-abc',
-      searchIndexName: undefined,
-    });
-
-    expect(Object.keys(sentBody(bff)).filter(k => CASCADE_KEYS.test(k))).toEqual([]);
+    expect(JSON.stringify(payload)).not.toMatch(/bu-container-abc/);
   });
 
   // Task 076 — the case W1 endangered: a project the user marked SECURE must not be born pointing at the shared
@@ -147,7 +132,6 @@ describe("ProjectService.createProject — the BU cascade is the server's (task 
       {
         businessUnitId: 'bu-guid-1',
         containerId: 'shared-bu-container-abc',
-        searchIndexName: 'spaarke-knowledge-index-v2',
       }
     );
     expect(result.success).toBe(true);
@@ -183,46 +167,6 @@ describe("ProjectService.createProject — the BU cascade is the server's (task 
 });
 
 // ---------------------------------------------------------------------------
-// INV-5: the helper is no longer called by ProjectService (nothing of the cascade is written)
-// ---------------------------------------------------------------------------
-
-describe('ProjectService.createProject — no client BU cascade (was INV-5 wiring, FR-WIZ-08)', () => {
-  it('does not call EntityCreationService.applyUserBuDefaults', async () => {
-    const applySpy = jest.spyOn(EntityCreationService, 'applyUserBuDefaults');
-    const { service } = makeDataService();
-
-    await new ProjectService(service, makeBff(), BFF).createProject(EMPTY_FORM, {
-      businessUnitId: 'bu-guid-1',
-      containerId: 'bu-container-abc',
-      searchIndexName: 'spaarke-knowledge-index-v2',
-    });
-
-    expect(applySpy).not.toHaveBeenCalled();
-  });
-
-  // The static helper itself is unchanged and still INV-5-safe for its other callers (EntityCreationService.cascade.test.ts
-  // is canonical); re-asserted here because this file used to own the project caller boundary.
-  it('static applyUserBuDefaults preserves explicit values on the payload (INV-5)', () => {
-    const entity: Record<string, unknown> = {
-      sprk_projectname: 'Protected Project',
-      sprk_containerid: 'explicit-override-container',
-      sprk_searchindexname: 'spaarke-file-index',
-    };
-    const defaults: IUserBuCascadeDefaults = {
-      businessUnitId: 'bu-guid-1',
-      containerId: 'bu-container-abc',
-      searchIndexName: 'spaarke-knowledge-index-v2',
-    };
-
-    const applied = EntityCreationService.applyUserBuDefaults(entity, defaults);
-
-    expect(applied).toEqual({ searchIndexNameSet: false });
-    expect(entity['sprk_containerid']).toBe('explicit-override-container');
-    expect(entity['sprk_searchindexname']).toBe('spaarke-file-index');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Error path — the cascade does not affect failure handling
 // ---------------------------------------------------------------------------
 
@@ -237,7 +181,6 @@ describe('ProjectService.createProject — error handling unchanged by cascade',
     const result = await new ProjectService(service, bff, BFF).createProject(EMPTY_FORM, {
       businessUnitId: 'bu-guid-1',
       containerId: 'bu-container-abc',
-      searchIndexName: 'spaarke-knowledge-index-v2',
     });
 
     expect(result.success).toBe(false);

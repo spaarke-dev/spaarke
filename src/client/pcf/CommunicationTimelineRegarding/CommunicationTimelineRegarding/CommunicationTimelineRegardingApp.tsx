@@ -25,9 +25,14 @@ import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody, Text } from '@
 import { authenticatedFetch } from '@spaarke/auth';
 import { CommunicationTimeline, type CommunicationTimelineProps, cleanGuid, getXrm } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
-import { initializeAuth, resolveDataverseUrl } from './authInit';
+import { usePcfAuthBootstrap, createHostContext } from '@spaarke/communication-components/logic/pcf-host';
 import { resolveRegardingContext } from './hostContext';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId } from '../../shared/utils/environmentVariables';
+
+/** The environment-variable readers the shared auth bootstrap resolves its settings with. */
+const PCF_ENV = { getMsalClientId, getBffApiAppId, getApiBaseUrl, getTenantId };
+// getXrm is never passed as a value (the Xrm capability guard follows every getXrm value to its uses).
+const getClientUrl = (): unknown => getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
 
 // React 16 type seam: the shared lib's .d.ts is emitted against newer React
 // types, whose FC return type is incompatible with React 16's JSX element
@@ -57,33 +62,19 @@ const useStyles = makeStyles({
   },
 });
 
-function getHostRecordId(): string | undefined {
-  // Shared cross-frame walker (task 081 / C-8).
-  // `any` view: typed XrmContext does not declare the members used below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('page') as any;
-  try {
-    const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
-  } catch {
-    /* ignore */
-  }
-  return undefined;
+// The typed Xrm page declares no data.entity, so each reader casts to the one member it calls.
+interface HostEntity {
+  getId?: () => unknown;
+  getEntityName?: () => unknown;
 }
-
-function getHostEntityName(): string | undefined {
-  // Shared cross-frame walker (task 081 / C-8).
-  // `any` view: typed XrmContext does not declare the members used below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('page') as any;
-  try {
-    const name = xrm?.Page?.data?.entity?.getEntityName?.();
-    if (typeof name === 'string' && name.length > 0) return name;
-  } catch {
-    /* ignore */
-  }
-  return undefined;
+interface HostPage {
+  data?: { entity?: HostEntity };
 }
+const { getHostRecordId, getHostEntityName } = createHostContext({
+  readEntityId: () => (getXrm('page')?.Page as HostPage | undefined)?.data?.entity?.getId?.(),
+  readEntityName: () => (getXrm('page')?.Page as HostPage | undefined)?.data?.entity?.getEntityName?.(),
+  cleanGuid,
+});
 
 export interface ICommunicationTimelineRegardingAppProps {
   context: ComponentFramework.Context<IInputs>;
@@ -105,39 +96,16 @@ export const CommunicationTimelineRegardingApp: React.FC<ICommunicationTimelineR
   const hostRecordId = React.useMemo(() => getHostRecordId(), []);
   const webApi = context.webAPI;
 
-  const [authReady, setAuthReady] = React.useState(false);
-  const [authError, setAuthError] = React.useState<string | null>(null);
-  const [bffBaseUrl, setBffBaseUrl] = React.useState('');
-
   // Bootstrap @spaarke/auth once (identical pattern to CommunicationTimelineApp).
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const clientAppId = manifestClientAppId || (await getMsalClientId(webApi));
-        const bffAppId = manifestBffAppId || (await getBffApiAppId(webApi));
-        const baseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
-        if (!clientAppId || !bffAppId || !baseUrl) {
-          if (!cancelled) {
-            setAuthError(
-              'The communication timeline is not configured. Set the sprk_MsalClientId / sprk_BffApiAppId / ' +
-                'sprk_BffApiBaseUrl Dataverse environment variables (or the PCF Client App ID / BFF App ID / API URL inputs).'
-            );
-          }
-          return;
-        }
-        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl(), await getTenantId(webApi));
-        if (cancelled) return;
-        setBffBaseUrl(baseUrl);
-        setAuthReady(true);
-      } catch (err) {
-        if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
+  const { authReady, authError, bffBaseUrl } = usePcfAuthBootstrap({
+    controlLabel: 'The communication timeline is',
+    webApi,
+    manifestClientAppId,
+    manifestBffAppId,
+    manifestApiBaseUrl,
+    env: PCF_ENV,
+    getClientUrl,
+  });
 
   const regardingContext = React.useMemo(
     () => resolveRegardingContext(hostEntityName, hostRecordId),

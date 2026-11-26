@@ -18,38 +18,70 @@
 # --- Deliberate (no fix planned) ---
 # (none at present; the write-handler pair from #2866 dropped below the floor)
 
-# --- Tracked: e-billing page scaffolding (#2965) ---
-src/solutions/ApExport/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/ApExport/src/main.tsx | src/solutions/InvoiceFiles/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/InvoiceFiles/src/main.tsx | src/solutions/RecordProcedures/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/InvoiceFiles/src/main.tsx | src/solutions/InvoiceReview/src/main.tsx | #2965 | E-billing page bootstrap; one shared bootstrap planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceFiles/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/InvoiceReview/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/RecordProcedures/vite.config.ts | #2965 | Byte-identical e-billing Vite configs; one shared config planned.
-src/solutions/InvoiceFiles/src/services/invoiceFilesApi.ts | src/solutions/RecordProcedures/src/services/recordProceduresApi.ts | #2965 | Duplicated toFailure / ApiFailure mapping; one e-billing API-error module planned.
 
-# --- Tracked: wizard code-page bootstrap (#2966) ---
-src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateProjectWizard/src/main.tsx | #2966 | CreateProjectWizard does not use useWizardPageBootstrap yet.
-src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateWorkAssignmentWizard/src/main.tsx | #2966 | CreateWorkAssignmentWizard does not use useWizardPageBootstrap yet.
-src/solutions/CreateMatterWizard/src/main.tsx | src/solutions/CreateTodoWizard/src/main.tsx | #2966 | CreateTodoWizard does not use useWizardPageBootstrap yet.
-src/solutions/CreateProjectWizard/src/main.tsx | src/solutions/CreateTodoWizard/src/main.tsx | #2966 | Neither page uses useWizardPageBootstrap yet.
-src/solutions/CreateTodoWizard/src/main.tsx | src/solutions/PlaybookLibrary/src/main.tsx | #2966 | Neither page uses a shared bootstrap yet.
-src/solutions/CreateEventWizard/src/main.tsx | src/solutions/CreateInvoiceWizard/src/main.tsx | #2966 | Mount code around useWizardPageBootstrap is still per page.
-src/solutions/CreateEventWizard/src/main.tsx | src/solutions/CreateReportCardWizard/src/main.tsx | #2966 | Mount code around useWizardPageBootstrap is still per page.
-src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/RuleReview/src/main.tsx | #2966 | Code-page auth bootstrap; check createCodePageAuthInitializer.
-src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage/src/main.tsx | #2966 | Code-page auth bootstrap; check createCodePageAuthInitializer.
-src/solutions/ApExport/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #2966 | resolveSharedLibDeps plugin and shared-lib aliases copied per page; one shared Vite config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #2966 | resolveSharedLibDeps plugin and shared-lib aliases copied per page; one shared Vite config planned.
-src/solutions/ApExport/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #2966 | resolveSharedLibDeps plugin and shared-lib aliases copied per page; one shared Vite config planned.
+# --- Tracked: wizard code-page bootstrap (#2966, remainder #3052) ---
+src/solutions/CommunicationReconciliation/src/main.tsx | src/solutions/EmailPage/src/main.tsx | #3052 | bootstrapAuth glue around createCodePageAuthInitializer; shared helper planned.
 
-# --- Tracked: Communication PCF boilerplate (#2967) ---
-src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
-src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx | src/client/pcf/CommunicationTimeline/CommunicationTimeline/CommunicationTimelineApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
-src/client/pcf/CommunicationConnections/CommunicationConnections/CommunicationConnectionsApp.tsx | src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx | #2967 | Row styles copied for RegardingResolver parity; shared style objects planned.
-src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #2967 | Copied host-context helpers (record id / entity name); one PCF-safe helper planned.
-src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/CommunicationTimelineRegardingApp.tsx | #2967 | Copied PCF auth bootstrap; one PCF-safe hook planned.
-src/client/pcf/CommunicationAttachments/CommunicationAttachments/CommunicationAttachmentsApp.tsx | src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx | #2967 | Attachment preview/open logic copied from the PCF; one shared hook in communication-components planned.
+# ===== #2974: older clusters recorded (2026-11-24). Jest scaffolding (__mocks__, jest.setup, jest.config) is excluded in .jscpd.json instead. =====
 
-# --- Tracked: Smart To Do and Email host copies (#2972, #2973) ---
-src/solutions/LegalWorkspace/src/services/DataverseService.ts | src/solutions/SmartTodo/src/services/DataverseService.ts | #2972 | SmartTodo page keeps a drifted copy of the workspace data service; shared to-do service planned.
-src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx | src/solutions/EmailPage/src/main.tsx | #2973 | Both hosts hand-build EmailWorkspace compose wiring; one host-props hook planned.
+
+# --- Tracked: code-page scaffolding, more pairs (#3052) ---
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/vite.wizard.shared.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/CommunicationReconciliation/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/DailyBriefing/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/LegalWorkspace/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/Reporting/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/SpaarkeAi/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CalendarSidePane/vite.config.ts | src/solutions/Notepad/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/CommunicationReconciliation/vite.config.ts | src/solutions/EmailPage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/DocumentUploadWizard/vite.config.ts | src/solutions/PlaybookLibrary/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_communicationspage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_invoicespage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/EventDetailSidePane/vite.config.ts | src/solutions/sprk_kpiassessmentspage/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/LegalWorkspace/src/config/publicConfig.ts | src/solutions/SpaarkeAi/src/config/publicConfig.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/LegalWorkspace/src/App.tsx | src/solutions/SpeAdminApp/src/App.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/Reporting/vite.config.ts | src/solutions/SpeAdminApp/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+src/solutions/sprk_invoicespage/src/main.tsx | src/solutions/sprk_kpiassessmentspage/src/main.tsx | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.
+
+# --- Tracked: twin schema validators (#3094) ---
+src/client/code-pages/PlaybookBuilder/src/services/schemaValidation.ts | src/client/pcf/ScopeConfigEditor/ScopeConfigEditor/utils/openAiSchemaValidator.ts | #3094 | Twin OpenAI schema validators; one to be hoisted into ui-components.
+
+# --- Tracked: PCF host boilerplate (#3095) ---
+src/client/pcf/MatterHeader/control/MatterHeaderHost.tsx | src/client/pcf/RecordHeader/control/RecordHeaderHost.tsx | #3095 | Copied PCF host boilerplate; ThemeService wrappers to go, host shell to be shared.
+src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/index.ts | src/client/pcf/SemanticSearchControl/SemanticSearchControl/index.ts | #3095 | Copied PCF host boilerplate; ThemeService wrappers to go, host shell to be shared.
+src/client/pcf/RelatedDocumentCount/RelatedDocumentCount/services/ThemeService.ts | src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/ThemeService.ts | #3095 | Copied PCF host boilerplate; ThemeService wrappers to go, host shell to be shared.
+
+# --- Tracked: Communication PCF residue after #2967 (#3096) ---
+src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx | src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/hostContext.ts | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/hostContext.ts | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+src/client/pcf/CommunicationMessageActions/CommunicationMessageActions/CommunicationMessageActionsApp.tsx | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/CommunicationTimelineRegardingApp.tsx | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+src/client/pcf/CommunicationTimeline/CommunicationTimeline/CommunicationTimelineApp.tsx | src/client/pcf/CommunicationTimelineRegarding/CommunicationTimelineRegarding/CommunicationTimelineRegardingApp.tsx | #3096 | Communication PCF App shells and thread resolvers left after #2967.
+
+# --- Tracked: lazy MSAL wrapper around BFF writes (#3097) ---
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/client/pcf/RegardingResolver/RegardingResolver/handlers/bffWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/solutions/EventDetailSidePane/src/services/childRecordWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/solutions/Notepad/src/services/memoWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+
+# --- Tracked: Reconciliation host wiring (#3099) ---
+src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/ReconciliationWorkspaceWidget.tsx | src/solutions/CommunicationReconciliation/src/main.tsx | #3099 | Reconciliation widget and page build the same host wiring; one host-props hook planned.
+
+# --- Tracked: re-declared result and Web API types (#3100) ---
+src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts | src/solutions/LegalWorkspace/src/types/xrm.ts | #3100 | Re-declared result and Web API types; one shared copy planned.
+src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts | src/solutions/LegalWorkspace/src/types/result.ts | #3100 | Re-declared result and Web API types; one shared copy planned.
+
+# --- Tracked: navigator page-context derivation (#3101) ---
+src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts | src/solutions/NavigatorPane/src/services/bookmarkService.ts | #3101 | Re-implemented page-context derivation; to be shared from navigatorCaptureService.
+
+# --- Tracked: Office add-in copies (#3102) ---
+src/client/office-addins/outlook/taskpane/index.tsx | src/client/office-addins/word/taskpane/index.tsx | #3102 | Office add-in copies; icon to come by exact-path alias, taskpane mount to be shared.
+src/client/office-addins/shared/taskpane/components/icons/MicrosoftToDoIcon.tsx | src/client/shared/Spaarke.UI.Components/src/icons/MicrosoftToDoIcon.tsx | #3102 | Office add-in copies; icon to come by exact-path alias, taskpane mount to be shared.
+
+# --- Deliberate: two SecureRecordOwnerRoleSet readers (#3103, closed as a record) ---
+src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerRoleSet.cs | src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SecureRecordSetup/SecureRecordOwnerRoleSet.cs | #3103 | Two readers by design (control plane has no BFF reference); SecureRecordOwnerRoleSetParityTests keeps them in step.
+
+# --- Tracked: SmartTodo leftovers after #3060 (#3122, #3097, #3052) ---
+src/solutions/LegalWorkspace/src/services/xrmProvider.ts | src/solutions/SmartTodo/src/services/xrmProvider.ts | #3122 | Copied Xrm access shim; to move into a shared package.
+src/solutions/LegalWorkspace/src/types/entities.ts | src/solutions/SmartTodo/src/types/entities.ts | #3122 | Copied entity types; to move into a shared package.
+src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/TodoAISummaryDialog.tsx | src/solutions/LegalWorkspace/src/components/ActivityFeed/AISummaryDialog.tsx | #3122 | Two AI summary dialogs share copied presentation; one shared frame planned.
+src/client/pcf/CommunicationConnections/CommunicationConnections/bffWrites.ts | src/solutions/SmartTodo/src/services/childRecordWrites.ts | #3097 | Same lazy MSAL wrapper around a BFF write; one shared provider planned.
+src/solutions/Notepad/vite.config.ts | src/solutions/SmartTodo/vite.config.ts | #3052 | Copied code-page scaffolding; one code-page config factory and bootstrap planned.

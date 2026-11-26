@@ -8,7 +8,7 @@
  *     workspace_widget SSE events (which carry the same string) resolve to
  *     the correct component without a mapping layer.
  *   - Provides WidgetMetadata (displayName, category, allowMultiple, defaultOrder).
- *   - Lazily imports the R1 component from @spaarke/ai-outputs via
+ *   - Lazily imports the R1 component from ../../outputs/output-widgets via
  *     createWorkspaceWrapper, which adds serialize/restore without touching
  *     the original widget files.
  *
@@ -36,6 +36,10 @@ import { hasWorkspaceWidget, registerWorkspaceWidget } from '../../registry/Work
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
+// The registry keys are the OutputWidgetType values, the same strings that
+// workspace_widget SSE events carry. Imported from the types module (not the
+// outputs barrel) so registration stays free of the lazily loaded widgets.
+import { OutputWidgetType } from '../../outputs/types/widget-types';
 // Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022):
 // context-type (existing `contextType` field, task 020) · overview tool(s) ·
 // per-item cards + landing target · interaction pattern. See
@@ -61,23 +65,6 @@ import { assistantContractOptOut } from '../../types/shared';
 function safeRegisterWidget(...args: Parameters<typeof registerWorkspaceWidget>): void {
   safeRegister('WorkspaceWidget', args[0], () => registerWorkspaceWidget(...args));
 }
-
-// ---------------------------------------------------------------------------
-// Widget type string constants
-// These MUST match the OutputWidgetType enum values from @spaarke/ai-outputs
-// so that workspace_widget SSE events resolve correctly. We duplicate them
-// here as string literals to avoid a hard dependency on the enum at runtime.
-// ---------------------------------------------------------------------------
-
-const WIDGET_TYPE = {
-  BudgetDashboard: 'BudgetDashboard',
-  SearchResults: 'SearchResults',
-  AnalysisEditor: 'AnalysisEditor',
-  ContractComparison: 'ContractComparison',
-  StatusSummary: 'StatusSummary',
-  Recommendation: 'Recommendation',
-  ActionPlan: 'ActionPlan',
-} as const;
 
 // ---------------------------------------------------------------------------
 // Assistant-contract constants (FR-08 + FR-15 SHAPE, R3 task 022)
@@ -215,7 +202,7 @@ function wrapFactory<T>(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.BudgetDashboard,
+  OutputWidgetType.BudgetDashboard,
   {
     displayName: 'Budget Dashboard',
     category: 'financial',
@@ -229,9 +216,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-budget-dashboard" */
-        '@spaarke/ai-outputs/output-widgets/BudgetDashboardWidget'
+        '../../outputs/output-widgets/BudgetDashboardWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.BudgetDashboard
+    OutputWidgetType.BudgetDashboard
   )
 );
 
@@ -242,7 +229,7 @@ safeRegisterWidget(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.SearchResults,
+  OutputWidgetType.SearchResults,
   {
     displayName: 'Search Results',
     category: 'search',
@@ -256,9 +243,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-search-results" */
-        '@spaarke/ai-outputs/output-widgets/SearchResultsWidget'
+        '../../outputs/output-widgets/SearchResultsWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.SearchResults
+    OutputWidgetType.SearchResults
   )
 );
 
@@ -270,7 +257,7 @@ safeRegisterWidget(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.AnalysisEditor,
+  OutputWidgetType.AnalysisEditor,
   {
     displayName: 'Analysis Editor',
     category: 'analysis',
@@ -284,9 +271,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-analysis-editor" */
-        '@spaarke/ai-outputs/output-widgets/AnalysisEditorWidget'
+        '../../outputs/output-widgets/AnalysisEditorWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.AnalysisEditor
+    OutputWidgetType.AnalysisEditor
   )
 );
 
@@ -297,7 +284,7 @@ safeRegisterWidget(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.ContractComparison,
+  OutputWidgetType.ContractComparison,
   {
     displayName: 'Contract Comparison',
     category: 'document',
@@ -313,9 +300,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-contract-comparison" */
-        '@spaarke/ai-outputs/output-widgets/ContractComparisonWidget'
+        '../../outputs/output-widgets/ContractComparisonWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.ContractComparison
+    OutputWidgetType.ContractComparison
   )
 );
 
@@ -326,7 +313,7 @@ safeRegisterWidget(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.StatusSummary,
+  OutputWidgetType.StatusSummary,
   {
     displayName: 'Status Summary',
     category: 'status',
@@ -340,9 +327,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-status-summary" */
-        '@spaarke/ai-outputs/output-widgets/StatusSummaryWidget'
+        '../../outputs/output-widgets/StatusSummaryWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.StatusSummary
+    OutputWidgetType.StatusSummary
   )
 );
 
@@ -353,7 +340,7 @@ safeRegisterWidget(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.Recommendation,
+  OutputWidgetType.Recommendation,
   {
     displayName: 'Recommendations',
     category: 'recommendation',
@@ -367,9 +354,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-recommendation" */
-        '@spaarke/ai-outputs/output-widgets/RecommendationWidget'
+        '../../outputs/output-widgets/RecommendationWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.Recommendation
+    OutputWidgetType.Recommendation
   )
 );
 
@@ -380,7 +367,7 @@ safeRegisterWidget(
 // ---------------------------------------------------------------------------
 
 safeRegisterWidget(
-  WIDGET_TYPE.ActionPlan,
+  OutputWidgetType.ActionPlan,
   {
     displayName: 'Action Plan',
     category: 'planning',
@@ -394,9 +381,9 @@ safeRegisterWidget(
     () =>
       import(
         /* webpackChunkName: "widget-action-plan" */
-        '@spaarke/ai-outputs/output-widgets/ActionPlanWidget'
+        '../../outputs/output-widgets/ActionPlanWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
-    WIDGET_TYPE.ActionPlan
+    OutputWidgetType.ActionPlan
   )
 );
 

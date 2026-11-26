@@ -15,7 +15,7 @@
 
 // America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
 // changes Jest's per-file copy of process.env, so it never reached Node (task 098).
-import { renderCellValue } from '../DataGrid';
+import { cellExportText, renderCellValue } from '../DataGrid';
 import { resolveConfig } from '../configResolution';
 import type { DataGridConfiguration } from '../../../types/DataGridConfiguration';
 import type { EntityMetadata } from '../../../services/IDataverseClient';
@@ -152,5 +152,19 @@ describe('ColumnRendererService — Date Only column renders the stored day', ()
     });
     expect(text('2026-10-02')).toBe(oct2);
     expect(text('2026-10-02T03:00:00Z')).toBe(oct1);
+  });
+});
+
+// #3045 round 3 (owner 2026-11-24: dates export as shown). Here, behind UTC, a plain `new Date('2026-10-02')` would
+// export Oct 1; the export must write the stored calendar day, exactly as the cell shows it.
+describe('cellExportText — a Date Only value exports its calendar day, never the previous day', () => {
+  const oct2 = new Date(2026, 9, 2).toLocaleDateString();
+  const oct1 = new Date(2026, 9, 1).toLocaleDateString();
+
+  it.each(['dateonly', 'date'])("the '%s' renderer exports the stored day", renderer => {
+    const text = cellExportText({ c: '2026-10-02' }, { name: 'c', renderer });
+    expect(text).toBe(oct2);
+    expect(text).not.toBe(oct1);
+    expect(text).toBe(renderCellValue('2026-10-02', renderer));
   });
 });

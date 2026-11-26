@@ -1,4 +1,4 @@
-import type { ConflictBehaviorOption } from '@spaarke/sdap-client';
+import type { ConflictBehaviorOption } from '../sdap';
 
 /**
  * Document Upload Service Types
@@ -67,6 +67,11 @@ export interface IDataverseClient {
 export interface DataverseRecordRef {
   /** Record GUID */
   id: string;
+  /**
+   * The server's non-fatal warnings on the create (a mapping source it could not read, a mapped value it did not
+   * write; field-mapping-server-write-path-r1). Present only when there are some.
+   */
+  warnings?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +173,7 @@ export interface ServiceResult<T = void> {
 // FileUploadApiRequest / FileDownloadRequest / FileDeleteRequest / FileReplaceRequest were DELETED
 // 2026-09-03 with `./SdapApiClient.ts`, the parallel upload client whose method signatures they
 // described. They had no other consumer — not the barrel's re-export, not a test, not a solution.
-// The surviving client (`@spaarke/sdap-client`) takes positional arguments instead, so there is no
+// The surviving client (`services/sdap`) takes positional arguments instead, so there is no
 // replacement type to point at. `FileUploadRequest` below is a DIFFERENT, still-live type: it is
 // this package's own service-layer input, not the wire shape.
 
@@ -216,7 +221,7 @@ export interface FileUploadRequest {
   target: UploadTarget;
 
   // `fileName?: string` ("optional override for file name") was REMOVED 2026-09-03 with the move to
-  // `@spaarke/sdap-client`, which names the stored file from `file.name`. No caller ever passed it.
+  // the SDAP client (`services/sdap`), which names the stored file from `file.name`. No caller ever passed it.
   // Removed rather than accepted-and-ignored: a field that is read from the type but dropped on the
   // way to the server is the same failure class as a comment that outlives its mechanism
   // (FAILURE-MODES AP-12). Renaming on upload needs a real parameter on the shared client.
@@ -392,6 +397,9 @@ export interface CreateResult {
 
   /** Error message (if failed) */
   error?: string;
+
+  /** The server's non-fatal warnings on the create (if any); present only when non-empty. */
+  warnings?: string[];
 }
 
 // ---------------------------------------------------------------------------

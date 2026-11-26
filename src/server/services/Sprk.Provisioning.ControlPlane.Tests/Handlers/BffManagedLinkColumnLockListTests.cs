@@ -8,10 +8,10 @@
 //     tests/Spaarke.ArchTests/InvoiceFamilyFieldLockSourceGuardTests (blocking) pins it to the same psd1, both ways, at
 //     exactly S27's pass condition: IsSecured=1, Readers 4/0/0, Writers 4/4/4, no other profile. So this file pins H7b's
 //     list to the psd1 only and does not repeat that package check (the S28 rows below have no such guard to rely on).
-//   - S28 SecureRecordSetupProcedure.MessageAccessColumns + DirectRecipientColumn = scripts/Set-ThreadFlagFieldSecurity.ps1
-//     $Targets (field-mapping task 054b), and the four packaged columns are what SpaarkeMaster ships: Entity.xml IsSecured=1,
-//     Other/FieldSecurityProfiles.xml Readers 4/0/0, Writers 4/4/4, no other profile. The direct recipient is NOT packaged
-//     (H7b checks it only where it exists).
+//   - S28 SecureRecordSetupProcedure.MessageAccessColumns + OptionalMessageAccessColumns = scripts/Set-ThreadFlagFieldSecurity.ps1
+//     $Targets (field-mapping tasks 054b, 056b), and the four packaged columns are what SpaarkeMaster ships: Entity.xml
+//     IsSecured=1, Other/FieldSecurityProfiles.xml Readers 4/0/0, Writers 4/4/4, no other profile. The optional four (the
+//     direct recipient and the three private-context references) are NOT packaged (H7b checks each only where it exists).
 //
 // Maintenance: a column joins or leaves a lock → change the owning list (psd1 / the thread-flag script / the package) and
 // H7b's list together; these tests fail until they agree. A new profile granting one of the columns is a change to the
@@ -43,17 +43,18 @@ public sealed class BffManagedLinkColumnLockListTests
     }
 
     [Fact]
-    public void MessageAccessColumnsAndDirectRecipient_EqualTheThreadFlagScriptTargets()
+    public void MessageAccessColumnsAndOptionalColumns_EqualTheThreadFlagScriptTargets()
     {
         var script = File.ReadAllText(Path.Combine(RepoRoot(), ThreadFlagScriptPath));
 
         ScriptTargetPairs(script).Should().BeEquivalentTo(
-            SecureRecordSetupProcedure.MessageAccessColumns.Append(SecureRecordSetupProcedure.DirectRecipientColumn),
-            $"H7b S28 checks exactly the columns {ThreadFlagScriptPath} secures (field-mapping task 054b)");
+            SecureRecordSetupProcedure.MessageAccessColumns
+                .Concat(SecureRecordSetupProcedure.OptionalMessageAccessColumns.Select(c => (c.Table, c.Column))),
+            $"H7b S28 checks exactly the columns {ThreadFlagScriptPath} secures (field-mapping tasks 054b, 056b)");
     }
 
     [Fact]
-    public void MessageAccessColumns_AreSecuredAndGrantedInThePackage_AndTheDirectRecipientIsNot()
+    public void MessageAccessColumns_AreSecuredAndGrantedInThePackage_AndTheOptionalColumnsAreNot()
     {
         var profiles = XDocument.Load(PackagePath("Other", "FieldSecurityProfiles.xml"));
 
@@ -67,10 +68,12 @@ public sealed class BffManagedLinkColumnLockListTests
             }, $"S28 passes only on exactly this lock for {table}.{column}");
         }
 
-        var (drTable, drColumn) = SecureRecordSetupProcedure.DirectRecipientColumn;
-        IsSecured(Entity(drTable), drColumn).Should().BeNull(
-            "H7b treats the direct recipient as optional because the package does not carry it; once it does, move it into " +
-            "MessageAccessColumns so S28 requires it");
+        foreach (var (table, column, _) in SecureRecordSetupProcedure.OptionalMessageAccessColumns)
+        {
+            IsSecured(Entity(table), column).Should().BeNull(
+                $"H7b treats {table}.{column} as optional because the package does not carry it; once it does, move it into " +
+                "MessageAccessColumns so S28 requires it");
+        }
     }
 
     // ---------- controls: the scans on seeded text ----------

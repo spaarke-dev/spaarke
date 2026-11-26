@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="iss041" project="ebilling-r1">
+  <metadata>
+    <title>ISS-041 (#2930): finishing a stranded reject or return after a page reload can still send the firm notice</title>
+    <phase>Issue fix; filed 2026-11-20 from the 132ui review</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies Invoice Review code page .tsx on the reject/return decision path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only change reusing an existing step and route.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>132ui</deps>
+    <tags>react, fluent-ui, frontend, testing</tags>
+  </metadata>
+
+  <prompt>Full entry: projects/ebilling-r1/notes/defer-issues.md, ISS-041. A reject or return carrying the reviewer-confirmed firm notice can stop part way (503 decision_incomplete, or no answer). 132ui makes the "Finish decision…" banner repeat carry the notice from the page's in-memory lock; after a page reload the lock is gone, so the repeat carries only reason and note, the server answers Decided and enqueues without a notice (InvoiceRejectReturnEndpoints.cs ~121 uses the repeat's body), and the firm gets no email although the reviewer confirmed one.
+Chosen fix (option a, client only; option b would need the first attempt's notice stored server-side, which is new storage): when the banner finishes a reject or return and the page holds no in-memory notice, the finish form offers the same Notify fields the original decision offers: the notice draft route and the 132ui NotifyStep, reused, not copied. When the page still holds the in-memory notice (no reload), today's behaviour is unchanged.
+Entry points: src/solutions/InvoiceReview/src/components/decision/DecideInvoiceAction.tsx (IncompleteDecisionBanner), the 132ui NotifyStep and its draft call (grep NotifyStep under src/solutions/InvoiceReview/src), projects/ebilling-r1/notes/132ui-*.md for the notify contract, src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceRejectReturnEndpoints.cs (read only: what the repeat body may carry).</prompt>
+
+  <constraints>
+    <constraint>Client only: no BFF, route, schema or shared-library change. If the server cannot accept a notice on a finishing repeat, stop and report that instead of changing the server.</constraint>
+    <constraint>The reviewer can also choose to send no notice (the same choice the original decision offers). Whatever the original Notify step validates (screening, required fields, length) applies here unchanged because it is the same component.</constraint>
+    <constraint>Firm-facing text never shows internal reason codes. Fluent v9 and the page's existing patterns (ADR-021); no new modal (the banner's finish form already exists; MODAL-DECISION-CRITERIA).</constraint>
+    <constraint>Tests (vitest, in the page's existing decision tests; find them with grep), failing before and passing after: after a simulated reload (no in-memory notice) a reject finish offers Notify and the repeat body carries the confirmed notice; the same for return; choosing no notice sends none; with the in-memory notice present the finish behaves as today; an approve/override finish shows no Notify fields. Run the page's vitest and build (npm run build in src/solutions/InvoiceReview; install with npm install --legacy-peer-deps --no-audit --no-fund if needed).</constraint>
+    <constraint>Never use --no-verify or git stash. Never run python. Never kill processes. Commit trailer "Co-Authored-By: Claude Opus 5.5 &lt;noreply@anthropic.com&gt;". Notes: projects/ebilling-r1/notes/iss041-finish-decision-notify.md (also: a repeat from another tab still has no notice unless the reviewer fills it here, K-limit).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">After a reload, finishing a stranded reject or return lets the reviewer send the firm notice, and the repeat carries it.</criterion>
+    <criterion testable="true">Without a reload, and for approve/override, the finish behaves as before.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -184,7 +184,7 @@ internal static class FromEmailMarkRules
     /// matches no entry is accepted.
     /// </summary>
     public static (FromEmailMarksRefusal? Refusal, IReadOnlyList<FromEmailResolvedMark> Saved) Check(
-        IReadOnlyList<AttachmentReference> attachments, IReadOnlyList<FromEmailMark> marks)
+        IReadOnlyList<AttachmentReference> attachments, IReadOnlyList<FromEmailMark> marks, long? maxFileBytes = null)
     {
         var none = Array.Empty<FromEmailResolvedMark>();
 
@@ -264,12 +264,27 @@ internal static class FromEmailMarkRules
                     "A file marked to be saved was not sent with its content, so nothing was saved."), none);
             }
 
+            // DEF-052 (#2553): a marked file over the per-file limit is refused here, in step 1, before the save, the replay or any write, so
+            // the .eml (which carries every marked part) is never stored. A file of exactly the limit passes.
+            if (maxFileBytes is { } limit && bytes.LongLength > limit)
+            {
+                return (new FromEmailMarksRefusal(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+                    Reason: string.Empty, mark.FileName, mark.Mark, TooLargeDetail(limit)), none);
+            }
+
             saved.Add(new FromEmailResolvedMark(mark, found.Entry, found.Index, EmlMimeParts.Sha256Hex(bytes)));
         }
 
         // The Invoice first, then the Supporting files in attachment order.
         return (null, saved.OrderBy(s => s.Mark.Mark == FromEmailMarks.Invoice ? 0 : 1).ThenBy(s => s.EntryIndex).ToList());
     }
+
+    /// <summary>
+    /// The 413 sentence of a from-email marked file over the per-file limit (<paramref name="maxFileBytes"/>): worded for any marked file, an
+    /// Invoice or a Supporting one (the upload route's own text, "The invoice file may be at most N MB.", is unchanged).
+    /// </summary>
+    internal static string TooLargeDetail(long maxFileBytes) =>
+        $"Each marked file may be at most {maxFileBytes / (1024 * 1024)} MB. Nothing was submitted or saved.";
 
     /// <summary>Contract section 6 <c>invoice_not_pdf</c>: a PDF unless the content type lacks "pdf" AND the name does not end in ".pdf".</summary>
     internal static bool IsPdf(FromEmailMark invoice) =>

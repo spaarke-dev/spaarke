@@ -293,6 +293,14 @@ public sealed partial class OntologyAdminAuthoringService
                 .Order(StringComparer.Ordinal)
                 .ToList();
 
+        // Task 210 (DI-169): the display name of every allow-listed column of the table, from the describer's one table of them (a guard
+        // test pins it to the solution source and to the allow-list), so the wizard shows "Created On" and still writes "createdon".
+        static IReadOnlyDictionary<string, string> FieldLabelsOf(string entity) =>
+            PolicyVersionValidator.AuthorableColumns
+                .Where(c => c.Entity == entity && RuleBodyDescriber.ColumnDisplayNames.ContainsKey(c))
+                .OrderBy(c => c.Column, StringComparer.Ordinal)
+                .ToDictionary(c => c.Column, c => RuleBodyDescriber.ColumnDisplayNames[c], StringComparer.Ordinal);
+
         var subjects = PredicateCompiler.EvaluatorGlobalReadableEntities
             .Where(SubjectTypeBySubject.ContainsKey)
             .Order(StringComparer.Ordinal)
@@ -307,9 +315,11 @@ public sealed partial class OntologyAdminAuthoringService
                 PredicateCompiler.VerifiedJoins
                     .Where(kv => kv.Key.Subject == subject && PredicateCompiler.EvaluatorGlobalReadableEntities.Contains(kv.Key.Related))
                     .OrderBy(kv => kv.Key.Related, StringComparer.Ordinal)
-                    .Select(kv => new OntologyCatalogJoin(kv.Key.Related, kv.Value, DateOnlyOf(kv.Key.Related), AuthorableOf(kv.Key.Related)))
+                    .Select(kv => new OntologyCatalogJoin(
+                        kv.Key.Related, kv.Value, DateOnlyOf(kv.Key.Related), AuthorableOf(kv.Key.Related), FieldLabelsOf(kv.Key.Related)))
                     .ToList(),
-                AuthorableOf(subject)))
+                AuthorableOf(subject),
+                FieldLabelsOf(subject)))
             .ToList();
 
         return new OntologyAuthoringCatalog(
@@ -1624,17 +1634,78 @@ public sealed partial class OntologyAdminAuthoringService
             var plan = DecisionPlanService.Resolve(draft.DecisionPlan, l);
             if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.DuplicateAction)
             {
-                errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): each code may appear once, in actions or in " +
-                    "nextSteps, never twice in one list and never in both."];
+                // DI-157/203: plain sentences, no internal refusal code in the text; the reason code travels in ReasonCode / the log.
+                errors["decisionPlan"] = ["Each action can be listed only once: not twice in one list, and not in both Actions and Next steps."];
                 check = check with { ReasonCode = check.ReasonCode ?? ReasonDuplicateAction };
+            }
+            else if (plan.IsRefused && plan.RefusalReason == DecisionPlanRefusalReason.PlanMissing)
+            {
+                // DI-157: an empty plan is the wizard's "nothing chosen yet", so the author is told what to do, not the internal code.
+                // The refusal reason is unchanged (telemetry, the plan route and the stored-plan refusal still carry it).
+                errors["decisionPlan"] = ["Choose at least one action."];
             }
             else if (plan.IsRefused)
             {
-                errors["decisionPlan"] = [$"The decision plan is refused ({plan.RefusalReason}): it must list actions from the {l} lane's catalog."];
+                // #3034: one plain sentence for what is actually wrong. The refusal reasons and the API reason codes are unchanged, and none of
+                // these branches carries a ReasonCode (as with PlanMissing above): the sentence is the whole message.
+                errors["decisionPlan"] = [plan.RefusalReason switch
+                {
+                    DecisionPlanRefusalReason.PlanMalformed =>
+                        "The decision plan can't be read. Choose its actions again in the wizard.",
+                    DecisionPlanRefusalReason.UnknownAction =>
+                        $"This plan lists an action that doesn't exist. Choose from the actions the wizard offers for the {l} lane.",
+                    DecisionPlanRefusalReason.ActionNotAllowed when NextStepsAreTheProblem(draft.DecisionPlan, l) =>
+                        "This plan lists a Next step that can't be used as one. Choose Next steps from the ones the wizard offers.",
+                    _ => $"This plan lists an action that can't be used in this rule's lane. Choose from the actions the wizard offers for the {l} lane.",
+                }];
             }
         }
 
         return errors.Count == 0 ? check : check with { RuleTypeName = null };
+    }
+
+    /// <summary>
+    /// A plan refused as <see cref="DecisionPlanRefusalReason.ActionNotAllowed"/> is refused for an action not offered in the lane or a
+    /// Next step that is not a Next-step creator; the resolver reports both alike. The plan is the second kind when it resolves once its
+    /// <c>nextSteps</c> are dropped (the resolver is asked again, so the rule stays in one place).
+    /// </summary>
+    private static bool NextStepsAreTheProblem(string? planJson, DecisionLane lane)
+    {
+        // JsonDocument, as Resolve reads it: a repeated top-level key is accepted (the last value wins) rather than thrown on, and the
+        // copy below repeats every key it keeps, so Resolve sees the same actions it saw the first time.
+        try
+        {
+            using var doc = JsonDocument.Parse(planJson ?? string.Empty);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            var hadNextSteps = false;
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (property.NameEquals("nextSteps"))
+                    {
+                        hadNextSteps = true;
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            return hadNextSteps && !DecisionPlanService.Resolve(Encoding.UTF8.GetString(stream.ToArray()), lane).IsRefused;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static void RequireText(string? value, string field, int max, Dictionary<string, string[]> errors)

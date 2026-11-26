@@ -148,9 +148,8 @@ export interface HeaderCellContentProps {
   sortDirection?: HeaderSortDirection;
   /**
    * Invoked when the user picks "A to Z" or "Z to A". When `undefined`, the
-   * sort menu items are hidden (back-compat for callers that haven't wired
-   * sort yet — e.g. the DataGrid host that today relies on Fluent v9 native
-   * header-click sorting).
+   * sort menu items are hidden (DataGrid passes it only when sorting is on;
+   * a host with no sort leaves it out).
    */
   onSortChange?: (next: HeaderSortDirection) => void;
 }
@@ -680,6 +679,13 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
     setMenuOpen(false);
   }, [descriptor, onStateChange, state]);
 
+  // Ref to the column's chevron Button — used as the positioning target for
+  // the Filter Popover so it anchors to the column header instead of floating
+  // at the document root (Fluent v9 default when no PopoverTrigger exists).
+  // Declared before the plain-label early return so the hook order never
+  // changes when a column gains or loses its menu (rules-of-hooks).
+  const anchorRef = React.useRef<HTMLButtonElement>(null);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render path 1 — plain label (no menu)
   // ─────────────────────────────────────────────────────────────────────────
@@ -696,11 +702,6 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
   // ─────────────────────────────────────────────────────────────────────────
   // Render path 2 — Power-Apps-OOB chevron menu
   // ─────────────────────────────────────────────────────────────────────────
-  // Ref to the column's chevron Button — used as the positioning target for
-  // the Filter Popover so it anchors to the column header instead of floating
-  // at the document root (Fluent v9 default when no PopoverTrigger exists).
-  const anchorRef = React.useRef<HTMLButtonElement>(null);
-
   return (
     // Stop ALL pointer events at the outer span so clicks on the chevron menu
     // trigger Button (and anything inside the menu/filter popover portals)
@@ -713,6 +714,11 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
     // nativeEvent.stopImmediatePropagation to also block any non-React
     // listeners that might be attached. Sort can still be invoked via the
     // chevron menu's Sort A→Z / Sort Z→A items (those call onSortChange).
+    //
+    // The keyboard too (R4 task 038 review, 2026-11-25): Enter (key down) and Space (key up) on the menu trigger also
+    // reach the header cell's own button, whose handler clicks itself and toggles the sort. So a keyboard user opening
+    // the menu re-sorted the grid. Only those two keys stop here; arrow keys keep reaching the grid's composite
+    // navigation (no stopImmediatePropagation).
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <span
       className={mergeClasses(styles.root, className)}
@@ -724,6 +730,12 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
         e.stopPropagation();
         e.nativeEvent.stopImmediatePropagation?.();
       }}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+      }}
+      onKeyUp={e => {
+        if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+      }}
     >
       <Menu open={menuOpen} onOpenChange={(_e, data) => setMenuOpen(data.open)}>
         <MenuTrigger disableButtonEnhancement>
@@ -732,7 +744,8 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
             appearance="transparent"
             size="small"
             className={styles.triggerButton}
-            aria-label={`${label} column options`}
+            // A filtered column is announced too: the Filter16Filled glyph below is aria-hidden (owner 2026-11-23).
+            aria-label={active ? `${label} column options, filtered` : `${label} column options`}
             data-testid={
               descriptor ? `header-cell-content-trigger-${descriptor.attribute}` : 'header-cell-content-trigger'
             }
@@ -792,7 +805,8 @@ export const HeaderCellContent: React.FC<HeaderCellContentProps> = ({
                     >
                       Z to A
                     </MenuItem>
-                    {(filterable || true) && <MenuDivider />}
+                    {/* Always drawn after the sort items (the old `(filterable || true) &&` was always true). */}
+                    <MenuDivider />
                   </>
                 )}
 
