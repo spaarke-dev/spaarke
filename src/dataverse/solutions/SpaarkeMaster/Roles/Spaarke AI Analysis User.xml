@@ -25,10 +25,6 @@
     <RolePrivilege name="prvAppendWorkflow" level="Basic" />
     <RolePrivilege name="prvAppendWorkflowSession" level="Basic" />
     <RolePrivilege name="prvAssignAsyncOperation" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_analysis" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_analysischatmessage" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_analysisemailmetadata" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_analysisworkingversion" level="Basic" />
     <RolePrivilege name="prvAssignWorkflow" level="Basic" />
     <RolePrivilege name="prvAssignWorkflowSession" level="Basic" />
     <RolePrivilege name="prvCreateNewProcess" level="Global" />
