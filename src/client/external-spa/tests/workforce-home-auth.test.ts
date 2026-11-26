@@ -1298,12 +1298,47 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
     expect(calls()).toEqual([ME, REGISTRATION]);
   });
 
-  it('registration_email_missing: tells the person to contact their administrator', async () => {
+  /** R4 FR-26 (#2155): the email-missing screen says who fixes it and what to do next. */
+  async function expectEmailMissingScreen(g: Awaited<ReturnType<typeof renderGate>>) {
+    expect(await g.screen.findByRole('heading', { name: /we could not read your email address/i })).toBeTruthy();
+    expect(
+      g.screen.getByText(
+        /ask your organization's IT administrator to set the Email on your Microsoft Entra account, then sign in again/i
+      )
+    ).toBeTruthy();
+    expect(g.screen.queryByText(/contact your administrator\.$/i)).toBeNull();
+    expect(g.screen.queryByText(/sdap\.access|preferred_username|upn/i)).toBeNull();
+    expect(g.screen.queryByLabelText(/first name/i)).toBeNull();
+    expect(g.screen.queryByRole('button', { name: /continue|try again/i })).toBeNull();
+    expect(g.screen.queryByTestId('workspace')).toBeNull();
+  }
+
+  it('registration_email_missing: asks for the IT administrator to set the Entra Email, then a new sign-in (FR-26)', async () => {
     h.script = { [ME]: [REG_REQUIRED], [REGISTRATION]: [problem(403, 'sdap.access.registration_email_missing')] };
     const g = await renderGate();
     await fillAndSubmit(g, { first: 'Jane', last: 'Doe' });
-    expect(await g.screen.findByText(/did not include an email address/i)).toBeTruthy();
+    await expectEmailMissingScreen(g);
+    expect(calls()).toEqual([ME, REGISTRATION]);
   });
+
+  it.each([
+    ['an empty email', ''],
+    ['a blank email', '   '],
+    ['a null email', null],
+    ['no email field', undefined],
+  ])(
+    'registration_required with %s: the email-missing screen, never a form that cannot succeed; nothing is posted (FR-27)',
+    async (_label, email) => {
+      const json: Record<string, unknown> = { ...(REG_REQUIRED.json as Record<string, unknown>), email };
+      if (email === undefined) delete json.email;
+      h.script = { [ME]: [{ status: 403, json }] };
+      const g = await renderGate();
+      await expectEmailMissingScreen(g);
+      expect(calls()).toEqual([ME]);
+      expect(calls()).not.toContain(REGISTRATION);
+      expect(g.onReady).toHaveBeenLastCalledWith(false);
+    }
+  );
 
   it.each([
     ['registration_unavailable (503)', problem(503, 'sdap.access.registration_unavailable')],
