@@ -1,5 +1,10 @@
 # ADR-039: Grounded Execution & Closed Catalogs (Concise)
 
+> **Amended 2026-11-25** (`specialist-legal-agents-r1`, CLAUDE.md §6.5 Path B, owner-approved):
+> **playbook terminology and the AI-run record**. The freeze applies to the node-graph
+> *engine* only; playbooks as a concept and as composite capabilities are the live model.
+> Every AI run is recorded on `sprk_playbookrun` ("AI Run"). See "Amendment (2026-11-25)" below.
+>
 > **Amended 2026-07-25** (`ai-advanced-capabilities-nda-r1` task 001, CLAUDE.md §6.5 Path B):
 > added **Output Determinism Modes** (`fact` vs `advisory`) refining grounded-execution
 > invariant (a). See the "Amendment (2026-07-25)" section below. No prior MUST/MUST NOT
@@ -136,6 +141,37 @@ never the *accuracy or auditability of facts*.
   determinism of *reasoning/expression*, never the accuracy or auditability of *facts*.
 - **MUST NOT** apply `advisory` to a capability whose output is consumed as authoritative fact by
   downstream deterministic logic — those stay `fact`.
+
+## Amendment (2026-11-25) — Playbook terminology and the AI-run record
+
+> Path-B amendment, owner-approved 2026-11-25 (`specialist-legal-agents-r1`). It exists because
+> "the node-graph engine is frozen" was repeatedly read as "Spaarke does not use playbooks".
+> Canonical explanation: [docs/architecture/playbook-architecture.md](../../docs/architecture/playbook-architecture.md).
+
+**What is frozen, and what is not.** The MUST NOT above freezes the **node-graph engine**
+(`PlaybookOrchestrationService`, its node executors and `sprk_playbooknode` graphs). It does
+**not** retire playbooks:
+- **The Playbook concept is live** (ontology D-209): how a legal procedure is carried out
+  (positions, steps, model wording, fallbacks, escalation). It has three formats: the JPS
+  playbook, the legal playbook (Markdown) and Microsoft's contract-review playbook.
+- **A playbook that runs is a composite capability**: a `prompted` Action for one step, or a
+  `coded` workflow (`ICodedWorkflow`) whose steps read their prompts from Action rows,
+  invoked through a Binding (`sprk_playbookconsumer`). That is the "playbook" of product language.
+
+### ✅ MUST (2026-11-25)
+- **MUST** build a new playbook as Actions + Bindings, with a `coded` workflow when it has more
+  than one step. Control flow is code; prompts, positions and gates are data.
+- **MUST** record every AI run (engine, `prompted` and `coded`) on `sprk_playbookrun`
+  (display name "AI Run"): run kind, Action and/or Binding, caller, status, timings and parent
+  run. Coded-workflow steps are recorded on `sprk_playbooknoderun`. *Schema extension pending:
+  `sprk_playbookid` becomes optional and the new columns land with `spaarkeai-mcp-bff-api-r2`
+  task 005.*
+
+### ❌ MUST NOT (2026-11-25)
+- **MUST NOT** read the engine freeze as "playbooks are not used", or design as if the
+  playbook concept were retired.
+- **MUST NOT** introduce a second AI-run store. The ADR-040 session ledger stays the
+  per-session, erasable record; it is not the durable run record.
 
 ## Integration
 ADR-013 (facade boundary; capability-invocation verb) · ADR-040 (ledger) ·

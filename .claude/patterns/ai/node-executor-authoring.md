@@ -1,5 +1,7 @@
 # Node-Executor Authoring (Playbook Node Pipeline)
 
+> **⛔ Frozen engine.** This pattern is for the node-graph engine, which takes **no new capability** (ADR-039). Use it only to maintain the existing Insights pipelines. **That does not mean playbooks are unused**: a new playbook is Actions + Bindings, with an `ICodedWorkflow` for several steps. See `docs/architecture/playbook-architecture.md` and CAPABILITY-INDEX rows 16 and 34.
+
 > **Last Reviewed**: 2026-11-15
 > **Reviewed By**: reuse-governance-tightening-r1 (ISS-001: `ActionType` → `ExecutorType` rename, commit `d2f768e8d5`); previously spaarke-platform-foundations-r3 task 066
 > **Status**: Verified

@@ -2290,6 +2290,10 @@ accordingly (2026-07-05): its engine-steering default is rescinded; its
 section-name-keyed streaming contract survives, binding for ANY composite
 executor.
 
+#### 4.2.2 "Playbook" after the freeze (2026-11-25)
+
+The freeze above covers the node-graph **engine** only. The Playbook *concept* (ontology D-209: how a legal procedure is carried out; JPS, legal and contract-review formats) and composite capabilities (prompted Actions and `coded` workflows invoked through Bindings) are live. Agreement/NDA review, chat Text path, document profiling, invoice AI and email triage are Actions; Daily Briefing is coded; only Insights, the analysis workspace and scheduled playbooks remain on the engine. See [`playbook-architecture.md`](playbook-architecture.md) for the four meanings of "playbook" and the constraints.
+
 ### 4.3 The session ledger (the composition backbone)
 
 Target model (ADR-040 proposed): an append-only, addressable, typed per-session
@@ -2525,6 +2529,19 @@ docs for the extended tables (+ `sprk_playbooknode` frozen-state doc);
 `Seed-JpsActions.ps1` sources delete; `Seed-PlaybookConsumers.ps1` regenerates
 from the table.
 
+
+### 6.6 The AI-run record (`sprk_playbookrun`, decided 2026-11-25)
+
+`sprk_playbookrun` (display name "AI Run") becomes the one durable record for every AI run: node-graph engine, prompted Action and coded workflow. **Decided; schema not yet changed.** Precedent: the Binding (`sprk_playbookconsumer`) kept its table name and changed meaning. The session ledger (ADR-040) is erasable and is not the durable record. `sprk_playbooknoderun` records coded-workflow steps (`sprk_playbooknodeid` optional, plus an Action lookup).
+
+| Column plan | Delivered by |
+|---|---|
+| `sprk_playbookid` made optional; run kind (engine / prompted / coded); Action lookup; Binding lookup; parent-run self-lookup; correlation/idempotency id; error code; regarding; summary | `spaarkeai-mcp-bff-api-r2` task 005 |
+| Profile-version lookup; gate-decision reference | `specialist-legal-agents-r1` Phase 1 |
+| Already present: name, status, startedon, completedon, inputcontextjson, outputsjson, errormessage, `sprk_triggeredby` | `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_playbookrun/Entity.xml` |
+
+Governed by the ADR-039 amendment of 2026-11-25 (MUST record every AI run here; MUST NOT add a second AI-run store).
+
 ---
 
 ## 7. Intent and dispatch (the three-path protocol)
@@ -2725,6 +2742,7 @@ per-task evidence: `projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDE
 
 | Version | Date/Time | Author | Notes |
 |---|---|---|---|
+| v0.5.1 | 2026-11-25 | Claude Sonnet 5.5 (specialist-legal-agents-r1; owner decision 2026-11-25) | **"Playbook" terminology and AI-run record.** Added §4.2.2 (the freeze covers the node-graph engine only; the Playbook concept and composite capabilities are live; points to `playbook-architecture.md`) and §6.6 (`sprk_playbookrun` is the one AI-run record for engine, prompted and coded runs; column plan; schema decided, not yet changed). Companion: ADR-039 amendment 2026-11-25. No section renumbering. |
 | v0.5 | 2026-07-07 | Claude Fable 5 (redesign-r1 task 052, FR-P4-03) | **Status flipped CONVERGED TARGET → SHIPPED ARCHITECTURE.** P0–P3 complete (G-P0/G-P1/G-P2 passed; G-P3 through three UAT fix rounds; P4 in flight); ADR-039 + ADR-040 recorded Accepted. New **§8.1 As-built record**: landed-as-designed highlights + nine as-built deltas (SideEffectGateAIFunction, TypedHandlerResumeExecutor + 422/transcript gate outcomes, OpenAiFunctionSchemaValidator + inputschemas mirrors, honesty-directive layer, workspace_open_tab assistant-drivable layout tabs, E-2 adapter relocation, F-1 accepted-with-note residual, partial soft-slash coverage, document-creation refusal policy). No changes to §0-7 design content. |
 | v0.1 | 2026-07-04 15:00 (approx) | Claude (with operator direction) | Initial draft. §0-3 (intro, product context, competitive landscape, use case catalog) drafted for review. Architecture and component sections deferred pending §3 approval. |
 | v0.2 | 2026-07-04 19:30 (approx) | Claude (with operator direction) | **Sequence framing** added as §3.0 — establishes UCs as connected nodes in a session graph, not isolated tools. Every UC in §3.A-H updated with **Typical prior context** and **Typical next steps** fields defining handoff patterns. **Category H (Task and workflow orchestration)** added with 6 UCs (H-1 through H-6). **UC-G-3 (Document-to-matter-to-communication)** and **UC-G-4 (Briefing-to-action)** added as canonical composition journeys. **Competitive landscape** expanded with **Wordsmith AI** (direct market overlap, chat-only) and **Peppermint Technology** (Power Platform sibling, not AI-native). §0.1, §0.3, §0.4, §0.5 updated to reflect sequence framing. §4-8 remain deferred to v0.3. |

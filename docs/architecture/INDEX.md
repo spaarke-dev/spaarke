@@ -39,7 +39,7 @@ This directory contains comprehensive architecture documentation covering system
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
 | [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) | Four-tier AI framework: Scope Library, Composition, Runtime, Infrastructure | 2026-04-05 | 2026-04-05 | Current |
-| [playbook-architecture.md](playbook-architecture.md) | Playbook system — node types, execution engine, canvas model, all node executors | 2026-04-05 | 2026-04-05 | Current |
+| [playbook-architecture.md](playbook-architecture.md) | Playbook architecture entry point: the four meanings of "playbook", what is frozen (node-graph engine only) vs live (concept, prompted/coded composites + Bindings), `sprk_playbookrun` as the AI-run record | 2026-11-25 | 2026-11-25 | Current |
 | [chat-architecture.md](chat-architecture.md) | SprkChat conversational AI: session management, playbook dispatch, compound intent detection, streaming pipeline | 2026-04-05 | 2026-04-05 | New |
 | [rag-architecture.md](rag-architecture.md) | RAG pipeline: text chunking, embedding cache, dual-index strategy, hybrid search, scheduled indexing | 2026-04-05 | 2026-04-05 | New |
 | [scope-architecture.md](scope-architecture.md) | Scope management: resolution chain, SYS-/CUST- ownership, single-level inheritance, gap detection | 2026-04-05 | 2026-04-05 | New |

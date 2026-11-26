@@ -1,6 +1,6 @@
 # ADR-039: Grounded Execution & Closed Catalogs
 
-- **Status**: **Accepted** (2026-07-05; **amended 2026-07-25**) — proposed 2026-07-05; accepted-in-principle by operator with the v0.4 converged target (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`); promoted Proposed → Accepted at migration phase P1 per this ADR's stated condition ("moves to Accepted when migration phase P1 ships") by `spaarke-ai-architecture-redesign-r1` task 026 (FR-P1-07). See "Acceptance evidence (P1)" below. **Amendment 2026-07-25** (`ai-advanced-capabilities-nda-r1` task 001, CLAUDE.md §6.5 Path B): added **Output Determinism Modes** (`fact` vs `advisory`) refining invariant (a) — see "Amendment (2026-07-25)" below.
+- **Status**: **Accepted** (2026-07-05; **amended 2026-07-25**) — proposed 2026-07-05; accepted-in-principle by operator with the v0.4 converged target (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`); promoted Proposed → Accepted at migration phase P1 per this ADR's stated condition ("moves to Accepted when migration phase P1 ships") by `spaarke-ai-architecture-redesign-r1` task 026 (FR-P1-07). See "Acceptance evidence (P1)" below. **Amendment 2026-07-25** (`ai-advanced-capabilities-nda-r1` task 001, CLAUDE.md §6.5 Path B): added **Output Determinism Modes** (`fact` vs `advisory`) refining invariant (a) — see "Amendment (2026-07-25)" below. **Amendment 2026-11-25** (`specialist-legal-agents-r1`, Path B): playbook terminology (the freeze is the node-graph engine only) and `sprk_playbookrun` as the one AI-run record — see "Amendment (2026-11-25)" below.
 - **Deciders**: Operator + `spaarke-ai-code-audit-r1` convergence review (2026-07-05)
 - **Concise version**: [`.claude/adr/ADR-039-grounded-execution-closed-catalogs.md`](../../.claude/adr/ADR-039-grounded-execution-closed-catalogs.md) (the operational MUST/MUST-NOT surface — binding)
 
@@ -118,6 +118,28 @@ refinement of an existing invariant, not a bolt-on mechanism, and therefore does
 - Enforcement: code review + adr-check verify (1) `output_determinism` is declared data (not
   inferred), (2) advisory capabilities still cite every factual claim and carry the disclaimer,
   (3) advisory mode is not used to smuggle free-form completion untethered from a capability.
+
+## Amendment (2026-11-25) — Playbook terminology and the AI-run record
+
+- **Amended by**: `specialist-legal-agents-r1` (CLAUDE.md §6.5 Path B — ADR amendment; owner-approved 2026-11-25).
+- **Deciders**: Operator + `specialist-legal-agents-r1`.
+
+### Context
+
+Readers repeatedly concluded "playbooks are not used" because this ADR freezes the node-graph engine while the word "playbook" survives in product language, the ontology (D-209) and table names. Separately, the engine keeps its runs in memory (`PlaybookOrchestrationService._activeRuns`) while prompted-Action and coded-workflow runs leave only the erasable session ledger (ADR-040), so no durable record answers "what AI ran". `sprk_playbookrun` and `sprk_playbooknoderun` exist (0 rows on DEV).
+
+### Clarification
+
+The freeze applies to the node-graph **engine** only (`PlaybookOrchestrationService` and its executors). The Playbook **concept** (ontology D-209: one concept, three formats) and **composite capabilities** (prompted Actions and `coded` workflows invoked through Bindings) are the live model. Canonical entry point: `docs/architecture/playbook-architecture.md`.
+
+### New rules
+
+- **MUST** record every AI run — engine, prompted, coded — on `sprk_playbookrun` (display name "AI Run"), with run kind, Action/Binding, caller and parent run.
+- **MUST NOT** introduce a second AI-run store. The session ledger (ADR-040) is not the durable record.
+
+### Status of the schema
+
+DECIDED, not yet implemented. The extension (optional `sprk_playbookid`; run kind, Action and Binding lookups, parent-run self-lookup, correlation id, error code, regarding, summary) is `spaarkeai-mcp-bff-api-r2` task 005; profile-version and gate-decision references follow in `specialist-legal-agents-r1` Phase 1. `sprk_playbooknoderun` will record coded-workflow steps. Rationale: the Binding precedent (`sprk_playbookconsumer` kept its name and changed meaning), one table answers "what AI ran", and CLAUDE.md §11 prefers extension over a new table.
 
 ## References
 
