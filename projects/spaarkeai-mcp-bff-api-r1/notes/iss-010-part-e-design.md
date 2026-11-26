@@ -180,3 +180,11 @@ Moved SDK calls (code-mapper estimates): archive 13-16, thread 8-11, enrichment 
   - (c) the response may say "sent", never "archived", before the job runs.
 - **Q5: one bell per communication** (ontology-r1, matching D-216 as amended, d7300b6e72). The bell goes to the decider or sender (Assigned To Internal, D-129, never the owning team) and links to that `sprk_communication` form ("Save to SharePoint" → `ArchiveExistingAsync`). Retries never add a second bell, because the bell is keyed on the communication.
 - **Review order:** field-mapping-r1 first (the CommunicationService hunks), then ontology-r1.
+
+## ontology-r1 on run 2 (2026-11-26, branch head b85413236f)
+- **Bell recipient `sprk_sentby`: ACCEPTED** (within D-129: the individual sender, not ownership; `BuildDataverseRecordAsync` stamps it with the caller on shared-mailbox sends too). Conditions:
+  - (a) When `sprk_sentby` is empty, the Error log names the communication id and the correlation id with a stable, queryable message. **Known limit:** the user is not told when the sender couldn't be resolved.
+  - (b) Optional, taken: carry the caller's systemuser id (resolved at send time) in the job payload and fall back to it when `sprk_sentby` is empty.
+  - Link and regarding only on Read+AppendTo (D-123), marker before create: agreed.
+- **`BudgetInquiryEmailFilingTests...Task176Review2`:** changed in this branch, reviewed by ontology-r1 in the PR. Proposed (a)–(c) agreed; **(d) re-drive still one bell is required**; (e) keep a test for the queue-fails → inline-fallback path, renamed for what it shows (the response carries the core's archival warning); (f) in the queued case assert the response does not say "archived" (it may say "sent"). Run under `~Signals` plus the BudgetInquiry tests; update changed contract baselines in the same PR.
+- These land in run 3 with the adversarial review's fixes.
