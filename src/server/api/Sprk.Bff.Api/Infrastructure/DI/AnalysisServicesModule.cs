@@ -638,6 +638,11 @@ public static class AnalysisServicesModule
         // compound-OFF DI graph remains uniform across all four PublicContracts facades.
         services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
 
+        // SPIKE BRANCH ONLY (specialist-legal-agents-r1 task 011, FR-02; never merged): ISpecialistProfileSpikeAi P3 peer for the
+        // compound-OFF path. The spike MCP tools map unconditionally with the route; with AI off the caller never resolves
+        // (CALLER_UNRESOLVED, never a profile) and a review throws FeatureDisabledException (REVIEW_FAILED).
+        services.AddScoped<ISpecialistProfileSpikeAi, NullSpecialistProfileSpikeAi>();
+
         // L1 — ICommunicationClassificationAi (email-r4 task 031 / FR-15). Real impl registered in
         // AddPublicContractsFacade. Consumed by the Association Engine's rung 5 (AiClassificationRung),
         // which resolves the facade from a per-evaluation scope. NOTE: unlike the fail-fast peers above,
@@ -1436,6 +1441,11 @@ public static class AnalysisServicesModule
         services.AddScoped<IInvoiceAi, InvoiceAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
+
+        // SPIKE BRANCH ONLY (specialist-legal-agents-r1 task 011, FR-02; never merged): the spike MCP tools' facade over
+        // ICallerSystemUserResolver + AnalysisActionService + IContextBinder + IActionRunner (all compound-ON). Scoped to match
+        // ICallerSystemUserResolver and IContextBinder. Null peer in AddNullObjectsForCompoundOff.
+        services.AddScoped<ISpecialistProfileSpikeAi, SpecialistProfileSpikeAi>();
 
         // ICommunicationClassificationAi → CommunicationClassificationAi (email-r4 task 031 / FR-15):
         // the ADR-013 PublicContracts seam for communication extract+classify. Thin wrapper over

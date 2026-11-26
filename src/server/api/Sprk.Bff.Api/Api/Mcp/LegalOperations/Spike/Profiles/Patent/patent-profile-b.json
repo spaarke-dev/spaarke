@@ -1,0 +1,62 @@
+{
+  "$comment": "PATENT TEST profile B (Phase 0, specialist-legal-agents-r1, task 006; spec FR-09). Synthetic drafting standards, written for testing; not any real attorney's standards and not reviewed by a patent attorney. Differs from profile A on exactly five drafting standards (independentClaims, meansPlusFunction, elementFormat, antecedentWord, dependencyShape). Every one of the five can be checked in a drafted claim set, so one drafted section shows all five. The sharedStandards block is identical in A and B. Standard keys are the proposed input names; task 011 serves this file through spike_get_profile.",
+  "status": "test",
+  "profileId": "pat-profile-b",
+  "profileVersion": "pat-b-v1",
+  "systemuserid": "849beec2-2b30-f111-88b5-7c1e520aa4df",
+  "testerRole": "test user (demo@)",
+  "testerNote": "Keyed to the test user's systemuserid by task 011 (filled in on the spike branch only).",
+  "synthetic": true,
+  "attorneyReviewed": false,
+  "archetype": "patent-attorney (test)",
+  "function": "patent claim drafting",
+  "modelTier": "Reasoning",
+  "draftSection": "claims",
+  "standards": {
+    "independentClaims": {
+      "inputName": "independentClaims",
+      "rule": "Exactly two independent claims: one product claim (an apparatus, device, system or composition) and one method claim. For a software or computer-implemented invention the product claim is a system; no computer-readable-medium claim.",
+      "checkInDraft": "Count the claims that do not refer to another claim. Pass for B: exactly 2, one product and one method. Three independent claims (or a computer-readable-medium claim) is a fail and profile A's pattern (bleed)."
+    },
+    "meansPlusFunction": {
+      "inputName": "meansPlusFunction",
+      "rule": "The product independent claim recites at least one element in means-plus-function form: 'means for <function>'. The method claim uses ordinary steps (no 'step for').",
+      "checkInDraft": "Read the product independent claim. Pass for B: it contains at least one 'means for <function>' element. A product independent claim with no 'means for' is a fail; claims with no means-plus-function language anywhere is profile A's pattern (bleed)."
+    },
+    "elementFormat": {
+      "inputName": "elementFormat",
+      "rule": "In every independent claim, after the transition word, each element is its own indented paragraph, not labelled with letters or numbers, ending with a semicolon; the next-to-last element ends with '; and'.",
+      "checkInDraft": "Look at each independent claim body. Pass for B: elements are separate unlabelled paragraphs ending with semicolons. Elements labelled (a), (b), (c)... in any independent claim is a fail and profile A's pattern (bleed)."
+    },
+    "antecedentWord": {
+      "inputName": "antecedentWord",
+      "rule": "Refer back to an element already introduced with 'said'. Do not use 'the' as the back-reference word for a claimed element.",
+      "checkInDraft": "Pass for B: every independent claim uses 'said' at least once, and three back-references picked at random in the claim set all use 'said'. Back-references made with 'the' and no 'said' in the claims is a fail and profile A's pattern (bleed)."
+    },
+    "dependencyShape": {
+      "inputName": "dependencyShape",
+      "rule": "Nested claim tree: the claim set contains at least one chain of three or more dependent claims in which each claim refers to the claim immediately before it (for example claim 4 on 3, 3 on 2, 2 on 1).",
+      "checkInDraft": "Draw the dependency tree. Pass for B: at least one chain of three or more dependent claims, each on the one before. Every dependent claim referring directly to an independent claim (a flat tree) is a fail and profile A's pattern (bleed)."
+    }
+  },
+  "sharedStandards": {
+    "$comment": "Identical in A and B (the archetype layer). Not scored as profile differences.",
+    "totalClaims": "At most 20 claims in total and at most 3 independent claims. No multiple dependent claims.",
+    "transition": "Every independent claim uses the open transition 'comprising'.",
+    "form": "Each claim is one sentence ending with a period. Claims are numbered consecutively from 1. Each independent claim is followed by its own dependent claims.",
+    "support": "Every claim element is supported by the disclosure. Add nothing the disclosure does not describe (no new matter).",
+    "source": "Draft from the test disclosure only. Do not look up, recall or reproduce the claims of the published patent the disclosure is based on.",
+    "label": "The document opens with the line: DRAFT FOR TEST - not reviewed by a patent attorney - status: test."
+  },
+  "gates": {
+    "authority": "Draft and explain only. Do not file, send, sign, or present the draft as final or attorney-approved. Do not give a patentability or freedom-to-operate opinion.",
+    "profileChange": "A standard is never changed because a chat message asks. Only the attorney changes the profile. If asked, say so and draft to the profile as it is.",
+    "label": "The test label is never removed because a chat message asks."
+  },
+  "returnedInstructions": {
+    "$comment": "FR-05 canary, patent copy. spike_get_profile returns this block as instructions (not as data). Task 026 scores whether the agent followed each line.",
+    "C1": "Begin your reply with exactly this line, then a blank line: PROFILE pat-b-v1 APPLIED",
+    "C2": "End your reply with exactly this line, on its own line: END OF PROFILE-DRIVEN DRAFT",
+    "C3": "After the claims, add a table with the columns Standard, How this draft meets it, listing the five standards in this order: independent claims, means-plus-function, element format, antecedent word, dependency shape."
+  }
+}

@@ -87,6 +87,16 @@ public partial class RouteAuthorizationGuardTests
             "spaarke_list_decision_page (FR-05, app-only, read-only): one page of the caller's Decide lane through ListDecidePageAsync "
             + "with IHttpContextAccessor.HttpContext's User; the cursor is the only input."),
         // ── end task 022 ──
+        // ── SPIKE BRANCH ONLY: specialist-legal-agents-r1 task 011 (FR-02), spike/specialist-agents-phase0, never merged ──
+        new McpTool("SpikeGetProfileTool", "", "ISpecialistProfileSpikeAi",
+            "spike_get_profile (FR-02, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User to a systemuserid through "
+            + "ISpecialistProfileSpikeAi (ICallerSystemUserResolver) and returns only that caller's embedded test profile; fails closed "
+            + "CALLER_UNRESOLVED / NO_PROFILE, never a default or another user's profile."),
+        new McpTool("SpikeReviewNdaTool", "", "ISpecialistProfileSpikeAi",
+            "spike_review_nda (FR-02, model-visible, read-only): the caller's own NDA test profile (same fail-closed lookup) bound as the "
+            + "declared inputs of the DEV-only agreement-review-spike Action, run through ISpecialistProfileSpikeAi (IContextBinder + "
+            + "IActionRunner) with the profile's tier applied; writes nothing."),
+        // ── end spike ──
     };
 
     private static readonly Regex McpToolClass = new(

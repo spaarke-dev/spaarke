@@ -268,6 +268,13 @@
     <EmbeddedResource Include="Services\Signals\Schemas\*.json" />
   </ItemGroup>
 
+  <!-- SPIKE BRANCH ONLY (specialist-legal-agents-r1 task 011, FR-02; never merged): the four test profiles spike_get_profile and
+       spike_review_nda serve, embedded (not loose Content) so they travel with the publish. -->
+  <ItemGroup>
+    <Content Remove="Api\Mcp\LegalOperations\Spike\Profiles\**\*.json" />
+    <EmbeddedResource Include="Api\Mcp\LegalOperations\Spike\Profiles\**\*.json" />
+  </ItemGroup>
+
   <!-- spaarkeai-mcp-bff-api-r1 task 030 (FR-12, NFR-03): the Spaarke decisions MCP App widget, ONE self-contained html file built by
        src/client/widgets/spaarke-decisions (npm run build), served by DecisionsWidgetResource as ui://spaarke/decisions.html.
        Condition=Exists keeps a local `dotnet build` without the widget built working: nothing is embedded and resources/read then

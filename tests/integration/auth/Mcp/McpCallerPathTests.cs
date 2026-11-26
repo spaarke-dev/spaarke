@@ -320,6 +320,9 @@ public sealed class McpCallerPathTests
         {
             ["spaarke_show_decisions"] = ["category"],
             ["spaarke_list_decision_page"] = ["cursor"],
+            // SPIKE BRANCH ONLY (specialist-legal-agents-r1 task 011, FR-02): the two never-merged spike tools, also static-schema.
+            ["spike_get_profile"] = ["function"],
+            ["spike_review_nda"] = ["documentText"],
         }, options => options.WithStrictOrdering());
     }
 
