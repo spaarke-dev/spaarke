@@ -8,8 +8,8 @@
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 Wave 7. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
 | **State** | 031 (analysis tools) and 034 (briefing tool and widget) are merged with both review passes' fixes. Merges: 034 3a93364b9d, fixes 6895d4525b; 031 ef89428a89, fixes 6a566dafcd. Scoped re-checks done. CAPABILITY-INDEX rows 45–48 are applied. Issues filed: #3226–#3233. |
-| **Next (exact)** | (1) Stop background job b9ons80af (it stalled: `C:\tmp\pubh` was never created). Remove `C:\tmp\pubm` with `scripts/worktree/Remove-WorktreeSafe.ps1`. (2) On HEAD, run the full ArchTests and the `Mcp|Analysis|Briefing` unit tests (background). (3) Measure the publish delta properly: build the widgets on both sides, then `dotnet publish` master vs HEAD. Compress with PowerShell from a .ps1 file, not inline bash quoting. (4) If all green, mark 031 and 034 ✅ in TASK-INDEX and the POMLs (drift check), commit, push. (5) Shared notes status file + devops-project-sync (Tasks Completed). (6) Wave 8: 035 (search results widget; deps 021, 022, 034) is unblocked. 032 waits on 030 (Q14). |
-| **Uncommitted** | None. HEAD 705887229f. Not pushed since 75ffafceaf. |
+| **Next (exact)** | (1) When 035 reports: merge, run two opus review passes, fix, re-check, mark done. (2) Then the owner questions decide the rest: Q14 (030 run model, blocks 030 and 032), 008 (blocks 033), #3181 (blocks 036), Q16 (FR-09 preferences). Deploys 019/029/039 wait on owner gates. |
+| **Uncommitted** | None. 031 and 034 marked done; pushed. |
 | **Branch state** | Agent worktrees brought in newer master PRs. The agent gates were green: 031 branch full ArchTests 2859; 034 fixes, filtered ArchTests 117, widget jest 130. The merged tree has not had a full ArchTests run yet. |
 
 ## Status (TASK-INDEX is authoritative)
@@ -19,7 +19,7 @@
   - 005: code and widened script merged; the dev schema go is not given;
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
-- 🔄 **Phase 2 merged, final gates pending:** 031, 034.
+- ✅ **Phase 2 done:** 031, 034 (merged-tree gates at 1895213b48: ArchTests 2859, unit tests 1367; publish about 42 MB). Wave 8: 035 running.
 - 🛑 **030:** stopped before code (owner Q14). 032 waits on it.
 - 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 035 is ready (Wave 8).
 

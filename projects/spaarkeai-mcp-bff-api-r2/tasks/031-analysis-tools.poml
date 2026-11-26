@@ -4,7 +4,7 @@
     <title>Analysis tools: spaarke_start_analysis, spaarke_get_analysis</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
     <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Model-callable write that must reuse AnalysisAuthorizationFilter's create check through a shared method (an extraction no Phase 0 task covers); tags include auth</rigor-reason>
     <model-tier>opus</model-tier>

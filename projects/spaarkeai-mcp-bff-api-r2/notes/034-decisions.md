@@ -115,3 +115,14 @@ rework: none task 034
 - **K1, readOnlyHint** (above): the tool is annotated read-only although each call writes a ledger entry and may write suggestion cards.
 - **FR-14 is unmeasured.** Whether real briefings exceed the 27 s budget is not known; measure at the dev deploys (D-034-1, #3226).
 - **Saved preferences** (D-034-2, above).
+
+## Main-session close (2026-11-26)
+- **Merged-tree gates at 1895213b48:**
+  - full ArchTests: 2,859 passed;
+  - unit tests filtered to Mcp, Analysis and Briefing: 1,367 passed, 2 skipped;
+  - BFF build clean.
+- **Publish size,** measured with both widgets built on each side: HEAD 44,038,798 bytes compressed vs master 152397ab11 at 44,094,475. `Sprk.Bff.Api.dll` grew by 1.33 MB, mostly the embedded briefing page (about 1.19 MB), well under the +5 MB threshold; total about 42 MB, under the 55 MB review line.
+- **CVE check:** no NuGet packages changed.
+- **Verifier fixes:** re-checked by the main session.
+
+Task 034 done.

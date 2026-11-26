@@ -114,3 +114,14 @@ Also added (item 9): `AnalysisCreateContractBaselineTests.Create_Fault_Is500_Fro
 - Unit (filter `Mcp | Analysis`): 1,204 passed, 2 skipped, 0 failed. New tests: 14 (10 in `AnalysisToolsContractTests`, the 500 baseline, two closed-list facts, one new `McpAuthTests` theory case); changed: the slim-get test and two auth tests.
 - Fail before: with the old `StartAnalysisTool.cs` and `GetAnalysisTool.cs`, 8 of the `031` tests fail (the cancel, lock-race, replay text, D-209 x2, system-failure message, slim get and never-run get). With the closed-list check disabled, 2 fail (`ReversibleWriteUnlisted` and the must-fire fact). The per-caller, key-shape, create-fault and 500-baseline tests guard behaviour that already held, so they pass before and after.
 - ArchTests (`RouteAuthoriz | Mcp`): 124 of 124 pass.
+
+## Main-session close (2026-11-26)
+- **Merged-tree gates at 1895213b48:**
+  - full ArchTests: 2,859 passed;
+  - unit tests filtered to Mcp, Analysis and Briefing: 1,367 passed, 2 skipped;
+  - BFF build clean.
+- **Publish size,** measured with both widgets built on each side: HEAD 44,038,798 bytes compressed vs master 152397ab11 at 44,094,475. `Sprk.Bff.Api.dll` grew by 1.33 MB, mostly the embedded briefing page (about 1.19 MB), well under the +5 MB threshold; total about 42 MB, under the 55 MB review line.
+- **CVE check:** no NuGet packages changed.
+- **Verifier fixes:** re-checked by the main session.
+
+Task 031 done.
