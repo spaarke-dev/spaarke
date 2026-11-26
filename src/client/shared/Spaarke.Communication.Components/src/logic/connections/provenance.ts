@@ -734,6 +734,13 @@ export interface PrimaryDenorm {
   entityType?: string | null;
   /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — the human type label for the confirmed chip. */
   recordTypeLabel?: string | null;
+  /**
+   * `sprk_regardingrecordid` — the ADR-024 pair's record id (the row's PRIMARY regarding). When given, the primary is the
+   * filed lookup holding this record, not the first filed lookup in slot order (task 140 review: a service-request primary
+   * filed beside a matter must not show — and Confirm must not file — the matter). Optional: without it the first filed
+   * lookup stays the primary, as before.
+   */
+  recordId?: string | null;
 }
 
 export interface PrimaryReviewModel {
@@ -784,13 +791,18 @@ export function flattenPrimaryCandidates(doc: ProvenanceDoc): PrimaryCandidate[]
   return Array.from(byKey.values()).sort((a, b) => b.confidence - a.confidence);
 }
 
-/** The confirmed primary: the filed lookup (authoritative), enriched with a matching candidate's number, else the denorm fields. */
+/**
+ * The confirmed primary: the filed lookup (authoritative), enriched with a matching candidate's number, else the denorm
+ * fields. The filed lookup is the one the ADR-024 pair (`denorm.recordId`) names; with no pair, the first filed lookup. A
+ * pair that names none of the filed lookups falls to the denorm fields (never another filed record).
+ */
 function resolveConfirmedPrimary(
   ranked: PrimaryCandidate[],
   filed: FiledAssociation[],
   denorm?: PrimaryDenorm
 ): PrimaryCandidate | undefined {
-  const f = filed[0];
+  const pairId = denorm?.recordId ? denorm.recordId.replace(/[{}]/g, '').toLowerCase() : '';
+  const f = pairId ? filed.find(a => a.recordId.replace(/[{}]/g, '').toLowerCase() === pairId) : filed[0];
   if (f) {
     const match = ranked.find(c => primaryKey(c.entity, c.targetId) === primaryKey(f.entityType, f.recordId));
     return {
@@ -854,22 +866,24 @@ export function derivePrimaryReview(
 
   // 🟡 Needs confirmation — a regarding is WRITTEN (a filed typed lookup, or the denorm primary) but no human confirmed it
   // (word-add-in-r1 task 140, ISS-043): the engine filed a suggestion, or its provenance trail carries no candidates. The
-  // written record is what the row is filed under, so it is the primary — never "No confident match". An Ambiguous conflict
-  // stays 🔴 (the reviewer still has to choose).
+  // written record is what the row is filed under, so it is the primary — never "No confident match". Only when the status
+  // is KNOWN and is neither Resolved nor Ambiguous: a view that selects the typed lookups but not the status must not turn
+  // an Ambiguous row yellow, so an unknown status keeps the 🔴 it had. An Ambiguous conflict stays 🔴 (the reviewer still
+  // has to choose). And only for a record that can be confirmed (it has an id): a denorm-only primary keeps the 🔴 too.
+  const statusKnown = associationStatus !== null && associationStatus !== undefined;
   const ambiguous = hasConflict || associationStatus === ASSOCIATION_STATUS_AMBIGUOUS_VALUE;
-  const written = !ambiguous && (filedList.length > 0 || !!denorm?.recordName);
-  if (written) {
+  const unconfirmed = statusKnown && !ambiguous && associationStatus !== ASSOCIATION_STATUS_RESOLVED_VALUE;
+  if (unconfirmed && (filedList.length > 0 || !!denorm?.recordName)) {
     const primary = resolveConfirmedPrimary(ranked, filedList, denorm);
-    if (primary) {
-      // The primary is shown as the card it is confirmed from: a written record with an id that no candidate carries
-      // (an empty trail) leads the candidate list. A denorm-only primary has no id to confirm, so it is the primary alone.
+    if (primary?.targetId) {
+      // The primary is shown as the card it is confirmed from: a written record that no candidate carries (an empty
+      // trail) leads the candidate list.
       const inList = (list: PrimaryCandidate[]): boolean =>
         list.some(c => primaryKey(c.entity, c.targetId) === primaryKey(primary.entity, primary.targetId));
-      const lead = primary.targetId ? [primary] : [];
       return {
         state: 'needs-confirmation',
-        candidates: inList(candidates) ? candidates : [...lead, ...candidates].slice(0, PRIMARY_CANDIDATE_SLOTS),
-        allCandidates: inList(allCandidates) ? allCandidates : [...lead, ...allCandidates],
+        candidates: inList(candidates) ? candidates : [primary, ...candidates].slice(0, PRIMARY_CANDIDATE_SLOTS),
+        allCandidates: inList(allCandidates) ? allCandidates : [primary, ...allCandidates],
         primary,
       };
     }

@@ -69,6 +69,8 @@ export interface EmailConnectionsReviewProps {
   regardingRecordNumber?: string | null;
   /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — the human type label for the confirmed chip when the primary is denorm-only. */
   regardingRecordType?: string | null;
+  /** `sprk_regardingrecordid` — the ADR-024 pair (the row's PRIMARY regarding): picks which filed lookup is the primary to confirm. Optional (absent: the first filed lookup). */
+  regardingRecordId?: string | null;
   /** The record's actually-filed regarding lookups (incl. manual "Link another" ones the engine never suggested) — merged into engine-derived slots so the surface shows every association, not just suggestions. */
   filedAssociations?: FiledAssociation[];
   /** Write context (webApi + hostEntity + hostRecordId) for the additive write path. `hostRecordId` MUST match `communicationId`. */

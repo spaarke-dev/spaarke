@@ -20,6 +20,7 @@ const SUGGESTED = 100000003;
 const AMBIGUOUS = 100000004;
 const MATTER_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 const OTHER_MATTER_ID = 'aaaaaaaa-0000-4000-8000-000000000002';
+const REQUEST_ID = 'aaaaaaaa-0000-4000-8000-000000000003';
 
 /** The ISS-043 provenance shape (dev row, ids removed): Suggested, not auto-filed, four rungs fired, NO candidates. */
 const ISS043_PROVENANCE = JSON.stringify({
@@ -81,12 +82,55 @@ describe('derivePrimaryReview — a written regarding that no human confirmed (t
     expect(summarizePrimaryReview(model)).toEqual({ tone: 'yellow', label: 'Needs confirmation' });
   });
 
-  it('a denorm-only regarding (no typed lookup read) is the primary too, with no card it cannot confirm from', () => {
+  it('a denorm-only regarding (no typed lookup read) has no record to confirm → stays requires-review (review item 5)', () => {
+    // Before: needs-confirmation with an EMPTY candidate list, which the reconcile panel rendered as a blank card.
     const model = derivePrimaryReview(ISS043_PROVENANCE, SUGGESTED, [], DENORM);
 
+    expect(model.state).toBe('requires-review');
+    expect(model.primary).toBeUndefined();
+  });
+
+  it('the ADR-024 pair picks the primary among the filed lookups, not the slot order (review item 1)', () => {
+    // A service-request primary filed beside a matter: the matter's slot comes first, the pair names the request.
+    const filed: FiledAssociation[] = [
+      { entityType: 'sprk_matter', recordId: MATTER_ID, recordName: 'Acme v Beta' },
+      { entityType: 'sprk_servicerequest', recordId: REQUEST_ID, recordName: 'Budget inquiry' },
+    ];
+
+    const model = derivePrimaryReview(ISS043_PROVENANCE, SUGGESTED, filed, {
+      ...DENORM,
+      recordName: 'Budget inquiry',
+      recordId: `{${REQUEST_ID.toUpperCase()}}`,
+    });
+
     expect(model.state).toBe('needs-confirmation');
-    expect(model.primary).toMatchObject({ targetName: 'Acme v Beta', recordNumber: 'MAT-000123', typeLabel: 'Matter' });
-    expect(model.candidates).toHaveLength(0);
+    expect(model.primary).toMatchObject({ entity: 'sprk_servicerequest', targetId: REQUEST_ID });
+    expect(model.candidates[0]).toMatchObject({ entity: 'sprk_servicerequest', targetId: REQUEST_ID });
+  });
+
+  it('with no pair given, the first filed lookup is still the primary (backward compatible)', () => {
+    const filed: FiledAssociation[] = [
+      { entityType: 'sprk_matter', recordId: MATTER_ID, recordName: 'Acme v Beta' },
+      { entityType: 'sprk_servicerequest', recordId: REQUEST_ID, recordName: 'Budget inquiry' },
+    ];
+
+    expect(derivePrimaryReview(ISS043_PROVENANCE, SUGGESTED, filed, DENORM).primary).toMatchObject({
+      targetId: MATTER_ID,
+    });
+  });
+
+  it('a Resolved row confirms the pair-named filed lookup too', () => {
+    const filed: FiledAssociation[] = [
+      { entityType: 'sprk_matter', recordId: MATTER_ID, recordName: 'Acme v Beta' },
+      { entityType: 'sprk_servicerequest', recordId: REQUEST_ID, recordName: 'Budget inquiry' },
+    ];
+
+    const model = derivePrimaryReview(ISS043_PROVENANCE, ASSOCIATION_STATUS_RESOLVED_VALUE, filed, {
+      recordId: REQUEST_ID,
+    });
+
+    expect(model.state).toBe('confirmed');
+    expect(model.primary).toMatchObject({ targetId: REQUEST_ID });
   });
 
   it('a written matter that IS a candidate is the primary, and the candidate list is not duplicated', () => {
@@ -99,11 +143,13 @@ describe('derivePrimaryReview — a written regarding that no human confirmed (t
     expect(model.candidates.map(c => c.targetId)).toEqual([MATTER_ID, OTHER_MATTER_ID]);
   });
 
-  it('a status left empty (never evaluated) with a written regarding is also needs-confirmation', () => {
+  it('an unknown status (a view selecting the typed lookups but not the status) keeps requires-review (review item 6)', () => {
+    // The row may be Ambiguous: without its status it must not read as a yellow suggestion.
     const model = derivePrimaryReview(null, null, FILED_MATTER, undefined);
 
-    expect(model.state).toBe('needs-confirmation');
-    expect(model.primary).toMatchObject({ targetId: MATTER_ID });
+    expect(model.state).toBe('requires-review');
+    expect(summarizePrimaryReview(model).tone).toBe('red');
+    expect(derivePrimaryReview(null, undefined, FILED_MATTER, DENORM).state).toBe('requires-review');
   });
 
   // ── Must not change ──────────────────────────────────────────────────────────────────────────────────────────────
