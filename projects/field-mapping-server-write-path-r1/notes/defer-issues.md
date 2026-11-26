@@ -492,3 +492,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. A later `sprk_event` ribbon import replaced the EventRibbons commands (Complete, Cancel, Reschedule, Reassign, Complete Selected, home-grid set); `EventRibbonDiffXml.xml` and the EventCommands README name `sprk_event_ribbon_commands` without `.js`. |
 | **Need** | Decide which commands are wanted; author them into the SpaarkeMaster `sprk_Event` RibbonDiff with the `.js` name; fix the README; add the ids to a verify check. |
 | **Status** | Filed. Outside 051's New/Assign scope. |
+
+## DI-051 — Push applies the field-secured source rule of task 064 (boundary 3)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 064. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3258 |
+| **Class** | A follow-on to 064 in this project's code, assigned to us by UAC-r2 on 2026-11-26. A dev check on 2026-11-26 found that none of the 57 rules reads a field-secured source column. |
+| **Need** | Push skips a rule whose source column is field-secured, with a warning, and maps nothing when the column's security state is unknown. Use one predicate shared with create, plus must-fire and must-not-fire tests. |
+| **Status** | Fixing in scope (task 064 follow-on). |
