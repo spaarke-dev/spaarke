@@ -2,6 +2,11 @@
 
 > **Last Updated**: 2026-11-26 (Claude Desktop session `acclerator-r1`). **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
 
+## 2026-11-26: PR #3237 OPEN — redline engine skip-and-report mode (for intake-pipeline-r1)
+
+- Branch `work/accelerator-redline-skip-unplaceable`, worktree `C:\code_files\spaarke-wt-accelerator-redline-skip` (remove only with `Remove-WorktreeSafe.ps1`). Head `a3c93d54d2`: `--skip-unplaceable REPORT.json` (closed code set, agreed with intake), `--refused` on summary_table/check_outputs, reproducible .docx (`safe_docx.write_parts`), exit-3 stderr carries `code`/`edit`. 82 engine + 63 build tests pass; default-mode outputs per-part identical to master on nda-01/02/03. One adversarial review done, all findings fixed.
+- intake-pipeline-r1 is reviewing it (task 009, read-only); merge is the owner's call. After merge: merge master into this project branch.
+
 ## 2026-11-26: PR #3163 MERGED (squash `4c80b81ed4`, 12:07 UTC)
 
 - `src/accelerators/` is on master and identical to this branch (checked: no diff). From now on every `src/accelerators` change goes to master through its own PR (branch from master); the mirror-to-#3163 rule is retired.
