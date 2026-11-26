@@ -38,6 +38,22 @@ Consequences for the wrapper design (needs a decision, not an engine edit):
 - Task 002 Bicep comments say `DefaultAzureCredential + AZURE_CLIENT_ID`; the POML says `ManagedIdentityCredential(client_id=...)`. Compatible (the wrapper reads `AZURE_CLIENT_ID`); note only.
 - Env vars defined by task 002 for the wrapper: `AZURE_CLIENT_ID`, `INTAKE_SERVICEBUS_FQDN`, `INTAKE_REQUEST_QUEUE`, `INTAKE_COMPLETION_QUEUE`, `INTAKE_STAGING_ACCOUNT_URL`, `INTAKE_STAGING_CONTAINER`, `INTAKE_MAX_DELIVERY_COUNT` (5), `INTAKE_JOB_TIMEOUT_SECONDS` (600), `APPLICATIONINSIGHTS_CONNECTION_STRING`.
 
+## Escalation 2 (2026-11-26, after the owner's "A with B as backup" decision): `.docx` outputs are not byte-reproducible
+
+POML trigger 3 ("container output not byte-identical to the local run: STOP and record the diff; do not normalise") fires before any container is built: **two local runs of the same engines on the same machine already differ.**
+
+- Cause (engine code): `ooxml_redline.py:593-596` and `summary_table.py:276-278` write each part with `zipfile.ZipFile.writestr(<str name>, data)`. With a string name, CPython stamps the entry with `time.localtime(time.time())`, so every zip local header and central-directory entry carries the wall-clock local time of the run.
+- Evidence: `run_local_e2e.py` run at 07:14 and again at 07:31 (Python 3.13, lxml 6.1.3, synthetic nda-01/02/03 + golden plan). All 9 `.docx` outputs differ by whole-file sha256. Per member, the content bytes and CRC-32 are identical; only `date_time` differs, e.g. `(2026,11,26,7,14,16)` vs `(2026,11,26,7,31,16)`. The 3 plan JSON files are identical.
+- `check_outputs` report (nda-02, both runs): byte-identical (sha256 `CBB4E955…53B4BF`), no file paths in it.
+- In a container the stamp is UTC while a developer machine uses local time, and the deflate stream depends on the image's zlib, so container output can never be byte-identical to a local run with the engines as they are.
+
+Options (owner and accelerator to choose; none taken here):
+1. **Accelerator change (recommended):** write zip entries with a fixed `ZipInfo(..., date_time=(1980, 1, 1, 0, 0, 0))` and `ZIP_DEFLATED`. Outputs become reproducible run to run. Cross-host bytes also depend on zlib being the same, which a CI run on the same image proves. It can ride with the skip-and-report request.
+2. **Criterion change (owner):** define parity as "the same part names, and identical bytes and CRC-32 for every part"; zip header timestamps are excluded. The check-report JSON stays a whole-file byte comparison.
+3. Rejected: running the engines under a faked clock or a monkeypatched `zipfile` (a runtime fork of engine behaviour), or rewriting the outputs' zip headers (normalising outputs, which the POML forbids).
+
+Independent of this choice: the envelope, the marker, Azure I/O, retries and dead-lettering, the refused-plan outcome, the Dockerfile and the requirements do not depend on it. Only `test_golden_parity.py` and the CI in-image parity step do.
+
 ## Verified on this machine
 
 - Local engine run (`run_local_e2e.py`, Python 3.13.x, lxml 6.1.3) on nda-01/02/03 + golden plan: all steps exit 0, all 10 checks ok on all three.
