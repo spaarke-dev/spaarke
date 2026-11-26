@@ -32,9 +32,10 @@ namespace Sprk.Bff.Api.Tests.Seam.Intake;
 /// Runs only when <c>AGREEMENT_EDIT_PLAN_LIVE_OPENAI_ENDPOINT</c> is set; otherwise every test reports Skipped (CI does not set it).
 /// Authenticates with <see cref="DefaultAzureCredential"/>: run locally with <c>AZURE_TOKEN_CREDENTIALS=AzureCliCredential</c> after
 /// <c>az login</c> (ADR-028 E-2). Optional: <c>AGREEMENT_EDIT_PLAN_LIVE_STANDARD_MODEL</c> and <c>AGREEMENT_EDIT_PLAN_LIVE_REASONING_MODEL</c>
-/// override the deployment names the Actions' tier maps to (default: the platform defaults, as <see cref="ModelTierDeploymentResolver"/>
-/// resolves them); <c>AGREEMENT_EDIT_PLAN_LIVE_REPORT</c> is a file the counts, codes, ids and latency are appended to;
-/// <c>AGREEMENT_EDIT_PLAN_LIVE_PLAN_DIR</c> is a folder (outside the repo) that each NDA's plan JSON is written to, for the engine dry-run.
+/// override the deployment names the Actions' tier maps to (default: the platform's Standard default, and the dev stamp's Reasoning
+/// deployment <c>gpt-5-reasoning</c>, as <see cref="ModelTierDeploymentResolver"/> resolves them); <c>AGREEMENT_EDIT_PLAN_LIVE_REPORT</c> is a file the counts, codes, ids and latency are appended to;
+/// <c>AGREEMENT_EDIT_PLAN_LIVE_PLAN_DIR</c> is a folder (outside the repo) that each NDA's plan JSON and the model's raw reply are written to, for the engine dry-run
+/// and for replaying each refused edit against the engine.
 /// </para>
 /// <para>
 /// <b>What is asserted and what is only recorded.</b> Asserted: the classifier's verdict per document, the plan validating against the
@@ -50,6 +51,9 @@ public sealed class AgreementAiEditPlanLiveTests
     private const string NdaStandardName = "Spaarke NDA – Mutual";
     private const string NdaStandardVersion = "1.2";
     private const double NdaGate = 0.85;
+
+    /// <summary>The dev stamp's Reasoning-tier deployment (spaarke-bff-dev <c>DocumentIntelligence__ReasoningModel</c>, read 2026-11-26).</summary>
+    private const string DevReasoningDeployment = "gpt-5-reasoning";
 
     private static readonly string? EndpointValue = Environment.GetEnvironmentVariable("AGREEMENT_EDIT_PLAN_LIVE_OPENAI_ENDPOINT");
     private static readonly object ReportLock = new();
@@ -97,6 +101,9 @@ public sealed class AgreementAiEditPlanLiveTests
             {
                 Directory.CreateDirectory(planDir);
                 await File.WriteAllTextAsync(Path.Combine(planDir, $"{corpusName}.plan.json"), plan.PlanJson);
+                // The raw reply too, so each refused edit can be replayed against the engine; it quotes clause text, so it goes only
+                // to this folder outside the repo, never to the report or the test output (ADR-015).
+                await File.WriteAllTextAsync(Path.Combine(planDir, $"{corpusName}.model-output.json"), rig.LastOutput);
             }
 
             schemaErrors.Should().BeEmpty("the plan must satisfy src/accelerators/core/schemas/edit-plan.schema.json");
@@ -176,7 +183,7 @@ public sealed class AgreementAiEditPlanLiveTests
         public int LastOutputChars { get; private set; }
         public int ModelCalls { get; private set; }
 
-        /// <summary>The last raw model reply; read only to describe the SHAPE of a refused edit, never written out.</summary>
+        /// <summary>The last raw model reply: described by SHAPE only in the report; written out only to the plan folder outside the repo.</summary>
         public string LastOutput { get; private set; } = string.Empty;
 
         public static LiveRig Create(string endpoint)
@@ -186,7 +193,11 @@ public sealed class AgreementAiEditPlanLiveTests
             {
                 OpenAiEndpoint = endpoint,
                 StandardModel = Environment.GetEnvironmentVariable("AGREEMENT_EDIT_PLAN_LIVE_STANDARD_MODEL") ?? defaults.StandardModel,
-                ReasoningModel = Environment.GetEnvironmentVariable("AGREEMENT_EDIT_PLAN_LIVE_REASONING_MODEL"),
+                // The dev BFF maps the Reasoning tier to this deployment (DocumentIntelligence__ReasoningModel on spaarke-bff-dev); unset,
+                // the resolver falls back to the Standard deployment and the run would not test the tier the Action asks for.
+                ReasoningModel = Environment.GetEnvironmentVariable("AGREEMENT_EDIT_PLAN_LIVE_REASONING_MODEL") is { Length: > 0 } reasoning
+                    ? reasoning
+                    : DevReasoningDeployment,
             };
             var real = new OpenAiClient(Options.Create(options), NullLogger<OpenAiClient>.Instance, managedIdentityCredential: new DefaultAzureCredential());
 
