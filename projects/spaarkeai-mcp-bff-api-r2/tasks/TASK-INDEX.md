@@ -25,7 +25,7 @@
 | 020 | Shared tool plumbing: general `McpToolResults`, start/status helper, per-area ledger files | 1 | ✅ [done] | 001 + r1 gate | Group E | opus / high | FULL |
 | 021 | Shared widget MCP transport; Decisions widget moved onto it | 1 | ✅ [done] | 011 + r1 gate | Group E | opus / high | FULL |
 | 022 | Search tools: `spaarke_search_documents`, `spaarke_find_records` | 1 | 🔲 [open] | 009, 020, 027 | Group F | sonnet / high | FULL |
-| 023 | Document tools: `spaarke_list_documents`, `spaarke_get_document` | 1 | 🔄 [wip] | 020 | Group F | sonnet / high | FULL |
+| 023 | Document tools: `spaarke_list_documents`, `spaarke_get_document` | 1 | ✅ [done] | 020 | Group F | sonnet / high | FULL |
 | 024 | `spaarke_list_playbooks` | 1 | ✅ [done] | 020 | Group F | sonnet / high | FULL |
 | 025 | Task read tools: `spaarke_list_tasks`, `spaarke_get_task` | 1 | 🔄 [wip] | 006, 020 | Group F | sonnet / high | FULL |
 | 026 | `spaarke_get_portfolio` | 1 | ✅ [done] | 020 | Group F | sonnet / high | FULL |
