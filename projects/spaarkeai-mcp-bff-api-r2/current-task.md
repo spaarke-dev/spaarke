@@ -57,7 +57,7 @@ About 20 failures, mostly Office/DataMutation tests that 027 doesn't touch. Each
 #3205 #3206 #3207 #3208 #3209 #3212 #3215 (plus earlier: #3173 #3178 #3179 #3181 #3182 #3185 #3186 #3196 #3198).
 
 ## Peer coordination
-- **mcp-r1:** #3199 merged and brought into this branch. r1 owns the ISS-010 files and the Decision wizard heading files; message r1 before editing them.
+- **mcp-r1:** #3199 merged and brought into this branch. #2575 (r1 ISS-001, the legacy Copilot agent code) was handed to us 2026-11-26: task 001 (8a92da8751) removes it, so the merge PR body must say "Closes #2575". r1 owns the ISS-010 files and the Decision wizard heading files; message r1 before editing them.
 - **specialist-legal-agents-r1:**
   - Run record decided. One shared writer (`PlaybookRunRecordStore`) is agreed; their Phase 1 adds the profile-version and gate columns to it and may later need a "required" write mode.
   - Docs PR #3213 is checked and matches 005.
