@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="231" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Held-email admin alert and last-day grant-expiry reminder write a valid appnotification priority and are delivered (#1697)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, specified correction of option-set values with a validator, reviving an approved PR.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NotificationService, GrantExpiryReminderJob, IncomingCommunicationJobHandler and notification option constants; no Signals files.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, notifications, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Read gh issue view 1697. Dataverse appnotification accepts priority 200000000 / 200000001 and toasttype 200000000 / 200000001. On origin/master d43fc9e16d GrantExpiryReminderJob.cs:99 (PriorityCritical = 200000002) and IncomingCommunicationJobHandler.cs:209 (priority: 200000002) write an invalid value, so the held-email admin alert is lost and the last-day reminder is never delivered; NotificationService.cs:47/96 documents a Critical value that does not exist. PR #1494 (branch work/132-notification-delivery-correctness, open, stale) added AppNotificationOptions (constants + Validate) and fixed these writers; re-apply its intent on a fresh branch from origin/master, dropping anything that touched the retired playbook path (CreateNotificationNodeExecutor and the retired playbook JSONs, D-100). Verify the option values from the repo solution source or by a read-only metadata read; never write.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse option sets, ADR-004/036 jobs.</role>
+  <goal>Every appnotification the BFF writes uses a valid priority and toast type, so the held-email alert and the last-day grant reminder are delivered as High.</goal>
+  <context>
+    <background>Keep NotificationService's contract for existing callers; an invalid value passed in throws ArgumentOutOfRangeException before any write. Run /conflict-check (NotificationService is shared).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-231-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1697"; notes in notes/task-231-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: the held-email alert and a grant reminder with DaysLeft &lt;= 7 write priority 200000001; otherwise 200000000.</criterion>
+    <criterion testable="true">Must-not-fire: NotificationService.CreateNotificationAsync with priority 200000002 throws ArgumentOutOfRangeException and writes nothing; a Hidden toast gets no Open action; other callers unchanged.</criterion>
+    <criterion testable="true">Build, filtered Notification/Jobs/ExternalAccess tests, full ArchTests pass; publish-size delta reported. The main session closes PR #1494 with a pointer after this merges.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a schema change or touches the retired playbook path: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt231); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="228" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>An open budget inquiry's To Do cannot be completed without a disposition, and recording one closes its Signal promptly (#1984, #1991 DI-101)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adds an invariant check to a shared child-record write route (one server owner per invariant, ADR-002) and enqueues re-evaluation; a wrong check blocks every To Do completion.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>ChildRecordEndpoints To Do completion path, InquiryDispositionService and the Worklist inquiry notice; no overlap with 225/226/230.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, signals, frontend, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Read gh issue view 1984 (with its uac-r2 comment) and gh issue view 1991, and DI-101 in notes/defer-issues.md. (1) #1984: PATCH /api/v1/child-records/sprk_todo/{id} with statecode=1 (Api/ChildRecordEndpoints.cs, the core MarkCompleteExecutor also calls) completes an inquiry-outcome To Do with no disposition; TodoDetail's Complete button uses it. Apply the worklist's check InquiryDispositionService.FindOpenInquiryOfTodoAsync (open + outbound only; a fault fails closed) on that route when it completes a sprk_todo, returning the same 409 inquiry.disposition_required; TodoDetail (src/client/shared/Spaarke.UI.Components/src/components/TodoDetail) shows plain words pointing to recording the outcome. (2) #1991: POST /api/v1/inquiries/{serviceRequestId}/disposition (InquiryDispositionService.RecordAsync) completes the To Do but leaves its open Do-lane Signal until the nightly run. Preferred fix from the issue: enqueue re-evaluation of that subject's open Signals through the existing evaluator event-hook IJobHandler path (D-12; grep the budget-revision hook), so it closes as ConditionCleared within seconds; then remove the stopgap notice (Worklist/inquiryDisposition.ts:50 and its test). Read docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md and .claude/adr/ADR-002-thin-plugins.md first. Line numbers at origin/master d43fc9e16d.</prompt>
+  <role>SPAARKE full-stack developer: .NET 10 BFF write paths and ADR-004 jobs, React/Fluent v9 shared components.</role>
+  <goal>No path completes an open budget inquiry's outcome To Do without a disposition, and recording a disposition closes the To Do's Signal within the job latency instead of at the next nightly run.</goal>
+  <context>
+    <background>The route serves every child-record table and every To Do: the check must run only for sprk_todo completion and cost nothing for a To Do with no open inquiry beyond the existing lookup. A closed inquiry's To Do completes as today. The re-evaluation must not write a Decision Record (BR-1) and must not stamp unchanged Signals (D-61). Run /conflict-check (ChildRecordEndpoints is shared).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-228-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1984, closes #1991"; notes in notes/task-228-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: completing an open inquiry's To Do through the child-record route returns 409 inquiry.disposition_required and writes nothing.</criterion>
+    <criterion testable="true">Must-not-fire: a To Do with no inquiry, or with a closed inquiry, completes as before; a non-To-Do child record is untouched by the check; a lookup fault refuses (fail closed) and is logged.</criterion>
+    <criterion testable="true">A test fails on origin/master: a successful disposition enqueues the re-evaluation job for that To Do's subject; the job closes the Signal as ConditionCleared; the stopgap notice text is removed and its test updated.</criterion>
+    <criterion testable="true">TodoDetail shows the 409 as plain words (jest test); build, Signals and filtered ChildRecord tests, full ArchTests, client-lint pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The check needs a plugin, a new route, a schema change, or would block completion of To Dos unrelated to an open inquiry: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt228); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

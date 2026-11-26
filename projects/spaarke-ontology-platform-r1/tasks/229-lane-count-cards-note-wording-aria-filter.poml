@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="229" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Worklist lane count cards: next-due note, overdue wording on Decide cards, progress in the aria label, stale filter not re-activated (#1688, DI-46)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies client code (.ts/.tsx).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only, fully specified fixes with unit tests.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Worklist laneCountFilters.ts and its host; task 228 edits inquiryDisposition.ts in the same folder (different file).</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Read gh issue view 1688 and DI-46 in notes/defer-issues.md. In src/client/shared/Spaarke.UI.Components/src/components/Worklist/laneCountFilters.ts (buildLaneCountCards, noteFor, resolveLaneFilterKey) and the host that keeps selectedKey: (1) add the next-due note to the Coming-due card (prototype W-7 wording, HANDOFF @ ae1cc9f; notes/v4-prototype-vs-solution.md); (2) Decide-lane cards say "N overdue" when they hold overdue items instead of always "oldest N days"; (3) ariaLabel includes "n of m done today" when card.progress is set; (4) when resolveLaneFilterKey falls back to all, the host clears selectedKey so the filter does not silently re-activate when items of that type return. Before starting, record the reconciliation §B.6 pre-start check against HANDOFF @ ae1cc9f (project CLAUDE.md §2 UI). Line numbers at origin/master d43fc9e16d.</prompt>
+  <role>SPAARKE frontend developer: React 19 / Fluent v9 shared components, jest.</role>
+  <goal>The lane count cards match the approved prototype wording, announce their progress to screen readers, and never re-activate a filter the user had lost.</goal>
+  <context>
+    <background>Reuse the existing card component (src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx + MetricCardRow); no new component. Keep dark-mode tokens (ADR-021).</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-229-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1688"; notes in notes/task-229-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Jest tests fail on origin/master and pass after: Coming-due note present; "N overdue" on a Decide card with overdue items; ariaLabel contains the progress text.</criterion>
+    <criterion testable="true">Negative jest test: after a filter's items vanish (fallback to all) and return, the filter is not re-activated.</criterion>
+    <criterion testable="true">Existing Worklist tests pass; client-lint check passes; no BFF change.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The prototype wording conflicts with D-227 or another binding decision, or the fix needs a new component: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt229); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

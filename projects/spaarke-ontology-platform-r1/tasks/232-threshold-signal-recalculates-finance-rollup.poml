@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="232" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A spend or budget Threshold Signal recalculates that matter's or project's stored finance roll-up, so the form agrees with the Signal (#1767, #1663)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adds a write on another module's columns from the evaluator; must stay targeted (D-61), idempotent and reviewed by ebilling-r1.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalEvaluator raise/update path and FinanceRollupService call; task 227 edits AssigneeColumnBySubject in SignalEvaluator.cs (different site): merge master before merging if 227 lands first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, signals, billing, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Read gh issue view 1767 and gh issue view 1663 (with the ebilling comment). Since PR #1756 (D-122) the evaluator computes spend/budget from FinanceBaseValues, while the matter/project form shows stored columns sprk_totalspendtodate, sprk_totalbudget, sprk_budgetutilizationpercent written only by FinanceRollupService (Services/Finance). Owner decision D-230: when the evaluator raises or updates a spend or budget Threshold Signal on a matter or project, it recalculates that one record's stored roll-up through the existing FinanceRollupService. First verify on origin/master d43fc9e16d how Threshold rules read spend today (#1663 says stored roll-ups; #1767 says computed): record the answer in the notes; if any Threshold rule still reads the stored columns, switch it to FinanceBaseValues in this task. ebilling-r1 owns FinanceRollupService and FinanceBaseValues: reuse them, do not fork; ask ebilling-r1 to review the PR (SendMessage to their session).</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, the ontology evaluator, the finance roll-up.</role>
+  <goal>After a spend or budget Threshold Signal is raised or updated, the record's form shows the same figures the Signal states, with no mass or unchanged writes.</goal>
+  <context>
+    <background>D-61: never stamp unchanged rows; the recalculation runs only for the record whose Signal was raised or updated, and FinanceRollupService should skip the write when values are unchanged (check; add if missing, with ebilling's agreement). A recalculation fault must not fail Signal raising: log it. Which identity writes (the evaluator's writer UAMI vs the BFF) must match how FinanceRollupService writes today; do not add privileges without the owner.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-232-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1767, closes #1663"; notes in notes/task-232-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: raising (and updating) a spend Threshold Signal on a matter calls the roll-up recalculation for exactly that matter; same for a project.</criterion>
+    <criterion testable="true">Must-not-fire: a non-finance Signal, an unchanged Signal (no raise/update) and other records trigger no recalculation; a recalculation fault leaves the Signal raised and is logged; unchanged roll-up values are not rewritten.</criterion>
+    <criterion testable="true">Notes record how Threshold rules read spend on master; build, Signals and Finance filters, full ArchTests pass; publish-size delta reported; ebilling-r1 asked to review.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The recalculation needs a new privilege, a schema change, a nightly or bulk write, or a change to FinanceRollupService's computation: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt232); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="230" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Repo-deployed system playbooks are read-only in the BFF: canvas save, JIT sync and the per-node routes refuse to change them (#1698, #1498)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Guards destructive writes on deployed AI playbooks; a wrong rule either keeps the wipe hazard or locks user-authored playbooks.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Services/Ai NodeService / PlaybookEndpoints / NodeEndpoints and AnalysisOrchestrationService JIT sync; no Signals files.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ai, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Read gh issue view 1698 and gh issue view 1498 (with its pickup comment). NodeService.SyncCanvasToNodesAsync (Services/Ai/NodeService.cs ~381; callers PlaybookEndpoints.cs ~728 PUT canvas, AnalysisOrchestrationService.cs ~204 JIT sync) deletes every node without a __canvasNodeId marker and recreates stubs, so one Designer save of a deployed system playbook wipes it. PR #1497 (branch fix/designer-readonly-system-playbooks, still open, far behind master) adds NodeService.EnsureCanvasSyncAllowedAsync (protected = sprk_issystemplaybook true OR sprk_playbooktype = 2 OR any node lacks the marker; fail closed: unreadable = refuse; PUT canvas 409 playbook_read_only / 503 playbook_canvas_unverifiable before persisting; JIT logs and runs on stored nodes) with 14 tests. Bring that change onto a fresh branch from origin/master (cherry-pick or re-apply; do not merge the stale branch), then apply the same guard to the per-node routes in Api/Ai/NodeEndpoints.cs (create, update, delete, scopes) returning 409 with zero writes, and make per-node writes on user playbooks not trip the unmarked-node rule (stamp the marker or exempt them). First search scripts/ and src/client for callers of the per-node routes on system playbooks; if deploy tooling uses them, STOP (escalation). The main session closes PR #1497 with a pointer after the new PR merges. Line numbers at origin/master d43fc9e16d.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, the AI playbook node model.</role>
+  <goal>No BFF path (canvas save, JIT sync, per-node create/update/delete/scopes) can change a repo-deployed system playbook's nodes, while user-authored playbooks keep working.</goal>
+  <context>
+    <background>Project CLAUDE.md §6 gotcha (2026-10-09): never open and save a system playbook in the Designer; this task is what lets that gotcha relax later (the main session edits CLAUDE.md, not you). Live check from the issue: every playbook with unmarked nodes on dev is a system/notification playbook. ADR-013: AI via PublicContracts; keep new types inside Services/Ai.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-230-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1698, closes #1498"; notes in notes/task-230-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Tests fail on origin/master: PUT canvas, JIT sync and each per-node route on a protected playbook refuse (409, or JIT runs on stored nodes) with zero Dataverse writes; an unreadable playbook returns 503 and writes nothing.</criterion>
+    <criterion testable="true">Must-not-fire: a user-authored playbook (all nodes marked, flag false, type != 2) saves, syncs and accepts per-node edits; a per-node create on it does not make it protected.</criterion>
+    <criterion testable="true">Build, the Ai filter, full ArchTests pass; publish-size delta reported; the caller search is recorded in the task notes.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>Deploy tooling or the Designer relies on the per-node routes for system playbooks, or the guard needs a schema change: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt230); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

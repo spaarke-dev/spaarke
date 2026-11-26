@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="226" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The Decision Records tab reads Decision Records first, so both reviews of a Signal and email-gate records appear (#2015, DI-104)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A new read of an append-only, secure-child table as the caller: who may see which record (D-33/D-35/D-39/D-123) must hold, and forged records must stay out.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalReadService decided-set read and the Decision Records tab client; task 225 edits the commit path only.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, signals, frontend, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Read gh issue view 2015 in full and DI-104 in notes/defer-issues.md. The Decision Records tab is built Signal-first: GET /api/v1/signals/worklist?set=decided lists decided Signals and attaches the record sprk_signal.sprk_decisionrecord points to (Services/Signals/SignalReadService.cs DecidedFetch, ReadDecisionRecordsAsync). A Signal reviewed twice (Send inquiry, then the decision) shows only the later record, and email-gate Decision Records (D-139, no Signal) never appear. Owner decision D-231: read Decision Records first; gate records are listed with their summary and no Open action. Keep the writer-authorship rule (WriterCreatedRecord, task 223) and the caller-read rules: core-record grouping via the existing stamps (D-34/D-36), secure children only to the family (D-33/D-123), no-core records owner-only (D-35/D-39). Client: the tab in src/client/shared/Spaarke.UI.Components (find it from the decided-set consumer). Line numbers at origin/master d43fc9e16d; search by name.</prompt>
+  <role>SPAARKE full-stack developer: .NET 10 BFF read routes as the caller, FetchXML, React/Fluent v9 shared components.</role>
+  <goal>The Decision Records tab lists every writer-authored Decision Record the caller can read in the window, including each review of a Signal reviewed more than once and email-gate records (shown without Open), and nothing the caller cannot read or that the writer did not create.</goal>
+  <context>
+    <background>Prefer extending the decided-set read over a new route (root §11). The window stays as today (check the code; the issue says 90 days on sprk_decidedon). Existing Open behaviour for Signal-backed records is unchanged (reopens read-only). Keep the response contract additive and update the contract baseline in the same PR. Check the worklist row layout rules in project CLAUDE.md §2 UI and D-227 for wording.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-226-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #2015"; notes in notes/task-226-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: a Signal reviewed twice yields two rows on the decided set, each with its own record.</criterion>
+    <criterion testable="true">A gate Decision Record the caller can read is listed with its summary and no Open action (server field and client test).</criterion>
+    <criterion testable="true">Must-not-fire: a record not created by the writer (WriterCreatedRecord) is omitted; a secure-child record of a family the caller is not in is omitted; a no-core record owned by someone else is omitted; existing decided-set tests pass or a changed assertion is justified.</criterion>
+    <criterion testable="true">Build, Signals filter (contract baselines updated), full ArchTests, client-lint and the Worklist jest suite pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The fix needs a new table column, a role change, a new route, or changes what an existing reader can see beyond adding these records: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt226); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

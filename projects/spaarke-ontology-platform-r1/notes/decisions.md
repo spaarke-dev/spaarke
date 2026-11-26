@@ -852,3 +852,24 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - The send stays in the commit request, so its `assignee_email_not_sent_*` warnings stay in the response.
   - Only the sent-items read, the .eml archive and the analysis move to a queued job (#3184).
   - A system-mailbox fallback that finally fails sends the assigner a bell (extends D-199). Scoped with the ISS-010 email part.
+
+## D-228 — Stored Signal evidence detail is accepted as a known limit (owner, 2026-11-26; #1900, DI-88)
+
+- **Finding:** `sprk_signal.sprk_evidencerefs` stores a witness communication's subject and sender. The Signal read route hides them from a reader who cannot read the witness (D-142, task 151), but a user with Read on the Signal row can read the column directly from Dataverse.
+- **Decision (owner, answered in this session during the group-C triage):** "Accept as known limit". No Spaarke UI shows the column; no write-time change, field security or strip pass. #1900 is closed with this decision.
+- **Rejected:** store no detail and resolve it at read time (option 1); field security on the column (option 2).
+
+## D-229 — The commit route shares a new secure-child Decision Record inline (owner, 2026-11-26; #1980, DI-97)
+
+- **Decision (owner, answered in this session):** "Share it inline". After a decision on a Signal whose Decision Record is a secure child, the commit path runs the existing secure-child share for that one new record before it returns, so the deciding user can read it at once instead of after the 2-minute reconcile. Reuse uac-r2's share mechanism (their review); the reconcile stays the backstop. Task 225.
+- **Rejected:** keep the 2-minute window and make the worklist and Decision Records tab retry.
+
+## D-230 — A spend or budget Threshold Signal recalculates that record's stored finance roll-up (owner, 2026-11-26; #1767, #1663)
+
+- **Decision (owner, answered in this session):** "Recalculate on raise". When the evaluator raises or updates a spend or budget Threshold Signal on a matter or project, it recalculates that one record's stored roll-up columns through the existing `FinanceRollupService`, so the form agrees with the Signal. Targeted, never a mass write (D-61); ebilling-r1 reviews (owner of the roll-up). Task 232.
+- **Rejected:** the form reading a computed value from the BFF; a line on the Signal saying the form may lag.
+
+## D-231 — Email-gate Decision Records are listed on the Decision Records tab without an Open action (owner, 2026-11-26; #2015, DI-104)
+
+- **Decision (owner, answered in this session):** "Listed, no Open". The tab reads Decision Records first (every writer-authored record the caller can read in the window, both reviews of a Signal reviewed twice included). A gate Decision Record (no Signal, D-139) appears with its summary and no Open action. Task 226.
+- **Rejected:** a read-only summary panel for gate records.

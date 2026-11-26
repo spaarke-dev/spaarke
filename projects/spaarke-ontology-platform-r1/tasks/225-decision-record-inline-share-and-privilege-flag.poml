@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="225" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The commit route shares a new secure-child Decision Record inline, and the Decision Record records the D-212 privilege flag (#1980 DI-97, #2630 DI-143)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes the access path of an append-only record on secure matters (D-33/D-123) and reuses uac-r2-owned share code; a wrong share widens a secure record, a missed one keeps the 403 window.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>DecisionCommitService / DecisionRecordWriter commit path and their tests; task 226 edits SignalReadService (read side), no overlap.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, signals, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Two issues on the decision commit path; read both in full (gh issue view 1980; gh issue view 2630) and DI-97 / DI-143 in notes/defer-issues.md. (1) #1980: after a decision on a Signal whose Decision Record is a secure child (D-33), the committing user gets 403 on the new record until the 2-minute secure-child share reconcile runs. Owner decision D-229 (notes/decisions.md): the commit path runs the existing secure-child share for that one new record before it returns. The share code is uac-r2's (src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs, SecureChildShareReconciliationJob.cs): reuse it, do not copy it; uac-r2 reviews the PR (project CLAUDE.md §4). (2) #2630: sprk_decisionrecord.sprk_privilegeflagged is copied from sprk_signal.sprk_privilegeflagged, which nothing writes, so every record says not privileged. D-212 (owner ruling in the issue comment): build the flag at commit with WorkItemPrivilege (Services/Signals, registered in SignalsModule.cs; DecisionCapability.cs uses it) from the Signal's subject and its stored sprk_evidencerefs, as the deciding caller, failing closed; never read the Signal column. Entry points at origin/master d43fc9e16d: Services/Signals/DecisionCommitService.cs (class at ~327), DecisionRecordWriter.cs. Search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, Dataverse sharing, the ontology decision commit route.</role>
+  <goal>A user who commits a decision can read the resulting secure-child Decision Record immediately (the share is applied in the commit path, the reconcile stays the backstop), and every new Decision Record carries the D-212 privilege flag derived from the subject and evidence communications.</goal>
+  <context>
+    <background>Read the commit sequence first (D-17: the Decision Record is written last). A share failure must not fail or undo a committed decision (the reconcile repairs it): log it and continue; decide and record whether it surfaces as a warning. The share must grant exactly what the reconcile would grant for that child (same rights, same principals), no more. The privilege flag is record accuracy only (ADR-015: never branched on, never gates access); a read fault means flagged = true. Run /conflict-check; read git log -5 on the files you edit.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-225-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1980, closes #2630"; notes in notes/task-225-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: after a commit that writes a secure-child Decision Record, the share synchronizer is invoked for that one record before the route returns, with the same grants the reconcile computes for it.</criterion>
+    <criterion testable="true">Must-not-fire: a Decision Record that is not a secure child triggers no share call; a share fault leaves the decision committed (200) and is logged; no other record is shared.</criterion>
+    <criterion testable="true">A Decision Record whose subject or any evidence communication is Privileged or Potentially Privileged gets sprk_privilegeflagged = true; None or null gives false; a read fault gives true; the Signal column is not read (tests, each failing when the derivation is removed).</criterion>
+    <criterion testable="true">Build, Signals filter (contract baselines included), full ArchTests pass; publish-size delta reported; uac-r2 asked to review via SendMessage to their session.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The inline share needs a new privilege, a role change, a change to uac-r2's share code beyond calling it, or would share anything the reconcile would not: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt225); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

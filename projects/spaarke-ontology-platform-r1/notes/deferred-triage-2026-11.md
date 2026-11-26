@@ -56,6 +56,8 @@ All 22 closed on GitHub 2026-11-26 on the owner's go, each with its evidence bel
 
 ## C. Fix in the R1 close-out: real, reachable defects (pass 2: none is a must-fix-before-ship) (15)
 
+**Started 2026-11-26 (owner: "Yes, start group C").** Owner decisions D-228..D-231. 13 issues are in tasks 225-232 (225: #1980 + #2630; 226: #2015; 227: #1848 + #1881; 228: #1984 + #1991; 229: #1688; 230: #1698 + #1498; 231: #1697; 232: #1767 + #1663). #1900 closed as a known limit (D-228). #2776 moves to group D with #1048 (same drifted action, deferred task 125): the fix is in the Dataverse-stored action and the seed `scripts/seed-email-intelligence-actions.ps1`, and needs a dev write with the owner's approval and a live run.
+
 | # | Title | Theme | Severity | Size | Why |
 |---|---|---|---|---|---|
 | [#1900](https://github.com/spaarke-dev/spaarke/issues/1900) | DI-88: Stored Signal evidence keeps a witness's subject/sender that a Signal reader cannot read (D-142 write-t | access-security | high | M | Stored sprk_evidencerefs still holds witness subject/sender; anyone with Read on sprk_signal can see it via Dataverse directly, bypassing the BFF route. Needs an unusual action (direct Dataverse read), so SHOULD, not MUST. |

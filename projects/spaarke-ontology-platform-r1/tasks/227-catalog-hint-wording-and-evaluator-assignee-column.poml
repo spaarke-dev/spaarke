@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Revise-budget hint drops developer wording, and the evaluator reads a work assignment's individual from sprk_assignedtointernal (#1848, #1881 DI-82)</title>
+    <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two small, fully specified changes with existing tests to extend.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-c-2026-11-26b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>DecisionActionCatalog.cs hint string and SignalEvaluator.AssigneeColumnBySubject; task 232 edits a different part of SignalEvaluator.cs: merge master before merging if 232 lands first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, signals, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-26: "Yes, start group C" (deferred-issue triage group C, notes/deferred-triage-2026-11.md). Two small Signals fixes; read gh issue view 1848 and gh issue view 1881. (1) #1848: DecisionActionCatalog.cs (Services/Signals/Actions), revise-budget parameter budget, Hint "Pre-selected when the matter has one budget; the user picks one when it has several (D-18)" is shown to users. Replace with copy addressed to the decider, e.g. "Chosen automatically when the matter has one budget; pick the budget to revise when it has several." Scan the catalog for any other (D-nn) or developer wording in user-visible strings and fix those too. The plan text is pinned in contract baselines (tests/integration/contract/Api/Signals/Baselines/plan.200.*.json): update them in the same PR. (2) #1881: SignalEvaluator.AssigneeColumnBySubject (SignalEvaluator.cs ~109) maps sprk_workassignment to sprk_assignedto; D-129 and OwnedChildWrite.ForPersonColumns name sprk_assignedtointernal. Take the column from ForPersonColumns["sprk_workassignment"].Column (or the same source), and add a test that pins the two maps together for every subject both define. Line numbers at origin/master d43fc9e16d.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, the ontology Signals catalog and evaluator.</role>
+  <goal>No user-visible catalog string carries a decision id or developer wording, and the evaluator and the worklist agree on who a work assignment's individual is.</goal>
+  <context>
+    <background>D-129: individuals come from Assigned To Internal (sprk_assignedtointernal), or sprk_assignedto1 on sprk_invoice/sprk_event; never ownerid. The pinning test should fail if the two maps diverge for a shared subject.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/deferred-triage-2026-11.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-227-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #1848, closes #1881"; notes in notes/task-227-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">The revise-budget budget hint has no "(D-" and no "the user"; a test asserts no user-visible catalog string contains "(D-"; contract baselines updated.</criterion>
+    <criterion testable="true">A test fails on origin/master: the evaluator's assignee column for sprk_workassignment equals OwnedChildWrite.ForPersonColumns for it; a pinning test covers every subject in both maps.</criterion>
+    <criterion testable="true">Must-not-fire: other subjects' assignee columns are unchanged; Signals filter and full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>The column change alters any other subject's mapping or needs a schema change: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt227); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>
