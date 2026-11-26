@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Search tools: spaarke_search_documents, spaarke_find_records</title>
+    <phase>1 Read tools</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF surface (two MCP tools) over access-trimmed retrieval; adds must-not-leak tests</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Thin adapters copying CompleteDecisionTool over two existing services; the access trim and raw-query proof already exist (route, task 009)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Search/**, the Search ledger partial and its tests</parallel-reason>
+    <deps>009, 020, 027</deps>
+    <tags>bff-api, api, ai, integration-test</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two read-only MCP tools: spaarke_search_documents over ISemanticSearchService with the same IRetrievalAccessTrim the POST /api/ai/search route applies, and spaarke_find_records over IRecordSearchService (POST /api/ai/search/records). Both run as the caller, return slim rows to the model, and match the REST results for the same caller and query.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool handlers and Spaarke retrieval authorization.</role>
+  <goal>Both tools are discovered by McpToolCatalog, pass McpToolAuthorization.ValidateTool, return the REST route's results (slimmed) for the same caller and query, never return a document the caller cannot open, and stay under 64 KiB at 50 hits.</goal>
+
+  <context>
+    <background>Spec FR-02, FR-15, NFR-02, NFR-07. REST: Api/Ai/SemanticSearchEndpoints.cs (group /api/ai/search, POST "/" :80; IRetrievalAccessTrim injected at :115) and Api/Ai/RecordSearchEndpoints.cs (POST /records :40). Task 009 proved no OData/FetchXML is built from raw query text. Tool pattern: Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs (caller via IHttpContextAccessor, UserContextRequired, McpToolResults). Errors via 020's general McpToolResults.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/SearchDocumentsTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/FindRecordsTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Search.cs (two ledger rows)</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Search/SearchToolsContractTests.cs (parity with REST, slim shape, size at 50 hits)</file>
+      <file role="new">tests/integration/auth/Mcp/Search/SearchToolsMustNotLeakTests.cs (trimmed document never appears; no caller → UserContextRequired)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Mcp/ShowDecisionsToolTests.cs</file>
+      <file role="canonical-reference">tests/integration/auth/Mcp/McpCallerPathTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="009" status="pending">Raw-query proof (FR-15 gate for find_records)</dependency>
+      <dependency task="020" status="pending">General McpToolResults, ledger partials</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Run as the caller: request HttpContext via IHttpContextAccessor; null or unauthenticated → isError UserContextRequired; never an app-only fallback; never pass or log the caller's token. The tool calls the same service methods and the same IRetrievalAccessTrim the REST handlers call; it does not re-implement trimming (spec MUST NOT copy authorization).</constraint>
+    <constraint source="project">Each tool: [McpArea("legal-operations")], readOnlyHint true, destructiveHint false, idempotentHint true, a title, and a "use for / not for" description ≤ 1,024 characters that distinguishes document search (content) from record search (matters, projects, invoices by name/number). Ledger rows go in RouteAuthorizationGuardTests.Mcp.Search.cs in the same diff.</constraint>
+    <constraint source="ADR-015">Model-visible output: id, name/title, type, parent matter name, snippet ≤ 200 chars and an open link per hit; no secured or privileged fields; full payload only in structuredContent for widgets (task 035). Logs: tool name, latency, row count, outcome and correlation id only, never query text.</constraint>
+    <constraint source="project">Result size &lt; 64 KiB at 50 hits (NFR-02); top is clamped to the REST maximum; errors map the REST reasonCode through McpToolResults.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and that 009 and 020 are merged; read the two REST handlers and CompleteDecisionTool.</step>
+    <step order="2">Write the two tools; add the ledger rows.</step>
+    <step order="3">Write the contract and must-not-leak tests; run them, the MCP suites, ArchTests and the conformance host.</step>
+    <step order="4">Measure the publish-size delta; record it in the PR.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the REST search route applies its access trim inside the endpoint (not a reusable service call), STOP and escalate before copying it (spec MUST NOT copy authorization).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md rows "Document search" and "Record search": ISemanticSearchService + IRetrievalAccessTrim (PublicContracts) and IRecordSearchService back the REST routes; CAPABILITY-INDEX rows for semantic search and record search.</existing>
+    <extension>The services are reused unchanged; the tools are the extension (thin MCP adapters on r1's host), as spec "Placement &amp; New Components" states.</extension>
+    <cost-of-doing-nothing>With the legacy agent removed, Copilot users cannot search Spaarke documents or records (FR-02 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test (contract/Api/Mcp, auth/Mcp, ArchTests, Mcp.Conformance.Host)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/SearchDocumentsTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Search/FindRecordsTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/Search/SearchToolsContractTests.cs</output>
+    <output type="test">tests/integration/auth/Mcp/Search/SearchToolsMustNotLeakTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For the same caller and query, each tool's hit ids and order equal the REST route's.</criterion>
+    <criterion testable="true">Negative (must-not-leak): a document the access trim removes for the caller never appears in either tool's content or structuredContent.</criterion>
+    <criterion testable="true">Negative: no HttpContext or an unauthenticated one returns isError UserContextRequired and calls no service.</criterion>
+    <criterion testable="true">At 50 hits the serialised result is under 64 KiB; model-visible text has no field outside the slim row list.</criterion>
+    <criterion testable="true">McpToolAuthorization.ValidateTool passes; ArchTests and the conformance host pass with both tools registered.</criterion>
+    <criterion testable="true">Publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02, FR-15, NFR-02, NFR-05, NFR-07. uac-r2 reviews the caller-path diff.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

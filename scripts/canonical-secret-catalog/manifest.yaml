@@ -182,7 +182,6 @@ secrets:
       - 'AzureAd__TenantId'
       - 'Graph__TenantId'
       - 'Dataverse__TenantId'
-      - 'AgentToken__TenantId'
       - 'ScheduledRagIndexing__TenantId'
     tags: ['identity', 'bff', 'public']
 
@@ -190,7 +189,7 @@ secrets:
     category: 'identity'
     purpose: 'BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.'
     consumers:
-      - 'BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId / AgentToken:ClientId'
+      - 'BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId'
     rotation_cadence: 'N/A'
     never_delete: false
     exception_note: >-
@@ -207,7 +206,6 @@ secrets:
       - 'AzureAd__ClientId'
       - 'Graph__ClientId'
       - 'Dataverse__ClientId'
-      - 'AgentToken__ClientId'
     tags: ['identity', 'bff', 'public']
 
   - canonical_name: 'BFF-API-Audience'

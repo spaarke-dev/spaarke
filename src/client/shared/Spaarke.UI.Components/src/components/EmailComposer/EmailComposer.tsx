@@ -560,6 +560,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const openedWithRef = React.useRef(state);
 
   const showAssociations = props.showAssociations ?? true;
+  const associationsRemovable = props.associationsRemovable ?? true;
+  const showBcc = props.showBcc ?? true;
+  const showInternalOnly = props.showInternalOnly ?? true;
   const attachmentSources = React.useMemo(
     () => defaultAttachmentSources(props.attachmentSources, props.wizardContext),
     [props.attachmentSources, props.wizardContext]
@@ -572,7 +575,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Bcc is hidden by default (owner UAT mockup 2026-07-22 shows To/Cc only); a small
   // "Bcc" toggle reveals it, and it auto-reveals when the field already carries values.
   const [showBccToggle, setShowBccToggle] = React.useState(false);
-  const bccVisible = showBccToggle || state.bcc.length > 0;
+  const bccVisible = showBcc && (showBccToggle || state.bcc.length > 0);
 
   // Imperative handle to the HTML body editor — used to insert a record link AT THE CURSOR
   // (owner UAT 2026-07-24) rather than appending to the end. Null in plain-text mode.
@@ -1535,7 +1538,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       {/* "External" | "Internal Only" tags (task 068; owner 2026-10-14) — External by default; Internal Only for a
           reply/forward of an internal source, and Internal Only locked when the host knows the target thread is
           Private. Hidden in read-only (view) mode — there is nothing to send. */}
-      {!state.readOnly && !props.composeOnly && (
+      {!state.readOnly && !props.composeOnly && showInternalOnly && (
         <InternalOnlySwitch
           variant="tags"
           checked={state.isInternalOnly}
@@ -1586,7 +1589,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             }
           />
         ) : (
-          !state.readOnly && (
+          !state.readOnly &&
+          showBcc && (
             <div className={styles.bccToggleRow}>
               <Button appearance="subtle" size="small" onClick={() => setShowBccToggle(true)}>
                 Bcc
@@ -1671,7 +1675,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                 associations={state.associations}
                 primaryIndex={0}
                 onRemove={
-                  state.readOnly
+                  state.readOnly || !associationsRemovable
                     ? undefined
                     : a =>
                         dispatch({

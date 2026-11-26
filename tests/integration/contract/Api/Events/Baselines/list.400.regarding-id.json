@@ -1,0 +1,14 @@
+{
+  "case": "list.400.regarding-id",
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"regardingRecordId\":[\"Regarding record id must be a GUID.\"]}}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "regardingRecordId": ["Regarding record id must be a GUID."]
+    }
+  }
+}

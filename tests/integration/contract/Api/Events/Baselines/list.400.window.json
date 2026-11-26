@@ -1,0 +1,14 @@
+{
+  "case": "list.400.window",
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"pageNumber\":[\"pageNumber × pageSize must not exceed 5000.\"]}}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "pageNumber": ["pageNumber × pageSize must not exceed 5000."]
+    }
+  }
+}
