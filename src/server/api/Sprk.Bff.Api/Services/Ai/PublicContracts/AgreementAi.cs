@@ -189,7 +189,7 @@ public sealed class AgreementAi : IAgreementAi
         }
 
         var reasoning = output.TryGetProperty("reasoning", out var reasoningElement) && reasoningElement.ValueKind == JsonValueKind.String
-            ? reasoningElement.GetString()
+            ? ReadString(reasoningElement, "$.reasoning")
             : throw new AgreementOutputRefusal(AgreementAiException.OutputInvalid, "$.reasoning");
 
         var keys = registry.ToDictionary(r => r.Key, r => r.Key, StringComparer.OrdinalIgnoreCase);
@@ -201,7 +201,7 @@ public sealed class AgreementAi : IAgreementAi
             if (item.ValueKind != JsonValueKind.Object
                 || !item.TryGetProperty("subDomainKey", out var keyElement)
                 || keyElement.ValueKind != JsonValueKind.String
-                || !keys.TryGetValue(keyElement.GetString() ?? string.Empty, out var registryKey))
+                || !keys.TryGetValue(ReadString(keyElement, $"{path}.subDomainKey"), out var registryKey))
             {
                 // Includes a key the model invented: the registry is the closed set.
                 throw new AgreementOutputRefusal(AgreementAiException.OutputInvalid, $"{path}.subDomainKey");
@@ -230,6 +230,22 @@ public sealed class AgreementAi : IAgreementAi
             Composite = composite,
             Reasoning = reasoning,
         };
+    }
+
+    /// <summary>
+    /// A JSON string's value. An escaped lone surrogate (<c>\uD800</c>) is valid JSON that <see cref="JsonElement.GetString"/> cannot
+    /// decode (it throws <see cref="InvalidOperationException"/>): that is <c>output_invalid</c> at this path, never an untyped error.
+    /// </summary>
+    private static string ReadString(JsonElement value, string path)
+    {
+        try
+        {
+            return value.GetString() ?? string.Empty;
+        }
+        catch (InvalidOperationException)
+        {
+            throw new AgreementOutputRefusal(AgreementAiException.OutputInvalid, path);
+        }
     }
 
     private static bool RequireBool(JsonElement parent, string name) =>

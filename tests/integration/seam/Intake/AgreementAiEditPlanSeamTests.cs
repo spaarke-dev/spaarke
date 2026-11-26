@@ -271,6 +271,25 @@ public sealed class AgreementAiEditPlanSeamTests
     }
 
     [Fact]
+    public async Task BuildEditPlan_ShowsTheModelTheClauseTextAsText_NeverAsUnicodeEscapes()
+    {
+        // Live run 2026-11-26: the prompt showed "’", "“", "”", "§" and "–" as ’-style escapes (in `## Input` and in
+        // `## Examples`); both models copied the escapes into their quotes and replacements garbled (\u0019, \u001c, \u001A),
+        // so the quotes never matched and the engine could not write the replacements. The model must see the characters.
+        var segmentation = Segmentation("nda-02-bluefin-harbor-counterparty-markup");
+        var rig = new Rig(_ => RecordedOutput("nda-02-bluefin-harbor-counterparty-markup"));
+
+        await rig.Ai.BuildEditPlanAsync(Request(segmentation));
+
+        var prompt = rig.Prompts.Single();
+        prompt.Should().NotMatchRegex(@"\\u[0-9A-Fa-f]{4}", "no character of the clause text, the standard or the examples is shown as an escape");
+        foreach (var ch in new[] { '’', '“', '”', '§' })
+        {
+            prompt.Should().Contain(ch.ToString(), "the character the model has to quote reaches it as itself");
+        }
+    }
+
+    [Fact]
     public async Task BuildEditPlan_WhenEditTextHasATabANewlineOrAnAstralCharacter_KeepsTheEdit()
     {
         // Must-not-fire control for the XML-text rule: tab, newline, a surrogate PAIR and U+FFFD are XML 1.0 text the engine writes.
@@ -666,6 +685,9 @@ public sealed class AgreementAiEditPlanSeamTests
     [InlineData("""{"isAgreement":true,"candidates":[],"composite":false,"reasoning":"x"}""")]
     [InlineData("""{"isAgreement":false,"candidates":[{"subDomainKey":"nda","confidence":0.9}],"composite":false,"reasoning":"x"}""")]
     [InlineData("""{"isAgreement":true,"candidates":[{"subDomainKey":"nda","confidence":0.9}],"composite":false}""")]
+    // An escaped lone surrogate is valid JSON that JsonElement.GetString() cannot decode: output_invalid, never an untyped InvalidOperationException.
+    [InlineData("""{"isAgreement":true,"candidates":[{"subDomainKey":"nda","confidence":0.9}],"composite":false,"reasoning":"x\uD800"}""")]
+    [InlineData("""{"isAgreement":true,"candidates":[{"subDomainKey":"nd\uDC00a","confidence":0.9}],"composite":false,"reasoning":"x"}""")]
     public async Task Classify_WhenTheVerdictContradictsItselfOrBreaksTheContract_ThrowsOutputInvalid(string reply)
     {
         var rig = new Rig(_ => reply);

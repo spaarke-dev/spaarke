@@ -150,6 +150,49 @@ public sealed class CompletionEngineSharedInputSeamTests
             "the narrator's hand-replicated `## Input` block is retired onto PromptInputSection — byte-for-behavior unchanged");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Regression (spaarke-intake-pipeline-r1 task 004 live run 2026-11-26): the producer showed every
+    // non-ASCII character as a \uXXXX escape, and the models copied the escapes into their output
+    // garbled (’ → \u0019, “ → \u001c; gpt-4.1-mini \u0000/\u0002/\u001A), which the redline
+    // engine cannot write. Text must reach the model as text, in `## Input` and in `## Examples`.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Render_ForNonAsciiAndHtmlSensitiveText_ShowsTheCharactersNotUnicodeEscapes()
+    {
+        // Built the way the PublicContracts facades build operands (JsonSerializer.SerializeToElement, default encoder).
+        var operand = JsonSerializer.SerializeToElement(new
+        {
+            text = "the “Confidential Information” of the other party’s § 9 – term & <notes> 'as is' + more",
+            control = "a\u0001b",
+            quote = "say \"hi\" \\ there",
+        });
+
+        var section = PromptInputSection.Render(operand);
+
+        section.Should().Contain("the “Confidential Information” of the other party’s § 9 – term & <notes> 'as is' + more");
+        section.Should().NotMatchRegex(@"\\u(?!0001)[0-9A-Fa-f]{4}", "no character the model must quote is shown as an escape");
+        section.Should().Contain("a\\u0001b", "a control character is still escaped, as JSON requires");
+        section.Should().Contain("say \\\"hi\\\" \\\\ there", "quote and backslash keep their JSON escapes");
+    }
+
+    [Fact]
+    public void Render_ForAJpsPromptWithInputAndExamples_ShowsNonAsciiAsTextInBothSections()
+    {
+        const string jps =
+            """{"$schema":"https://spaarke.com/schemas/prompt/v1","instruction":{"role":"r","task":"t"},"examples":[{"input":"i","output":{"section":"§13 Assignment","issue":"the party’s “consent”"}}]}""";
+        var renderer = new PromptSchemaRenderer(NullLogger<PromptSchemaRenderer>.Instance);
+
+        var rendered = renderer.Render(
+            rawPrompt: jps, skillContext: null, knowledgeContext: null, documentText: null,
+            templateParameters: null, downstreamNodes: null,
+            runtimeInput: JsonSerializer.SerializeToElement(new { text = "Bluefin’s “Purpose” – § 2" }));
+
+        rendered.PromptText.Should().Contain("Bluefin’s “Purpose” – § 2");
+        rendered.PromptText.Should().Contain("\"section\": \"§13 Assignment\"").And.Contain("the party’s “consent”");
+        rendered.PromptText.Should().NotMatchRegex(@"\\u[0-9A-Fa-f]{4}");
+    }
+
     // ─── Node context builder (mirrors AiCompletionNodeExecutorTests.CreateValidContext) ─────
 
     private static NodeExecutionContext BuildNodeContext(string systemPrompt, string outputSchemaJson, string configJson)
