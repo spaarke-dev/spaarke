@@ -87,7 +87,9 @@ See spec.md "Owner Clarifications" for the full table; design.md §9 for Q1–Q8
 - **Writes:**
   - Engine runs are written by `PlaybookOrchestrationService` (r2 FR-13; run kind = engine).
   - Action and coded runs are written at the PublicContracts facade or the coded-workflow seam by specialist-legal-agents-r1 Phase 1.
-  - r2 proposed that all of them go through 005's `PlaybookRunRecordStore`, so one component owns the row shape (ADR-002: one owner per invariant). Answer pending.
+  - **Agreed (specialist-legal-agents-r1, 2026-11-25): one shared writer.** 005's `PlaybookRunRecordStore` owns the row shape and the write rules. Engine runs call it with run kind = engine. Phase 1 calls it from the PublicContracts facade and the coded-workflow seam for prompted and coded runs. Phase 1 adds its profile-version and gate-decision columns to the store and never writes the table directly.
+  - All writes are fail-safe today. Phase 1 may need a "required" write mode, where a gated side-effect run fails closed if its gate attribution does not persist, or it may record that attribution in the Decision Record instead; Phase 1 design decides. 005 keeps the write call extensible (an options object) and does not add that mode now.
+  - Docs PR #3213 (ADR-039 amendment, AI architecture doc §6.6) was checked against 005. Reported differences: the node-run started-on, completed-on and sequence columns, and the CAPABILITY-INDEX row 34/35 collision; on the master merge, fold our row 35 into #3213's row 35 and renumber ours from 36.
 - **Still needed:**
   - the owner's explicit go to run the widened `scripts/dataverse/Add-PlaybookRunColumns.ps1` on dev (root §5; this decision is a design choice, not that go);
   - task 030 keeps its ADR-039 check (the node engine stays frozen);
