@@ -47,11 +47,11 @@
 //   The stamp UAMI also holds namespace-wide Sender + Receiver (modules/bff-runtime-rbac.bicep); the two BFF
 //   grants here keep the engine pipeline's contract self-contained if that is ever narrowed.
 //
-// REGISTRY (escalation trigger 2 in the task): this module never CREATES a registry. `registryName` names an
-//   EXISTING registry in this resource group; with `grantAcrPull` true (default) the identity gets AcrPull on
-//   it. For a registry elsewhere (the platform registry from controlplane-acr.bicep), pass grantAcrPull=false
-//   and grant the identity AcrPull there (controlplane-acr.bicep `controlPlaneUamiPrincipalId`). Which
-//   registry a stamp uses is owed by customer-provisioning-orchestration-r1 and the owner.
+// REGISTRY: this module never CREATES a registry. Decided 2026-11-25 (notes/decisions.md): dev and Model 1
+//   stamps pull from the platform ACR. Pass its login server in `registryLoginServer`; provisioning grants
+//   the Job identity (customer.bicep output intakeEngineIdentityObjectId) AcrPull on it, because that registry
+//   is outside this deployment's scope. Alternatively `registryName` names a registry in this resource group
+//   and `grantAcrPull` grants AcrPull here (the path a Model 2 stamp needs after importing the image).
 //
 // QUEUES (request + completion)
 //   Created here (not in the shared stamp queue list) because service-bus.bicep gives every queue
@@ -98,11 +98,13 @@ param identityClientId string
 @minLength(36)
 param bffPrincipalId string
 
-@description('Name of an EXISTING Azure Container Registry in this resource group that holds the engine image. Never created here.')
-@minLength(5)
-param registryName string
+@description('Login server of a registry OUTSIDE this resource group (the platform ACR: platform-controlplane.bicep output acrLoginServer). When set, registryName is ignored, no lookup is made here, and the AcrPull grant is made on that registry by provisioning. Empty = use registryName in this resource group.')
+param registryLoginServer string = ''
 
-@description('Grant the identity AcrPull on registryName. Set false when the registry is elsewhere and the grant is made there.')
+@description('Name of an EXISTING Azure Container Registry in this resource group (only when registryLoginServer is empty). Never created here.')
+param registryName string = ''
+
+@description('Grant the identity AcrPull on registryName (local registry only; ignored when registryLoginServer is set).')
 param grantAcrPull bool = true
 
 @description('Full image reference, for example {registry}.azurecr.io/sprk-intake-engine:{tag}. The tag comes from the image build (task 003).')
@@ -159,9 +161,16 @@ resource serviceBusNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview
   name: serviceBusNamespaceName
 }
 
-resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+// A registry in another resource group (the platform ACR) cannot be looked up from this scope: an `existing`
+// reference resolves in THIS resource group and would fail the deployment. So the lookup is made only for a
+// local registry; a remote one is named by its login server.
+var useLocalRegistry = empty(registryLoginServer)
+
+resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = if (useLocalRegistry) {
   name: registryName
 }
+
+var effectiveLoginServer = useLocalRegistry ? registry!.properties.loginServer : registryLoginServer
 
 // ============================================================================
 // ENGINE REQUEST QUEUE -- shape copied from service-bus.bicep, with per-queue settings
@@ -258,9 +267,9 @@ resource bffReceiverOnCompletionQueue 'Microsoft.Authorization/roleAssignments@2
   }
 }
 
-resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (grantAcrPull) {
+resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useLocalRegistry && grantAcrPull) {
   scope: registry
-  name: guid(registry.id, identityPrincipalId, acrPullRoleId)
+  name: guid(registry!.id, identityPrincipalId, acrPullRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
     principalId: identityPrincipalId
@@ -358,7 +367,7 @@ resource engineJob 'Microsoft.App/jobs@2025-01-01' = {
       }
       registries: [
         {
-          server: registry.properties.loginServer
+          server: effectiveLoginServer
           identity: identityResourceId
         }
       ]

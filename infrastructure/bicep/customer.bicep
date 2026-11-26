@@ -146,7 +146,10 @@ param deployIntakeEngine bool = false
 @description('Engine image reference ({registry}.azurecr.io/sprk-intake-engine:{tag}). Required when deployIntakeEngine is true; the tag comes from the image build workflow (task 003).')
 param intakeEngineImage string = ''
 
-@description('Name of an EXISTING Azure Container Registry in the stamp resource group that holds the engine image. Required when deployIntakeEngine is true. Never created here: the registry choice belongs to the owner and customer-provisioning-orchestration-r1.')
+@description('Login server of the platform ACR that holds the engine image (platform-controlplane.bicep output acrLoginServer). The decided registry for dev and Model 1 stamps. When set, intakeEngineRegistryName is ignored and provisioning grants AcrPull on the platform ACR to output intakeEngineIdentityObjectId.')
+param intakeEngineRegistryLoginServer string = ''
+
+@description('Name of an EXISTING Azure Container Registry in the stamp resource group (only when intakeEngineRegistryLoginServer is empty, e.g. a Model 2 stamp with an imported image). Never created here.')
 param intakeEngineRegistryName string = ''
 
 @description('Grant the intake engine identity AcrPull on intakeEngineRegistryName. Set false when the registry is elsewhere and the grant is made there (controlplane-acr.bicep).')
@@ -852,6 +855,7 @@ module intakeEngineJob 'modules/intake-engine-job.bicep' = if (deployIntakeEngin
     identityPrincipalId: uamiIntakeEngine!.outputs.principalId
     identityClientId: uamiIntakeEngine!.outputs.clientId
     bffPrincipalId: uami.outputs.principalId
+    registryLoginServer: intakeEngineRegistryLoginServer
     registryName: intakeEngineRegistryName
     grantAcrPull: intakeEngineGrantAcrPull
     image: intakeEngineImage

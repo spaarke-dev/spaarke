@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "11685694059939255316"
+      "templateHash": "720484517038749111"
     }
   },
   "parameters": {
@@ -222,11 +222,18 @@
         "description": "Engine image reference ({registry}.azurecr.io/sprk-intake-engine:{tag}). Required when deployIntakeEngine is true; the tag comes from the image build workflow (task 003)."
       }
     },
+    "intakeEngineRegistryLoginServer": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Login server of the platform ACR that holds the engine image (platform-controlplane.bicep output acrLoginServer). The decided registry for dev and Model 1 stamps. When set, intakeEngineRegistryName is ignored and provisioning grants AcrPull on the platform ACR to output intakeEngineIdentityObjectId."
+      }
+    },
     "intakeEngineRegistryName": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Name of an EXISTING Azure Container Registry in the stamp resource group that holds the engine image. Required when deployIntakeEngine is true. Never created here: the registry choice belongs to the owner and customer-provisioning-orchestration-r1."
+        "description": "Name of an EXISTING Azure Container Registry in the stamp resource group (only when intakeEngineRegistryLoginServer is empty, e.g. a Model 2 stamp with an imported image). Never created here."
       }
     },
     "intakeEngineGrantAcrPull": {
@@ -4264,6 +4271,9 @@
           "bffPrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
+          "registryLoginServer": {
+            "value": "[parameters('intakeEngineRegistryLoginServer')]"
+          },
           "registryName": {
             "value": "[parameters('intakeEngineRegistryName')]"
           },
@@ -4293,7 +4303,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "5771539284649197138"
+              "templateHash": "16881022448270677655"
             }
           },
           "parameters": {
@@ -4369,18 +4379,25 @@
                 "description": "Principal (object) id of the BFF identity (the stamp UAMI). Granted Sender on the request queue and Receiver on the completion queue."
               }
             },
+            "registryLoginServer": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Login server of a registry OUTSIDE this resource group (the platform ACR: platform-controlplane.bicep output acrLoginServer). When set, registryName is ignored, no lookup is made here, and the AcrPull grant is made on that registry by provisioning. Empty = use registryName in this resource group."
+              }
+            },
             "registryName": {
               "type": "string",
-              "minLength": 5,
+              "defaultValue": "",
               "metadata": {
-                "description": "Name of an EXISTING Azure Container Registry in this resource group that holds the engine image. Never created here."
+                "description": "Name of an EXISTING Azure Container Registry in this resource group (only when registryLoginServer is empty). Never created here."
               }
             },
             "grantAcrPull": {
               "type": "bool",
               "defaultValue": true,
               "metadata": {
-                "description": "Grant the identity AcrPull on registryName. Set false when the registry is elsewhere and the grant is made there."
+                "description": "Grant the identity AcrPull on registryName (local registry only; ignored when registryLoginServer is set)."
               }
             },
             "image": {
@@ -4458,7 +4475,8 @@
           "variables": {
             "serviceBusDataSenderRoleId": "69a216fc-b8fb-44d8-bc22-1f3c2cd27a39",
             "serviceBusDataReceiverRoleId": "4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0",
-            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d"
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+            "useLocalRegistry": "[empty(parameters('registryLoginServer'))]"
           },
           "resources": [
             {
@@ -4567,7 +4585,7 @@
               ]
             },
             {
-              "condition": "[parameters('grantAcrPull')]",
+              "condition": "[and(variables('useLocalRegistry'), parameters('grantAcrPull'))]",
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
               "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
@@ -4662,7 +4680,7 @@
                   },
                   "registries": [
                     {
-                      "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), '2023-07-01').loginServer]",
+                      "server": "[if(variables('useLocalRegistry'), reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), '2023-07-01').loginServer, parameters('registryLoginServer'))]",
                       "identity": "[parameters('identityResourceId')]"
                     }
                   ],
