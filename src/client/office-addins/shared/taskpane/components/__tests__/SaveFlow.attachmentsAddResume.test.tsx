@@ -139,7 +139,10 @@ let queued: string[] = [];
 let finished = false;
 let failReads = false;
 let jobReads = 0;
+// Fake timers: the add watch polls on a timer (3 s in the pane), and waitFor advances fake time itself, so these tests do not
+// depend on how fast the machine runs (a loaded CI runner used to starve the real-time waits).
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
   sessionStorage.clear();
   mockFetch.mockReset();
@@ -171,6 +174,10 @@ beforeEach(() => {
     }
     return response(200, { data: {} });
   });
+});
+
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 async function addAndSettle(toAdd: string[]) {

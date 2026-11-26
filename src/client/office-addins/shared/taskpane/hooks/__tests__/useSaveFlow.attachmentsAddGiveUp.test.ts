@@ -127,10 +127,21 @@ async function startAdd(hook: ReturnType<typeof renderSaveFlow>) {
   await waitFor(() => expect(hook.onComplete).toHaveBeenCalledTimes(1));
 }
 
+// Fake milliseconds waitFor may spend: it advances 50 ms per check and the watch makes one read per check, so the 40-read cap needs about
+// 40 checks. Fake time costs nothing real.
+const FAKE_TIME_FOR_WATCH = 10_000;
+
+// Fake timers: the add watch polls on a timer (3 s in the pane), and waitFor advances fake time itself, so these tests do not
+// depend on how fast the machine runs (a loaded CI runner used to starve the real-time waits).
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
   sessionStorage.clear();
   mockFetch.mockReset();
+});
+
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 describe('useSaveFlow — an add watch that stops waiting is not an outcome (task 141 review, round 2)', () => {
@@ -139,7 +150,9 @@ describe('useSaveFlow — an add watch that stops waiting is not an outcome (tas
     const hook = renderSaveFlow();
     await startAdd(hook);
 
-    await waitFor(() => expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledTimes(1), {
+      timeout: FAKE_TIME_FOR_WATCH,
+    });
     expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledWith(EML_ID, [B], 'job-141');
     expect(hook.onAttachmentsAddFinished).not.toHaveBeenCalled();
     expect(jobReads()).toBe(1 + ATTACHMENTS_ADD_WATCH_MAX_POLLS);
@@ -150,7 +163,9 @@ describe('useSaveFlow — an add watch that stops waiting is not an outcome (tas
     const hook = renderSaveFlow();
     await startAdd(hook);
 
-    await waitFor(() => expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledTimes(1), {
+      timeout: FAKE_TIME_FOR_WATCH,
+    });
     expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledWith(EML_ID, [B], 'job-141');
     expect(hook.onAttachmentsAddFinished).not.toHaveBeenCalled();
     expect(jobReads()).toBe(1 + 3);
@@ -169,7 +184,9 @@ describe('useSaveFlow — an add watch that stops waiting is not an outcome (tas
     serve(() => job('AttachmentsQueued'));
     const hook = renderSaveFlow();
     await startAdd(hook);
-    await waitFor(() => expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(hook.onAttachmentsAddUnconfirmed).toHaveBeenCalledTimes(1), {
+      timeout: FAKE_TIME_FOR_WATCH,
+    });
 
     serve(() => job('AttachmentsAdded'));
     act(() => hook.result.current.watchAttachmentsAdd('job-141', EML_ID, [B]));

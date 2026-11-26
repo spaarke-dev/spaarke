@@ -115,10 +115,17 @@ function renderSaveFlow() {
   return { ...hook, onComplete, onAttachmentsAddFinished };
 }
 
+// Fake timers: the add watch polls on a timer (3 s in the pane), and waitFor advances fake time itself, so these tests do not
+// depend on how fast the machine runs (a loaded CI runner used to starve the real-time waits).
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
   sessionStorage.clear();
   mockFetch.mockReset();
+});
+
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 describe('useSaveFlow — watching an add until its job finished (task 141 review F2)', () => {
@@ -147,7 +154,9 @@ describe('useSaveFlow — watching an add until its job finished (task 141 revie
 
     // Once only: no more reads after it finished.
     const reads = jobReads();
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(80);
+    });
     expect(jobReads()).toBe(reads);
     expect(hook.onAttachmentsAddFinished).toHaveBeenCalledTimes(1);
   });
@@ -172,7 +181,9 @@ describe('useSaveFlow — watching an add until its job finished (task 141 revie
     });
     await waitFor(() => expect(hook.onComplete).toHaveBeenCalledTimes(1));
     const reads = jobReads();
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(80);
+    });
 
     expect(jobReads()).toBe(reads);
     expect(hook.onAttachmentsAddFinished).not.toHaveBeenCalled();
@@ -187,7 +198,9 @@ describe('useSaveFlow — watching an add until its job finished (task 141 revie
       await hook.result.current.startSave({ ...plain, attachments: [] });
     });
     await waitFor(() => expect(hook.onComplete).toHaveBeenCalledTimes(1));
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(80);
+    });
 
     expect(hook.onAttachmentsAddFinished).not.toHaveBeenCalled();
   });
@@ -201,7 +214,10 @@ describe('useSaveFlow — watching an add until its job finished (task 141 revie
     });
     await waitFor(() => expect(hook.onComplete).toHaveBeenCalledTimes(1));
     act(() => hook.result.current.reset());
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Fake time: far longer than the nine reads the job needs (20 ms apart), so a watch that was not stopped would have finished.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(400);
+    });
 
     expect(hook.onAttachmentsAddFinished).not.toHaveBeenCalled();
   });

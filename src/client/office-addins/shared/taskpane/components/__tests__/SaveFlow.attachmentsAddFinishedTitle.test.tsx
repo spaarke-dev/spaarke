@@ -118,7 +118,10 @@ const tick = (name: string) => fireEvent.click(screen.getByText(name));
 
 /** The add answers that it queued B and C; the job reads `AttachmentsQueued` until `phaseWhenFinished` is set. */
 let phaseWhenFinished: string | null = null;
+// Fake timers: the add watch polls on a timer (3 s in the pane), and waitFor advances fake time itself, so these tests do not
+// depend on how fast the machine runs (a loaded CI runner used to starve the real-time waits).
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
   sessionStorage.clear();
   mockFetch.mockReset();
@@ -143,6 +146,10 @@ beforeEach(() => {
           })
         : response(200, { data: {} })
   );
+});
+
+afterEach(() => {
+  jest.useRealTimers();
 });
 
 async function addBAndC() {
