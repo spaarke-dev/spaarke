@@ -122,6 +122,22 @@ public sealed class CopilotAgentClientPreAuthorizationTests
     }
 
     [Fact]
+    public void DevParameters_ListTheOperatorToolsClient_OnlyAsADemoOnlyClient()
+    {
+        var text = File.ReadAllText(Path.Combine(RepoRoot(), "infrastructure", "bicep", "parameters", "platform-controlplane-dev.bicepparam"));
+        const string operatorToolsClientId = "ec3c52c1-3f6f-41ac-b50e-2a251096fdb7";
+
+        text.Should().MatchRegex(@"param demoPreAuthorizedClientAppIds = \[\s*'" + operatorToolsClientId + @"'\s*\]",
+            "dev states the client explicitly: 'Spaarke Operator Tools (Demo)' was created 2026-11-26 (demo plan decision 1)");
+        var platformList = System.Text.RegularExpressions.Regex.Match(text, @"param preAuthorizedClientAppIds = \[(?<ids>[^\]]*)\]");
+        if (platformList.Success)
+        {
+            platformList.Groups["ids"].Value.Should().NotContain(operatorToolsClientId,
+                "the platform list reaches every customer stamp; the operator client is for Demo stamps only");
+        }
+    }
+
+    [Fact]
     public void TheEmittedDemoSettings_BindToDemoPreAuthorizedClientAppIds_NotThePlatformList()
     {
         var config = new ConfigurationBuilder()

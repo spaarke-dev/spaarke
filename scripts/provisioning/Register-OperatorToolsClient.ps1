@@ -200,7 +200,7 @@ $assignees = if ($AssignUserUpn) {
 else { @($me) }
 if ($sp) {
     $assignments = @(Get-OperatorToolsGraphCollection -Path "servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType")
-    $assigned = @($assignments | ForEach-Object principalId)
+    $assigned = @($assignments.principalId)  # member access: ForEach-Object <name> honours -WhatIf and would return nothing
     Write-Host "[assign] currently assigned ($($assignments.Count)): $(($assignments | ForEach-Object { "$($_.principalDisplayName) [$($_.principalType)]" }) -join ', ')"
     foreach ($user in $assignees) {
         if ($assigned -contains $user.id) { Write-Host "[assign] $($user.userPrincipalName) already assigned"; continue }
@@ -211,7 +211,7 @@ if ($sp) {
         }
     }
 }
-else { Write-Host "WhatIf: would assign: $(($assignees | ForEach-Object userPrincipalName) -join ', ')" }
+else { Write-Host "WhatIf: would assign: $(@($assignees.userPrincipalName) -join ', ')" }
 
 Write-Host ''
 Write-Host "Application (client) id: $($app.appId)"
