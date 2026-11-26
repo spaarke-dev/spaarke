@@ -2,6 +2,12 @@
 
 > **Last Updated**: 2026-11-26 (Claude Desktop session `acclerator-r1`). **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
 
+## 2026-11-26: PR #3163 MERGED (squash `4c80b81ed4`, 12:07 UTC)
+
+- `src/accelerators/` is on master and identical to this branch (checked: no diff). From now on every `src/accelerators` change goes to master through its own PR (branch from master); the mirror-to-#3163 rule is retired.
+- intake-pipeline-r1 builds its engine image from `src/accelerators/core/engines` on master: **message it BEFORE any change to the engine CLI contract** (args, output paths, exit codes).
+- Branch `work/legal-ai-accelerator-src-to-master` and worktree `C:\code_files\spaarke-wt-accelerator-src-to-master` still exist; remove only with `scripts/worktree/Remove-WorktreeSafe.ps1`, on the owner's OK.
+
 ## 2026-11-26: Word desktop round 2 recorded (`results.md` "Tier tests round 2: Word desktop")
 
 - **WP-2 pass in Word desktop (3/3):** Word follows a third-party instructions-only skill (WPI-1112-A + headings). WP-1 (script) unknown. Word desktop has a new **Custom skills** panel ("your Skills folder", off, empty).
