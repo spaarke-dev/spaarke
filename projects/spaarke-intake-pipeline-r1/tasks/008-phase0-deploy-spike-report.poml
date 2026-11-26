@@ -46,6 +46,7 @@
     <constraint source="ADR-004">Scope: test messages sent by hand. Valid Job Contract envelopes carrying ids and blob paths only; no document content in any message.</constraint>
     <constraint source="project">Scope: inputs. Synthetic NDAs only (`evals/corpus/`); never `answer-key/` or a real NDA (NFR-10); delete nothing manually from staging (the lifecycle rule does it).</constraint>
     <constraint source="ADR-015">Scope: the spike report. Ids, timings, hashes and outcome codes; no clause or document text quoted.</constraint>
+    <constraint source="project">Scope: the dev engine deploy (owner 2026-11-25; agreed with customer-provisioning-orchestration-r1, #3210 / their ISS-046). Do NOT depend on L2 holding the constrained RBAC-administrator grant on the platform ACR: it is not approved. Deploy in three steps by hand, each with the owner's OK: (1) `customer.bicep` with `deployIntakeEngine=true` and NO `intakeEngineImage` (creates the engine identity, both queues, environment, staging, RBAC); (2) the owner (or an operator they name) grants AcrPull on the platform ACR to output `intakeEngineIdentityObjectId`; (3) redeploy with `intakeEngineImage` = the digest-pinned `image` from `provisioning-artifacts/intake-engine/latest.json` and `intakeEngineRegistryLoginServer` = the platform ACR login server. Then set the BFF app setting `ServiceBus__IntakeEngineCompletionQueueName=intake-engine-completions`. Record any difference from this flow for #3210.</constraint>
   </constraints>
 
   <knowledge>
