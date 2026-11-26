@@ -14,19 +14,24 @@ namespace Spaarke.ArchTests;
 /// </summary>
 /// <remarks>
 /// <para><b>Part 1, A2 (uac-r2 rulings after run 1, option (b) tightened).</b> Roslyn, over every file under
-/// <c>Services/Signals</c> and <c>Services/RecordCreation</c> and every file of the step-12 services
-/// (<see cref="StepTwelveServices"/>, as <see cref="PostCreateNoCallerAccessGuardTests"/> lists them). It counts each banned
+/// <c>Services/Signals</c> and <c>Services/RecordCreation</c>, every file of the step-12 services
+/// (<see cref="StepTwelveServices"/>, as <see cref="PostCreateNoCallerAccessGuardTests"/> lists them) and the four further files
+/// the commit reaches (<see cref="ExtraFiles"/>: the child-record route, the caller write authorization, the ownership resolver and
+/// the external team-share synchronizer). It counts each banned
 /// word in identifier tokens and string text (comments and XML documentation are trivia, so they are not seen). One PINNED
 /// exemption: <c>SecureRootInheritance.Cascade.cs</c> <c>PlatformReadableTablesAsync</c>, which READS whether the BFF's own user
 /// holds System Administrator or a field-security profile (no association write). There each token is pinned to its exact count
 /// (<see cref="PinnedReads"/>, 4 in total), each occurrence must sit in the filter argument of a <c>QueryAsync</c> call and be a
 /// navigation inside <c>any(…)</c>, and the method may hold no write shape. A new occurrence, a write shape there, or the
-/// method's removal fails (the stale-entry check).</para>
+/// method's removal fails (the stale-entry check). Two further PINNED read-only lookups (<see cref="LookupPins"/>): the one
+/// method in <c>RecordOwnershipResolver</c> and the one in <c>ExternalTeamShareSynchronizer</c> that name
+/// <c>ExternalCollaboratorPlacement</c> exactly once, as the target of <c>.ResolveUnitAsync(…)</c> (a business-unit lookup by
+/// name, no role association), and hold no write shape; any other occurrence there, a different member, a write shape or the
+/// method's removal fails.</para>
 /// <para><b>Part 2.</b> <c>DecisionAccessWindow.Open(</c> is called from <c>Services/Signals/DecisionCommitService.cs</c> and
 /// nowhere else (the window is one commit's; a second opener could keep answers across work the design did not audit).</para>
 /// <para><b>Limits.</b> A name match, not a type-resolved one: a role edit through a type whose name carries none of the banned
-/// words, or reached through a class outside the scanned files, is not seen. <c>RecordOwnershipResolver</c> (Services/Dataverse)
-/// is outside the amendment's scope and names <c>ExternalCollaboratorPlacement</c> for the external plane's unit lookup.</para>
+/// words, or reached through a class outside the scanned files, is not seen.</para>
 /// <para>Enforced by: this guard (ArchTests, CI and the Stop hook). Must-fire and must-not-fire controls below.</para>
 /// </remarks>
 public class DecisionAccessWindowGuardTests
@@ -50,6 +55,25 @@ public class DecisionAccessWindowGuardTests
         "SecureRootFilingGate",
         "SecureRootInheritance",
     ];
+
+    /// <summary>Further files the commit reaches (BFF-root relative): the route core, the caller's write authorization, the owner resolver, the external team-share synchronizer.</summary>
+    private static readonly string[] ExtraFiles =
+    [
+        "Api/ChildRecordEndpoints.cs",
+        "Services/Dataverse/CallerWriteAuthorization.cs",
+        "Services/Dataverse/RecordOwnershipResolver.cs",
+        "Services/Access/ExternalTeamShareSynchronizer.cs",
+    ];
+
+    /// <summary>The read-only unit lookups pinned (BFF-root relative file, method): each names <c>ExternalCollaboratorPlacement</c> once, as <c>.ResolveUnitAsync(…)</c>.</summary>
+    private static readonly IReadOnlyDictionary<string, string> LookupPins = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Services/Dataverse/RecordOwnershipResolver.cs"] = "IsInExternalCollaboratorsUnitAsync",
+        ["Services/Access/ExternalTeamShareSynchronizer.cs"] = "ResolveExternalTeamAsync",
+    };
+
+    private const string LookupWord = "ExternalCollaboratorPlacement";
+    private const string LookupMember = "ResolveUnitAsync";
 
     private const string PinnedFile = "SecureRootInheritance.Cascade.cs";
     private const string PinnedMethod = "PlatformReadableTablesAsync";
@@ -77,18 +101,30 @@ public class DecisionAccessWindowGuardTests
         var files = ScannedFiles().ToList();
         Assert.Contains(files, f => f.EndsWith(Path.Combine("Services", "Signals", "DecisionCommitService.cs"), StringComparison.Ordinal));
         Assert.Contains(files, f => Path.GetFileName(f) == PinnedFile);
+        foreach (var extra in ExtraFiles)
+            Assert.Contains(files, f => BffRelative(f) == extra);
 
         var problems = new List<string>();
         var pinnedSeen = false;
+        var lookupsSeen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in files)
         {
-            var result = Scan(SourceScan.Relative(file).Replace('\\', '/'), File.ReadAllText(file), Path.GetFileName(file) == PinnedFile);
+            var bffRelative = BffRelative(file);
+            LookupPins.TryGetValue(bffRelative, out var lookupMethod);
+            var result = Scan(SourceScan.Relative(file).Replace('\\', '/'), File.ReadAllText(file), Path.GetFileName(file) == PinnedFile, lookupMethod);
             problems.AddRange(result.Problems);
             pinnedSeen |= result.PinnedMethodFound;
+            if (result.LookupMethodFound)
+                lookupsSeen.Add(bffRelative);
         }
 
         if (!pinnedSeen)
             problems.Add($"{PinnedFile}: {PinnedMethod} is gone. Remove its exemption from this guard (stale entry); do not leave it listed.");
+        foreach (var (lookupFile, lookupMethod) in LookupPins)
+        {
+            if (!lookupsSeen.Contains(lookupFile))
+                problems.Add($"{lookupFile}: {lookupMethod} is gone. Remove its exemption from this guard (stale entry); do not leave it listed.");
+        }
 
         Assert.True(problems.Count == 0,
             "The decision commit's access window keeps privilege answers for the whole commit, so nothing on its path may edit "
@@ -117,6 +153,21 @@ public class DecisionAccessWindowGuardTests
 
         // The stale entry: the pinned method missing from its file.
         Assert.False(Scan(PinnedFile, "class SecureRootInheritance { Task Other() => Task.CompletedTask; }", true).PinnedMethodFound);
+
+        // The read-only unit lookups: a second occurrence, another member, a write shape, a $ref, a banned association word in the
+        // method, the name in another method of the file, the name in a file with no pin, and the stale entry.
+        const string lookupFile = "Services/Dataverse/RecordOwnershipResolver.cs";
+        Assert.NotEmpty(Scan(lookupFile, Lookup(extra: "var again = ExternalCollaboratorPlacement.ResolveUnitAsync(_dataverse, ct);"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(call: "Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.PlaceAsync(_dataverse, ct)"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(call: "ExternalCollaboratorPlacement.ResolveUnitAsync"), false, LookupMethod).Problems); // named, not called
+        Assert.NotEmpty(Scan(lookupFile, Lookup(extra: "await _dataverse.UpdateAsync(\"businessunit\", id, null!, ct);"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(extra: "await _dataverse.AssociateAsync(\"x\", id, \"y\", id, ct);"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(extra: "var s = \"/$ref\";"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(extra: "var s = \"systemuserroles_association\";"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(extra: "var s = \"ExternalCollaboratorPlacement\";"), false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup() + "\nclass Other { Task M() => ExternalCollaboratorPlacement.ResolveUnitAsync(d, ct); }", false, LookupMethod).Problems);
+        Assert.NotEmpty(Scan(lookupFile, Lookup(), false).Problems); // no pin for this file: the name is banned
+        Assert.False(Scan(lookupFile, "class RecordOwnershipResolver { Task Other() => Task.CompletedTask; }", false, LookupMethod).LookupMethodFound);
     }
 
     [Fact(DisplayName = "ISS-010 C A2 guard (must not fire): the pinned reads, comments, XML docs and other association names")]
@@ -125,6 +176,13 @@ public class DecisionAccessWindowGuardTests
         var pinned = Scan(PinnedFile, Pinned(), true);
         Assert.True(pinned.PinnedMethodFound);
         Assert.Empty(pinned.Problems);
+
+        // The pinned lookups: qualified and unqualified, XML docs naming the type are trivia.
+        var lookup = Scan("Services/Dataverse/RecordOwnershipResolver.cs", Lookup(), false, LookupMethod);
+        Assert.True(lookup.LookupMethodFound);
+        Assert.Empty(lookup.Problems);
+        Assert.Empty(Scan("Services/Dataverse/RecordOwnershipResolver.cs", Lookup(call: "ExternalCollaboratorPlacement.ResolveUnitAsync(_dataverse, ct)"), false, LookupMethod).Problems);
+        Assert.Empty(Scan("Services/Dataverse/RecordOwnershipResolver.cs", Lookup(extra: "var teams = (await _dataverse.RetrieveMultipleAsync(q, ct)).Entities;"), false, LookupMethod).Problems);
 
         const string clean = """
             /// <summary>Not <see cref="ExternalCollaboratorPlacement"/>; reads no systemuserroles_association.</summary>
@@ -193,20 +251,31 @@ public class DecisionAccessWindowGuardTests
             return StepTwelveServices.Any(s => name.Equals(s + ".cs", StringComparison.Ordinal)
                                                || (name.StartsWith(s + ".", StringComparison.Ordinal) && name.EndsWith(".cs", StringComparison.Ordinal)));
         });
-        return files.Concat(services).Distinct(StringComparer.OrdinalIgnoreCase);
+        var extras = ExtraFiles.Select(f => Path.Combine(BffRoot, f.Replace('/', Path.DirectorySeparatorChar)));
+        return files.Concat(services).Concat(extras).Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
-    internal sealed record ScanResult(IReadOnlyList<string> Problems, bool PinnedMethodFound);
+    /// <summary>The file's path under the BFF root, with <c>/</c> separators.</summary>
+    private static string BffRelative(string file) => Path.GetRelativePath(BffRoot, file).Replace('\\', '/');
 
-    /// <summary>The banned words in <paramref name="source"/>'s code (identifiers and string text), with the pinned method's rules applied when <paramref name="pinnedFile"/>.</summary>
-    internal static ScanResult Scan(string file, string source, bool pinnedFile)
+    internal sealed record ScanResult(IReadOnlyList<string> Problems, bool PinnedMethodFound, bool LookupMethodFound = false);
+
+    /// <summary>
+    /// The banned words in <paramref name="source"/>'s code (identifiers and string text), with the pinned method's rules applied when
+    /// <paramref name="pinnedFile"/>, and the read-only unit-lookup rules applied to <paramref name="lookupMethod"/> when given.
+    /// </summary>
+    internal static ScanResult Scan(string file, string source, bool pinnedFile, string? lookupMethod = null)
     {
         var root = CSharpSyntaxTree.ParseText(source).GetRoot();
         var pinnedMethods = pinnedFile
             ? root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(m => m.Identifier.ValueText == PinnedMethod).ToList()
             : [];
+        var lookupMethods = lookupMethod is null
+            ? []
+            : root.DescendantNodes().OfType<MethodDeclarationSyntax>().Where(m => m.Identifier.ValueText == lookupMethod).ToList();
         var problems = new List<string>();
         var pinnedCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var lookupCount = 0;
 
         foreach (var token in root.DescendantTokens())
         {
@@ -219,6 +288,14 @@ public class DecisionAccessWindowGuardTests
                 var count = Occurrences(text, word);
                 if (count == 0)
                     continue;
+
+                if (word == LookupWord && lookupMethods.Any(m => m.Span.Contains(token.Span)))
+                {
+                    lookupCount += count;
+                    if (!token.IsKind(SyntaxKind.IdentifierToken) || !IsResolveUnitCall(token))
+                        problems.Add($"{file}:{line} {lookupMethod}: {word} is not the target of .{LookupMember}(…)");
+                    continue;
+                }
 
                 var inPinned = pinnedMethods.Any(m => m.Span.Contains(token.Span));
                 if (!inPinned || !PinnedReads.ContainsKey(word))
@@ -259,7 +336,43 @@ public class DecisionAccessWindowGuardTests
             }
         }
 
-        return new ScanResult(problems, pinnedMethods.Count == 1);
+        if (lookupMethods.Count > 1)
+            problems.Add($"{file}: {lookupMethod} is declared {lookupMethods.Count} times; the exemption pins one");
+
+        if (lookupMethods.Count == 1)
+        {
+            if (lookupCount != 1)
+                problems.Add($"{file} {lookupMethod}: {LookupWord} occurs {lookupCount} time(s), pinned at 1");
+
+            foreach (var call in lookupMethods[0].DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                var name = NameOf(call);
+                if (name is not null && WriteVerbs.Any(v => name.StartsWith(v, StringComparison.Ordinal)))
+                    problems.Add($"{file} {lookupMethod}: write shape {name}(…)");
+            }
+
+            foreach (var token in lookupMethods[0].DescendantTokens())
+            {
+                if (TextOf(token) is { } t && t.Contains("$ref", StringComparison.Ordinal))
+                    problems.Add($"{file} {lookupMethod}: write shape $ref");
+            }
+        }
+
+        return new ScanResult(problems, pinnedMethods.Count == 1, lookupMethods.Count == 1);
+    }
+
+    /// <summary>The identifier is the type of a <c>Type.ResolveUnitAsync(…)</c> call (qualified or not): the unit lookup by name, which reads and writes nothing.</summary>
+    private static bool IsResolveUnitCall(SyntaxToken token)
+    {
+        SyntaxNode? node = token.Parent;
+        if (node?.Parent is MemberAccessExpressionSyntax qualified && ReferenceEquals(qualified.Name, node))
+            node = qualified;
+
+        return node?.Parent is MemberAccessExpressionSyntax member
+               && ReferenceEquals(member.Expression, node)
+               && member.Name.Identifier.ValueText == LookupMember
+               && member.Parent is InvocationExpressionSyntax invocation
+               && ReferenceEquals(invocation.Expression, member);
     }
 
     /// <summary>The code text of an identifier or string token; null for anything else (comments and docs are trivia, never tokens).</summary>
@@ -314,6 +427,25 @@ public class DecisionAccessWindowGuardTests
             });
 
     // ── Fixtures ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private const string LookupMethod = "IsInExternalCollaboratorsUnitAsync";
+
+    /// <summary>A unit-lookup method in its shape today (<c>RecordOwnershipResolver</c>), with an optional extra statement or a different call.</summary>
+    private static string Lookup(
+        string extra = "",
+        string call = "Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement\n            .ResolveUnitAsync(_dataverse, ct)") =>
+        $$"""
+        partial class RecordOwnershipResolver
+        {
+            /// <summary>See <see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.ResolveUnitAsync"/>.</summary>
+            private async Task<bool> {{LookupMethod}}(Guid businessUnitId, CancellationToken ct)
+            {
+                var unit = await {{call}}.ConfigureAwait(false);
+                {{extra}}
+                return unit.Candidates.Contains(businessUnitId);
+            }
+        }
+        """;
 
     /// <summary>The pinned method in its shape today (4 reads), with an optional extra statement or a different first filter / call.</summary>
     private static string Pinned(

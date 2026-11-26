@@ -88,6 +88,7 @@ internal static class DecisionCapabilityFixtures
             new Mock<Spaarke.Scheduling.IScheduledJobLease>(MockBehavior.Strict).Object,
             Unused<DecisionPlanReadStamp>(),
             TimeProvider.System,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<DecisionCommitService>.Instance);
 
     /// <summary>

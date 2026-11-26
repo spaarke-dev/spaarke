@@ -5,6 +5,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
@@ -588,5 +589,166 @@ public sealed class DecisionAccessWindowTests
         RightsAsks().Should().Be(1, "inside a window the repeat is answered from it");
         PrivilegeAsks().Should().Be(1);
         _probe.Invocations.Count(i => i.Method.Name == nameof(CallerRecordAccessProbe.GetCallerRightsAsync)).Should().Be(4, "unchanged");
+    }
+
+    // ── K2: the wrappers implement every member of the interface themselves ───────────────────────────────────────────
+
+    /// <summary>
+    /// The members of <see cref="IDataverseUserClient"/> that <paramref name="implementation"/> does NOT declare itself: its interface
+    /// map points at the interface's own (default) body, or at a base type's method. A wrapper that inherits a member would pass a
+    /// call to its default body (or past the window), so a new member of the interface must be implemented, deliberately, on each wrapper.
+    /// </summary>
+    private static List<string> InheritedMembers(Type implementation)
+    {
+        var map = implementation.GetInterfaceMap(typeof(IDataverseUserClient));
+        var inherited = new List<string>();
+        for (var i = 0; i < map.InterfaceMethods.Length; i++)
+        {
+            if (map.TargetMethods[i] is not { } target || target.DeclaringType != implementation)
+                inherited.Add(map.InterfaceMethods[i].ToString()!);
+        }
+
+        return inherited;
+    }
+
+    /// <summary>A client that forgets the interface's default member (the version-conditional PATCH): the control for <see cref="InheritedMembers"/>.</summary>
+    private sealed class ForgetfulClient : IDataverseUserClient
+    {
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void BothCallerClientWrappers_DeclareEveryInterfaceMemberThemselves()
+    {
+        typeof(IDataverseUserClient).GetMethods().Length.Should().BeGreaterThanOrEqualTo(6, "the check reads the whole interface, default members included");
+
+        var inherited = new[] { typeof(DecisionAccessWindowCallerClient), typeof(CallerMetadataReadMemo) }
+            .SelectMany(wrapper => InheritedMembers(wrapper).Select(member => $"{wrapper.Name}: {member}"))
+            .ToList();
+
+        inherited.Should().BeEmpty("the access window's view and the metadata memo implement every IDataverseUserClient member themselves");
+    }
+
+    [Fact]
+    public void TheInheritedMemberCheck_MustFire_OnAClientThatInheritsTheDefaultMember()
+    {
+        InheritedMembers(typeof(ForgetfulClient)).Should().ContainSingle().Which.Should().Contain("PatchAsync").And.Contain("Int64");
+    }
+
+    // ── K4: the off switch ────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData("false", false)]
+    [InlineData("False", false)]
+    [InlineData("nonsense", true)]
+    public void IsEnabled_IsOnUnlessTheKeyParsesAsFalse(string? setting, bool expected)
+    {
+        var values = setting is null ? [] : new Dictionary<string, string?> { [DecisionAccessWindow.EnabledConfigKey] = setting };
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+        DecisionAccessWindow.IsEnabled(configuration).Should().Be(expected);
+        DecisionAccessWindow.IsEnabled(null).Should().BeTrue();
+        DecisionAccessWindow.EnabledConfigKey.Should().Be("Signals:DecisionAccessWindow:Enabled");
+    }
+
+    [Fact]
+    public async Task OpenedSwitchedOff_IsTheClosedWindow_AndKeepsNothing()
+    {
+        var http = Request(CallerA);
+
+        using var window = DecisionAccessWindow.Open(http, CallerA, enabled: false);
+        var client = window.CallerClient(_rig.NewClient(_wire));
+
+        DecisionAccessWindow.Of(http).Should().BeNull();
+        http.Items.Values.OfType<DecisionAccessWindow>().Should().BeEmpty("a switched-off window never takes the slot");
+        for (var i = 0; i < 2; i++)
+        {
+            await window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default);
+            await window.CallerPrivilegeAsync(_probe.Object, http, Privilege, default);
+            await client.GetAsync(PrivilegesPath, default);
+        }
+
+        RightsAsks().Should().Be(2);
+        PrivilegeAsks().Should().Be(2);
+        _wire.Count(PrivilegesPath).Should().Be(2, "every ask reaches the wire");
+    }
+
+    // ── K4: observability ─────────────────────────────────────────────────────────────────────────────────────────────
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<(LogLevel Level, string Message)> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact]
+    public async Task Debug_LogsHitAndMissCountsPerStoreOncePerStep_AndOnceAtClose_NamingNoIdentity()
+    {
+        var http = Request(CallerA);
+        http.TraceIdentifier = "trace-k4-0001";
+        var log = new CapturingLogger();
+        using var window = DecisionAccessWindow.Open(http, CallerA, log);
+        var client = window.CallerClient(_rig.NewClient(_wire));
+
+        window.BeginStep(ChildCreate());
+        for (var i = 0; i < 2; i++)
+        {
+            await window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default); // record access: miss, hit
+            await window.CallerPrivilegeAsync(_probe.Object, http, Privilege, default); // privilege: miss, hit
+            await client.GetAsync(RightsPath, default); // record access (route): miss, hit
+            await client.GetAsync(CatalogPath, default); // catalog: miss, hit
+            await client.GetAsync(RowPath, default); // not a kept path: counted nowhere
+        }
+
+        window.EndStep();
+        window.BeginStep(ChildCreate());
+        await window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default); // record access: miss (forgotten with the step)
+        await window.CallerPrivilegeAsync(_probe.Object, http, Privilege, default); // privilege: hit (kept for the window)
+        window.EndStep();
+        window.Close();
+        window.Close(); // idempotent: no second closing line
+        window.EndStep(); // a late end of step on a closed window logs nothing
+
+        log.Lines.Should().HaveCount(3).And.OnlyContain(l => l.Level == LogLevel.Debug);
+        log.Lines[0].Message.Should().Contain("step 1 ended").And.Contain("record access hit 2 miss 2; privilege hit 1 miss 1; catalog hit 1 miss 1");
+        log.Lines[1].Message.Should().Contain("step 2 ended").And.Contain("record access hit 0 miss 1; privilege hit 1 miss 0; catalog hit 0 miss 0");
+        log.Lines[2].Message.Should().Contain("closed").And.Contain("after 2 step(s)").And.Contain("record access hit 2 miss 3; privilege hit 2 miss 1; catalog hit 1 miss 1");
+        log.Lines.Should().OnlyContain(l => l.Message.Contains("trace-k4-0001", StringComparison.Ordinal));
+        foreach (var forbidden in new[] { CallerA.ToString("D"), Matter.ToString("D"), "systemusers", "sprk_matters", "sprk_recordtype_refs", Privilege, "RetrievePrincipalAccess", "Bearer" })
+            log.Lines.Should().OnlyContain(l => !l.Message.Contains(forbidden, StringComparison.OrdinalIgnoreCase), $"no '{forbidden}' in a log line");
+    }
+
+    [Fact]
+    public async Task ASwitchedOffWindow_LogsNothing()
+    {
+        var http = Request(CallerA);
+        var log = new CapturingLogger();
+        using var window = DecisionAccessWindow.Open(http, CallerA, log, enabled: false);
+
+        window.BeginStep(ChildCreate());
+        await window.CallerRightsAsync(_probe.Object, http, "sprk_matters", Matter, default);
+        window.EndStep();
+        window.Close();
+
+        log.Lines.Should().BeEmpty();
     }
 }

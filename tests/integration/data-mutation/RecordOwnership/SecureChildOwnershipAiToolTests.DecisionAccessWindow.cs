@@ -105,6 +105,44 @@ public sealed partial class SecureChildOwnershipAiToolTests
         counted.Should().Be(WithoutWindow, $"measured: {counted}");
     }
 
+    /// <summary>
+    /// K4 off switch, must-fire: <c>Signals:DecisionAccessWindow:Enabled=false</c> makes the commit ask the wire every time (the profile
+    /// is back at the no-window counts: 32 record-access, 18 privilege-set, 8 catalog, 137 calls), with the same writes and the same
+    /// response as the window-on commit. Fails if the switch is not read (the window then saves its 23 calls).
+    /// </summary>
+    [Fact]
+    public async Task Iss010C_OffSwitch_False_TheCommitAsksTheWireEveryTime()
+    {
+        var on = BuildFourActionWorld();
+        var onResult = await on.CommitAsync();
+        var onWrites = on.Profile.WriteTranscript();
+        _appCreates.Clear();
+
+        var w = BuildFourActionWorld(windowSwitch: "false");
+        var result = await w.CommitAsync();
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var counted = CountAccess(w.Profile);
+        counted.Should().Be(WithoutWindow, $"measured: {counted}");
+        (counted.PrincipalAccess, counted.PrivilegeSets, counted.RecordTypeRefs, counted.Total).Should().Be((32, 18, 8, 137));
+        w.Profile.WriteTranscript().Should().Be(onWrites, "the switch changes how often a question is asked, never what is written");
+        Normalized(result).Should().Be(Normalized(onResult));
+    }
+
+    /// <summary>K4 off switch, must-not-fire: the switch set to <c>true</c> (and the other tests, where it is unset) keeps the window's saving.</summary>
+    [Fact]
+    public async Task Iss010C_OffSwitch_True_TheWindowServes()
+    {
+        var w = BuildFourActionWorld(windowSwitch: "true");
+
+        var result = await w.CommitAsync();
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var counted = CountAccess(w.Profile);
+        counted.Should().Be(WithWindow, $"measured: {counted}");
+        (WithoutWindow.Total - counted.Total).Should().Be(23);
+    }
+
     public static TheoryData<string> EquivalenceScenarios => new()
     {
         "recorded", "replay", "refused-before", "refused-after", "fault-before", "fault-after", "metadata-fault",

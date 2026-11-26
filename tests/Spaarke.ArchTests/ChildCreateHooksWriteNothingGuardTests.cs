@@ -6,10 +6,10 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// ISS-010 part C (K2): the decision commit's access window keeps record-access answers across a <c>ChildCreateExecutorBase</c>
 /// step, which is sound only because every ask comes before the step's ONE write (<c>CreateChildAsync</c> in the sealed
-/// <c>WriteAsync</c>). The two hooks that still run inside that step, <c>ExtendColumnsAsync</c> and <c>FileUnderAsync</c>, are
+/// <c>WriteAsync</c>). The hooks that still run inside that step, <c>ExtendColumnsAsync</c>, <c>FileUnderAsync</c> and the overridable <c>PreflightAsync</c>, are
 /// virtual and their subclasses hold <c>IGenericEntityService</c> (which has write members), so a hook that wrote would put a
-/// write between the asks and the window's kept answers. This guard: the overrides of those two hooks in
-/// <c>ChildCreateExecutorBase</c> subclasses call no create, update, upsert, delete, associate, disassociate, bulk, post, patch,
+/// write between the asks and the window's kept answers. This guard: the overrides of those hooks in
+/// <c>ChildCreateExecutorBase</c> and its subclasses call no create, update, upsert, delete, associate, disassociate, bulk, post, patch,
 /// execute or write member.
 /// </summary>
 /// <remarks>
@@ -20,11 +20,14 @@ namespace Spaarke.ArchTests;
 /// </remarks>
 public class ChildCreateHooksWriteNothingGuardTests
 {
+    /// <summary>A class that derives from <c>ChildCreateExecutorBase</c>, or the base itself (its own <c>PreflightAsync</c> override of the
+    /// executor contract runs in the step too).</summary>
     private static readonly Regex SubclassDeclaration = new(
-        @"\bclass\s+(?<name>\w+)\b[^{;]*:\s*(?:[\w.]+\s*,\s*)*ChildCreateExecutorBase\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        @"\bclass\s+(?<name>\w+)\b[^{;]*:\s*(?:[\w.]+\s*,\s*)*ChildCreateExecutorBase\b|\bclass\s+(?<name>ChildCreateExecutorBase)\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex HookOverride = new(
-        @"\boverride\s+[^(;{=]*?\b(?<hook>ExtendColumnsAsync|FileUnderAsync)\s*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        @"\boverride\s+[^(;{=]*?\b(?<hook>ExtendColumnsAsync|FileUnderAsync|PreflightAsync)\s*\(", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>A member CALL whose name starts like a write (a constant such as DecisionActionReasons.WriteFailed is not a call): IGenericEntityService / IDataverseUserClient / the route cores.</summary>
     private static readonly Regex WriteMember = new(
@@ -32,10 +35,11 @@ public class ChildCreateHooksWriteNothingGuardTests
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>The hooks scanned and every write member called inside them, over <paramref name="source"/>.</summary>
-    internal static (int HooksScanned, List<string> Findings) Scan(string source)
+    internal static (int HooksScanned, List<string> Findings, int PreflightsScanned) Scan(string source)
     {
         var code = SourceScan.CodeText(source.Split('\n'));
         var hooks = 0;
+        var preflights = 0;
         var findings = new List<string>();
         foreach (Match declaration in SubclassDeclaration.Matches(code))
         {
@@ -47,13 +51,15 @@ public class ChildCreateHooksWriteNothingGuardTests
             foreach (Match hook in HookOverride.Matches(classBody))
             {
                 hooks++;
+                if (hook.Groups["hook"].Value == "PreflightAsync")
+                    preflights++;
                 var body = HookBody(classBody, hook.Index + hook.Length - 1);
                 foreach (Match write in WriteMember.Matches(body))
                     findings.Add($"{declaration.Groups["name"].Value}.{hook.Groups["hook"].Value} calls .{write.Groups["member"].Value}");
             }
         }
 
-        return (hooks, findings);
+        return (hooks, findings, preflights);
     }
 
     /// <summary>The body of the method whose parameter list opens at <paramref name="openParen"/>: a block, or an expression body to its <c>;</c>.</summary>
@@ -96,6 +102,7 @@ public class ChildCreateHooksWriteNothingGuardTests
     public void TheHooksOfTheChildCreateExecutors_WriteNothing()
     {
         var hooks = 0;
+        var preflights = 0;
         var findings = new List<string>();
         foreach (var file in SourceScan.ServerSourceFiles())
         {
@@ -103,14 +110,16 @@ public class ChildCreateHooksWriteNothingGuardTests
             if (!source.Contains("ChildCreateExecutorBase", StringComparison.Ordinal))
                 continue;
 
-            var (scanned, found) = Scan(source);
+            var (scanned, found, preflightsFound) = Scan(source);
+            preflights += preflightsFound;
             hooks += scanned;
             findings.AddRange(found.Select(f => $"{SourceScan.Relative(file).Replace('\\', '/')}: {f}"));
         }
 
         Assert.True(hooks >= 2, $"The scan saw {hooks} hook override(s); the budget executor alone has two, so the scan lost its signal.");
+        Assert.True(preflights >= 2, $"The scan saw {preflights} PreflightAsync override(s); the base and the assign-task executor have one each, so the scan lost its signal.");
         Assert.True(findings.Count == 0,
-            "A ChildCreateExecutorBase hook (ExtendColumnsAsync, FileUnderAsync) runs inside the step whose record-access answers the "
+            "A ChildCreateExecutorBase hook (ExtendColumnsAsync, FileUnderAsync, PreflightAsync) runs inside the step whose record-access answers the "
             + "decision commit's access window keeps; it must read only, because the step's one write is the sealed WriteAsync's "
             + "CreateChildAsync (ISS-010 part C):\n" + string.Join("\n", findings));
     }
@@ -130,13 +139,40 @@ public class ChildCreateHooksWriteNothingGuardTests
 
                 protected override Task<DecisionActionOutcome?> FileUnderAsync(DecisionCoreRecord core, IDictionary<string, object?> payload, CancellationToken ct) =>
                     _cores.CreateChildAsync(null, "sprk_todo", "{}", ct);
+
+                public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+                {
+                    await Entities.CreateAsync("sprk_todo", new Dictionary<string, object>(), ct);
+                    return await base.PreflightAsync(request, ct);
+                }
             }
             """;
 
-        var (hooks, findings) = Scan(violation);
+        var (hooks, findings, preflights) = Scan(violation);
 
-        Assert.Equal(2, hooks);
-        Assert.Equal(["SneakyExecutor.ExtendColumnsAsync calls .UpdateAsync", "SneakyExecutor.FileUnderAsync calls .CreateChildAsync"], findings);
+        Assert.Equal(3, hooks);
+        Assert.Equal(1, preflights);
+        Assert.Equal(
+            [
+                "SneakyExecutor.ExtendColumnsAsync calls .UpdateAsync",
+                "SneakyExecutor.FileUnderAsync calls .CreateChildAsync",
+                "SneakyExecutor.PreflightAsync calls .CreateAsync",
+            ],
+            findings);
+
+        // The base's own override is scanned too.
+        var (baseHooks, baseFindings, _) = Scan("""
+            public abstract class ChildCreateExecutorBase : DecisionExecutorBase
+            {
+                public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+                {
+                    await _entities.UpdateAsync("sprk_todo", Guid.Empty, new Dictionary<string, object>(), ct);
+                    return null;
+                }
+            }
+            """);
+        Assert.Equal(1, baseHooks);
+        Assert.Equal(["ChildCreateExecutorBase.PreflightAsync calls .UpdateAsync"], baseFindings);
     }
 
     [Fact(DisplayName = "ISS-010 K2 control (must not fire): reads in a hook, and a write outside the hooks, are not findings")]
@@ -154,13 +190,22 @@ public class ChildCreateHooksWriteNothingGuardTests
                     return null;
                 }
 
+                public override async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+                {
+                    if (await base.PreflightAsync(request, ct).ConfigureAwait(false) is { } refused)
+                        return refused;
+                    return await DecisionExec.CallerHoldsAsync(_probe, request.Http, "x", Guid.Empty, "AppendTo", ct).ConfigureAwait(false)
+                        ? null
+                        : Refuse(DecisionActionReasons.NotAuthorized, "no");
+                }
+
                 protected override BuildColumnsSomething Other() { Entities.UpdateAsync("x", Guid.Empty, null!, default); }
             }
             """;
 
-        var (hooks, findings) = Scan(fine);
+        var (hooks, findings, _) = Scan(fine);
 
-        Assert.Equal(1, hooks);
+        Assert.Equal(2, hooks);
         Assert.Empty(findings);
     }
 }

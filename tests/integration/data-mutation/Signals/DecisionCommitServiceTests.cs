@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -218,6 +219,12 @@ public sealed partial class DecisionCommitServiceTests
 
         /// <summary>Task 170: when set, the commit asks THIS probe (the shipped one, wire seams counted) instead of <see cref="Probe"/>.</summary>
         public CallerRecordAccessProbe? ProbeOverride { get; set; }
+
+        /// <summary>The commit's configuration (ISS-010 C off switch <c>Signals:DecisionAccessWindow:Enabled</c>); empty by default, so the window is on.</summary>
+        public IConfiguration? Configuration { get; set; }
+
+        /// <summary>The commit's logger (ISS-010 C observability); the null logger by default.</summary>
+        public ILogger<DecisionCommitService>? Logger { get; set; }
 
         /// <summary>ISS-010 (#3184): when set, the commit runs THESE executors (the real ones over a create world) instead of the
         /// scripted <see cref="Executors"/>.</summary>
@@ -683,7 +690,7 @@ public sealed partial class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), EntitiesSeam ?? Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(RealExecutors ?? Executors.Values.Cast<IDecisionActionExecutor>()), records, WriterClient(),
-                EntitiesSeam ?? Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                EntitiesSeam ?? Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, Configuration ?? new ConfigurationBuilder().Build(), Logger ?? NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);

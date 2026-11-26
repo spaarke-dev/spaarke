@@ -36,6 +36,11 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <c>CallerMetadataReadMemo.For</c>). Any other <see cref="IDataverseUserClient"/> is returned unwrapped and gets no kept answer.
 /// The wrapper is a per-request view: production resolves a fresh transient client per create, and every create of the commit
 /// shares this window's stores.</para>
+/// <para><b>Off switch and observability.</b> <c>Signals:DecisionAccessWindow:Enabled</c> (<see cref="EnabledConfigKey"/>, default on, absent
+/// or unparseable is on): <c>false</c> makes <see cref="Open"/> return the already-closed window, so the commit asks Dataverse
+/// every time. At Debug the window logs once per executor step (<see cref="EndStep"/>) and once when it closes: hit and miss counts
+/// per store (record access, privilege, record-type catalog) and the request's trace id. Counts only; never an identity, record id,
+/// path or claim.</para>
 /// <para><b>ADR-003 / ADR-009 (Path C, comply).</b> A per-request snapshot of Dataverse's UAC answers for one decision commit on one
 /// <see cref="HttpContext"/>; nothing is shared across requests, callers or processes, and nothing is written to any shared store.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: <c>CallerMetadataReadMemo.RequestScope</c> (schema reads,
@@ -47,6 +52,16 @@ internal sealed class DecisionAccessWindow : IDisposable
 {
     /// <summary>The <see cref="HttpContext.Items"/> key; a private object, so no other code can reach the slot.</summary>
     private static readonly object ItemsKey = new();
+
+    /// <summary>The kinds of answer the window keeps, for the hit and miss counts: record access (probe and route), privileges (probe and route), the record-type catalog (route).</summary>
+    private enum Store
+    {
+        RecordAccess,
+        Privilege,
+        Catalog,
+    }
+
+    private const int StoreCount = 3;
 
     private const string PrincipalAccessCall = "/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(";
     private const string PrivilegeSetCall = "/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(";
@@ -66,23 +81,45 @@ internal sealed class DecisionAccessWindow : IDisposable
     private volatile bool _suspended;
     private volatile bool _closed;
 
-    private DecisionAccessWindow(HttpContext request, Guid callerSystemUserId)
+    // K4 observability: kept-answer hits and misses per store, for the running step and for the whole window. Counts only: no
+    // identity, record id, path or claim is ever logged. The trace id is the request's own correlation id.
+    private readonly ILogger? _logger;
+    private readonly string _traceId;
+    private readonly long[] _stepHits = new long[StoreCount];
+    private readonly long[] _stepMisses = new long[StoreCount];
+    private readonly long[] _hits = new long[StoreCount];
+    private readonly long[] _misses = new long[StoreCount];
+    private int _steps;
+
+    private DecisionAccessWindow(HttpContext request, Guid callerSystemUserId, ILogger? logger)
     {
         _request = request;
         _callerSystemUserId = callerSystemUserId;
+        _logger = logger;
+        _traceId = request.TraceIdentifier;
     }
+
+    /// <summary>The config key of the off switch. Absent or unparseable means ON; <c>false</c> makes <see cref="Open"/> return a closed window.</summary>
+    internal const string EnabledConfigKey = "Signals:DecisionAccessWindow:Enabled";
+
+    /// <summary>Whether the window is on: <see langword="true"/> unless <see cref="EnabledConfigKey"/> parses as <c>false</c>.</summary>
+    internal static bool IsEnabled(IConfiguration? configuration) =>
+        !bool.TryParse(configuration?[EnabledConfigKey], out var enabled) || enabled;
 
     /// <summary>
     /// Opens the window for one commit on <paramref name="request"/>, whose caller is <paramref name="callerSystemUserId"/> (their
     /// own <c>WhoAmI</c>). Only <see cref="DecisionCommitService"/> calls this (ArchTest). Dispose (or <see cref="Close"/>) ends it.
+    /// With <paramref name="enabled"/> <see langword="false"/> (the <see cref="EnabledConfigKey"/> off switch) it returns the
+    /// already-closed window, so the commit asks Dataverse every time, as before part C. <paramref name="logger"/> receives the
+    /// per-step and closing hit and miss counts at Debug.
     /// </summary>
-    internal static DecisionAccessWindow Open(HttpContext request, Guid callerSystemUserId)
+    internal static DecisionAccessWindow Open(HttpContext request, Guid callerSystemUserId, ILogger? logger = null, bool enabled = true)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var window = new DecisionAccessWindow(request, callerSystemUserId);
-        if (callerSystemUserId == Guid.Empty)
+        var window = new DecisionAccessWindow(request, callerSystemUserId, logger);
+        if (!enabled || callerSystemUserId == Guid.Empty)
         {
-            window._closed = true; // no proven caller: nothing is kept, every ask goes to Dataverse
+            window._closed = true; // switched off, or no proven caller: nothing is kept, every ask goes to Dataverse
             return window;
         }
 
@@ -136,8 +173,55 @@ internal sealed class DecisionAccessWindow : IDisposable
     /// <summary>The end of one executor step, whatever its outcome: the record-access answers are forgotten.</summary>
     internal void EndStep()
     {
+        LogStep();
         ForgetRecordAccess();
         _suspended = false;
+    }
+
+    private void Count(Store store, bool hit)
+    {
+        Interlocked.Increment(ref (hit ? _stepHits : _stepMisses)[(int)store]);
+        Interlocked.Increment(ref (hit ? _hits : _misses)[(int)store]);
+    }
+
+    /// <summary>One Debug line per step with the step's hit and miss counts, then the step's counts start again. Nothing for a window that was never open.</summary>
+    private void LogStep()
+    {
+        var step = Interlocked.Increment(ref _steps);
+        var counts = Take(_stepHits, _stepMisses);
+        if (_closed || _logger is not { } logger || !logger.IsEnabled(LogLevel.Debug))
+            return;
+
+        logger.LogDebug(
+            "Decision access window step {Step} ended (trace {TraceId}): record access hit {RecordAccessHits} miss {RecordAccessMisses}; "
+            + "privilege hit {PrivilegeHits} miss {PrivilegeMisses}; catalog hit {CatalogHits} miss {CatalogMisses}",
+            step, _traceId, counts[0], counts[1], counts[2], counts[3], counts[4], counts[5]);
+    }
+
+    /// <summary>One Debug line when an open window closes, with the commit's totals.</summary>
+    private void LogClosed()
+    {
+        var counts = Take(_hits, _misses);
+        if (_logger is not { } logger || !logger.IsEnabled(LogLevel.Debug))
+            return;
+
+        logger.LogDebug(
+            "Decision access window closed (trace {TraceId}) after {Steps} step(s): record access hit {RecordAccessHits} miss {RecordAccessMisses}; "
+            + "privilege hit {PrivilegeHits} miss {PrivilegeMisses}; catalog hit {CatalogHits} miss {CatalogMisses}",
+            _traceId, Volatile.Read(ref _steps), counts[0], counts[1], counts[2], counts[3], counts[4], counts[5]);
+    }
+
+    /// <summary>The counts (hits then misses, per store) read and zeroed.</summary>
+    private static long[] Take(long[] hits, long[] misses)
+    {
+        var counts = new long[2 * StoreCount];
+        for (var i = 0; i < StoreCount; i++)
+        {
+            counts[2 * i] = Interlocked.Exchange(ref hits[i], 0);
+            counts[(2 * i) + 1] = Interlocked.Exchange(ref misses[i], 0);
+        }
+
+        return counts;
     }
 
     /// <summary>Ends the window: the slot is removed (when it is still this window's) and every answer forgotten. Idempotent.</summary>
@@ -146,6 +230,7 @@ internal sealed class DecisionAccessWindow : IDisposable
         if (!_closed)
         {
             _closed = true;
+            LogClosed();
             try
             {
                 lock (_request)
@@ -189,8 +274,9 @@ internal sealed class DecisionAccessWindow : IDisposable
     {
         var caller = DecisionExec.CallerObjectId(http);
         if (caller is { } oid && IsServing && _probeRights.TryGetValue((oid, entitySet, recordId), out var known))
-            return known;
+            return Hit(Store.RecordAccess, known);
 
+        Count(Store.RecordAccess, hit: false);
         var answers = await probe.GetCallerRightsForRecordsOrUnknownAsync(
             TokenHelper.ExtractBearerTokenOrNull(http), [(entitySet, recordId)], ct).ConfigureAwait(false);
         var answer = answers is { Count: 1 } ? answers[0] : null;
@@ -208,8 +294,9 @@ internal sealed class DecisionAccessWindow : IDisposable
     {
         var caller = DecisionExec.CallerObjectId(http);
         if (caller is { } oid && IsServing && _probePrivileges.TryGetValue((oid, privilege), out var known))
-            return known;
+            return Hit(Store.Privilege, known);
 
+        Count(Store.Privilege, hit: false);
         var answer = await probe.CallerPrivilegeAnswerAsync(TokenHelper.ExtractBearerTokenOrNull(http), privilege, ct).ConfigureAwait(false);
         if ((answer is CallerPrivilegeAnswer.Held or CallerPrivilegeAnswer.NotHeld) && caller is { } asker && IsServing)
             _probePrivileges[(asker, privilege)] = answer;
@@ -232,14 +319,15 @@ internal sealed class DecisionAccessWindow : IDisposable
     /// </summary>
     internal async Task<DataverseUserResponse> RouteGetAsync(IDataverseUserClient inner, string relativePath, CancellationToken ct)
     {
-        var store = RouteStoreOf(relativePath);
+        var store = RouteStoreOf(relativePath, out var kind);
         if (store is null)
             return await inner.GetAsync(relativePath, ct).ConfigureAwait(false);
 
         var key = (_callerSystemUserId, relativePath);
         if (IsServing && store.TryGetValue(key, out var known))
-            return Answer(known);
+            return Hit(kind, Answer(known));
 
+        Count(kind, hit: false);
         var response = await inner.GetAsync(relativePath, ct).ConfigureAwait(false);
         if (response.IsSuccess && IsServing)
             Keep(store, key, response);
@@ -247,14 +335,34 @@ internal sealed class DecisionAccessWindow : IDisposable
     }
 
     /// <summary>The store a route-core GET path is kept in, or null when the path is not one the window keeps.</summary>
-    private ConcurrentDictionary<(Guid Caller, string Path), (int StatusCode, string? RawJson)>? RouteStoreOf(string relativePath)
+    private ConcurrentDictionary<(Guid Caller, string Path), (int StatusCode, string? RawJson)>? RouteStoreOf(string relativePath, out Store kind)
     {
+        kind = default;
         if (relativePath.Contains(PrincipalAccessCall, StringComparison.Ordinal))
+        {
+            kind = Store.RecordAccess;
             return _routeRights;
-        if (relativePath.Contains(PrivilegeSetCall, StringComparison.Ordinal)
-            || relativePath.TrimStart('/').StartsWith(RecordTypeCatalogRead, StringComparison.Ordinal))
+        }
+
+        if (relativePath.Contains(PrivilegeSetCall, StringComparison.Ordinal))
+        {
+            kind = Store.Privilege;
             return _routeCommitLong;
+        }
+
+        if (relativePath.TrimStart('/').StartsWith(RecordTypeCatalogRead, StringComparison.Ordinal))
+        {
+            kind = Store.Catalog;
+            return _routeCommitLong;
+        }
+
         return null;
+    }
+
+    private T Hit<T>(Store store, T answer)
+    {
+        Count(store, hit: true);
+        return answer;
     }
 
     /// <summary>

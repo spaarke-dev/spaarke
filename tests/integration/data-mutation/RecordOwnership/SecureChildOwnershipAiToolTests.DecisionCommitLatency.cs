@@ -72,7 +72,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// default (unstaged) runs the real executor types, as production does.</param>
     /// <param name="withoutAccessWindow">The request drops the commit's access window as it is opened (its <c>Items</c> refuse it), so
     /// every caller-access question goes to the wire, as before ISS-010 part C. Nothing else changes.</param>
-    private FourActionWorld BuildFourActionWorld(bool staged = false, bool withoutAccessWindow = false)
+    /// <param name="windowSwitch">The commit's <c>Signals:DecisionAccessWindow:Enabled</c> setting (ISS-010 C off switch); null leaves it unset (on).</param>
+    private FourActionWorld BuildFourActionWorld(bool staged = false, bool withoutAccessWindow = false, string? windowSwitch = null)
     {
         var profile = new DecisionCommitCallProfile();
         _world.WithUser(Commit.Caller, Commit.CallerOid, Directory.ChildBu); // the commit rig's caller, in the child business unit
@@ -117,6 +118,13 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var probe = new DecisionCommitCallProfile.ProfiledProbe(profile, Commit.Caller);
         var rig = new Commit.Rig { ActiveBudgets = 0, ProbeOverride = probe };
+        if (windowSwitch is not null)
+        {
+            rig.Configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [DecisionAccessWindow.EnabledConfigKey] = windowSwitch })
+                .Build();
+        }
+
         rig.AddSignal(Commit.Primary, DecisionLane.Decide, OrdinaryMatter, PfVersion);
         rig.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", PfVersion, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_policyversion", PfVersion) { ["sprk_decisionplan"] = FourActionPlan });

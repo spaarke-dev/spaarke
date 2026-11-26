@@ -365,6 +365,7 @@ public sealed class DecisionCommitService
     private readonly IScheduledJobLease _lease;
     private readonly DecisionPlanReadStamp _planReads;
     private readonly TimeProvider _clock;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<DecisionCommitService> _logger;
 
     public DecisionCommitService(
@@ -382,6 +383,7 @@ public sealed class DecisionCommitService
         IScheduledJobLease lease,
         DecisionPlanReadStamp planReads,
         TimeProvider clock,
+        IConfiguration configuration,
         ILogger<DecisionCommitService> logger)
     {
         _access = access ?? throw new ArgumentNullException(nameof(access));
@@ -398,6 +400,7 @@ public sealed class DecisionCommitService
         _lease = lease ?? throw new ArgumentNullException(nameof(lease));
         _planReads = planReads ?? throw new ArgumentNullException(nameof(planReads));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -1301,7 +1304,7 @@ public sealed class DecisionCommitService
         // ISS-010 C: from here the commit's caller-access answers are kept per request (DecisionAccessWindow): FR-51, every
         // preflight and step 1's execute share window 0; the record-access part clears after every step; it is closed for the
         // replay, before the Decision Record and before the follow-ups, and removed on every return path (using).
-        using var accessWindow = DecisionAccessWindow.Open(http, confirmedBy);
+        using var accessWindow = DecisionAccessWindow.Open(http, confirmedBy, _logger, DecisionAccessWindow.IsEnabled(_configuration));
         if (await CallerMayDecideAsync(http, p.Core, p.Resolved, ct).ConfigureAwait(false) is { } denied)
             return denied with { ReviewId = reviewId };
 
