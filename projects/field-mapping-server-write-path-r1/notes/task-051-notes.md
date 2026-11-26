@@ -16,6 +16,19 @@ Branch `task/fm-051` (first round) and `task/fm-051-r1` (fix round, below). Code
 | 6 (K1) | `Merge-NativeCreateRibbon.ps1` wrote `-Out` before its checks. | Writes a temp file beside `-Out`, runs the checks, then moves it into place; a failed check leaves `-Out` unchanged; the temp file never lingers. Idempotency test still green. | Pester `writes -Out only after its checks, through a temporary file that does not linger (K1)` (an order check on the script text plus no `*.tmp` left: no check can be made to fail from a seed file, so the order is what is pinned). |
 | 7 | Wording. | Notes, script help and comments say "steer to the product's create surface"; hiding is not enforcement. | - |
 
+**Fail-before / pass-after, measured 2026-11-26.** "Before" = the 20 non-test files put back to their state at `02e2ff0833` with the new tests in place; "after" = the fix commit.
+
+| Suite | Before (fix reverted) | After |
+|---|---|---|
+| ArchTests `SecureChildNewCommandAgreementTests` (filtered, built without `--no-build`) | 3 failed, 13 passed (the table-parameter check, the web-resource-order check, the Add KPI no-native-rule check) | 16 passed |
+| Pester 5.7.1 `Test-NativeCreateSurfaces.Tests.ps1` | 11 failed, 17 passed | 28 passed |
+| node `EventCommands` | 1 failed (save fails: memo must still open), 26 passed | 27 passed |
+| Jest `projectMatterSubgridCommands` (report card launcher) | 4 failed, 15 passed | 19 passed |
+| Jest `secureChildRibbonScript` | not affected by the change | 71 passed |
+| Full `dotnet test tests/Spaarke.ArchTests` | not run | 2849 passed, 0 failed |
+
+The Pester K1 case pins the write order from the script text (no check can be forced to fail from a seed file), not a behavioural failure of a check; the old script fails it because it wrote `-Out` first.
+
 **Owner decisions, 2026-11-26** (received during this round; recorded, implemented below):
 
 - **OQ-1 report card.** A report card is created only in the context of its parent matter. Its form "New" opens the Report Card wizard (`sprk_createreportcardwizard`, task 027) filed under the matter (or project) the form names; the subgrid "+ New" already opens it (`Spaarke.SecureChild.Ribbon.newChild` via `NATIVE_NEW_REDIRECTED` + `WIZARDS`, working now that the table parameter is passed); the HOME grid has no New. New launcher `Spaarke.Commands.Wizards.openCreateReportCardFromForm` (`sprk_wizard_commands.js`, both copies identical; registered in `create-launchers.json` as `sprk_reportcard`). A form that names no parent opens nothing and says so (there is no unfiled report card). `sprk_reportcard` is now `redirected` in the config, `gridButton: none`.
