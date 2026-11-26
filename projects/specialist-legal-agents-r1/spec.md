@@ -319,6 +319,7 @@ No other ADR tensions surfaced for Phase 0. T-1, T-2, T-6 and T-8 apply to later
 | Phase 0 scope | Which partly answered items stay? | G2 remainder and G3 stay. G4 Outlook, G10 and G11 are out ("do not invest in Copilot Studio or SPFx") | FR-03, FR-08; Out of Scope |
 | Test effort | How much manual prompt-running? | **Staged, small** | Pilots of 10, early stop below 90%, about 40 runs per surface for survivors |
 | Reuse: server-side review | `IActionRunner` or playbook orchestration? The owner asked which is more robust, then asked for a Fable code-level review (2026-11-25) | **The action-based model, for both the spike and Phase 1.** The playbook node engine is frozen (ADR-039 MUST NOT; ADR-013 amendment 2026-07-05), has open defects (PB-02, PB-08; #919), and has no tier resolver. `notes/run-path-review-2026-11-25.md` | FR-02 uses `IActionRunner` (production-shaped, not a stand-in); FR-13 carries the action model plus `ICodedWorkflow` into Phase 1; the run record is an open owner question |
+| Run record | Where are Action and coded-workflow runs recorded (`sprk_playbookrun` requires a playbook)? | **Extend `sprk_playbookrun` as the one AI-run record** ("yes extend"): `sprk_playbookid` becomes optional; add Action, Binding, profile-version and parent-run lookups and a run kind; noderun records coded-workflow steps | I-3 confirms the column list with mcp-r2 (its task 005 builds the shared columns); Phase 1 adds the profile-version lookup. The playbook architecture is documented in the ADRs and the canonical AI architecture doc |
 
 ## Assumptions
 
@@ -331,7 +332,7 @@ No other ADR tensions surfaced for Phase 0. T-1, T-2, T-6 and T-8 apply to later
 
 - [ ] Whether the `agreement-review` Action row is deployed in DEV Dataverse. Blocks: FR-02 `spike_review_nda`. The spike task checks it first and reports it if it is missing.
 - [ ] When mcp-r2's Phase 0 merges land on master, which sets the spike branch's base. Blocks: the FR-02 dev deploy. It does not block writing the kits (FR-01, FR-09) or the desk items (FR-12).
-- [ ] **Run record for Action-path runs (D-A18 (7) revised).** `sprk_playbookrun` requires a playbook, and the action path has no run record. The options are (1) a new capability-run table, (2) relaxing `sprk_playbookid` and adding an action lookup, or (3) the ledger plus the Decision Record. Blocks: Phase 1 run attribution, and mcp-r2's FR-13 column choices (agree one design with mcp-r2). It does not block Phase 0. Owner decision.
+- [x] ~~**Run record for Action-path runs (D-A18 (7) revised).**~~ **Decided 2026-11-25 (owner): extend `sprk_playbookrun` as the one AI-run record** (option 2; `notes/playbook-concept-and-run-record-2026-11-25.md`). Earlier text: `sprk_playbookrun` requires a playbook, and the action path has no run record. The options are (1) a new capability-run table, (2) relaxing `sprk_playbookid` and adding an action lookup, or (3) the ledger plus the Decision Record. Blocks: Phase 1 run attribution, and mcp-r2's FR-13 column choices (agree one design with mcp-r2). It does not block Phase 0. Owner decision.
 - [ ] Who reviews the patent golden set from Phase 1. Blocks: nothing in Phase 0; it is recorded so Phase 1 can line someone up early.
 
 ---
