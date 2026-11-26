@@ -33,6 +33,9 @@ internal sealed class RealCallerClientRig
     private const string ClientId = "66666666-7777-4888-9999-aaaaaaaaaaaa";
     private const string CallerDataverseToken = "test-CALLER-dataverse-token-iss010";
 
+    /// <summary>The Dataverse access token the OBO exchange yields for <paramref name="bearerToken"/>: one per caller, so a wire can tell whose call it saw.</summary>
+    public static string DataverseTokenFor(string bearerToken = BearerToken) => CallerDataverseToken + "-" + bearerToken;
+
     private readonly OrderedCredentialClientProvider _credentials;
     private readonly IConfiguration _configuration;
     private int _created;
@@ -104,7 +107,7 @@ internal sealed class RealCallerClientRig
                     ["credential_type"] = "AccessToken",
                     ["realm"] = TenantId,
                     ["target"] = $"{EnvironmentUrl}/.default",
-                    ["secret"] = CallerDataverseToken,
+                    ["secret"] = DataverseTokenFor(userAssertion),
                     ["cached_at"] = now.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["expires_on"] = expires,
                     ["extended_expires_on"] = expires,

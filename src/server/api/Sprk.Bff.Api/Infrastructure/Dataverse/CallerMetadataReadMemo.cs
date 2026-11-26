@@ -18,8 +18,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <para><b>For how long, for whom.</b> One instance wraps one caller's client for one create's step 5, and (task 049c) a
 /// second instance for the same create's steps 2 and 3 (the caller's payload, then the merge of the mapped values, which
 /// re-read the table's relationships and the entity sets step 2 read); each is then dropped (locals of
-/// <c>RecordCreationService.DecideAsync</c>). Off the child-records route (the chat tool, jobs) each keeps its own answers:
-/// nothing is shared across those groups, creates, requests or callers. On the route (ISS-010, #3184) the instances are built
+/// <c>RecordCreationService.DecideAsync</c>). A create that does not go through <c>ChildRecordEndpoints.CreateAsync</c> (a job, any other off-route create) keeps its own
+/// answers: nothing is shared across those groups, creates, requests or callers. On that path (ISS-010, #3184), which the
+/// decision commit from the MCP complete-decision tool also takes (<c>DecisionRouteCores.CreateChildAsync</c>), the instances are built
 /// with <see cref="For"/> over the request's <see cref="RequestScope"/> (when the client is the <see cref="DataverseUserClient"/>), so they share one store for that request,
 /// across the groups and across every create the request runs (the decision commit runs four, each with its own transient client); see
 /// <see cref="RequestScope"/> for that contract. The
@@ -33,7 +34,7 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// and the related tables' entity sets.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: <see cref="CallerWhoAmIMemo"/> (the caller's
 /// <c>WhoAmI</c> only, per request, in <c>HttpContext.Items</c>) and <c>Spaarke.Core.Cache.RequestCache</c> (scoped, not
-/// thread-safe, and absent when the service runs off a request — a chat tool or a job). Extension: neither can hold this
+/// thread-safe, and absent when the service runs off a request, a job for one). Extension: neither can hold this
 /// without becoming thread-safe and request-bound, and the create service runs off-request too; this is a decorator with
 /// no DI registration. Cost of doing nothing: each repeat is a sequential Dataverse round trip (about 80 ms live) inside
 /// the create's NFR-02 budget.</para>
@@ -62,8 +63,8 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     /// The memo a create's caller checks use: over <paramref name="requestReads"/>'s store when the create runs in a request that
     /// carries one (the child-records route, and so the decision commit's in-process creates) AND <paramref name="inner"/> is
     /// the <see cref="DataverseUserClient"/> itself, so every create of that request shares one answer per metadata path and a
-    /// row write forgets nothing; otherwise a memo of its own, exactly as before (the chat tool, jobs, every other off-route
-    /// create, and any other <see cref="IDataverseUserClient"/> even inside a request).
+    /// row write forgets nothing; otherwise a memo of its own, exactly as before (a job, every create that does not go through
+    /// <c>ChildRecordEndpoints.CreateAsync</c>, and any other <see cref="IDataverseUserClient"/> even inside a request).
     /// </summary>
     internal static CallerMetadataReadMemo For(IDataverseUserClient inner, RequestScope? requestReads) =>
         requestReads is not null && inner is DataverseUserClient
@@ -103,9 +104,11 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     /// access answer (<c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>) or a failure: those are asked
     /// every time, as before (ADR-009: no authorization answer is cached). The store lives and dies with the request: nothing is
     /// shared across requests, and there is no process-wide cache.</para>
-    /// <para><b>Who gets it.</b> Only a create whose request names it (<c>RecordCreationRequest.MetadataReads</c>), which the
-    /// child-records route sets from its own request. Off-request creates (the chat tool, jobs) name none and keep the
-    /// per-create memo.</para>
+    /// <para><b>Who gets it.</b> Only a create whose request names it (<c>RecordCreationRequest.MetadataReads</c>), which
+    /// <c>ChildRecordEndpoints.CreateAsync</c> sets from its own request: the shared store applies to every create that goes
+    /// through it, including the decision commit from the MCP complete-decision tool (via <c>DecisionRouteCores.CreateChildAsync</c>).
+    /// Any create that does not go through <c>ChildRecordEndpoints.CreateAsync</c> (a job, any other off-route create) names none
+    /// and keeps the per-create memo.</para>
     /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: this memo (one step of one create) and
     /// <see cref="CallerWhoAmIMemo"/> (the caller's <c>WhoAmI</c> per request, static over <c>HttpContext.Items</c>). Extension:
     /// this IS the extension of the memo, scoped to a request instead of a step; the WhoAmI memo holds one keyed answer per

@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// DISTINCT <see cref="DataverseUserClient"/> instances (production resolves a fresh transient client per create) and across row
 /// writes; a failure, a row, a catalog row and an access answer are asked every time; a different request shares nothing; any
 /// client that is not the <see cref="DataverseUserClient"/> keeps the per-create memo even inside a request; and a create with no
-/// scope (the chat tool, jobs) keeps the per-create memo.
+/// scope (a create that does not go through <c>ChildRecordEndpoints.CreateAsync</c>, a job) keeps the per-create memo.
 /// </summary>
 /// <remarks>The clients here are the REAL <see cref="DataverseUserClient"/> over a counting wire (<see cref="RealCallerClientRig"/>), so
 /// the type the production gate tests is the type under test.</remarks>
@@ -30,6 +30,9 @@ public sealed class CallerMetadataReadMemoRequestScopeTests
     {
         public ConcurrentDictionary<string, int> Gets { get; } = new(StringComparer.Ordinal);
 
+        /// <summary>Every GET in arrival order with the Authorization header it carried (the caller's Dataverse token).</summary>
+        public ConcurrentQueue<(string Path, string? Authorization)> Calls { get; } = new();
+
         public Func<string, HttpStatusCode?>? Fault { get; set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -40,6 +43,7 @@ public sealed class CallerMetadataReadMemoRequestScopeTests
             var original = request.RequestUri!.OriginalString;
             var path = original[(original.IndexOf("/api/data/v9.2/", StringComparison.Ordinal) + "/api/data/v9.2/".Length)..];
             Gets.AddOrUpdate(path, 1, (_, n) => n + 1);
+            Calls.Enqueue((path, request.Headers.Authorization?.ToString()));
             return Task.FromResult(Fault?.Invoke(path) is { } status
                 ? new HttpResponseMessage(status)
                 : new HttpResponseMessage(HttpStatusCode.OK)
@@ -145,6 +149,35 @@ public sealed class CallerMetadataReadMemoRequestScopeTests
     }
 
     [Fact]
+    public async Task TwoRequestsOfTwoDifferentCallers_ShareNothing_AndEachCallCarriesItsOwnCallersToken()
+    {
+        var rigA = RealCallerClientRig.Create("bearer-caller-A");
+        var rigB = RealCallerClientRig.Create("bearer-caller-B");
+
+        var requestA = RealCallerClientRig.Request("bearer-caller-A");
+        new HttpContextAccessor().HttpContext = requestA;
+        var scopeA = CallerMetadataReadMemo.RequestScope.Of(requestA);
+        var answerA = await CallerMetadataReadMemo.For(rigA.NewClient(_wire), scopeA).GetAsync(Metadata, default);
+
+        var requestB = RealCallerClientRig.Request("bearer-caller-B");
+        new HttpContextAccessor().HttpContext = requestB;
+        var scopeB = CallerMetadataReadMemo.RequestScope.Of(requestB);
+        var answerB = await CallerMetadataReadMemo.For(rigB.NewClient(_wire), scopeB).GetAsync(Metadata, default);
+
+        scopeA.Should().NotBeSameAs(scopeB);
+        answerA.IsSuccess.Should().BeTrue();
+        answerB.IsSuccess.Should().BeTrue();
+        _wire.Gets[Metadata].Should().Be(2, "caller B's request does not see caller A's answer: each asked Dataverse for itself");
+        _wire.Calls.Select(c => c.Authorization).Should().Equal(
+            new[]
+            {
+                "Bearer " + RealCallerClientRig.DataverseTokenFor("bearer-caller-A"),
+                "Bearer " + RealCallerClientRig.DataverseTokenFor("bearer-caller-B"),
+            },
+            "each request's read went out with its own caller's Dataverse token, in order, and neither carried the other's");
+    }
+
+    [Fact]
     public async Task AClientThatIsNotTheDataverseUserClient_GetsNoSharedAnswers_EvenInARequestWithAScope()
     {
         var scope = CallerMetadataReadMemo.RequestScope.Of(AmbientRequest());
@@ -173,7 +206,7 @@ public sealed class CallerMetadataReadMemoRequestScopeTests
     public async Task WithNoRequestScope_TheMemoIsPerInstance_AndForgetsOnAWrite_AsBefore()
     {
         AmbientRequest();
-        CallerMetadataReadMemo.RequestScope.Of(null).Should().BeNull("off-request (the chat tool, jobs) there is no scope");
+        CallerMetadataReadMemo.RequestScope.Of(null).Should().BeNull("off-request (a job) there is no scope");
         var client = _rig.NewClient(_wire);
 
         var memo = CallerMetadataReadMemo.For(client, null);
