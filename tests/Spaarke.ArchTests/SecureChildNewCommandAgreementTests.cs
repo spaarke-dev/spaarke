@@ -127,9 +127,13 @@ public class SecureChildNewCommandAgreementTests
         var merge = File.ReadAllText(MergeFile);
         Assert.Contains("'sprk.matter.subgrid.kpi.AddKpiButton.Command'", merge, StringComparison.Ordinal);
 
-        // The script's own check: the Quick Create opens only for a record read as NOT secure.
+        // Task 051 (FR-24): the button no longer opens a quick create at all. It creates through the BFF (the shared
+        // Spaarke.SecureChild.Ribbon.newChild), which files, owns and maps the row on the server for a secure host and an ordinary
+        // one alike, so there is no client-side secure read left to pin.
         var actions = File.ReadAllText(Path.Combine(Root, "src", "solutions", "webresources", "sprk_kpi_ribbon_actions.js"));
-        Assert.Contains("row.sprk_issecure === false", actions, StringComparison.Ordinal);
+        Assert.Contains("ribbon.newChild(primaryControl, subgrid, \"sprk_kpiassessment\")", actions, StringComparison.Ordinal);
+        Assert.DoesNotContain("createFromEntity", actions, StringComparison.Ordinal);
+        Assert.DoesNotContain("useQuickCreateForm", actions, StringComparison.Ordinal);
     }
 
     [Fact]
