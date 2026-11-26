@@ -67,6 +67,11 @@ export interface RegistrationPageProps {
   loginHint?: string;
   /** Registration or linking completed: the gate re-reads `/me`. */
   onDone: () => void;
+  /**
+   * The shell's sign-out. When given, the email-missing screen offers "Sign out": a reload alone keeps the cached token,
+   * which still has no email, so the person signs out to get a new one after the admin's fix (R4 task 042). Absent in Teams.
+   */
+  onSignOut?: () => void;
 }
 
 type View =
@@ -173,7 +178,7 @@ function refusalView(reason: RegistrationRefusal, confirm: boolean): View {
   }
 }
 
-export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, loginHint, onDone }) => {
+export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, loginHint, onDone, onSignOut }) => {
   const s = useStyles();
   // R4 FR-25 (#2192): a licensed user's email can never be registered, so the page opens on the link step (the same view the
   // registration POST's `licensed_user_link_required` leads to). No popup opens here: only the "Link my account" click does.
@@ -342,7 +347,12 @@ export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, log
       return message(
         <Warning48Regular className={s.iconWarning} />,
         'We could not read your email address',
-        EMAIL_MISSING_MESSAGE
+        EMAIL_MISSING_MESSAGE,
+        onSignOut ? (
+          <Button appearance="primary" onClick={onSignOut}>
+            Sign out
+          </Button>
+        ) : undefined
       );
 
     case 'notInvited':

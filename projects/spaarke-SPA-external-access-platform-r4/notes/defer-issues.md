@@ -498,3 +498,10 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 **Why it matters.** If workforce contacts should submit, they can't from the SPA until this is decided. If they shouldn't, the server should say so (for example `/me` sends no firms on the workforce plane) and the client rule becomes a backstop.
 
 **Fix.** ebilling-r1 decides, with uac-r2 for the ceiling: either (a) workforce contacts don't submit, and `ExternalUserContextEndpoint` sends no firms on the workforce plane; or (b) they do, and the offer also checks the ceiling's Create on the submission table and AppendTo on documents, after which the SPA's plane rule is removed. Effort: under a day either way, plus reviews. Status: Open (urgency: next-round). Issue: https://github.com/spaarke-dev/spaarke/issues/3159 (board Type=Idea).
+## D-42 — External SPA: the email-missing screen offers no account link for a licensed user without an email claim (#3201)
+
+**What.** A licensed Spaarke user whose home token has no `email` claim (only a username) and whose silent link failed lands on "We could not read your email address", which has no "Link my account" action. The licensedUser hint needs an email, so it is false; the link route itself needs none, so linking would work. This predates task 042: before it, the person reached the same screen after submitting the form. Found by task 042's adversarial review (K1).
+
+**Why it matters.** Such a person waits for their admin to set the Email, though they could link now.
+
+**Fix.** A secondary action on the email-missing screen, "I already have a Spaarke account – link it", running the existing link step (popup only from the click; `/workforce/link` still proves the account). Needs a UX decision, since the person may not know whether they have a Spaarke account. Entry-points: `RegistrationPage.tsx` (`emailMissing` view, `link()`), `WorkforceHomeGate.tsx` (`afterSilentLinkFailure`). Effort: about half a day plus tests. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3201 (board Type=Idea).

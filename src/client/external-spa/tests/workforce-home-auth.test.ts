@@ -993,7 +993,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
   };
 
   /** A signed-in contoso user on the home plane, the gate rendered over a marker child. */
-  async function renderGate(options: { guest?: Behaviour } = {}) {
+  async function renderGate(options: { guest?: Behaviour; onSignOut?: () => void } = {}) {
     stubEnv();
     sessionStorage.setItem(INVITE_CODE_STORAGE_KEY, JSON.stringify({ code: INVITE_CODE, customerKey: null }));
     h.byClient[HOME_CLIENT_ID] = { accounts: [JANE] };
@@ -1016,7 +1016,7 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
         { theme: webLightTheme },
         React.createElement(
           WorkforceHomeGate,
-          { onReady } as any,
+          { onReady, onSignOut: options.onSignOut } as any,
           React.createElement('div', { 'data-testid': 'workspace' }, 'workspace')
         )
       )
@@ -1339,6 +1339,23 @@ describe('Workforce home gate: registration_required -> silent link -> profile f
       expect(g.onReady).toHaveBeenLastCalledWith(false);
     }
   );
+
+  it('email missing in the browser: "Sign out" uses the shell sign-out, so the next sign-in gets a new token', async () => {
+    h.script = { [ME]: [{ status: 403, json: { ...(REG_REQUIRED.json as Record<string, unknown>), email: null } }] };
+    const onSignOut = vi.fn();
+    const g = await renderGate({ onSignOut });
+    await expectEmailMissingScreen(g);
+    g.fireEvent.click(g.screen.getByRole('button', { name: /^sign out$/i }));
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+    expect(calls()).toEqual([ME]);
+  });
+
+  it('email missing with no shell sign-out (the Teams tab): no "Sign out" button', async () => {
+    h.script = { [ME]: [{ status: 403, json: { ...(REG_REQUIRED.json as Record<string, unknown>), email: null } }] };
+    const g = await renderGate();
+    await expectEmailMissingScreen(g);
+    expect(g.screen.queryByRole('button', { name: /sign out/i })).toBeNull();
+  });
 
   it.each([
     ['registration_unavailable (503)', problem(503, 'sdap.access.registration_unavailable')],
