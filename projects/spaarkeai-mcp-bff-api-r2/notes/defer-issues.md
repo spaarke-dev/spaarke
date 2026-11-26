@@ -209,3 +209,21 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 ## D-022-2 — SemanticSearchEndpoints logs full exceptions; client abort → 500 → #3221
 - **Status**: deferred (pre-existing REST route, outside 022's diff). Log the exception type only; return 499 at Debug on `RequestAborted`, as 024 did for playbook lists.
 - **Labels**: spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+## From task 030 (2026-11-26)
+
+### D-030-1: ComposeProfileDispatcher clears the save request's IHttpContextAccessor and carries the bearer token out of the request (pre-existing, found in passing)
+- **GitHub issue**: to file (main session)
+- **Title**: `Compose: background profile dispatch nulls the request's HttpContext accessor and detaches the caller token (ADR-052)`
+- **Body**:
+  - `Services/Compose/ComposeProfileDispatcher.cs` `Dispatch` → `Task.Run(() => RunAsync(...))`. `RunAsync` sets `accessor.HttpContext = detachedContext` on a pool thread.
+  - It does not call `ExecutionContext.SuppressFlow()` first, so the task inherits the save request's `HttpContextAccessor` AsyncLocal holder.
+  - The accessor's setter clears the holder it finds (`holder.Context = null`) before it installs a new one.
+  - Effect: while the save request is still running (`ComposeService.cs:2323` onward: memory capture, completion projection, response), every `IHttpContextAccessor.HttpContext` read on the request flow can return null. Whether it does depends on timing.
+  - Failure scenario: a request-flow consumer of the accessor (for example telemetry or `ContextEventEmitter`) loses the caller and logs or behaves as if no caller were present.
+  - Separately, the dispatcher copies the caller's `Authorization` header into a detached task that outlives the request. ADR-052 MUST NOT ("the caller's token must not leave the BFF request that holds it") forbids that.
+  - Fix:
+    - suppress flow before `Task.Run`;
+    - decide the ADR-052 position: an exception, or move the profile onto an ADR-004 job with A5 impersonation once #988–#990 land.
+  - Add a seam test that asserts the request's accessor is still populated after `Dispatch`.
+- **Labels**: compose; Type=Bug. Owner: the active Compose project (r7) / uac-r2 for the ADR-052 position.
