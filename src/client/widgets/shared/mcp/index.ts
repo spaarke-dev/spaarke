@@ -22,6 +22,7 @@ export {
   type WidgetMcpTransportOptions,
   type WidgetToolResult,
 } from './widgetMcpTransport';
+export { hostThemeName, themeFromHostContext, type HostThemeContext, type HostThemeName } from './hostTheme';
 export {
   createMcpFetch,
   ShimReason,
