@@ -365,6 +365,37 @@ public sealed class CallerPrincipalResolution
     /// <summary>Constructs a failure outcome carrying the ProblemDetails result to return.</summary>
     public static CallerPrincipalResolution Denied(IResult failure)
         => new() { Failure = failure ?? throw new ArgumentNullException(nameof(failure)) };
+
+    /// <summary>
+    /// The ProblemDetails detail of a <see cref="BinderFault"/> answer. Fixed text: no exception text, and nothing about
+    /// the caller (no tenant, oid, UPN or email).
+    /// </summary>
+    internal const string BinderFaultDetail =
+        "Your sign-in could not be completed because your account could not be checked right now. Try again in a moment.";
+
+    /// <summary>
+    /// R4 FR-28 (#2269): true for the three deny codes that mean the contact lookup, create or bind FAILED (Dataverse could
+    /// not answer), not that the caller was refused. ADR-028: an indeterminate access result is a retryable 503, never a
+    /// 403. Every other deny code is a real answer and keeps its own status.
+    /// </summary>
+    internal static bool IsBinderFault(string? denyCode) => denyCode is ContactBindingDecision.DenyContactLookupFailed
+        or ContactBindingDecision.DenyContactCreateFailed
+        or ContactBindingDecision.DenyContactBindFailed;
+
+    /// <summary>
+    /// The answer for an <see cref="IsBinderFault"/> code on BOTH planes: 503 ProblemDetails with the same deny code as
+    /// <c>reasonCode</c> (what the 403 carried before) and as <c>errorCode</c>, and <see cref="BinderFaultDetail"/>. The SPA
+    /// retries it (FR-28). Nothing was created or bound.
+    /// </summary>
+    internal static CallerPrincipalResolution BinderFault(string denyCode) => Denied(Results.Problem(
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Service Unavailable",
+        detail: BinderFaultDetail,
+        extensions: new Dictionary<string, object?>
+        {
+            ["reasonCode"] = denyCode,
+            ["errorCode"] = denyCode,
+        }));
 }
 
 /// <summary>
@@ -547,6 +578,12 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             _logger.LogWarning(
                 "[EXT-AUTH] Cannot resolve Dataverse Contact ({DenyCode}; oid present: {HasOid}, email present: {HasEmail})",
                 code, !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
+
+            // R4 FR-28: a lookup/create/bind that FAILED is not a refusal: a retryable 503 with the same code.
+            if (CallerPrincipalResolution.IsBinderFault(code))
+            {
+                return CallerPrincipalResolution.BinderFault(code);
+            }
 
             // A person whose external access an administrator removed is answered exactly as one who is not invited; the
             // log line above (and the binder's) keeps the specific code for operators.
@@ -896,6 +933,13 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
                     _logger.LogWarning("[WF-AUTH] Denying request: {DenyCode}", resolution.DenyCode);
                     return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(
                         ContactBindingDecision.DenyContactNotInvited, WorkforceNotInvitedDetail));
+
+                case WorkforceDenyReason.PrincipalNotResolved
+                    when CallerPrincipalResolution.IsBinderFault(resolution.DenyCode):
+                    // R4 FR-28 (#2269): the contact lookup, create or bind FAILED; a retryable 503 with the same code,
+                    // never a 403 (ADR-028). Same answer as the CIAM plane.
+                    _logger.LogWarning("[WF-AUTH] Sign-in not completed (retryable): {DenyCode}", resolution.DenyCode);
+                    return CallerPrincipalResolution.BinderFault(resolution.DenyCode!);
 
                 case WorkforceDenyReason.PrincipalNotResolved:
                 default:

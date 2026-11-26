@@ -18,7 +18,9 @@
  *      screen, by the same rules) and never re-runs the silent link, so nothing loops without a click. The form registers through the BFF (or,
  *      for a licensed user whose silent link failed, the link step links through the popup), then /me is read again.
  *
- * 401 -> the sign-in state; any other 403 -> the denied state; 5xx or a network fault -> a generic error with a retry.
+ * 401 -> the sign-in state; any other 403 -> the denied state; a 503 binder fault (R4 FR-28: the contact could not be
+ * read, created or bound right now) -> retried 3x behind the spinner, then "We couldn't finish signing you in. Try again"
+ * with a Retry; any other 5xx or a network fault -> a generic error with a retry.
  * `onReady(true)` tells the shell the workspace is showing (the notification bell waits for it, so it never reads the BFF
  * for a person who is not registered yet).
  *
@@ -43,6 +45,7 @@ import {
   type RegistrationPrefill,
 } from '../../auth/registration-client';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './BffAccessState';
+import { BINDER_FAULT_MESSAGE, BinderFaultError, withBinderFaultRetry } from '../../api/me-client';
 import { LinkBlockedNotice, RegistrationPage } from '../../pages/RegistrationPage';
 
 /** True when the gate does anything: the workforce home plane, in a browser or in Teams. CIAM renders its children directly. */
@@ -79,6 +82,7 @@ export type GateState =
   | { kind: 'register'; prefill: RegistrationPrefill }
   | { kind: 'linkBlocked' }
   | { kind: 'retry' }
+  | { kind: 'binderFault' }
   | { kind: 'access'; failure: BffAccessFailure }
   | { kind: 'ready' };
 
@@ -118,11 +122,16 @@ const ActiveGate: React.FC<{
       const current = () => runId.current === id;
       setState({ kind: 'checking' });
       try {
-        await getExternalUserContext();
+        // A binder fault (R4 FR-28, #2269) is retried 3x (1 s, 2 s, 4 s) behind the spinner before it surfaces.
+        await withBinderFaultRetry(() => getExternalUserContext());
         if (current()) setState({ kind: 'ready' });
         return;
       } catch (err) {
         if (!current()) return;
+        if (err instanceof BinderFaultError) {
+          setState({ kind: 'binderFault' });
+          return;
+        }
         const prefill = parseRegistrationRequired(err);
         if (!prefill) {
           const failure = accessFailureOf(err);
@@ -214,6 +223,20 @@ const ActiveGate: React.FC<{
       return <LinkBlockedNotice />;
     case 'access':
       return <BffAccessState failure={state.failure} />;
+    case 'binderFault':
+      // R4 FR-28: the automatic retries are used up. Retry runs the whole sequence (and its retries) again.
+      return (
+        <Centered>
+          <MessageBar intent="warning">
+            <MessageBarBody>{BINDER_FAULT_MESSAGE}</MessageBarBody>
+            <MessageBarActions>
+              <Button appearance="primary" onClick={() => void probe(true)}>
+                Retry
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        </Centered>
+      );
     case 'retry':
     default:
       return (
