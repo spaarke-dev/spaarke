@@ -18,7 +18,7 @@
 - Publish size +201 bytes (≈ 43.6 MB). No CVE, no package change. Conflict check clean (35 open PRs).
 
 ## Live on dev
-- **BFF:** uac-r2 deploys master `1e64e94168` (tasks 040 + 041 BFF) at ~01:52Z 2026-11-26 on the owner's go; rollback `aa933c09e6`. Before that: `aa933c09e6` since 2026-11-25 21:49:11Z (rollback `a1b7db1def`). Watch for uac-r2's LIVE notice.
+- **BFF:** master `1e64e94168` (tasks 040 + 041 BFF) LIVE since 2026-11-26 01:56:50Z (uac-r2, owner's go; healthz 200); rollback `aa933c09e6`. uac-r2's 30-minute gate ~02:27Z. Task 042's BFF part is not in it.
 - **SPA:** `0267ee64a2` (rollback `3067fb3bdc`). Tasks 040, 041 (and 042 once merged) are NOT in it. Master has moved past `0267ee64a2`, including ebilling ISS-052 #3082 (`2ac250cae4`): list it in the next SPA deploy proposal. The SPA deploy needs the owner's go on an exact SHA; re-check master HEAD before running `deploy-external-spa.yml`.
 
 ## Owner questions open
