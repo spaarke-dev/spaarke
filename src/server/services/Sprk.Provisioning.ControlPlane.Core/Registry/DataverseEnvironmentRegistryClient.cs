@@ -134,6 +134,10 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     // ISS-031: when the stamp was (last) provisioned — H13 promotes it on every completed run. POST /api/runs reads it
     // to recognise an upgrade of an existing stamp.
     private const string ProvisionedOnColumn = "sprk_provisionedon";
+    // Demo environment plan decision 1 (2026-11-26): H3 pre-authorizes the Demo-only operator client only when the row
+    // is Environment Type = Demo and active — the same test the demo loader's guard applies.
+    private const string EnvironmentTypeColumn = "sprk_environmenttype";
+    private const string IsActiveColumn = "sprk_isactive";
 
     // Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
     // state field. SINGLE-LINE-OF-TEXT column (written as a JSON string —
@@ -178,7 +182,7 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
             $"/api/data/v9.2/{_options.EntitySetName}?" +
             $"$filter={TenantIdColumn} eq '{Uri.EscapeDataString(filterValue)}'" +
             $"&$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
-            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn}" +
+            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn},{EnvironmentTypeColumn},{IsActiveColumn}" +
             "&$top=1";
         var requestUri = new Uri(envUri, relative);
 
@@ -253,7 +257,7 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         var relative =
             $"/api/data/v9.2/{_options.EntitySetName}({envRowId})?" +
             $"$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
-            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn}";
+            $"{SetupStatusColumn},{CurrentRunIdColumn},{ProvisionedOnColumn},{EnvironmentTypeColumn},{IsActiveColumn}";
         var requestUri = new Uri(envUri, relative);
 
         var httpClient = _httpClientFactory.CreateClient(HttpClientName);
@@ -783,8 +787,10 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         var setupStatus = ReadSetupStatusAsDisplayName(row) ?? string.Empty;
         var currentRunId = ReadOptionalString(row, CurrentRunIdColumn);
         var provisionedOn = ReadOptionalTimestamp(row, ProvisionedOnColumn);
+        var environmentType = ReadOptionalInt(row, EnvironmentTypeColumn);
+        var isActive = ReadOptionalBool(row, IsActiveColumn);
         return new DataverseEnvironmentRegistrySnapshot(
-            environmentId, customerId, tenantId, setupStatus, currentRunId, provisionedOn);
+            environmentId, customerId, tenantId, setupStatus, currentRunId, provisionedOn, environmentType, isActive);
     }
 
     // Maps a display-name string (as used by RegistrySetupStatusUpdate.SetupStatus
@@ -888,6 +894,18 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
             ? parsed
             : null;
     }
+
+    // A choice column ships as a JSON number. Missing, null or another kind → null (never read as a type).
+    private static int? ReadOptionalInt(JsonElement row, string column)
+        => row.TryGetProperty(column, out var prop) && prop.ValueKind == JsonValueKind.Number && prop.TryGetInt32(out var v)
+            ? v
+            : null;
+
+    // A Yes/No column ships as a JSON boolean. Missing, null or another kind → null (never read as true).
+    private static bool? ReadOptionalBool(JsonElement row, string column)
+        => row.TryGetProperty(column, out var prop) && prop.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? prop.GetBoolean()
+            : null;
 
     private static HttpRequestMessage BuildRequest(HttpMethod method, Uri uri, string bearerToken)
     {

@@ -244,6 +244,39 @@ public sealed class DataverseEnvironmentRegistryClientTests
         snapshot.SetupStatus.Should().Be("InProgress");
         snapshot.CurrentRunId.Should().Be("65109e91-5968-4300-933e-9e79dea4109c");
         snapshot.ProvisionedOn.Should().BeNull("sprk_provisionedon is absent — never provisioned");
+        snapshot.EnvironmentType.Should().BeNull("sprk_environmenttype is absent");
+        snapshot.IsActive.Should().BeNull("sprk_isactive is absent");
+        snapshot.IsActiveDemo.Should().BeFalse("an unmarked row is never read as Demo");
+    }
+
+    // Demo environment plan decision 1: H3 pre-authorizes the Demo-only operator client only when the row is
+    // Environment Type = Demo (1) AND active. Only a JSON number / boolean counts; anything else reads as unset.
+    [Theory]
+    [InlineData("1", "true", 1, true, true)]
+    [InlineData("6", "true", 6, true, false)]
+    [InlineData("1", "false", 1, false, false)]
+    [InlineData("1", "null", 1, null, false)]
+    [InlineData("null", "true", null, true, false)]
+    [InlineData("\"1\"", "\"true\"", null, null, false)]
+    public void ParseSnapshot_Reads_EnvironmentType_And_IsActive(
+        string typeJson, string activeJson, int? expectedType, bool? expectedActive, bool expectedActiveDemo)
+    {
+        var payload = $$"""
+        {
+          "sprk_dataverseenvironmentid": "721bce03-13c8-f111-a05c-0022482913fc",
+          "sprk_customerid": "acme",
+          "sprk_tenantid": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+          "sprk_setupstatus": 2,
+          "sprk_environmenttype": {{typeJson}},
+          "sprk_isactive": {{activeJson}}
+        }
+        """;
+        using var doc = JsonDocument.Parse(payload);
+        var snapshot = DataverseEnvironmentRegistryClient.ParseSnapshot(doc.RootElement);
+
+        snapshot.EnvironmentType.Should().Be(expectedType);
+        snapshot.IsActive.Should().Be(expectedActive);
+        snapshot.IsActiveDemo.Should().Be(expectedActiveDemo);
     }
 
     [Theory]

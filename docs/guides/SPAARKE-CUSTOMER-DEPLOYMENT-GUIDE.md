@@ -1312,6 +1312,16 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   the Worker Bicep parameter `preAuthorizedClientAppIds`; default the **production** Office add-in `1958aec2…` "Spaarke Office Add-in (Production)"; the dev add-in
   `c1258e2d…` calls only the dev BFF and is never pre-authorized on a customer stamp). A manual extra redirect
   or pre-authorization is removed on the next run.
+- **Demo-only client (demo environment plan decision 1, 2026-11-26):** on a stamp whose registry row
+  (`sprk_dataverseenvironment`, read by the run's environment id and matched on customer id) is **Environment Type = Demo
+  and active**, H3 also pre-authorizes the clients in `EntraAppRegOptions__DemoPreAuthorizedClientAppIds__N` (Worker Bicep
+  parameter `demoPreAuthorizedClientAppIds`, default empty). Today that is the public client **"Spaarke Operator Tools
+  (Demo)"**, registered once by `scripts/provisioning/Register-OperatorToolsClient.ps1` (single tenant, device code, no
+  secret or certificate, assignment required), which operator scripts such as the demo data loader sign in with to call a
+  demo stamp's BFF as a user. Every other stamp never lists it: a row that is not an active Demo, a missing row or another
+  customer's row leaves it out, and the next run of a stamp whose row stops being an active Demo removes it. A malformed
+  entry refuses H3 before any write (`appreg-demo-preauthorized-client-invalid`); a failed registry read refuses H3 as
+  Resumable (`appreg-registry-environment-type-unavailable`). With the parameter empty, H3 does not read the registry.
 - **adopts an existing registration only when it is provably the control plane's** (T240a review): refused when more
   than one app has the name, when it holds a client secret or certificate, when it carries a federated credential H3 did
   not create (H3 keeps exactly `spaarke-uami-trust` and `spaarke-l2-worker`, repairing either by triple), or when anyone but

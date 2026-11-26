@@ -206,6 +206,10 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   `dataverseEnvUrl`, via `DataverseEnvironmentUrlRule`) and `api.preAuthorizedApplications` (Worker setting
   `EntraAppRegOptions__PreAuthorizedClientAppIds__N` on `user_impersonation`). It PATCHes only that registration — never a
   shared client app. A shared client's own sign-in redirects live on that client app, once, never per customer.
+- **Demo-only pre-authorization:** H3 adds `EntraAppRegOptions__DemoPreAuthorizedClientAppIds__N` (the "Spaarke Operator
+  Tools (Demo)" client) ONLY when the run's registry row is Environment Type = Demo (1) and active, for the same customer.
+  Never put that client in `preAuthorizedClientAppIds` (it would reach every stamp), and never mark a production or
+  customer stamp's row Demo to get it. The client stays secret-free and assignment-required.
 - **`EntraAppRegOptions__SpaarkeTenantId`** (Worker Bicep, the deployment's tenant) is the FIC issuer for Model 1; without
   it every Model 1 run fails at H3.
 - **H3 keeps two federated credentials on every Spaarke-tenant customer BFF registration (ISS-015):** `spaarke-uami-trust`
