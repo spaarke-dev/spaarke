@@ -632,3 +632,49 @@ copilot-platform-coordination before the probe upload (recorded there, commit `4
 5. **Fixed after this round:** both Cowork skills now say the review and plan go in the chat reply before the card
    (C-3 defect; commit `72fdc9ab98` on PR #3163, mirrored here); `copilot-app-components.md` now says where outputs
    really land (C-2).
+
+## Tier tests round 2: Word desktop (owner, Word for Windows, 2026-11-25 evening)
+
+Evidence: 14 screenshots in OneDrive `Documents/Spaarke Test Documents/Screens/` (22:19 to 23:36 local), plus the
+owner's notes in chat. The owner ran the tests in their own order and words, so some rows don't map one-to-one onto
+the script; where a detail wasn't captured, the row says so.
+
+| Test | Setup | Result |
+|---|---|---|
+| WP-2 (a) | Typed *run the word probe* (no "Spaarke" in the prompt) | `Spaarke Word probe · instructions loaded · WPI-1112-A`, then the open NDA's 15 headings, "Running in Word." **Pass** |
+| WP-2 (b) | Plugin chip **Spaarke Word Probe** + the same text | The same code and headings ("App: Word."). **Pass** |
+| WP-2 (c) | Plugin chip alone, no text | The same code and headings. **Pass** (owner: "all gave the same results") |
+| WP-1 | Script probe | No screenshot; not known whether it was run. **Open** |
+| Plugin list | Copilot pane › Manage plugins | **Custom skills** (off; "Skills you created or uploaded to your Skills folder will appear here"; Add › Create manually / Upload / Record a skill / Add in OneDrive; none listed), **Legal** on, **Spaarke MCP** on, **Spaarke Word Probe** on, Spaarke off, Fabric, Dataverse, Patent off, Harvey, Legora, PandaDoc off (warning icons) |
+| `/` list | Type `/` | Both probe skills as **"Shared skill"**, the plugin, and `spaarke-decisions` (a shared skill that isn't ours) |
+| U-1 search | `/` + "playbook" | Lists **Word files** with "playbook" in the name: four `mutual-nda-review-playbook` (Nov 5 and 6, Word's `/Create playbook` drafts, now in the archive), Brightwater test copies, "Spaarke NDA Playbook – Mutual (baseline)" and "– test B", the legal hold playbook. These are files, not saved playbooks. Owner: "many playbooks and I don't know where they are saved" |
+| U-1 extract | Brightwater open; attached `Spaarke NDA – Mutual v1.2.docx` **uploaded from the PC** | Card *What would you like me to do with "Spaarke NDA – Mutual v1.2.docx"?*: **Review open NDA** (Recommended), **Extract playbook only**, Summarize the file, Compare key provisions. Chose Extract → "Used Legal Review" → Save playbook. The upload made a **new OneDrive file** "Spaarke NDA – Mutual v1.2" ("Created 4 minutes ago"; folder not checked, probably `Microsoft Copilot Chat Files/`). After closing and reopening Word that file is an ordinary document, as expected: the saved playbook lives in Copilot's store, not in a file (R4) |
+| U-1 picker | New chat, prompt starter **Review contract with a playbook** | *Choose a playbook to review this contract*: **v1.2** (Last updated November 11), **NDA - Mutual (Spaarke baseline)** (November 1), **v1.1** (November 7), New playbook, View all. **One v1.2**: re-saving added no second card and the date stayed November 11 (replaced in place without a new date, or not saved; can't tell). v1.1 is still in the list at 22:57, though the owner saw no v1.1 elsewhere |
+| U-1 delete | — | **The owner found how to delete saved playbooks** ("there is no 'playbook' menu"). This reverses R6 (2026-11-07: no delete). Route not yet written down |
+| W-1 | Picked the saved v1.2 | Ran in about **5 minutes**; the edits needed **Apply › Apply edits with comments**; the owner counted **24** (topics, as in round 1, or comments: to confirm). **Pass** |
+| W-2 | Rated chart as a second step | "The Spaarke Review Method produced a chart." Version line and row count not recorded. **Pass (mechanics)** |
+| R-1b (variant) | `Acme NDA Approval and Signature Authority Policy v1.0.docx` attached, *who must approve and sign* | Answered from the policy with citations to the file: Director or above for a clean NDA; any deviation needs Legal approval and a VP or above; non-compete, non-solicit, residuals, non-US law or a liability cap need the General Counsel's written approval. **No rule numbers** (`NDA-x.x`) cited. Not refused, but this was a policy question on its own, not the playbook review plus policy the script asked for |
+| R-2 | Draft from `Acme Mutual NDA (model form).docx` | Drafted **in the Word document** from the model form. **Pass** (placeholders, timing and spot checks not recorded) |
+| Generic (a) | Spaarke MCP added to the chat, *review this NDA* | **Generic review**: no playbook, no topics |
+| Generic (b) | *review this NDA*, nothing added | **Generic review** |
+| G-3b, G-5, H-1, R-3 | — | Owner: "all of the others had similar outputs". Not recorded one by one |
+| WP-3, WP-4 | — | Not run |
+
+**Findings.**
+1. **Word desktop follows a third-party instructions-only skill** (WP-2, 3 of 3, including a plain typed prompt).
+   Word for the web did not (WP-2b), but that run was confounded by "Spaarke" in the prompt. This reopens a Word
+   edition of our procedures as instructions-only skills (protocol type K). Whether scripts run (WP-1), and whether
+   it holds without our own probe plugin turned on, are still open.
+2. **Word desktop now has a Custom skills panel with a "Skills folder"** (off, empty). Our four Cowork skills in
+   `Documents/Cowork/Skills/` did not appear there, so either it is a different folder or the panel needs turning on.
+   Next check: open the **Skills folder** link and note the path.
+3. **In Word, a playbook is used only when the user picks it.** `/` (or the prompt starter) → Review contract with a
+   playbook → pick a saved playbook, or attach the file. A plain *review this NDA*, or a chat routed to the Spaarke
+   MCP, gives a generic review. The Read me's "Microsoft's legal skills turn on by themselves" is wrong as a user
+   instruction: start with `/`. (Owner's takeaway, 2026-11-25.)
+4. **"Playbook" means three different things to the user**, and the package never told them apart: our playbook
+   files in `Cowork/Playbooks/`, Word's **saved playbooks** (inside Copilot, no file, frozen at save, now deletable),
+   and other `.docx` files with "playbook" in the name that search turns up (Word's `/Create playbook` drafts in
+   `Copilot/Created/` and the archive). The user guide must name them apart and say where each lives.
+5. **Uploading from the PC makes another OneDrive copy**, which search then finds (gap #34). The guide says attach
+   from OneDrive (cloud) instead.

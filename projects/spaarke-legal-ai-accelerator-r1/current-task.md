@@ -1,6 +1,13 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-25 (Claude Desktop session `acclerator-r1`, after tier tests round 2 and P-1). **Next action:** wait for the owner's Word desktop results (WP-1/WP-2/WP-3, contract steps); on "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
+> **Last Updated**: 2026-11-26 (Claude Desktop session `acclerator-r1`). **Next action:** owner reviews `notes/user-guide-draft.md` and answers its 6 open items (delete route for saved playbooks, "24" = topics or comments, Word "Skills folder" path, WP-1 script probe, upload folder, format); then wire the guide into `package_docs.py` (`WORD_STEPS`/`render_readme`; drop "legal skills turn on by themselves"), rebuild, mirror to PR #3163. On "probe removed", tell copilot-platform-coordination. Nothing uncommitted except the owner's untracked `notes/copilot v claude nda comparison/`.
+
+## 2026-11-26: Word desktop round 2 recorded (`results.md` "Tier tests round 2: Word desktop")
+
+- **WP-2 pass in Word desktop (3/3):** Word follows a third-party instructions-only skill (WPI-1112-A + headings). WP-1 (script) unknown. Word desktop has a new **Custom skills** panel ("your Skills folder", off, empty).
+- Owner's takeaway: in Word, start with `/` (Review contract with a playbook → saved playbook); plain "review this NDA" or Spaarke MCP gives a generic review.
+- Saved playbooks are now **deletable** (owner found how; reverses R6). After Extract playbook only + save: still one v1.2 card dated Nov 11.
+- Owner's key ask: clear setup/training instructions → draft `notes/user-guide-draft.md` (for review, not yet in the package).
 > **Recovery**: Read "Quick Recovery" section first
 > **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged)
 > Earlier checkpoints (verbatim): `notes/handoff-history/2026-11.md`. Session narrative: `git log`.
