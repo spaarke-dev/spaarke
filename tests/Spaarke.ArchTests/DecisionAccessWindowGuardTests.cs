@@ -32,6 +32,12 @@ namespace Spaarke.ArchTests;
 /// nowhere else (the window is one commit's; a second opener could keep answers across work the design did not audit).</para>
 /// <para><b>Limits.</b> A name match, not a type-resolved one: a role edit through a type whose name carries none of the banned
 /// words, or reached through a class outside the scanned files, is not seen.</para>
+/// <para><b>Known limit K (uac-r2 access review, 2026-11-26, item 2).</b> Privilege answers live for the whole commit, but this
+/// scan does not follow into the services the NON-child-create executors call (communication, events, the update route core).
+/// Their executes run with the window suspended, so they never read a kept answer; the limit is that a role or team-membership
+/// write added there would not be seen here, and a later step's kept privilege answer would predate it. Today nothing on that
+/// path writes team or role membership: only <c>RegistrationDataverseService</c> and <c>ExternalCollaboratorPlacement</c> do,
+/// and neither is reached by a decision. Closing it fully means widening the scanned files to everything the executors reach.</para>
 /// <para>Enforced by: this guard (ArchTests, CI and the Stop hook). Must-fire and must-not-fire controls below.</para>
 /// </remarks>
 public class DecisionAccessWindowGuardTests
@@ -68,7 +74,9 @@ public class DecisionAccessWindowGuardTests
     /// <summary>The read-only unit lookups pinned (BFF-root relative file, method): each names <c>ExternalCollaboratorPlacement</c> once, as <c>.ResolveUnitAsync(…)</c>.</summary>
     private static readonly IReadOnlyDictionary<string, string> LookupPins = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        // Reads business units only (ResolveUnitAsync); uac-r2 approved 2026-11-26.
         ["Services/Dataverse/RecordOwnershipResolver.cs"] = "IsInExternalCollaboratorsUnitAsync",
+        // Reads business units only (ResolveUnitAsync); uac-r2 approved 2026-11-26.
         ["Services/Access/ExternalTeamShareSynchronizer.cs"] = "ResolveExternalTeamAsync",
     };
 

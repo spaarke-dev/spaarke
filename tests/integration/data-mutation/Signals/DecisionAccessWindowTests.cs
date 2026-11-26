@@ -652,15 +652,37 @@ public sealed class DecisionAccessWindowTests
     [InlineData("TRUE", true)]
     [InlineData("false", false)]
     [InlineData("False", false)]
-    [InlineData("nonsense", true)]
-    public void IsEnabled_IsOnUnlessTheKeyParsesAsFalse(string? setting, bool expected)
+    [InlineData(" true ", true)]
+    [InlineData("  ", true)]
+    public void IsEnabled_IsOnWhenAbsentOrBlank_AndAsWrittenForTrueOrFalse(string? setting, bool expected)
     {
         var values = setting is null ? [] : new Dictionary<string, string?> { [DecisionAccessWindow.EnabledConfigKey] = setting };
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        var log = new CapturingLogger();
 
-        DecisionAccessWindow.IsEnabled(configuration).Should().Be(expected);
+        DecisionAccessWindow.IsEnabled(configuration, log).Should().Be(expected);
+        log.Lines.Should().BeEmpty("a recognised or absent value is not a misconfiguration");
         DecisionAccessWindow.IsEnabled(null).Should().BeTrue();
         DecisionAccessWindow.EnabledConfigKey.Should().Be("Signals:DecisionAccessWindow:Enabled");
+    }
+
+    // uac-r2 item 3: a rollback that writes 0, off or no must roll back, not silently leave the window on.
+    [Theory]
+    [InlineData("0")]
+    [InlineData("off")]
+    [InlineData("no")]
+    [InlineData("nonsense")]
+    public void IsEnabled_IsOff_AndWarnsNamingTheSetting_WhenTheValueIsNeitherTrueNorFalse(string setting)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [DecisionAccessWindow.EnabledConfigKey] = setting })
+            .Build();
+        var log = new CapturingLogger();
+
+        DecisionAccessWindow.IsEnabled(configuration, log).Should().BeFalse();
+        log.Lines.Should().ContainSingle().Which.Should().Match<(LogLevel Level, string Message)>(
+            l => l.Level == LogLevel.Warning && l.Message.Contains("Signals:DecisionAccessWindow:Enabled", StringComparison.Ordinal));
+        DecisionAccessWindow.IsEnabled(configuration).Should().BeFalse("no logger still fails safe");
     }
 
     [Fact]

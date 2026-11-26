@@ -36,8 +36,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <c>CallerMetadataReadMemo.For</c>). Any other <see cref="IDataverseUserClient"/> is returned unwrapped and gets no kept answer.
 /// The wrapper is a per-request view: production resolves a fresh transient client per create, and every create of the commit
 /// shares this window's stores.</para>
-/// <para><b>Off switch and observability.</b> <c>Signals:DecisionAccessWindow:Enabled</c> (<see cref="EnabledConfigKey"/>, default on, absent
-/// or unparseable is on): <c>false</c> makes <see cref="Open"/> return the already-closed window, so the commit asks Dataverse
+/// <para><b>Off switch and observability.</b> <c>Signals:DecisionAccessWindow:Enabled</c> (<see cref="EnabledConfigKey"/>, default on; absent
+/// or blank is on; a value that is neither true nor false is OFF, with a Warning): <c>false</c> makes <see cref="Open"/> return the already-closed window, so the commit asks Dataverse
 /// every time. At Debug the window logs once per executor step (<see cref="EndStep"/>) and once when it closes: hit and miss counts
 /// per store (record access, privilege, record-type catalog) and the request's trace id. Counts only; never an identity, record id,
 /// path or claim.</para>
@@ -99,12 +99,28 @@ internal sealed class DecisionAccessWindow : IDisposable
         _traceId = request.TraceIdentifier;
     }
 
-    /// <summary>The config key of the off switch. Absent or unparseable means ON; <c>false</c> makes <see cref="Open"/> return a closed window.</summary>
+    /// <summary>The config key of the off switch. Absent or blank means ON; <c>true</c> is on; <c>false</c>, or any other value, is OFF.</summary>
     internal const string EnabledConfigKey = "Signals:DecisionAccessWindow:Enabled";
 
-    /// <summary>Whether the window is on: <see langword="true"/> unless <see cref="EnabledConfigKey"/> parses as <c>false</c>.</summary>
-    internal static bool IsEnabled(IConfiguration? configuration) =>
-        !bool.TryParse(configuration?[EnabledConfigKey], out var enabled) || enabled;
+    /// <summary>
+    /// Whether the window is on. Absent or blank: on (the default). <c>true</c>/<c>false</c> (any case): as written. Any other value
+    /// (<c>0</c>, <c>off</c>, <c>no</c>, a typo) is OFF, fail safe for a cache, so a rollback that misspells the setting still rolls
+    /// back; <paramref name="logger"/> then gets a Warning naming the setting and its value.
+    /// </summary>
+    internal static bool IsEnabled(IConfiguration? configuration, ILogger? logger = null)
+    {
+        var raw = configuration?[EnabledConfigKey];
+        if (string.IsNullOrWhiteSpace(raw))
+            return true;
+        if (bool.TryParse(raw.Trim(), out var enabled))
+            return enabled;
+
+        logger?.LogWarning(
+            "Setting {SettingKey} has the value {SettingValue}, which is neither true nor false; the decision access window is OFF "
+            + "(every caller-access question goes to Dataverse). Set it to true or false.",
+            EnabledConfigKey, raw);
+        return false;
+    }
 
     /// <summary>
     /// Opens the window for one commit on <paramref name="request"/>, whose caller is <paramref name="callerSystemUserId"/> (their

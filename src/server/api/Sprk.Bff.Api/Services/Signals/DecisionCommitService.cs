@@ -1304,7 +1304,7 @@ public sealed class DecisionCommitService
         // ISS-010 C: from here the commit's caller-access answers are kept per request (DecisionAccessWindow): FR-51, every
         // preflight and step 1's execute share window 0; the record-access part clears after every step; it is closed for the
         // replay, before the Decision Record and before the follow-ups, and removed on every return path (using).
-        using var accessWindow = DecisionAccessWindow.Open(http, confirmedBy, _logger, DecisionAccessWindow.IsEnabled(_configuration));
+        using var accessWindow = DecisionAccessWindow.Open(http, confirmedBy, _logger, DecisionAccessWindow.IsEnabled(_configuration, _logger));
         if (await CallerMayDecideAsync(http, p.Core, p.Resolved, ct).ConfigureAwait(false) is { } denied)
             return denied with { ReviewId = reviewId };
 

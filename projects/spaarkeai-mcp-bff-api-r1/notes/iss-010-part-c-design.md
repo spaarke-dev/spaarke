@@ -207,10 +207,6 @@ No package or DI registration is added.
   - Every other executor is SUSPENDED during its ExecuteAsync. That covers, for example, revise-budget's caller PATCH of `sprk_budget.sprk_totalbudget` at :490 and mark-complete/reschedule's caller cores at :833/:871/:875. Their writes therefore never meet a window-served answer, and the window clears after the step.
 - **Not traced by the audit,** covered by the design instead: the DecisionRouteCores/ChildRecordEndpoints internals and CoreAncestorRestamper. These run inside step 1's own execute: after the create for a child create (A3), or while suspended for the others.
 
-## A1: writes between Open and step 1 (pending audit)
-
-*Placeholder. The audit is done separately and is filled in here: every write between `DecisionAccessWindow.Open` and step 1's `ExecuteAsync`, with file:line, and for each why it cannot change the caller's access (or that the (c) stores are cleared after it).*
-
 ## A4: ADR record: ADR-003/ADR-009 Path C (comply)
 
 **Resolution path: C (comply). No owner tension; nothing to amend.**
