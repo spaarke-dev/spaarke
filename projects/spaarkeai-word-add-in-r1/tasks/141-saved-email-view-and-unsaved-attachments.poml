@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="141" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Saved email view: one compact "Saved to Spaarke" section, saved/unsaved attachments listed, and Save adds only the unsaved attachments</title>
+    <phase>Phase 7: fixes before close (owner Outlook test feedback 2026-11-26)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Pane UI over SaveFlow plus a BFF change on the Office save and identity routes (an additive contract field and the add-attachments path); tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Two subsystems; the add-attachments trigger must not depend on a matching prior job, and a read of saved children is authorization-relevant.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>office-addins, react, fluent-ui, bff-api, authorization</tags>
+  </metadata>
+
+  <prompt>Owner's test in Outlook, 2026-11-26. An email with 5 attachments was saved first with the email and 1 attachment. The user came back to add the other 4:
+1. The pane shows the email as saved, with its profile, but no attachments.
+2. The user wants to save only the 4 attachments that were not saved.
+3. The user clicks "Save again as a new document".
+4. The original matter shows pre-selected; the user un-ticks it, because they do not want to save the email again.
+5. The attachments now show; the user ticks the unsaved ones and clicks Save.
+6. The attachments are NOT saved.
+
+Owner's direction, verbatim in substance. Change the UI so it is cleaner and easier to understand:
+1. Combine the green "Saved to Spaarke" card with the email information area into one section. View Document and Copy Link become icon buttons with tooltips (no labels).
+2. In that section, "Filed to" includes the record number, with an icon-only link to open the record.
+3. Remove the "Email" icon/header, and remove the separate "Filed to" card with its Open link.
+4. The Profile section therefore moves up.
+5. In the Profile, remove the "Document type" label and its value "Email", if that is easy (do not make a significant change if it is embedded in the AI output).
+6. Move Generate Profile to the right of the "Profile" section label, as an icon only (tooltip, no label).
+7. List the attachments below: a check mark for each one already saved, a checkbox for each one not yet saved. The user selects unsaved attachments and clicks Save.
+8. Do not show the Save button when all attachments are saved.
+9. In the top "Saved to Spaarke" area, show a yellow warning triangle with "Unsaved attachments" when any are unsaved.
+
+Diagnosis already done (code mapping, 2026-11-26; line numbers on master and approximate):
+- The saved state is `SaveFlow.tsx` `showResolvedBox` (~:1012-1016, `isExistingMode` ~:887). It renders:
+  - `renderSavedBar` (~:1637, with the View Document and Copy Link buttons);
+  - `renderDocumentHeader` (~:2047, the "Email" title, the "This email is saved…" hint and "Save again as a new document" ~:2095);
+  - `RelatedRecordCard` (~:1941);
+  - `DocumentProfileSection` (~:1984).
+
+  `AttachmentSelector` (~:1992) is hidden when `isExistingMode`. The post-own-save view is `renderSavedForm` (~:2282).
+- The pane does not know which attachments were saved. `resolve-email-identity` (`documentIdentityService.ts` ~:124-142, ~:348) returns only the document, file name and related record.
+- Task 138 (`EmailAttachmentAddPlanner`, `OfficeService` ~:495-570, `GetEmailAttachmentAddCandidate` ~:1735) adds missed attachments as children of the stored .eml. It matches saved children by name (`IsAlreadySaved` ~:338). But it runs ONLY when `_jobs.FindExistingAsync(idempotencyKey, userId)` finds a Completed job under the same key, and the key includes the target (`GenerateIdempotencyKey` ~:1511).
+- Root cause of step 6: un-ticking the matter drops `targetEntity` (`useSaveFlow.ts` ~:1065), so the key differs. The save runs as a fresh email save, and the dedup suppresses its byte-identical .eml, so no children are made. The same miss happens whenever the first save was made by another user, or by any path that left no job.</prompt>
+
+  <goal>A saved email shows one compact "Saved to Spaarke" section, then the Profile, then its attachments, each marked saved or not. When some attachments are unsaved, the section warns "Unsaved attachments" and Save adds exactly the ticked unsaved attachments as children of the existing saved .eml, filed like it, without saving the email again and without needing the user to pick the record. When all attachments are saved, there is no Save button.</goal>
+
+  <constraints>
+    <constraint source="owner 2026-11-26">The owner's nine UI points above are the acceptance contract for the layout. Keep "Save again as a new document" available (smaller is fine): it still saves a NEW document as today.</constraint>
+    <constraint source="project">The pane needs the saved attachment names. Extend the EXISTING identity response (`POST /api/documents/resolve-email-identity`) with an additive, optional field, e.g. `savedAttachmentNames: string[]`: the names of the resolved .eml's child documents.
+      - Use the same name rule task 138's planner uses (`IsAlreadySaved`: `sprk_documentname` or `sprk_filename`, case-insensitive), and reuse its child read (`IDocumentDataverseService.GetDocumentsByParentAsync`). Do not write a second matcher; share one.
+      - Read the children with the same authorization the identity route already applies to the parent document. List only children the caller may read.
+      - Omit the field when nothing can be said (unresolved, or the read failed), so an older pane and a failed read both behave as today.</constraint>
+    <constraint source="project">Save of the ticked unsaved attachments must reach task 138's add path WITHOUT depending on a prior Completed job under the same idempotency key, or on the user re-picking the record.
+      - Make the pane's request explicit: send the save with the saved document's identity (for example its document id or the stored Message-ID) and the ticked names, filed to the record the .eml is filed to.
+      - The server finds the existing .eml by the request's own lookup, checks it as the caller, and plans and creates only the missing children via `EmailAttachmentAddPlanner`.
+
+      Pick the smallest change. Preferred: the existing `POST /api/office/save` with an additive optional request field that names the existing document, so the existing filters (`EntityAccessFilter` on the target, the version-save filter pattern) still apply. If the server looks up the .eml itself, it is an ADR-008 A1 instance: the caller's Write (or the right task 138 already requires) on that exact document, checked in the service, fails closed, tested. Name it in the A1 table.
+
+      Never create a second .eml, never re-upload the email, never move the filing. Report the result with the existing `AttachmentsAdded` / `AttachmentsNotStored` fields.</constraint>
+    <constraint source="project">Attachments the stored .eml does not hold (`AttachmentsNotStored`, task 138: the server creates children only from the stored .eml, never from request bytes) are shown as not saveable, with the existing notice. They are not offered as a checkbox that cannot work. Check how the pane can know this before the save; if it cannot, the post-save notice is enough. Say which.</constraint>
+    <constraint source="project">Both saved states render the same compact layout: the identity-resolved saved state, and the state right after this pane saved (`renderSavedForm`). Word's saved document view gets the same compact bar (icon buttons, record number and link); Word has no attachments section. The version-save flows (task 047/094, "Save version") keep working.</constraint>
+    <constraint source="project">Profile:
+      - Hide the "Document type" row when the document is an email. It is a fixed field in `DocumentProfileSection` (~:336-343), so this is a small change; keep it for Word documents.
+      - Put the Generate Profile / Refresh control as an icon-only button with a tooltip at the right of the "Profile" label, in both its modes; keep its busy and disabled states.</constraint>
+    <constraint source="ADR-021 / ADR-012">Fluent v9 only: `Tooltip` with `relationship="label"` as `TaskPaneHeader.tsx` uses it; icons from `@fluentui/react-icons` (`OpenRegular`, `CopyRegular`, `LinkRegular`, `WarningRegular` or `Warning20Filled` with the palette warning token, `CheckmarkCircleRegular`). Every icon-only button has an accessible name. Use no new shared-library import.</constraint>
+    <constraint source="project">Coordination:
+      - Do not touch fm-owned create paths beyond what task 138 already shares (`OfficeDocumentPersistence`, `UploadFinalizationWorker`, `RecordTableRules`). If the add path needs a change there, stop and report.
+      - Do not edit TASK-INDEX.md, current-task.md, any CLAUDE.md, `.claude/` or ci-gated-suites.txt. The main session adds new test suites to the gate list.</constraint>
+    <constraint source="BFF hygiene (§10)">
+      - Publish-size delta against a fresh master build.
+      - `dotnet list package --vulnerable`.
+      - No new package. No new route unless the additive field on the existing route is shown not to work; if so, give a §11 justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file>src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file>src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</file>
+      <file>src/client/office-addins/shared/taskpane/components/RelatedRecordCard.tsx</file>
+      <file>src/client/office-addins/shared/taskpane/services/documentIdentityService.ts</file>
+      <file>src/client/office-addins/shared/taskpane/services/attachmentsAddedNotice.ts</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/EmailAttachmentAddPlanner.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Office/SaveResponse.cs</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Reproduce first (fail-before):
+      - a jest test: in the saved state, the attachments are not listed, and an attachments-only Save sends no target;
+      - a BFF test: a save naming unsaved attachments for an already-saved email, where no Completed job exists under the same key, creates no children today.</step>
+    <step>Server: the additive saved-attachment names on the identity response; the explicit add-attachments save that does not need a prior job. ADR-008 A1 treatment if the service finds the document itself.</step>
+    <step>Pane: the compact saved section (owner points 1–3, 9), the Profile changes (points 5–6), the attachments list with saved checks and unsaved checkboxes (point 7), and Save only when something is unsaved (point 8). After a successful add, the list shows the new ones as saved.</step>
+    <step>Gates:
+      - BFF: build with 0 warnings; the affected test classes; ArchTests (full).
+      - office-addins: jest (all suites), tsc (68-error baseline, none in changed files), ESLint and Prettier, webpack production build with the CI env.
+      - Publish delta and vulnerable packages.
+      - List the new test files for the gate list.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A saved email shows ONE top section: "Saved to Spaarke", the email subject, sender and date, "Filed to {record name} ({record number})" with an icon-only open-record link, and icon-only View Document and Copy Link buttons with tooltips. There is no separate "Email" header and no separate "Filed to" card.</criterion>
+    <criterion testable="true">With any unsaved attachment, the top section shows a warning triangle and "Unsaved attachments". With none, there is no warning.</criterion>
+    <criterion testable="true">The attachments list shows each attachment with a saved check, or with a checkbox if it is not saved. The Save button appears only when at least one attachment is unsaved, and is enabled only when at least one unsaved one is ticked.</criterion>
+    <criterion testable="true">Save sends the add-attachments request for exactly the ticked names. The server creates exactly those children under the existing .eml, filed like it, with NO new .eml and no re-upload, even when no prior job exists for this user and key. Afterwards the list shows them as saved and the warning clears when none are left.</criterion>
+    <criterion testable="true">Negative:
+      - the caller without the required right on the saved .eml (or its record) gets no children, a clear refusal, and the .eml unchanged;
+      - a name the stored .eml does not hold is reported as not stored, never created from request bytes;
+      - an already saved name is never created twice.</criterion>
+    <criterion testable="true">The identity response's saved-attachment names are additive. An older pane is unaffected, and a failed child read leaves the field absent. The pane then shows the attachments without saved marks, and keeps today's behaviour, without claiming they are unsaved.</criterion>
+    <criterion testable="true">Profile:
+      - no "Document type" row for an email (kept for Word);
+      - Generate Profile / Refresh is an icon-only button with a tooltip at the right of the "Profile" label, in both modes.</criterion>
+    <criterion testable="true">"Save again as a new document" still saves a new document; Word's saved view and version saves keep working.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>The identity response (`resolve-email-identity`), the Office save route, task 138's `EmailAttachmentAddPlanner`, and SaveFlow's saved state.</existing>
+    <extension>Extends them: an additive response field, an additive request field on the existing save route, and the planner's own child read and name rule. No new route, column or service unless shown necessary.</extension>
+    <cost-of-doing-nothing>A user cannot add the attachments they skipped the first time: the only path today silently saves nothing. They cannot see which attachments are saved, so they re-save the email or give up.</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
