@@ -39,8 +39,14 @@ The stored columns are plain columns (SourceType 0) written only by `FinanceRoll
 - K4: a Money column on an environment whose currency precision is above 2 could treat a sub-cent change as unchanged (tolerance 0.005).
 - `FinanceRollupService` counts only invoices with the writer's approve record (`CountedInvoiceStatuses` / `InvoiceApproveRecord`); on dev it reads spend 0 for most matters (ebilling-r1 comment on #1663). Same computation as the evaluator, so the form and the Signal agree.
 
+## Verification
+
+- Build clean; `--filter "FullyQualifiedName~Signals|FullyQualifiedName~Finance"`: 15175 passed, 0 failed, 10 skipped (live seams); ArchTests (built explicitly): 2845 passed.
+- Publish size (BFF hygiene §10, NFR-01): `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o <out>`, framework-dependent, Release, `Compress-Archive -CompressionLevel Optimal` over `<out>/*`, PDBs included, fresh detached worktrees `C:\wt232m` (master `c438119bca`) and `C:\wt232b` (`4c7273310a`): master 43,676,602 bytes (41.65 MB), branch 43,680,391 bytes (41.66 MB), delta +3,789 bytes; 194 files each. No package change, so no new CVE.
+- §11: no new service, interface, endpoint, DI registration, package, column or job. One constructor dependency (`IServiceScopeFactory`, already registered) on the existing job, and one optional parameter plus two private/internal helpers inside ebilling-r1's existing service.
+
 ## Found, not fixed (D-106)
 
-- See the PR / completion report.
+- None beyond the known limits above.
 
 rework: none task 232
