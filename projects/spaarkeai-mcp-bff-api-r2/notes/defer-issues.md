@@ -322,3 +322,14 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
   run against it in this task (no deploy). If a host does not send it, the heading reads "your search" and the widget shows no Load more (it says "Ask for the next page
   in the chat"). At deploy 039 ask "Find Spaarke documents about indemnification" in Chat and in Cowork and confirm the heading shows the query and Load more appears on
   a full page inside one matter. Labels: spaarkeai-mcp-bff-api-r2; Type=Task.
+
+## #3268 — AI runs ignore per-run user instructions (found by the 038 review, 2026-11-26)
+
+- **Defect:** `UserContext` / `AdditionalContext` flows through the engine to `ToolExecutionContext` but is never put into a prompt.
+- **Effects:**
+  - The chat "rerun with additional instructions" (`AnalysisExecutionHandler.cs:268-278, 376-378`) falsely tells the user the instructions were used.
+  - The REST execute `userContext` has no effect.
+  - 038's `instructions` argument has no effect.
+- **Fix:** needs an engine edit (ADR-039), so the owner decides: (a) append a "User focus" block in PromptContextHelper / GenericAnalysisHandler, or (b) withdraw the claims.
+- Task 038 is merged but NOT marked done until this is decided.
+- Issue: https://github.com/spaarke-dev/spaarke/issues/3268
