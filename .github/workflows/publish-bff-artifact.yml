@@ -39,6 +39,9 @@ on:
       - 'src/client/widgets/spaarke-briefing/**'
       - 'src/client/widgets/shared/**'
       - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
+      # The briefing widget's build shims re-export deep paths of the shared library (src/shims/uiComponents.ts, uiServices.ts), so any change there
+      # changes the built page and its size gate.
+      - 'src/client/shared/Spaarke.UI.Components/src/**'
       - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
       - 'src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj'
 
