@@ -24,4 +24,11 @@ public sealed record RecordSearchFilters
     /// </summary>
     [JsonPropertyName("referenceNumbers")]
     public IReadOnlyList<string>? ReferenceNumbers { get; init; }
+
+    /// <summary>
+    /// Filter by matter type: record ids of the matter type (<c>sprk_mattertype</c>). Matches matters and projects of
+    /// those types; invoices carry no matter type and are excluded while this filter is set. Non-GUID values are ignored.
+    /// </summary>
+    [JsonPropertyName("matterTypes")]
+    public IReadOnlyList<string>? MatterTypes { get; init; }
 }

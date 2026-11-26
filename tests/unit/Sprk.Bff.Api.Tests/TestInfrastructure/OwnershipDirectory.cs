@@ -136,11 +136,13 @@ internal sealed class OwnershipDirectory
     /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate. fm task 054 (F1):
     /// <paramref name="directMessageOwnerTeam"/> is the Direct message owner team lookup the resolver composes (none by default).
     /// fm task 052b: <paramref name="customerContactOwner"/> is the contact owner lookup (none by default: every contact is refused).
+    /// ISS-010 (#3184): <paramref name="seam"/> wraps the directory's Dataverse (a counting seam); none by default.
     /// </summary>
     public RecordOwnershipResolver Resolver(
         Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null,
         Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null,
-        Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder? customerContactOwner = null)
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder? customerContactOwner = null,
+        Func<IGenericEntityService, IGenericEntityService>? seam = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
@@ -182,7 +184,8 @@ internal sealed class OwnershipDirectory
         }).Build();
 
         return new RecordOwnershipResolver(
-            entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance, directMessageOwnerTeam,
+            seam?.Invoke(entities.Object) ?? entities.Object, // ISS-010: a counting seam, when given
+            configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance, directMessageOwnerTeam,
             customerContactOwner);
     }
 

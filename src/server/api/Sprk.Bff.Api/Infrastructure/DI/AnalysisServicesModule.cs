@@ -117,6 +117,23 @@ public static class AnalysisServicesModule
         Sprk.Bff.Api.Services.Dataverse.Extensions.MetadataServiceExtensions.AddCoreAncestorResolver(services);
         services.TryAddScoped<Sprk.Bff.Api.Services.Dataverse.DocumentIndexParentResolver>();
 
+        // The matter type a document's chunks carry (Matter Type search filter): derived from the parent the resolver above chose.
+        // Unconditional for the same reason (FileIndexingService, a scoped consumer, is registered under the AI gate, and the
+        // bulk/app-only handlers resolve it from their scope).
+        services.TryAddScoped<Sprk.Bff.Api.Services.Dataverse.DocumentMatterTypeResolver>();
+
+        // The scheduled job that keeps those fields current (ADR-036 A1 rule 6: AddScheduledJob, no BackgroundService). UNCONDITIONAL: it
+        // resolves the AI-gated services (IKnowledgeDeploymentService, SearchIndexClient) from its own scope and skips the run when they
+        // are absent, so AI-off registers and runs it harmlessly (§10 F.1). Cron is fixed; the kill switch is MatterTypeIndexSync:Enabled
+        // (a change needs a restart) and the admin enable/disable (ADR-036 A1 §2).
+        services.Configure<Sprk.Bff.Api.Services.Ai.Jobs.MatterTypeIndexSyncOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Ai.Jobs.MatterTypeIndexSyncOptions.SectionName));
+        services.TryAddSingleton(TimeProvider.System);
+        Spaarke.Scheduling.ScheduledJobServiceCollectionExtensions.AddScheduledJob<Sprk.Bff.Api.Services.Ai.Jobs.MatterTypeIndexSyncJob>(
+            services,
+            Sprk.Bff.Api.Services.Ai.Jobs.MatterTypeIndexSyncJob.DefaultCronSchedule,
+            enabled: configuration.GetSection(Sprk.Bff.Api.Services.Ai.Jobs.MatterTypeIndexSyncOptions.SectionName).GetValue("Enabled", true));
+
         // unified-access-control-r2 task 166 f1-v1 (owner round 37 item 1) — the PublicContracts facade through which
         // DocumentContainerRelocator (CRUD code, ADR-013) re-indexes a MOVED file and removes the old item's chunks.
         // TRULY UNCONDITIONAL like the enqueuer it wraps: the relocator serves the unconditionally mapped

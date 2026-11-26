@@ -98,6 +98,12 @@ public sealed record AppliedFilters
     public IReadOnlyList<string>? FileTypes { get; init; }
 
     /// <summary>
+    /// Matter type ids that were filtered.
+    /// </summary>
+    [JsonPropertyName("matterTypes")]
+    public IReadOnlyList<string>? MatterTypes { get; init; }
+
+    /// <summary>
     /// Tags that were filtered.
     /// </summary>
     [JsonPropertyName("tags")]

@@ -209,13 +209,53 @@ public sealed class DocumentIndexParentResolver
             return null;
         }
 
+        return (await DecideForRowAsync(id, row, DirectCandidates(row), ct).ConfigureAwait(false)).Parent;
+    }
+
+    /// <summary>
+    /// The decision for a document known only by id: <see cref="ResolveAsync(string?, CancellationToken)"/>'s derivation with the
+    /// "could not decide" answer kept apart from "no parent". A document that is not a record id, or whose row does not exist
+    /// (Dataverse answered not-found), has no parent and that is DECIDED (nothing governs a document that is not there); a row
+    /// that cannot be read is <see cref="IndexParentDecision.Undecided"/>. For callers that need the difference (the matter-type
+    /// resolver seals "belongs to nothing" only on a decided answer).
+    /// </summary>
+    public async Task<IndexParentDecision> DecideAsync(string? documentId, CancellationToken ct)
+    {
+        if (!Guid.TryParse(documentId, out var id) || id == Guid.Empty)
+        {
+            return IndexParentDecision.NothingNamed;
+        }
+
+        Entity? row;
+        try
+        {
+            row = await _dataverse.RetrieveAsync(DocumentEntity, id, RowColumns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFoundInChain(ex))
+        {
+            _logger.LogInformation("Index parent: document {DocumentId} no longer exists; it has no parent.", id);
+            return IndexParentDecision.NothingNamed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Index parent: document {DocumentId}'s row could not be read; undecided.", id);
+            return IndexParentDecision.Undecided;
+        }
+
+        return row is null
+            ? IndexParentDecision.NothingNamed
+            : await DecideForRowAsync(id, row, DirectCandidates(row), ct).ConfigureAwait(false);
+    }
+
+    private static List<IndexParentCandidate> DirectCandidates(Entity row)
+    {
         var candidates = new List<IndexParentCandidate>(8);
         foreach (var (column, table, searchType, unknownName) in DirectLinks)
         {
             AddCandidate(candidates, row, column, table, searchType, unknownName);
         }
 
-        return (await DecideForRowAsync(id, row, candidates, ct).ConfigureAwait(false)).Parent;
+        return candidates;
     }
 
     /// <summary>

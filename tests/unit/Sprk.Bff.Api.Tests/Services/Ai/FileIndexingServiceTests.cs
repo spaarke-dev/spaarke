@@ -1,11 +1,13 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
@@ -45,7 +47,8 @@ public class FileIndexingServiceTests
             _chunkingServiceMock.Object,
             _ragServiceMock.Object,
             _loggerMock.Object,
-            containerResolver ?? TestRecordContainerResolver.ForBusinessUnitContainers(TestDriveId));
+            containerResolver ?? TestRecordContainerResolver.ForBusinessUnitContainers(TestDriveId),
+            new DocumentMatterTypeResolver(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), TestDocumentIndexParentResolver.Over(), NullLogger<DocumentMatterTypeResolver>.Instance));
     }
 
     private static FileIndexRequest CreateFileIndexRequest() => new()

@@ -212,6 +212,42 @@ describe('useRecordSearch', () => {
       });
     });
 
+    // #3165: a Matter Type chosen on Matters was never sent; record search sent no filters.
+    it('sends the chosen matter types for matters and projects', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+      const filters = { ...defaultFilters, matterTypes: ['mt-1', 'mt-2'] };
+
+      await act(async () => {
+        result.current.search('dispute', ['sprk_matter'], filters);
+      });
+      await act(async () => {
+        result.current.search('dispute', ['sprk_project'], filters);
+      });
+
+      expect((mockSearch.mock.calls[0][0] as Record<string, unknown>).filters).toEqual({
+        matterTypes: ['mt-1', 'mt-2'],
+      });
+      expect((mockSearch.mock.calls[1][0] as Record<string, unknown>).filters).toEqual({
+        matterTypes: ['mt-1', 'mt-2'],
+      });
+    });
+
+    it('does not send matter types for invoices (they have none), nor an empty filter', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('dispute', ['sprk_invoice'], { ...defaultFilters, matterTypes: ['mt-1'] });
+      });
+      await act(async () => {
+        result.current.search('dispute', ['sprk_matter'], defaultFilters);
+      });
+
+      expect(mockSearch.mock.calls[0][0]).not.toHaveProperty('filters');
+      expect(mockSearch.mock.calls[1][0]).not.toHaveProperty('filters');
+    });
+
     it('should clear previous results when starting a new search', async () => {
       const firstResponse = makeResponse([makeResult('rec-1', 'sprk_matter')], 1);
       const secondResponse = makeResponse([makeResult('rec-2', 'sprk_project')], 1);
@@ -410,7 +446,11 @@ describe('useRecordSearch', () => {
     };
 
     it("shows the server's ProblemDetails detail", async () => {
-      const problem = { title: 'Validation Error', status: 400, detail: 'recordTypes must contain at least one value.' };
+      const problem = {
+        title: 'Validation Error',
+        status: 400,
+        detail: 'recordTypes must contain at least one value.',
+      };
       const state = await run(new ThrownApiError(problem.detail, 400, problem));
       expect(state.searchState).toBe('error');
       expect(state.errorMessage).toBe('recordTypes must contain at least one value.');
