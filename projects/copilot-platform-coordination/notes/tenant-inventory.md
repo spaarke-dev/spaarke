@@ -61,20 +61,20 @@ Status values: **KEEP** (stays, has an owner) · **REPLACE** (stays until a name
 | G1a-chat | `spaarke-legal-g1a-nda-test` (app id `f80243d0-b9ef-409c-8a8f-787c184162ea`) | Declarative agent v1.6 with one private MCP action; org catalog | G1 NDA review variant A, Chat | **PLANNED** | task 031 |
 | G1b-chat | `spaarke-legal-g1b-nda-test` (`67f754d4-9327-4451-9c79-552047a17ed4`) | as G1a-chat | variant B, Chat | **PLANNED** | task 031 |
 | G1c-chat | `spaarke-legal-g1c-nda-test` (`080ac94c-c863-4802-acf0-ec2f71dea925`) | as G1a-chat | variant C, Chat | **PLANNED** | task 031 |
-| G1a-cw | `spaarke-legal-g1a-cowork` (`9c52e606-2574-48f5-b557-1f7246c19414`), skill `spaarke-g1-nda-review-a` | Plugin package, manifest 1.30, one skill, **no action or connector**: uses C1 (R2). Plugin registry; switched on in Cowork by the owner and demo@ only | variant A, Cowork | **PLANNED** | task 031 |
-| G1b-cw | `spaarke-legal-g1b-cowork` (`6940e661-d067-4154-adb4-06366648c697`), skill `spaarke-g1-nda-review-b` | as G1a-cw | variant B, Cowork | **PLANNED** | task 031 |
-| G1c-cw | `spaarke-legal-g1c-cowork` (`391d8de8-e48b-4a66-84ba-ef9c764222fc`), skill `spaarke-g1-nda-review-c` | as G1a-cw | variant C, Cowork | **PLANNED** | task 031 |
-| G2 | `spaarke-legal-g2-q1-test` (`7bcab05e-3d88-4006-96c9-545edfc5a6ee`) | Manifest 1.30: one declarative agent with the MCP action, plus one marker skill `spaarke-g2-marker`; org catalog | G2 Q1 test | **PLANNED** | task 031 |
+| G1a-cw | `spaarke-legal-g1a-cowork-test` (`9c52e606-2574-48f5-b557-1f7246c19414`), skill `spaarke-test-g1-nda-review-a` | Plugin package, manifest 1.30, one skill, **no action or connector**: uses C1 (R2). Plugin registry; switched on in Cowork by the owner and demo@ only | variant A, Cowork | **PLANNED** | task 031 |
+| G1b-cw | `spaarke-legal-g1b-cowork-test` (`6940e661-d067-4154-adb4-06366648c697`), skill `spaarke-test-g1-nda-review-b` | as G1a-cw | variant B, Cowork | **PLANNED** | task 031 |
+| G1c-cw | `spaarke-legal-g1c-cowork-test` (`391d8de8-e48b-4a66-84ba-ef9c764222fc`), skill `spaarke-test-g1-nda-review-c` | as G1a-cw | variant C, Cowork | **PLANNED** | task 031 |
+| G2 | `spaarke-legal-g2-q1-test` (`7bcab05e-3d88-4006-96c9-545edfc5a6ee`) | Manifest 1.30: one declarative agent with the MCP action, plus one marker skill `spaarke-test-g2-marker`; org catalog | G2 Q1 test | **PLANNED** | task 031 |
 | G5 | `spaarke-legal-g5-area-test` (`f7af4143-02b0-4912-b3ee-e73b0e202422`) | — | — | **HELD, no row yet**: waits on an owner decision about two more spike tools; row before any upload | — |
 
-Checks on these rows (sent to the specialist 2026-11-26):
-- **R1′ is not yet approved.** The three Chat agents rely on agent-private actions (R1′). It passed G8-P2, but the owner has not approved the rules yet. Running tests on it is fine; it does not make R1′ a decided rule.
-- **R3 test marker.** The three Cowork package slugs (`-cowork`) and their skills (`spaarke-g1-nda-review-*`), and `spaarke-g2-marker`, contain none of `spike`/`probe`/`test`, so the display names need one. The skill names look like product skills.
-- **NDA routing confounders in Cowork.**
-  - The three G1 skills all review NDAs.
-  - S1 `nda-review` and `nda-library-review` are also switched on for the owner.
-  - The spike tool `spike_review_nda` is on C1 (T1).
-  - Unless only one variant is switched on at a time, the model may pick any of them.
+Checks on these rows (raised 2026-11-26; all three settled by the specialist, commit `d1cf402ec2`):
+- **R1′ not yet approved:** the three Chat agents rely on agent-private actions. The specialist now records G2 as evidence for the proposed R1′, still waiting on the owner's rules decision.
+- **R3 test marker: fixed.** The Cowork packages are now `-cowork-test`, and the skills `spaarke-test-g1-nda-review-{a,b,c}` and `spaarke-test-g2-marker`. App ids are unchanged; the zips were rebuilt.
+- **NDA routing in Cowork: a written run rule** (specialist `phase0/g1-nda/README.md`, "Run isolation").
+  - Each run switches on one G1 variant only, for the owner and demo@.
+  - The accelerator's `nda-review` and `nda-library-review` are switched off for both users during the run, and back on after.
+  - `spike_review_nda` (T1) can't be hidden per tool, so any call to it is recorded as a deviation and left out of the score.
+  - Each run's header records what was on.
 
 While C2 is still installed, any BFF call in G8 is recorded as "tenant registration, C1 probable" (C2's package connectors fail in Chat before reaching the BFF and are not agent actions).
 
