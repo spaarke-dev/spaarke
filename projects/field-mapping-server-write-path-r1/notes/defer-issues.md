@@ -482,3 +482,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. `DataGrid/commandBar/defaults.ts:139` opens the native form for any table; the repair pass is the backstop. |
 | **Need** | Call the table's wizard launcher where one exists, or hide New by config; tests per path. |
 | **Status** | Filed. Outside 051's ribbon scope. |
+
+## DI-050 — Event ribbon commands are missing on dev; their sources name the library without .js (found in the 051 fix round)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 051 fix round (read-only dev checks, notes/task-051-notes.md §9 items 2 and 3). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3256 |
+| **Class** | Pre-existing. A later `sprk_event` ribbon import replaced the EventRibbons commands (Complete, Cancel, Reschedule, Reassign, Complete Selected, home-grid set); `EventRibbonDiffXml.xml` and the EventCommands README name `sprk_event_ribbon_commands` without `.js`. |
+| **Need** | Decide which commands are wanted; author them into the SpaarkeMaster `sprk_Event` RibbonDiff with the `.js` name; fix the README; add the ids to a verify check. |
+| **Status** | Filed. Outside 051's New/Assign scope. |
