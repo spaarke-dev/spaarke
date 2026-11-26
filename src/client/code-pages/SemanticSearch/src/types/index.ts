@@ -96,6 +96,8 @@ export interface DocumentSearchFilters {
   documentTypes?: string[];
   /** Filter by file types/extensions (e.g., "pdf", "docx"). */
   fileTypes?: string[];
+  /** Filter by matter type (`sprk_mattertype_ref` record ids) of the document's matter or project (#3165). */
+  matterTypes?: string[];
   /** Filter by document tags. */
   tags?: string[];
   /** Filter by date range. */
@@ -299,6 +301,8 @@ export interface RecordSearchFilters {
   people?: string[];
   /** Filter by reference numbers (e.g., matter numbers, project codes, invoice numbers). */
   referenceNumbers?: string[];
+  /** Filter matters and projects by matter type (`sprk_mattertype_ref` record ids) (#3165). */
+  matterTypes?: string[];
 }
 
 /**
@@ -531,6 +535,10 @@ export interface AppUrlParams {
   searchMode?: EnvelopeSearchMode;
   /** File-type filters parsed from CSV (e.g. `pdf,docx` → `['pdf','docx']`). */
   fileTypes?: string[];
+  /** Document-type filters (`sprk_documenttype` option numbers) parsed from CSV (#3131). */
+  documentTypes?: string[];
+  /** Matter-type filters (`sprk_mattertype_ref` record ids) parsed from CSV (#3131). */
+  matterTypes?: string[];
   /** Inclusive start of date range (ISO 8601 string). */
   dateFrom?: string;
   /** Inclusive end of date range (ISO 8601 string). */

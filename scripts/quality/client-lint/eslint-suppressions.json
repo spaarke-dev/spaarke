@@ -50,14 +50,6 @@
       "count": 2
     }
   },
-  "src/client/code-pages/SemanticSearch/src/services/DataverseWebApiService.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 3
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/client/code-pages/SemanticSearch/src/services/aiSearchIndexService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 1
@@ -348,7 +340,7 @@
   },
   "src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 12
+      "count": 11
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/useCommunicationArrivals.ts": {
@@ -1645,7 +1637,7 @@
   },
   "src/solutions/SpaarkeAi/src/components/context/SemanticSearchCriteriaTool.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     },
     "no-restricted-syntax": {
       "count": 2

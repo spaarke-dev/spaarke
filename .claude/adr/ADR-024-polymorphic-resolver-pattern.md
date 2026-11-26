@@ -135,7 +135,7 @@ ADR-024 exception: the tension dissolves once "related-to" is understood as inte
 | **EntityCreationService** | Document creation with automatic resolver field population | `src/client/shared/.../services/EntityCreationService.ts` |
 | **IncomingAssociationResolver** | Server-side resolver for Communication entity (BFF API) | `src/server/api/.../Services/Communication/IncomingAssociationResolver.cs` |
 | **IDataverseService** | `QueryRecordTypeRefAsync()` for server-side `sprk_recordtype_ref` lookups | `src/server/shared/Spaarke.Dataverse/IDataverseService.cs` |
-| **FieldMappingService** | Applies parent field values to child records | `src/client/shared/.../services/FieldMappingService.ts` |
+| **RecordCreationService** (server) | Applies parent field values to new child records at create, fill-only (the client engine was deleted in field-mapping-server-write-path-r1 task 035) | `src/server/api/.../Services/RecordCreation/RecordCreationService.cs` |
 
 ### Active PCF (single consolidated resolver, post-SRFR-045)
 

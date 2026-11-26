@@ -21,6 +21,7 @@ describe('calculatePresetRange — the LOCAL calendar, not the UTC date', () => 
     const now = lateEvening();
     expect(now.toISOString().slice(0, 10)).toBe('2026-03-11'); // the date the former copies used
     expect(calculatePresetRange('thisYear', now)).toEqual({ from: '2026-01-01', to: '2026-03-10' });
+    expect(calculatePresetRange('last7', now)).toEqual({ from: '2026-03-03', to: '2026-03-10' });
     expect(calculatePresetRange('last30', now)).toEqual({ from: '2026-02-08', to: '2026-03-10' });
     expect(calculatePresetRange('last90', now)).toEqual({ from: '2025-12-10', to: '2026-03-10' });
     expect(calculatePresetRange('lastYear', now)).toEqual({ from: '2025-01-01', to: '2025-12-31' });

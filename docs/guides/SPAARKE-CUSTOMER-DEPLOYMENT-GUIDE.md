@@ -1312,6 +1312,18 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   the Worker Bicep parameter `preAuthorizedClientAppIds`; default the **production** Office add-in `1958aec2…` "Spaarke Office Add-in (Production)"; the dev add-in
   `c1258e2d…` calls only the dev BFF and is never pre-authorized on a customer stamp). A manual extra redirect
   or pre-authorization is removed on the next run.
+- **Demo-only client (demo environment plan decision 1, 2026-11-26):** on a stamp whose registry row
+  (`sprk_dataverseenvironment`, read by the run's environment id and matched on customer id) is **Environment Type = Demo
+  and active**, H3 also pre-authorizes the clients in `EntraAppRegOptions__DemoPreAuthorizedClientAppIds__N` (Worker Bicep
+  parameter `demoPreAuthorizedClientAppIds`, default empty). Today that is the public client **"Spaarke Operator Tools
+  (Demo)"**, registered once by `scripts/provisioning/Register-OperatorToolsClient.ps1` (single tenant, interactive
+  browser sign-in only: no device code or password flow, no secret or certificate, assignment required), which operator scripts such as the demo data loader sign in with to call a
+  demo stamp's BFF as a user. Every other stamp never lists it: a row that is not an active Demo, a missing row or another
+  customer's row leaves it out, as does a stamp outside the Spaarke tenant. When a row stops being an active Demo, the
+  client stays until that stamp's next run reaches H3: run an upgrade, then check the BFF app's
+  `api.preAuthorizedApplications`. A malformed
+  entry refuses H3 before any write (`appreg-demo-preauthorized-client-invalid`); a failed registry read refuses H3 as
+  Resumable (`appreg-registry-environment-type-unavailable`). With the parameter empty, H3 does not read the registry.
 - **adopts an existing registration only when it is provably the control plane's** (T240a review): refused when more
   than one app has the name, when it holds a client secret or certificate, when it carries a federated credential H3 did
   not create (H3 keeps exactly `spaarke-uami-trust` and `spaarke-l2-worker`, repairing either by triple), or when anyone but
@@ -1773,12 +1785,12 @@ purpose: that role also creates Decision Records and creates and writes Signals,
 hold it, so "written by the server writer" stays true. Never assign the reader role to people, teams or the writer identity.
 H10 does not assign it (H10 runs before H6, so the role does not exist yet on a new stamp): **H7b step S29** assigns it,
 after H6 imports SpaarkeMaster 1.3.1.0 or later. S29 gives each App User its own business unit's copy, verifies that the
-root role holds only that one read at Global, and refuses with a Resumable failure (naming the script below) if it holds
+root role holds that one read at Global and nothing else outside 9 platform-added privileges (the plugin-metadata reads Dataverse puts on every role and the SharePoint privileges an import puts back), and refuses with a Resumable failure (naming the script below) if it holds
 more, or with QuarantineRequired if any other principal (a person, a team, another App User) holds the role; it never
 removes a privilege or a holder. For a stamp H7b has not reached, or to clear that drift, run
 `scripts/ebilling/Set-BffDecisionRecordReaderRole.ps1 -EnvironmentUrl <stamp> -BffApplicationIds <bff-app-id>,<bff-uami-client-id> -Apply`,
-then the same with `-Verify` (exit 0 = both App Users hold it, the role holds only that read, and nobody else holds it).
-`-Apply` strips privileges Dataverse adds to the role outside its one declared privilege.
+then the same with `-Verify` (exit 0 = both App Users hold it, the role holds only that read plus the platform-added ones, and nobody else holds it).
+`-Apply` strips privileges outside its one declared privilege and those 9 platform-added ones, which it reports and keeps.
 
 Then reconciles the stamp identity's Microsoft Graph app roles to exactly the evidence-backed set in `GraphAppRoles.cs`
 (task 261 / G31 — every app-only call the stamp BFF makes, its Microsoft Learn least-privileged permission, and the

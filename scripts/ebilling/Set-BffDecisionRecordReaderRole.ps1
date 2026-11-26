@@ -15,12 +15,17 @@
     WHAT IT DOES
       - Reads the role from the root business unit. The role is created by the SpaarkeMaster import; this script never
         creates it and never adds or changes a privilege on it.
-      - Checks the root role holds EXACTLY prvReadsprk_DecisionRecord at Global (the source pin:
-        FeatureRolePrivilegeGuardTests.ExactPrivilegeSets). Anything else is drift. -Apply first strips every privilege
-        Dataverse added outside that one (removal only, this role only, on the root role, as Set-CustomerOwnerTeams.ps1
-        does; Dataverse propagates it to the per-business-unit copies), reads the role back and requires exactly the
-        declared set. A missing role, a missing declared privilege or one at another depth is real drift: -Apply exits 2
-        and writes nothing. -Verify stays strict: any extra privilege fails it.
+      - Checks the root role holds prvReadsprk_DecisionRecord at Global (the source pin:
+        FeatureRolePrivilegeGuardTests.ExactPrivilegeSets) and nothing else outside the platform-added set. The
+        platform-added set is the 9 privileges Dataverse puts on a role by itself: the 5 plugin-metadata reads on every
+        role it creates, and the 4 SharePoint privileges AddPrivilegesRole puts back after an import. It is the same list
+        as provisioning's H7b S29 (SecureRecordSetupProcedure.DecisionRecordReaderPlatformAddedPrivileges) and
+        Deploy-EbillingBillingAdminRole.ps1 $PlatformDefaults, so both checks agree (owner, 2026-11-25). Those 9 are
+        reported, never stripped and never a gap. Any other privilege is drift. -Apply first strips each of those
+        (removal only, this role only, on the root role, as Set-CustomerOwnerTeams.ps1 does; Dataverse propagates it to
+        the per-business-unit copies), reads the role back and requires the declared privilege with nothing else outside
+        the platform-added set. A missing role, a missing declared privilege or one at another depth is real drift:
+        -Apply exits 2 and writes nothing. -Verify fails on any privilege outside the declared one and the platform-added set.
       - For each -BffApplicationIds application user that exists in the environment (the BFF app registration's and the
         BFF user-assigned managed identity's, where both exist), assigns the role copy of THAT user's business unit when
         it is not already assigned. A user that is not in the environment is reported and skipped; none present is drift.
@@ -33,7 +38,7 @@
       (default)  Dry run: the state and the plan (including the extra privileges -Apply would strip). Zero writes. Exits 0
                  (1 when the drift is not one -Apply can fix).
       -Apply     Strips extra privileges, then assigns the missing copies, then re-reads. Exits 0 when the state then holds,
-                 1 when gaps remain, 2 when it refused (role or declared privilege wrong) or the strip did not leave the exact set.
+                 1 when gaps remain, 2 when it refused (role or declared privilege wrong) or the strip did not leave the declared privilege plus only the platform-added set.
       -Verify    Read-only. Exit 0 when the state holds, exit 1 naming each gap.
 
     Dataverse caches privileges: after -Apply, re-probe the identity's access before trusting a live check.
@@ -66,9 +71,14 @@ $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | F
 if ($BffApplicationIds.Count -eq 0) { throw '-BffApplicationIds is empty: name the BFF application user(s) explicitly.' }
 foreach ($id in $BffApplicationIds) { if (-not ($id -as [guid])) { throw "-BffApplicationIds: '$id' is not a GUID." } }
 
-# The pinned set: exactly this, nothing else (FeatureRolePrivilegeGuardTests.ExactPrivilegeSets).
+# The pinned set (FeatureRolePrivilegeGuardTests.ExactPrivilegeSets); the platform-added set below is the only thing tolerated beside it.
 $PinnedPrivilege = 'prvReadsprk_DecisionRecord'
 $PinnedDepth = 'Global'
+# Added by the platform, not by SpaarkeMaster: reported, never stripped, never a gap. Keep this list identical to
+# SecureRecordSetupProcedure.DecisionRecordReaderPlatformAddedPrivileges (provisioning H7b S29) and
+# Deploy-EbillingBillingAdminRole.ps1 $PlatformDefaults.
+$PlatformAdded = 'prvReadPluginAssembly', 'prvReadPluginType', 'prvReadSdkMessage', 'prvReadSdkMessageProcessingStep',
+'prvReadSdkMessageProcessingStepImage', 'prvCreateSharePointData', 'prvReadSharePointData', 'prvWriteSharePointData', 'prvReadSharePointDocument'
 
 $BaseUrl = $EnvironmentUrl.TrimEnd('/')
 $Api = "$BaseUrl/api/data/v9.2"
@@ -92,12 +102,15 @@ function Invoke-DvPost([string]$Path, [object]$Body) {
 }
 
 # The role's privileges read against the pin. Missing: the declared privilege is absent or at another depth (real drift; never
-# repaired by adding). Extras: every other privilege (platform noise Dataverse adds; -Apply strips these, nothing else).
+# repaired by adding). PlatformAdded: held privileges in $PlatformAdded (reported only). Extras: every other privilege
+# (-Apply strips these, nothing else).
 function Get-RolePrivilegeState([string]$RoleId) {
     $held = @((Invoke-DvGet "RetrieveRolePrivilegesRole(RoleId=@p)?@p=$RoleId").RolePrivileges)
     $pinned = @($held | Where-Object { $_.PrivilegeName -eq $PinnedPrivilege -and "$($_.Depth)" -eq $PinnedDepth })
-    $extras = @($held | Where-Object { $_.PrivilegeName -ne $PinnedPrivilege } | Sort-Object PrivilegeName)
-    [pscustomobject]@{ Missing = ($pinned.Count -ne 1); Extras = $extras }
+    $others = @($held | Where-Object { $_.PrivilegeName -ne $PinnedPrivilege })
+    $platform = @($others | Where-Object { $PlatformAdded -contains $_.PrivilegeName } | Sort-Object PrivilegeName)
+    $extras = @($others | Where-Object { $PlatformAdded -notcontains $_.PrivilegeName } | Sort-Object PrivilegeName)
+    [pscustomobject]@{ Missing = ($pinned.Count -ne 1); Extras = $extras; PlatformAdded = $platform }
 }
 
 Write-Host "Environment : $BaseUrl"
@@ -120,10 +133,11 @@ function Read-State {
     $role = $roots[0]
     $state.Role = $role
 
-    # Exactly the pinned privilege, at the pinned depth.
+    # The pinned privilege at the pinned depth; nothing else outside the platform-added set.
     $priv = Get-RolePrivilegeState $role.roleid
     if ($priv.Missing) { $state.Gaps.Add("role does not hold $PinnedPrivilege at $PinnedDepth") }
     foreach ($x in $priv.Extras) { $state.Gaps.Add("role holds $($x.PrivilegeName) at $($x.Depth), outside its one-privilege set") }
+    foreach ($p in $priv.PlatformAdded) { Write-Host "  role holds $($p.PrivilegeName) at $($p.Depth): platform-added, accepted (not stripped)" -ForegroundColor DarkGray }
     $state.PrivilegeMissing = $priv.Missing
     $state.Extras = $priv.Extras
 
@@ -170,7 +184,7 @@ $fixableNames = @($state.Fixable | ForEach-Object { "BFF app user $($_.Name) ($(
 $unfixable = @($state.Gaps | Where-Object { $fixableNames -notcontains $_ })
 
 if ($Verify) {
-    if ($state.Gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every BFF application user present holds '$RoleName' ($PinnedPrivilege at $PinnedDepth, nothing else), and nobody else does." -ForegroundColor Green; exit 0 }
+    if ($state.Gaps.Count -eq 0) { Write-Host "`nVERIFY PASS: every BFF application user present holds '$RoleName' ($PinnedPrivilege at $PinnedDepth, nothing else outside the platform-added set), and nobody else does." -ForegroundColor Green; exit 0 }
     foreach ($g in $state.Gaps) { Write-Host "  GAP  $g" -ForegroundColor Red }
     Write-Host "`nVERIFY FAIL: $($state.Gaps.Count) gap(s)." -ForegroundColor Red
     exit 1
@@ -205,7 +219,7 @@ if ($state.Extras.Count -gt 0) {
     Write-Host "  STRIPPED from '$RoleName' (outside its one-privilege set): $(($state.Extras | ForEach-Object PrivilegeName) -join ', ')" -ForegroundColor Green
     $check = Get-RolePrivilegeState $state.Role.roleid
     if ($check.Missing -or $check.Extras.Count -gt 0) {
-        Write-Host "`nREFUSED: after the strip the role is not exactly $PinnedPrivilege at $PinnedDepth (still held: $(($check.Extras | ForEach-Object PrivilegeName) -join ', ')). Nothing was assigned." -ForegroundColor Red
+        Write-Host "`nREFUSED: after the strip the role is not $PinnedPrivilege at $PinnedDepth plus only the platform-added set (still held: $(($check.Extras | ForEach-Object PrivilegeName) -join ', ')). Nothing was assigned." -ForegroundColor Red
         exit 2
     }
 }

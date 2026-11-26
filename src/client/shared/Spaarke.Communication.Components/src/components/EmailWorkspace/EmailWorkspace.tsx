@@ -362,6 +362,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           recordName: record.recordState?.regardingRecordName,
           recordNumber: record.recordState?.regardingRecordNumber,
           recordTypeLabel: record.recordState?.regardingRecordType,
+          recordId: record.recordState?.regardingRecordId,
         }
       ),
     [record.recordState, filedAssociations]
@@ -498,6 +499,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   regardingRecordName={record.recordState?.regardingRecordName ?? null}
                   regardingRecordNumber={record.recordState?.regardingRecordNumber ?? null}
                   regardingRecordType={record.recordState?.regardingRecordType ?? null}
+                  regardingRecordId={record.recordState?.regardingRecordId ?? null}
                   filedAssociations={filedAssociations}
                   writeContext={{
                     webApi,

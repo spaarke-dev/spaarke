@@ -1,4 +1,13 @@
-import { createInvoiceReviewApi, isIncomplete, loadFailureMessage, routes, toFailure, writeFailureMessage } from '../services/invoiceReviewApi';
+import {
+  createInvoiceReviewApi,
+  firmsFailureMessage,
+  isIncomplete,
+  loadFailureMessage,
+  routes,
+  setFirmFailureMessage,
+  toFailure,
+  writeFailureMessage,
+} from '../services/invoiceReviewApi';
 import { parseLaunch } from '../services/launch';
 // The real decoder, through the jest seam for the library barrel.
 import { parseDataParams } from '@spaarke/ui-components';
@@ -129,6 +138,85 @@ describe('createInvoiceReviewApi', () => {
     const r = await api.fetchFile(PDF_ID);
     expect(r.ok).toBe(true);
     expect(fetchFn.mock.calls[0][0]).toBe(routes.fileContent(BASE, PDF_ID));
+  });
+});
+
+describe('Set firm and the linked firms (095d-3)', () => {
+  const FIRM_ID = 'a1a1a1a1-0000-4000-8000-0000000000a1';
+  const MATTER = 'aaaaaaaa-0000-4000-8000-0000000000a1';
+
+  it('builds the two routes: the section 8 firms of a core record, and the invoice firm', () => {
+    expect(routes.coreRecordFirms(BASE, 'workAssignment', MATTER.toUpperCase())).toBe(`https://bff.example.test/api/finance/core-records/workAssignment/${MATTER}/firms`);
+    expect(routes.assignFirm(BASE, INVOICE_ID.toUpperCase())).toBe(`https://bff.example.test/api/finance/invoices/${INVOICE_ID}/firm`);
+  });
+
+  it('lists the firms of the core record with a GET, reading each row as the add-in does (a row without a string id and name is dropped)', async () => {
+    const fetchFn = fetchReturning([{ firmId: FIRM_ID, name: 'Alpha Law LLP', extra: 1 }, { firmId: 5, name: 'x' }, { name: 'no id' }, null]);
+    const api = createInvoiceReviewApi(fetchFn, BASE);
+    const r = await api.listFirms('matter', MATTER);
+    expect(r).toEqual({ ok: true, value: [{ firmId: FIRM_ID, name: 'Alpha Law LLP' }] });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe(routes.coreRecordFirms(BASE, 'matter', MATTER));
+    expect(fetchFn.mock.calls[0][1]?.method).toBe('GET');
+    expect(fetchFn.mock.calls[0][1]?.body).toBeUndefined();
+  });
+
+  it('an empty 200 is an empty list, and a body that is not a list is a failure (never an empty list)', async () => {
+    expect(await createInvoiceReviewApi(fetchReturning([]), BASE).listFirms('project', MATTER)).toEqual({ ok: true, value: [] });
+    const bad = await createInvoiceReviewApi(fetchReturning({ firms: [] }), BASE).listFirms('project', MATTER);
+    expect(bad.ok).toBe(false);
+  });
+
+  it('maps a refused or unreachable read to a failure with the status', async () => {
+    const refused = await createInvoiceReviewApi(jest.fn(async () => { throw problem(404, null); }) as never, BASE).listFirms('matter', MATTER);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.failure.status).toBe(404);
+      expect(firmsFailureMessage(refused.failure)).toMatch(/isn't available to you/);
+    }
+    const unavailable = await createInvoiceReviewApi(jest.fn(async () => { throw problem(503, null); }) as never, BASE).listFirms('matter', MATTER);
+    expect(unavailable.ok === false && firmsFailureMessage(unavailable.failure)).toMatch(/couldn't be listed/);
+    expect(unavailable.ok === false && firmsFailureMessage(unavailable.failure)).not.toMatch(/No firm/);
+    expect(firmsFailureMessage(toFailure(new AuthError('no token')))).toMatch(/Sign-in/);
+  });
+
+  it('Set firm posts exactly { firmId, note: null } to the invoice firm route and returns the answer as is', async () => {
+    const answer = { outcome: 'assigned', decisionId: 'd1', trackingNumber: 'ALPHA-000042', previousTrackingNumber: null, rulesRerun: 'pending' };
+    const fetchFn = fetchReturning(answer);
+    const api = createInvoiceReviewApi(fetchFn, BASE);
+    const r = await api.setFirm(INVOICE_ID, FIRM_ID);
+    expect(r).toEqual({ ok: true, value: answer });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][0]).toBe(routes.assignFirm(BASE, INVOICE_ID));
+    expect(fetchFn.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchFn.mock.calls[0][1]?.body))).toEqual({ firmId: FIRM_ID, note: null });
+    expect(String(fetchFn.mock.calls[0][1]?.body)).toBe(JSON.stringify({ firmId: FIRM_ID, note: null }));
+  });
+
+  it('Set firm maps a refusal to a failure carrying the server detail and code, and no answer to status 0', async () => {
+    const refused = await createInvoiceReviewApi(
+      jest.fn(async () => { throw problem(409, 'ebilling.assign_firm.firm_already_set', { detail: 'This invoice already has a firm.' }); }) as never,
+      BASE
+    ).setFirm(INVOICE_ID, FIRM_ID);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.failure).toMatchObject({ status: 409, errorCode: 'ebilling.assign_firm.firm_already_set', detail: 'This invoice already has a firm.' });
+      expect(setFirmFailureMessage(refused.failure)).toBe('This invoice already has a firm.');
+    }
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const down = await createInvoiceReviewApi(jest.fn(async () => { throw new TypeError('Failed to fetch'); }) as never, BASE).setFirm(INVOICE_ID, FIRM_ID);
+    warn.mockRestore();
+    expect(down.ok).toBe(false);
+    if (!down.ok) {
+      expect(down.failure.status).toBe(0);
+      expect(setFirmFailureMessage(down.failure)).toBe('The firm could not be confirmed. Check the invoice header; if no firm is shown, try again.');
+      expect(setFirmFailureMessage(down.failure)).not.toMatch(/Nothing was changed/);
+    }
+    // A sign-in failure keeps the sign-in sentence, not the nothing-was-changed one.
+    expect(setFirmFailureMessage(toFailure(new AuthError('no token')))).toMatch(/Sign-in/);
+    // A refusal without a detail falls back to the shared write sentence.
+    expect(setFirmFailureMessage(toFailure(problem(500, null)))).toBe(writeFailureMessage(toFailure(problem(500, null))));
   });
 });
 

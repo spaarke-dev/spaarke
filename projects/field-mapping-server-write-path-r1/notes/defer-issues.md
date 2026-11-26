@@ -422,3 +422,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. The shared `FileUploadZone` resolves a type only for PDF/DOCX/XLSX, and `AddFilesStep` ignores the validation errors, so the user sees nothing. |
 | **Need** | Every advertised extension resolves to a type; validation errors are shown; tests for each extension and for a shown rejection. |
 | **Status** | Filed. Outside FR-16 (the create payload). |
+
+## DI-044 — The Create Matter wizard reads the business unit on every submit and discards it (found in the 035 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 035 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3190 |
+| **Class** | Pre-existing. `CreateMatterWizard.tsx` awaits `resolveUserBuDefaults()` (systemuser, then businessunit) and passes the result as `_cascadeDefaults`, which `matterService.createMatter` never reads. |
+| **Need** | Remove the prop, its hosts' wiring and the unused parameter; keep `EntityCreationService.resolveUserBuDefaults` for its container callers; test that a matter create makes no systemuser or businessunit read. |
+| **Status** | Filed. Out of 035 scope (no wizard-logic changes). |

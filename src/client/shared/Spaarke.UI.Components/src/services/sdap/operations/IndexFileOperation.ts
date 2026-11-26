@@ -33,7 +33,7 @@ export class IndexFileOperation {
   /**
    * Index a single file via the BFF's RAG indexing pipeline.
    *
-   * @param request - File location, tenant, optional parent entity + index targeting
+   * @param request - File location, tenant, optional parent entity
    * @returns Indexing outcome with chunk count or error message
    * @throws Error only if the BFF endpoint is unreachable; HTTP errors are returned
    *         as `{ success: false, errorMessage }` so callers can decide their policy.
@@ -48,7 +48,6 @@ export class IndexFileOperation {
       tenantId: request.tenantId,
       documentId: request.documentId,
       parentEntity: request.parentEntity,
-      searchIndexName: request.searchIndexName,
     };
 
     const response = await this.authenticatedFetch(url, {

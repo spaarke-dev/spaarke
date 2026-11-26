@@ -70,8 +70,8 @@
  * subgrid — is ported here. AssociationResolver is retired in this same
  * task; both PCFs did essentially the same job. Key differences that
  * disqualified AssociationResolver: field-mapping cascade is now driven
- * from the parent side (SRFR-062 push ribbon), so the write-time
- * FieldMappingHandler is redundant.
+ * from the parent side (SRFR-062 push ribbon), so the former write-time
+ * FieldMappingHandler (deleted in field-mapping-server-write-path-r1 task 035) was redundant.
  *
  * Behavior on mount (React useEffect):
  *   - Iterate `sprk_regarding{entityName}` field names derived from the

@@ -210,15 +210,13 @@ export interface ICreateMatterWizardProps {
    */
   resolveSpeContainerId?: () => Promise<string>;
   /**
-   * Resolves the current user's owning Business Unit cascade defaults
-   * (`sprk_containerid`, `sprk_searchindexname`) for application to the
-   * `sprk_matter` create payload.
+   * Resolves the current user's owning Business Unit (`businessUnitId`, `containerId`).
+   * Nothing from it reaches the `sprk_matter` create payload: the container and the search
+   * index are the server's to set (FR-38, FR-40), so the callback stays only as the host's contract.
    *
-   * Aligned with the proven CreateProjectWizard pattern: the host (solution
-   * `main.tsx`) implements this using
+   * The host (solution `main.tsx`) implements this using
    * `Xrm.Utility.getGlobalContext().userSettings.userId` and calls
-   * {@link EntityCreationService.resolveUserBuDefaults}. Required for
-   * `sprk_searchindexname` to be populated on new matters (FR-WIZ-01).
+   * {@link EntityCreationService.resolveUserBuDefaults}.
    */
   resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
   /**
@@ -816,10 +814,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   );
 
   // Adapt IDataService to the IWebApi shape that CreateRecordWizard expects
-  const webApiAdapter = React.useMemo(
-    () => createWebApiFromDataService(dataService),
-    [dataService]
-  );
+  const webApiAdapter = React.useMemo(() => createWebApiFromDataService(dataService), [dataService]);
 
   return (
     <CreateRecordWizard

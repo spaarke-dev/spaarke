@@ -120,6 +120,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
+using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
@@ -160,6 +161,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     private readonly IEntraAppRegProvisioner _provisioner;
     private readonly IAdminConsentVerifier _consentVerifier;
     private readonly EntraAppRegOptions _options;
+    private readonly IDataverseEnvironmentRegistryClient _registry;
     private readonly ILogger<H3EntraAppRegHandler> _logger;
 
     /// <inheritdoc/>
@@ -170,18 +172,21 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         IEntraAppRegProvisioner provisioner,
         IAdminConsentVerifier consentVerifier,
         IOptions<EntraAppRegOptions> options,
+        IDataverseEnvironmentRegistryClient registry,
         ILogger<H3EntraAppRegHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(consentVerifier);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _provisioner = provisioner;
         _consentVerifier = consentVerifier;
         _options = options.Value;
+        _registry = registry;
         _logger = logger;
     }
 
@@ -333,6 +338,66 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 $"EntraAppRegOptions:PreAuthorizedClientAppIds contains '{badClientAppId}', which is not an application " +
                 "(client) id GUID. Fix the Worker setting (Bicep preAuthorizedClientAppIds); nothing was written to Entra.",
                 cancellationToken).ConfigureAwait(false);
+        }
+
+        // (4d) Demo environment plan decision 1: the Demo-only clients join the list only when the customer's registry
+        //      row is Environment Type = Demo and active. Read only when such clients are configured; a failed read
+        //      refuses (it never guesses), a missing row or any other type leaves them out.
+        if (!TryNormalizeClientAppIds(_options.DemoPreAuthorizedClientAppIds, out var demoClientAppIds, out var badDemoClientAppId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                EntraAppRegRejectionCodes.DemoPreAuthorizedClientAppIdInvalid,
+                $"EntraAppRegOptions:DemoPreAuthorizedClientAppIds contains '{badDemoClientAppId}', which is not an " +
+                "application (client) id GUID. Fix the Worker setting (Bicep demoPreAuthorizedClientAppIds); nothing was " +
+                "written to Entra.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (demoClientAppIds.Count > 0)
+        {
+            DataverseEnvironmentRegistrySnapshot? registryRow;
+            try
+            {
+                registryRow = await _registry.LookupByEnvironmentIdAsync(run.EnvironmentId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogError(ex,
+                    "H3 run {RunId} customer {CustomerId}: registry row {EnvironmentId} could not be read to decide the " +
+                    "Demo-only clients; refusing (Resumable), nothing written to Entra",
+                    run.RunId, envelope.CustomerId, run.EnvironmentId);
+                var detail = ex.Message.Length > 300 ? ex.Message[..300] + "..." : ex.Message;
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    EntraAppRegRejectionCodes.RegistryEnvironmentTypeUnavailable,
+                    $"Could not read registry row '{run.EnvironmentId}' to tell whether the stamp is Demo " +
+                    $"({ex.GetType().Name}: {detail}); nothing was written to Entra. Fix the cause (the Worker identity's " +
+                    "access to the registry, or the row itself), then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // The Demo-only clients are single-tenant Spaarke apps: only a Spaarke-tenant stamp (Model 1) whose
+            // registry row names this customer AND this tenant can carry them.
+            var isDemo = registryRow is not null
+                && string.Equals(registryRow.CustomerId, envelope.CustomerId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(registryRow.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_options.SpaarkeTenantId)
+                && string.Equals(tenantId, _options.SpaarkeTenantId, StringComparison.OrdinalIgnoreCase)
+                && registryRow.IsActiveDemo;
+            if (isDemo)
+            {
+                preAuthorizedClientAppIds = [.. preAuthorizedClientAppIds.Union(demoClientAppIds, StringComparer.Ordinal)];
+            }
+            _logger.LogInformation(
+                "H3 run {RunId} customer {CustomerId}: registry row {EnvironmentId} found={RowFound} customerMatch={CustomerMatch} " +
+                "tenantMatch={TenantMatch} spaarkeTenant={IsSpaarkeTenant} type={EnvironmentType} active={IsActive} " +
+                "-> Demo-only clients {Decision} ({Count})",
+                run.RunId, envelope.CustomerId, run.EnvironmentId, registryRow is not null,
+                registryRow is not null && string.Equals(registryRow.CustomerId, envelope.CustomerId, StringComparison.OrdinalIgnoreCase),
+                registryRow is not null && string.Equals(registryRow.TenantId, tenantId, StringComparison.OrdinalIgnoreCase),
+                !string.IsNullOrWhiteSpace(_options.SpaarkeTenantId)
+                    && string.Equals(tenantId, _options.SpaarkeTenantId, StringComparison.OrdinalIgnoreCase),
+                registryRow?.EnvironmentType, registryRow?.IsActive,
+                isDemo ? "pre-authorized" : "left out", demoClientAppIds.Count);
         }
 
         var provisionResult = await HandlePerCustomerProvisionAsync(

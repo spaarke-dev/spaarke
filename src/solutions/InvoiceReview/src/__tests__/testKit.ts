@@ -189,6 +189,11 @@ export function mockApi(reviews: InvoiceReview[] | InvoiceReview): MockApi {
     addLine: jest.fn(async (_i: string, r: { requestId: string }) =>
       ok({ requestId: r.requestId, lineId: ADDED_LINE_ID, decisionId: 'dd', status: 'Flagged', alreadyApplied: false, totals: null })
     ),
+    // 095d-3: the firms linked to the core record, and Set firm. A default that nothing but the Set firm field's tests reaches.
+    listFirms: jest.fn(async () => ok([{ firmId: 'a1a1a1a1-0000-4000-8000-0000000000a1', name: 'Alpha Law LLP' }])),
+    setFirm: jest.fn(async () =>
+      ok({ outcome: 'assigned', decisionId: 'dd', trackingNumber: 'ALPHA-000042', previousTrackingNumber: null, rulesRerun: 'completed' })
+    ),
     fetchFile: jest.fn(async () => ok(new ArrayBuffer(8))),
   };
 }

@@ -566,6 +566,9 @@ export function isConnectionConfirmed(conn: Connection, confirmedFields: Readonl
 // resolver AND the collapsible-section status dot derive connections identically.
 export const ASSOCIATION_STATUS_RESOLVED_VALUE = 100000000;
 
+/** `sprk_associationstatus` = Ambiguous (the engine refused to pick among conflicting high-confidence matches). */
+const ASSOCIATION_STATUS_AMBIGUOUS_VALUE = 100000004;
+
 /** An empty provenance doc so `deriveConnections` still has a shape to walk when every association was filed manually (no engine trail). */
 function emptyProvenanceDoc(): ProvenanceDoc {
   return {
@@ -731,6 +734,13 @@ export interface PrimaryDenorm {
   entityType?: string | null;
   /** `sprk_regardingrecordtype` FormattedValue (e.g. "Matter") — the human type label for the confirmed chip. */
   recordTypeLabel?: string | null;
+  /**
+   * `sprk_regardingrecordid` — the ADR-024 pair's record id (the row's PRIMARY regarding). When given, the primary is the
+   * filed lookup holding this record, not the first filed lookup in slot order (task 140 review: a service-request primary
+   * filed beside a matter must not show — and Confirm must not file — the matter). Optional: without it the first filed
+   * lookup stays the primary, as before.
+   */
+  recordId?: string | null;
 }
 
 export interface PrimaryReviewModel {
@@ -781,13 +791,18 @@ export function flattenPrimaryCandidates(doc: ProvenanceDoc): PrimaryCandidate[]
   return Array.from(byKey.values()).sort((a, b) => b.confidence - a.confidence);
 }
 
-/** The confirmed primary: the filed lookup (authoritative), enriched with a matching candidate's number, else the denorm fields. */
+/**
+ * The confirmed primary: the filed lookup (authoritative), enriched with a matching candidate's number, else the denorm
+ * fields. The filed lookup is the one the ADR-024 pair (`denorm.recordId`) names; with no pair, the first filed lookup. A
+ * pair that names none of the filed lookups falls to the denorm fields (never another filed record).
+ */
 function resolveConfirmedPrimary(
   ranked: PrimaryCandidate[],
   filed: FiledAssociation[],
   denorm?: PrimaryDenorm
 ): PrimaryCandidate | undefined {
-  const f = filed[0];
+  const pairId = denorm?.recordId ? denorm.recordId.replace(/[{}]/g, '').toLowerCase() : '';
+  const f = pairId ? filed.find(a => a.recordId.replace(/[{}]/g, '').toLowerCase() === pairId) : filed[0];
   if (f) {
     const match = ranked.find(c => primaryKey(c.entity, c.targetId) === primaryKey(f.entityType, f.recordId));
     return {
@@ -839,15 +854,52 @@ export function derivePrimaryReview(
     if (primary) return { state: 'confirmed', candidates, allCandidates, primary };
   }
 
-  // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
-  // an ambiguous conflict (2+ competing high-confidence candidates stay 🔴).
   const hasConflict = doc.candidates.some(c => c.conflict);
   const top = ranked[0];
+
+  // 🟡 Needs confirmation — a regarding is WRITTEN (a filed typed lookup, or the denorm primary) but no human confirmed it
+  // (word-add-in-r1 task 140, ISS-043): the engine filed a suggestion, or its provenance trail carries no candidates. The
+  // written record is what the row is filed under, so it is the primary — never "No confident match". Only when the status
+  // is KNOWN and is neither Resolved nor Ambiguous: a view that selects the typed lookups but not the status must not turn
+  // an Ambiguous row yellow, so an unknown status keeps the 🔴 it had. An Ambiguous conflict stays 🔴 (the reviewer still
+  // has to choose). And only for a record that can be confirmed (it has an id): a denorm-only primary keeps the 🔴 too.
+  const statusKnown = associationStatus !== null && associationStatus !== undefined;
+  const ambiguous = hasConflict || associationStatus === ASSOCIATION_STATUS_AMBIGUOUS_VALUE;
+  const unconfirmed = statusKnown && !ambiguous && associationStatus !== ASSOCIATION_STATUS_RESOLVED_VALUE;
+  const written =
+    unconfirmed && (filedList.length > 0 || !!denorm?.recordName)
+      ? resolveConfirmedPrimary(ranked, filedList, denorm)
+      : undefined;
+  const writtenReview = (primary: PrimaryCandidate): PrimaryReviewModel => {
+    // The primary is shown as the card it is confirmed from: a written record that no candidate carries (an empty trail)
+    // leads the candidate list.
+    const inList = (list: PrimaryCandidate[]): boolean =>
+      list.some(c => primaryKey(c.entity, c.targetId) === primaryKey(primary.entity, primary.targetId));
+    return {
+      state: 'needs-confirmation',
+      candidates: inList(candidates) ? candidates : [primary, ...candidates].slice(0, PRIMARY_CANDIDATE_SLOTS),
+      allCandidates: inList(allCandidates) ? allCandidates : [primary, ...allCandidates],
+      primary,
+    };
+  };
+
+  // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
+  // an ambiguous conflict (2+ competing high-confidence candidates stay 🔴).
   const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
   if (autoMatched && top) {
+    // Task 140 review pass 2: on an unconfirmed row the engine did NOT auto-file, a 100% candidate is only a suggestion.
+    // The WRITTEN record (pair-preferred) is what the row is filed under, so it stays the primary; Confirm on the candidate
+    // would file it beside the written one. Resolved and auto-filed rows keep the auto-matched primary.
+    const writtenWins =
+      !!written?.targetId &&
+      doc.decision.autoFiled !== true &&
+      primaryKey(written.entity, written.targetId) !== primaryKey(top.entity, top.targetId);
+    if (written && writtenWins) return writtenReview(written);
     const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
     return { state: 'needs-confirmation', candidates, allCandidates, primary };
   }
+
+  if (written?.targetId) return writtenReview(written);
 
   // 🔴 Requires review — the reviewer picks from candidates (or links another record).
   return { state: 'requires-review', candidates, allCandidates };

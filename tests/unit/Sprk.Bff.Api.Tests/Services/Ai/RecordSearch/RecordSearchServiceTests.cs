@@ -838,6 +838,64 @@ public class RecordSearchServiceTests
             Times.Exactly(2));
     }
 
+    // Issue #3165: the Matter Type filter narrows records by the matterTypeId the record indexers stamp, and a search
+    // with different matter types must never be answered from another's cached result.
+
+    private const string MatterTypeA = "3165c000-0000-4000-8000-0000000000a1";
+    private const string MatterTypeB = "3165c000-0000-4000-8000-0000000000b2";
+
+    [Fact]
+    public async Task SearchAsync_WithMatterTypes_FiltersOnTheStoredMatterTypeId()
+    {
+        var service = CreateService();
+        var request = CreateValidRequest(RecordHybridSearchMode.KeywordOnly) with
+        {
+            Filters = new RecordSearchFilters { MatterTypes = new List<string> { MatterTypeA.ToUpperInvariant(), "not-a-guid" } }
+        };
+
+        SearchOptions? capturedOptions = null;
+        _searchClientMock
+            .Setup(x => x.SearchAsync<SearchIndexDocument>(It.IsAny<string>(), It.IsAny<SearchOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<string, SearchOptions, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(CreateEmptySearchResponse());
+
+        await service.SearchAsync(request);
+
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.Filter.Should().Contain($"search.in(matterTypeId, '{MatterTypeA}', ',')");
+        capturedOptions.Filter.Should().NotContain("not-a-guid");
+    }
+
+    [Fact]
+    public async Task SearchAsync_DifferentMatterTypes_UseDifferentCacheKeys()
+    {
+        var service = CreateService();
+        var ids = new List<string>();
+
+        // The hash is the input itself, so the cache id shows exactly what the key was built from.
+        _embeddingCacheMock
+            .Setup(x => x.ComputeContentHash(It.IsAny<string>()))
+            .Returns<string>(s => s);
+        _distributedCacheMock
+            .Setup(x => x.GetAsync<RecordSearchResponse>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, int, string, CancellationToken>((_, _, id, _, _, _) => ids.Add(id))
+            .ReturnsAsync((RecordSearchResponse?)null);
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        foreach (var types in new[] { new[] { MatterTypeA }, new[] { MatterTypeB }, Array.Empty<string>() })
+        {
+            var request = CreateValidRequest() with { Filters = new RecordSearchFilters { MatterTypes = types.ToList() } };
+            await service.SearchAsync(request);
+        }
+
+        ids.Should().HaveCount(3);
+        ids.Distinct().Should().HaveCount(3, "matter types A, B and none must each have their own cache entry");
+    }
+
     #endregion
 
     #region SearchAsync - SearchIndexName Resolver Routing Tests (FR-BFF-07 part 3)

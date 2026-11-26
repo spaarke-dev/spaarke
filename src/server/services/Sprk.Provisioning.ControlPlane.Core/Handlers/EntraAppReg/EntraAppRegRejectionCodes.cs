@@ -187,6 +187,20 @@ public static class EntraAppRegRejectionCodes
     public const string PreAuthorizedClientAppIdInvalid = "appreg-preauthorized-client-invalid";
 
     /// <summary>
+    /// Demo environment plan decision 1: <c>EntraAppRegOptions:DemoPreAuthorizedClientAppIds</c> holds a value that is not
+    /// a GUID — platform configuration drift. Nothing is written to Entra. Resumable after the Worker setting is fixed.
+    /// </summary>
+    public const string DemoPreAuthorizedClientAppIdInvalid = "appreg-demo-preauthorized-client-invalid";
+
+    /// <summary>
+    /// Demo environment plan decision 1: Demo-only clients are configured, but the customer's registry row could not be
+    /// read, so H3 cannot tell whether the stamp is Demo. Refused rather than guessed in either direction (adding the
+    /// client to a non-Demo stamp is the risk; silently removing it from a Demo stamp would flap). Nothing is written to
+    /// Entra. Resumable.
+    /// </summary>
+    public const string RegistryEnvironmentTypeUnavailable = "appreg-registry-environment-type-unavailable";
+
+    /// <summary>
     /// T240a: the app registration has no enabled <c>user_impersonation</c> scope to pre-authorize clients on, after H3's
     /// own reconcile added it — Entra state H3 cannot repair. Resumable.
     /// </summary>

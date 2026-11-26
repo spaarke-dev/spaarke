@@ -187,6 +187,8 @@ Expect one row pointing at the target search service resource ID.
 
 All schemas deploy via the **single canonical deployer** `scripts/ai-search/Deploy-AllIndexes.ps1` (FR-07 — catalog-driven, idempotent, mirrors the validated `scripts/Deploy-RedisCache.ps1` structure). The script reads the canonical index list from [`AI-SEARCH-INDEX-CATALOG.md`](../architecture/AI-SEARCH-INDEX-CATALOG.md) §4 and PUTs each schema against the target environment's search service.
 
+**Deploy order:** deploy the files, discovery and records index schemas with `scripts/ai-search/Deploy-AllIndexes.ps1` BEFORE a BFF that writes `matterTypeId` / `matterTypeSourceId` (GitHub #3165); an older schema rejects those fields and fails the indexing writes.
+
 Deploy all 7 indexes:
 
 ```powershell

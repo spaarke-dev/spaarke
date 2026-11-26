@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
@@ -22,6 +23,12 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 //   Extension: this IS the extension: it calls the same capability as the REST route; the only new logic is the category partition
 //     (DecideLaneCategories, parity-tested) and the FR-04 reduction (DecisionsTextSummary).
 //   Cost of doing nothing: Copilot cannot list a user's Work Items (FR-03), and privileged detail would reach the model (FR-04).
+//
+// FR-13 "done today" (DEF-001, #2832) — component justification for the new `closedToday` member.
+//   Existing: the Console's figure (WorklistWidget.doneToday): the caller's closedToday set of GET /api/v1/signals/worklist, which is
+//     IDecisionCapability.ListDecideAsync(WorklistSet.ClosedToday); the widget has no tool that returns it.
+//   Extension: show calls that same read and partitions it with DecideLaneCategories; no new service, route, query or column.
+//   Cost of doing nothing: the widget's All card cannot show "n of m done today" (FR-13), a line the Console's card has.
 // =====================================================================================================================
 
 /// <summary>
@@ -36,7 +43,9 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 /// <para><b>Reads.</b> As the caller, through <see cref="IDecisionCapability"/>: ONE read of the lane (<c>ListDecidePageAsync</c>, page 1,
 /// whose privilege flags the capability derives, task 018). The counts come from the whole lanes response that page was cut from
 /// (<see cref="DecidePageResult.Lane"/>, the same response <c>ListDecideAsync</c> returns), so they equal the Console's cards over every item
-/// (NFR-01, 2026-11-25: the lane was read twice before, ~2 s each). A failure is an <c>isError</c> result through
+/// (NFR-01, 2026-11-25: the lane was read twice before, ~2 s each). One further read, of the caller's closed-today set, runs beside it
+/// (<see cref="ReadClosedTodayAsync"/>, FR-13): it gives <c>closedToday</c>, the count per category of the items closed today, and its
+/// failure only leaves that member out. A failure of the lane is an <c>isError</c> result through
 /// <see cref="DecisionResultMapper"/>, never a partial answer (the worklist's 503, <c>too_many_signals</c> included, is
 /// <c>ontology.signal.worklist_unavailable</c>); a page without its lane is the same 503, never counts of zero.</para>
 /// <para><b>Caller (FR-10).</b> The request context is <c>IHttpContextAccessor.HttpContext</c>, passed through unchanged; a null context or an
@@ -121,7 +130,7 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         var rows = 0;
         try
         {
-            var result = await RunAsync(request.Params?.Arguments, http, decisions, dataverse.Value.EnvironmentUrl, cancellationToken);
+            var result = await RunAsync(request.Params?.Arguments, http, decisions, dataverse.Value.EnvironmentUrl, cancellationToken, logger);
             rows = result.Rows;
             outcome = DecisionToolCall.OutcomeOf(result.Result);
             return result.Result;
@@ -137,7 +146,8 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         HttpContext? http,
         IDecisionCapability decisions,
         string? environmentUrl,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ILogger? logger = null)
     {
         if (!DecisionToolCall.TryReadSingleArgument(arguments, Name, CategoryArgument, http?.TraceIdentifier, out var argument, out var argumentError))
         {
@@ -165,7 +175,13 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
         }
 
         // One read of the lane (NFR-01): page 1 carries the whole lanes response it was cut from, and the counts come from that.
-        var page = await decisions.ListDecidePageAsync(http.User, null, cancellationToken);
+        // The closed-today read starts beside it (independent reads; the same caller) and is awaited with it on every path, so no read
+        // outlives the call. It never fails the call: see ReadClosedTodayAsync.
+        var pageRead = decisions.ListDecidePageAsync(http.User, null, cancellationToken);
+        var closedRead = ReadClosedTodayAsync(decisions, http.User, logger, http.TraceIdentifier, cancellationToken);
+        await Task.WhenAll(pageRead, closedRead);
+        var page = await pageRead;
+        var closedToday = await closedRead;
         var pageError = DecisionResultMapper.ToToolError(page)
             // An Ok page without its lane cannot give the counts; it is the worklist's 503, never counts of zero.
             ?? (page.Lane == null ? DecisionResultMapper.ToToolError(DecidePageResult.ReadFailed(SignalReadResult.Unavailable("fault"))) : null);
@@ -195,13 +211,60 @@ internal sealed class ShowDecisionsTool : McpToolDefinition
                 DecisionsTextSummary.PrivilegedLine(privileged, page.Items.Count, page.NextCursor != null),
                 DecisionsTextSummary.PrivilegedScope(page.NextCursor != null)),
             page.NextCursor,
-            baseUrl);
+            baseUrl,
+            closedToday);
         return (DecisionToolCall.Success(text, structured), page.Items.Count);
+    }
+
+    /// <summary>
+    /// The Console's "done today" source, as counts per category (FR-13): the caller's <see cref="WorklistSet.ClosedToday"/> read, which
+    /// the Console reads for the same figure (<c>WorklistWidget.doneToday</c>: the items of the lane in that set). It is the same
+    /// <see cref="IDecisionCapability.ListDecideAsync"/> as the lane's, as the caller, so it holds what the caller may read and no more
+    /// (core-record access, the Do-lane "mine" rule) and "today" is each item's own day (D-25 as amended by D-129): nothing is redefined
+    /// here. The counts are partitioned by <see cref="DecideLaneCategories"/>, like the cards.
+    /// <para>A read that does not answer Ok, or that throws (anything but the caller's own cancellation), is null, so the figure is absent and
+    /// the widget shows no line: what the Console does when its closed-today set did not load (<c>doneToday</c> undefined). The lane's own
+    /// answer is never held back for it.</para>
+    /// <para><b>Privileged items (FR-04).</b> They are counted here exactly as the lane's <c>Categories</c> count them: both partition
+    /// <see cref="DecideLaneMember"/>, which carries no privilege flag, so a privileged item is one more in its category's number in both,
+    /// and neither names it. Counts only.</para>
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<string, int>?> ReadClosedTodayAsync(
+        IDecisionCapability decisions, ClaimsPrincipal user, ILogger? logger, string? correlationId, CancellationToken cancellationToken)
+    {
+        SignalReadResult read;
+        try
+        {
+            read = await decisions.ListDecideAsync(user, cancellationToken, WorklistSet.ClosedToday);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // A thrown read (an unexpected Dataverse or HTTP fault, not an outcome) is the same as a failed one: the member is left out and
+            // the lane is answered. Task.WhenAll would otherwise rethrow it and fail the whole call. Only the exception type is logged:
+            // its message may carry request data. The caller's own cancellation still propagates.
+            logger?.LogWarning(
+                "MCP tool {ToolName}: the closed-today read threw {ExceptionType}; closedToday is left out. Correlation {CorrelationId}.",
+                Name, ex.GetType().Name, correlationId);
+            return null;
+        }
+
+        if (read.Outcome != SignalReadOutcome.Ok || read.Response == null)
+        {
+            logger?.LogInformation(
+                "MCP tool {ToolName}: the closed-today read answered {Outcome}; closedToday is left out. Correlation {CorrelationId}.",
+                Name, read.Outcome, correlationId);
+            return null;
+        }
+
+        return DecideLaneCategories.CountsByKey(
+            read.Response.Lanes.SelectMany(l => l.Groups).SelectMany(g => g.Items).Select(DecideLaneMember.From));
     }
 }
 
 /// <summary>
-/// <c>structuredContent</c> of <c>spaarke_show_decisions</c>: model-visible, so reduced (FR-04). <see cref="Items"/> are the non-privileged
+/// <c>structuredContent</c> of <c>spaarke_show_decisions</c>: model-visible, so reduced (FR-04). <see cref="ClosedToday"/> is a count per
+/// <see cref="DecideLaneCategories.Keys"/> key (<c>all</c> is the Decide lane's total, the Console's "done today"), counts only, and is
+/// absent when that read did not answer. <see cref="Items"/> are the non-privileged
 /// rows of page 1 in Console order and <see cref="Cores"/> their core records; <see cref="PageItemCount"/> is how many items page 1 holds,
 /// privileged ones included; <see cref="NextCursor"/> continues after page 1 through the paging tool; <see cref="ConsoleBaseUrl"/> is the
 /// base the widget builds link-outs on (absent when the environment URL is not usable).
@@ -215,7 +278,8 @@ internal sealed record ShowDecisionsContent(
     int PageItemCount,
     PrivilegedCount Privileged,
     string? NextCursor,
-    string? ConsoleBaseUrl);
+    string? ConsoleBaseUrl,
+    IReadOnlyDictionary<string, int>? ClosedToday = null);
 
 /// <summary>The FR-04 reduction of page 1: how many items were taken out, the line that stands for them, and its <c>scope</c> ('firstPage' when the lane continues after page 1, so the lane may hold more; 'lane' when page 1 is the whole lane).</summary>
 internal sealed record PrivilegedCount(int Count, string Text, string Scope);

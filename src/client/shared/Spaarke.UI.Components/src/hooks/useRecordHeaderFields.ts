@@ -67,7 +67,7 @@
  *    from metadata (FR-15/FR-21) — R1's hard-coded `LOOKUP_META` is gone.
  *  - Deviation from R1, documented: R1's `console.warn`/`console.info` calls
  *    are replaced by the shared `createLogger` (the shared-lib convention, cf.
- *    `services/FieldMappingHandler.ts`). The warn-before-throw was redundant
+ *    the other shared services). The warn-before-throw was redundant
  *    with the thrown message; the staged-edit trace is retained at debug level.
  *    Logging is not a form-buffer semantic — staging behavior is unchanged.
  *
