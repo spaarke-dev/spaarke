@@ -119,3 +119,22 @@
 2. **D1:** a request-scoped memo of business-unit and team config reads (owner resolver, share sync, secure BU, currency). ~30–35 repeats; safe, since the commit never writes those rows.
 3. **D2:** pass the in-memory `sprk_communication` row forward instead of re-reading it. ~8–10 reads. Unsafe as a read cache, because the row is written several times.
 4. **D3:** share the `sprk_recordtype_refs` and matter stamp reads between the creates and the communication, per request.
+
+### Part E constraints (ontology-r1, 2026-11-25)
+
+**Owners**
+- field-mapping-r1 first: most recent changes, including #3133.
+- ontology reviews too: task 177 / D-217 archive of filed outgoing email (#2666), and task 216 ArchiveOutgoingOptIn (#3117).
+- The private-message path (056b `privateContext`) is another project's; E must leave it alone.
+
+**Stays inline**
+- The send.
+- The `sprk_communication` create with its `sprk_correlationid`, filing lookups and internal-only flag. That row is the idempotency key the system-mailbox job's `AlreadySentAsync` reads (AssignTaskNotifier ~:655). Moving it would allow a second email on replay.
+
+**May go async:** thread, enrichment (AI), participant index, arrived producer. Nothing in the commit or the Decision Record references them. Check that the arrived notification drives no user-visible message within the request. Enrichment's AI must stay out of anything the decision depends on.
+
+**Archive (OWNER DECISION).** D-216: the budget inquiry's "sent, but .eml not archived" warning is returned in the commit response (`executed[].Warning`, DecisionCommitService ~:1522). If the archive goes async, that warning cannot be returned. Either:
+- keep the archive inline, or
+- the job raises a bell to the decider on archive failure.
+
+D-217: every filed outgoing email becomes an `.eml` Document in Messages. Async means a short lag. The job is idempotent (one Document per communication) and retried. Say so in the PR.
