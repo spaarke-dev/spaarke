@@ -35,6 +35,8 @@ if [[ "$build" == 1 ]]; then
     (cd "$repo/src/client/widgets/spaarke-decisions" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
     # r2 task 034: the briefing widget is embedded the same way.
     (cd "$repo/src/client/widgets/spaarke-briefing" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
+    # r2 task 035: the search results widget is embedded the same way.
+    (cd "$repo/src/client/widgets/spaarke-search-results" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
   fi
   dotnet build "$host_dir/Mcp.Conformance.Host.csproj" -c Debug
 fi

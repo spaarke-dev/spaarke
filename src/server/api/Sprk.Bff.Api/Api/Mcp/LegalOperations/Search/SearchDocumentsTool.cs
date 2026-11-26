@@ -56,6 +56,9 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
 {
     internal const string ToolName = "spaarke_search_documents";
 
+    /// <summary>The widget the tool's descriptor points at (<c>_meta.ui.resourceUri</c>).</summary>
+    public const string WidgetUri = SearchResultsWidgetResource.Uri;
+
     internal const string EntityTypeArgument = "entityType";
 
     internal const string EntityIdArgument = "entityId";
@@ -126,6 +129,11 @@ internal sealed class SearchDocumentsTool : McpToolDefinition
                 Idempotent = true,
                 Destructive = false,
                 OpenWorld = false,
+                // MCP Apps (task 035): the search results widget renders the result. Only the descriptor changes; the text and structuredContent are 022's.
+                Meta = new JsonObject
+                {
+                    ["ui"] = new JsonObject { ["resourceUri"] = WidgetUri },
+                },
             });
 
         // The input schema is stated, not inferred; the handler reads the raw arguments against the same closed set.

@@ -220,11 +220,14 @@ jobs:
               - 'tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs'
               - 'src/client/widgets/spaarke-decisions/**'
               - 'src/client/widgets/spaarke-briefing/**'
+              - 'src/client/widgets/spaarke-search-results/**'
               - 'src/client/widgets/shared/**'
               - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
               # The briefing widget's build shims re-export deep paths of the shared library, so a change there changes the built page.
               - 'src/client/shared/Spaarke.UI.Components/src/**'
               - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
+              # The search results widget imports the Console's SearchResultsWidget by relative path (task 035).
+              - 'src/client/shared/Spaarke.AI.Widgets/src/**'
               - 'tests/integration/Mcp.Conformance.Host/**'
               - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'
               - '.github/workflows/**'
@@ -1227,6 +1230,13 @@ jobs:
       # spaarkeai-mcp-bff-api-r2 task 034: the briefing widget is embedded the same way (ui://spaarke/briefing.html).
       - name: Build the briefing widget
         working-directory: src/client/widgets/spaarke-briefing
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
+      # spaarkeai-mcp-bff-api-r2 task 035: the search results widget is embedded the same way (ui://spaarke/search-results.html).
+      - name: Build the search results widget
+        working-directory: src/client/widgets/spaarke-search-results
         run: |
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
