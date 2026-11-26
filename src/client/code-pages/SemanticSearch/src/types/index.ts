@@ -531,6 +531,10 @@ export interface AppUrlParams {
   searchMode?: EnvelopeSearchMode;
   /** File-type filters parsed from CSV (e.g. `pdf,docx` → `['pdf','docx']`). */
   fileTypes?: string[];
+  /** Document-type filters (`sprk_documenttype` option numbers) parsed from CSV (#3131). */
+  documentTypes?: string[];
+  /** Matter-type filters (`sprk_mattertype_ref` record ids) parsed from CSV (#3131). */
+  matterTypes?: string[];
   /** Inclusive start of date range (ISO 8601 string). */
   dateFrom?: string;
   /** Inclusive end of date range (ISO 8601 string). */
