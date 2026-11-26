@@ -19,7 +19,7 @@ export interface QuickSaveResponse {
   statusUrl?: string;
   /**
    * Task 131 (#2171): what the save did about filing the email it reconciled to (`"Filed" | "AlreadyFiled" |
-   * "NotPermitted" | "Failed"`); omitted when there is nothing to report. Read through `readEmailFilingProblem`, so a value
+   * "NotPermitted" | "Failed" | "FiledUnconfirmed"`); omitted when there is nothing to report. Read through `readEmailFilingProblem`, so a value
    * this build does not know is ignored.
    */
   emailFiling?: EmailFilingOutcome;

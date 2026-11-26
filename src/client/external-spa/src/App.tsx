@@ -159,7 +159,8 @@ const AppShell: React.FC<{
       <main className={styles.content}>
         <AuthGuard teamsHost={teamsHost}>
           <ErrorBoundary>
-            <WorkforceHomeGate onReady={setHomeReady}>
+            {/* Sign out on the email-missing screen (R4 task 042): the browser only; Teams has no account of ours. */}
+            <WorkforceHomeGate onReady={setHomeReady} onSignOut={teamsHost ? undefined : onSignOut}>
               {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
               <RecordDeepLink teamsHost={teamsHost} />
               <Routes>

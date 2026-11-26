@@ -50,7 +50,6 @@
 These are facts, not decisions. They are where a second implementation already exists beside the canonical one; extend the row's component, not these.
 
 - **Row 3** — `src/client/pcf/shared/utils/environmentVariables.ts` keeps a private `normalizeBffUrl`.
-- **Row 5** — `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts` and `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts` sit beside the BFF field-mapping endpoints.
 - **Rows 6–7** — 21 BFF classes derive directly from `BackgroundService` (the job processor itself among them); several are hand-rolled timers that predate ADR-052 (e.g. `src/server/api/Sprk.Bff.Api/Services/Communication/DailySendCountResetService.cs`, `src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs`). ADR-052 forbids new ones; it does not require migrating these.
 - **Row 15** — `src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs` is a second chunk → embed → index path (knowledge + discovery indexes), used by the session-files upload in `src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs`.
 - **Row 18** — 10 endpoint files under `src/server/api/Sprk.Bff.Api/Api` set `text/event-stream` by hand; there is no shared SSE writer.

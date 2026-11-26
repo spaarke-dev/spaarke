@@ -10,7 +10,8 @@
  * Mirrors `src/solutions/ApExport/src/services/apExportApi.ts`.
  */
 
-import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import { toFailure, type ApiFailure, type ApiResult } from '../../../_ebilling-shared/apiFailure';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types (the BFF's JSON, camelCase)
@@ -49,44 +50,11 @@ export interface FetchedFile {
 // Failures
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Everything the page needs of a failed call, whatever raised it. */
-export interface ApiFailure {
-  /** HTTP status; 0 when no response arrived (network, or a token that could not be acquired). */
-  status: number;
-  /** The stable `errorCode` of ProblemDetails (ADR-019), when there is one. */
-  errorCode: string | null;
-  detail: string | null;
-  /** True when sign-in failed (an exhausted 401 or no token). */
-  signInFailed: boolean;
-}
-
-export type ApiResult<T> = { ok: true; value: T } | { ok: false; failure: ApiFailure };
+// `ApiFailure`, `ApiResult` and `toFailure` are the e-billing pages' shared copy (#2965); re-exported so this module's importers are unchanged.
+export { toFailure, type ApiFailure, type ApiResult };
 
 export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
 export const CODE_SCAN_PENDING = 'file_scan_pending';
-
-function str(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-/** Turn whatever `authenticatedFetch` threw into an {@link ApiFailure}. Exported for the tests. */
-export function toFailure(err: unknown): ApiFailure {
-  if (isApiError(err)) {
-    const p = problemOf(err) as Record<string, unknown> | null;
-    return {
-      status: err.status,
-      errorCode: str(p?.errorCode),
-      detail: str(p?.detail) ?? str(err.message),
-      signInFailed: isAuthFailure(err),
-    };
-  }
-  return {
-    status: 0,
-    errorCode: null,
-    detail: err instanceof Error ? err.message : null,
-    signInFailed: isAuthFailure(err),
-  };
-}
 
 /** The sentence the Files section shows for a failed list. The 404 is the uniform one (no Read, or no such invoice). */
 export function listFailureMessage(f: ApiFailure): string {

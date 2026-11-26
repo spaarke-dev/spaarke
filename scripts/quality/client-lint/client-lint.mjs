@@ -48,6 +48,9 @@ const EXPECTED_FIRE = { [NUC_RULE]: 2, "no-restricted-syntax": 6, "spaarke-clien
 // Rules whose existing violations are recorded in eslint-suppressions.json by `baseline`.
 const SUPPRESSED_RULES = [NUC_RULE, "no-restricted-syntax", "spaarke-client/catch-disable-needs-reason"];
 
+/** What ESLint is pointed at for a package: its `src/` plus any folder of shared source it imports (`extraDirs`, issue 2965). */
+const lintTargets = (p) => [`${p.dir}/src`, ...(p.extraDirs ?? [])];
+
 const fmt = (ms) => `${(ms / 1000).toFixed(1)}s`;
 
 function requireToolchain() {
@@ -114,7 +117,7 @@ async function check() {
   // One ESLint process per package keeps each TypeScript program (and heap) small and gives per-package timing.
   // The suppressions file is shared; ESLint only reconciles entries for files it linted.
   for (const p of selected) {
-    const r = await runEslint([], [`${p.dir}/src`], CONFIG, (t) => (stale ||= STALE_RE.test(t)));
+    const r = await runEslint([], lintTargets(p), CONFIG, (t) => (stale ||= STALE_RE.test(t)));
     timings.push([p.id, r.ms, r.code]);
     if (r.code !== 0) exit = r.code;
   }
@@ -134,7 +137,7 @@ async function prune() {
   requireToolchain();
   let exit = 0;
   for (const p of selected) {
-    const r = await runEslint(["--prune-suppressions"], [`${p.dir}/src`]);
+    const r = await runEslint(["--prune-suppressions"], lintTargets(p));
     if (r.code > 1) exit = r.code;
   }
   process.exit(exit);
@@ -146,14 +149,14 @@ async function baseline() {
   if (!only) fs.rmSync(SUPPRESSIONS, { force: true });
   let exit = 0;
   for (const p of selected) {
-    const r = await runEslint(SUPPRESSED_RULES.flatMap((rule) => ["--suppress-rule", rule]), [`${p.dir}/src`]);
+    const r = await runEslint(SUPPRESSED_RULES.flatMap((rule) => ["--suppress-rule", rule]), lintTargets(p));
     console.log(`${p.id}: ${fmt(r.ms)}`);
     if (r.code > 1) exit = r.code;
   }
   if (only && exit === 0) {
     // Drop the entries a moved/renamed file left behind at its old path.
     for (const p of selected) {
-      const r = await runEslint(["--prune-suppressions"], [`${p.dir}/src`]);
+      const r = await runEslint(["--prune-suppressions"], lintTargets(p));
       if (r.code > 1) exit = r.code;
     }
   }

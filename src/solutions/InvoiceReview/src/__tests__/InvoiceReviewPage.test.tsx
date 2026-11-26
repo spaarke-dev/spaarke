@@ -439,7 +439,7 @@ describe('InvoiceReviewPage: decisions (task 100)', () => {
 });
 
 describe('InvoiceReviewPage: the invoice needs its firm first (095d-0, EB-D-185 / EB-D-197)', () => {
-  const FIRM_SENTENCE = 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.';
+  const FIRM_SENTENCE = 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). If it has no firm, set the firm in the invoice header above, then decide.';
   const SERVER_SENTENCE = 'This invoice has no firm. A reviewer must add the firm before its lines can be decided.';
 
   it('must-fire: disables Confirm (Accept, Reduce, Disallow), the ticked-row actions, Accept all clean, the By-rule suggestions and the corrections, and says why', async () => {
@@ -1362,8 +1362,15 @@ describe('source guards', () => {
     }
   });
 
-  it('registers the Navigator side pane on mount', () => {
+  it('registers the Navigator side pane on mount (through the e-billing shared bootstrap, issue 2965)', () => {
     const main = fs.readFileSync(path.join(srcDir, 'main.tsx'), 'utf8');
-    expect(main).toMatch(/React\.useEffect\(\(\) => \{\s*ensureNavigatorSidePane\(\);\s*\}, \[\]\);/);
+    expect(main).toMatch(/useCodePageBootstrap\(\{[^}]*registerNavigator: true/);
+    const shared = fs.readFileSync(path.resolve(srcDir, '../../_ebilling-shared/codePageBootstrap.ts'), 'utf8');
+    expect(shared).toMatch(/React\.useEffect\(\(\) => \{\s*if \(registerNavigator\) ensureNavigatorSidePane\(\);\s*\}, \[registerNavigator\]\);/);
+  });
+
+  it('uses no colour literal in the shared chrome the page now mounts through (issue 2965)', () => {
+    const chrome = fs.readFileSync(path.resolve(srcDir, '../../_ebilling-shared/codePageChrome.tsx'), 'utf8');
+    expect(findColourLiterals(chrome)).toEqual([]);
   });
 });

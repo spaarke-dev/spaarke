@@ -1,0 +1,17 @@
+# Legal hold accelerator: what build_package.py assembles (individual-base package). Paths are relative to
+# src/accelerators/. Unlike practices/nda this practice has no plugin of its own yet: its skill ships as a Cowork
+# skill folder (Documents/Cowork/Skills/legal-hold-review).
+id: legal-hold
+version: 0.1.0
+status: mvp-test # positions are test positions, not attorney-approved
+
+skills:
+  - name: legal-hold-review
+    source: practices/legal-hold/skills/legal-hold-review
+    engines: [probe, safe_docx, segment_clauses, playbook_parse, ooxml_redline, summary_table, check_outputs]
+    references:
+      - core/shared-references/guardrails.md
+      - core/shared-references/spaarke-review-method.md
+      - core/schemas/edit-plan.schema.json
+      - { from: "practices/legal-hold/positions/Spaarke Legal Hold Notice – Employee Custodians v1.0.md", as: legal-hold-playbook.md }
+      - generated/topics.json

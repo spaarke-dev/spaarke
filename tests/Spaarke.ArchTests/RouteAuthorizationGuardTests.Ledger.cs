@@ -602,8 +602,10 @@ public partial class RouteAuthorizationGuardTests
             + "ADR-008 Amendment A1 (word-add-in-r1 tasks 121 + 138): POST /save makes two checks in the service on a resource "
             + "only the save's own lookup identifies -- OfficeService.AuthorizeEmailAttachmentAddAsync (Write on the earlier "
             + "save's .eml through InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync, before any read of it and before the "
-            + "add job's row; 403 OFFICE_009) and ReconciledEmailFiling (Write on the matched unfiled communication through "
-            + "CallerRecordAccessProbe with the caller's token, before the filing write; refused = left unfiled)."),
+            + "add job's row; 403 OFFICE_009) and ReconciledEmailFiling (Write on the matched communication through "
+            + "CallerRecordAccessProbe with the caller's token, before the filing write when it is unfiled, and before the "
+            + "confirm write (status Resolved, task 140) when it is filed to the save's own record and unconfirmed; refused = "
+            + "left as it was)."),
         new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/communications/* — every read runs through IDataverseUserClient as the caller (task 127)."),
 

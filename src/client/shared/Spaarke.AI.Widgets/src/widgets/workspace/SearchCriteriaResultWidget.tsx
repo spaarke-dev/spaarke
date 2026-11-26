@@ -63,13 +63,27 @@ export interface SearchCriteriaResultWidgetData {
   query: string;
   /** Active search domain — one of documents / matters / projects / invoices. */
   domain: string;
-  /** Document Type filter when domain === 'documents' (e.g. 'contract'). */
+  /** Selected Document Type LABELS (documents domain); empty or absent = All. */
+  documentTypes?: string[];
+  /** Selected File Type LABELS (documents domain); empty or absent = All. */
+  fileTypes?: string[];
+  /** Selected Matter Type LABELS (documents or matters domain); empty or absent = All. */
+  matterTypes?: string[];
+  /** Start of the date range, a LOCAL calendar day `YYYY-MM-DD`; null/absent = open. */
+  dateFrom?: string | null;
+  /** End of the date range, a LOCAL calendar day `YYYY-MM-DD`; null/absent = open. */
+  dateTo?: string | null;
+  /**
+   * @deprecated Before #3131 the tool sent one value per filter and a date preset id. Workspace
+   * tabs persist their `widgetData`, so tabs saved then still carry these; the widget shows them
+   * when the list fields are absent.
+   */
   documentType?: string;
-  /** File Type filter when domain === 'documents' (e.g. 'pdf'). */
+  /** @deprecated see `documentType`. */
   fileType?: string;
-  /** Matter Type filter when domain === 'matters' or 'documents'. */
+  /** @deprecated see `documentType`. */
   matterType?: string;
-  /** Date range preset (off | last7 | last30 | last90 | custom). */
+  /** @deprecated see `documentType`: a preset id (off | last7 | last30 | last90 | custom). */
   dateRange?: string;
   /**
    * ISO-8601 timestamp at which the dispatcher constructed this payload.
@@ -178,8 +192,23 @@ const useStyles = makeStyles({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Map dateRange preset id → human label. Mirrors SemanticSearchCriteriaTool. */
-function formatDateRange(preset: string | undefined): string {
+/** The date range as shown: "From – To" (an open side reads "any"), or the legacy preset label. */
+function formatDateRange(data: SearchCriteriaResultWidgetData): string {
+  const from = data.dateFrom ?? null;
+  const to = data.dateTo ?? null;
+  if (from || to) return `${from ?? 'any'} – ${to ?? 'any'}`;
+  if (data.dateFrom !== undefined || data.dateTo !== undefined) return 'Off';
+  return formatLegacyDatePreset(data.dateRange);
+}
+
+/** The filter values as shown, from the label list or (older tabs) the single legacy value. */
+function filterValues(list: string[] | undefined, legacy: string | undefined): string[] {
+  if (list !== undefined) return list;
+  return legacy && legacy !== 'all' ? [titleCase(legacy)] : [];
+}
+
+/** Map a legacy (pre-#3131) dateRange preset id → human label. */
+function formatLegacyDatePreset(preset: string | undefined): string {
   switch (preset) {
     case 'last7':
       return 'Last 7 days';
@@ -251,10 +280,10 @@ const SearchCriteriaResultWidget: React.FC<WorkspaceWidgetProps<SearchCriteriaRe
 
   const query = isValid ? data.query : '';
   const domain = isValid ? data.domain : '';
-  const documentType = isValid ? data.documentType : undefined;
-  const fileType = isValid ? data.fileType : undefined;
-  const matterType = isValid ? data.matterType : undefined;
-  const dateRange = isValid ? data.dateRange : undefined;
+  const documentTypes = isValid ? filterValues(data.documentTypes, data.documentType) : [];
+  const fileTypes = isValid ? filterValues(data.fileTypes, data.fileType) : [];
+  const matterTypes = isValid ? filterValues(data.matterTypes, data.matterType) : [];
+  const dateRangeLabel = isValid ? formatDateRange(data) : 'Off';
   const capturedAtLabel = formatCapturedAt(isValid ? data.capturedAt : undefined);
 
   // Per-domain filter visibility — mirrors SemanticSearchCriteriaTool.
@@ -262,11 +291,11 @@ const SearchCriteriaResultWidget: React.FC<WorkspaceWidgetProps<SearchCriteriaRe
   const showFileTypeFilter = domain === 'documents';
   const showMatterTypeFilter = domain === 'documents' || domain === 'matters';
 
-  const renderFilterValue = (value: string | undefined): React.ReactNode => {
-    if (!value || value === 'all' || value === '') {
+  const renderFilterValue = (values: string[]): React.ReactNode => {
+    if (values.length === 0) {
       return <Text className={mergeClasses(styles.sectionValue, styles.emptyValue)}>All</Text>;
     }
-    return <Text className={styles.sectionValue}>{titleCase(value)}</Text>;
+    return <Text className={styles.sectionValue}>{values.join(', ')}</Text>;
   };
 
   return (
@@ -329,27 +358,27 @@ const SearchCriteriaResultWidget: React.FC<WorkspaceWidgetProps<SearchCriteriaRe
             {showDocumentTypeFilter && (
               <div className={styles.section}>
                 <Text className={styles.sectionLabel}>Document Type</Text>
-                {renderFilterValue(documentType)}
+                {renderFilterValue(documentTypes)}
               </div>
             )}
 
             {showFileTypeFilter && (
               <div className={styles.section}>
                 <Text className={styles.sectionLabel}>File Type</Text>
-                {renderFilterValue(fileType)}
+                {renderFilterValue(fileTypes)}
               </div>
             )}
 
             {showMatterTypeFilter && (
               <div className={styles.section}>
                 <Text className={styles.sectionLabel}>Matter Type</Text>
-                {renderFilterValue(matterType)}
+                {renderFilterValue(matterTypes)}
               </div>
             )}
 
             <div className={styles.section}>
               <Text className={styles.sectionLabel}>Date Range</Text>
-              <Text className={styles.sectionValue}>{formatDateRange(dateRange)}</Text>
+              <Text className={styles.sectionValue}>{dateRangeLabel}</Text>
             </div>
 
             <div className={styles.noticeBanner} data-testid="search-criteria-result-notice">

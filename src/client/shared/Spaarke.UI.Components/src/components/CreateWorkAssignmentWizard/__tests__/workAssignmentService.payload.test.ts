@@ -7,7 +7,7 @@
  * search index (FR-38).
  *
  * Proven here:
- *   (a) `applyFieldMappings` is never imported or called, and no field-mapping profile is read;
+ *   (a) no client mapping engine is imported or called, and no field-mapping profile is read;
  *   (b) the work assignment goes to the route with the related record as the explicit mapping source in the query string
  *       (sprk_workassignment is not in the server's InferMappingSourceTables), and with no query string when it has none;
  *   (c) the follow-on event goes to the route with the NEW work assignment as its mapping source, after the work
@@ -26,11 +26,6 @@ import { WorkAssignmentService } from '../workAssignmentService';
 import { EMPTY_ASSIGN_WORK_STATE, EMPTY_FOLLOW_ON_EVENT_STATE, EMPTY_WORK_ASSIGNMENT_FORM } from '../formTypes';
 import type { ICreateWorkAssignmentFormState } from '../formTypes';
 import { _resetNavPropCacheForTests } from '../../../services/PolymorphicResolverService';
-import { applyFieldMappings } from '../../../services/FieldMappingService';
-
-jest.mock('../../../services/FieldMappingService', () => ({
-  applyFieldMappings: jest.fn(),
-}));
 
 const BFF_BASE = 'https://bff.test';
 const WA_ROUTE = `${BFF_BASE}/api/v1/child-records/sprk_workassignment`;
@@ -219,7 +214,6 @@ describe('WorkAssignmentService — the server write path (task 026, FR-16)', ()
     stubNavPropFetch();
     jest.spyOn(console, 'info').mockImplementation(() => undefined);
     jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    (applyFieldMappings as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -298,20 +292,18 @@ describe('WorkAssignmentService — the server write path (task 026, FR-16)', ()
   });
 
   // (a) -------------------------------------------------------------------------------------------------------------
-  it('does not use the client field-mapping engine: applyFieldMappings is never called and no profile is read', async () => {
+  it('does not use the client field-mapping engine: no profile is read', async () => {
     const fetchMock = makeFetch();
     const service = new WorkAssignmentService(makeDataService(), fetchMock, BFF_BASE, undefined);
 
     await service.createWorkAssignment(makeForm(MATTER_FILING), [], []);
     await service.createFollowOnEvent(NEW_WA_ID, { ...EMPTY_FOLLOW_ON_EVENT_STATE });
 
-    expect(applyFieldMappings).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/field-mappings/'))).toBe(false);
   });
 
-  it('source scan: workAssignmentService.ts has no applyFieldMappings or FieldMappingService', () => {
+  it('source scan: workAssignmentService.ts has no FieldMappingService', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../workAssignmentService.ts'), 'utf8');
-    expect(source).not.toMatch(/applyFieldMappings/);
     expect(source).not.toMatch(/FieldMappingService/);
   });
 
