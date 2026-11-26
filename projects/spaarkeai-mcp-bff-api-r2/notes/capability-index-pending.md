@@ -30,3 +30,13 @@ copies it into the index (next free `#`) and marks it applied.
 1. Line 5 (`appliesTo`): add `"**/RouteAuthorizationGuardTests.Mcp.*.cs"` after `"**/RouteAuthorizationGuardTests.Mcp.cs"`, so the skill loads when a tool task edits its area's ledger partial.
 2. Workflow step 4, replace with: `4. **Add the ledger entry** in your area's partial, `RouteAuthorizationGuardTests.Mcp.{Area}.cs` (`McpTools{Area}`: policy, caller seam, reason), never in `RouteAuthorizationGuardTests.Mcp.cs` (it concatenates the partials). The ArchTest fails on any tagged tool missing from every partial or listed twice.`
 3. Workflow step 3, append: `Errors: `McpToolResults.FromError(new McpToolError(reasonCode, message, status, partial?), http?.TraceIdentifier)` with the REST route's `reasonCode`. Work that can take over 30 s (`McpLongRunning.Budget`): return `McpLongRunning.Started(...)` and add a status tool that returns `McpLongRunning.Status(...)` (FR-14).`
+
+## Task 024 — playbook lists for the caller (status: pending)
+
+| # | Capability | Synonyms | Canonical component | Symbol | Governing ADR | Extension point |
+|---|---|---|---|---|---|---|
+| (next) | List the signed-in caller's own JPS playbooks or the public ones (the rules of `GET /api/ai/playbooks` and `/public`) from REST or an MCP tool | playbook list, my playbooks, public playbooks, owned playbooks, playbook catalog, list_playbooks | `src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs` | `PlaybookEndpoints.ListPlaybooksForCallerAsync(HttpContext?, PlaybookListScope, …)` → `PlaybookListResult` (`Outcome`, `Status`, `ReasonCode`, `Page`) | `.claude/adr/ADR-013-ai-architecture.md` (grandfathered owner of the `IPlaybookService` call; no AI-internal type in the signature), `.claude/adr/ADR-028-spaarke-auth-architecture.md` (as the caller, fails closed), `.claude/adr/ADR-019-problemdetails.md` | Pass the request's own `HttpContext` (never a token); map `PlaybookListResult` to your contract. The owner is the caller's `systemuserid` (WhoAmI), and `OwnerUnresolved` is an empty page on REST — an `/mcp` host refuses it with `UserContextRequired` (ADR-028 A10). Never call `IPlaybookService.ListUserPlaybooksAsync` / `ListPublicPlaybooksAsync` directly from new non-AI code. Consumers: the two REST handlers, `Api/Mcp/LegalOperations/Playbooks/ListPlaybooksTool.cs`. |
+
+### `.claude/skills/mcp-tool-handler/SKILL.md` / guide note (optional)
+
+- Resources table: "the five legal-operations tools" is now six (task 024 adds `spaarke_list_playbooks`); the guide's Step 4 still names `RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyTheFiveV1Tools` (method name kept; its list now holds 6).

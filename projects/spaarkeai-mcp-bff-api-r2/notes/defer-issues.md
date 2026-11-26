@@ -105,3 +105,17 @@
   - K4: Partial is untyped; revisit when the first non-decision tool uses it.
   - K2: an unwired partial can hide a stale row (fails closed for tagged tools).
   - K2: an out-of-range McpRunState is a programming error only.
+
+## From task 024 (2026-11-25)
+
+GitHub issues: NOT yet filed (task 024 ran as a wave sub-agent told to record here only); the main session files both and adds the links.
+
+### D-024-1: the playbook list routes answer 500, not the AI kill switch's 503, when AI is disabled (pre-existing)
+- **Title**: `GET /api/ai/playbooks and /public answer 500 "Failed to list playbooks" when the AI feature is switched off`
+- **Body**: With AI disabled, `NullPlaybookService.ListUserPlaybooksAsync` / `ListPublicPlaybooksAsync` throw `FeatureDisabledException`. The two list handlers' catch-all (now `PlaybookEndpoints.ListPlaybooksForCallerAsync` → `Failed`, unchanged bytes by design in task 024) turn it into a 500, where `GET /api/ai/chat/playbooks` (`ChatEndpoints.cs` ~:1867) answers the kill switch's 503 (`ex.AsFeatureDisabled503()`). Failure scenario: an environment with AI switched off shows "Failed to list playbooks" (an error to retry) instead of "AI is disabled"; `spaarke_list_playbooks` relays it as `playbook.list-failed` / 500 "try again shortly". Fix: add a `Disabled` outcome (503, the feature-disabled code) to `PlaybookListResult`, map it in the REST handlers (a REST contract change; update `PlaybookListRoutesFrozenBytesTests`) and in the tool.
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
+
+### D-024-2: the chat playbook picker keeps its own copy of the owned+public list rules (pre-existing duplication)
+- **Title**: `GET /api/ai/chat/playbooks re-implements the owned/public playbook list instead of PlaybookEndpoints.ListPlaybooksForCallerAsync`
+- **Body**: `ChatEndpoints.cs` ~:1830-:1900 resolves the owner (`ResolveCallerSystemUserIdAsync`), lists owned then public at page size 50 and de-duplicates by id — the same rules task 024 made one method for (and the MCP tool's union). It differs: on an unresolvable systemuser it lists public only, on an owned-list fault it continues with public only, and it answers the kill switch 503. Failure scenario: a future change to the owner or fail-closed rule in the shared method (e.g. D-024-1) silently misses the picker. Fix: call the shared method twice (owned, public) and keep only the picker's own union and 503 mapping.
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Task (tech debt).
