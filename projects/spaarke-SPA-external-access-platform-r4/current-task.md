@@ -8,8 +8,8 @@
 | Field | Value |
 |-------|-------|
 | **Active** | None. Task 042 is ✅ completed (FR-26 #2155, FR-27 #2449); details in `notes/task-042-notes.md`. The next 🔲 in `TASK-INDEX.md` is the next task. |
-| **In flight** | Task 042's PR (open it from this branch; merge only on the owner's go). PR #3180 (041) and #3160 (040) MERGED. |
-| **Next action** | Open/confirm the 042 PR, then ask the owner for the merge go. Then the next 🔲 in `TASK-INDEX.md` via task-execute. After the 042 merge: flip #2449 / #2155 in R3's `notes/defer-issues.md` (ISS entries at ~:692 and ~:815) to Done with the PR link. |
+| **In flight** | **PR #3203** (task 042) open, pushed at `2e1a02dec3`; auto-merge OFF: **merge only on the owner's go.** #2449 now has only the r4 label. PR #3180 (041) and #3160 (040) MERGED. No uncommitted files. |
+| **Next action** | Check #3203 CI with `mcp__ccd_pr__get_status` (never poll), then ask the owner for the merge go. Then the next 🔲 in `TASK-INDEX.md` via task-execute. After the 042 merge: flip #2449 / #2155 in R3's `notes/defer-issues.md` (ISS entries at ~:692 and ~:815) to Done with the PR link. |
 
 ## Task 042 outcome
 - BFF: the workforce 403 `registration_required` prefills `email` with `ExternalRegistrationEndpoints.TokenEmail` (the registration's rule: the email claim only, one value). `WorkforceCallerClaims.TokenEmail` unchanged. The licensedUser hint reads the same value.
