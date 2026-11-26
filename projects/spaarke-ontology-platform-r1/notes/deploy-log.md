@@ -1,5 +1,19 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-26 ~13:02Z — `sprk_communicationreconciliation` redeployed to dev from master `6a2a569ac9`
+
+- **Owner go:** "Yes redeploy the reconciliation" (2026-11-26, typed in the main session's chat).
+- **Why:** live was our 2026-11-24 build `a2a1ab60009c` from `57a68b06c5`. About 60 master commits since then touch the page or the libraries it bundles, including task 140's communication-components fixes, #3071 (sdap-client folded into ui-components) and #3058.
+- **Source and build:** implementer agent (Sonnet) in a fresh detached worktree `C:\wtdep-recon` at origin/master `6a2a569ac9`. Libraries were built in the order Auth, UI.Components, Communication.Components (`@spaarke/sdap-client` no longer exists). The page was built with caches cleared: vite built 3,636 modules into `dist/sprk_communicationreconciliation.html`.
+- **D-126 clobber check:** acorn parse of the inline script; string literals and template quasis compared, 9,365 in live against 9,374 in the build. **Live-only: 0.** Build-only: 9, of which the user-facing ones are "Open invoice", "work assignment", " column options, filtered", and the error tail "… because of how the record you chose is set up. Submitting it again will not help until that is fixed. Contact the team".
+- **Write:** live was re-read just before the write and equalled the snapshot. PATCH by id returned 204, then one `PublishXml` naming only that id returned 204. No `PublishAllXml`, no solution import, and no other Dataverse write.
+- **Result:**
+  - Live `a2a1ab60009c` (1,578,908 B) → **`a6735d597819`** (1,584,859 B), modifiedon 13:02:09Z.
+  - The API content and the served `/WebResources/` content both equal the build. The main session re-read it independently: `a6735d597819`, "Open invoice" present, "Link Invoice" absent.
+- **Rollback:** the pre-deploy content was saved as `live.html` in the session scratchpad.
+- **Cleanup:** `C:\wtdep-recon` was removed with `Remove-WorktreeSafe.ps1 -Force`. The force was needed only because `npm install` had rewritten the page's `package-lock.json`.
+- **Not done:** no UI click-through. The page opens from the Email Review sitemap entry.
+
 ## 2026-11-26 ~03:15Z — #3199 (D-227 finding first) live in the Console on dev (read-only check)
 
 - The owner asked for a LegalWorkspace deploy. None was needed: LegalWorkspace has no web resource of its own (`sprk_corporateworkspace` was retired) and is compiled into the Console bundle `sprk_spaarkeai`. `deploy-spaarke-ai.yml` republished the bundle from master for `14f45b7412` (#3199, run started 02:51:37Z) and again for `5577cace71` (02:58:13Z); both succeeded. Nothing was deployed by hand.
