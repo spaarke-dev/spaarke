@@ -26,7 +26,7 @@
 - **mcp-r1 ISS-010 Part C: PR #3272** (head 18be14d973; the kill-switch fix was re-checked and approved; the PR quotes both approval lines). mcp-r1 merges it. Part E #3260 is MERGED to master as 4d69bf527e and NOT deployed. **NEXT: review the Part D1 diff when it is built.**
 - **spa-r4 task 043 (PR #3267):** approved; both notes resolved (370390781e). Merge on owner's go in their session; dev deploy then on the owner's SHA go here.
 - **ontology-r1 PR #3270 (task 225, DR inline share):** APPROVED 2026-11-26 (~20:05Z). Notes they accepted: keep the share after `accessWindow.Close()` whichever of #3270/Part C lands second; resumed/replay paths rely on the reconcile (one line in the PR). They merge after their Opus reviews + CI.
-- **field-mapping-r1:** 051 live on dev (verified). 064b merged on their branch; 064c running → they send the combined 064 diff; I agreed with the fail-closed CallerWriteAuthorization change.
+- **field-mapping-r1:** 051 is live on dev (verified). **Combined 064 (064+b+c+d, `3e0268349a..fd8172ea32`): APPROVED 2026-11-26 ~20:30Z.** One pre-deploy condition: a read-only dev check that every column of the other create tables (document, communication, todo, workassignment, invoice, project, analysis, memo) returns a boolean IsSecured, because the fail-closed CallerWriteAuthorization change would otherwise refuse creates. Target-side field-security skip = owner-decided known limit. Nit: a missing source column gets the "field-secured" warning text.
 - **mcp-r2 030 + ADR-052 amendment:** 030 closed; amendment PROPOSED until the owner's security sign-off.
 - **word-add-in-r1 #3214 (task 140):** gate passed.
 
