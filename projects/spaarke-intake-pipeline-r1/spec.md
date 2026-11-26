@@ -119,7 +119,7 @@ r1 = design Phases 0–3 (owner clarification, 2026-11-25).
      - (d) The image has no HIGH or CRITICAL CVE.
      - (e) Cold-start and run latency are measured and recorded.
      - (f) The job has no secrets and makes no network calls other than blob storage and Service Bus.
-     - (g) A refused edit (anchor not unique, or crossing a revision) is reported in the check report, never applied.
+     - (g) A refused edit (anchor not unique, or crossing a revision) is never applied. On master the engine refuses the whole plan (exit 3); the job ends that run with the non-retryable outcome `plan_does_not_fit`, carrying the refused edit's index and a reason code, never clause text. When the accelerator ships its skip-and-report mode, the job runs in that mode and returns the refused edits as structured data while the edits that fit are applied (owner 2026-11-26).
 2. **FR-02 App-only agreement review writes an edit plan.**
    - **What:** `agreement-classify` and `agreement-review` run app-only from a job, through a PublicContracts facade, outside any chat session. The review step writes an edit plan that is valid against `edit-plan.schema.json`. Topic ids come from the pinned NDA standard.
    - **Acceptance:**
@@ -202,12 +202,15 @@ r1 = design Phases 0–3 (owner clarification, 2026-11-25).
 9. **FR-09 NDA harness.**
    - **What:** classify (FR-02) → review into an edit plan → engine job (FR-01) → redline, external and clean `.docx` plus the page-1 clause table → `check_outputs` passes → persist the outputs as `sprk_document`s on the request and the results as `sprk_analysis`/`sprk_analysisoutput` linked to the run. The pinned NDA standard version is stamped on the run and on every output.
    - **Prior markup (owner):** existing tracked changes and comments in the submitted draft are preserved. They are never accepted, rejected or removed. An edit whose anchor crosses an existing revision becomes a comment-only note, and the clause table lists it as a "manual" row.
+   - **Refused edits (owner 2026-11-26: "A, with B as backup"):** (A) the engine applies the edits that fit and reports the ones it cannot place (accelerator skip-and-report mode); (B) the harness gives each refused edit one AI rewrite and one more engine pass; an edit still refused becomes a comment plus a "manual" clause-table row for the attorney. One awkward clause never fails the whole NDA.
+   - **Clean copy (owner 2026-11-26):** Clean accepts every revision, from all sides; that is what a clean copy is. The redline and external outputs keep every prior and new edit and never auto-accept anything.
    - **Acceptance:**
      - (a) A clean synthetic NDA produces three outputs and a clause table, and `check_outputs` passes.
      - (b) A synthetic NDA with counterparty revisions and comments keeps every one of them in the redline and external outputs, and refused edits appear as comments plus manual rows.
      - (c) A `check_outputs` failure holds the run with admin attention and sends nothing for approval.
      - (d) The version stamp equals the pinned standard version.
-     - (e) The Clean output follows the resolution of Unresolved Question 1.
+     - (e) The Clean output accepts all revisions from all sides; the redline and external outputs lose no edit and accept none (Unresolved Question 1, resolved 2026-11-26).
+     - (f) A plan with one unplaceable edit still produces outputs: the edit gets one AI rewrite, and if still refused it is a comment plus a manual row; the other edits are applied.
 10. **FR-10 Manual-triage path.**
     - **What:** when a request is not an NDA, no harness is registered for its type, or classification confidence is below the harness threshold:
       - the request moves to "Needs triage";
@@ -524,7 +527,7 @@ The External SPA (Front Door) is also touched (FR-13, FR-16).
 
 ## Unresolved Questions
 
-- [ ] **Clean copy with prior markup.** The engine's Clean output "accepts all changes", which would accept the counterparty's revisions; the owner requires that they are never accepted. Options: the engine accepts only our revisions in Clean (an accelerator engine change), or Clean is omitted for drafts with prior markup. Blocks: FR-09 acceptance (e); settle in the Phase 0 spike with the accelerator.
+- [x] **Clean copy with prior markup.** Resolved by the owner 2026-11-26: a clean copy accepts all revisions from all sides by definition, so the engine's Clean output is correct as is. The rule that applies is to the redline files: never lose an edit and never auto-accept (FR-09 (e)).
 - [ ] **ADR-049 scope confirmation.** Confirm in `/adr-check` that I-5/I-7 govern only the Compose save path. Blocks: FR-09 code review sign-off.
 - [ ] **Ontology columns on `sprk_servicerequest`.** Agree names and ownership of direction, disposition and response-due date with ontology r1 so FR-05 doesn't collide. Blocks: FR-05 schema task.
 
