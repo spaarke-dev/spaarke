@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="142" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>ISS-043 reopened: the reconciliation page shows a written regarding as needs-confirmation, not "No confident match"</title>
+    <phase>Phase 7: fixes before close</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared client logic (.ts) on every ReconciliationWorkspace mount; tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <deps>140</deps>
+    <tags>react, frontend, communications</tags>
+  </metadata>
+
+  <prompt>Task 140 (PR #3214, 152397ab11) made `derivePrimaryReview` show a written regarding on an unconfirmed row as
+'needs-confirmation', and it passed the owner's check in the add-in. On 2026-11-26 the owner reported, through
+spaarke-ontology-platform-r1, that the email reconciliation page still shows "No confident match" for such a row.
+
+Root cause (ontology-r1's trace, verified here): the reconciliation page's row mapper `buildResolveReview`
+(`Spaarke.Communication.Components/src/logic/connections/reconciliationResolvers.ts`, shared by all three
+ReconciliationWorkspace mounts: the standalone code page, the Console widget, and the LegalWorkspace section) never
+passed `filedAssociations` or `regardingRecordId` to `EmailConnectionsReview`. The review then reduced the row to a
+denorm-only primary with no target id, and task 140's rule (an id is needed to confirm) kept it red. The Email
+workspace's mapper (`EmailWorkspace.mapping.ts`) already passed both, which is why task 140's check passed there.</prompt>
+
+  <goal>On the reconciliation page, an unconfirmed (not Resolved, not Ambiguous) row whose typed regarding lookup is
+written shows that record as its primary in 'needs-confirmation', with the existing Confirm.</goal>
+
+  <constraints>
+    <constraint>`reconciliationResolvers.ts` stays a Layer-1 module with no runtime import from the component layer or
+`@spaarke/ui-components`; the typed-lookup reader lives there, shared with `resolveRegarding`.</constraint>
+    <constraint>`resolveRegarding` behaviour is unchanged (pair-preferred, else the first filed slot; Resolved only).</constraint>
+    <constraint>No change to `derivePrimaryReview` or `EmailConnectionsReview`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>An enriched Suggested row with `_sprk_regardingmatter_value` written: `buildResolveReview` returns that
+matter in `filedAssociations` (name from the FormattedValue annotation, else the id) and the cleaned
+`sprk_regardingrecordid`; `derivePrimaryReview` over those props is 'needs-confirmation' with that matter as primary.</criterion>
+    <criterion>When the pair names a second filed slot, the primary is the pair's record.</criterion>
+    <criterion>Negative: a lightweight grid row with no typed lookups gives an empty `filedAssociations` and stays
+'requires-review'; a row with no regarding gives a null id.</criterion>
+    <criterion>The new test fails without the fix and passes with it; package jest, tsc and client-lint pass.</criterion>
+    <criterion>After merge, with the owner's go: `sprk_communicationreconciliation` and the Console (`sprk_spaarkeai`)
+are rebuilt from master and redeployed (the Console's workflow paths omit this package); the owner re-checks; #3194 is
+closed and ontology-r1 is told.</criterion>
+  </acceptance-criteria>
+
+  <notes>2026-11-26: fix + test in `C:\wt142` (branch fix/word-addin-142). New test fails 8/8 before the fix, 8/8 after;
+package jest 45 suites / 475 tests; tsc 0; client-lint ok; prettier clean.</notes>
+</task>
