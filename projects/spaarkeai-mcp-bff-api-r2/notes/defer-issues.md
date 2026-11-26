@@ -145,6 +145,26 @@
   by matter). Failure scenario: a dead route is still an authorization surface that must stay correct (two filters guard it) and that a
   refactor can break unnoticed. Fix: delete it with its filter wiring or give it a caller and a test. Out of scope for 023.
 - **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Task.
+
+### D-023-3: DocumentEntity.MatterName / ProjectName are never filled in production (pre-existing; the document tools withhold names until it is fixed)
+
+- **GitHub issue**: not filed
+- **Title**: `DataverseServiceClientImpl.MapToDocumentEntityWithLookups sets MatterId/ProjectId but never MatterName/ProjectName, and three outputs depend on the null`
+- **Body**:
+  `MapToDocumentEntityWithLookups` (`src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs`, ~:1461-1483) copies the lookup ids
+  only, although the retrieves ask for `sprk_matter` / `sprk_project` and the SDK sets `EntityReference.Name`. `DocumentEntity.MatterName` /
+  `ProjectName` are therefore null in production. Filling them (`MatterName = matterRef.Name`, `ProjectName = projectRef.Name`) changes three
+  outputs that today fall back on the null: (1) `POST /api/ai/search` with `associatedOnly=true`:
+  `SemanticSearchService.MapDocumentEntityToSearchResult` sets `parentEntityName` (null becomes the name); (2) `GET /api/ai/visualization/related/{documentId}`:
+  `VisualizationService.CreateParentHubNode` sets the hub label (the literal "Matter"/"Project" becomes the name); (3) the index parent
+  stamp: `DocumentIndexParentResolver.DecideAsync` sets `ParentEntityContext.EntityName` (the "Unknown ..." fallback becomes the name;
+  used by the `RagEndpoints` index paths, so what is written to the index changes). Failure scenario today: the Spaarke MCP tools
+  `spaarke_list_documents` and `spaarke_get_document` cannot name the matter or project a document is filed under, and the REST
+  search, visualization and index outputs above show placeholder or empty names. Fix: decide whether those three output changes are
+  wanted (owner / uac-r2), then fill the names in the mapping and update their tests. After the fix the document tools add the name back
+  (`regarding.name` on the list, `regardingMatter.name` / `regardingProject.name` and the "Filed under ..." text lines on the get;
+  task 023 removed them: D-023-names in `023-decisions.md`).
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Bug.
 ## From task 024 (2026-11-25)
 
 GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).

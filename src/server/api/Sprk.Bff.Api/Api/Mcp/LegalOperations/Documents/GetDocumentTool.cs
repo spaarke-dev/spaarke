@@ -24,16 +24,16 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 // no package, no DI registration (found by [McpArea]), no background work, no AI-internal type.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
-//   Existing: GET /api/v1/documents/{id}, GET /api/documents/{id}/preview-url and /open-links (their link steps are now
-//     FileAccessEndpoints.MintPreviewUrlAsync and ResolveOpenLinksAsync, extracted unchanged under a frozen-bytes test).
+//   Existing: GET /api/v1/documents/{id} and GET /api/documents/{id}/open-links (its link step is now
+//     FileAccessEndpoints.ResolveOpenLinksAsync, extracted unchanged under a frozen-bytes test).
 //   Extension: this IS the extension: it makes the routes' per-document decision (DocumentAuthorizationFilter's, through
 //     InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync, the one document-resource decision outside the filter), reads the row the
-//     GET route reads, and calls the two extracted methods for the links.
+//     GET route reads, and calls the extracted open-links method for the links.
 //   Cost of doing nothing: Copilot users cannot open a matter document by id (FR-03), and the email widget cannot show an attachment.
 // =====================================================================================================================
 
 /// <summary>
-/// <c>spaarke_get_document</c> (FR-03): one Spaarke document's slim metadata and its preview and open links, for a caller who may read it.
+/// <c>spaarke_get_document</c> (FR-03): one Spaarke document's slim metadata and its desktop and browser open links, for a caller who may read it.
 /// Read-only; visible to the model and the widget.
 /// </summary>
 /// <remarks>
@@ -44,13 +44,16 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 /// exist give the same <c>isError</c> not-found (<see cref="DocumentToolSupport.NotFound"/>): the REST routes already answer the first
 /// and third alike (403, because Dataverse grants no rights on a row that does not exist), so a uniform result contradicts no contract.</para>
 /// <para><b>Metadata</b> is the row <c>GET /api/v1/documents/{id}</c> returns (<c>IDocumentDataverseService.GetDocumentAsync</c>), reduced
-/// to what the model may see (ADR-015, NFR-07): id, name, file type, size, modified date and the matter or project it is filed under. No
+/// to what the model may see (ADR-015, NFR-07): id, name, file type, size, modified date and the id of the matter or project it is filed under (no display name: D-023-names). No
 /// storage pointer, summary, description or content.</para>
-/// <para><b>Links</b> come from <see cref="FileAccessEndpoints.MintPreviewUrlAsync"/> and <see cref="FileAccessEndpoints.ResolveOpenLinksAsync"/>,
-/// the link steps of the two routes, so the tool and the routes cannot disagree. The tool does not do the open-links route's last step
-/// (a just-in-time writer role on a secure container): it is read-only. When a link cannot be made (no file attached, the pointer's
-/// container is refused, Graph fails) the metadata is still returned with <c>linksError</c> (<c>{ reasonCode, message }</c>), never a
-/// whole-call failure.</para>
+/// <para><b>Links</b> come from <see cref="FileAccessEndpoints.ResolveOpenLinksAsync"/>, the link step of the open-links route, so the tool
+/// and the route cannot disagree. The tool does not do the route's last step (a just-in-time writer role on a secure container): it is
+/// read-only. When a link cannot be made (no file attached, the pointer's container is refused, Graph fails) the metadata is still
+/// returned with <c>linksError</c> (<c>{ reasonCode, message }</c>), never a whole-call failure. <b>No preview link</b> (D-023-preview,
+/// fail closed): the preview URL is minted app-only, outlives the request, works without a Dataverse check and would be model-visible
+/// (NFR-07, ADR-015), so the tool never makes it; the REST route is unchanged.</para>
+/// <para><b>Faults.</b> An unexpected fault in the authorization or row reads is an <c>isError</c> <c>document.unavailable</c> (503) with fixed
+/// text, never the not-found and never an escaped exception; only the caller's own cancellation propagates.</para>
 /// <para><b>Caller (ADR-028 A10).</b> The request context is <c>IHttpContextAccessor.HttpContext</c>; a null context or an unauthenticated
 /// caller is <c>UserContextRequired</c> before anything is read, and nothing falls back to app-only. The bearer token is handed only to the
 /// authorization service, as the REST filter does, and is never logged.</para>
@@ -92,7 +95,7 @@ internal sealed class GetDocumentTool : McpToolDefinition
                 Title = "Get a document",
                 Description =
                     "Use for: opening one Spaarke document the signed-in user may read, by its id: its name, file type, size, last modified "
-                    + "date, the matter or project it is filed under, a preview link and links to open it on the desktop (Word, Excel or "
+                    + "date, the matter or project it is filed under, and links to open it on the desktop (Word, Excel or "
                     + "PowerPoint) or in the browser. Not for: reading or summarising what the document says (use the search or analysis "
                     + "tools); listing a matter's documents (use spaarke_list_documents); downloading, editing or sharing a document. A "
                     + "document that does not exist and one the user may not read return the same not-found answer.",
@@ -151,78 +154,85 @@ internal sealed class GetDocumentTool : McpToolDefinition
                 new McpToolError(DocumentToolSupport.InvalidIdReasonCode, $"'{DocumentIdArgument}' must be the document's id (a GUID).", StatusCodes.Status400BadRequest), http);
         }
 
-        // 1. The routes' per-document decision (Read as the caller, then the external narrowing). Denied, hidden and missing are one answer.
-        var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
-            http!, authorization, userId, [documentGuid], "read", TokenHelper.ExtractBearerTokenOrNull(http!), "mcp-get-document", logger, cancellationToken);
-        if (!decision.IsAllowed)
+        // 1-2. The routes' per-document decision (Read as the caller, then the external narrowing), then the row GET /api/v1/documents/{id}
+        // reads. Denied, hidden and missing are one answer. A fault in either read is "could not answer" (503), never the not-found and
+        // never an escaped exception; only the caller's own cancellation propagates (a timeout that is not theirs is a fault).
+        var documentId = documentGuid.ToString("D");
+        DocumentEntity? document;
+        try
         {
-            return DocumentToolSupport.Failure(DocumentToolSupport.NotFound, http);
+            var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                http!, authorization, userId, [documentGuid], "read", TokenHelper.ExtractBearerTokenOrNull(http!), "mcp-get-document", logger, cancellationToken);
+            if (!decision.IsAllowed)
+            {
+                return DocumentToolSupport.Failure(DocumentToolSupport.NotFound, http);
+            }
+
+            // A row gone between the decision and here is the same not-found.
+            document = await documents.GetDocumentAsync(documentId, cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return DocumentToolSupport.Fault(ex, ToolName, "the document read", http, logger);
         }
 
-        // 2. The row GET /api/v1/documents/{id} reads. A row gone between the decision and here is the same not-found.
-        var documentId = documentGuid.ToString("D");
-        var document = await documents.GetDocumentAsync(documentId, cancellationToken);
         if (document is null)
         {
             return DocumentToolSupport.Failure(DocumentToolSupport.NotFound, http);
         }
 
-        // 3. The links, from the routes' own link steps. A failure here costs the links, not the metadata.
-        string? previewUrl = null;
+        // 3. The open links, from the route's own link step. A failure here costs the links, not the metadata (the result names why).
+        // The preview link is deliberately NOT made (D-023-preview): it is minted app-only, outlives the request, needs no Dataverse
+        // check to use and would be model-visible (NFR-07, ADR-015).
         OpenLinksResponse? open = null;
         LinksError? linksError = null;
         try
         {
-            previewUrl = await FileAccessEndpoints.MintPreviewUrlAsync(
-                document, documentGuid, documentId, speFileStore, containerResolver, logger, http!.TraceIdentifier, cancellationToken);
             open = await FileAccessEndpoints.ResolveOpenLinksAsync(
-                document, documentGuid, documentId, speFileStore, containerResolver, logger, http.TraceIdentifier, cancellationToken);
+                document, documentGuid, documentId, speFileStore, containerResolver, logger, http!.TraceIdentifier, cancellationToken);
         }
         catch (SdapProblemException ex)
         {
-            // The route's own problem (no file attached, pointer container refused, no preview): its code and title, never its detail.
-            previewUrl = null;
-            open = null;
+            // The route's own problem (no file attached, pointer container refused): its code and title, never its detail.
             linksError = new LinksError(ex.Code, ex.Title);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             // ADR-015: the exception type only, never its message (a Graph fault message can carry a drive or item id).
             logger.LogWarning("MCP tool {ToolName}: the links of a document could not be made (a storage or Graph fault: {ExceptionType}).", ToolName, ex.GetType().Name);
-            previewUrl = null;
-            open = null;
-            linksError = new LinksError(LinksUnavailableReasonCode, "The preview and open links could not be made right now. Try again.");
+            linksError = new LinksError(LinksUnavailableReasonCode, "The open links could not be made right now. Try again.");
         }
 
         var row = DocumentToolSupport.RowOf(document);
         var body = new GetBody(
             row,
-            RegardingOf("sprk_matter", document.MatterId, document.MatterName),
-            RegardingOf("sprk_project", document.ProjectId, document.ProjectName),
-            linksError is null ? new DocumentLinks(previewUrl, open?.DesktopUrl, open?.WebUrl) : null,
+            RegardingOf("sprk_matter", document.MatterId),
+            RegardingOf("sprk_project", document.ProjectId),
+            linksError is null ? new DocumentLinks(open?.DesktopUrl, open?.WebUrl) : null,
             linksError);
 
         var text = DocumentToolSupport.LineOf(row)
-                   + (body.RegardingMatter?.Name is { } matter ? $"\nFiled under matter: {matter}" : string.Empty)
-                   + (body.RegardingProject?.Name is { } project ? $"\nFiled under project: {project}" : string.Empty)
                    + (body.Links is { } links
-                       ? $"\nPreview: {links.PreviewUrl}\nOpen in the browser: {links.WebUrl}"
+                       ? $"\nOpen in the browser: {links.WebUrl}"
                          + (links.DesktopUrl is null ? string.Empty : $"\nOpen on the desktop: {links.DesktopUrl}")
                        : $"\nLinks are not available: {linksError!.Message}");
         return DecisionToolCall.Success(text, body);
     }
 
-    private static RegardingRecord? RegardingOf(string entityType, string? id, string? name) =>
+    private static RegardingRecord? RegardingOf(string entityType, string? id) =>
         string.IsNullOrWhiteSpace(id)
             ? null
-            : new RegardingRecord(entityType, id, WorklistItemSummary.Clip(name, DocumentToolSupport.NameBytes));
+            : new RegardingRecord(entityType, id);
 
     /// <summary><c>structuredContent</c> of <c>spaarke_get_document</c>: <see cref="Links"/> or <see cref="LinksError"/> is set, not both.</summary>
     internal sealed record GetBody(
         DocumentRow Document, RegardingRecord? RegardingMatter, RegardingRecord? RegardingProject, DocumentLinks? Links, LinksError? LinksError);
 
-    /// <summary>The links the routes return: the embeddable preview URL (preview-url), and the desktop-app and browser URLs (open-links).</summary>
-    internal sealed record DocumentLinks(string? PreviewUrl, string? DesktopUrl, string? WebUrl);
+    /// <summary>
+    /// The links the open-links route returns: the desktop-app and browser URLs (both need a SharePoint sign-in). There is no preview URL
+    /// by design (D-023-preview): that link works without a sign-in and without a Dataverse check, and must not reach the model.
+    /// </summary>
+    internal sealed record DocumentLinks(string? DesktopUrl, string? WebUrl);
 
     /// <summary>Why the links are missing: <c>{ reasonCode, message }</c>, the REST problem's code and title or this host's own.</summary>
     internal sealed record LinksError(string ReasonCode, string Message);

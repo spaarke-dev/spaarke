@@ -58,3 +58,23 @@ security property the helper owns, one case each per tool).
 - ArchTests: 2848 passed (the two ledger rows included).
 
 rework: none task 023
+
+## Verifier-finding fixes (round 2)
+- D-023-preview: preview link withheld from model-visible output (fail-closed); a widget that needs preview gets it through an app-only
+  path in a later task; owner may reverse. `spaarke_get_document` no longer calls `FileAccessEndpoints.MintPreviewUrlAsync`, and neither
+  its text nor `structuredContent.links` carries a preview or embed URL (links = `desktopUrl`, `webUrl` only). Reason: the preview URL is
+  minted app-only, outlives the request, works without a Dataverse check and is model-visible (NFR-07, ADR-015). The REST routes are
+  unchanged (`FileAccessLinkRoutesFrozenBytesTests`). Supersedes the preview parts of D3 and D5 for the tool.
+- D-023-fault: an unexpected fault in the authorization or Dataverse reads of either tool is an `isError` `document.unavailable` (503) with
+  fixed text and the correlation id (the model-visible text carries no exception text; the log carries the exception type only). The
+  catch is `when (!cancellationToken.IsCancellationRequested)`: an `HttpClient` timeout (`TaskCanceledException`) is mapped, the caller's
+  own cancellation propagates. An open-links fault (SDAP problem or other) still returns the metadata with `linksError`.
+- D-023-empty-text: the list says "No documents are filed under this matter." only when the source returned no rows; when rows came back
+  and none survived the narrowing (or it failed closed), or the list may be cut, it says "No documents you can see are filed under this
+  matter."
+- D-023-names: names withheld until the shared mapping is fixed. A deviation from the POML's model-visible "regarding matter name" field.
+  Filling DocumentEntity.MatterName/ProjectName changes POST /api/ai/search (associatedOnly parentEntityName), GET
+  /api/ai/visualization/related hub label and the index parent stamp, so it is filed as a separate issue for an owner/uac-r2 decision
+  (defer-issues.md D-023-3). Until then `regarding` (list) and `regardingMatter` / `regardingProject` (get) carry `entityType` and `id`
+  only, and the get text has no "Filed under ..." line. `DocumentToolsWorld` no longer seeds a name, so the double gives what production
+  gives; `BothTools_NeverCarryAMatterOrProjectName_EvenWhenTheSourceRowHoldsOne` seeds names on purpose to prove none is passed through.

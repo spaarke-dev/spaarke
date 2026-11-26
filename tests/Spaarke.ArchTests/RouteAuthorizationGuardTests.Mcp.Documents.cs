@@ -15,8 +15,8 @@ public partial class RouteAuthorizationGuardTests
             + "caller (RecordRouteAccessAuthorizationFilter.DecideRouteRecordAsync, the list route's owning-record gate) and the external document "
             + "narrowing over the rows (the list route's second gate); a forbidden and a missing matter are one not-found. Bare [Authorize]."),
         new McpTool("GetDocumentTool", "", "IDocumentDataverseService",
-            "FR-03, read-only: one document's slim metadata (IDocumentDataverseService.GetDocumentAsync, the GET route's row) and its preview and "
-            + "open links (the two routes' extracted link steps), after the routes' own per-document decision, Read as the caller then the external "
+            "FR-03, read-only: one document's slim metadata (IDocumentDataverseService.GetDocumentAsync, the GET route's row) and its desktop and browser "
+            + "open links (the open-links route's extracted link step; no preview link, D-023-preview), after the routes' own per-document decision, Read as the caller then the external "
             + "narrowing, through InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync; forbidden, hidden and missing are one not-found. Bare [Authorize]."),
     };
 }

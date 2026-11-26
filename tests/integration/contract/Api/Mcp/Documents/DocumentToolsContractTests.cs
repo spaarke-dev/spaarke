@@ -96,7 +96,7 @@ public sealed class DocumentToolsContractTests
         var regarding = body.GetProperty("regarding");
         regarding.GetProperty("entityType").GetString().Should().Be("sprk_matter");
         regarding.GetProperty("id").GetString().Should().Be(DocumentToolsWorld.MatterId.ToString("D"));
-        regarding.GetProperty("name").GetString().Should().Be("Acme v. Roadrunner");
+        regarding.TryGetProperty("name", out _).Should().BeFalse("D-023-names: the shared mapping never fills a matter name, so none is advertised");
 
         var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
         text.Should().Contain("Master services agreement.docx").And.Contain(DocumentToolsWorld.ReadableDocumentId);
@@ -187,7 +187,7 @@ public sealed class DocumentToolsContractTests
     // ---- spaarke_get_document --------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Get_ReturnsTheSourceMetadata_AndThePreviewAndOpenLinksTheRestRoutesReturn()
+    public async Task Get_ReturnsTheSourceMetadata_AndTheOpenLinksTheRestRouteReturns()
     {
         var world = new DocumentToolsWorld();
         await using var host = await DocumentToolsHost.StartAsync(world);
@@ -205,15 +205,128 @@ public sealed class DocumentToolsContractTests
         document.GetProperty("modifiedOn").GetDateTime().Should().Be(source.ModifiedOn);
         document.GetProperty("hasFile").GetBoolean().Should().BeTrue();
         body.GetProperty("regardingMatter").GetProperty("id").GetString().Should().Be(source.MatterId);
-        body.GetProperty("regardingMatter").GetProperty("name").GetString().Should().Be("Acme v. Roadrunner");
+        body.GetProperty("regardingMatter").TryGetProperty("name", out _).Should().BeFalse("D-023-names");
         body.TryGetProperty("regardingProject", out _).Should().BeFalse("the document is not filed under a project");
         body.TryGetProperty("linksError", out _).Should().BeFalse();
 
         var links = body.GetProperty("links");
-        links.GetProperty("previewUrl").GetString().Should().Be(DocumentToolsWorld.ExpectedPreviewUrl, "the preview-url route's previewUrl, byte for byte");
+        links.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(new[] { "desktopUrl", "webUrl" }, "only the two links that need a SharePoint sign-in");
         links.GetProperty("webUrl").GetString().Should().Be(DocumentToolsWorld.ExpectedWebUrl, "the open-links route's webUrl");
         links.GetProperty("desktopUrl").GetString().Should().Be(DocumentToolsWorld.ExpectedDesktopUrl, "the open-links route's desktopUrl");
         world.SpeCalls.Should().OnlyContain(c => c.Contains($"b!drive-{DocumentToolsWorld.ReadableDocumentId}"), "the pointer is followed, app-only, for this document only");
+    }
+
+    [Fact]
+    public async Task Get_NeverCarriesAPreviewLink_InTheTextOrTheStructuredContent_AndNeverMintsOne()
+    {
+        // D-023-preview (fail closed): the preview link is minted app-only, outlives the request and works without a Dataverse check, so it
+        // is withheld from everything the model reads. Its REST route is unchanged (FileAccessLinkRoutesFrozenBytesTests).
+        var world = new DocumentToolsWorld();
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var result = await host.CallAsync(GetTool, new { documentId = DocumentToolsWorld.ReadableDocumentId });
+
+        IsError(result).Should().BeFalse(result.GetRawText());
+        var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+        var structured = result.GetProperty("structuredContent").GetRawText();
+        foreach (var surface in new[] { text, structured })
+        {
+            surface.Should().NotContainEquivalentOf("previewUrl").And.NotContainEquivalentOf("Preview:")
+                .And.NotContain("embed.aspx").And.NotContain("nb=true").And.NotContain(DocumentToolsWorld.ExpectedPreviewUrl);
+        }
+
+        text.Should().Contain(DocumentToolsWorld.ExpectedWebUrl, "the sign-in-gated links are still given");
+        world.SpeCalls.Should().NotContain(c => c.StartsWith("preview:", StringComparison.Ordinal), "the preview is not even minted");
+    }
+
+    [Fact]
+    public async Task BothTools_NeverCarryAMatterOrProjectName_EvenWhenTheSourceRowHoldsOne()
+    {
+        // D-023-names: production never fills DocumentEntity.MatterName/ProjectName (the shared mapping sets ids only), so the tools do
+        // not advertise a name field. This row is seeded WITH names to prove the tools do not pass one through if the mapping ever fills it.
+        var world = new DocumentToolsWorld();
+        foreach (var row in world.Rows.Values)
+        {
+            row.MatterName = "Acme v. Roadrunner";
+            row.ProjectName = "Project Wile E";
+            row.ProjectId = Guid.Parse("23000000-0000-4000-8000-0000000000d1").ToString("D");
+        }
+
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var list = await host.CallAsync(ListTool, new { regardingEntityType = "sprk_matter", regardingId = DocumentToolsWorld.MatterId });
+        var get = await host.CallAsync(GetTool, new { documentId = DocumentToolsWorld.ReadableDocumentId });
+
+        IsError(list).Should().BeFalse(list.GetRawText());
+        IsError(get).Should().BeFalse(get.GetRawText());
+        list.GetProperty("structuredContent").GetProperty("regarding").EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(new[] { "entityType", "id" });
+        var body = get.GetProperty("structuredContent");
+        body.GetProperty("regardingMatter").EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(new[] { "entityType", "id" });
+        body.GetProperty("regardingProject").EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(new[] { "entityType", "id" });
+        foreach (var result in new[] { list, get })
+        {
+            result.GetRawText().Should().NotContain("Acme v. Roadrunner").And.NotContain("Project Wile E").And.NotContain("Filed under");
+        }
+    }
+
+    [Fact]
+    public async Task ToolsList_GetDocumentDescription_DoesNotOfferAPreview()
+    {
+        await using var host = await DocumentToolsHost.StartAsync(new DocumentToolsWorld());
+
+        var list = await host.RpcAsync("tools/list", new { });
+
+        var description = list.GetProperty("tools").EnumerateArray()
+            .Single(t => t.GetProperty("name").GetString() == GetTool).GetProperty("description").GetString()!;
+        description.Should().NotContainEquivalentOf("preview");
+    }
+
+    [Fact]
+    public async Task Get_WhenTheOpenLinksFault_StillReturnsTheMetadata_AndSaysTheLinksAreUnavailable()
+    {
+        var world = new DocumentToolsWorld { SpeLinksFault = new InvalidOperationException("Graph said b!drive-secret item-secret is gone") };
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var result = await host.CallAsync(GetTool, new { documentId = DocumentToolsWorld.ReadableDocumentId });
+
+        IsError(result).Should().BeFalse("a Graph fault costs the links, not the call");
+        var body = result.GetProperty("structuredContent");
+        body.GetProperty("document").GetProperty("name").GetString().Should().Be("Master services agreement.docx");
+        body.TryGetProperty("links", out _).Should().BeFalse();
+        body.GetProperty("linksError").GetProperty("reasonCode").GetString().Should().Be(GetDocumentTool.LinksUnavailableReasonCode);
+        var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
+        text.Should().Contain("Master services agreement.docx").And.Contain("Links are not available");
+        result.GetRawText().Should().NotContain("secret", "ADR-015: the fault's message never reaches the model");
+    }
+
+    [Fact]
+    public async Task Get_WhenTheDocumentReadFaults_IsAnIsErrorDocumentUnavailable503_WithNoExceptionText()
+    {
+        var world = new DocumentToolsWorld { DocumentReadFault = new InvalidOperationException("Dataverse says sprk_document 0xdead is down") };
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var result = await host.CallAsync(GetTool, new { documentId = DocumentToolsWorld.ReadableDocumentId });
+
+        IsError(result).Should().BeTrue();
+        Code(result).Should().Be(DocumentToolSupport.UnavailableReasonCode);
+        result.GetProperty("structuredContent").GetProperty("status").GetInt32().Should().Be(503);
+        result.GetProperty("structuredContent").GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
+        result.GetRawText().Should().NotContain("0xdead");
+    }
+
+    [Fact]
+    public async Task List_WhenTheDocumentReadFaults_IsAnIsErrorDocumentUnavailable503_NotAnEmptyList()
+    {
+        var world = new DocumentToolsWorld { DocumentReadFault = new TimeoutException("sprk_document read timed out at 0xdead") };
+        await using var host = await DocumentToolsHost.StartAsync(world);
+
+        var result = await host.CallAsync(ListTool, new { regardingEntityType = "sprk_matter", regardingId = DocumentToolsWorld.MatterId });
+
+        IsError(result).Should().BeTrue("a fault is not an empty matter");
+        Code(result).Should().Be(DocumentToolSupport.UnavailableReasonCode);
+        result.GetProperty("structuredContent").GetProperty("status").GetInt32().Should().Be(503);
+        result.GetRawText().Should().NotContain("0xdead").And.NotContain("No documents");
     }
 
     [Fact]

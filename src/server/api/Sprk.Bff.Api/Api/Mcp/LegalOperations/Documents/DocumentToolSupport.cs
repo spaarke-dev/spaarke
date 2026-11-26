@@ -53,6 +53,30 @@ internal static class DocumentToolSupport
     internal static McpToolError UserContextRequired { get; } =
         new(DataverseUserClientErrorCodes.UserContextRequired, "The request has no signed-in caller.", StatusCodes.Status401Unauthorized);
 
+    /// <summary>The <c>reasonCode</c> of a read that faulted (Dataverse, a decision service or a timeout): this host's own, never a REST code.</summary>
+    internal const string UnavailableReasonCode = "document.unavailable";
+
+    /// <summary>
+    /// An unexpected fault while reading documents: fixed text, no exception text (ADR-015: a Dataverse or Graph message can carry ids), 503.
+    /// It is NOT the not-found: a fault is "could not answer", which the model should retry, not read as "no such document".
+    /// </summary>
+    internal static McpToolError Unavailable { get; } =
+        new(UnavailableReasonCode, "The documents could not be read right now. Try again shortly.", StatusCodes.Status503ServiceUnavailable);
+
+    /// <summary>
+    /// The result for an unexpected fault in <paramref name="step"/>: logs the exception TYPE and the correlation id only (never its
+    /// message or stack: NFR-05, ADR-015) and answers <see cref="Unavailable"/>. Callers catch with
+    /// <c>when (!cancellationToken.IsCancellationRequested)</c>, so a caller's own cancellation still propagates while a timeout that is
+    /// not the caller's (an <c>HttpClient</c> <c>TaskCanceledException</c>) is mapped here.
+    /// </summary>
+    internal static CallToolResult Fault(Exception exception, string toolName, string step, HttpContext? http, ILogger logger)
+    {
+        logger.LogError(
+            "MCP tool {ToolName}: {Step} failed ({ExceptionType}). CorrelationId={CorrelationId}",
+            toolName, step, exception.GetType().Name, http?.TraceIdentifier);
+        return Failure(Unavailable, http);
+    }
+
     /// <summary>An <c>isError</c> result for <paramref name="error"/>, with the request's correlation id.</summary>
     internal static CallToolResult Failure(McpToolError error, HttpContext? http) =>
         McpToolResults.FromError(error, http?.TraceIdentifier);
@@ -152,5 +176,5 @@ internal static class DocumentToolSupport
 /// <summary>One document as the document tools return it (id, name, file type, size, modified date, whether a file is attached).</summary>
 internal sealed record DocumentRow(string Id, string Name, string? FileType, long? SizeBytes, DateTime? ModifiedOn, bool HasFile);
 
-/// <summary>A record a document is filed under: its type, id and display name (the name is absent when the document row carries none).</summary>
-internal sealed record RegardingRecord(string EntityType, string Id, string? Name);
+/// <summary>A record a document is filed under: its type and id. No display name (D-023-names): the shared document mapping never fills one, so the tools do not advertise it.</summary>
+internal sealed record RegardingRecord(string EntityType, string Id);
