@@ -11,9 +11,12 @@ namespace Sprk.Bff.Api.Services.Ai.PlaybookRuns;
 
 /// <summary>
 /// Reads and writes the durable record of a playbook run: one <c>sprk_playbookrun</c> row per run and one
-/// <c>sprk_playbooknoderun</c> row per node the run reached. <see cref="PlaybookOrchestrationService"/> is the only
-/// writer; it writes on the run's own execution path (start, each node, completion — no background work, ADR-052) and
-/// reads back here when a run is not in its in-memory map.
+/// <c>sprk_playbooknoderun</c> row per node the run reached. This is the one writer for every AI run kind
+/// (<see cref="PlaybookRunKind"/>: engine, prompted, coded; the owner's run-record decision, 2026-11-25), so one
+/// component owns the row shape (ADR-002). <see cref="PlaybookOrchestrationService"/> writes the engine's runs on the
+/// run's own execution path (start, each node, completion — no background work, ADR-052) and reads them back here when
+/// a run is not in its in-memory map. Other kinds' callers belong to the projects that own those runs; they take the
+/// same <see cref="PlaybookRunRecord"/> request.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -54,6 +57,10 @@ public sealed class PlaybookRunRecordStore
     internal const string RegardingEntityTypeColumn = "sprk_regardingentitytype";
     internal const string RegardingRecordIdColumn = "sprk_regardingrecordid";
     internal const string SummaryColumn = "sprk_summary";
+    internal const string RunKindColumn = "sprk_runkind";
+    internal const string ActionColumn = "sprk_analysisactionid";
+    internal const string BindingColumn = "sprk_playbookconsumerid";
+    internal const string ParentRunColumn = "sprk_parentrunid";
 
     internal const string NodeRunRunColumn = "sprk_playbookrunid";
     internal const string NodeRunNodeColumn = "sprk_playbooknodeid";
@@ -65,6 +72,8 @@ public sealed class PlaybookRunRecordStore
 
     internal const string PlaybookEntity = "sprk_analysisplaybook";
     internal const string NodeEntity = "sprk_playbooknode";
+    internal const string ActionEntity = "sprk_analysisaction";
+    internal const string BindingEntity = "sprk_playbookconsumer";
     internal const string SystemUserEntity = "systemuser";
     internal const string SystemUserOidColumn = "azureactivedirectoryobjectid";
 
@@ -98,10 +107,31 @@ public sealed class PlaybookRunRecordStore
     {
         var entity = new Entity(RunEntity, run.RunId)
         {
-            [NameColumn] = Truncate($"Playbook run {run.RunId:D}", NameMaxLength),
-            [PlaybookColumn] = new EntityReference(PlaybookEntity, run.PlaybookId),
+            [NameColumn] = Truncate($"{RunNamePrefix(run.Kind)} {run.RunId:D}", NameMaxLength),
+            [RunKindColumn] = new OptionSetValue((int)run.Kind),
             [InputContextColumn] = JsonSerializer.Serialize(new InputContext(run.DocumentIds), InputContextJson),
         };
+
+        // sprk_playbookid is optional since the run-record decision: a prompted or coded run has no playbook.
+        if (run.PlaybookId is { } playbookId)
+        {
+            entity[PlaybookColumn] = new EntityReference(PlaybookEntity, playbookId);
+        }
+
+        if (run.ActionId is { } actionId)
+        {
+            entity[ActionColumn] = new EntityReference(ActionEntity, actionId);
+        }
+
+        if (run.BindingId is { } bindingId)
+        {
+            entity[BindingColumn] = new EntityReference(BindingEntity, bindingId);
+        }
+
+        if (run.ParentRunId is { } parentRunId)
+        {
+            entity[ParentRunColumn] = new EntityReference(RunEntity, parentRunId);
+        }
 
         foreach (var (column, value) in RunStateFields(run))
         {
@@ -140,9 +170,15 @@ public sealed class PlaybookRunRecordStore
             [CompletedOnColumn] = node.CompletedAt.UtcDateTime,
         };
 
-        if (node.NodeId != Guid.Empty)
+        // sprk_playbooknodeid is optional since the run-record decision: an Action run's row has no playbook node.
+        if (node.NodeId is { } nodeId && nodeId != Guid.Empty)
         {
-            entity[NodeRunNodeColumn] = new EntityReference(NodeEntity, node.NodeId);
+            entity[NodeRunNodeColumn] = new EntityReference(NodeEntity, nodeId);
+        }
+
+        if (node.ActionId is { } actionId)
+        {
+            entity[ActionColumn] = new EntityReference(ActionEntity, actionId);
         }
 
         if (node.DurationMs is { } durationMs)
@@ -198,6 +234,15 @@ public sealed class PlaybookRunRecordStore
             return null;
         }
 
+        // A row with no playbook id is a prompted or coded run (the run-record decision made sprk_playbookid optional).
+        // It has no PlaybookRunStatus shape (a playbook id is part of it), so this playbook run read does not return it:
+        // the playbook run routes answer it like an unknown run id. A reader for the other kinds is a later addition to
+        // this store. Checked before the owner lookup, so it costs no further query.
+        if (row.GetAttributeValue<EntityReference>(PlaybookColumn) is not { } playbook || playbook.Id == Guid.Empty)
+        {
+            return null;
+        }
+
         var startedByOid = await ReadTriggeredByOidAsync(
             row.GetAttributeValue<EntityReference>(TriggeredByColumn), cancellationToken).ConfigureAwait(false);
         if (!IsSameOid(startedByOid, callerOid))
@@ -243,7 +288,7 @@ public sealed class PlaybookRunRecordStore
 
         return new StoredPlaybookRun(
             RunId: runId,
-            PlaybookId: row.GetAttributeValue<EntityReference>(PlaybookColumn)?.Id ?? Guid.Empty,
+            PlaybookId: playbook.Id,
             State: state,
             StartedAt: ToOffset(row.GetAttributeValue<DateTime?>(StartedOnColumn)) ?? DateTimeOffset.MinValue,
             CompletedAt: ToOffset(row.GetAttributeValue<DateTime?>(CompletedOnColumn)),
@@ -301,6 +346,14 @@ public sealed class PlaybookRunRecordStore
             yield return (SummaryColumn, Truncate(run.Summary, SummaryMaxLength));
         }
     }
+
+    private static string RunNamePrefix(PlaybookRunKind kind) => kind switch
+    {
+        PlaybookRunKind.Engine => "Playbook run",
+        PlaybookRunKind.Prompted => "Prompted run",
+        PlaybookRunKind.Coded => "Coded run",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown run kind."),
+    };
 
     /// <summary><c>sprk_playbookrunstatus</c>: 0 Pending, 1 Running, 2 Completed, 3 Failed, 4 Cancelled (read on dev 2026-11-25).</summary>
     internal static int ToRunOption(PlaybookRunState state) => state switch
@@ -383,35 +436,102 @@ public enum PlaybookNodeRunOutcome
 /// <summary>The record subject of a run: a Dataverse table logical name and a row id.</summary>
 public sealed record PlaybookRunRegarding(string EntityLogicalName, Guid RecordId);
 
-/// <summary>The run-level values written to <c>sprk_playbookrun</c>.</summary>
-public sealed record PlaybookRunRecord(
-    Guid RunId,
-    Guid PlaybookId,
-    PlaybookRunState State,
-    DateTimeOffset StartedAt,
-    DateTimeOffset? CompletedAt,
-    string? ErrorMessage,
-    string? ErrorCode,
-    Guid? TriggeredBy,
-    string? CorrelationId,
-    PlaybookRunRegarding? Regarding,
-    IReadOnlyList<Guid> DocumentIds,
-    string? Summary);
+/// <summary>
+/// How a run executed (<c>sprk_runkind</c>, a choice on <c>sprk_playbookrun</c>). The numeric values are the choice's
+/// option values (Spaarke's 100000000+ convention, <c>scripts/dataverse/Add-PlaybookRunColumns.ps1</c>).
+/// </summary>
+public enum PlaybookRunKind
+{
+    /// <summary>A playbook run on the node engine (<see cref="PlaybookOrchestrationService"/>).</summary>
+    Engine = 100000000,
+
+    /// <summary>A single prompted Action run.</summary>
+    Prompted = 100000001,
+
+    /// <summary>A coded-workflow run.</summary>
+    Coded = 100000002,
+}
+
+/// <summary>
+/// The run-level values written to <c>sprk_playbookrun</c>: the one write request for every run kind.
+/// </summary>
+/// <remarks>
+/// <b>Extension point.</b> This is an object with init-only members, not a positional parameter list, so a later
+/// addition (another column, or a write mode such as a "required" mode that fails closed for a gated side-effect run) is
+/// one more member with a default. No existing caller changes. Today every write is fail-safe: the store throws, and its
+/// caller logs <c>playbook_run_persist_failed</c> and carries on. The engine writes <see cref="Kind"/>
+/// <see cref="PlaybookRunKind.Engine"/> and sets none of the Action, Binding or parent-run references.
+/// </remarks>
+public sealed record PlaybookRunRecord
+{
+    public required Guid RunId { get; init; }
+
+    /// <summary>The playbook (engine runs); <c>null</c> for a prompted or coded run.</summary>
+    public Guid? PlaybookId { get; init; }
+
+    public PlaybookRunKind Kind { get; init; } = PlaybookRunKind.Engine;
+
+    public required PlaybookRunState State { get; init; }
+
+    public required DateTimeOffset StartedAt { get; init; }
+
+    public DateTimeOffset? CompletedAt { get; init; }
+
+    public string? ErrorMessage { get; init; }
+
+    public string? ErrorCode { get; init; }
+
+    public Guid? TriggeredBy { get; init; }
+
+    public string? CorrelationId { get; init; }
+
+    public PlaybookRunRegarding? Regarding { get; init; }
+
+    public IReadOnlyList<Guid> DocumentIds { get; init; } = [];
+
+    public string? Summary { get; init; }
+
+    /// <summary>The <c>sprk_analysisaction</c> a prompted or coded run executed.</summary>
+    public Guid? ActionId { get; init; }
+
+    /// <summary>The <c>sprk_playbookconsumer</c> (Binding) row the run was routed through.</summary>
+    public Guid? BindingId { get; init; }
+
+    /// <summary>The <c>sprk_playbookrun</c> that started this run (a nested run).</summary>
+    public Guid? ParentRunId { get; init; }
+}
 
 /// <summary>The node-level values written to <c>sprk_playbooknoderun</c>.</summary>
-public sealed record PlaybookNodeRunRecord(
-    Guid RunId,
-    Guid NodeId,
-    string Name,
-    PlaybookNodeRunOutcome Outcome,
-    int Sequence,
-    DateTimeOffset StartedAt,
-    DateTimeOffset CompletedAt,
-    long? DurationMs,
-    int? TokensIn,
-    int? TokensOut,
-    double? Confidence,
-    string? ErrorMessage);
+public sealed record PlaybookNodeRunRecord
+{
+    public required Guid RunId { get; init; }
+
+    /// <summary>The playbook node (engine runs); <c>null</c> (or empty) for an Action run's row.</summary>
+    public Guid? NodeId { get; init; }
+
+    public required string Name { get; init; }
+
+    public required PlaybookNodeRunOutcome Outcome { get; init; }
+
+    public required int Sequence { get; init; }
+
+    public required DateTimeOffset StartedAt { get; init; }
+
+    public required DateTimeOffset CompletedAt { get; init; }
+
+    public long? DurationMs { get; init; }
+
+    public int? TokensIn { get; init; }
+
+    public int? TokensOut { get; init; }
+
+    public double? Confidence { get; init; }
+
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>The <c>sprk_analysisaction</c> the row stands for (a prompted or coded run).</summary>
+    public Guid? ActionId { get; init; }
+}
 
 /// <summary>A node row read back from <c>sprk_playbooknoderun</c>.</summary>
 public sealed record StoredPlaybookNodeRun(

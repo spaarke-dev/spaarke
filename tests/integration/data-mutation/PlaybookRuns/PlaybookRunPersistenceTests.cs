@@ -87,6 +87,10 @@ public sealed class PlaybookRunPersistenceTests
         created.GetAttributeValue<string>("sprk_correlationid").Should().Be(TraceId);
         created.GetAttributeValue<string>("sprk_regardingentitytype").Should().Be("sprk_matter");
         created.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(MatterId.ToString("D"));
+        created.GetAttributeValue<OptionSetValue>("sprk_runkind").Value.Should().Be(100000000, "the node engine's rows are Engine runs");
+        created.Contains("sprk_analysisactionid").Should().BeFalse("the engine path sets none of the prompted/coded references");
+        created.Contains("sprk_playbookconsumerid").Should().BeFalse();
+        created.Contains("sprk_parentrunid").Should().BeFalse();
         created.Contains("sprk_completedon").Should().BeFalse();
 
         var row = _dataverse.Row("sprk_playbookrun", runId);
@@ -242,6 +246,92 @@ public sealed class PlaybookRunPersistenceTests
 
         (await status.Should().ThrowAsync<InvalidOperationException>()).WithMessage("playbook_run_read_failed*");
         (await detail.Should().ThrowAsync<InvalidOperationException>()).WithMessage("playbook_run_read_failed*");
+    }
+
+    // ── Other run kinds (D-run-record-decided): the store is the one writer; the engine's reads skip them ──────
+
+    [Fact]
+    public async Task Store_PromptedRun_WritesKindAndActionBindingParent_WithNoPlaybook_AndANodeRowWithoutANode()
+    {
+        var store = new PlaybookRunRecordStore(_dataverse);
+        var runId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var bindingId = Guid.NewGuid();
+        var parentRunId = Guid.NewGuid();
+
+        await store.WriteRunAsync(
+            new PlaybookRunRecord
+            {
+                RunId = runId,
+                Kind = PlaybookRunKind.Prompted,
+                State = PlaybookRunState.Completed,
+                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-2),
+                CompletedAt = DateTimeOffset.UtcNow,
+                TriggeredBy = CallerSystemUserId,
+                ActionId = actionId,
+                BindingId = bindingId,
+                ParentRunId = parentRunId,
+            },
+            CancellationToken.None);
+        await store.CreateNodeRunAsync(
+            new PlaybookNodeRunRecord
+            {
+                RunId = runId,
+                Name = "action",
+                Outcome = PlaybookNodeRunOutcome.Completed,
+                Sequence = 1,
+                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-2),
+                CompletedAt = DateTimeOffset.UtcNow,
+                ActionId = actionId,
+            },
+            CancellationToken.None);
+
+        var row = _dataverse.Row("sprk_playbookrun", runId);
+        row.GetAttributeValue<OptionSetValue>("sprk_runkind").Value.Should().Be(100000001);
+        row.Contains("sprk_playbookid").Should().BeFalse("a prompted run has no playbook (sprk_playbookid is optional)");
+        row.GetAttributeValue<EntityReference>("sprk_analysisactionid").Should().Match<EntityReference>(
+            r => r.Id == actionId && r.LogicalName == "sprk_analysisaction");
+        row.GetAttributeValue<EntityReference>("sprk_playbookconsumerid").Should().Match<EntityReference>(
+            r => r.Id == bindingId && r.LogicalName == "sprk_playbookconsumer");
+        row.GetAttributeValue<EntityReference>("sprk_parentrunid").Should().Match<EntityReference>(
+            r => r.Id == parentRunId && r.LogicalName == "sprk_playbookrun");
+
+        var node = _dataverse.Rows("sprk_playbooknoderun").Single();
+        node.Contains("sprk_playbooknodeid").Should().BeFalse("an Action run's row has no playbook node (sprk_playbooknodeid is optional)");
+        node.GetAttributeValue<EntityReference>("sprk_analysisactionid").Id.Should().Be(actionId);
+    }
+
+    [Theory]
+    [InlineData(PlaybookRunKind.Prompted)]
+    [InlineData(PlaybookRunKind.Coded)]
+    public async Task GetRunStatusAndDetail_StoredRunWithNoPlaybookId_ReturnNullWithoutThrowing(PlaybookRunKind kind)
+    {
+        // A prompted or coded run written by another project's code: no playbook id, so no PlaybookRunStatus shape.
+        // The playbook run read skips it (the routes answer it like an unknown run id) rather than returning a
+        // status with an empty playbook id, and reading it never throws.
+        var runId = Guid.NewGuid();
+        await new PlaybookRunRecordStore(_dataverse).WriteRunAsync(
+            new PlaybookRunRecord
+            {
+                RunId = runId,
+                Kind = kind,
+                State = PlaybookRunState.Completed,
+                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-2),
+                CompletedAt = DateTimeOffset.UtcNow,
+                TriggeredBy = CallerSystemUserId,
+                ActionId = Guid.NewGuid(),
+            },
+            CancellationToken.None);
+        var service = NewService(_dataverse, reader: CallerOid);
+        var queriesBefore = _dataverse.QueriedEntities.Count;
+
+        var status = await service.GetRunStatusAsync(runId, CancellationToken.None);
+        var detail = await service.GetRunDetailAsync(runId, CancellationToken.None);
+
+        status.Should().BeNull();
+        detail.Should().BeNull();
+        _dataverse.QueriedEntities.Skip(queriesBefore).Should().OnlyContain(
+            e => e == "sprk_playbookrun", "the playbook-id check runs before the owner lookup and the node query");
     }
 
     // ── Fail-safe ───────────────────────────────────────────────────────────────────────────────────────────
