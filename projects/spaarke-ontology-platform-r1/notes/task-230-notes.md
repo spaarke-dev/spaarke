@@ -108,6 +108,27 @@ failure), so the behaviour was proved by two mutations applied to the finished c
 
 ## Verification
 
-(filled in below)
+- BFF build: 0 warnings. Test project build: 0 warnings.
+- Targeted suites (`PlaybookRouteAuthorizationContractTests`, `NodeServiceCanvasSyncGuardTests`, `NodeEndpointsTests`,
+  `AnalysisOrchestrationServiceTests`): 170/170.
+- Fail-before:
+  - M1 (no guard, no per-node guard calls, JIT catch disabled): 40 of 161 failed. These were every refusal test, the
+    8 per-node route-level cases, the JIT test and the canvas tests. All must-not-fire tests passed.
+  - M2 (guard kept, stamping removed): 6 failed. These were the 3 stamping cases, the marker-kept-on-update test, and
+    the create and update must-not-fire cases.
+- Full `tests/Spaarke.ArchTests`, built explicitly first: 2845/2845.
+- `--filter "FullyQualifiedName~Ai"` matched about 23.6k tests. It ran for 58 minutes alongside three other sessions'
+  test hosts: 23,422 passed, 184 failed, 8 skipped. Every failure was a 5–7-minute timeout in Office, Document,
+  SPE-admin or other WebApplicationFactory contract classes; none was in playbook, node or canvas code. Run alone, a
+  sample of the failing classes passed 74/74: the three under `Api.Ai` (`NodeEndpointsTests`,
+  `AnalysisChatContextEndpointsTests`, `ChatAgentRouteProofTests`) and two Office classes. That matches the project
+  gotcha: contended full suites give false failures. The 103-class isolated re-run was stopped after 65 minutes
+  without results, for the same contention reason.
+- Publish size, Release, short paths, both zipped with Python `zipfile` deflate:
+  - master d43fc9e16d: 42,606,799 B, 194 files
+  - branch: 42,609,298 B, 194 files
+  - delta: +2,499 B zipped (+13,740 B raw); 40.64 MB total
+  - No package change.
+- Step 10.6: master moved 11 commits after the branch point; none touches the files changed here.
 
 rework: none task 230
