@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-26 ~03:15Z (checkpoint after 095d-3 merged into work)
+> **Last Updated:** 2026-11-26 ~03:40Z (master PR #3211 opened for the next batch)
 > History: `notes/handoff-history/current-task-2026-11-26a.md` (the previous state, verbatim), plus `-2026-11-24a`, `-20a`, `-16a`, `-15a` and `-13a`.
 
 ## Owner mode
@@ -10,8 +10,8 @@
 
 ## Now
 
-- **No task running.** Work tip is pushed; branch `work/ebilling-r1`.
-- **On work, not yet in a master PR (the next batch):**
+- **No task running.** Work tip is pushed; branch `work/ebilling-r1`. **Master PR #3211 open** (merged origin/master in 031102c7b4; jest 696/0, Pester 18/0, no open-PR overlap); CI running; waits on the owner's merge go (merge commit, no auto-merge). uac-r2 told (FYI).
+- **In PR #3211 (the next batch):**
   - 095d-3 Billing firm field in the Invoice Review header (merged 9ad5c99e02; one review pass, fixes 7bc2910398; jest 696/0). The header firm is an editable dropdown only while the invoice has no firm, firmNeeded is true and the caller can write. It lists the core record's linked firms (`GET /api/finance/core-records/{type}/{id}/firms`) and saves through `POST /api/finance/invoices/{id}/firm`. A 403 stays in the field (it is about the chosen firm).
   - Reader-role script accepts the 9 platform-added privileges (e714592cb2; owner yes; uac-r2 cleared). **Owed:** tell provisioning-r1 when it reaches master; it then rewords the S29 refusal text and the rejection-code doc. Until then ACME gets `-Verify` only.
   - Docs: 095c and 095d closed; checklist Y; current-task.
