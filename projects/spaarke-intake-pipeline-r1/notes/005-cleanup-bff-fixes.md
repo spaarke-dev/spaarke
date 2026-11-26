@@ -43,3 +43,12 @@ Eval/Catalog/ConsumerType/Routing filter: 2630 passed, 0 failed.
 - Filtered Eval|ConsumerType|RoutingConsumer|Catalog: 2630 pass.
 - `tests/Spaarke.ArchTests`: 2831 pass, 0 fail (includes Adr032 ledgers and WorkloadPlacementDocDriftTests).
 - First full `Sprk.Bff.Api.Tests` run while two other sessions were building: ~35 WebApplicationFactory tests timed out after 3+ minutes each (`TaskCanceledException`, "client aborted the request"); the two real failures were the eval tests above. A sample of the timeouts (ChatRefine, DriveKeyedWriteRouteRetirement) passed in isolation: environmental load, not this change. See the final figures below.
+
+## Final figures
+
+- Full `Sprk.Bff.Api.Tests` run, twice, on a machine at ~96% CPU from other sessions: only WebApplicationFactory tests failed, all by 1-3 minute request timeouts (about 35 different tests per run, a different set each time). 91 of them re-run in isolation (Compose, Insights, Office, Workspace, PipelineHealth, Issue1084/1086 classes): 91 pass. Filtered Communication|DiGraph|JobProcessing|Jobs|EmailAnalysis|AppOnly: 5855 pass, 0 fail (DiGraphValidation included). Eval|ConsumerType|RoutingConsumer|Catalog: 2630 pass. ArchTests: 2831 pass. Not run to a clean full-suite green because of the load; the operator should let CI confirm.
+- Build: `dotnet build` of the BFF and test project: 0 errors, 0 warnings.
+- Publish size (BFF hygiene section 10 item 4): `dotnet publish -c Release` (framework-dependent linux-x64) of origin/master @ d148580e15 vs this branch, each from a fresh `git archive` copy at a short path (`C:\w5m`, `C:\w5b`; no worktree created), zipped with `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included. Both 194 files. master 41.608 MB, branch 41.602 MB, delta -0.006 MB. Well under 60 MB.
+- CVE: `dotnet list package --vulnerable --include-transitive` on the BFF: none; no package reference changed.
+- Placement Justification (for the PR): no new surface. Deletions plus a key fix; the only additions are three `ConsumerTypes` constants for Binding rows that already exist, one test file, and three eval-coverage cases. Hot path: Communication files are hot (open PR #1494 touches `IncomingCommunicationJobHandler.cs`, not the two files edited here); `/conflict-check` is left to the PR step.
+- Commit hook note: the husky pre-commit needs `prettier` on PATH; this worktree has no `node_modules`, so I committed with the main checkout's `node_modules/.bin` on PATH (hook ran, not skipped).
