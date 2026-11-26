@@ -1,0 +1,1469 @@
+{
+  "table": "sprk_billingcode",
+  "entitySet": "sprk_billingcodes",
+  "primaryKey": "sprk_billingcodeid",
+  "match": "naturalKey",
+  "naturalKey": "sprk_code",
+  "nameColumn": "sprk_code",
+  "naturalKeyScope": "sprk_codeset",
+  "lookups": [
+    {
+      "column": "sprk_codeset",
+      "navigationProperty": "sprk_CodeSet",
+      "targetTable": "sprk_billingcodeset",
+      "targetEntitySet": "sprk_billingcodesets"
+    }
+  ],
+  "columns": ["sprk_code", "sprk_codetype", "sprk_phase", "sprk_description", "sprk_guidancetext"],
+  "rows": [
+    {
+      "sprk_billingcodeid": "7836ffba-8059-5343-abde-1b507c5d0f3f",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A101",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Plan and prepare for",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "fc0f2573-ad92-5bf7-bea9-43175e5ff774",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A102",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Research",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "834a16c0-e6b6-5840-9c5d-3899a7da9e19",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A103",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Draft/revise",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "f1ef1952-0283-58c5-82b6-19445d0bb2ea",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A104",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Review/analyze",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "63b7945c-5b42-5b2b-944b-5c64c97a1b84",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A105",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Communicate (in firm)",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "9271c843-df1e-5bdf-96ff-e464ecbcab5a",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A106",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Communicate (with client)",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "cbb1653b-b63b-5790-8038-84b950c2dd75",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A107",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Communicate (other outside counsel)",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "dffc2212-74b4-5ef5-8013-ee8fd3b81d88",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A108",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Communicate (other external)",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "f9412570-9679-5e69-8bf9-5856f1b5baf9",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A109",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Appear for/attend",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "a4e616c4-3112-5538-846e-38ad6dae51b8",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A110",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Manage data/files",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "73a920a9-6f24-5293-83c2-bc3b3740be55",
+      "sprk_codeset": "bd3b04d2-8821-5c18-aa1c-31f4f8914790",
+      "sprk_code": "A111",
+      "sprk_codetype": 100000001,
+      "sprk_phase": null,
+      "sprk_description": "Other",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "2f79f3b6-6f82-5e2d-b51f-5a1dd183756b",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B110",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Case Administration",
+      "sprk_guidancetext": "Coordination and compliance matters, including preparation of statement of financial affairs; schedules; list of contracts; United States Trustee interim statements and operating reports; contacts with the United States Trustee; general creditor inquiries."
+    },
+    {
+      "sprk_billingcodeid": "f287deeb-97a1-5edd-b502-56875a6ebff7",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B120",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Asset Analysis and Recovery",
+      "sprk_guidancetext": "Identification and review of potential assets including causes of action and non-litigation recoveries."
+    },
+    {
+      "sprk_billingcodeid": "06cb3e0a-f6da-5bc6-9898-c2c0ab1c1c84",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B130",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Asset Disposition",
+      "sprk_guidancetext": "Sales, abandonment and transaction work related to asset disposition."
+    },
+    {
+      "sprk_billingcodeid": "cdb9bb4f-96a8-5d47-ada6-4b26f4d18cbb",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B140",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Relief from Stay/Adequate Protection Proceedings",
+      "sprk_guidancetext": "Matters relating to termination or continuation of automatic stay under 362 and motions for adequate protection."
+    },
+    {
+      "sprk_billingcodeid": "b6537eb1-c36f-574d-b706-d16dd1bafdd9",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B150",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Meetings of and Communications with Creditors",
+      "sprk_guidancetext": "Preparing for and attending the conference of creditors, the 341(a) meeting and other creditors' committee meetings."
+    },
+    {
+      "sprk_billingcodeid": "f33194ad-1b51-5e77-898e-c055a10dfa5d",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B160",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Fee/Employment Applications",
+      "sprk_guidancetext": "Preparations of employment and fee applications for self or others; motions to establish interim procedures."
+    },
+    {
+      "sprk_billingcodeid": "1bacfc09-49a7-5e88-a63d-b82760e332d7",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B170",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Fee/Employment Objections",
+      "sprk_guidancetext": "Review of and objections to the employment and fee applications of others."
+    },
+    {
+      "sprk_billingcodeid": "5d3c7d59-c06a-5b90-b08b-6754f00b2bbc",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B180",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Avoidance Action Analysis",
+      "sprk_guidancetext": "Review of potential avoiding actions under Sections 544-549 of the Code to determine whether adversary proceedings are warranted."
+    },
+    {
+      "sprk_billingcodeid": "7c07069b-50d4-5bdc-9019-8ee404e59265",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B185",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Assumption/Rejection of Leases and Contracts",
+      "sprk_guidancetext": "Analysis of leases and executory contracts and preparation of motions specifically to assume or reject."
+    },
+    {
+      "sprk_billingcodeid": "bca7f0ad-986e-5b0e-998e-3f33a6fc29ee",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B190",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Other Contested Matters (excluding assumption/rejection motions)",
+      "sprk_guidancetext": "Analysis and preparation of all other motions, opposition to motions and reply memoranda in support of motions."
+    },
+    {
+      "sprk_billingcodeid": "2a066a04-372e-55f6-9c19-fbfed2007f1b",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B195",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B100",
+      "sprk_description": "Non-Working Travel",
+      "sprk_guidancetext": "Non-working travel where the court reimburses at less than full hourly rates."
+    },
+    {
+      "sprk_billingcodeid": "64feecee-0891-5582-821c-c02fa3e6b921",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B210",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B200",
+      "sprk_description": "Business Operations",
+      "sprk_guidancetext": "Issues related to debtor-in-possession operating in chapter 11 such as employee, vendor, tenant issues and other similar problems."
+    },
+    {
+      "sprk_billingcodeid": "cb3df767-12fe-5118-92a7-9dd97bc3a88e",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B220",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B200",
+      "sprk_description": "Employee Benefits/Pensions",
+      "sprk_guidancetext": "Review issues such as severance, retention, 401K coverage and continuance of pension plan."
+    },
+    {
+      "sprk_billingcodeid": "bc68bbf5-ac3b-5268-9fbd-02d763453df5",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B230",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B200",
+      "sprk_description": "Financing/Cash Collections",
+      "sprk_guidancetext": "Matters under 361, 363 and 364 including cash collateral and secured claims; loan document analysis."
+    },
+    {
+      "sprk_billingcodeid": "9e9d5e2b-937a-5409-9a0e-38025b85a59d",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B240",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B200",
+      "sprk_description": "Tax Issues",
+      "sprk_guidancetext": "Analyses and advice regarding tax-related issues, including the preservation of net operating loss carry forwards."
+    },
+    {
+      "sprk_billingcodeid": "eb08dc38-48d7-53ac-8a40-bddc48262fce",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B250",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B200",
+      "sprk_description": "Real Estate",
+      "sprk_guidancetext": "Review and analysis of real estate-related matters, including purchase agreements and lease provisions (e.g., common area maintenance clauses)."
+    },
+    {
+      "sprk_billingcodeid": "0673c38c-3e51-5850-b75f-b9e62a354224",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B260",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B200",
+      "sprk_description": "Board of Directors Matters",
+      "sprk_guidancetext": "Preparation of materials for and attendance at Board of Directors meetings; analysis and advice regarding corporate governance issues and review and preparation of corporate documents (e.g., Articles, Bylaws, employment agreements, compensation plans, etc.)"
+    },
+    {
+      "sprk_billingcodeid": "eb92b451-d63a-5a00-983f-cd02bf3a0af7",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B310",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B300",
+      "sprk_description": "Claims Administration and Objections",
+      "sprk_guidancetext": "Specific claim inquiries; bar date motions; analyses, objections and allowances of claims."
+    },
+    {
+      "sprk_billingcodeid": "0a1ee1ce-9bd5-5dff-812e-7ded19ac22ce",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B320",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B300",
+      "sprk_description": "Plan and Disclosure Statement (including Business Plan)",
+      "sprk_guidancetext": "Formulation, presentation and confirmation; compliance with the plan confirmation order, related orders and rules; disbursement and case closing activities, except those related to the allowance and objections to allowance of claims."
+    },
+    {
+      "sprk_billingcodeid": "15bdb8e7-931b-5490-bdb5-2a20c75b6b7a",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B410",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B400",
+      "sprk_description": "General Bankruptcy Advice/Opinions",
+      "sprk_guidancetext": "Analysis, advice and/or opinions regarding potential bankruptcy related issues, where no bankruptcy case has been filed."
+    },
+    {
+      "sprk_billingcodeid": "1d06902b-9d72-5cb9-9ecb-720078f1b3cc",
+      "sprk_codeset": "f506ec3d-a145-53ed-a665-719fdcd663e5",
+      "sprk_code": "B420",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "B400",
+      "sprk_description": "Restructurings",
+      "sprk_guidancetext": "Analysis, consultation and drafting in connection with the restructuring of agreements, including financing agreements, where no bankruptcy case has been filed."
+    },
+    {
+      "sprk_billingcodeid": "0b186cc5-997a-5605-a1ad-c0887fac6b55",
+      "sprk_codeset": "9adb2c71-6339-5849-ba7f-347cf625a851",
+      "sprk_code": "C100",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "C100",
+      "sprk_description": "Fact Gathering",
+      "sprk_guidancetext": "This phase includes all initial inquiries, meetings and instructions and the identification and collection of information relevant to the assignment."
+    },
+    {
+      "sprk_billingcodeid": "97d7cbf7-08b2-5369-a4db-54cf0bcbfee5",
+      "sprk_codeset": "9adb2c71-6339-5849-ba7f-347cf625a851",
+      "sprk_code": "C200",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "C200",
+      "sprk_description": "Researching Law",
+      "sprk_guidancetext": "This phase includes all legal research tasks, including internal meetings and consultations with those with special expertise, and computer and on-line research."
+    },
+    {
+      "sprk_billingcodeid": "1fe76af8-acd7-5639-aac1-159c80d0b41f",
+      "sprk_codeset": "9adb2c71-6339-5849-ba7f-347cf625a851",
+      "sprk_code": "C300",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "C300",
+      "sprk_description": "Analysis and Advice",
+      "sprk_guidancetext": "This phase includes all tasks associated with analysis of both the facts and research performed (under C100 and C200) and communicating related opinions or advice to clients. Written communication, meetings, and telephone conversations during which advice is conveyed would all be captured by this phase."
+    },
+    {
+      "sprk_billingcodeid": "f2f75899-539f-5dee-8abb-885c8376f84b",
+      "sprk_codeset": "9adb2c71-6339-5849-ba7f-347cf625a851",
+      "sprk_code": "C400",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "C400",
+      "sprk_description": "Third Party Communication",
+      "sprk_guidancetext": "This phase includes all discussions with third parties not otherwise covered above, such as communications with regulators or parties to contracts with the client."
+    },
+    {
+      "sprk_billingcodeid": "eca613f5-878f-5cbf-89e5-925a8ea2a3f1",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E101",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Copying",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "e10bd915-78f7-547d-9ecc-577e99f4b0dd",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E102",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Outside printing",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "bd0a3bcd-423c-5b04-9646-a31e6571a78c",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E103",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Word processing",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "b7cfa1b9-4bb5-51f8-91d3-de9225708849",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E104",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Facsimile",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "f63e0f53-166a-5204-a50d-0412d6a1a392",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E105",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Telephone",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "97a210bd-964b-529b-8a01-7da816659cc2",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E106",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Online research",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "d97c37a3-8a25-592c-81b6-fb5e74b48bdd",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E107",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Delivery services/messengers",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "e14d2096-3c4e-528c-8497-40dac31edebc",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E108",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Postage",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "07512016-8cc3-5d55-a4bd-2bdd9b576c15",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E109",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Local travel",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "5c90571c-791a-5da4-8c33-6867915645ee",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E110",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Out-of-town travel",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "898fb7a4-c44c-5e0c-8337-19c28811120d",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E111",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Meals",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "1508b576-fb64-5397-acdd-c4d5cbb1fc47",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E112",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Court fees",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "2a7304f8-3bee-5c44-b438-45602b568266",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E113",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Subpoena fees",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "0da73270-cd4f-5b24-8a65-844c2cdde6d3",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E114",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Witness fees",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "3b3612ff-80f0-54c3-8cb8-67688b7ed8c8",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E115",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Deposition transcripts",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "17db8ef2-c773-5dbd-a913-758f60f0677a",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E116",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Trial transcripts",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "b652df8f-1d9e-5828-b054-4bae9f993bc4",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E117",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Trial exhibits",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "0e4b85c0-0ae9-5969-b255-b178be42df5b",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E118",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Litigation support vendors",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "2b5ceb94-0d9d-5836-b08b-3cc76cf3df3d",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E119",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Experts",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "55529414-0069-50d7-9fa4-daff59759e8d",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E120",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Private investigators",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "fdb8b909-0edb-5c7e-94c9-ce5a962e3732",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E121",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Arbitrators/mediators",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "2501a306-523c-5428-8607-58c27d24bb8e",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E122",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Local counsel",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "cb6c7d29-f86d-53fe-8678-9aa500e6ec48",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E123",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Other professionals",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "f34201a7-fc2e-5ad9-b84e-fb4633064d68",
+      "sprk_codeset": "d4e3cc62-45b8-51ee-8d72-17e69779b6e8",
+      "sprk_code": "E124",
+      "sprk_codetype": 100000002,
+      "sprk_phase": null,
+      "sprk_description": "Other",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "c3d0ae06-d92d-5e69-b8d7-e45286aa7645",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110101",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110100",
+      "sprk_description": "Become Familiar with Invention/Idea",
+      "sprk_guidancetext": "USPTO documents that validate this task: Invention disclosure analysis."
+    },
+    {
+      "sprk_billingcodeid": "a9f6202c-ec28-5c80-bd35-3319e7d7c0e4",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110102",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110100",
+      "sprk_description": "Formalize Invention/Idea",
+      "sprk_guidancetext": "USPTO documents that validate this task: Invention disclosures analysis."
+    },
+    {
+      "sprk_billingcodeid": "dc9a276b-0b2d-5ad6-bfae-9ab79b86d3a5",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110103",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110100",
+      "sprk_description": "Develop Filing Strategy",
+      "sprk_guidancetext": "USPTO documents that validate this task: Preliminary search reports; Opinion letters."
+    },
+    {
+      "sprk_billingcodeid": "4cc7763c-3006-54d0-a593-01a6834c7bea",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110201",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110200",
+      "sprk_description": "Prepare/Submit Initial Application",
+      "sprk_guidancetext": "USPTO documents that validate this task: Applications; Application Data Sheets; Inventor oaths or declarations (with initial filing); [PCT] Requests for international Application (RO/101). USPTO PAIR transactions: Initial Exam Team; RO/101 - Request form for new IA - Conventional."
+    },
+    {
+      "sprk_billingcodeid": "cff6fc01-5579-57ba-8f6e-b48894736770",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110202",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110200",
+      "sprk_description": "Prepare/Submit Supplemental Documents",
+      "sprk_guidancetext": "USPTO documents that validate this task: [PCT] Requests for supplementary search (IB/375); Inventor Oaths or Declarations; Powers Of Attorney; Preliminary amendment; Petition for micro/small entity status (PTO/SB/15A and 15B); Tip: for IDS see “Examination”. USPTO PAIR transactions: Affidavit(s) (Rule 131 or 132) or Exhibit(s) Received; Applicant Has Filed a Verified Statement of Micro Entity Status in Compliance with 37 CFR 1.29; Applicant has Filed a Verified Statement of Micro to Small Entity Status; Change in Power of Attorney (May Include Associate POA); Documents submitted with 371 Applications; Drawing Preliminary Amendment; Power of Attorney; Preliminary Amendment; Preliminary Amendments; Small Entity Statement (37 CFR 1.27); Translation of Specification into English."
+    },
+    {
+      "sprk_billingcodeid": "37a033b3-d83c-585c-a3f0-12db8a220256",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110203",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110200",
+      "sprk_description": "Request Special Examination",
+      "sprk_guidancetext": "USPTO documents that validate this task: Petition to make special; Track 1 Request. USPTO PAIR transactions: COVID-19 Prioritized Examination Request; Green Tech Petition under 37 CFR 1.102; Petition to make special based on Age/Health; Track 1 Request."
+    },
+    {
+      "sprk_billingcodeid": "e0d66227-7119-561f-8a66-57b3401c4e97",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110301",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110300",
+      "sprk_description": "Correct Application",
+      "sprk_guidancetext": "USPTO documents that validate this task: Requests to correct inventorship; Responses to notice of missing parts; Responses to formalities notice; Requests to change the applicant; Corrected application data sheets; Certificates of Correction; [PCT] Responses to Invitation to correct defects in the demand (PCT/IPEA/404); [PCT] Substitute Drawings; [PCT] Substitute Sheets - IA; [PCT] Substitute Sheets of Request (Form PCT/RO/101). USPTO PAIR transactions: USC 115, Oath of the Applic; A statement by one or more inventors satisfying the requirement under Applicant Response to Pre-Exam Formalities Notice; Applicant has submitted a new specification to correct Corrected Papers problems; CHII - Response to form PCT/IPEA/404; Corrected Paper; Drawings-only black and white line drawings; Drawings-other than black and white line drawings; Oath or Declaration Filed (Including Supplemental); Payment of additional filing fee/Preexam; Response - Re: Informal Power of Attorney (PTOL-308); Substitute Sheets - IA; Substitute Sheets of Request (Form PCT/RO/101); Substitute Specification Filed."
+    },
+    {
+      "sprk_billingcodeid": "b954e6f4-5970-54fc-ba2b-c1847b466858",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110302",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110300",
+      "sprk_description": "Restrict Application",
+      "sprk_guidancetext": "USPTO documents that validate this task: Response to restriction requirements. USPTO PAIR transactions: Response to Election / Restriction Filed."
+    },
+    {
+      "sprk_billingcodeid": "5b9efa2f-3458-59e8-be96-d873b3ab070f",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110401",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110400",
+      "sprk_description": "[PCT] Patentability Analysis",
+      "sprk_guidancetext": "USPTO documents that validate this task: Demand For International Preliminary Examination; Response to ISA written opinion (PCT/ISA/237). USPTO PAIR transactions: CHII - Form PCT/IPEA/401 – Demand; CHII-Resp to the written opinion ISA/237 / IPEA/408; CHII - Amendments to descriptions/drawings - PCT Art. 34; Request for recording of a change/PCT Rule 92bis; Response to Form PCT/ISA/206 Unity of Invention; Request for Reconsideration – IA; Request for rectification – IA; Evidence for restore of priority claim; Priority Claim Adjustment under PCT Rule 26bis; CHII - Misc. communication from Applicant – IA; CHII - Request for Reconsideration – IA; CHII - Request for rectification – IA; CHII - Response to form PCT/IPEA/405; Misc. incoming letter from Applicant – IA."
+    },
+    {
+      "sprk_billingcodeid": "1f5e0528-8c51-5c6d-bb59-4ec37dbaf9a2",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110402",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110400",
+      "sprk_description": "Respond to Office Action",
+      "sprk_guidancetext": "USPTO documents that validate this task: Responses to Non-Final Office Actions; Response to Final Office Actions. USPTO PAIR transactions: Response after Non-Final Action; Response after Final Action; Response after Ex Parte Quayle Action; Amendment After Final or under 37CFR 1.312, initialed by the examiner.."
+    },
+    {
+      "sprk_billingcodeid": "a8a94781-cb6f-5eb5-911b-ed53fa3f91a8",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110403",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110400",
+      "sprk_description": "Interview Examiner",
+      "sprk_guidancetext": "USPTO documents that validate this task: Examiner Interviews. USPTO PAIR transactions: Interview Summary - Applicant Initiated – Personal; Applicant Initiated Interview Summary (PTOL-413); Interview Summary - Applicant Initiated – Conference."
+    },
+    {
+      "sprk_billingcodeid": "6fa6af3f-254b-5c04-90eb-503a6277272e",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110404",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110400",
+      "sprk_description": "File Information Disclosure Statement",
+      "sprk_guidancetext": "USPTO documents that validate this task: Information Disclosure Statements (IDS). USPTO PAIR transactions: Information Disclosure Statement (IDS) Filed."
+    },
+    {
+      "sprk_billingcodeid": "4c144fb0-f5f3-5b65-8b16-51077eda9809",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110405",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110400",
+      "sprk_description": "Request Continued Examination",
+      "sprk_guidancetext": "USPTO documents that validate this task: Requests for Continued Examination (RCEs). USPTO PAIR transactions: Request for Continued Examination (RCE)."
+    },
+    {
+      "sprk_billingcodeid": "b87d84c8-cc81-54d9-baeb-41deb548953a",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110501",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110500",
+      "sprk_description": "Abandon Application",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "8356aa8b-bf84-5a2e-ae4a-119f24623a15",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110601",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110600",
+      "sprk_description": "File Appeal",
+      "sprk_guidancetext": "Intended to cover patent office venues; work in other court jurisdictions should utilize litigation codes. USPTO documents that validate this task: Notices of Appeal; Appellate Briefs; Response; Reply. USPTO PAIR transactions: Notice of Appeal Filed; Appeal Brief Filed; Reply Brief Filed; Petition for review and processing by the PCT legal office; CHII - Petition for review by the PCT legal office."
+    },
+    {
+      "sprk_billingcodeid": "78cfadb7-a553-5ed9-a36e-4bf8f73ccd2b",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110701",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110700",
+      "sprk_description": "Conduct Post-allowance review",
+      "sprk_guidancetext": "USPTO documents that validate this task: Issue fee checklist."
+    },
+    {
+      "sprk_billingcodeid": "cdc74e57-b476-59e6-b835-0fb29a35ad1e",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110702",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110700",
+      "sprk_description": "Pay Issue Fee",
+      "sprk_guidancetext": "USPTO documents that validate this task: Pay issue fee. USPTO PAIR transactions: Issue Fee Payment (PTO-85B); Issue Fee Payment Verified."
+    },
+    {
+      "sprk_billingcodeid": "4df83cbf-aa72-5e90-93c5-223757def00f",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110703",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110700",
+      "sprk_description": "Withdraw from Issue",
+      "sprk_guidancetext": "USPTO documents that validate this task: Petition to withdraw from issuance."
+    },
+    {
+      "sprk_billingcodeid": "9b838518-1b51-5846-ba90-d7a96760db2b",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110801",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110800",
+      "sprk_description": "Pay Maintenance Fees",
+      "sprk_guidancetext": "USPTO documents that validate this task: Maintenance Fee Address Change Forms (PTO/SB/47); Maintenance Fee Payments. USPTO PAIR transactions: Payment of Maintenance Fee, 4th Year, Micro Entity; Payment of Maintenance Fee, 4th Yr, Small Entity; Payment of Maintenance Fee, 4th Year, Large Entity; Payment of Maintenance Fee, 8th Year, Micro Entity; Payment of Maintenance Fee, 8th Yr., Small Entity; Payment of Maintenance Fee, 8th Yr., Large Entity; Payment of Maintenance Fee, 12th Year, Micro Entity; Payment of Maintenance Fee, 12th Yr., Small Entity; Payment of Maintenance Fee, 12th Year, LargeEntity; Payment of Maintenance Fee under 1.28(c)."
+    },
+    {
+      "sprk_billingcodeid": "0d07cdd6-bbaf-566f-b754-343b3e3a1816",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110802",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110800",
+      "sprk_description": "Request Patent Term Adjustment",
+      "sprk_guidancetext": "USPTO documents that validate this task: Requests for Reconsideration of PTA."
+    },
+    {
+      "sprk_billingcodeid": "81641b73-1a89-5877-8381-d60150d8327c",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110803",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110800",
+      "sprk_description": "Re-Issue",
+      "sprk_guidancetext": "USPTO documents that validate this task: Re-Issue."
+    },
+    {
+      "sprk_billingcodeid": "624f71cb-b523-5a40-b57a-081d9635d73c",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110804",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110800",
+      "sprk_description": "Re-Examine",
+      "sprk_guidancetext": "USPTO documents that validate this task: Re-Examination."
+    },
+    {
+      "sprk_billingcodeid": "b8a5e0c4-e670-5bf5-9a38-6875d5137e0a",
+      "sprk_codeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4",
+      "sprk_code": "110901",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "110900",
+      "sprk_description": "Petition to Revive",
+      "sprk_guidancetext": null
+    },
+    {
+      "sprk_billingcodeid": "f3bf9eb2-39f0-50d5-99a3-7e903b49b924",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L110",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Fact Investigation/Development",
+      "sprk_guidancetext": "All actions to investigate and understand the facts of a matter. Covers interviews of client personnel and potential witnesses, review of documents to learn the facts of the case (but not for document production, L320), work with an investigator, and all related communications and correspondence."
+    },
+    {
+      "sprk_billingcodeid": "d5c7ba8c-7fe2-506f-a65c-46b5abb7ac36",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L120",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Analysis/Strategy",
+      "sprk_guidancetext": "The thinking, strategizing, and planning for a case, including discussions, writing, and meetings on case strategy. Also includes initial legal research for case assessment purposes and legal research for developing a basic case strategy. Most legal research will be under the primary task for which the research is conducted, such as research for a summary judgment motion (L240). Once concrete trial preparation begins, use L440 for trial strategy and planning."
+    },
+    {
+      "sprk_billingcodeid": "6bb5876b-5121-564e-b277-9ffc0f3de952",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L130",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Experts/Consultants",
+      "sprk_guidancetext": "Identifying and interviewing experts and consultants (testifying or non-testifying), working with them, and developing expert reports. Does not include preparing for expert depositions (L340) or trial (L420)."
+    },
+    {
+      "sprk_billingcodeid": "dda78ff0-8ca6-587d-ae9e-a1356f36a768",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L140",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Document/File Management",
+      "sprk_guidancetext": "A narrowly defined task that comprises only the processes of creating and populating document and other databases or filing systems. Includes the planning, design, and overall management of this process. Work of outside vendors in building litigation support databases should be an Expense."
+    },
+    {
+      "sprk_billingcodeid": "4f66ae8a-a3bf-54e0-8c77-e717c50a2534",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L150",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Budgeting",
+      "sprk_guidancetext": "Covers developing, negotiating, and revising the budget for a matter."
+    },
+    {
+      "sprk_billingcodeid": "70da6368-b4a5-5144-a38e-3fc37f04809f",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L160",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Settlement/Non-Binding ADR",
+      "sprk_guidancetext": "All activities directed specifically to settlement. Encompasses planning for and participating in settlement discussions, conferences, and hearings and implementing a settlement. Covers pursuing and participating in mediation and other non-binding Alternative Dispute Resolution (ADR) procedures. Also includes pre-litigation demand letters and ensuing discussions."
+    },
+    {
+      "sprk_billingcodeid": "a0b96895-4a4f-5978-aac2-b9cd0557d101",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L190",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L100",
+      "sprk_description": "Other Case Assessment, Development and Administration",
+      "sprk_guidancetext": "Time not attributable to any other overall task. Specific use in a given matter often may be pre-determined jointly by the client and law firm."
+    },
+    {
+      "sprk_billingcodeid": "4909b2c4-d96b-5f93-800f-b0bdab1c8e7e",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L210",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L200",
+      "sprk_description": "Pleadings",
+      "sprk_guidancetext": "Developing (researching, drafting, editing, filing) and reviewing complaints, answers, counter-claims and third party complaints. Also embraces motions directed at pleadings such as motions to dismiss, motions to strike, and jurisdictional motions."
+    },
+    {
+      "sprk_billingcodeid": "27bf097a-0692-5cb1-9623-a3b19c335b4c",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L220",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L200",
+      "sprk_description": "Preliminary Injunctions/Provisional Remedies",
+      "sprk_guidancetext": "Developing and discussing strategy for these remedies, preparing motions, affidavits and briefs, reviewing opponent's papers, preparing for and attending court hearing, preparing witnesses for the hearing, and effectuating the remedy."
+    },
+    {
+      "sprk_billingcodeid": "76728c0c-f7fb-5e86-9969-04a8cdc43566",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L230",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L200",
+      "sprk_description": "Court Mandated Conferences",
+      "sprk_guidancetext": "Preparing for and attending hearings and conferences required by court order or procedural rules (including Rule 16 sessions) other than settlement conferences (L160)."
+    },
+    {
+      "sprk_billingcodeid": "4af53783-1d15-5c20-995d-8e8fc994126f",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L240",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L200",
+      "sprk_description": "Dispositive Motions",
+      "sprk_guidancetext": "Developing and discussing strategy for or opposing motions for judgment on the pleadings and motions for complete or partial summary judgment, preparing papers, reviewing opponent's papers, defensive motions (e.g., motion to strike affidavit testimony, Rule 56(f) motion), and preparing for and attending the hearing."
+    },
+    {
+      "sprk_billingcodeid": "493a1412-1573-5c1d-8593-0ad7e5dfb469",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L250",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L200",
+      "sprk_description": "Other Written Motions and Submissions",
+      "sprk_guidancetext": "Developing, responding to, and arguing all motions other than dispositive (L240), pleadings (L210), and discovery (L350), such as motions to consolidate, to bifurcate, to remand, to stay, to compel arbitration, for MDL treatment and for change of venue."
+    },
+    {
+      "sprk_billingcodeid": "7cabe747-2b0a-596b-ab41-9b00fce27272",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L260",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L200",
+      "sprk_description": "Class Action Certification and Notice",
+      "sprk_guidancetext": "Proceedings unique to class action litigation and derivative suits such as class certification and notice."
+    },
+    {
+      "sprk_billingcodeid": "732cd98d-ffb5-5289-8a1e-0cdfab9dd954",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L310",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L300",
+      "sprk_description": "Written Discovery",
+      "sprk_guidancetext": "Developing, responding to, objecting to, and negotiating interrogatories and requests to admit. Includes mandatory meet-and-confer sessions. Also covers mandatory written disclosures as under Rule 26(a)."
+    },
+    {
+      "sprk_billingcodeid": "dab35e45-c76a-533f-a556-546ecf9ad7b3",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L320",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L300",
+      "sprk_description": "Document Production",
+      "sprk_guidancetext": "Developing, responding to, objecting to, and negotiating document requests, including the mandatory meet-and-confer sessions to resolve objections. Includes identifying documents for production, reviewing documents for privilege, effecting production, and preparing requested privilege lists. (While a general review of documents produced by other parties falls under this task, coding and entering produced documents into a data base is Task L140 and reviewing documents primarily to understand the facts is Task L110.)"
+    },
+    {
+      "sprk_billingcodeid": "b8f25068-3a8f-527c-85ac-762a20431d87",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L330",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L300",
+      "sprk_description": "Depositions",
+      "sprk_guidancetext": "All work concerning depositions, including determining the deponents and the timing and sequence of depositions, preparing deposition notices and subpoenas, communicating with opposing or other party's counsel on scheduling and logistics, planning for and preparing to take the depositions, discussing deposition strategy, preparing witnesses, reviewing documents for deposition preparation, attending depositions, and drafting any deposition summaries."
+    },
+    {
+      "sprk_billingcodeid": "0b1a2428-12b8-53c1-a66e-f731c9fb0f29",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L340",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L300",
+      "sprk_description": "Expert Discovery",
+      "sprk_guidancetext": "Same as L330, but for expert witnesses."
+    },
+    {
+      "sprk_billingcodeid": "d658c370-69c7-5aed-8553-0e170a945dfb",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L350",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L300",
+      "sprk_description": "Discovery Motions",
+      "sprk_guidancetext": "Developing, responding to, and arguing all motions that arise out of the discovery process. Includes the protective order process."
+    },
+    {
+      "sprk_billingcodeid": "5fc606d1-00ee-536e-b961-6a4a74b1af60",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L390",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L300",
+      "sprk_description": "Other Discovery",
+      "sprk_guidancetext": "Less frequently used forms of discovery, such as medical examinations and on-site inspections."
+    },
+    {
+      "sprk_billingcodeid": "620c687e-2634-5d24-a47b-d732342fb223",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L410",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Fact Witnesses",
+      "sprk_guidancetext": "Preparing for examination and cross-examination of non-expert witnesses."
+    },
+    {
+      "sprk_billingcodeid": "cb6fd6eb-20db-5cea-8dd4-d8c3d419cacc",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L420",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Expert Witnesses",
+      "sprk_guidancetext": "Preparing for examination and cross-examination of expert witnesses."
+    },
+    {
+      "sprk_billingcodeid": "8067a8d7-a8bd-5c62-a699-b80c1fe7a7f6",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L430",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Written Motions and Submissions",
+      "sprk_guidancetext": "Developing, responding to and arguing written motions during preparation for trial and trial, such as motions in limine and motions to strike proposed evidence. Also includes developing other written pre-trial and trial filings, such as jury instructions, witness lists, proposed findings of fact and conclusions of law, and trial briefs."
+    },
+    {
+      "sprk_billingcodeid": "b4fa9258-5098-5d58-a968-4a4be6ea5646",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L440",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Other Trial Preparation and Support",
+      "sprk_guidancetext": "All other time spent in preparing for and supporting a trial, including developing overall trial strategy, preparing opening and closing arguments, establishing an off-site support office, identifying documents for use at trial, preparing demonstrative materials, etc."
+    },
+    {
+      "sprk_billingcodeid": "3459e76e-1fd1-50c4-826b-0f125785c1f0",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L450",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Trial and Hearing Attendance",
+      "sprk_guidancetext": "Appearing at trial, at hearings and at court-mandated conferences, including the pre-trial conferences to prepare for trial. For scheduling conferences that are denominated as \"Pre-Trial Conferences\", but not directed toward conduct of the trial, use Task L230."
+    },
+    {
+      "sprk_billingcodeid": "5aec3ab1-4810-59eb-927d-b51458d522d4",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L460",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Post-Trial Motions and Submissions",
+      "sprk_guidancetext": "Developing, responding to and arguing all post-verdict matters in the trial court, such as motions for new trial or j.n.o.v., for stay pending appeal, bills of costs, and requests for attorney's fees."
+    },
+    {
+      "sprk_billingcodeid": "e8295ac6-04a4-566b-b72d-01635c89f380",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L470",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L400",
+      "sprk_description": "Enforcement",
+      "sprk_guidancetext": "All work performed in enforcing and collecting judgments and asserting or addressing defenses thereto."
+    },
+    {
+      "sprk_billingcodeid": "ee16da45-7c94-5d36-b0b6-fdfe9765b78a",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L510",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L500",
+      "sprk_description": "Appellate Motions and Submissions",
+      "sprk_guidancetext": "Developing, responding to and arguing motions and other filings before a reviewing body, such as motions and other filings for stay pending appeal."
+    },
+    {
+      "sprk_billingcodeid": "3eab7986-a3ba-5077-9809-eaa8fe584b50",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L520",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L500",
+      "sprk_description": "Appellate Briefs",
+      "sprk_guidancetext": "Preparing and reviewing appellate briefs."
+    },
+    {
+      "sprk_billingcodeid": "65afd442-d652-5829-88d2-2b1002782ccc",
+      "sprk_codeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63",
+      "sprk_code": "L530",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "L500",
+      "sprk_description": "Oral Argument",
+      "sprk_guidancetext": "Preparing for and arguing an appeal before a reviewing body."
+    },
+    {
+      "sprk_billingcodeid": "a44def83-960e-5c1c-852b-9790bf942297",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P100",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P100",
+      "sprk_description": "Project Administration",
+      "sprk_guidancetext": "Focuses on administrative aspects of the assignment, including planning, budgeting, and maintenance of documents. Covers developing, negotiating, and revising the administrative plan and the budget for a matter. Also includes developing and communicating project status reports. Time coded here is to be distinguished from strategizing about the project, which is included in the P300 code."
+    },
+    {
+      "sprk_billingcodeid": "191c8f36-9169-56fe-8add-71d0e984d683",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P210",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Corporate Review",
+      "sprk_guidancetext": "This task includes all fact investigation/due diligence from a corporate perspective, such as structural reviews, material contract reviews, SEC filing reviews, financing document reviews, and industry information reviews."
+    },
+    {
+      "sprk_billingcodeid": "6c103e69-39e9-5049-8b97-cb456912e5c8",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P220",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Tax",
+      "sprk_guidancetext": "This task includes all steps involved in conducting fact investigation/due diligence from a tax perspective."
+    },
+    {
+      "sprk_billingcodeid": "1b778ede-5870-5c79-bfce-62fc3c0e2100",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P230",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Environmental",
+      "sprk_guidancetext": "This task includes all fact investigation/due diligence from an environmental perspective."
+    },
+    {
+      "sprk_billingcodeid": "d5f1ebba-b6b7-5ef1-8ceb-74b49557156a",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P240",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Real and Personal Property",
+      "sprk_guidancetext": "This task includes all fact investigation/due diligence from a real and personal property perspective."
+    },
+    {
+      "sprk_billingcodeid": "ae3ff2ee-430a-577f-8baa-71f3e64334f1",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P250",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Employee/Labor",
+      "sprk_guidancetext": "This task includes all fact investigation/due diligence from an employee benefits and labor perspective."
+    },
+    {
+      "sprk_billingcodeid": "160918f5-da5a-5ad4-96d9-5a5210c63409",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P260",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Intellectual Property",
+      "sprk_guidancetext": "This task includes all fact investigation/due diligence from an intellectual property (patent, trademarks, copyrights) perspective."
+    },
+    {
+      "sprk_billingcodeid": "e5d2111c-741c-5fc4-8ad1-edd413cb6bfb",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P270",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Regulatory Reviews",
+      "sprk_guidancetext": "This task includes fact investigation/due diligence from a regulatory perspective not covered elsewhere. Includes review of agency filings (e.g., FCC, FTC, and State analogues) by a party to or the subject of the transaction or project. Also includes consumer credit reviews."
+    },
+    {
+      "sprk_billingcodeid": "c5049b5f-34f5-5c8f-afb9-9b90abd70c21",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P280",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P200",
+      "sprk_description": "Other",
+      "sprk_guidancetext": "This task includes all fact investigation/due diligence not captured more specifically in the P200 codes set forth above."
+    },
+    {
+      "sprk_billingcodeid": "5eb860d0-9f31-53d2-8ef9-05354d693240",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P300",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P300",
+      "sprk_description": "Structure/Strategy/Analysis",
+      "sprk_guidancetext": "Includes time spent in planning the approach to the deal or project. Tasks include all analysis performed for purposes of developing and reassessing the strategy for the project or transaction, and all steps taken to develop a written outline or description of the structure of a transaction or the strategy for a matter (e.g., term sheets) throughout the life of the matter."
+    },
+    {
+      "sprk_billingcodeid": "e651978a-ae70-506e-a710-19f646d36537",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P400",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P400",
+      "sprk_description": "Initial Document Preparation/Filing",
+      "sprk_guidancetext": "This phase includes all tasks undertaken to prepare transaction documents and opinions prior to their being sent to non-client third parties. Also includes all tasks undertaken to file documents (including regulatory filings). All related communications with the client and review of client generated transaction documentation should be coded here."
+    },
+    {
+      "sprk_billingcodeid": "7e8f36af-7072-505a-8915-4cb696ddb645",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P500",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P500",
+      "sprk_description": "Negotiation/Revision/Responses",
+      "sprk_guidancetext": "This phase includes conducting negotiations, revising the initial (P400) transaction documentation as a result of such negotiations, attendance at meetings, and responses thereto (including communications with clients with respect thereto). The review of documents received from non-client third parties should also be coded here."
+    },
+    {
+      "sprk_billingcodeid": "307b5d37-b0bf-5da1-b5bc-ac53dec39e41",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P600",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P600",
+      "sprk_description": "Completion/Closing",
+      "sprk_guidancetext": "This phase includes all tasks related to transaction pre-closing and closing, project completion or filing acceptance, such as attendance at closing."
+    },
+    {
+      "sprk_billingcodeid": "5d54ca2d-bef1-53af-aa43-5af81eb1e4d0",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P700",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P700",
+      "sprk_description": "Post-Completion/Post-Closing",
+      "sprk_guidancetext": "This phase includes all post-completion or post-closing tasks such as amendments to final documentation and resolution of post-closing issues. Also includes all implementation tasks (e.g., funds held in escrow) and preparation of closing binders (i.e., primarily clerical actions). Would not typically include total or significant restructuring which should be considered a new assignment."
+    },
+    {
+      "sprk_billingcodeid": "4ce35b92-9421-5932-9ba1-e685f4dc2458",
+      "sprk_codeset": "66cd4a35-5663-591e-979f-e02874bdbefe",
+      "sprk_code": "P800",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "P800",
+      "sprk_description": "Maintenance and Renewal",
+      "sprk_guidancetext": "This phase includes all tasks related to subsequent maintenance and renewal requirements under the terms of the transaction or project such as monitoring of lease agreements, routine waivers and coordination of UCC requirements."
+    },
+    {
+      "sprk_billingcodeid": "1480527d-1a20-5bb7-842b-12c00a39f8d6",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR110",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR100",
+      "sprk_description": "Fact Investigation and Development",
+      "sprk_guidancetext": "All actions to investigate and understand the facts of a matter that are not included under another trademark task code below. Covers initial meeting to discuss new matter, interview of client personnel and potential witnesses, review of documents to learn the facts of a potential case, work with an investigator, and all related communications and correspondence."
+    },
+    {
+      "sprk_billingcodeid": "f4a59e43-86b8-5437-ba62-3f5fe1f88f23",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR120",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR100",
+      "sprk_description": "Analysis/Strategy",
+      "sprk_guidancetext": "The thinking, strategizing, and planning for a case that is not included under other trademark task codes below. Includes discussions, writing, and meetings on case strategy. Also includes initial legal research for case assessment purposes and legal research for developing a basic case strategy. Most legal research and/or other activity will be under the primary task for which the research is conducted, such as research for a response to an office action under TR430 and TR630 respectively."
+    },
+    {
+      "sprk_billingcodeid": "22aebcac-18a3-5fa5-b72f-6ab94fe99836",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR130",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR100",
+      "sprk_description": "Document/File Management",
+      "sprk_guidancetext": "A narrowly defined task that includes creating and populating document and other databases or filing systems, that does not fit under other task codes below. Includes the planning, design, and overall management of this process. Work of outside vendors in building litigation support databases should be an expense under E100. Calendaring (or \"docketing\" in the U.S.) should be included under the appropriate task codes below for each matter unless, otherwise instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "297d3304-4cb1-51f7-8ca7-ea8812274e5f",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR140",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR100",
+      "sprk_description": "Budgeting",
+      "sprk_guidancetext": "Covers developing, negotiating, and revising the budget for a matter that does not fit under other task codes below. Cost estimates which are included as part of other activities, such as reporting an Official Communication from a Trademark Office, should be included under the appropriate task codes below, unless otherwise instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "e0e71d45-7c86-5a2e-94ee-5ef354a43dd8",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR199",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR100",
+      "sprk_description": "Other Assessment, Development, or Administration",
+      "sprk_guidancetext": "Use only for assessment, development, administration and other activities that can not be included under a previous code, or as instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "64921c5d-b988-59e2-af0a-4fac52148280",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR220",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Registerability Investigation",
+      "sprk_guidancetext": "All actions associated with determining the initial availability and registerability of a particular trademark, including the definition of the scope of protection, searching, analyzing search results, and reporting results to the client. Also known as a \"knock out\" search, or 'preliminary' search, it is the most general type of trademark search which usually encompasses a review of trademark registry records, such as pending trademark applications, active trademark registrations, and abandoned trademark applications and registrations. Preliminary searches are conducted to determine if a full clearance investigation is warranted under TR230. Work of outside vendors in conducting searches or otherwise assisting the investigation should be an expense under E100. Any formal opinion should be prepared under TR710."
+    },
+    {
+      "sprk_billingcodeid": "0e9edaff-35b3-5faa-a198-89ca08dc4c15",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR230",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Clearance Investigation",
+      "sprk_guidancetext": "All actions associated with determining the final availability and registerability of a particular trademark, including definition of the scope of protection, searching, analyzing the search results, and reporting the results to the client. Also known as a \"full\" search, a clearance search is the broadest type of trademark search which includes review of pending trademark applications, active trademark registrations, abandoned trademark applications and registrations, public and corporate records, government publications and various databases. Any formal opinion should be prepared under TR710. Work of outside vendors in conducting searches or otherwise assisting investigation should be an expense under E100."
+    },
+    {
+      "sprk_billingcodeid": "32d15dd0-e49c-5cd1-9a1b-77c54be7ea38",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR240",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Opposition Investigation",
+      "sprk_guidancetext": "All actions associated with investigating a claim or potential claim of trademark opposition, trademark infringement or trademark dilution before a trademark office tribunal, including definition of the scope of the investigation, searching, analyzing the search results, and reporting the search results to the client. Work of outside vendors in conducting searches or otherwise assisting the investigation should be an expense under E100. This code set is for determining the facts and recommendations of an opposition matter. Any formal opinion should be prepared under TR710. Any subsequent work completed in a contested matter would be completed under TR440 or TR640 respectively."
+    },
+    {
+      "sprk_billingcodeid": "7cb33e3c-0c4f-5798-b212-10bff1ce2aa3",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR250",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Publication Watches",
+      "sprk_guidancetext": "All actions associated with planning, completing, and reporting the results of periodic searches for conflicting trademarks. For example, this may include monitoring the file history of trademark applications, and/or publication for opposition. Work of outside vendors in conducting searches or otherwise assisting the investigation should be expensed under E100."
+    },
+    {
+      "sprk_billingcodeid": "4ff11b74-ac94-5668-9230-3e946a6e963c",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR260",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Enforcement Investigation",
+      "sprk_guidancetext": "All actions associated with investigating a claim or potential claim of trademark infringement, dilution or unfair competition before a court of jurisdiction, including definition of the scope of the investigation, searching, analyzing the search results, and reporting the search results to the client. Work of outside vendors in conducting searches or otherwise assisting the investigation should be an expense under E100. This code set is for determining the facts and recommendations of an enforcement matter. Any subsequent work completed in a contested matter would be expensed under general litigation codes. Any formal opinion should be prepared under TR710."
+    },
+    {
+      "sprk_billingcodeid": "595757fd-c5df-5cbb-a661-e38671520213",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR270",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Status Investigation",
+      "sprk_guidancetext": "All actions associated with determining the status of a pending or registered trademark, including inquiries with the trademark office, directing outside counsel and database review, and forwarding status report to the client. Includes annuities or maintenance fee status investigations. Work of outside vendors in conducting searches or otherwise assisting the investigation should be an expense under E100."
+    },
+    {
+      "sprk_billingcodeid": "4b2df06c-d1e8-57fb-817a-8a8280afb23c",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR299",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR200",
+      "sprk_description": "Other Trademark Investigation and Analysis",
+      "sprk_guidancetext": "Use only for trademark investigation and analysis activities that can not be included under a previous code or as instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "3baaea21-5e6a-53d4-a47b-b2e4bfc7912c",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR310",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR300",
+      "sprk_description": "Application Preparation and Filing - Domestic",
+      "sprk_guidancetext": "All actions associated with completing a trademark or service mark application (including renewal applications) that is to be filed in the (\"domestic\") home country or region of the applicant, including obtaining the specimen of use from the client, scanning the specimen for electronic filing, discussion with the client to ascertain the dates of first use and first use in commerce, drafting and revision of the application, preparation and filing of the application by electronic or paper formats, and reporting the results to the client. This section includes all domestic trademark and service mark applications filed on the Principal or Supplemental Register. Note that government fees and external expenses (or \"disbursements\" in the U.S.) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "629eb9bc-bba4-5109-955f-65b06eac6eec",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR399",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR300",
+      "sprk_description": "Other Domestic Trademark Application Preparation and Filing",
+      "sprk_guidancetext": "Use only for trademark application preparation activities that can not be included under a previous code or as instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "7082354b-da28-58cb-83c2-6fbd071d43a9",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR410",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR400",
+      "sprk_description": "Affidavits, Petitions, Extensions, Declarations and Other Filings - Domestic",
+      "sprk_guidancetext": "All action associated with processing affidavits, petitions, extensions, declarations, and change of correspondence with the Trademark Office in the home country of an application filed under TR300, including initial review and any calendaring (\"docketing\" in the U.S.) of any response deadline, report to client with any proposed response, review of applicant's instructions and comments, preparation of affidavits, petitions, extensions, declarations, change of address or change of ownership and/or responsive arguments, examiner interviews, and report of actions to the client. Excludes any filings in response to Official Communications under TR430. Includes any affidavit, petition, extension, declaration and other requests for supervisory action that are not decided by a quasi-judicial or appellate tribunal within the Trademark Office. Note that governmental fees and external expenses (or \"disbursements\" in the US) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "7ae57b02-5efa-5149-9543-a4262f72640f",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR420",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR400",
+      "sprk_description": "Preliminary Amendment - Domestic",
+      "sprk_guidancetext": "All action associated with revising an application prior to the examination of the application on its merits in the home country of the applicant for an application filed under TR300, including preparation of amendments and revised drawings that does not materially alter the original drawing."
+    },
+    {
+      "sprk_billingcodeid": "9de3f8f7-dd1d-5591-89b9-ba2030434257",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR430",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR400",
+      "sprk_description": "Official Communication - Domestic",
+      "sprk_guidancetext": "All action associated with processing an Official Communication from a Trademark Office (known as an \"Office Action\" in the U.S. when directed toward the merits of the application) in the home country of an application for an application filed under TR300, including initial review and any calendaring (\"docketing\" in the U.S.) of any response deadline, report to client with any proposed response, review of applicant's instructions and comments, preparation of amendments and/or responsive arguments, examiner interviews, and report of actions to the client. Includes activities associated with Official Communications not affecting the merits of the application, such as reporting Notice of Allowance, receipt of Certificate of Registration, petitions, and other requests for supervisory action that are not decided by a quasi-judicial or appellate tribunal within the Trademark Office. Note that government fees and external expenses (or \"disbursements\" in the US) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "da49d8a6-14ac-5e8b-8f39-fc8b7aee7e26",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR440",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR400",
+      "sprk_description": "Quasi-Judicial Administrative Proceedings - Domestic",
+      "sprk_guidancetext": "All action associated with completing a quasi-judicial proceeding before an administrative tribunal associated with the Trademark Office of the home country of the applicant in connection with an application filed under TR300, including Appeals, Oppositions, and other ex-parte and inter-parties proceedings. Includes collecting evidence, preparing and filing motions, briefs, responses, replies, surreplies, and other documents, attending conferences, depositions, hearings, and other proceedings. Does not include requests for supervisory action (\"Petitions\" in the U.S.) under TR430. Note that governmental fees and external expenses (or \"disbursements\" in the U.S.) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "50a6c28f-2f2c-50a8-bd91-7e04eb6677a8",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR499",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR400",
+      "sprk_description": "Other Trademark Prosecution - Domestic",
+      "sprk_guidancetext": "Use only for trademark prosecution activities for applications that are to be initially filed in the (\"domestic\") home country or region of the applicant, and that can not be included under a previous code, or as instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "0e6f5276-6861-5325-a3d6-bd4a53ce2765",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR510",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR500",
+      "sprk_description": "Application Preparation and Filing - International",
+      "sprk_guidancetext": "All actions associated with completing a trademark, service mark or design mark application (including renewal applications) that is to be filed in a jurisdiction outside the home country or region of the applicant, including obtaining the power of attorney, translations if necessary, obtaining supporting information and documentation from the client, discussing priority filings with the client, drafting and revision of the application, preparation and filing of the application, and reporting the results to the client. This section includes all international national applications, regional applications (such as a CTM or Benelux application), and marks filed under WIPO (Madrid Agreement and Madrid Protocol). Note that government fees and external expenses (or \"disbursements\" in the U.S.) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "f36b306f-ae8e-5ecb-a01d-3a927bf20f1c",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR599",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR500",
+      "sprk_description": "Other International Trademark Application Preparation and Filing",
+      "sprk_guidancetext": "Use only for international trademark application preparation activities that can not be included under a previous code or as instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "fd423c91-83dd-5478-ba84-b37d2025d4d6",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR610",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR600",
+      "sprk_description": "Affidavits, Petitions, Extensions, Declarations and Other Filings - International",
+      "sprk_guidancetext": "All action associated with processing affidavits, petitions, extensions, declarations, and change of correspondence with the Trademark Office in the home country of an application filed under TR500, including initial review and any calendaring (\"docketing\" in the U.S.) of any response deadline, report to client with any proposed response, review of applicant's instructions and comments, preparation of affidavits, petitions, extensions, declarations, change of address or change of ownership and/or responsive arguments, examiner interviews, and report of actions to the client. Excludes any filings in response to Official Communications under TR630. Includes any affidavit, petition, extension, declaration and other requests for supervisory action that are not decided by a quasi-judicial or appellate tribunal within the Trademark Office. Note that governmental fees and external expenses (or \"disbursements\" in the US) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "5d71de5f-0e29-5e34-9564-c77373a9d37c",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR620",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR600",
+      "sprk_description": "Preliminary Amendment - International",
+      "sprk_guidancetext": "All action associated with revising an application prior to the examination of the application on its merits in the home country of the applicant for an application filed under TR500, including preparation of amendments and revised drawings that does not materially alter the original drawing."
+    },
+    {
+      "sprk_billingcodeid": "4f5921fb-7a75-593b-8d4e-d6ccf0678113",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR630",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR600",
+      "sprk_description": "Official Communication - International",
+      "sprk_guidancetext": "All action associated with processing an Official Communication from a Trademark Office outside the home country of the applicant in connection with an application filed under TR500, including initial review and calendaring of any response deadline, report to client with any proposed response, review of applicant's instructions and comments, preparation of amendments and/or responsive arguments, submitting response to local counsel, and report of actions to the client. Includes activities associated with Official Communications not affecting the merits of the application, such as receipt of Certificate of Registration, petitions, and other requests for supervisory action that are not decided by a quasi-judicial or appellate tribunal within the Trademark Office. Note that government fees and external expenses (or \"disbursements\" outside the US) are included under E100. Additionally, Appeals, Oppositions, and other such quasi-judicial proceedings before an administrative tribunal associated with the Trademark Office are included under TR640."
+    },
+    {
+      "sprk_billingcodeid": "70a0d0ed-2f4b-5ddb-b4c8-5550b53ebfa9",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR640",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR600",
+      "sprk_description": "Quasi-Judicial Administrative Proceedings - International",
+      "sprk_guidancetext": "All action associated with completing a quasi-judicial proceeding before an administrative tribunal associated with a Trademark Office outside of the home country of the applicant in connection with an application filed under TR500, including Appeals, Oppositions, and other ex-parte and inter-parties proceedings. Includes collecting evidence, preparing and filing motions, briefs, responses, replies, surreplies, and other documents, attending conferences, depositions, hearings, and other proceedings. Does not include requests for supervisory action under TR630. Note that governmental fees and external expenses (or \"disbursements\" outside the US) are included under E100."
+    },
+    {
+      "sprk_billingcodeid": "578974ea-0b7a-5817-8c42-1657d738a5e2",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR699",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR600",
+      "sprk_description": "Other Trademark Prosecution - International",
+      "sprk_guidancetext": "Use only for trademark prosecution activities in connection with applications that are (\"international\") filed outside the home country or region of the applicant, and that can not be included under a previous code, or as instructed by the client."
+    },
+    {
+      "sprk_billingcodeid": "cb642bfd-2f7f-5d8a-a803-91f9b13b07fa",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR710",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Opinion Preparation",
+      "sprk_guidancetext": "All actions associated with completing formal legal opinions on the validity, enforceability, infringement, and/or non-infringement of a trademark right, includes opinions on infringement of a client's trademark by a non-client infringer. Work of outside vendors in conducting searches or otherwise assisting investigation should be an expense under E100."
+    },
+    {
+      "sprk_billingcodeid": "0ebd859c-ac60-5c18-a5a0-5074386b9871",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR720",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Portfolio Analysis and Management",
+      "sprk_guidancetext": "All action associated with reviewing, analyzing, documenting, and managing a portfolio of trademarks. Includes trademark \"due diligence\" during transactional analysis."
+    },
+    {
+      "sprk_billingcodeid": "56462ab4-ba26-5991-8246-c9200e05d5bf",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR730",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Assignments and Security Interests",
+      "sprk_guidancetext": "All actions associated with negotiating and preparing assignment (i.e. previously registered or filed application) or security interest, including review of file history, checking status and meeting with client. Work of outside vendors in conducting searches or otherwise assisting investigation should be an expense under E100."
+    },
+    {
+      "sprk_billingcodeid": "21d290dc-f533-584a-81c1-6f0b6f32dc36",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR740",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Licensing",
+      "sprk_guidancetext": "All actions associated with negotiating and preparing trademark license."
+    },
+    {
+      "sprk_billingcodeid": "ec32c7c0-b16c-5b71-ad75-23de8653a7dd",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR750",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Domain Names - gTLDs",
+      "sprk_guidancetext": "Domain Name Filing - Generic: All actions associated with completing a domain name application (including renewal) that is to be filed as a generic top-level domain (gTLD), e.g., .com. The domain name applications should be filed through the current domain name provider unless otherwise instructed."
+    },
+    {
+      "sprk_billingcodeid": "40855338-c8a1-5e68-ba03-fb7be8baea99",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR760",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Domain Names - ccTLDs",
+      "sprk_guidancetext": "Domain Name Filing - Country Code. All actions associated with completing a domain name application (including renewal) that is to be filed as a country code top-level domain (ccTLD), e.g., .jp, .uk, .tv. The domain name applications should be filed through the current domain name provider unless otherwise instructed."
+    },
+    {
+      "sprk_billingcodeid": "a412a636-b012-559f-9a25-855a4a649a20",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR770",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Quasi-Judicial Administrative Proceedings - Domain Names",
+      "sprk_guidancetext": "All action associated with completing a quasi-judicial proceeding before an administrative tribunal associated with domain name enforcement actions, including Uniform Domain Name Dispute Resolution (UDRP) actions administered under ICANN and WIPO. Note that governmental fees and external expenses (or \"disbursements\") are included under E100. This code set is for quasi-judicial proceedings only, and any subsequent work completed in a contested matter (i.e. filing complaint or appeal to a national court of jurisdiction) would be expensed under general litigation codes."
+    },
+    {
+      "sprk_billingcodeid": "a5c85731-9213-5817-b5be-9a720ce01596",
+      "sprk_codeset": "b80f82de-21b2-5251-8985-931010ea2971",
+      "sprk_code": "TR799",
+      "sprk_codetype": 100000000,
+      "sprk_phase": "TR700",
+      "sprk_description": "Other Trademark Prosecution",
+      "sprk_guidancetext": "Use only for other trademark related tasks that can not be included under a previous code, or as instructed by the client."
+    }
+  ]
+}

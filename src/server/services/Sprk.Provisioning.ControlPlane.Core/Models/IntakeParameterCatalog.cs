@@ -220,7 +220,7 @@ public static class IntakeParameterCatalog
         // --- Stamp shape (defaults applied at CreateRun or in the handler) ----------
         new(EnvironmentName, "Customer stamp environment segment (dev | staging | prod). Absent → 'prod' stored at CreateRun. H2a, H2b, H4b."),
         new(SolutionPackageType, "Dataverse package type H6 imports: managed | unmanaged. Absent → 'managed' stored at CreateRun (ADR-027 §3 amended 2026-10-07, owner D8: unmanaged only on explicit instruction). H6; H13 records it on the registry row (sprk_solutionversion)."),
-        new(ReferenceDataPack, "Starter taxonomy pack H12b seeds into the reference tables (matter, practice-area, project, document, contact and organization types): legal-standard | none. Absent → 'legal-standard' stored at CreateRun (data-setup plan D4, owner decision B); 'none' for a customer who brings its own taxonomy. Existing rows are never changed. Validated at POST /api/runs; H12b."),
+        new(ReferenceDataPack, "Starter taxonomy pack H12b seeds into the reference tables (matter, practice-area, project, document, contact and organization types, and the UTBMS billing code sets and codes with the default code set of the matter and practice-area types): legal-standard | none. Absent → 'legal-standard' stored at CreateRun (data-setup plan D4, owner decision B); 'none' for a customer who brings its own taxonomy. Existing rows are never changed. Validated at POST /api/runs; H12b."),
         new("location", "Primary Azure region for customer.bicep (H2a; default westus2)."),
         new("signalrEnabled", "Deploy SignalR (H2a; default false)."),
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
