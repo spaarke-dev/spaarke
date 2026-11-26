@@ -38,14 +38,17 @@ Rework: none (first build; two escalations resolved by the owner before any code
 
 **Outcomes:** `completed`; `plan_does_not_fit` (exit 3; non-retryable; nothing uploaded); `input_invalid` (exit 2; non-retryable); `contract_error` (engine output breaks its contract, or an unknown skip-report code → dead-letter `Poisoned`). Retryable (timeout, kill, other exit codes, storage/marker errors) → scheduled copy with `PriorDeliveryCount`, `JobContract.RetryDelay` (1/2/4/8 min), DLQ `MaxRetriesExceeded` at logical delivery 5; unexpected exceptions → `ProcessingError` path. Invalid envelope → `InvalidFormat`.
 
-**Refusal codes:** default mode reads `{"code","edit"|"bookmark"}` from the last stderr line when present (the shape in accelerator commit 2759ef3a7d; `"error"` is never read into anything that is logged), else maps master's `edit N: …` messages onto the accelerator's closed set; no edit prefix → `plan_invalid`, garbage → `unrecognised`. Stderr is never logged, raised or sent.
+**Refusal codes:** default mode reads `{"code","edit"|"bookmark"}` from the last stderr line when present (the shape PR #3237 put on master as 244171569a; `"error"` is never read into anything that is logged), else maps master's `edit N: …` messages onto the accelerator's closed set; no edit prefix → `plan_invalid`, garbage → `unrecognised`. Stderr is never logged, raised or sent.
 
 **Skip-and-report (seam, OFF):** `INTAKE_ENGINE_SKIP_AND_REPORT` (default false). When on: `--skip-unplaceable refused-report.json` on the redline, `--refused` to summary and check, the report is validated strictly (closed code set; any deviation → `contract_error`) and uploaded as `refused-report.json` beside the outputs; the completion carries the refused codes. `main` refuses to start (exit 2) if the flag is on and the engines' `--help` lacks the flags.
 
-## Follow-ups once accelerator commit 2759ef3a7d (or its PR, #3237) is on master
+## Follow-ups now that PR #3237 is on master (244171569a; not yet merged into this branch)
 
-1. Turn skip mode on: set `INTAKE_ENGINE_SKIP_AND_REPORT=true` in the job's Bicep env (task 002 module), then re-run the skip-mode tests against the real engines instead of the fake scripts.
-2. Tighten parity: set `DOCX_IDENTITY = "sha256"` in `tests/test_golden_parity.py` (whole-file sha256 for every .docx). Check first that the runner's zlib and the image's give the same deflate stream; if not, the in-image comparison needs a reference produced in the same image.
+Contract: `notes/009-engine-changes.md`. The flags, REPORT.json shape, closed code set and exit-3 stderr shape there match what this job already implements.
+
+1. **Turn on skip mode in `redline`:** set `INTAKE_ENGINE_SKIP_AND_REPORT=true` in the job's Bicep env (task 002 module), and replace the fake-engine skip-mode tests in `test_message_flow.py` with runs of the real engines (a refused edit → outputs written, `refused-report.json` uploaded, codes in the completion). `main` already refuses to start if the flag is on but the image's engines lack `--skip-unplaceable`.
+2. **Read `code`/`edit` from the exit-3 stderr JSON, never log `"error"`:** already implemented (`engines._structured_refusal`, tested with synthetic stderr). After the merge, add a real-engine test asserting the structured keys are used (not the regex fallback) and that the `"error"` text appears in no log, completion or blob.
+3. **Tighten in-image parity to whole-file sha256, same image only:** the engines' .docx bytes depend on the zlib build, so the runner-side reference manifest cannot be compared by sha256. Change the CI step so the reference run happens **inside the same image** (e.g. run `test_golden_parity.py --write-manifest` in one `docker run`, then the suite in a second), then set `DOCX_IDENTITY = "sha256"` in `tests/test_golden_parity.py`. Cross-host comparison (runner vs image, or local Windows vs image) stays per-part.
 
 ## Review against code-review / adr-check criteria (Step 9.5)
 
