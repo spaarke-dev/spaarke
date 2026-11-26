@@ -333,6 +333,7 @@ public sealed class McpCallerPathTests
             ["spaarke_get_analysis"] = ["analysisId"], // r2 task 031
             ["spaarke_get_playbook_run"] = ["runId"], // r2 task 030
             ["spaarke_run_playbook"] = ["documentIds", "idempotencyKey", "instructions", "parameters", "playbookId"], // r2 tasks 030, 038
+            ["spaarke_get_matter_finance"] = ["matterId"], // r2 task 033
         }, options => options.WithStrictOrdering());
     }
 
