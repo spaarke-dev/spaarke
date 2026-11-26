@@ -8,6 +8,8 @@ import {
   ASK_FOR_MORE,
   MAY_BE_MORE,
   NARROW_ADVICE,
+  NO_MORE_AFTER_THESE,
+  PAGING_LIMIT,
   nextCallArguments,
   noticesFor,
   parseSearchResult,
@@ -21,6 +23,7 @@ const page = (overrides: Partial<SearchPage> = {}): SearchPage => ({
   kind: 'documents',
   hits: [{ id: 'a', title: 'A', excerpt: '' }],
   limit: 20,
+  offset: 0,
   nextOffset: null,
   truncated: false,
   partial: false,
@@ -53,6 +56,7 @@ describe('parseSearchResult', () => {
         kind: 'documents',
         hits: [{ id: 'd1', title: 'MSA', excerpt: 'pdf · in matter Acme — text', link: 'https://x.example/a?b=1' }],
         limit: 10,
+        offset: 0,
         nextOffset: 10,
         truncated: true,
         partial: true,
@@ -77,6 +81,15 @@ describe('parseSearchResult', () => {
   it.each([[0], [-5], [1.5], ['20'], [null], [undefined]])('ignores a nextOffset of %p', value => {
     const parsed = parseSearchResult({ items: [{ id: 'd1', name: 'A' }], limit: 20, nextOffset: value });
     expect(parsed.status === 'page' && parsed.page.nextOffset).toBeNull();
+  });
+
+  it('reads the page offset, 0 when it is missing or not a whole number', () => {
+    const offsetOf = (offset: unknown) => {
+      const parsed = parseSearchResult({ items: [{ id: 'd1', name: 'A' }], limit: 20, offset });
+      return parsed.status === 'page' ? parsed.page.offset : -1;
+    };
+    expect(offsetOf(40)).toBe(40);
+    expect([offsetOf(undefined), offsetOf(-3), offsetOf(1.5), offsetOf('40')]).toEqual([0, 0, 0, 0]);
   });
 
   it('drops a row with no id, de-duplicates by id and falls back to a title', () => {
@@ -171,6 +184,15 @@ describe('nextCallArguments', () => {
     expect(nextCallArguments('documents', undefined, 20)).toBeNull();
     expect(nextCallArguments('documents', { limit: 20 }, 20)).toBeNull();
   });
+
+  it('asks for the largest offset the tools accept, and for none above it (they would refuse it)', () => {
+    expect(nextCallArguments('documents', { query: 'q' }, 1000)).toEqual({
+      tool: 'spaarke_search_documents',
+      args: { query: 'q', offset: 1000 },
+    });
+    expect(nextCallArguments('documents', { query: 'q' }, 1001)).toBeNull();
+    expect(nextCallArguments('records', { query: 'q' }, 1003)).toBeNull();
+  });
 });
 
 describe('noticesFor', () => {
@@ -197,5 +219,21 @@ describe('noticesFor', () => {
 
   it('points at the chat when an offset was advised but the widget cannot ask for it', () => {
     expect(noticesFor(page({ nextOffset: 20 }), false, false).ending).toBe(ASK_FOR_MORE);
+  });
+
+  it('says to narrow the search, not to ask the chat, when the advised offset is above the tools bound', () => {
+    expect(noticesFor(page({ nextOffset: 1001 }), false, false).ending).toBe(PAGING_LIMIT);
+    expect(noticesFor(page({ nextOffset: 1000 }), false, false).ending).toBe(ASK_FOR_MORE); // at the bound it is still a page the tools accept
+  });
+
+  it('ends a list the reader paged into when the newest page is empty, and never calls an empty first page an end', () => {
+    expect(noticesFor(page({ hits: [], offset: 20 }), false, false, 2).ending).toBe(NO_MORE_AFTER_THESE);
+    expect(noticesFor(page({ hits: [] }), false, false, 1).ending).toBeNull();
+  });
+
+  it('says a first page that opened past the start and found nothing is past the end', () => {
+    expect(noticesFor(page({ hits: [], offset: 40 }), false, false, 1).ending).toBe(
+      'No more matches after the first 40.'
+    );
   });
 });

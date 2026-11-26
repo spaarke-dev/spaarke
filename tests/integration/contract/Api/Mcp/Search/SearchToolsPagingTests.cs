@@ -106,6 +106,73 @@ public sealed class SearchToolsPagingTests
         Text(result).Should().Contain("The page was full; send offset 6 for the next page.");
     }
 
+    // ---- the offset cap: never advise an offset the tool itself refuses (task 035 review fix) -------------------------
+
+    [Fact]
+    public async Task BothTools_AFullPageWhoseNextOffsetIsTheCap_StillAdvisesIt()
+    {
+        await using var host = await SearchToolsHost.StartAsync();
+        var parent = Guid.NewGuid();
+        host.Access.Grant(SearchToolsHost.Matters, parent, AccessRights.Read);
+        var ids = Enumerable.Range(0, 1010).Select(_ => Guid.NewGuid()).ToList();
+        ids.ForEach(id => host.Access.Grant(SearchToolsHost.Matters, id, AccessRights.Read));
+        host.DocumentIndex.Returns(Enumerable.Range(0, 1010).Select(_ => Doc(parent)).ToArray());
+        host.RecordIndex.Returns(ids.Select(id => Record(id)).ToArray());
+
+        var documents = await host.CallToolAsync(DocumentsTool, new { query = "q", entityType = "matter", entityId = parent, limit = 3, offset = 997 });
+        var records = await host.CallToolAsync(RecordsTool, new { query = "q", limit = 3, offset = 997 });
+
+        foreach (var result in new[] { documents, records })
+        {
+            HasMore(result).Should().BeTrue();
+            NextOffset(result).Should().Be(SearchToolSupport.MaxOffset);
+            Text(result).Should().Contain("send offset 1000 for the next page.").And.NotContain(SearchToolSupport.PagingLimitAdvice);
+        }
+    }
+
+    [Theory]
+    [InlineData(998)]
+    [InlineData(1000)]
+    public async Task BothTools_AFullPageWhoseNextOffsetWouldPassTheCap_AdvisesNoOffset_AndSaysToNarrow(int offset)
+    {
+        await using var host = await SearchToolsHost.StartAsync();
+        var parent = Guid.NewGuid();
+        host.Access.Grant(SearchToolsHost.Matters, parent, AccessRights.Read);
+        var ids = Enumerable.Range(0, 1010).Select(_ => Guid.NewGuid()).ToList();
+        ids.ForEach(id => host.Access.Grant(SearchToolsHost.Matters, id, AccessRights.Read));
+        host.DocumentIndex.Returns(Enumerable.Range(0, 1010).Select(_ => Doc(parent)).ToArray());
+        host.RecordIndex.Returns(ids.Select(id => Record(id)).ToArray());
+
+        var documents = await host.CallToolAsync(DocumentsTool, new { query = "q", entityType = "matter", entityId = parent, limit = 3, offset });
+        var records = await host.CallToolAsync(RecordsTool, new { query = "q", limit = 3, offset });
+
+        foreach (var result in new[] { documents, records })
+        {
+            Items(result).Should().HaveCount(3, "the page is full");
+            NextOffset(result).Should().BeNull("the tool refuses an offset above its own cap, so it never advises one");
+            HasMore(result).Should().BeFalse("hasMore must not promise a next page the caller cannot ask for");
+            Text(result).Should().Contain(SearchToolSupport.PagingLimitAdvice).And.NotContainEquivalentOf("send offset");
+        }
+    }
+
+    [Fact]
+    public async Task SearchDocuments_ASizeCutPageWhoseNextOffsetWouldPassTheCap_AdvisesNoOffset()
+    {
+        await using var host = await SearchToolsHost.StartAsync();
+        var parent = Guid.NewGuid();
+        host.Access.Grant(SearchToolsHost.Matters, parent, AccessRights.Read);
+        host.DocumentIndex.Returns(Enumerable.Range(0, 1070)
+            .Select(_ => Doc(parent, new string('語', 600), new string('語', 300)) with { Highlights = [new string('語', 1000)], FileType = new string('f', 80) })
+            .ToArray());
+
+        var result = await host.CallToolAsync(DocumentsTool, new { query = "q", entityType = "matter", entityId = parent, limit = 50, offset = 1000 });
+
+        Content(result).GetProperty("truncated").GetBoolean().Should().BeTrue();
+        NextOffset(result).Should().BeNull();
+        HasMore(result).Should().BeFalse();
+        Text(result).Should().Contain("The list was cut to fit.").And.Contain(SearchToolSupport.PagingLimitAdvice).And.NotContainEquivalentOf("send offset");
+    }
+
     // ---- over every record: no offset continues the list ------------------------------------------------------------
 
     [Fact]

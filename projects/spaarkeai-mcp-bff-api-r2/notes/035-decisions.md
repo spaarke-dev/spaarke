@@ -124,4 +124,29 @@ Placement: BFF, inside the existing `/mcp/legal-operations` host (no new host, p
 - Class check (Step 9.5 rule 6): the "tool result trimmed or partial" and "next offset" rules are applied in one module (`searchResults.ts`) for both tools.
   Pattern greps: `fetch(` / `.fetch(` / `innerHTML` / `window.open` in the new widget's `src/`: none (the surface guard fails the build otherwise).
 
+## Review fixes
+
+Seven review findings, all confirmed against the source and fixed. The fail-before column names what was reverted, and the tests that then failed.
+
+| # | Finding | Fix | Fail-before proof |
+|---|---|---|---|
+| 1 | Right-click opened the link: `openThroughHost` was on `onAuxClick`, and Chromium fires `auxclick` for the context-menu button | `openThroughHost` returns early (no `preventDefault`, no `openLink`) when `event.type === 'auxclick'` and `button !== 1` (`App.tsx`) | Early return removed: "a right click ... is left to the browser" fails. The middle-click test is unchanged and still passes |
+| 2 | The server advised an offset it then refused (022's code): `DescribePage` set `next = offset + limit` (or `+ kept`) with no cap, and the argument check refuses an offset above `MaxOffset` (1000) | `SearchToolSupport.DescribePage`: a next offset above `MaxOffset` is not advised: `nextOffset` null, `hasMore` false, and the text says `PagingLimitAdvice` ("That is as far as paging goes. For more, narrow the search with a more specific query.") instead of "send offset N". An offset of exactly 1000 is still advised. Widget: `nextCallArguments` returns null above 1000 (no Load more), and `noticesFor` says to narrow the search rather than "Ask for the next page in the chat" | Server: the cap condition disabled, 3 of 15 `SearchToolsPagingTests` fail (offsets 998 and 1000 for both tools, and the size-cut page at 1000). Widget: guards removed, 3 tests fail (`nextCallArguments` bound, `noticesFor` bound, App "largest offset ... narrow") |
+| 3 | Load more ended silently after an empty page, and an opening result at offset > 0 with no rows said "No results found." | `SearchPage` now carries `offset`. `noticesFor` says "No more matches after these." when the newest page is empty and the reader paged into the list; for an opening result at offset N > 0 with no rows the component is not drawn and the widget says "No more matches after the first N." (`App.tsx`, `searchResults.ts`) | Empty-page branches disabled: 4 tests fail (two `noticesFor`, two App) |
+| 4 | Keyboard focus lost on Load more (NFR-09): `disabled={loading}` | `disabledFocusable={loading}`; the label stays "Load more"; the footer carries `aria-busy` while the existing spinner ("Loading more results") shows. A click while loading does nothing (the handler already guards `loading`; Fluent also suppresses it) | `disabled={loading}` restored: the focus test fails (button disabled, focus lost) |
+| 5 | The widget behaviour suites ran in no workflow (each `build` runs only its `widgetSurface` guard) | `ci-tier1-blocking.yml` (`mcp_conformance` job): a `npx jest --ci` step after each of the three widget builds (Decisions, Briefing, Search results), run from the widget's folder. No `package.json`, publish or deploy workflow changed; nothing under `spaarke-decisions/` changed. D-021-1's text in `defer-issues.md` now states what runs. YAML parses (`yaml` package: the six widget steps listed in order). All three suites pass here: Decisions 398 pass / 2 skipped, Briefing 129 pass / 1 skipped, Search results 131 pass | n/a (workflow change) |
+| 6 | The "host rejects" App test proved nothing: it asserted a warning that was already on screen from the first click | The test now goes false (warning), true (warning gone), reject (warning back) | `setLinkError(!opened)` replaced by `setLinkError(true)`: the test fails (the old version of it passed under that mutation) |
+| 7 | The built-page guard's must-fire table lacked rows | `BUILT_FORBIDDEN` already named `msal`, `acquireToken`, `sessionStorage` and `indexedDB`; rows added for each. The built page passes | The four patterns dropped from `BUILT_FORBIDDEN`: the four new rows fail |
+
+Tests added: server `SearchToolsPagingTests` (+4: full page at next offset 1000 still advised; offsets 998 and 1000 advise none for both tools; a size-cut page at offset 1000 advises none). Widget: `App.test.tsx` (+5, one rewritten), `searchResults.test.ts` (+5), `widgetSurface.test.ts` (+4 rows). 022's contract tests were not edited; none pinned the old text for a case at the cap.
+
+Results: widget `npm run build` passes, bundle **905,979 bytes (0.86 MB)**; widget jest 131 pass; Briefing 129 pass / 1 skipped; Decisions 398 pass / 2 skipped. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors. `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~Mcp|FullyQualifiedName~Search"`: 1542 passed, 0 failed, 6 skipped (the earlier 1538 plus the four new server tests). `dotnet format whitespace --verify-no-changes` on the two changed `.cs` files: clean. REST bytes untouched (MCP tool text only).
+
+### Known limits (recorded, not fixed)
+
+- The browser context menu's "Open link in new tab" and dragging a link bypass the interception. The href is always a server-built http(s) link.
+- A failed or cancelled opening call leaves the widget spinning for 45 s, and then it says "No search results arrived." That is shared-host behaviour.
+- The two tools do not set `_meta.ui.visibility`; the spec default is the same.
+- `parentType` is shown exactly as the index stores it (022's data).
+
 rework: none task 035

@@ -355,6 +355,12 @@ internal static partial class SearchToolSupport
     internal const string NarrowToOneRecordAdvice = "For more, search inside one matter, project or invoice (entityType + entityId).";
 
     /// <summary>
+    /// The advice when the next page would start above <see cref="MaxOffset"/>: the argument check refuses such an offset, so none is advised
+    /// (plain wording, like <see cref="NarrowToOneRecordAdvice"/>).
+    /// </summary>
+    internal const string PagingLimitAdvice = "That is as far as paging goes. For more, narrow the search with a more specific query.";
+
+    /// <summary>
     /// What the paging facts of one result say: the lead sentence of the text, <c>hasMore</c> and <c>nextOffset</c>.
     /// </summary>
     /// <param name="Header">The first line of the text (before the hits).</param>
@@ -368,7 +374,8 @@ internal static partial class SearchToolSupport
     /// <list type="bullet">
     /// <item>No rows at an offset past zero: "No more {noun}s after the first {offset}." (at offset 0: <paramref name="noMatchText"/>).</item>
     /// <item>Rows: "Showing N {noun}(s), best match first." then, when the page came back <b>full</b> or the size bound <b>cut</b> it: the offset to send
-    /// (<c>offset + limit</c> for a full page, <c>offset + kept</c> after a cut, so no cut hit is skipped), or, when <paramref name="offsetContinues"/>
+    /// (<c>offset + limit</c> for a full page, <c>offset + kept</c> after a cut, so no cut hit is skipped; none and <see cref="PagingLimitAdvice"/> when
+    /// that offset would be above <see cref="MaxOffset"/>, which the argument check refuses), or, when <paramref name="offsetContinues"/>
     /// is false, <see cref="NarrowToOneRecordAdvice"/> and no offset. A page that came back short and whole gets the hedge "There may be more than this."
     /// because rows are authorized after the index ranks them, so a short page does not mean the end of the list.</item>
     /// </list>
@@ -397,6 +404,7 @@ internal static partial class SearchToolSupport
         }
 
         int? next = null;
+        var pastLimit = false;
         if (full || truncated)
         {
             if (!offsetContinues)
@@ -406,8 +414,18 @@ internal static partial class SearchToolSupport
             else if (kept > 0)
             {
                 // kept == 0 cannot happen (one hit is far under the row budget); it would advise an offset that repeats this page.
-                next = truncated ? offset + kept : offset + limit;
-                text.Append(truncated ? $" Send offset {next} for the next page." : $" The page was full; send offset {next} for the next page.");
+                var candidate = truncated ? offset + kept : offset + limit;
+                if (candidate > MaxOffset)
+                {
+                    // The tool would refuse this offset itself (INVALID_OFFSET), so it is never advised.
+                    pastLimit = true;
+                    text.Append(' ').Append(PagingLimitAdvice);
+                }
+                else
+                {
+                    next = candidate;
+                    text.Append(truncated ? $" Send offset {next} for the next page." : $" The page was full; send offset {next} for the next page.");
+                }
             }
         }
         else
@@ -415,7 +433,7 @@ internal static partial class SearchToolSupport
             text.Append(" There may be more than this.");
         }
 
-        return new PageNote(text.ToString(), HasMore: full && offsetContinues, next);
+        return new PageNote(text.ToString(), HasMore: full && offsetContinues && !pastLimit, next);
     }
 
     // ---- result ----------------------------------------------------------------------------------------------------------------------
