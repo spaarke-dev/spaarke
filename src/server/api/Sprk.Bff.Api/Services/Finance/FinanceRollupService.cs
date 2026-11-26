@@ -11,7 +11,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// Calculates and persists denormalized financial fields on Matter/Project records.
 /// Called by the subgrid parent rollup web resource (sprk_subgrid_parent_rollup.js)
 /// when Invoices or Budgets are added/changed via the form, and by
-/// SpendSnapshotGenerationJobHandler after background invoice processing.
+/// SpendSnapshotGenerationJobHandler after background invoice processing, and (ontology task 232, D-230) by
+/// SignalReevaluationJob for the one matter or project it has just raised a spend, budget or utilization Threshold Signal on.
 ///
 /// Follows the same pattern as ScorecardCalculatorService:
 ///   1. Parallel queries for child records
@@ -129,8 +130,14 @@ public class FinanceRollupService
     /// exist yet on an environment the BFF reaches before the schema script runs, and Dataverse refuses a whole PATCH that names
     /// an unknown column. So a failure to read or write it is logged as an Error and leaves the stored value as it was (never 0);
     /// it never stops total spend, budget, velocity or the timeline from updating (ontology-r1 review F1, 2026-10-19).
+    /// <para>Ontology task 232 (D-230, D-61): with <paramref name="readStored"/>, each PATCH is skipped when the parent already holds
+    /// its values (<see cref="IsUnchanged"/>), so a recalculation that changes nothing writes nothing. The stored values are read per
+    /// PATCH, with exactly that PATCH's columns (a column missing on the environment fails only its own read). A stored read that
+    /// answers null (unknown) leaves the write to go ahead as before.</para>
     /// </summary>
-    /// <returns>Whether Pending Spend was written.</returns>
+    /// <param name="readStored">The parent's stored values of the given columns, or null when they cannot be read. Null (the
+    /// default): every PATCH is sent, as before task 232.</param>
+    /// <returns>Whether Pending Spend is current: written, or already holding the recalculated value.</returns>
     internal static async Task<bool> WriteRollupAsync(
         IFieldMappingDataverseService writer,
         ILogger logger,
@@ -138,17 +145,32 @@ public class FinanceRollupService
         Guid parentId,
         Dictionary<string, object?> countedFields,
         Func<CancellationToken, Task<decimal>> readPendingSpend,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<IReadOnlyCollection<string>, CancellationToken, Task<Entity?>>? readStored = null)
     {
         // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
         // authorization check (or a background job's stale id) would be recreated as an empty row carrying
-        // only these rollup fields. A missing parent surfaces as KeyNotFoundException → the endpoint's uniform 404.
-        await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, countedFields, ct);
+        // only these rollup fields. A missing parent surfaces as KeyNotFoundException → the endpoint's uniform 404
+        // (its stored read answers null, so the write below still runs and raises it).
+        if (readStored is not null && IsUnchanged(countedFields, await readStored(countedFields.Keys, ct)))
+        {
+            logger.LogDebug("Finance rollup of {Entity} {EntityId} unchanged; nothing written", parentEntityName, parentId);
+        }
+        else
+        {
+            await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, countedFields, ct);
+        }
 
         try
         {
             var pendingSpend = await readPendingSpend(ct);
-            await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, BuildPendingSpendFields(pendingSpend), ct);
+            var pendingFields = BuildPendingSpendFields(pendingSpend);
+            if (readStored is not null && IsUnchanged(pendingFields, await readStored(pendingFields.Keys, ct)))
+            {
+                return true;
+            }
+
+            await writer.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, pendingFields, ct);
             return true;
         }
         // Not the caller's cancellation; an HttpClient timeout (TaskCanceledException with ct not cancelled) is a pending failure too.
@@ -159,6 +181,65 @@ public class FinanceRollupService
                 "Pending Spend (D-104) not updated for {Entity} {EntityId}; the counted rollup was written and the stored pending value is unchanged",
                 parentEntityName, parentId);
             return false;
+        }
+    }
+
+    /// <summary>Ontology task 232: how far a recalculated amount may sit from the stored one and still be "unchanged": half the stored
+    /// precision (every decimal and money rollup column has Accuracy 2 in the SpaarkeMaster schema; Dataverse rounds on store, so an
+    /// unrounded figure such as a utilization of 95.238… is stored as 95.24).</summary>
+    internal const decimal StoredValueTolerance = 0.005m;
+
+    /// <summary>
+    /// Ontology task 232 (D-61): true when <paramref name="stored"/> already holds every value in <paramref name="fields"/>: an amount
+    /// within <see cref="StoredValueTolerance"/> (a <see cref="Money"/> compares by its value), an equal count, an ordinally equal text.
+    /// A stored row that is unknown (null) or lacks a column (an empty column against a computed 0 is a change) is not unchanged.
+    /// </summary>
+    internal static bool IsUnchanged(IReadOnlyDictionary<string, object?> fields, Entity? stored)
+    {
+        if (stored is null)
+        {
+            return false;
+        }
+
+        foreach (var (column, value) in fields)
+        {
+            var current = stored.Attributes.TryGetValue(column, out var raw) ? raw : null;
+            if (current is Money money)
+            {
+                current = money.Value;
+            }
+
+            var same = (value, current) switch
+            {
+                (decimal computed, decimal held) => Math.Abs(computed - held) <= StoredValueTolerance,
+                (int computed, int held) => computed == held,
+                (string computed, string held) => string.Equals(computed, held, StringComparison.Ordinal),
+                _ => false,
+            };
+            if (!same)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Ontology task 232: the parent's stored values of <paramref name="columns"/>, through the application identity's read
+    /// (the one the base-row reads use). Null when they cannot be read (a parent gone, a column missing on the environment, a fault):
+    /// the caller then writes as before, so a failed read never stops or changes a recalculation. The caller's cancellation propagates.</summary>
+    private async Task<Entity?> ReadStoredAsync(string parentEntityName, Guid parentId, IReadOnlyCollection<string> columns, CancellationToken ct)
+    {
+        try
+        {
+            return await _dataverseService.RetrieveAsync(parentEntityName, parentId, columns.ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Stored finance rollup of {Entity} {EntityId} could not be read ({ExceptionType}); writing the recalculated values without comparing",
+                parentEntityName, parentId, ex.GetType().Name);
+            return null;
         }
     }
 
@@ -230,7 +311,8 @@ public class FinanceRollupService
             _fieldMappingService, _logger, parentEntityName, parentId, fields,
             async token => (await FinanceBaseValues.ReadPendingSpendAsync(_dataverseService, parentEntityName, [parentId], token, _logger))
                 .GetValueOrDefault(parentId),
-            ct);
+            ct,
+            (columns, token) => ReadStoredAsync(parentEntityName, parentId, columns, token));
 
         _logger.LogInformation(
             "Finance rollup complete for {Entity} {EntityId}: " +

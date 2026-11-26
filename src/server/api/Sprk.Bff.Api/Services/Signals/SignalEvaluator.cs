@@ -63,6 +63,11 @@ public sealed record SignalEvaluation(
 {
     internal static SignalEvaluation Invalid { get; } =
         new(false, null, default, PredicateCompiler.DefaultQuietWindowDays, Array.Empty<SignalHit>());
+
+    /// <summary>Task 232 (D-230, #1767): the matter or project column a base-derived Threshold compared (spend, budget or utilization,
+    /// <see cref="FinanceBaseValues.IsDerived"/>), judged from the invoice and budget rows; null for every other rule. The job recalculates
+    /// the stored roll-up of each subject it raises such a Signal for, so the form shows the figure the Signal states.</summary>
+    public string? DerivedThresholdField { get; init; }
 }
 
 /// <summary>
@@ -323,7 +328,7 @@ public sealed class SignalEvaluator
                 CoreRefusalCause: refusalCause));
         }
 
-        return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits, missing);
+        return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits, missing) { DerivedThresholdField = derived?.Field };
     }
 
     // ── Base-derived Threshold (task 025b, D-122) ─────────────────────────────────────────────────────────────────
