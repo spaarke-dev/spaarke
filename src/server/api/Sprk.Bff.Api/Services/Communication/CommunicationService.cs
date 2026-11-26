@@ -4047,8 +4047,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var linked = emailDirection == SentEmailDirection && StageArchiveRecordLink(document, filedCommunication);
 
         // ISS-010 part E (Q3, field-mapping-r1): the on-demand archive asks again, after the PUT and before the create, whether another
-        // archive of this communication created its Document meanwhile (the lock fails open, #984). The PUT went to the same path, so the
-        // existing Document still names the file; no second row is created, and the detected race is an Error.
+        // archive of this communication created its Document meanwhile (the lock fails open, #984). No second row is created, and the
+        // detected race is an Error. Between two on-demand archives (route and job) the PUT went to the same path, so the existing
+        // Document still names the file. Known limit (field-mapping-r1 review of #3260): the send's own inline archive names its file
+        // from the send time, not sprk_sentat, and takes no comm-archive lock, so if it races an on-demand archive the on-demand .eml is
+        // left in SPE with no Document; and if the on-demand create lands first, the send's archive (no re-check) makes a second
+        // Document (pre-existing with DeferPostSend off).
         if (recheckBeforeCreate && await FindExistingArchiveDocumentAsync(communicationId, ct) is { } racedDocumentId)
         {
             _logger.LogError(
