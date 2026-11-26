@@ -1195,6 +1195,12 @@ public sealed class OfficeVersionSaveWorld
 
         /// <summary>Task 138: the row's <c>sprk_parentdocument</c> (an email attachment's <c>.eml</c>), written in the create.</summary>
         public Guid? ParentDocumentId { get; set; }
+
+        /// <summary>Task 141 review: the row's <c>sprk_emailmessageid</c>, written by the email save's update.</summary>
+        public string? EmailMessageId { get; set; }
+
+        /// <summary>Task 141 review: the row's <c>sprk_relatedcommunication</c>, written in the create.</summary>
+        public Guid? RelatedCommunicationId { get; set; }
     }
 
     public sealed class SpeItem
@@ -1424,10 +1430,20 @@ public sealed class OfficeVersionSaveWorld
                         document["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matterId);
                     if (row.RelatedMatterId is { } relatedMatterId)
                         document["sprk_relatedmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", relatedMatterId);
+                    // Task 141 review: the named add compares the row's own message id and takes its communication.
+                    if (row.EmailMessageId is { } emailMessageId)
+                        document["sprk_emailmessageid"] = emailMessageId;
+                    if (row.RelatedCommunicationId is { } communicationId)
+                        document["sprk_relatedcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", communicationId);
                     return document;
                 }
             }
         }
+
+        // Task 141 review: a communication registered by Message-ID, read back with that Message-ID.
+        if (entity == "sprk_communication"
+            && CommunicationsByMessageId.FirstOrDefault(c => c.Value == id) is { Key: { } internetMessageId })
+            return new Microsoft.Xrm.Sdk.Entity("sprk_communication", id) { ["sprk_internetmessageid"] = internetMessageId };
 
         return null;
     }
@@ -1462,6 +1478,7 @@ public sealed class OfficeVersionSaveWorld
                 FileName = request.Name,
                 DocumentName = request.Name,
                 ParentDocumentId = request.ParentDocumentLookup,
+                RelatedCommunicationId = request.RelatedCommunicationId,
             };
             // Field-mapping task 030b: the save's association moved from the follow-up update into the CREATE
             // (CreateDocumentRequest.Association), so the world files the row to its matter here, as Dataverse does.
@@ -1505,6 +1522,7 @@ public sealed class OfficeVersionSaveWorld
             row.FileSize = update.FileSize ?? row.FileSize;
             row.FilePath = update.FilePath ?? row.FilePath;
             row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
+            row.EmailMessageId = update.EmailMessageId ?? row.EmailMessageId;
             // Task 055: the ASSOCIATION the save writes. (Since field-mapping task 030b the save puts it on the CREATE,
             // read above; this line stays for any update that still carries one.) DocumentAssociationMap.TryApply put it on the
             // UPDATE (Spaarke.Dataverse/Models.cs:78-110) and DataverseServiceClientImpl:922-931 writes it to

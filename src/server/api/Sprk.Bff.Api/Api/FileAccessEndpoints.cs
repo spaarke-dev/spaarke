@@ -335,8 +335,10 @@ public static class FileAccessEndpoints
         /// checked here, as the caller, with the check the route's filter makes on the parent: <c>read</c> through
         /// <see cref="InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync"/> (the root grants, then the external document
         /// narrowing). A child the caller may not read is left out. Only the lookup runs before the check; no child content is
-        /// read at all. Fail closed: a read or a check that faults omits the whole field, so the pane never claims an attachment
-        /// is unsaved on a guess and keeps today's behaviour.
+        /// read at all. Fail closed: a read that throws, or a child whose check answers the system-failure deny
+        /// (<see cref="Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode"/> — the authorization service answers a
+        /// fault that way and does not throw), omits the whole field, so the pane never claims an attachment is unsaved on a
+        /// guess and keeps today's behaviour.
         /// </remarks>
         static async Task<IReadOnlyList<string>?> ReadSavedAttachmentNamesAsync(
             Guid emlDocumentId,
@@ -370,6 +372,16 @@ public static class FileAccessEndpoints
                     if (decision.IsAllowed)
                     {
                         names.AddRange(Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf(child));
+                    }
+                    else if (string.Equals(
+                        decision.ReasonCode, Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode, StringComparison.Ordinal))
+                    {
+                        // The check did not decide: the service answers a fault as a deny with this reason code, never a
+                        // throw. Dropping the child would make the pane show it as unsaved on a guess, so say nothing.
+                        logger.LogWarning(
+                            "Email identity: a saved attachment's access check of document {DocumentId} faulted; the field is omitted.",
+                            emlDocumentId);
+                        return null;
                     }
                 }
 

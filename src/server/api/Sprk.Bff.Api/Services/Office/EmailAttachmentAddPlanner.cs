@@ -76,7 +76,7 @@ public class EmailAttachmentAddPlanner
     /// <param name="EmlFileName">Its stored file name (the children's "attachment from" name).</param>
     /// <param name="EmlFileSize">Its size.</param>
     /// <param name="AttachmentNames">The attachments to add, by file name; empty when the plan only reports
-    /// <see cref="NotStored"/>.</param>
+    /// <see cref="NotStored"/> or <see cref="NotSaveable"/>.</param>
     public sealed record Plan(
         Guid EmlDocumentId,
         string DriveId,
@@ -91,6 +91,23 @@ public class EmailAttachmentAddPlanner
         /// request's own bytes. Reported, so the user is told instead of seeing "Saved".
         /// </summary>
         public IReadOnlyList<string> NotStored { get; init; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Task 141 review: the names the selection asked for that the stored <c>.eml</c> DOES hold but an email save never
+        /// creates a document for: the noise filter drops them (<see cref="AttachmentFilterService"/>: a calendar file, a
+        /// blocked extension, an inline or signature image, a tiny image, an oversized file) or they have no content
+        /// (<see cref="CanBeCreated"/>), and no child saves them. They can never be added, by this save or a new one, so they
+        /// are reported (never answered as "nothing to add", which the pane would show as saved). Kept apart from
+        /// <see cref="NotStored"/> because the advice differs: saving the email again as a new document does not help here.
+        /// </summary>
+        public IReadOnlyList<string> NotSaveable { get; init; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Task 141 review: the <c>.eml</c> row's own <c>sprk_relatedcommunication</c>, read with its filing (named add only;
+        /// <see langword="null"/> when it has none, and on task 138's key-matched add). The children of a named add are linked to
+        /// this communication, never to one found from the request.
+        /// </summary>
+        public Guid? CommunicationId { get; init; }
     }
 
     /// <summary>
@@ -136,7 +153,26 @@ public class EmailAttachmentAddPlanner
 
         /// <summary>The stored <c>.eml</c> could not be read.</summary>
         Unreadable,
+
+        /// <summary>
+        /// Task 141 review: the request's email is not the email the named <c>.eml</c> stores (<see cref="IsTheNamedEmailAsync"/>).
+        /// </summary>
+        NotThisEmail,
     }
+
+    /// <summary>
+    /// Task 141 review: the keys of the email a named add's request describes: its RFC Message-ID
+    /// (<see cref="OfficeEmailEnricher.ResolveRfcMessageId"/>) and its Exchange item id
+    /// (<see cref="OfficeEmailEnricher.ResolveExchangeItemId"/>).
+    /// </summary>
+    public sealed record RequestEmailKeys(string? RfcMessageId, string? ExchangeItemId);
+
+    /// <summary><c>sprk_document</c>'s stored message id (the Office save writes the RFC Message-ID, or an item id before task 121).</summary>
+    internal const string EmailMessageIdColumn = "sprk_emailmessageid";
+
+    private const string RelatedCommunicationColumn = "sprk_relatedcommunication";
+    private const string CommunicationEntityName = "sprk_communication";
+    private const string CommunicationInternetMessageIdColumn = "sprk_internetmessageid";
 
     /// <summary>
     /// Task 141: the plan for an add-attachments save that NAMES the saved email (<c>SaveRequest.Email.SavedDocumentId</c>), so it
@@ -147,13 +183,21 @@ public class EmailAttachmentAddPlanner
     /// </summary>
     /// <param name="selection">The names to add. The caller never passes <c>null</c> or <c>[]</c>: the request validator
     /// refuses an add that names none.</param>
+    /// <param name="requestEmail">The keys of the email the request describes. The named <c>.eml</c> must store that email
+    /// (<see cref="IsTheNamedEmailAsync"/>), else <see cref="SavedEmailOutcome.NotThisEmail"/>: the request's metadata never
+    /// decides anything about another email's <c>.eml</c>.</param>
     public async Task<(SavedEmailOutcome Outcome, Plan? Plan)> PlanForSavedEmailAsync(
         Guid emlDocumentId,
         IReadOnlyCollection<string> selection,
+        RequestEmailKeys requestEmail,
         string? targetLogicalName,
         Guid targetRecordId,
         CancellationToken cancellationToken)
-        => await PlanCoreAsync(emlDocumentId, emlItemId: null, selection, targetLogicalName, targetRecordId, cancellationToken);
+    {
+        ArgumentNullException.ThrowIfNull(requestEmail);
+        return await PlanCoreAsync(
+            emlDocumentId, emlItemId: null, selection, targetLogicalName, targetRecordId, cancellationToken, requestEmail);
+    }
 
     /// <summary>
     /// The plan shared by both triggers. <paramref name="emlItemId"/> is the SPE item an earlier job uploaded (task 138: the
@@ -166,7 +210,8 @@ public class EmailAttachmentAddPlanner
         IReadOnlyCollection<string>? selection,
         string? targetLogicalName,
         Guid targetRecordId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RequestEmailKeys? requestEmail = null)
     {
         var eml = await _documents.GetDocumentAsync(emlDocumentId.ToString("D"), cancellationToken);
         var itemId = emlItemId ?? eml?.GraphItemId;
@@ -185,8 +230,22 @@ public class EmailAttachmentAddPlanner
             return (SavedEmailOutcome.NotASavedEmail, null);
         }
 
-        var filing = await _entities.RetrieveAsync(
-            "sprk_document", emlDocumentId, DocumentLinkFields.LogicalNames.ToArray(), cancellationToken);
+        // A named add (task 141) also reads the row's own message id, in the same read; the communication link is one of the
+        // filing columns.
+        var columns = requestEmail is null
+            ? DocumentLinkFields.LogicalNames.ToArray()
+            : DocumentLinkFields.LogicalNames.Append(EmailMessageIdColumn).ToArray();
+        var filing = await _entities.RetrieveAsync("sprk_document", emlDocumentId, columns, cancellationToken);
+        if (requestEmail is not null && !await IsTheNamedEmailAsync(filing, requestEmail, cancellationToken))
+        {
+            // Task 141 review: the request names this .eml but describes another email. Nothing is added, captured or filed
+            // for either email.
+            _logger.LogWarning(
+                "Email attachments add: the request's email is not the email .eml document {DocumentId} stores; nothing is added",
+                emlDocumentId);
+            return (SavedEmailOutcome.NotThisEmail, null);
+        }
+
         if (!IsFiledTo(filing, targetLogicalName, targetRecordId))
         {
             // The key matched a save that filed this .eml somewhere else (or it was re-filed since): adding under it would
@@ -230,24 +289,38 @@ public class EmailAttachmentAddPlanner
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // The names the selection asked for that the stored .eml does not hold at all (not "filtered out" or "empty": those
-            // ARE in the .eml). Nothing is created for them from the request's bytes; the answer names them.
+            // The names the selection asked for that the stored .eml does not hold at all. Nothing is created for them from the
+            // request's bytes; the answer names them.
             var stored = new HashSet<string>(chosen.All.Select(a => a.FileName), StringComparer.OrdinalIgnoreCase);
             var notStored = selection is null
                 ? new List<string>()
                 : selection.Where(name => !stored.Contains(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
+            // Task 141 review: the names the .eml holds that the ONE selection drops (the noise filter, or no content) and no
+            // child saves: no save can ever create them, so they are reported too, never answered as "nothing to add".
+            var creatable = new HashSet<string>(chosen.Wanted.Select(a => a.FileName), StringComparer.OrdinalIgnoreCase);
+            var notSaveable = selection is null
+                ? new List<string>()
+                : selection
+                    .Where(name => stored.Contains(name)
+                        && !creatable.Contains(name)
+                        && !children.Any(child => IsAlreadySaved(child, name)))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
             _logger.LogInformation(
                 "Email re-save: {Missing} of {Wanted} selected attachment(s) are not yet saved under .eml document {DocumentId}; "
-                + "{NotStored} selected name(s) are not in the stored .eml",
-                missing.Count, chosen.Wanted.Count, emlDocumentId, notStored.Count);
+                + "{NotStored} selected name(s) are not in the stored .eml; {NotSaveable} can never be saved",
+                missing.Count, chosen.Wanted.Count, emlDocumentId, notStored.Count, notSaveable.Count);
 
-            return missing.Count == 0 && notStored.Count == 0
+            return missing.Count == 0 && notStored.Count == 0 && notSaveable.Count == 0
                 ? (SavedEmailOutcome.NothingToAdd, null)
                 : (SavedEmailOutcome.Planned,
                     new Plan(emlDocumentId, eml.GraphDriveId, itemId, eml.FileName ?? eml.Name, eml.FileSize ?? 0, missing)
                     {
                         NotStored = notStored,
+                        NotSaveable = notSaveable,
+                        CommunicationId = requestEmail is null ? null : CommunicationOf(filing),
                     });
         }
         finally
@@ -414,6 +487,49 @@ public class EmailAttachmentAddPlanner
             yield return child.FileName;
         }
     }
+
+    /// <summary>
+    /// Task 141 review: whether the <c>.eml</c> row <paramref name="emlRow"/> stores the email <paramref name="requestEmail"/>
+    /// describes, by the rule <c>resolve-email-identity</c> found it with (<c>DocumentUrlIdentityResolution.ResolveByEmailMessageIdAsync</c>):
+    /// the row's own <c>sprk_emailmessageid</c> equals either key, OR its <c>sprk_relatedcommunication</c>'s
+    /// <c>sprk_internetmessageid</c> equals the RFC Message-ID (a mailbox-captured or Spaarke-sent archive stores no key of its
+    /// own). Compared case-insensitively, as Dataverse string equality is. No key, an unreadable row or a communication that
+    /// cannot be found: not this email (fail closed). The communication is read only when the row's own key does not match.
+    /// </summary>
+    internal async Task<bool> IsTheNamedEmailAsync(
+        Microsoft.Xrm.Sdk.Entity? emlRow, RequestEmailKeys requestEmail, CancellationToken cancellationToken)
+    {
+        if (emlRow is null)
+        {
+            return false;
+        }
+
+        var stored = emlRow.GetAttributeValue<string>(EmailMessageIdColumn);
+        if (SameKey(stored, requestEmail.RfcMessageId) || SameKey(stored, requestEmail.ExchangeItemId))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(requestEmail.RfcMessageId) || CommunicationOf(emlRow) is not { } communicationId)
+        {
+            return false;
+        }
+
+        var communication = await _entities.RetrieveAsync(
+            CommunicationEntityName, communicationId, new[] { CommunicationInternetMessageIdColumn }, cancellationToken);
+        return SameKey(communication?.GetAttributeValue<string>(CommunicationInternetMessageIdColumn), requestEmail.RfcMessageId);
+    }
+
+    private static bool SameKey(string? stored, string? requested) =>
+        !string.IsNullOrWhiteSpace(stored)
+        && !string.IsNullOrWhiteSpace(requested)
+        && string.Equals(stored, requested, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The <c>.eml</c> row's own <c>sprk_relatedcommunication</c>, or <see langword="null"/>.</summary>
+    private static Guid? CommunicationOf(Microsoft.Xrm.Sdk.Entity? emlRow) =>
+        emlRow?.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(RelatedCommunicationColumn) is { Id: var id } && id != Guid.Empty
+            ? id
+            : null;
 
     /// <summary>
     /// Task 141: whether a document the request named is a saved email: flagged an email archive, or stored as a <c>.eml</c>

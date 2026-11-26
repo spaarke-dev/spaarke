@@ -520,6 +520,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             // communication, owner) and, in place of the upload and the create, queues an attachments-only finalization.
             EmailAttachmentAddPlanner.Plan? attachmentAdd = null;
             IReadOnlyList<string>? attachmentsNotStored = null;
+            // Task 141 review: names the stored .eml holds that no save ever creates a document for (EmailAttachmentAddPlanner.Plan.NotSaveable).
+            IReadOnlyList<string>? attachmentsNotSaveable = null;
+
+            // Task 141 review: set when this save is an add that NAMES its saved email. Such an add runs no capture and no
+            // filing or confirm step, and its children take the .eml row's own communication (see below).
+            var namedEmailAdd = false;
 
             // Task 141: an add-attachments save that NAMES the saved email (Email.SavedDocumentId). It needs no earlier job under
             // this key (the first save may be another user's, or left none, or the pane may not resend the key's target), so it is
@@ -540,17 +546,20 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 {
                     // Every name asked for is already saved under the .eml: nothing to add, no job, nothing written. The answer
                     // names the saved email, so the pane completes on it.
-                    return SavedEmailAnswer(savedEmailId, notStored: null);
+                    return SavedEmailAnswer(savedEmailId, notStored: null, notSaveable: null);
                 }
 
                 if (plan.AttachmentNames.Count == 0)
                 {
-                    // Only names the stored .eml does not hold: nothing can be added (never from the request's bytes).
-                    return SavedEmailAnswer(savedEmailId, plan.NotStored);
+                    // Only names the stored .eml does not hold, or names no save creates: nothing can be added (never from the
+                    // request's bytes).
+                    return SavedEmailAnswer(savedEmailId, plan.NotStored, plan.NotSaveable);
                 }
 
                 attachmentAdd = plan;
                 attachmentsNotStored = plan.NotStored.Count > 0 ? plan.NotStored : null;
+                attachmentsNotSaveable = plan.NotSaveable.Count > 0 ? plan.NotSaveable : null;
+                namedEmailAdd = true;
                 _logger.LogInformation(
                     "Email attachments add names .eml document {DocumentId}: adding {Count} attachment(s)",
                     plan.EmlDocumentId, plan.AttachmentNames.Count);
@@ -577,6 +586,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     // Names the selection asked for that the stored .eml does not hold are reported on either answer (an add or
                     // the duplicate one); a plan with no name to add is only that report.
                     attachmentsNotStored = plan is { NotStored.Count: > 0 } ? plan.NotStored : null;
+                    attachmentsNotSaveable = plan is { NotSaveable.Count: > 0 } ? plan.NotSaveable : null;
                     attachmentAdd = plan is { AttachmentNames.Count: > 0 } ? plan : null;
                 }
 
@@ -619,7 +629,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     JobId = existingJob.JobId,
                     StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
                     StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream",
-                    AttachmentsNotStored = attachmentsNotStored
+                    AttachmentsNotStored = attachmentsNotStored,
+                    AttachmentsNotSaveable = attachmentsNotSaveable
                 };
             }
 
@@ -636,7 +647,16 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             Guid? emailCommunicationId = null;
             // Task 131 (#2171): what the filing below did, reported on the success response. Null = nothing to report.
             EmailFilingOutcome? emailFiling = null;
-            if (request.ContentType == SaveContentType.Email)
+            if (namedEmailAdd)
+            {
+                // Task 141 review: an add that names its saved email runs NO capture and NO filing or confirm step. The email
+                // was captured and filed when it was saved (or by mailbox capture); the add only creates children of the .eml
+                // that already exists, and the user asked for nothing else. The request's metadata is never used to capture,
+                // file or confirm any email here (the planner has also refused a request that describes a different email).
+                // The children take the .eml row's own communication: the planner read it with the row's filing.
+                emailCommunicationId = attachmentAdd!.CommunicationId;
+            }
+            else if (request.ContentType == SaveContentType.Email)
             {
                 var capture = await _emailUploadCapture.CaptureWithOutcomeAsync(request, userId, cancellationToken);
                 emailCommunicationId = capture?.CommunicationId;
@@ -736,8 +756,12 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             var emailCommunicationResolved = false;
             if (!IsVersionSave(request))
             {
-                var (communicationResolved, relatedCommunicationId) = await _documentPersistence
-                    .ResolveEmailCommunicationAsync(request, emailCommunicationId, emailMessageIdFallback, cancellationToken);
+                // Task 141 review: a named add's communication is the .eml row's own link, final even when it is none: no lookup
+                // by the request's Message-ID.
+                var (communicationResolved, relatedCommunicationId) = namedEmailAdd
+                    ? (true, emailCommunicationId)
+                    : await _documentPersistence
+                        .ResolveEmailCommunicationAsync(request, emailCommunicationId, emailMessageIdFallback, cancellationToken);
                 if (!communicationResolved)
                 {
                     // 194b V-fix (verifier B F1/F2): a read that FAILED is transient, not a refusal: the retryable
@@ -1019,7 +1043,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         StreamUrl = $"/api/office/jobs/{jobId}/stream",
                         EmailFiling = emailFiling,
                         AttachmentsAdded = attachmentAdd.AttachmentNames,
-                        AttachmentsNotStored = attachmentsNotStored
+                        AttachmentsNotStored = attachmentsNotStored,
+                        AttachmentsNotSaveable = attachmentsNotSaveable
                     };
                 }
 
@@ -1876,6 +1901,9 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             (outcome, plan) = await _attachmentAddPlanner.PlanForSavedEmailAsync(
                 savedEmailId,
                 request.Email!.SelectedAttachmentFileNames!,
+                new EmailAttachmentAddPlanner.RequestEmailKeys(
+                    OfficeEmailEnricher.ResolveRfcMessageId(request.Email!),
+                    OfficeEmailEnricher.ResolveExchangeItemId(request.Email!)),
                 DocumentAssociationMap.ToLogicalName(request.TargetEntity?.EntityType),
                 request.TargetEntity?.EntityId ?? Guid.Empty,
                 cancellationToken);
@@ -1895,6 +1923,13 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 return (SavedEmailRefusal(
                     OfficeErrorCodes.AccessDenied,
                     "This item is not a saved email that attachments can be added to, so nothing was saved.",
+                    retryable: false), null);
+            case EmailAttachmentAddPlanner.SavedEmailOutcome.NotThisEmail:
+                // Task 141 review: the same refusal as a document that is not a saved email (OFFICE_009, 403): the request
+                // names a saved email but describes another one.
+                return (SavedEmailRefusal(
+                    OfficeErrorCodes.AccessDenied,
+                    "This saved email is not the email being saved, so its attachments can't be added. Nothing was saved.",
                     retryable: false), null);
             case EmailAttachmentAddPlanner.SavedEmailOutcome.NotFiledToTheRecord:
                 return (SavedEmailRefusal(
@@ -1940,13 +1975,15 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// (<paramref name="notStored"/>) the stored <c>.eml</c> does not hold it. No job, nothing written; the answer names the saved
     /// email (<see cref="SaveResponse.Artifact"/>) so the pane completes on it, and reports what could not be added.
     /// </summary>
-    private static SaveResponse SavedEmailAnswer(Guid savedEmailId, IReadOnlyList<string>? notStored) => new()
-    {
-        Success = true,
-        Duplicate = true,
-        Artifact = new CreatedArtifact { Type = ArtifactType.Document, Id = savedEmailId },
-        AttachmentsNotStored = notStored is { Count: > 0 } ? notStored : null,
-    };
+    private static SaveResponse SavedEmailAnswer(
+        Guid savedEmailId, IReadOnlyList<string>? notStored, IReadOnlyList<string>? notSaveable) => new()
+        {
+            Success = true,
+            Duplicate = true,
+            Artifact = new CreatedArtifact { Type = ArtifactType.Document, Id = savedEmailId },
+            AttachmentsNotStored = notStored is { Count: > 0 } ? notStored : null,
+            AttachmentsNotSaveable = notSaveable is { Count: > 0 } ? notSaveable : null,
+        };
 
     /// <summary>
     /// Task 138 (#2209): may the caller add attachment documents under the existing <c>.eml</c> NOW? "write" on that document

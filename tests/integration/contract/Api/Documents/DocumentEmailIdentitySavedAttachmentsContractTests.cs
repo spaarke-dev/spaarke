@@ -102,17 +102,29 @@ public class DocumentEmailIdentitySavedAttachmentsContractTests
     }
 
     [Fact]
-    public async Task ResolveEmail_WhenAChildsCheckFaults_NeverNamesThatChild()
+    public async Task ResolveEmail_WhenAChildsCheckFaults_OmitsTheWholeField()
     {
+        // The access source throws; the real AuthorizationService answers that as a deny with the system-failure reason code
+        // (it does not throw), which is the shape the handler sees in production.
         var emlId = Guid.NewGuid();
+        var readable = Child("Settlement terms.pdf");
         var faulting = Child("Faulting check.pdf");
-        var rights = new Dictionary<Guid, AccessRights> { [emlId] = AccessRights.Read };
+        var rights = new Dictionary<Guid, AccessRights>
+        {
+            [emlId] = AccessRights.Read,
+            [Guid.Parse(readable.Id)] = AccessRights.Read,
+        };
 
-        using var host = Host(emlId, rights, children: new[] { faulting }, faultFor: Guid.Parse(faulting.Id));
+        using var host = Host(emlId, rights, children: new[] { readable, faulting }, faultFor: Guid.Parse(faulting.Id));
         var response = await Client(host).PostAsJsonAsync(Route, new { internetMessageId = MessageId });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("Faulting check", "the check fails closed");
+        var raw = await response.Content.ReadAsStringAsync();
+        raw.Should().NotContain("Faulting check", "the check fails closed");
+        var body = JsonDocument.Parse(raw).RootElement;
+        body.GetProperty("resolved").GetBoolean().Should().BeTrue("the identity never fails on the attachments check");
+        body.TryGetProperty("savedAttachmentNames", out _).Should().BeFalse(
+            "a check that did not decide cannot say the child is unsaved, so nothing is said");
     }
 
     [Fact]
@@ -142,7 +154,7 @@ public class DocumentEmailIdentitySavedAttachmentsContractTests
     };
 
     /// <param name="children">The children read's answer; <see langword="null"/> = the read throws.</param>
-    /// <param name="faultFor">A child whose access check throws.</param>
+    /// <param name="faultFor">A child whose access-source read throws (the authorization service answers a system-failure deny).</param>
     private static WebApplicationFactory<Program> Host(
         Guid emlId, Dictionary<Guid, AccessRights> rights, DocumentEntity[]? children, Guid? faultFor = null)
     {
