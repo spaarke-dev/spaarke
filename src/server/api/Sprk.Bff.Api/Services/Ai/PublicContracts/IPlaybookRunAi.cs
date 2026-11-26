@@ -169,9 +169,10 @@ public interface IPlaybookRunAi
     /// <param name="parameters">The run parameters; this exact instance is authorized and handed to the run.</param>
     /// <param name="userContext">
     /// What the caller asked the run to focus on, already trimmed and capped by the caller of this method (task 038); <c>null</c> when
-    /// there is none. Handed to the engine as <c>PlaybookRunRequest.UserContext</c>, the field the Console's run request fills. It is
-    /// user query text: it travels in the detached run's request object in memory only, and this contract never logs or stores it
-    /// (ADR-015, ADR-052).
+    /// there is none. Handed to the engine as <c>PlaybookRunRequest.UserContext</c>, which reaches the AI prompt as a fenced "User focus"
+    /// block (<c>PromptContextHelper.BuildUserFocusBlock</c>, #3268): it may narrow emphasis, and the model is instructed not to change the action's
+    /// instructions, the output format or the grounding rules. It is user query text: it travels in the detached run's request
+    /// object in memory only, and this contract never logs or stores it (ADR-015, ADR-052).
     /// </param>
     /// <param name="cancellationToken">The caller's token (the start, not the run).</param>
     Task<PlaybookRunStartResult> StartAsCallerAsync(

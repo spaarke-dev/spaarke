@@ -393,7 +393,8 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                 templateParameters,
                 context.DownstreamNodes,
                 context.AdditionalKnowledge,
-                context.AdditionalSkills
+                context.AdditionalSkills,
+                userFocus: context.UserContext
             );
 
             var prompt = rendered.PromptText;
