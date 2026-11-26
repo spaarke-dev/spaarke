@@ -1,5 +1,13 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-26 ~03:15Z — #3199 (D-227 finding first) live in the Console on dev (read-only check)
+
+- The owner asked for a LegalWorkspace deploy. None was needed: LegalWorkspace has no web resource of its own (`sprk_corporateworkspace` was retired) and is compiled into the Console bundle `sprk_spaarkeai`. `deploy-spaarke-ai.yml` republished the bundle from master for `14f45b7412` (#3199, run started 02:51:37Z) and again for `5577cace71` (02:58:13Z); both succeeded. Nothing was deployed by hand.
+- **Console Worklist PASS** (Claude in Chrome, fresh tab, new bundle): each Decide row now leads with the finding ("Submission integrity") and puts the subject under it ("Invoice INV-123456.7"). At 02:36Z, before the merge, the subject came first.
+- **Not yet verified:**
+  - The DecisionWizard's first step heading (FoundStep) was not opened.
+  - The MCP widget's DecideLane ships with the next dev BFF; its SHA was sent to uac-r2.
+
 ## 2026-11-26 02:30–03:00Z — read-only checks on dev BFF `1e64e94168` (uac-r2, live 01:56:50Z, 30-min gate PASS 02:27Z; rollback `aa933c09e6`)
 
 - Main session; nothing written. This build adds #3161 `75e01f35f1`, #3164 `ef1dc4f2c9` (task 224) and #3167 `feef9a9c72` (task 223). Tasks 209, 217, 221 and 222 were already on dev.
