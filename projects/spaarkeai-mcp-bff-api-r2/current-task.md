@@ -1,15 +1,15 @@
 # Current Task State — spaarkeai-mcp-bff-api-r2
 
-> **Last Updated**: 2026-11-26 (Wave 8: 035 merged, reviewed, fixed and done; every remaining code task waits on an owner decision)
+> **Last Updated**: 2026-11-26 (checkpoint at 85%: 030 built, reviewed (2 opus + uac-r2), fixes merged 258579bddb; closing the cap race next)
 > **Phase**: Phase 0 and Phase 1 code complete. Phase 2: 031, 034, 035 done; 030 stopped (owner Q14), 032 waits on 030; 033 and 036 blocked on owner decisions.
 
 ## Quick Recovery
 | Field | Value |
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2 (Wave 8 done; waiting on owner decisions). Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (two adversarial passes on opus per FULL task; scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
-| **State** | 035 (search results widget) merged 4f56fbbe54, review fixes merged (550e4bcb71) plus a main-session re-check fix; CAPABILITY-INDEX row 49 applied; issues #3234, #3235 filed. Merged-tree gates at 4f56fbbe54: ArchTests 2859, `Mcp|Search` unit 1538, widget jest Decisions 400, Briefing 130, Search results 117. CI now runs each widget's full jest (`ci-tier1-blocking.yml`). |
-| **Next (exact)** | 030: draft the ADR-052 amendment (after the MSAL long-running OBO research), then build on it; then 032. Still owner-blocked: 008 A10 Path A or C (unblocks 033), #3181 fix choice (unblocks 036), Q16 (FR-09 preferences). Deploys 019/029/039 wait on owner gates. 040 (email) needs 039. When #3213 merges, fold CAPABILITY-INDEX row 35. |
-| **Uncommitted** | None after the 035 done commit; pushed. |
+| **State** | 030 merged c005cdb47d; review fixes merged 258579bddb (per-caller cap 3, guard setter + Authorization-header scans, Graph TTL min(exp-5,55), test clocks, retry-key order, missing StartedOn). Master merged 80ac987a4e (DEF-001 #3247; RecordSearchService BuildCacheId conflict resolved = JSON identity + MatterTypes; show_decisions ledger prose updated). ADR-052 amendment PROPOSED (55db14d39c, 3a6cf8cd35, cdbc56445e), uac-r2 reviewed (no blocking). |
+| **Next (exact)** | (1) Close the cap race in DetachedPlaybookRunner.StartAsCallerAsync (:118-122): concurrent starts pass the RunningCount check before any is accepted. Add an atomic per-oid pending reservation (ConcurrentDictionary<Guid,int> + lock or AddOrUpdate) taken before authorizing, released when the start ends (accepted -> counted by _runs; refused/failed -> released). Test with 4 concurrent starts. (2) Check bs3nw126i output (pins + affected tests on 80ac987a4e). (3) Re-run 030 tests + filtered ArchTests on the merged tree; push. (4) Send uac-r2 the fix diff c005cdb47d..HEAD for re-check. (5) Mark 030 done (TASK-INDEX + POML), apply its 2 CAPABILITY-INDEX rows from notes/capability-index-pending.md, board sync (Tasks Completed 21). (6) Owner: amendment security sign-off; Q17/Q18 new. Then 032 (needs 012 go for dev only; code can proceed). |
+| **Uncommitted** | This checkpoint edit only. Unpushed: merges 80ac987a4e, 258579bddb and commits since cdbc56445e. |
 | **Branch state** | Agent worktrees brought in newer master PRs (normal master merges). Full ArchTests on the merged tree: 2859 at 4f56fbbe54. |
 
 ## Status (TASK-INDEX is authoritative)
@@ -20,7 +20,7 @@
   - 008: A10 Path A or C;
   - 012: registry PATCH go.
 - ✅ **Phase 2 done:** 031, 034, 035 (publish about 42 MB; 035 adds +0.23 MB).
-- 🔄 **030:** owner chose Option A (D-030-run-model); ADR-052 amendment being drafted, then build. 032 follows 030.
+- 🔄 **030:** built and reviewed; fixes merged; cap race fix + uac-r2 re-check + mark done remain.
 - 🔲 **Blocked on owner:** 033 (008), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions
