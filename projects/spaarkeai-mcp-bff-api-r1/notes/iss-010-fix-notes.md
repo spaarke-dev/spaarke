@@ -132,3 +132,4 @@ None. B changes no code in `CallerRecordAccessProbe` or `CallerWriteAuthorizatio
    - Probe preflight vs execute: 12 repeated questions, all before the step's own write. Each step's execute re-asks its preflight.
    - Route core: `RightsOnAsync` 15, privileges 10, `sprk_recordtype_refs` 8, including the two passes of step 5 between the same writes.
    - The writes the memo must see are application writes (`IFieldMappingDataverseService`), not the caller client's.
+5. **D candidate: cache Dataverse's "table not supported" `RetrievePrincipalAccess` 400.** Request-scoped, keyed on table only, that one error code only; every other 400 stays a fault (uac-r2 2026-11-25).
