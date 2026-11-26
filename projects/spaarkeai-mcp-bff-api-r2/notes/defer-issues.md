@@ -65,3 +65,21 @@
 
 ### D-002-2: BYOK template still provisions an Azure Bot for the retired agent; runbook E2 misses the bot's Key Vault access policy
 - **GitHub issue**: https://github.com/spaarke-dev/spaarke/issues/3186
+
+## From task 021 (2026-11-25)
+
+### D-021-1: CI path filters miss the shared widget transport, so a change to it does not rebuild, retest or republish the Decisions widget
+- **GitHub issue**: not filed yet (main session files it).
+- **Title**: `ci: add src/client/widgets/shared/** to the decisions-widget path filters (tier-1 MCP surface, publish-bff-artifact)`
+- **Body**:
+  Task 021 (spaarkeai-mcp-bff-api-r2) moved the Decisions widget's MCP transport into `src/client/widgets/shared/mcp/`, which the
+  widget now imports by relative path and builds into `dist/index.html` (the HTML the BFF embeds as `ui://spaarke/decisions.html`).
+  Two path filters still list only `src/client/widgets/spaarke-decisions/**`:
+  - `.github/workflows/ci-tier1-blocking.yml` ~:217 (the MCP surface flag that runs the widget job at ~:1205: typecheck, jest, build, 3 MB gate);
+  - `.github/workflows/publish-bff-artifact.yml` :38 (the pull_request dry run of the embedded widget).
+  Failure scenario: a PR that edits only `src/client/widgets/shared/mcp/mcpFetch.ts` (for example a change in error mapping) runs
+  neither the widget's jest suite (which also runs the shared tests) nor its build, so a regression in the live Decide lane / wizard
+  error handling merges green. Same gap, pre-existing, for `src/client/shared/Spaarke.UI.Components/src/**` files the widget imports
+  by deep path (worklist, Decision wizard). Fix: add `'src/client/widgets/shared/**'` to both filters (and consider the deep-imported
+  ui-components folders). Task 021 could not edit `.github/workflows/**` (outside its file list; ci-workflows hot path).
+- **Labels**: project label spaarkeai-mcp-bff-api-r2; Type=Task.
