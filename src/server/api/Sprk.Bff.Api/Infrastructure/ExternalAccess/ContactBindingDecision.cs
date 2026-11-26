@@ -1200,6 +1200,9 @@ public static class ContactBindingDecision
     /// </summary>
     private static BindingDecision DecideIntent(BindingRequest request, BindIntentLookup intent, Guid contactId)
     {
+        // A stamp read for ANOTHER contact is an inconsistent read (a race between the two reads), not an outage; it shares
+        // lookup_failed, so since R4 task 043 the caller gets the retryable 503, which a retry resolves. This decision is pure
+        // (no logger), so the audit trail shows only the code; telling a race from a fault apart is tracked in #3264.
         if (intent.ContactId != contactId
             || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
         {

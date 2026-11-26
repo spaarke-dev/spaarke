@@ -153,6 +153,23 @@ public sealed class BinderFaultStatusTests
         ShouldBeTheBinderFault(status, json, ContactBindingDecision.DenyContactBindFailed);
     }
 
+    // Must-not-fire (UAC review): a bind refused for a missing privilege is permanent, an operator fix, so it is NOT the
+    // retryable binder fault: a 403 with contact_create_unavailable, like the registration bind.
+    [Fact]
+    public async Task CiamStrategy_TheBindIsRefusedForAMissingPrivilege_Stays403CreateUnavailable_NotA503()
+    {
+        var invited = Guid.NewGuid();
+        var invite = InviteCode.Create(invited);
+        _store.AddContact(invited, email: Email, invitedOn: Now, inviteCodeHash: invite.StoredValue);
+        _store.StampInvite(invited, Email);
+        _store.BindStatusOverride = StoreWriteStatus.Forbidden;
+
+        var (status, json) = await CiamAnswerAsync(invite.Code);
+
+        status.Should().Be(StatusCodes.Status403Forbidden);
+        json.GetProperty("reasonCode").GetString().Should().Be(ContactBindingDecision.DenyContactCreateUnavailable);
+    }
+
     [Fact]
     public async Task CiamStrategy_NotInvited_Stays403NotInvited()
     {

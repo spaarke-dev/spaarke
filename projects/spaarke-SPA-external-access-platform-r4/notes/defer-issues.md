@@ -512,7 +512,7 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 
 **Why it matters.** (1) breaks ADR-028 (an indeterminate result is a retryable 503, never a 403): a workforce caller is told "denied" during a Dataverse blip. (2) makes a misconfigured environment look transient.
 
-**Fix.** (1) map those catch arms to a fault code in `CallerPrincipalResolution.IsBinderFault` (and the SPA's `BINDER_FAULT_CODES` if a new code). (2) give `Forbidden` its own code answered as a non-retryable 500 (owner-unconfigured is the precedent). Auth review by uac-r2. Effort: about a day. Status: Open (urgency: next-round). Issue: https://github.com/spaarke-dev/spaarke/issues/3264 (board Type=Bug).
+**Fix.** (1) map those catch arms to a fault code in `CallerPrincipalResolution.IsBinderFault` (and the SPA's `BINDER_FAULT_CODES` if a new code). (2) DONE in task 043 (UAC review): a sign-in Forbidden bind/create now answers 403 `contact_create_unavailable`. Also: tell an inconsistent-read `lookup_failed` (`DecideIntent`) apart from a fault in the trail. Auth review by uac-r2. Effort: about a day. Status: Open (urgency: next-round). Issue: https://github.com/spaarke-dev/spaarke/issues/3264 (board Type=Bug).
 
 ## D-44 — Workforce principal resolver logs caller identifiers (#3265)
 

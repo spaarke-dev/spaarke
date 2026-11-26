@@ -130,4 +130,28 @@ No Critical and no F-class finding.
 - **ArchTests:** 2845/2845.
 
 ## UAC review
-- Requested from uac-r2 on 2026-11-26 (diff summary of the resolver and registration changes, plus D-43/D-44). Answer: pending at this checkpoint.
+Requested from uac-r2 on 2026-11-26. **Answer (2026-11-26 ~18:35Z), quoted:** "uac-r2 review of R4 task 043 (675457fbb4, c49088800b), items 1-2: APPROVE."
+
+uac-r2's reasons:
+- A 503 still refuses: nothing binds or creates and no principal resolves, so the request fails closed.
+- The codes are unchanged, the detail is fixed text and nothing about the caller is in the body, so there is no new disclosure.
+- The ordering is right on both planes and on the registration route.
+
+Two non-blocking notes, both acted on:
+1. "Some fault codes are not transient": a privilege-refused (`StoreWriteStatus.Forbidden`) bind or create on the first-sign-in path mapped to bind_failed/create_failed, so it would now retry. **Fixed in 043** (cheap), in `ContactIdentityBinder.cs`:
+   - the sign-in email bind's Forbidden → `contact_create_unavailable` (403, logged at Error), as the registration bind already did;
+   - the sign-in create's Forbidden → `contact_create_unavailable`, as the registration create did.
+   
+   Tests:
+   - `BinderFaultStatusTests.CiamStrategy_TheBindIsRefusedForAMissingPrivilege_Stays403CreateUnavailable_NotA503` (new);
+   - `ContactIdentityBinderOwnerTeamTests.TheFirstSignInCreate_RefusedForAMissingPrivilege_IsCreateUnavailable_NotTheRetryableCreateFailed` (new);
+   - `AnyOtherCreateFault_KeepsItsExistingMapping_AndIsNotTheOwnerRefusal` now expects create_unavailable for the sign-in Forbidden row (an intended change; it still proves that only the owner fault becomes owner-unconfigured).
+   
+   Seeding: both branches disabled → 3 of 5 fail; restored.
+   
+   Not changed: the reconciliation link path (`EnsureSystemUserLinkAsync`), which keeps its mapping (it reports, it is not a sign-in answer). #3264 is narrowed to the resolver's catch arms.
+2. `DecideIntent` answers lookup_failed for a stamp read for another contact (an inconsistent read, a race). A comment there now says it is a race that a retry resolves. The decision is pure (no logger), so telling a race from a fault apart in the trail stays under #3264. No status change.
+
+#3264/#3265 stay labelled R4 (uac-r2: "resolver-plane items you own end to end"). uac-r2 reviews their diffs.
+
+BFF tests after this: 746/746 on the external-access, binder, registration, link and reconciliation filter.
