@@ -1118,6 +1118,36 @@ public class PlaybookRouteAuthorizationContractTests
         }
     }
 
+    public enum WriteDenial { NoWritePrivilege, NotOwner }
+
+    // Ordering (uac-r2 review of #3278): the authorization filters decide BEFORE the read-only guard. A caller without
+    // Write, or a non-owner, gets the usual 403 even on a playbook whose guard would refuse, and the guard is never asked
+    // (it reads the playbook and its nodes app-only, so asking it first would read for a caller who may not write).
+    [Theory]
+    [InlineData(WriteRoute.Canvas, WriteDenial.NoWritePrivilege)]
+    [InlineData(WriteRoute.Canvas, WriteDenial.NotOwner)]
+    [InlineData(WriteRoute.NodeDelete, WriteDenial.NoWritePrivilege)]
+    [InlineData(WriteRoute.NodeDelete, WriteDenial.NotOwner)]
+    public async Task Write_DeniedCaller_OnProtectedPlaybook_Is403_AndTheReadOnlyGuardIsNeverAsked(WriteRoute route, WriteDenial denial)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, route, storedIsPublic: false, requestIsPublic: false);
+        host.Nodes.Setup(n => n.EnsureCanvasSyncAllowedAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProtectedPlaybookCanvasSyncException(Guid.NewGuid(), "matter-health-single", ProtectedPlaybookReason.SystemFlag));
+        if (denial == WriteDenial.NotOwner)
+        {
+            host.Probe.HeldPrivileges.Add(WritePlaybookPrivilege);
+            host.Probe.SystemUserId = Guid.NewGuid(); // the arranged playbook is owned by another user
+        }
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        host.Nodes.Verify(n => n.EnsureCanvasSyncAllowedAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Playbooks.Verify(p => p.SaveCanvasLayoutAsync(It.IsAny<Guid>(), It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.DeleteNodeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
     // D-97 / PB-08 (#1698) and #1498: after the caller passes Write and ownership, the canvas save and every per-node
     // write route refuse a repo-deployed system playbook (409) or one the guard cannot verify (503), before any write.
     [Theory]

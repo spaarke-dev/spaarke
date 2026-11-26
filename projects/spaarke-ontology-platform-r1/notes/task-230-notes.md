@@ -87,6 +87,27 @@ failure), so the behaviour was proved by two mutations applied to the finished c
   "Node … refused" line.
 - The error code `playbook_canvas_unverifiable` is reused for per-node 503s, so the Designer handles one contract.
 
+Known limits from the independent review of PR #3278 (no F-class findings):
+
+- **Review K1:** the analysis-time JIT sync continues on the stored nodes when the guard cannot verify the playbook
+  (a 503-class Unverifiable fault), as it does when the guard refuses. The run then executes nodes the canvas may have
+  changed, instead of failing.
+- **Review K2:** a playbook that repo scripts patch without setting the system flag or type 2, and whose nodes all
+  carry `__canvasNodeId`, is not protected. The rule only recognises the system flag, type 2 or an unmarked node.
+- **Review K3:** a node created on a user playbook outside the BFF (Dataverse forms or the Web API) carries no marker,
+  so it makes that playbook read-only for the BFF routes. This fails closed: the playbook is refused, not wiped.
+- **Review K4, minor:**
+  - Each refusal logs two warnings (service and endpoint).
+  - A deleted or unknown playbook that reaches the guard answers 503 Unverifiable rather than 404.
+  - A config that repeats the `__canvasNodeId` key keeps whichever value `JsonDocument` reads; the duplicate is not
+    rejected.
+
+Ordering (uac-r2 request): the Write-privilege and owner filters decide before the guard runs.
+`Write_DeniedCaller_OnProtectedPlaybook_Is403_AndTheReadOnlyGuardIsNeverAsked` pins this for the canvas route and
+for `DELETE` node, for both a caller without Write and a non-owner: they get 403, and `EnsureCanvasSyncAllowedAsync`
+is called `Times.Never`. The no-Write case was already caught indirectly by `VerifyNoOtherCalls` on the Strict
+`INodeService` mock in `Write_CallerWithoutWrite_Is403_BeforeAnyReadOrWrite`; no non-owner case existed before.
+
 ## Found, not fixed (D-106: report, don't fix)
 
 - **Two write models for one node set (pre-existing).** On a user-authored playbook that has a stored canvas, a node
