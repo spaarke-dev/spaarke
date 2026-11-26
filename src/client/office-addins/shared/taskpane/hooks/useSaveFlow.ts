@@ -20,8 +20,11 @@ import {
   type EmailFilingProblem,
 } from '../services/emailFilingNotice';
 import {
+  describeAttachmentsNotSaveable,
   describeAttachmentsNotStored,
+  readAttachmentsAdded,
   readAttachmentsAddedCount,
+  readAttachmentsNotSaveable,
   readAttachmentsNotStored,
 } from '../services/attachmentsAddedNotice';
 
@@ -149,6 +152,12 @@ export interface SaveResponse {
    * first time), so they cannot be added. OMITTED when there are none. Read through {@link readAttachmentsNotStored}.
    */
   attachmentsNotStored?: string[];
+  /**
+   * Task 141 review: the file names the save was asked to add that the stored email holds but no email save ever creates a
+   * document for (a calendar file, a blocked type, an inline or signature image, no content). OMITTED when there are none.
+   * Read through {@link readAttachmentsNotSaveable}.
+   */
+  attachmentsNotSaveable?: string[];
   /**
    * The saved document. Task 141: an add to a saved email that adds nothing (every name already saved, or only names the
    * stored email does not hold) answers 200 with `duplicate: true`, NO job, and this naming the saved `.eml` — the save
@@ -370,12 +379,18 @@ export interface UseSaveFlowResult {
   /** Document URL after successful save */
   savedDocumentUrl: string | null;
   /**
-   * Task 141: the attachment file names the LAST submitted save asked to become documents
-   * (`email.selectedAttachmentFileNames` as sent), or `undefined` when it sent none (a Word save, an email without
-   * attachments, or nothing submitted yet). Read at completion so the pane can mark those attachments saved. A stable
-   * function, safe to call from a callback.
+   * Task 141 review: what the SERVER answered about the attachments of the last save that completed: the names it is adding
+   * (`attachmentsAdded`) and the names it can never save (`attachmentsNotSaveable`), each empty when it said none. Never
+   * what the pane sent: the server may dedup to an existing document or leave names out. A stable function, safe to call
+   * from a callback.
    */
-  getSentAttachmentFileNames: () => string[] | undefined;
+  getAttachmentsAnswer: () => SaveAttachmentsAnswer;
+}
+
+/** Task 141 review: the server's answer about a save's attachments (see {@link UseSaveFlowResult.getAttachmentsAnswer}). */
+export interface SaveAttachmentsAnswer {
+  added: string[];
+  notSaveable: string[];
 }
 
 /**
@@ -559,6 +574,8 @@ interface DuplicateSaveResponse {
   message?: string;
   /** Task 138: names the re-save asked to add that the stored email does not hold (read through `readAttachmentsNotStored`). */
   attachmentsNotStored?: unknown;
+  /** Task 141 review: names no email save ever creates (read through `readAttachmentsNotSaveable`). */
+  attachmentsNotSaveable?: unknown;
 }
 
 function isDuplicateSaveResponse(value: unknown): value is DuplicateSaveResponse {
@@ -662,9 +679,10 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // key's failedAttempts, as for a version save; never reset).
   const activeAddSaveRef = useRef(false);
   const addFailuresRef = useRef(0);
-  // Task 141: the attachment names the last submitted save asked to become documents (see getSentAttachmentFileNames).
-  const sentAttachmentFileNamesRef = useRef<string[] | undefined>(undefined);
-  const getSentAttachmentFileNames = useCallback(() => sentAttachmentFileNamesRef.current, []);
+  // Task 141 review: the server's answer about the current save's attachments (see getAttachmentsAnswer). Cleared with
+  // emailFilingProblemRef.
+  const attachmentsAnswerRef = useRef<SaveAttachmentsAnswer>({ added: [], notSaveable: [] });
+  const getAttachmentsAnswer = useCallback(() => attachmentsAnswerRef.current, []);
   // Task 131 (#2171): the refused / failed email filing the CURRENT save's 202 reported, handed to onComplete when the job
   // completes. Null = nothing to tell the user. Cleared when a save starts and on reset.
   const emailFilingProblemRef = useRef<EmailFilingProblem | null>(null);
@@ -751,6 +769,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     emailFilingProblemRef.current = null;
     attachmentsAddedRef.current = 0;
     attachmentsNotStoredRef.current = [];
+    attachmentsAnswerRef.current = { added: [], notSaveable: [] };
     savedContextRef.current = null;
   }, [cleanup]);
 
@@ -1108,7 +1127,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       activeVersionSaveRef.current = false;
       activeVersionDocumentIdRef.current = null;
       activeAddSaveRef.current = false;
-      sentAttachmentFileNamesRef.current = undefined;
+      attachmentsAnswerRef.current = { added: [], notSaveable: [] };
       emailFilingProblemRef.current = null;
       attachmentsAddedRef.current = 0;
       attachmentsNotStoredRef.current = [];
@@ -1266,7 +1285,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
                     .map(id => context.attachments.find(a => a.id === id)?.name)
                     .filter((name): name is string => !!name)
                 : undefined;
-          sentAttachmentFileNamesRef.current = selectedAttachmentFileNames;
 
           const typedEmailName = context.documentName?.trim();
           serverRequest.email = {
@@ -1441,7 +1459,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           const notStoredNotice = describeAttachmentsNotStored(
             readAttachmentsNotStored(responseData.attachmentsNotStored)
           );
-          const duplicateMessage = [responseData.message || 'This item was previously saved.', notStoredNotice]
+          // Task 141 review: and names no save can ever create.
+          const notSaveableNotice = describeAttachmentsNotSaveable(
+            readAttachmentsNotSaveable(responseData.attachmentsNotSaveable)
+          );
+          const duplicateMessage = [
+            responseData.message || 'This item was previously saved.',
+            notStoredNotice,
+            notSaveableNotice,
+          ]
             .filter(Boolean)
             .join(' ');
           setDuplicateInfo({
@@ -1487,6 +1513,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Task 138 (#2209): a re-save that added attachments to the already-saved email — counted for onComplete.
         attachmentsAddedRef.current = readAttachmentsAddedCount(saveResponse?.attachmentsAdded);
         attachmentsNotStoredRef.current = readAttachmentsNotStored(saveResponse?.attachmentsNotStored);
+        // Task 141 review: the names the server says it is adding, and the ones it can never save — the pane's only
+        // source for marking attachments after an add.
+        attachmentsAnswerRef.current = {
+          added: readAttachmentsAdded(saveResponse?.attachmentsAdded),
+          notSaveable: readAttachmentsNotSaveable(saveResponse?.attachmentsNotSaveable),
+        };
 
         // Task 141: an answer with NO job that names the saved document completes here — nothing was queued to track
         // (an add whose names were all saved already, or none of which the stored email holds).
@@ -1571,6 +1603,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     retry,
     savedDocumentId,
     savedDocumentUrl,
-    getSentAttachmentFileNames,
+    getAttachmentsAnswer,
   };
 }

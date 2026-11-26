@@ -42,12 +42,17 @@ import {
   type SaveTarget,
   type StageStatus,
   type UseSaveFlowOptions,
+  type SaveAttachmentsAnswer,
 } from '../hooks/useSaveFlow';
 import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/documentIdentityService';
 import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { describeEmailFilingProblem, type EmailFilingProblem } from '../services/emailFilingNotice';
-import { describeAttachmentsAdded, describeAttachmentsNotStored } from '../services/attachmentsAddedNotice';
+import {
+  describeAttachmentsAdded,
+  describeAttachmentsNotSaveable,
+  describeAttachmentsNotStored,
+} from '../services/attachmentsAddedNotice';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
   clearReferenceListCache,
@@ -77,7 +82,6 @@ import {
   classifySavedAttachments,
   hasUnsavedAttachments,
   mergeSavedAttachmentNames,
-  withoutNames,
 } from '../services/savedEmailAttachments';
 
 /** True inside the browser test harness (taskpane-test.html sets the flag). */
@@ -415,13 +419,16 @@ interface PendingSaveSnapshot {
   filedRecord?: FiledRecordRef | null;
   mode: SaveTarget['mode'];
   /**
-   * Task 141: whether this save's attachment names are tracked (an email save): on completion the names it sent become
-   * the saved state's `savedAttachmentNames`, merged with `priorSavedAttachmentNames` for an add.
+   * Task 141: whether this save's attachment names are tracked (an email save). Task 141 review: on completion the saved
+   * names come only from the SERVER — the identity re-read after the save, and for an add the server's `attachmentsAdded`
+   * merged with `priorSavedAttachmentNames` (themselves the server's) — never from what this save sent.
    */
   tracksAttachments?: boolean;
   priorSavedAttachmentNames?: string[];
   /** Task 141: the names an earlier add found the stored email does not hold — kept across adds. */
   priorAttachmentsNotStored?: string[];
+  /** Task 141 review: the names an earlier add said no save can create — kept across adds. */
+  priorAttachmentsNotSaveable?: string[];
 }
 
 /** Task 088: the document this pane session last saved — the target of the next version save. */
@@ -437,10 +444,14 @@ export interface SavedDocumentState {
   /** Whether the save that produced this state created the document, added a version to it, or (task 141) added attachments to it. */
   lastSave: SaveTarget['mode'];
   /**
-   * Task 141: the names of the saved email's attachments known to be saved under it — what this pane's save sent (and,
-   * after an add, what was saved before). Absent when not known: the attachments then show no saved/unsaved marks.
+   * Task 141: the names of the saved email's attachments known to be saved under it. Task 141 review: only ever the
+   * SERVER's answer — the email identity's `savedAttachmentNames` re-read after the save, plus (after an add) the names
+   * the server said it is adding. Absent when not known (until the re-read arrives, or when the server omitted it): the
+   * attachments then show no saved/unsaved marks, Save-to-add is not offered and there is no warning.
    */
   savedAttachmentNames?: string[];
+  /** Task 141 review: the names the server said no save can ever create (`attachmentsNotSaveable`). Absent otherwise. */
+  attachmentsNotSaveable?: string[];
   /**
    * Task 131 (#2171): set when the save worked but the email it reconciled to could not be filed to the chosen record
    * (the server's `SaveResponse.emailFiling` was `NotPermitted` / `Failed`), or is filed there but could not be confirmed
@@ -513,6 +524,8 @@ interface SavedEmailAttachmentsView {
   name: string;
   savedNames: string[] | undefined;
   notStoredNames: string[] | undefined;
+  /** Task 141 review: the names the server said no save can ever create. */
+  notSaveableNames: string[] | undefined;
   record: { entityType: string; id: string; name: string } | null;
   filedTo: FiledTo;
   filedToNumber: string | null;
@@ -799,9 +812,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const updateSavedState = onSavedStateChange ?? setInternalSavedState;
   const { savedDocument, profileRefreshSignal, contentChangedSinceSave } = savedStateBundle;
   const pendingSaveRef = useRef<PendingSaveSnapshot | null>(null);
-  // Task 141: read by onComplete (built before the hook) — the attachment names the completed save sent. Set below, after
-  // the hook, to the hook's stable getter.
-  const sentAttachmentNamesGetterRef = useRef<(() => string[] | undefined) | undefined>(undefined);
+  // Task 141 review: read by onComplete (built before the hook) — the SERVER's answer about the completed save's
+  // attachments. Set below, after the hook, to the hook's stable getter.
+  const attachmentsAnswerGetterRef = useRef<(() => SaveAttachmentsAnswer) | undefined>(undefined);
+  // Task 141 review: the identity re-read a completed email save asked for, so its saved attachment names come from the
+  // server (see the effect after the hook). `added` = the names an add's answer says it is adding (null for a first save).
+  const attachmentsRefreshRef = useRef<{ documentId: string; added: string[] | null; sawChecking: boolean } | null>(
+    null
+  );
+  const retryIdentityRef = useRef(onRetryDocumentIdentity);
+  retryIdentityRef.current = onRetryDocumentIdentity;
 
   // Initialize save flow hook
   const saveFlowOptions: UseSaveFlowOptions = useMemo(
@@ -810,18 +830,22 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       getAccessToken,
       onComplete: (docId, docUrl, emailFilingProblem, attachmentsAdded, attachmentsNotStored) => {
         const pending = pendingSaveRef.current;
-        // Task 141: the attachments this save sent to become documents are saved now — less any the stored email does not
-        // hold. An add merges them into what was saved before; the names an add could not use are kept across adds.
-        const sentNames = withoutNames(sentAttachmentNamesGetterRef.current?.() ?? [], attachmentsNotStored);
-        const savedAttachmentNames = pending?.tracksAttachments
-          ? pending.mode === 'addAttachments'
-            ? mergeSavedAttachmentNames(pending.priorSavedAttachmentNames, sentNames)
-            : sentNames
-          : undefined;
-        const notStored =
-          pending?.mode === 'addAttachments'
-            ? (mergeSavedAttachmentNames(pending.priorAttachmentsNotStored ?? [], attachmentsNotStored ?? []) ?? [])
-            : (attachmentsNotStored ?? []);
+        const isAdd = pending?.mode === 'addAttachments';
+        // Task 141 review: the saved attachment names come only from the server, never from what this save sent (a save
+        // can dedup to an existing email with no new children, and the worker may leave names out). A first save knows
+        // none until the identity is re-read below; an add knows the names before it plus those the server said it is
+        // adding (the documents are created after the answer, so a re-read alone would not list them yet).
+        const answer = attachmentsAnswerGetterRef.current?.() ?? { added: [], notSaveable: [] };
+        const savedAttachmentNames =
+          pending?.tracksAttachments && isAdd
+            ? mergeSavedAttachmentNames(pending.priorSavedAttachmentNames, answer.added)
+            : undefined;
+        const notStored = isAdd
+          ? (mergeSavedAttachmentNames(pending?.priorAttachmentsNotStored ?? [], attachmentsNotStored ?? []) ?? [])
+          : (attachmentsNotStored ?? []);
+        const notSaveable = isAdd
+          ? (mergeSavedAttachmentNames(pending?.priorAttachmentsNotSaveable ?? [], answer.notSaveable) ?? [])
+          : answer.notSaveable;
         updateSavedState(prev => ({
           savedDocument: {
             documentId: cleanGuid(docId) || docId,
@@ -833,6 +857,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             ...(emailFilingProblem ? { emailFilingProblem } : {}),
             ...(attachmentsAdded ? { attachmentsAdded } : {}),
             ...(notStored.length ? { attachmentsNotStored: notStored } : {}),
+            ...(notSaveable.length ? { attachmentsNotSaveable: notSaveable } : {}),
             ...(savedAttachmentNames ? { savedAttachmentNames } : {}),
           },
           profileRefreshSignal: prev.profileRefreshSignal + 1,
@@ -842,6 +867,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         }));
         announce('Document saved successfully', 'polite');
         onComplete?.(docId, docUrl);
+        // Task 141 review: re-read the email's identity (the pane's existing retry path, which asks resolve-email-identity
+        // and so gets savedAttachmentNames), AFTER the caller's own completion handling, so this newer read is the one
+        // that lands. The effect below applies its names when it settles on this document.
+        if (pending?.tracksAttachments && retryIdentityRef.current) {
+          attachmentsRefreshRef.current = {
+            documentId: cleanGuid(docId) || docId,
+            added: isAdd ? answer.added : null,
+            sawChecking: false,
+          };
+          retryIdentityRef.current();
+        }
       },
       onError: error => {
         announce(`Error: ${error.message}`, 'assertive');
@@ -868,9 +904,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     startSave,
     reset,
     retry,
-    getSentAttachmentFileNames,
+    getAttachmentsAnswer,
   } = useSaveFlow(saveFlowOptions);
-  sentAttachmentNamesGetterRef.current = getSentAttachmentFileNames;
+  attachmentsAnswerGetterRef.current = getAttachmentsAnswer;
 
   // Task 088: the open document's own filing, from the SAME resolved identity the related-record card reads
   // (no second call) — used to name the record in the confirmation bar after a version save.
@@ -1426,6 +1462,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         tracksAttachments: true,
         ...(view.savedNames ? { priorSavedAttachmentNames: view.savedNames } : {}),
         ...(view.notStoredNames ? { priorAttachmentsNotStored: view.notStoredNames } : {}),
+        ...(view.notSaveableNames ? { priorAttachmentsNotSaveable: view.notSaveableNames } : {}),
       };
       void startSave({ ...buildSaveContext(), saveTarget: target });
       announce(names.length === 1 ? 'Saving 1 attachment.' : `Saving ${names.length} attachments.`, 'polite');
@@ -1497,6 +1534,36 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     );
     announce('Saved document refreshed.', 'polite');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when identity settles after a Refresh; savedDocument/resolvedRelatedRecord are read at that moment
+  }, [documentIdentity]);
+
+  // Task 141 review: the identity re-read a completed email save asked for (see onComplete). Once it has gone through
+  // 'checking' and settled, the saved attachment names are the SERVER's: the identity's `savedAttachmentNames` when it
+  // resolved to the saved document and sent them, plus (after an add) the names the add's answer said it is adding, whose
+  // documents may not exist yet. Any other outcome (no names sent, another document, no identity) leaves them unknown:
+  // no marks, no Save-to-add, no warning.
+  useEffect(() => {
+    const pending = attachmentsRefreshRef.current;
+    if (!pending) return;
+    if (documentIdentity === 'checking') {
+      pending.sawChecking = true;
+      return;
+    }
+    if (!pending.sawChecking) return;
+    attachmentsRefreshRef.current = null;
+    const serverNames =
+      documentIdentity !== undefined &&
+      documentIdentity.kind === 'resolved' &&
+      cleanGuid(documentIdentity.documentId) === pending.documentId &&
+      Array.isArray(documentIdentity.savedAttachmentNames)
+        ? documentIdentity.savedAttachmentNames
+        : undefined;
+    const names = pending.added ? mergeSavedAttachmentNames(serverNames, pending.added) : serverNames;
+    updateSavedState(prev => {
+      if (!prev.savedDocument || prev.savedDocument.documentId !== pending.documentId) return prev;
+      const { savedAttachmentNames: _previous, ...rest } = prev.savedDocument;
+      return { ...prev, savedDocument: { ...rest, ...(names ? { savedAttachmentNames: names } : {}) } };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the identity settles; the pending re-read is a ref
   }, [documentIdentity]);
 
   // A refused VERSION save whose cause is the existing document (task 024): switch to "a new document" so
@@ -2062,6 +2129,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       </MessageBar>
     ) : null;
 
+  // Task 141 review: the save was asked to add attachments no email save ever creates a document for. The same
+  // non-blocking warning and single announcement channel as the not-stored notice.
+  const renderAttachmentsNotSaveableNotice = (names: string[] | undefined) =>
+    names && names.length > 0 ? (
+      <MessageBar intent="warning" layout="multiline">
+        <MessageBarBody>{describeAttachmentsNotSaveable(names)}</MessageBarBody>
+      </MessageBar>
+    ) : null;
+
   // Task 117 (O3/W1): what Copy Link copies — the document's Spaarke record link, built exactly like View Document's
   // (`buildOpenRecordUrl`, ORG_URL + SPAARKE_APP_NAME). `null` when ORG_URL is unset: Copy Link is then HIDDEN, never
   // a fallback to the stored file's URL.
@@ -2074,10 +2150,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // Task 141: whether the saved email's attachments include one known unsaved (owner point 9). Outlook only — Word has no
   // attachments section; host-shaped DATA, like the attachment list itself.
-  const unsavedAttachmentsIn = (savedNames: string[] | undefined): boolean =>
+  // Task 141 review: an attachment no save can create is never "unsaved" (classifySavedAttachments marks it notSaveable).
+  const unsavedAttachmentsIn = (savedNames: string[] | undefined, notSaveableNames?: string[]): boolean =>
     hostType === 'outlook' &&
     attachments.length > 0 &&
-    hasUnsavedAttachments(classifySavedAttachments(attachments, savedNames));
+    hasUnsavedAttachments(classifySavedAttachments(attachments, savedNames, notSaveableNames));
 
   // The box for a save this pane just made.
   const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
@@ -2092,7 +2169,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     notFiledText: 'Not filed to a record.',
     copyUrl: documentRecordLinkOf(saved.documentId),
     itemDetails: !canSaveNewVersion,
-    unsavedAttachments: unsavedAttachmentsIn(saved.savedAttachmentNames),
+    unsavedAttachments: unsavedAttachmentsIn(saved.savedAttachmentNames, saved.attachmentsNotSaveable),
   });
 
   // Task 111: the box for a document that was already in Spaarke when the pane opened. Copy Link copies the
@@ -2131,6 +2208,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       name: identity.documentName || identity.fileName,
       savedNames: identity.savedAttachmentNames,
       notStoredNames: undefined,
+      notSaveableNames: undefined,
       record,
       filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
       filedToNumber: resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
@@ -2150,6 +2228,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       name: saved.savedName,
       savedNames: saved.savedAttachmentNames,
       notStoredNames: saved.attachmentsNotStored,
+      notSaveableNames: saved.attachmentsNotSaveable,
       record,
       filedTo: saved.filedTo,
       filedToNumber: saved.filedToNumber ?? null,
@@ -2163,7 +2242,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // withheld) lists them without checkboxes; so are names an add found the stored email does not hold.
   const renderSavedEmailAttachments = (view: SavedEmailAttachmentsView): React.ReactElement | null => {
     if (hostType !== 'outlook' || attachments.length === 0) return null;
-    const states = classifySavedAttachments(attachments, view.savedNames);
+    const states = classifySavedAttachments(attachments, view.savedNames, view.notSaveableNames);
+    // Task 141 review (finding 5): Save-to-add is offered ONLY when the server sent `savedAttachmentNames`. That field is
+    // new with the add, so its presence proves the server knows `savedDocumentId`; an older server would ignore it and
+    // run a plain email save (a second, attachment-less .eml). `savedNames` is never a list the pane worked out itself.
     const canAdd = view.record !== null && view.savedNames !== undefined;
     const notStored = new Set((view.notStoredNames ?? []).map(name => name.toLowerCase()));
     const nonSelectableIds = new Set(
@@ -2724,6 +2806,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         {renderSavedBar(savedBarOf(saved))}
         {renderEmailFilingNotice(saved.emailFilingProblem)}
         {renderAttachmentsNotStoredNotice(saved.attachmentsNotStored)}
+        {renderAttachmentsNotSaveableNotice(saved.attachmentsNotSaveable)}
         {/* Task 141 (owner point 3): an email has no header — its lines are in the section above. */}
         {canSaveNewVersion && renderDocumentHeader('locked', lockedName)}
         <div className={styles.section}>

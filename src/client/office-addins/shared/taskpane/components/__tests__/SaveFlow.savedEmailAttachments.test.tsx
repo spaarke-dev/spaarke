@@ -148,10 +148,21 @@ afterAll(() => {
 
 describe('SaveFlow — a saved email with unsaved attachments (task 141)', () => {
   it("owner's bug: the saved state marks each attachment, and Save sends savedDocumentId with only the ticked unsaved names", async () => {
-    mockFetch.mockImplementation(async (url: string) =>
+    // The server's real add answer (task 141 review): a 202 whose attachmentsAdded names what it is adding — the pane
+    // marks those, never what it sent.
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) =>
       String(url).includes('/api/office/save')
-        ? response(200, { success: true, duplicate: true, artifact: { type: 'Document', id: EML_ID } })
-        : response(200, { data: {} })
+        ? response(202, {
+            jobId: 'job-141',
+            statusUrl: '/api/office/jobs/job-141',
+            streamUrl: '/api/office/jobs/job-141/stream',
+            status: 'Queued',
+            duplicate: false,
+            attachmentsAdded: JSON.parse(String(init?.body)).email.selectedAttachmentFileNames,
+          })
+        : String(url).includes('/api/office/jobs/')
+          ? response(200, { jobId: 'job-141', status: 'Completed', completedPhases: [] })
+          : response(200, { data: {} })
     );
     render(<OutlookPane initial={savedEmail(['Exhibit A.pdf'])} />);
 

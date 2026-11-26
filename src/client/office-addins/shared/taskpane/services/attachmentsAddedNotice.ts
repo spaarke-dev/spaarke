@@ -24,6 +24,19 @@ export function readAttachmentsAddedCount(value: unknown): number {
   return readNames(value).length;
 }
 
+/** Task 141 review: the names in `attachmentsAdded` (the server's answer, never what was sent), or none when absent or malformed. */
+export function readAttachmentsAdded(value: unknown): string[] {
+  return readNames(value);
+}
+
+/**
+ * Task 141 review: the attachments no email save ever creates a document for (`attachmentsNotSaveable`): their names, or
+ * none when absent or malformed.
+ */
+export function readAttachmentsNotSaveable(value: unknown): string[] {
+  return readNames(value);
+}
+
 /** The attachments the stored email does not hold (`attachmentsNotStored`): their names, or none when absent or malformed. */
 export function readAttachmentsNotStored(value: unknown): string[] {
   return readNames(value);
@@ -47,4 +60,17 @@ export function describeAttachmentsNotStored(names: readonly string[] | undefine
   return names.length === 1
     ? `This attachment could not be added because it was not saved with the email: ${list}. To include it, choose "Save again as a new document", which saves a second copy of the email.`
     : `These attachments could not be added because they were not saved with the email: ${list}. To include them, choose "Save again as a new document", which saves a second copy of the email.`;
+}
+
+/**
+ * Task 141 review: the warning for attachments no email save ever creates a document for (a calendar file, a blocked type,
+ * an inline or signature image, an empty file), or `null` when there are none. Saving the email again would not save them,
+ * so it is not suggested.
+ */
+export function describeAttachmentsNotSaveable(names: readonly string[] | undefined): string | null {
+  if (!names || names.length < 1) return null;
+  const list = names.join(', ');
+  return names.length === 1
+    ? `This attachment can't be saved to Spaarke (its type or content is not saved with emails): ${list}.`
+    : `These attachments can't be saved to Spaarke (their type or content is not saved with emails): ${list}.`;
 }

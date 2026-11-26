@@ -128,7 +128,8 @@ describe('useSaveFlow — add attachments to a saved email (task 141)', () => {
     const [captureAttachments, captureSelected] = capture.mock.calls[0] as unknown as [unknown[], Set<string>];
     expect(captureAttachments).toEqual([]);
     expect(captureSelected.size).toBe(0);
-    expect(hook.result.current.getSentAttachmentFileNames()).toEqual(['Exhibit B.pdf']);
+    // Task 141 review: what the pane marks saved is the server's answer, never what it sent (here: nothing added).
+    expect(hook.result.current.getAttachmentsAnswer()).toEqual({ added: [], notSaveable: [] });
   });
 
   it('a 200 answer with no job that names the saved .eml completes directly — no job is polled', async () => {
