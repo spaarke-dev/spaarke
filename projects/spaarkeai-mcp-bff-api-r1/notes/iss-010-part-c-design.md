@@ -206,3 +206,14 @@ No package or DI registration is added.
   - A child create (create-budget, assign-task, to-do, work) makes all its checks before its one app-only create (A3 guards that).
   - Every other executor is SUSPENDED during its ExecuteAsync. That covers, for example, revise-budget's caller PATCH of `sprk_budget.sprk_totalbudget` at :490 and mark-complete/reschedule's caller cores at :833/:871/:875. Their writes therefore never meet a window-served answer, and the window clears after the step.
 - **Not traced by the audit,** covered by the design instead: the DecisionRouteCores/ChildRecordEndpoints internals and CoreAncestorRestamper. These run inside step 1's own execute: after the create for a child create (A3), or while suspended for the others.
+
+## uac-r2 rulings after run 1 (2026-11-25)
+
+**A2 guard: option (b), tightened.** Allow-list `SecureRootInheritance.Cascade.cs` `PlatformReadableTablesAsync`, with the reason "reads: does the BFF's own user hold System Administrator / a field-security profile; no association write".
+- Pin the EXACT occurrences: each token to its count (`systemuserroles_association`, `teamroles_association`, `teammembership_association`; 4 in total as found), each inside a `$filter`/`$expand` query string.
+- The test fails on any new occurrence in that method, on a write shape there, or on the method's removal (the stale-entry check).
+
+**Type gate and caller key (applies to #3193's request store and to this design's route-core decorator).**
+- Share only when the inner client IS a `DataverseUserClient`. Any other `IDataverseUserClient` gets no shared answers; a must-not-fire test covers it.
+- Key every stored route-core shape on (caller systemuserid from the request, path). That includes `sprk_recordtype_refs` and the privilege-set calls. Do not rely on the path naming the caller: an org-owned catalog read is still a caller-privileged read.
+- The decorator is per REQUEST, not per client instance: production makes a new transient client per create (ontology #3193 review F4).
