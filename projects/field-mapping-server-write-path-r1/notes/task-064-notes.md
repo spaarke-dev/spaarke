@@ -162,7 +162,7 @@ Replace the second sub-bullet of "MUST run caller checks on the merged payload":
 And §3 "A mapped value failing AppendTo or field security is skipped with a warning." → "An ordinary mapped value from the
 filing parent is copied regardless of the caller's rights (4b/4c); the exceptions are in §2 FR-08."
 
-Out-of-scope defects: push declassification (section 3), for the main session to file. rework: none task 064
+Follow-ons: the push field-secured source rule (DI-051, #3258) is done in section 8. rework: none task 064
 
 ## 8. 064b push follow-on (DI-051, #3258)
 
