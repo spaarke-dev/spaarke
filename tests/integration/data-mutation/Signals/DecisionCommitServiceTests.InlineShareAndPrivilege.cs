@@ -125,6 +125,119 @@ public sealed partial class DecisionCommitServiceTests
         log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId == DecisionCommitEvents.AfterRecordFailed);
     }
 
+    /// <summary>The reconcile, run now, writes nothing more to the new record (the inline share already granted what it grants).</summary>
+    private static async Task TheReconcileHasNothingLeftForTheRecord(Rig rig)
+    {
+        var before = rig.ShareTable.WriteLog.Count;
+        var mask = rig.ShareTable.MaskOf("sprk_decisionrecord", RecordId, ShareePrincipal);
+        (await rig.Synchronizer().ReconcileAllAsync(CancellationToken.None)).Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        rig.ShareTable.WriteLog.Skip(before).Should().NotContain(w => w.RecordId == RecordId);
+        rig.ShareTable.MaskOf("sprk_decisionrecord", RecordId, ShareePrincipal).Should().Be(mask);
+    }
+
+    [Fact(DisplayName = "225 r1: a resumed review whose record an earlier attempt wrote shares it, even when this request's owner answer is ordinary")]
+    public async Task AResumedReview_WhoseRecordAlreadyExists_SharesIt_WhateverTheOwnerAnswerNow()
+    {
+        var rig = SecureRecordRig();
+        rig.FailRecordAfterCreateWith = new TimeoutException("no answer"); // the create committed, then timed out
+        var review = PathBReview(inquiry: false, todo: false);
+        var failed = await rig.CommitAsync(review);
+        failed.Status.Should().Be(DecisionCommitStatus.Failed);
+        failed.FailedStep.Should().Be(5);
+        failed.Resumable.Should().BeTrue();
+        var written = rig.Records.Single();
+        written.Id = RecordId;
+        written["createdby"] = new EntityReference("systemuser", WriterUser);
+        rig.ExistingRecords.Add(written);
+        rig.ShareTable.MaskOf("sprk_decisionrecord", RecordId, ShareePrincipal).Should().BeNull("the precondition: the first attempt never shared it");
+        rig.Owner = RecordOwnerResolution.Owned(OrdinaryTeam); // a parent unsecured between the attempts: the stored row is still secure
+
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        retried.RecordClass.Should().Be("Existing");
+        rig.Records.Should().ContainSingle("the retry writes no second record");
+        rig.ShareTable.MaskOf("sprk_decisionrecord", RecordId, ShareePrincipal).Should().NotBeNull(
+            "the share is decided by the stored row, never by an owner answer resolved again in this request");
+        rig.ShareTable.WriteLog.Should().OnlyContain(w => w.RecordId == RecordId);
+        await TheReconcileHasNothingLeftForTheRecord(rig);
+    }
+
+    [Fact(DisplayName = "225 r1: finishing a review whose record exists (the ledger forgot) shares the record when the first attempt did not")]
+    public async Task FinishingAReview_WhoseRecordExists_SharesIt()
+    {
+        var rig = SecureRecordRig();
+        rig.ShareWorld.FailingQueriesOf("sprk_decisionrecord"); // the first attempt's share does not happen (a crash right after the write)
+        var review = Dismissal("not-material");
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.ShareTable.MaskOf("sprk_decisionrecord", RecordId, ShareePrincipal).Should().BeNull("the precondition: not shared yet");
+        rig.ShareWorld.ClearQueryFaults();
+        await LedgerForgetsButTheRecordStays(rig, review);
+
+        var finished = await rig.CommitAsync(review);
+
+        finished.Status.Should().Be(DecisionCommitStatus.Recorded, finished.Detail);
+        finished.Replayed.Should().BeTrue();
+        rig.Records.Should().ContainSingle();
+        rig.ShareTable.MaskOf("sprk_decisionrecord", RecordId, ShareePrincipal).Should().NotBeNull();
+        rig.ShareTable.WriteLog.Should().OnlyContain(w => w.RecordId == RecordId);
+        await TheReconcileHasNothingLeftForTheRecord(rig);
+    }
+
+    [Fact(DisplayName = "225 r1 must-not-fire: finishing a review whose record is ordinary shares nothing")]
+    public async Task FinishingAReview_WhoseRecordIsOrdinary_SharesNothing()
+    {
+        var rig = SecureRecordRig();
+        rig.Owner = RecordOwnerResolution.Owned(OrdinaryTeam);
+        var review = Dismissal("not-material");
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+
+        var finished = await rig.CommitAsync(review);
+
+        finished.Replayed.Should().BeTrue(finished.Detail);
+        rig.ShareTable.WriteLog.Should().BeEmpty("SyncChildAsync answers NotApplicable for a row the Secure team does not own");
+    }
+
+    [Fact(DisplayName = "225 r1: a share that throws is logged with 50363 and the decision is still recorded")]
+    public async Task AShareThatThrows_IsLogged_AndTheDecisionIsRecorded()
+    {
+        var rig = SecureRecordRig();
+        var log = new ListLogger();
+        rig.CommitLogger = log;
+        var sink = new ThrowsOnTheRunSummary();
+        rig.SynchronizerLogger = sink;
+
+        var result = await rig.CommitAsync(Dismissal("not-material"));
+
+        sink.Thrown.Should().Be(1, "the precondition: the share threw out of SyncChildAsync");
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Status(Primary).Should().Be(Resolved);
+        rig.LinkedRecord(Primary).Should().Be(RecordId);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId == DecisionCommitEvents.AfterRecordFailed
+            && e.Exception is InvalidOperationException);
+    }
+
+    /// <summary>The synchronizer's logger that throws the first time it logs its run summary: the one fault that escapes
+    /// <c>SyncChildAsync</c> (the shape uac-r2's own refile tests use).</summary>
+    private sealed class ThrowsOnTheRunSummary : ILogger<SecureChildShareSynchronizer>
+    {
+        public int Thrown { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (Thrown == 0 && formatter(state, exception).StartsWith("[SECURE-CHILD-SHARES] scope=", StringComparison.Ordinal))
+            {
+                Thrown++;
+                throw new InvalidOperationException("Test: the run summary's log sink faulted.");
+            }
+        }
+    }
+
     // ── D-212: the privilege flag ────────────────────────────────────────────────────────────────────────────────
 
     private static string Evidence(params Guid[] communications) => System.Text.Json.JsonSerializer.Serialize(
@@ -226,7 +339,7 @@ public sealed partial class DecisionCommitServiceTests
     /// <summary>The commit's log, for the share-fault tests.</summary>
     private sealed class ListLogger : ILogger<DecisionCommitService>
     {
-        public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = new();
+        public List<(LogLevel Level, EventId EventId, string Message, Exception? Exception)> Entries { get; } = new();
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -235,7 +348,7 @@ public sealed partial class DecisionCommitServiceTests
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             lock (Entries)
-                Entries.Add((logLevel, eventId, formatter(state, exception)));
+                Entries.Add((logLevel, eventId, formatter(state, exception), exception));
         }
     }
 }

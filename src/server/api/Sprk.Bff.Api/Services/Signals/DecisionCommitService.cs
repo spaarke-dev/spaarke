@@ -1323,6 +1323,11 @@ public sealed class DecisionCommitService
             var closedNow = await CloseAllAsync(ids, resolution, dismissalText, existingRecord.Id, confirmedBy, reviewStart, clearedSince).ConfigureAwait(false);
             var finishWarnings = closedNow.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList();
             finishWarnings.AddRange(await SuppressAfterRepairAsync(resolution, p.Resolved, closedNow).ConfigureAwait(false));
+
+            // Task 225 fix round 1 (D-229): the record may have been written by an attempt that stopped before its inline share (a crash
+            // between the write and the share, retried at once), so it is shared here too, app-only and idempotent. Not gated on an owner
+            // answer: none is resolved on this path, and SyncChildAsync decides from the stored row (NotApplicable unless Secure-team-owned).
+            await ShareSecureRecordAsync(reviewId, existingRecord.Id).ConfigureAwait(false);
             return new DecisionCommitResult
             {
                 Status = DecisionCommitStatus.Recorded,
@@ -1539,7 +1544,10 @@ public sealed class DecisionCommitService
         // for that ONE record, with uac-r2's own per-child mirror (SecureChildShareSynchronizer.SyncChildAsync: exactly what the
         // two-minute reconcile computes for it), so the deciding user reads it at once. Never fails or undoes the decision: a fault is
         // logged and the reconcile, still the backstop, repairs it. Not a warning to the person (the wizard does not re-read the record).
-        if (recordOwner.Resolution.IsSecureOwner)
+        // A record written by an earlier attempt (the found branch above) is shared whatever this request's owner answer says (task 225
+        // fix round 1: a parent unsecured between the attempts must not skip it); SyncChildAsync decides from the stored row. A record
+        // written now is shared only when the resolver placed it under the Secure Record Owners team.
+        if (existingRecord is not null || recordOwner.Resolution.IsSecureOwner)
             await ShareSecureRecordAsync(reviewId, recordId).ConfigureAwait(false);
 
         // ---- (6) Close (or, for an inquiry only, link) every Signal the decision covers -------------------------------------

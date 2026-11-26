@@ -184,8 +184,15 @@ public sealed partial class DecisionCommitServiceTests
 
         public List<string> CommunicationReads { get; } = new();
 
+        /// <summary>Task 225 fix round 1: the synchronizer's logger, when a test makes it fault (the one fault that escapes SyncChildAsync).</summary>
+        public Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>? SynchronizerLogger { get; set; }
+
+        /// <summary>Task 225 fix round 1: the next Decision Record create COMMITS (the row is stored) and then throws this: a create
+        /// that timed out after committing.</summary>
+        public Exception? FailRecordAfterCreateWith { get; set; }
+
         /// <summary>Task 225: the REAL synchronizer over <see cref="ShareWorld"/> and <see cref="ShareTable"/>.</summary>
-        public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Synchronizer() => ShareWorld.Synchronizer(ShareTable);
+        public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Synchronizer() => ShareWorld.Synchronizer(ShareTable, logger: SynchronizerLogger);
 
         /// <summary>Task 225: a created row as Dataverse stores it, for the synchronizer: its columns, the owner as owningteam/owninguser.</summary>
         private void StoreInShareWorld(Entity created, Guid id)
@@ -413,6 +420,12 @@ public sealed partial class DecisionCommitServiceTests
                     if (FailRecordWith is not null) throw FailRecordWith;
                     Records.Add(e);
                     StoreInShareWorld(e, RecordId);
+                    if (FailRecordAfterCreateWith is { } afterCreate)
+                    {
+                        FailRecordAfterCreateWith = null;
+                        throw afterCreate;
+                    }
+
                     return Task.FromResult(RecordId);
                 });
             // Uac-r2 re-check F1: WhoAmI on the writer's own connection (the createdby of every row it creates).
