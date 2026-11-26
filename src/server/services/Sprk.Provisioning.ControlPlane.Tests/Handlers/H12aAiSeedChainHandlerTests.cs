@@ -73,7 +73,7 @@ public sealed class H12aAiSeedChainHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
-        success.IdempotencyKey.Should().Be(H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash));
+        success.IdempotencyKey.Should().Be(H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash, FakeAiContentSeeder.Hash));
 
         // Cosmos state advanced with completed phase + seed summary in ErrorDetail.
         repo.LastWrittenRun.Should().NotBeNull();
@@ -98,7 +98,7 @@ public sealed class H12aAiSeedChainHandlerTests
     public async Task Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
         var run = BuildRun();
-        var expectedKey = H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash);
+        var expectedKey = H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash, FakeAiContentSeeder.Hash);
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H12a",
@@ -337,7 +337,7 @@ public sealed class H12aAiSeedChainHandlerTests
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H12a",
-            IdempotencyKey = H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, priorHash),
+            IdempotencyKey = H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, priorHash, FakeAiContentSeeder.Hash),
             StartedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
             CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-29),
             JobId = "prior-run",
@@ -377,13 +377,101 @@ public sealed class H12aAiSeedChainHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
+    // ---------- T13 AI content (L56 / W2) ----------
+
+    [Fact]
+    public async Task W2_AiContent_IsSeededBeforeTheManifestRunner_AndBothSummariesAreRecorded()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-13");
+        var calls = new List<string>();
+        var content = FakeAiContentSeeder.Succeeds("AI content OK: 3 row(s) created", calls);
+        var runner = FakeSeedManifestRunner.Success("manifest OK", calls);
+        var handler = BuildHandler(repo, FakeSeedManifestReader.CleanWithHash(ManifestHash), runner, content);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        calls.Should().Equal(new[] { "content", "manifest" }, "fixed-id rows must exist before the by-name writer looks for them");
+        content.LastRequest!.TargetDataverseUrl.Should().Be(DataverseUrl);
+        content.LastRequest.TenantId.Should().Be(TenantId);
+        repo.LastWrittenRun!.ErrorDetail.Should().Contain("AI content OK: 3 row(s) created").And.Contain("manifest OK");
+    }
+
+    [Fact]
+    public async Task W2_AiContentMissingDependency_FailsResumable_AndTheManifestRunnerIsNotInvoked()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-14");
+        var content = FakeAiContentSeeder.Returns(new AiContentSeedOutcome.Refused("sprk_playbooknode/x points at sprk_analysisplaybook/y"));
+        var runner = FakeSeedManifestRunner.Success("must not run");
+        var handler = BuildHandler(repo, FakeSeedManifestReader.CleanWithHash(ManifestHash), runner, content);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(AiSeedChainRejectionCodes.AiContentMissingDependency);
+        failure.Diagnostic.Should().Contain("sprk_analysisplaybook/y");
+        runner.CallCount.Should().Be(0);
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task W2_AiContentDataverseFailure_FailsResumable_NotQuarantined(bool throws)
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-15");
+        var content = throws
+            ? FakeAiContentSeeder.Throws(new HttpRequestException("503 from Dataverse"))
+            : FakeAiContentSeeder.Returns(new AiContentSeedOutcome.Failed("POST sprk_analysisactions returned 503"));
+        var runner = FakeSeedManifestRunner.Success("must not run");
+        var handler = BuildHandler(repo, FakeSeedManifestReader.CleanWithHash(ManifestHash), runner, content);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable, "the content seed is create-if-missing, so a resume continues where it stopped");
+        failure.RejectionCode.Should().Be(AiSeedChainRejectionCodes.AiContentSeedFailed);
+        failure.Diagnostic.Should().Contain("503");
+        runner.CallCount.Should().Be(0);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task W2_AChangedContentSet_DoesNotMatchThePriorCompletedPhase_ReSeeds()
+    {
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H12a",
+            IdempotencyKey = H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash, "0000-old-export"),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-29),
+            JobId = "prior-run",
+        });
+        var repo = new FakeRepository(run, etag: "etag-16");
+        var content = FakeAiContentSeeder.Succeeds();
+        var handler = BuildHandler(repo, FakeSeedManifestReader.CleanWithHash(ManifestHash), FakeSeedManifestRunner.Success("ok"), content);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        content.CallCount.Should().Be(1, "a re-export changes the content hash and so the key");
+        H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash, "a")
+            .Should().NotBe(H12aAiSeedChainHandler.BuildIdempotencyKey(CustomerId, ManifestHash, "b"));
+    }
+
     // ---------- helpers ----------
 
     private static H12aAiSeedChainHandler BuildHandler(
         FakeRepository repo,
         FakeSeedManifestReader reader,
-        FakeSeedManifestRunner runner)
-        => new(repo, reader, runner, NullLogger<H12aAiSeedChainHandler>.Instance);
+        FakeSeedManifestRunner runner,
+        FakeAiContentSeeder? content = null)
+        => new(repo, reader, runner, content ?? FakeAiContentSeeder.Succeeds(), NullLogger<H12aAiSeedChainHandler>.Instance);
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -495,8 +583,10 @@ public sealed class H12aAiSeedChainHandlerTests
             _throw = ex;
         }
 
-        public static FakeSeedManifestRunner Success(string stdoutSummary)
-            => new(new SeedManifestInvocationOutcome.Success(stdoutSummary));
+        public static FakeSeedManifestRunner Success(string stdoutSummary, List<string>? calls = null)
+            => new(new SeedManifestInvocationOutcome.Success(stdoutSummary)) { Calls = calls };
+
+        public List<string>? Calls { get; private init; }
 
         public static FakeSeedManifestRunner Failure(string diagnostic)
             => new(new SeedManifestInvocationOutcome.Failure(diagnostic));
@@ -508,6 +598,43 @@ public sealed class H12aAiSeedChainHandlerTests
         {
             CallCount++;
             LastRequest = request;
+            Calls?.Add("manifest");
+            if (_throw is not null) throw _throw;
+            return Task.FromResult(_outcome!);
+        }
+    }
+
+    /// <summary>AI content seeder fake (L56 / W2): fixed content hash, canned outcome, optional shared call log.</summary>
+    private sealed class FakeAiContentSeeder : IAiContentSeeder
+    {
+        public const string Hash = "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff";
+        private readonly AiContentSeedOutcome? _outcome;
+        private readonly Exception? _throw;
+        private readonly List<string>? _calls;
+
+        private FakeAiContentSeeder(AiContentSeedOutcome? outcome, Exception? ex, List<string>? calls)
+        {
+            _outcome = outcome;
+            _throw = ex;
+            _calls = calls;
+        }
+
+        public string ContentHash => Hash;
+        public int CallCount { get; private set; }
+        public SeedManifestInvocationRequest? LastRequest { get; private set; }
+
+        public static FakeAiContentSeeder Succeeds(string summary = "AI content OK", List<string>? calls = null)
+            => new(new AiContentSeedOutcome.Success(summary), null, calls);
+
+        public static FakeAiContentSeeder Returns(AiContentSeedOutcome outcome) => new(outcome, null, null);
+
+        public static FakeAiContentSeeder Throws(Exception ex) => new(null, ex, null);
+
+        public Task<AiContentSeedOutcome> SeedAsync(SeedManifestInvocationRequest request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastRequest = request;
+            _calls?.Add("content");
             if (_throw is not null) throw _throw;
             return Task.FromResult(_outcome!);
         }

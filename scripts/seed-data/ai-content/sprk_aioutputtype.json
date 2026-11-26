@@ -1,0 +1,22 @@
+{
+  "table": "sprk_aioutputtype",
+  "entitySet": "sprk_aioutputtypes",
+  "primaryKey": "sprk_aioutputtypeid",
+  "nameColumn": "sprk_name",
+  "match": "naturalKey",
+  "matchKeys": [["sprk_name"]],
+  "columns": ["sprk_name", "sprk_outputtypecode"],
+  "lookups": [],
+  "rows": [
+    {
+      "sprk_aioutputtypeid": "6fdda81c-03ec-f011-8406-7c1e520aa4df",
+      "sprk_name": "Document Type",
+      "sprk_outputtypecode": null
+    },
+    {
+      "sprk_aioutputtypeid": "d232201b-03ec-f011-8406-7ced8d1dc988",
+      "sprk_name": "Summary",
+      "sprk_outputtypecode": null
+    }
+  ]
+}

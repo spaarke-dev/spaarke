@@ -16,6 +16,13 @@
 //   spaarke-playbook-embeddings retired; frozen multi-node engine
 //   deliberately UNDEPLOYED).
 //
+// AI CONTENT (L56 / data-setup plan D3 / demo plan W2): before the manifest
+//   runner, IAiContentSeeder writes the exported AI content set
+//   (scripts/seed-data/ai-content — tools, skills, knowledge, actions with
+//   their JPS schemas, playbooks, nodes, N:N links, canvases, routing rows) with
+//   FIXED primary keys, create-if-missing. The idempotency key folds in the
+//   content hash, so a re-export re-seeds on the next run.
+//
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-15 (H12a
 //     acceptance): all seed rows present; no duplicates; playbook consumers
@@ -69,6 +76,10 @@
 //   │                                     │ (partial seed = broken FK;│
 //   │                                     │ operator inspects runNotes│
 //   │                                     │ before decommission)      │
+//   │ AI content set missing dependency   │ Resumable (refused before │
+//   │ (L56 / W2; nothing written)         │ any Dataverse call)       │
+//   │ AI content seed Dataverse failure   │ Resumable (create-if-     │
+//   │                                     │ missing; resume continues)│
 //   │ Concurrent Cosmos writer conflict   │ Resumable                 │
 //   │ Run row deleted mid-flight          │ Resumable                 │
 //   └─────────────────────────────────────┴───────────────────────────┘
@@ -117,6 +128,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
     private readonly IProvisioningRunRepository _repository;
     private readonly ISeedManifestReader _manifestReader;
     private readonly ISeedManifestRunner _seedRunner;
+    private readonly IAiContentSeeder _aiContentSeeder;
     private readonly ILogger<H12aAiSeedChainHandler> _logger;
 
     /// <inheritdoc/>
@@ -131,16 +143,19 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         IProvisioningRunRepository repository,
         ISeedManifestReader manifestReader,
         ISeedManifestRunner seedRunner,
+        IAiContentSeeder aiContentSeeder,
         ILogger<H12aAiSeedChainHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(manifestReader);
         ArgumentNullException.ThrowIfNull(seedRunner);
+        ArgumentNullException.ThrowIfNull(aiContentSeeder);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _manifestReader = manifestReader;
         _seedRunner = seedRunner;
+        _aiContentSeeder = aiContentSeeder;
         _logger = logger;
     }
 
@@ -242,7 +257,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         }
 
         var manifestHash = manifestSuccess.ContentHash;
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash);
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash, _aiContentSeeder.ContentHash);
 
         // (5) Level-3 idempotency: durable no-op on duplicate. A change to
         //     manifest.yaml (any content byte) produces a new hash + key, so
@@ -264,6 +279,35 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
             CustomerId: envelope.CustomerId,
             TenantId: tenantId,
             TargetDataverseUrl: targetDataverseUrl);
+
+        // (6a) AI content (L56 / W2): tools, skills, knowledge, actions, playbooks, nodes, N:N links, canvases and
+        //      routing rows with their FIXED primary keys from git. It runs BEFORE the by-name manifest writer so a
+        //      fresh stamp gets the source ids (the manifest writer then finds those rows by name and skips them).
+        //      Create-if-missing: a resume after a part-way failure re-reads and continues, so both failures are Resumable.
+        AiContentSeedOutcome contentOutcome;
+        try
+        {
+            contentOutcome = await _aiContentSeeder.SeedAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H12a AI content seed infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            contentOutcome = new AiContentSeedOutcome.Failed($"AI content seed infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        switch (contentOutcome)
+        {
+            case AiContentSeedOutcome.Refused refused:
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    AiSeedChainRejectionCodes.AiContentMissingDependency, refused.Diagnostic, cancellationToken).ConfigureAwait(false);
+            case AiContentSeedOutcome.Failed failed:
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    AiSeedChainRejectionCodes.AiContentSeedFailed, failed.Diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        var contentSummary = ((AiContentSeedOutcome.Success)contentOutcome).Summary;
 
         SeedManifestInvocationOutcome outcome;
         try
@@ -304,7 +348,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
             "H12a AI seed chain succeeded: runId={RunId} customerId={CustomerId} durationMs={DurationMs}",
             envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds);
 
-        return await MarkCompleteAsync(run, etag, idempotencyKey, success.StdoutSummary, envelope, cancellationToken)
+        return await MarkCompleteAsync(run, etag, idempotencyKey, $"{contentSummary} | manifest: {success.StdoutSummary}", envelope, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -319,6 +363,19 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
         return $"h12a-{customerId}-{manifestHash}";
+    }
+
+    /// <summary>
+    /// The key H12a records: <c>h12a-{customerId}-{SHA-256(manifestHash ":" contentHash)}</c>. A change to the manifest OR to the
+    /// exported AI content set (a re-export PR) forces a re-seed on the next run.
+    /// </summary>
+    internal static string BuildIdempotencyKey(string customerId, string manifestHash, string contentHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentHash);
+        var combined = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{manifestHash}:{contentHash}"))).ToLowerInvariant();
+        return BuildIdempotencyKey(customerId, combined);
     }
 
     private static bool TryGetNonEmpty(

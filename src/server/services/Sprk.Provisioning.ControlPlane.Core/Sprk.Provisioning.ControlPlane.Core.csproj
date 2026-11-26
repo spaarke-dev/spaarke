@@ -348,6 +348,21 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.output-types.json</LogicalName>
     </EmbeddedResource>
 
+    <!-- L56 / demo plan W2: the AI content set (tools, skills, knowledge, actions,
+         playbooks, nodes, N:N links, canvases, routing rows) exported with fixed
+         primary keys by scripts/seed-data/ai-content/Export-AiContent.ps1 and
+         seeded create-if-missing by DataverseWebApiAiContentSeeder (H12a).
+         AiContentSet reads every resource under this prefix; a missing table,
+         link or canvas file fails its embedded-set unit test. -->
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\ai-content\*.json"
+                       Link="Handlers\AiSeedChain\AiContent\%(Filename)%(Extension)">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.AiContent.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\ai-content\associations\*.json"
+                       Link="Handlers\AiSeedChain\AiContent\associations\%(Filename)%(Extension)">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.AiContent.associations.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+
     <!-- Task 151 (Wave G-5 Batch G-5A, parallel with task 150) — H12b
          DataGrid + workspace-layout DV-REST ports. Same single-source-of-
          truth embedding pattern as the task 124/126/150 entries above: the

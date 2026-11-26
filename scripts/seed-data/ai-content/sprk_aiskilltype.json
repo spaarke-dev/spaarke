@@ -1,0 +1,37 @@
+{
+  "table": "sprk_aiskilltype",
+  "entitySet": "sprk_aiskilltypes",
+  "primaryKey": "sprk_aiskilltypeid",
+  "nameColumn": "sprk_name",
+  "match": "naturalKey",
+  "matchKeys": [["sprk_name"]],
+  "columns": ["sprk_name", "sprk_skilltypecode"],
+  "lookups": [],
+  "rows": [
+    {
+      "sprk_aiskilltypeid": "4085df1c-eae9-f011-8406-7ced8d1dc988",
+      "sprk_name": "01 - Document Analysis",
+      "sprk_skilltypecode": null
+    },
+    {
+      "sprk_aiskilltypeid": "4185df1c-eae9-f011-8406-7ced8d1dc988",
+      "sprk_name": "05 - Financial",
+      "sprk_skilltypecode": null
+    },
+    {
+      "sprk_aiskilltypeid": "ad44311b-eae9-f011-8406-7c1e520aa4df",
+      "sprk_name": "02 - Contract Specific",
+      "sprk_skilltypecode": null
+    },
+    {
+      "sprk_aiskilltypeid": "af44311b-eae9-f011-8406-7c1e520aa4df",
+      "sprk_name": "03 - Compliance",
+      "sprk_skilltypecode": null
+    },
+    {
+      "sprk_aiskilltypeid": "b044311b-eae9-f011-8406-7c1e520aa4df",
+      "sprk_name": "04 - Risk Analysis",
+      "sprk_skilltypecode": null
+    }
+  ]
+}

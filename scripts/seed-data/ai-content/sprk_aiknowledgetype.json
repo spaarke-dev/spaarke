@@ -1,0 +1,28 @@
+{
+  "table": "sprk_aiknowledgetype",
+  "entitySet": "sprk_aiknowledgetypes",
+  "primaryKey": "sprk_aiknowledgetypeid",
+  "nameColumn": "sprk_name",
+  "match": "naturalKey",
+  "matchKeys": [["sprk_name"]],
+  "columns": ["sprk_name"],
+  "lookups": [],
+  "rows": [
+    {
+      "sprk_aiknowledgetypeid": "3885df1c-eae9-f011-8406-7ced8d1dc988",
+      "sprk_name": "01 - Standards"
+    },
+    {
+      "sprk_aiknowledgetypeid": "3985df1c-eae9-f011-8406-7ced8d1dc988",
+      "sprk_name": "03 - Best Practices"
+    },
+    {
+      "sprk_aiknowledgetypeid": "3a85df1c-eae9-f011-8406-7ced8d1dc988",
+      "sprk_name": "04 - Templates"
+    },
+    {
+      "sprk_aiknowledgetypeid": "3c85df1c-eae9-f011-8406-7ced8d1dc988",
+      "sprk_name": "05 - Taxonomy"
+    }
+  ]
+}
