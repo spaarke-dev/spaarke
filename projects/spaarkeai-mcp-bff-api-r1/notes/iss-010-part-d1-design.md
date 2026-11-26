@@ -59,3 +59,16 @@ After #3193 merges, because it reuses #3193's `RequestScope` plumbing on the sam
 4. R7 is keyed by AAD object id.
 5. Two adversarial passes, because owner resolution is security-relevant (root §8.5).
 6. Order: after #3193, and one at a time with Part C. Ping field-mapping-r1 before branching, because their task 052 (repair pass) also touches `RecordCreationService`. Whoever merges second updates from master. We merge master in; we never rebase. Placement and the publish-size delta go in the PR.
+
+## uac-r2 answers to Q1-Q4 (2026-11-26)
+- **Q1 placement:** yes, a per-request `RecordOwnerLookupCache`. Not a memo behind `IGenericEntityService`: that boundary also carries rows the commit writes (child rows, stamps, shares), so a memo there would serve stale reads, and a shape list can't bound it.
+- **Q2 R3:** safe for one request, keyed per team id. Keep both "can be" and "cannot be": it is team configuration, and a cached "cannot" fails closed into a refusal. Never keep not-found or a fault. This holds only because Q3 holds, so the Q3 guard is binding.
+- **Q3:** no team or businessunit writes on the commit path. uac-r2 grepped master. The only team-row writes are `RegistrationDataverseService:732` (registration route) and `ExternalCollaboratorPlacement` (external plane), neither on the commit path. **Enforce it:** extend Part C's A2 source scan, or add one, so the commit-path folders fail on any create, update, delete or upsert of `team`/`teams`/`businessunit`/`businessunits`, on `SetBusinessSystemUser`, and on a `systemuser` `businessunitid` write. Include a must-fire control.
+- **Q4 R7:** IN. Key it by AAD oid, keep only successful non-empty answers, and keep it per request only. The Deep-depth caller BU test stays uncached.
+- **Build conditions:**
+  - (a) A faulted, cancelled or empty `Lazy<Task<T>>` is removed with `TryRemove` of that exact instance before returning or rethrowing. Must-fire test: the first read faults, and the second goes to the wire and succeeds.
+  - (b) Key R1/R2 on the configuration VALUE read at use (the BU name, the team name), not a constant slot, so a mid-request config reload can't serve the old unit.
+- **Gate:** send uac-r2 the diff as an access gate when it is built. Sequencing: after #3193, never in parallel with Part C.
+
+## Status
+All of Q1–Q5 are answered. D1 is **ready to build after #3193 merges**, on its own branch from master, one at a time with Part C. Ping field-mapping-r1 before branching (their task 052).
