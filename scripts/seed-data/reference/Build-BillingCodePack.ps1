@@ -60,7 +60,7 @@ function ConvertTo-JsonText($value) {
 }
 
 # RFC 4122 version-5 UUID of $Name in the fixed namespace (stable across runs and machines).
-function New-SeedGuid([string]$Name) {
+function Get-SeedGuid([string]$Name) {
     $ns = $IdNamespace.ToByteArray()
     [Array]::Reverse($ns, 0, 4); [Array]::Reverse($ns, 4, 2); [Array]::Reverse($ns, 6, 2)   # .NET little-endian -> network order
     $data = [System.Text.Encoding]::UTF8.GetBytes($Name)
@@ -121,7 +121,7 @@ $null = $sb.Append("  `"columns`": [`"sprk_name`", `"sprk_body`", `"sprk_version
 $null = $sb.Append("  `"rows`": [`n")
 $setLines = foreach ($s in $sets) {
     $tune = $tuning[$s.Name]
-    $id = New-SeedGuid "sprk_billingcodeset|$($s.Name)"
+    $id = Get-SeedGuid "sprk_billingcodeset|$($s.Name)"
     $fields = @(
         "      `"sprk_billingcodesetid`": $(ConvertTo-JsonText $id)",
         "      `"sprk_name`": $(ConvertTo-JsonText $s.Name)",
@@ -143,15 +143,16 @@ $null = $sb.Append("{`n")
 $null = $sb.Append("  `"table`": `"sprk_billingcode`",`n  `"entitySet`": `"sprk_billingcodes`",`n  `"primaryKey`": `"sprk_billingcodeid`",`n")
 $null = $sb.Append("  `"match`": `"naturalKey`",`n  `"naturalKey`": `"sprk_code`",`n  `"nameColumn`": `"sprk_code`",`n")
 $null = $sb.Append("  `"naturalKeyScope`": `"sprk_codeset`",`n")
-$null = $sb.Append("  `"lookups`": [ { `"column`": `"sprk_codeset`", `"navigationProperty`": `"sprk_CodeSet`", `"targetTable`": `"sprk_billingcodeset`", `"targetEntitySet`": `"sprk_billingcodesets`" } ],`n")
+# Laid out the way prettier (the pre-commit hook) formats it, so a committed file equals what this script writes.
+$null = $sb.Append("  `"lookups`": [`n    {`n      `"column`": `"sprk_codeset`",`n      `"navigationProperty`": `"sprk_CodeSet`",`n      `"targetTable`": `"sprk_billingcodeset`",`n      `"targetEntitySet`": `"sprk_billingcodesets`"`n    }`n  ],`n")
 $null = $sb.Append("  `"columns`": [`"sprk_code`", `"sprk_codetype`", `"sprk_phase`", `"sprk_description`", `"sprk_guidancetext`"],`n")
 $null = $sb.Append("  `"rows`": [`n")
 $codeLines = foreach ($s in $sets) {
-    $setId = New-SeedGuid "sprk_billingcodeset|$($s.Name)"
+    $setId = Get-SeedGuid "sprk_billingcodeset|$($s.Name)"
     foreach ($r in $s.Rows) {
         $code = $r.code.Trim()
         $fields = @(
-            "      `"sprk_billingcodeid`": $(ConvertTo-JsonText (New-SeedGuid "sprk_billingcode|$($s.Name)|$code"))",
+            "      `"sprk_billingcodeid`": $(ConvertTo-JsonText (Get-SeedGuid "sprk_billingcode|$($s.Name)|$code"))",
             "      `"sprk_codeset`": $(ConvertTo-JsonText $setId)",
             "      `"sprk_code`": $(ConvertTo-JsonText $code)",
             "      `"sprk_codetype`": $($CodeTypeValue[$r.code_type.Trim()])",
