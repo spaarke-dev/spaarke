@@ -73,6 +73,7 @@ public static class McpToolAuthorization
     public static readonly IReadOnlySet<string> ModelCallableWrites = new HashSet<string>(StringComparer.Ordinal)
     {
         "spaarke_start_analysis",
+        "spaarke_run_playbook", // r2 task 030: starts a detached caller run (ADR-052 amendment 2026-11-26); retry key per caller
     };
 
     // The full name of the ASP.NET Core anonymity metadata interface. Matched by name because the anonymity guard

@@ -209,7 +209,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// For user context operations where SPE must enforce user permissions.
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
     /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
-    /// Phase 4: Caches OBO tokens (55-min TTL) to reduce Azure AD load by 97%.
+    /// Phase 4: Caches OBO tokens until shortly before they expire (<see cref="OboTokenCacheTtl"/>) to reduce Azure AD load by 97%.
     /// </summary>
     /// <param name="baseUrl">
     /// Graph base address for the resulting client. Defaults to v1.0. Threading it through here
@@ -295,8 +295,13 @@ public sealed class GraphClientFactory : IGraphClientFactory
             _logger.LogInformation("OBO token exchange successful");
             _logger.LogInformation("OBO token scopes: {Scopes}", string.Join(", ", result.Scopes));
 
-            // Cache the token for 55 minutes (5-minute buffer before 60-minute expiration)
-            await _tokenCache.SetTokenAsync(tokenHash, result.AccessToken, TimeSpan.FromMinutes(55));
+            // Cache the token until shortly before ITS OWN expiry (spaarkeai-mcp-bff-api-r2 task 030). A fixed 55 minutes outlived a
+            // token issued with less than an hour left, so a long playbook run was served an expired token from this cache. A token
+            // already within the margin of its expiry is not cached at all.
+            if (OboTokenCacheTtl(result.ExpiresOn, DateTimeOffset.UtcNow) is { } ttl)
+            {
+                await _tokenCache.SetTokenAsync(tokenHash, result.AccessToken, ttl);
+            }
 
             return CreateGraphClientFromToken(result.AccessToken, baseUrl);
         }
@@ -319,6 +324,20 @@ public sealed class GraphClientFactory : IGraphClientFactory
         }
     }
 
+    /// <summary>How long before an OBO Graph token's own expiry it stops being served from the Redis cache.</summary>
+    internal static readonly TimeSpan OboTokenCacheSafetyMargin = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// The Redis TTL of an OBO Graph token that expires at <paramref name="expiresOn"/>: its remaining life less
+    /// <see cref="OboTokenCacheSafetyMargin"/>, or <c>null</c> (do not cache) when that leaves nothing. Never a fixed value: Entra issues
+    /// access tokens with 60 to 90 minutes of life and MSAL may return a cached one with less, so a fixed TTL can outlive the token.
+    /// </summary>
+    internal static TimeSpan? OboTokenCacheTtl(DateTimeOffset expiresOn, DateTimeOffset now)
+    {
+        var ttl = expiresOn - now - OboTokenCacheSafetyMargin;
+        return ttl > TimeSpan.Zero ? ttl : null;
+    }
+
     /// <summary>
     /// Creates Graph client using On-Behalf-Of flow for user context operations.
     /// Extracts user token from Authorization header and exchanges it for Graph API token.
@@ -330,7 +349,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// <exception cref="Microsoft.Identity.Client.MsalServiceException">OBO token exchange failed</exception>
     /// <remarks>
     /// This method wraps CreateOnBehalfOfClientAsync with automatic token extraction.
-    /// OBO tokens are cached in Redis for 55 minutes to reduce Azure AD load by 97%.
+    /// OBO tokens are cached in Redis until shortly before they expire (<see cref="OboTokenCacheTtl"/>).
     /// </remarks>
     public async Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default)
     {

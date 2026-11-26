@@ -71,6 +71,24 @@ public sealed class HandoffUrlBuilder
     }
 
     /// <summary>
+    /// A link that opens the Spaarke Console (<c>sprk_spaarkeai</c>) for a JPS playbook run's subject (spaarkeai-mcp-bff-api-r2
+    /// task 030): scoped to <paramref name="documentId"/> as <c>entityLogicalName=sprk_document</c> + <c>entityId</c> (the
+    /// "Entity form command bar" launch context <c>SpaarkeAiLaunchParams</c> already supports), or the unscoped Console when there
+    /// is none. The Console has no run view, so no run id is carried: no new launch parameter is invented.
+    /// </summary>
+    public string BuildConsoleUrl(Guid? documentId)
+    {
+        var parameters = new Dictionary<string, string>();
+        if (documentId is { } id && id != Guid.Empty)
+        {
+            parameters["entityLogicalName"] = "sprk_document";
+            parameters["entityId"] = id.ToString();
+        }
+
+        return BuildWebResourceUrl("sprk_spaarkeai", parameters);
+    }
+
+    /// <summary>
     /// Generates a deep-link to the Document Upload Wizard with pre-filled matter context.
     /// </summary>
     public string BuildDocumentUploadWizardUrl(
