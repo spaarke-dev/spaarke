@@ -395,12 +395,15 @@ def expected_line():
     return f"{SCRIPT_CODE} {probe_value()}"
 
 
-def build(out):
+def build(out, without_script=False):
+    """without_script leaves out the Python skill: a diagnostic for the admin-center upload, which refused v0.5-v0.7
+    while admin-deployed spaarke-decisions (no scripts) installed. WP-6 needs no script skill."""
+    skills = {n: v for n, v in SKILLS.items() if not (without_script and n.endswith("-script"))}
     stage = os.path.join(out, "plugin")
     if os.path.exists(stage):
         shutil.rmtree(stage)
     os.makedirs(os.path.join(stage, "skills"))
-    for name, (desc, body) in SKILLS.items():
+    for name, (desc, body) in skills.items():
         d = os.path.join(stage, "skills", name)
         os.makedirs(os.path.join(d, "references"))
         shutil.copy2(GUARDRAILS, os.path.join(d, "references", "guardrails.md"))
@@ -429,13 +432,13 @@ def build(out):
                                 "Reviews nothing. Not legal advice."},
         "icons": {"color": "color.png", "outline": "outline.png"},
         "accentColor": "#1F3864",
-        "agentSkills": [{"folder": f"./skills/{n}"} for n in SKILLS],
+        "agentSkills": [{"folder": f"./skills/{n}"} for n in skills],
     }
     write(os.path.join(stage, "manifest.json"), json.dumps(manifest, indent=2))
     problems = gates.lint_plugin(os.path.join(stage, "manifest.json"))
     if problems:
         raise SystemExit("plugin gate: " + "; ".join(f"{r}: {m}" for r, m in problems))
-    z = zip_dir(stage, os.path.join(out, f"Spaarke Word probe plugin v{VERSION[:3]}.zip"))
+    z = zip_dir(stage, os.path.join(out, f"Spaarke Word probe plugin v{VERSION[:3]}{' no script' if without_script else ''}.zip"))
     per, mark = edit_hashes()
     edits = "; ".join(f"'{f}' -> '{r}'" for f, r in EXPECTED_EDITS)
     err, log = error_lines()
@@ -458,9 +461,10 @@ def build(out):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default=os.path.join(BUILD, "out", "word-probe"))
+    ap.add_argument("--without-script", action="store_true", help="leave out the Python skill (admin-upload diagnostic)")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
-    z = build(a.out)
+    z = build(a.out, a.without_script)
     print(f"WORD PROBE BUILD OK\n  {z}\n  expected script line starts with: {expected_line()}\n"
           f"  expected JavaScript marker: {js_marker()}\n  expected edit mark: {edit_hashes()[1]}\n"
           f"  sizes: " + ", ".join(f"{kb}k={len(js_size(kb)):,} chars" for kb in SIZES_KB))
