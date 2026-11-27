@@ -2844,3 +2844,32 @@ After `onNavigate`, if the focused nav button is now disabled, move focus to the
 **Related**: ADR-050; ebilling task 195. Owner of `SprkModal`: the modal-system / ontology area.
 
 ---
+
+### ISS-056 — Billing Decision Records on secure matters are not shared inline (DI-178)
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress |
+| **Urgency** | now |
+| **Filed** | 2026-11-26 (by ontology-r1 as DI-178; taken by ebilling-r1 the same day, owner go) |
+| **Source** | PR #3270 review (ontology task 225) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3276 |
+
+**Description**
+
+PR #3270 made the decision commit route share a new secure-child Decision Record inline. The billing entry points (`BillingDecisionRecorder.RecordAsync` and `RecordProcedureAsync`) do not, so on a secure matter the matter's sharees cannot read an Invoice Review or Procedure decision's record until the secure-child reconcile runs (up to about 2 minutes).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs:165` and `:185`
+- Reference: `src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs` `ShareSecureRecordAsync` (#3270)
+
+**Suggested fix**
+
+After each write, call `SecureChildShareSynchronizer.SyncChildAsync` for the one record when it was written Secure-team-owned or already existed. Use app-only access and `CancellationToken.None`. Log a fault and never fail the decision. The recorder is a singleton and the synchronizer is scoped, so resolve it in a fresh scope.
+
+**Estimated effort**: half a day with tests.
+**Blockers**: none (#3270 merged 2026-11-26 at 77433e5660).
+**Related**: ontology D-229, D-106; branch `fix/ebilling-3276-billing-dr-inline-share`; uac-r2 reviews.
+
+---
