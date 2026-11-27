@@ -10,7 +10,7 @@ From the W4/W5/W6 comparison (`results.md`): the skill upgraded 2 of 4 fallback 
 
 ## 2026-11-26: WP-5 JavaScript probe (PR #3266) — PASSED with v0.4 (2026-11-27)
 
-**Result:** Word desktop ran our fixed Office.js as written (hash `d81beac6` in the document; runner form `async function main(context) {…}`, return value not passed back). Pending: owner confirms by eye the tracked deletion/insertion, the comment, and that Track Changes was restored; then removes the probe plugin (tell copilot-platform-coordination). Open: whether to design a Word edition on this route (fixed JS applies an edit list) and the coordination v0.1 question. Details: `results.md` "WP-5 run 3".
+**Result:** Word desktop ran our fixed Office.js as written (hash `d81beac6` in the document; runner form `async function main(context) {…}`, return value not passed back). Owner checked the document by eye: pass (2026-11-27); v0.1 was removed before v0.2 (told coordination). v0.4 is still uploaded; on removal, tell coordination. Open: whether to design a Word edition on this route (fixed JS applies an edit list) and a WP-6 probe for the unknowns. Details: `results.md` "WP-5 run 3".
 
 Probe plugin v0.2 adds `spaarke-word-probe-js` (fixed Office.js in SKILL.md; marker `WPJ-1126-A d81beac6`). Branch `test/accelerator-word-js-probe`, worktree `C:\code_files\spaarke-wt-accelerator-word-js-probe`; zip in its `src/accelerators/build/out/word-probe/` (sent to owner). Owner steps: `tier-test-script.md` WP-5. copilot-platform-coordination got the row before upload; on removal, tell it. After merge, sync `build_word_probe.py` + `tests/test_package.py` from master.
 

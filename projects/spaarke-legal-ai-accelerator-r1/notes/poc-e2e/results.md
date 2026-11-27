@@ -802,9 +802,10 @@ a tracked change and attached a comment, did not write the line itself, and chan
    that form and report through the document (or Copilot reads the document afterwards), not through `return`.
 3. Its pre-run checks (run 1: `toString` refused; run 2: top-level `await` refused) are a filter our code must pass.
    `JS_FORBIDDEN` and the no-top-level-await test in `build_word_probe.py` hold what we know.
-**Still to confirm by eye (owner):** in the document, "bravo" shows as a tracked deletion and "charlie" as a
-tracked insertion (the quoted text shows the accepted view), the comment on "charlie" reads
-`Spaarke JS probe comment WPJ-1126-A d81beac6`, and Track Changes is back to its earlier setting.
+**Checked by eye (owner, 2026-11-27): all as expected.** "bravo" shows as a tracked deletion and "charlie" as a
+tracked insertion (the quoted text was the accepted view), the comment on "charlie" reads
+`Spaarke JS probe comment WPJ-1126-A d81beac6`, and Track Changes is back to its earlier setting. **WP-5: pass.**
+(Owner also confirmed each earlier probe version was removed before the next was uploaded, v0.1 included.)
 **What it means:** a Word edition can make real tracked changes and comments in the open document with our own
 code, carried in an instructions-only skill, with no Office add-in and no server round trip for the edit itself.
 Deciding *which* edits to make still needs either the model (reading the playbook) or our engines server-side; the
