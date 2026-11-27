@@ -16,7 +16,7 @@
 | 007 | Review and merge ADR-004 Amendment A2 (FR-04) — **main session only** (`.claude/`) | 0 | ✅ [done] | none | SERIAL | opus / high |
 | 008 | Phase 0 dev deploy + engine-hosting spike report (latency, golden, Clean-copy finding) | 0 | 🔲 [open] | 001–006 | P0-C | sonnet / high |
 | 009 | Engine changes in `src/accelerators`: skip-and-report mode, reproducible .docx, closed reason codes (FR-01g, FR-09f): verify the accelerator's PR #3237, fix gaps | 0 | ✅ (#3237 merged as 244171569a; `notes/009-engine-changes.md`) | #3237 merged | P0-B | opus / high |
-| 010 | `sprk_servicerequest` intake columns (FR-05) | 1 | 🔲 [open] | none (coordinate ontology first) | P1-A | sonnet / high |
+| 010 | `sprk_servicerequest` intake columns (FR-05) | 1 | ✅ live on dev (a689958ce8); names agreed with ontology-r1 | none (coordinate ontology first) | P1-A | sonnet / high |
 | 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | ✅ [done] | none | P1-A | sonnet / high |
 | 012 | `requestType` on RoutingContext + intake harness registry (FR-08) | 1 | ✅ [done] | 005 | P1-A | opus / high |
 | 013 | Orchestrator IJobHandler: stages, resume, atomic claim, terminal-last, kill switches (FR-07) | 1 | 🔲 [open] | 004, 010, 011, 012 | P1-B | opus / high |
