@@ -43,6 +43,10 @@ internal static class PlaybookRunResultsReader
 
     internal const string WorkingDocumentColumn = "sprk_workingdocument";
     internal const string AnalysisDocumentColumn = "_sprk_documentid_value";
+    internal const string StatusColumn = "statuscode";
+
+    /// <summary>The <c>statuscode</c> the run's save sets when it finalizes the analysis (<c>WorkingDocumentService.FinalizeAnalysisAsync</c>).</summary>
+    internal const int FinalizedStatus = 2;
 
     /// <summary>Reads the results of <paramref name="run"/>, whose owner and link the caller of this method has already established.</summary>
     internal static async Task<PlaybookRunResults?> ReadAsync(
@@ -67,7 +71,8 @@ internal static class PlaybookRunResultsReader
 
         // No analysis (a run started before task 037a, or outside the Copilot start): its first document is its subject. A caller who can no
         // longer read it gets the same not-found as an unknown run; a run with no documents has no subject to check.
-        var documents = await ReadDocumentsAsync(http, dataverse, documentIds, runs, logger, cancellationToken).ConfigureAwait(false);
+        var (listed, moreDocuments) = Capped(documentIds);
+        var documents = await ReadDocumentsAsync(http, dataverse, listed, runs, logger, cancellationToken).ConfigureAwait(false);
         if (documentIds.Length > 0 && !documents.Any(d => d.DocumentId == documentIds[0]))
         {
             return null;
@@ -81,8 +86,18 @@ internal static class PlaybookRunResultsReader
             playbookName,
             WorkingDocument: null,
             pending ? [] : documents,
-            runs.RunConsoleLink(http, documentIds.Length > 0 ? documentIds[0] : null));
+            runs.RunConsoleLink(http, documentIds.Length > 0 ? documentIds[0] : null),
+            pending ? 0 : moreDocuments);
     }
+
+    /// <summary>
+    /// Task 037 review F-D: the first <see cref="PlaybookRunLimits.MaxDocuments"/> of a run's documents (the only ones queried and listed),
+    /// and how many more the run has. A Copilot run never has more; a REST run has no cap.
+    /// </summary>
+    internal static (Guid[] Listed, int More) Capped(Guid[] documentIds) =>
+        documentIds.Length <= PlaybookRunLimits.MaxDocuments
+            ? (documentIds, 0)
+            : (documentIds[..PlaybookRunLimits.MaxDocuments], documentIds.Length - PlaybookRunLimits.MaxDocuments);
 
     private static async Task<PlaybookRunResults?> ReadAnalysisResultsAsync(
         HttpContext http,
@@ -106,7 +121,7 @@ internal static class PlaybookRunResultsReader
         // has finished (a running run returns its state, no content).
         var select = pending
             ? $"sprk_name,{AnalysisDocumentColumn}"
-            : $"sprk_name,{AnalysisDocumentColumn},{WorkingDocumentColumn}";
+            : $"sprk_name,{AnalysisDocumentColumn},{WorkingDocumentColumn},{StatusColumn}";
         var response = await dataverse.GetAsync($"{AnalysisEntitySet}({analysisId:D})?$select={select}", cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccess)
         {
@@ -124,13 +139,16 @@ internal static class PlaybookRunResultsReader
         var workingDocument = pending ? null : ReadString(row, WorkingDocumentColumn);
         var state = pending
             ? PlaybookRunResultsState.Pending
-            : string.IsNullOrWhiteSpace(workingDocument) ? PlaybookRunResultsState.None : PlaybookRunResultsState.Available;
+            : !string.IsNullOrWhiteSpace(workingDocument) ? PlaybookRunResultsState.Available
+            : IsUnsaved(run, row) ? PlaybookRunResultsState.Unsaved
+            : PlaybookRunResultsState.None;
 
         // The analysis's own document first, then the run's others, each shown only when the caller reads it.
         var ordered = anchor is { } first ? documentIds.Prepend(first).Distinct().ToArray() : documentIds;
+        var (listed, moreDocuments) = Capped(ordered);
         var documents = pending
             ? []
-            : await ReadDocumentsAsync(http, dataverse, ordered, runs, logger, cancellationToken).ConfigureAwait(false);
+            : await ReadDocumentsAsync(http, dataverse, listed, runs, logger, cancellationToken).ConfigureAwait(false);
         var playbookName = await ReadPlaybookNameAsync(dataverse, run.PlaybookId, cancellationToken).ConfigureAwait(false);
         var consoleLink = http.RequestServices?.GetService<HandoffUrlBuilder>()?.BuildAnalysisWorkspaceUrl(analysisId, anchor ?? Guid.Empty);
 
@@ -141,7 +159,8 @@ internal static class PlaybookRunResultsReader
             playbookName,
             state == PlaybookRunResultsState.Available ? workingDocument : null,
             documents,
-            consoleLink);
+            consoleLink,
+            pending ? 0 : moreDocuments);
     }
 
     /// <summary>
@@ -217,6 +236,16 @@ internal static class PlaybookRunResultsReader
         return response.IsSuccess ? ReadString(response.Body, "sprk_name") : null;
     }
 
+    /// <summary>
+    /// Task 037 review F-A: a run that COMPLETED and whose analysis (with no working document) was never finalized: its save failed
+    /// (<c>AnalysisResultPersistence.SaveNodeRunAsync</c> skips the finalize when the write fails). A failed or cancelled run never
+    /// finalizes, so it stays "none" (its status already says it failed); an analysis whose status is not read stays "none".
+    /// </summary>
+    private static bool IsUnsaved(PlaybookRunView run, JsonElement? row) =>
+        run.Phase == PlaybookRunPhase.Completed
+        && ReadInt(row, StatusColumn) is { } status
+        && status != FinalizedStatus;
+
     /// <summary>A refusal by Dataverse security (403) or a row the caller cannot see (404): the uniform not-found, never a fault.</summary>
     private static bool IsRefusal(DataverseUserResponse response) =>
         response.StatusCode is StatusCodes.Status403Forbidden or StatusCodes.Status404NotFound;
@@ -226,6 +255,14 @@ internal static class PlaybookRunResultsReader
         && value.TryGetProperty(column, out var cell)
         && cell.ValueKind == JsonValueKind.String
             ? cell.GetString()
+            : null;
+
+    private static int? ReadInt(JsonElement? row, string column) =>
+        row is { ValueKind: JsonValueKind.Object } value
+        && value.TryGetProperty(column, out var cell)
+        && cell.ValueKind == JsonValueKind.Number
+        && cell.TryGetInt32(out var number)
+            ? number
             : null;
 
     private static Guid? ReadGuid(JsonElement? row, string column) =>

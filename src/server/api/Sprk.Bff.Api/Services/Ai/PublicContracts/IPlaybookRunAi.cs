@@ -44,6 +44,13 @@ public static class PlaybookRunLimits
     /// a restart or a scale-in never writes its final state).
     /// </summary>
     public static readonly TimeSpan InterruptedMargin = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// The most documents one Copilot run takes (<c>spaarke_run_playbook</c>'s cap, constraint 3), and the most of a run's documents the
+    /// results read queries and lists (task 037 review F-D: a REST run has no cap, and an uncapped list would break the result's 64 KiB
+    /// bound and the OData <c>$filter</c> URL length).
+    /// </summary>
+    public const int MaxDocuments = 20;
 }
 
 /// <summary>The stable reason codes a detached caller run reports (ADR-019: codes, never exception text).</summary>
@@ -174,6 +181,13 @@ public enum PlaybookRunResultsState
     /// or a run that failed before its output was saved).
     /// </summary>
     None,
+
+    /// <summary>
+    /// Task 037 review F-A: the run COMPLETED, but its analysis has no working document and was never finalized: the save of its output
+    /// failed (for example a Dataverse write that was throttled or refused). The output is lost; the caller can open the analysis or run
+    /// the playbook again.
+    /// </summary>
+    Unsaved,
 }
 
 /// <summary>One of a run's source documents the caller can read (its own row read as the caller), with its "open in Spaarke" link.</summary>
@@ -199,6 +213,10 @@ public sealed record PlaybookRunSourceDocument(Guid DocumentId, string Name, str
 /// Where the caller opens the results in Spaarke: the analysis in the Console (<c>HandoffUrlBuilder.BuildAnalysisWorkspaceUrl</c>) when the
 /// run has one, else <see cref="IPlaybookRunAi.RunConsoleLink"/> for its first readable document; <c>null</c> when this host builds no links.
 /// </param>
+/// <param name="MoreDocuments">
+/// Task 037 review F-D: how many of the run's documents were neither read nor listed, past the first
+/// <see cref="PlaybookRunLimits.MaxDocuments"/> (a REST run has no cap); 0 otherwise.
+/// </param>
 public sealed record PlaybookRunResults(
     PlaybookRunView Run,
     PlaybookRunResultsState State,
@@ -206,7 +224,8 @@ public sealed record PlaybookRunResults(
     string? PlaybookName,
     string? WorkingDocument,
     IReadOnlyList<PlaybookRunSourceDocument> Documents,
-    string? ConsoleLink);
+    string? ConsoleLink,
+    int MoreDocuments = 0);
 
 /// <summary>
 /// The one seam through which a host other than the REST run routes starts and reads a JPS playbook run (spaarkeai-mcp-bff-api-r2

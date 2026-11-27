@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -38,12 +37,14 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Playbooks;
 /// </summary>
 /// <remarks>
 /// <para><b>structuredContent</b> (part c's widget reads it; null members are omitted):
-/// <c>{ runId, status, outcome, results, playbookId, playbookName?, progress?, reasonCode?, analysisId?, sections[], truncated, moreLink?,
-/// consoleLink?, documents[] }</c>. <c>status</c> is the status tool's (<c>running</c>, <c>completed</c>, <c>failed</c>), <c>outcome</c> too
-/// (<c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c>, <c>interrupted</c>). <c>results</c> is <c>pending</c> (still running:
-/// no content), <c>available</c> (sections hold the analysis's working document) or <c>none</c> (finished with nothing to show). Each
-/// section is <c>{ heading?, text, truncated }</c>: the working document split at its Markdown headings, or one section without a heading.
-/// Each document is <c>{ documentId, name, link? }</c>.</para>
+/// <c>{ runId, status, outcome, results, resultsReason?, playbookId, playbookName?, progress?, reasonCode?, analysisId?, sections[],
+/// truncated, moreLink?, consoleLink?, documents[], moreDocuments? }</c>. <c>status</c> is the status tool's (<c>running</c>,
+/// <c>completed</c>, <c>failed</c>), <c>outcome</c> too (<c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c>,
+/// <c>interrupted</c>). <c>results</c> is <c>pending</c> (still running: no content), <c>available</c> (sections hold the analysis's
+/// working document), <c>none</c> (finished with nothing to show) or <c>unsaved</c> (task 037 review F-A: completed, but saving its
+/// output failed; <c>resultsReason</c> is <see cref="UnsavedReason"/>). Each section is <c>{ heading?, text, truncated }</c>: the working
+/// document split at its Markdown headings, or one section without a heading. Each document is <c>{ documentId, name, link? }</c>; at most
+/// <see cref="PlaybookRunLimits.MaxDocuments"/> are listed and <c>moreDocuments</c> counts the rest (F-D).</para>
 /// <para><b>Bounded (NFR-02).</b> Every result is under 64 KiB: the sections share <see cref="SectionsBudgetBytes"/> of worst-case JSON
 /// (every character the encoder may escape counted as six bytes); past it the cut section is <c>truncated</c>, later sections are dropped,
 /// <c>truncated</c> is true and <c>moreLink</c> opens the full analysis in Spaarke.</para>
@@ -103,8 +104,11 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
         ["additionalProperties"] = false,
     });
 
-    // A Markdown ATX heading: up to three spaces, one to six '#', a space, the text, optional closing '#'s.
-    private static readonly Regex Heading = new(@"^ {0,3}#{1,6}[ \t]+(?<text>.*?)(?:[ \t]+#+)?[ \t]*$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    /// <summary>
+    /// The <c>resultsReason</c> of an <c>unsaved</c> result (task 037 review F-A): the run completed, but saving its output to the analysis
+    /// failed, so the analysis has no text and was not finalized.
+    /// </summary>
+    internal const string UnsavedReason = "analysis_save_failed";
 
     public override McpServerTool Create(IServiceProvider services)
     {
@@ -186,17 +190,29 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
             return DocumentToolSupport.Failure(DocumentToolSupport.NotFound, http);
         }
 
-        var result = ResultOf(results, time.GetUtcNow());
-        var body = result.StructuredContent!.Value;
-        logger.LogInformation(
-            "MCP tool {ToolName}: results {Results}, {Bytes} bytes, {Sections} sections, truncated {Truncated}. CorrelationId={CorrelationId}",
-            ToolName,
-            body.GetProperty("results").GetString(),
-            Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(result, McpJsonUtilities.DefaultOptions)),
-            body.GetProperty("sections").GetArrayLength(),
-            body.GetProperty("truncated").GetBoolean(),
-            http!.TraceIdentifier);
-        return result;
+        // Task 037 review F-C: building the result is pure, but a fault in it (any input it was not written for) is the read's own
+        // isError, never a transport-level error the widget cannot read.
+        try
+        {
+            var result = ResultOf(results, time.GetUtcNow());
+            var body = result.StructuredContent!.Value;
+            logger.LogInformation(
+                "MCP tool {ToolName}: results {Results}, {Bytes} bytes, {Sections} sections, truncated {Truncated}. CorrelationId={CorrelationId}",
+                ToolName,
+                body.GetProperty("results").GetString(),
+                Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(result, McpJsonUtilities.DefaultOptions)),
+                body.GetProperty("sections").GetArrayLength(),
+                body.GetProperty("truncated").GetBoolean(),
+                http!.TraceIdentifier);
+            return result;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // ADR-015: the exception type only.
+            logger.LogWarning("MCP tool {ToolName}: building the result faulted ({ExceptionType}). CorrelationId={CorrelationId}",
+                ToolName, ex.GetType().Name, http!.TraceIdentifier);
+            return DocumentToolSupport.Failure(GetFailed, http);
+        }
     }
 
     /// <summary>The result for <paramref name="results"/> (pure): the bounded body and one fixed text line with no content.</summary>
@@ -236,8 +252,10 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
             {
                 PlaybookRunResultsState.Pending => "pending",
                 PlaybookRunResultsState.Available => "available",
+                PlaybookRunResultsState.Unsaved => "unsaved",
                 _ => "none",
             },
+            state == PlaybookRunResultsState.Unsaved ? UnsavedReason : null,
             run.PlaybookId.ToString("D"),
             string.IsNullOrWhiteSpace(results.PlaybookName) ? null : SearchToolSupport.Clip(McpText.SingleLine(results.PlaybookName).Trim(), HeadingMaxChars),
             status == "running" ? run.Progress : null,
@@ -247,17 +265,21 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
             truncated,
             truncated ? results.ConsoleLink : null,
             results.ConsoleLink,
+            // F-D: the reader lists at most PlaybookRunLimits.MaxDocuments; this bound keeps the 64 KiB result whatever it is handed.
             results.Documents
+                .Take(PlaybookRunLimits.MaxDocuments)
                 .Select(d => new DocumentBody(
                     d.DocumentId.ToString("D"),
                     SearchToolSupport.Clip(McpText.SingleLine(d.Name).Trim(), DocumentNameMaxChars) ?? string.Empty,
                     d.ConsoleLink))
-                .ToArray());
+                .ToArray(),
+            results.MoreDocuments > 0 ? results.MoreDocuments : null);
 
         var line = body.Results switch
         {
             "pending" => $"JPS playbook run {body.RunId} is still running; its results are not ready.",
             "available" => $"JPS playbook run {body.RunId} ({body.Outcome}): {sections.Count} result section(s){(truncated ? ", shortened" : string.Empty)}.",
+            "unsaved" => $"JPS playbook run {body.RunId} ({body.Outcome}) finished, but its results could not be saved.",
             _ => $"JPS playbook run {body.RunId} ({body.Outcome}) has no results to show here.",
         };
         return DecisionToolCall.Success(line, body);
@@ -328,8 +350,7 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
                 inFence = !inFence;
             }
 
-            var match = inFence ? Match.Empty : Heading.Match(line);
-            if (match.Success && match.Groups["text"].Value.Trim() is { Length: > 0 } title)
+            if (!inFence && HeadingText(line)?.Trim() is { Length: > 0 } title)
             {
                 Flush();
                 heading = SearchToolSupport.Clip(McpText.SingleLine(title), HeadingMaxChars);
@@ -341,6 +362,68 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
 
         Flush();
         return sections;
+    }
+
+    /// <summary>
+    /// The text of a Markdown ATX heading line, or <c>null</c> when <paramref name="line"/> is not one (pure, linear). The same match as the
+    /// pattern <c>^ {0,3}#{1,6}[ \t]+(?&lt;text&gt;.*?)(?:[ \t]+#+)?[ \t]*$</c>: up to three spaces, one to six '#', at least one space or
+    /// tab, the text, then an optional closing run of '#' after a space or tab, and trailing spaces or tabs. Task 037 review F-C: that
+    /// pattern backtracked quadratically on a long run of spaces or tabs (50,000 spaces hit its one-second timeout), so it is a scan.
+    /// </summary>
+    internal static string? HeadingText(string line)
+    {
+        var i = 0;
+        while (i < line.Length && i < 3 && line[i] == ' ')
+        {
+            i++;
+        }
+
+        var hashes = 0;
+        while (i + hashes < line.Length && line[i + hashes] == '#')
+        {
+            hashes++;
+        }
+
+        if (hashes is 0 or > 6)
+        {
+            return null;
+        }
+
+        i += hashes;
+        if (i >= line.Length || line[i] is not (' ' or '\t'))
+        {
+            return null;
+        }
+
+        // The opening run of spaces and tabs is taken whole (the pattern's greedy [ \t]+ never needs to give any back).
+        while (i < line.Length && line[i] is ' ' or '\t')
+        {
+            i++;
+        }
+
+        // Trailing spaces and tabs, then a closing run of '#' only when a space or tab comes before it inside the text.
+        var end = line.Length;
+        while (end > i && line[end - 1] is ' ' or '\t')
+        {
+            end--;
+        }
+
+        var closing = end;
+        while (closing > i && line[closing - 1] == '#')
+        {
+            closing--;
+        }
+
+        if (closing < end && closing > i && line[closing - 1] is ' ' or '\t')
+        {
+            end = closing - 1;
+            while (end > i && line[end - 1] is ' ' or '\t')
+            {
+                end--;
+            }
+        }
+
+        return line[i..end];
     }
 
     /// <summary>
@@ -398,6 +481,7 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
         string Status,
         string Outcome,
         string Results,
+        string? ResultsReason,
         string PlaybookId,
         string? PlaybookName,
         int? Progress,
@@ -407,7 +491,8 @@ internal sealed class GetPlaybookRunResultsTool : McpToolDefinition
         bool Truncated,
         string? MoreLink,
         string? ConsoleLink,
-        IReadOnlyList<DocumentBody> Documents);
+        IReadOnlyList<DocumentBody> Documents,
+        int? MoreDocuments);
 
     /// <summary>One section of the working document: its heading (none for text before the first heading), its text, whether it was cut.</summary>
     internal sealed record SectionBody(string? Heading, string Text, bool Truncated);

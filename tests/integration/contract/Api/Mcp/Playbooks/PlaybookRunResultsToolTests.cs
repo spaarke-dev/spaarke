@@ -237,6 +237,162 @@ public sealed class PlaybookRunResultsToolTests
         body.GetProperty("reasonCode").GetString().Should().Be(PlaybookRunReasonCodes.Interrupted);
     }
 
+    // ---- task 037 review F-A: a completed run whose save failed is "unsaved", not "none" ---------------------------------------------
+
+    [Fact(DisplayName = "037 review F-A: a completed run whose analysis has no text and was never finalized is 'unsaved' with its reason, not 'none'")]
+    public async Task CompletedRun_UnfinalizedEmptyAnalysis_IsUnsaved()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        world.SeedAnalysisAnchor(PlaybookRunWorld.AnalysisId, documentId);
+        world.CallerReadsAnalysis(PlaybookRunWorld.AnalysisId, documentId, workingDocument: null, statusCode: 1);
+        world.CallerReadsDocuments((documentId, "NDA.docx"));
+        var runId = await StartAndFinishAsync(world, playbookId, documentId);
+
+        var result = await world.ResultsToolAsync(world.CallerContext(), runId);
+
+        result.IsError.Should().NotBe(true, result.StructuredContent?.ToString());
+        var body = Body(result);
+        body.GetProperty("status").GetString().Should().Be("completed");
+        body.GetProperty("results").GetString().Should().Be("unsaved");
+        body.GetProperty("resultsReason").GetString().Should().Be(GetPlaybookRunResultsTool.UnsavedReason);
+        body.GetProperty("sections").GetArrayLength().Should().Be(0);
+        body.GetProperty("consoleLink").GetString().Should().Be(Links.BuildAnalysisWorkspaceUrl(PlaybookRunWorld.AnalysisId, documentId));
+        world.AnalysisReads.Should().ContainSingle().Which.Should().Contain("statuscode");
+        Text(result).Should().Contain("could not be saved");
+    }
+
+    [Fact(DisplayName = "037 review F-A: a FAILED run's unfinalized, empty analysis stays 'none' (a failed run never finalizes; its status says it failed)")]
+    public async Task FailedRun_UnfinalizedEmptyAnalysis_IsNone()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var documentId = world.Host.ReadableDocument();
+        var analysisId = Guid.NewGuid();
+        var runId = world.SeedStoredRun(Guid.NewGuid(), PlaybookRunState.Failed, PlaybookRunWorld.CallerOid, ("sprk_analysis", analysisId), documentId);
+        world.SeedAnalysisAnchor(analysisId, documentId);
+        world.CallerReadsAnalysis(analysisId, documentId, workingDocument: null, statusCode: 1);
+        world.CallerReadsDocuments((documentId, "NDA.docx"));
+
+        var body = Body(await world.ResultsToolAsync(world.CallerContext(), runId));
+
+        body.GetProperty("status").GetString().Should().Be("failed");
+        body.GetProperty("results").GetString().Should().Be("none");
+        body.TryGetProperty("resultsReason", out _).Should().BeFalse();
+    }
+
+    // ---- task 037 review F-C: no input can make the result building throw out of the tool --------------------------------------------
+
+    [Fact(DisplayName = "037 review F-C: a heading followed by 50,000 spaces is split quickly and never throws (it timed out the old pattern)")]
+    public async Task LongWhitespaceHeading_IsLinear_AndTheToolAnswers()
+    {
+        var hostile = "# a" + new string(' ', 50_000) + "x\nbody";
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var (sections, _) = GetPlaybookRunResultsTool.Sections(hostile);
+        clock.Stop();
+
+        clock.ElapsedMilliseconds.Should().BeLessThan(500, "the heading scan is linear");
+        sections.Single().Heading.Should().StartWith("a ");
+        sections.Single().Text.Should().Be("body");
+
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        world.SeedAnalysisAnchor(PlaybookRunWorld.AnalysisId, documentId);
+        world.CallerReadsAnalysis(PlaybookRunWorld.AnalysisId, documentId, hostile);
+        world.CallerReadsDocuments((documentId, "NDA.docx"));
+        var runId = await StartAndFinishAsync(world, playbookId, documentId);
+
+        var result = await world.ResultsToolAsync(world.CallerContext(), runId);
+
+        result.IsError.Should().NotBe(true, result.StructuredContent?.ToString());
+        Body(result).GetProperty("results").GetString().Should().Be("available");
+    }
+
+    [Theory(DisplayName = "037 review F-C: the heading scan matches what the old ATX heading pattern matched")]
+    [InlineData("# Title")]
+    [InlineData("###### Six")]
+    [InlineData("####### Seven is not a heading")]
+    [InlineData("#NoSpace")]
+    [InlineData("   # Three spaces")]
+    [InlineData("    # Four spaces is not a heading")]
+    [InlineData("\t# A tab first is not a heading")]
+    [InlineData("# Closing ##")]
+    [InlineData("# Closing ##   ")]
+    [InlineData("# Not closing#")]
+    [InlineData("# a # b")]
+    [InlineData("# ##")]
+    [InlineData("#  ##")]
+    [InlineData("# ")]
+    [InlineData("#\tTabbed\t#\t")]
+    [InlineData("## a ## b ##")]
+    [InlineData("plain text")]
+    [InlineData("")]
+    public void HeadingText_MatchesTheOldPattern(string line)
+    {
+        var old = new System.Text.RegularExpressions.Regex(
+            @"^ {0,3}#{1,6}[ \t]+(?<text>.*?)(?:[ \t]+#+)?[ \t]*$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant).Match(line);
+
+        GetPlaybookRunResultsTool.HeadingText(line).Should().Be(old.Success ? old.Groups["text"].Value : null);
+    }
+
+    [Fact(DisplayName = "037 review F-C: a fault while building the result is the 'could not read' isError (503, the status tool's code), never a thrown error")]
+    public async Task ResultBuildingFault_IsCouldNotRead()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var run = new PlaybookRunView(Guid.NewGuid(), Guid.NewGuid(), PlaybookRunPhase.Completed, 100, 1, 0, 0, null,
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, FromDurableRecord: false);
+        var runs = new Mock<IPlaybookRunAi>();
+        runs.Setup(r => r.ReadResultsAsCallerAsync(It.IsAny<HttpContext>(), run.RunId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookRunResults(run, PlaybookRunResultsState.None, null, null, null, new FaultingDocuments(), null));
+
+        var result = await GetPlaybookRunResultsTool.RunAsync(
+            PlaybookRunWorld.Args(new { runId = run.RunId }), world.CallerContext(), runs.Object, world.Time,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, CancellationToken.None);
+
+        result.IsError.Should().BeTrue();
+        Body(result).GetProperty("reasonCode").GetString().Should().Be(GetPlaybookRunTool.GetFailedReasonCode);
+        Body(result).GetProperty("status").GetInt32().Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    /// <summary>A document list whose enumeration faults: any fault inside the result building, from the tool's point of view.</summary>
+    private sealed class FaultingDocuments : IReadOnlyList<PlaybookRunSourceDocument>
+    {
+        public PlaybookRunSourceDocument this[int index] => throw new InvalidOperationException("fault (test)");
+
+        public int Count => 1;
+
+        public IEnumerator<PlaybookRunSourceDocument> GetEnumerator() => throw new InvalidOperationException("fault (test)");
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    // ---- task 037 review F-D: the document list is capped before it is queried ------------------------------------------------------
+
+    [Fact(DisplayName = "037 review F-D: a run with 60 documents queries and lists at most 20, reports the other 40, and stays under 64 KiB")]
+    public async Task SixtyDocuments_AreCappedAtTwenty_UnderTheSizeBound()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var anchor = world.Host.ReadableDocument();
+        var others = Enumerable.Range(0, 59).Select(_ => Guid.NewGuid()).ToArray();
+        var all = others.Prepend(anchor).ToArray();
+        var analysisId = Guid.NewGuid();
+        var runId = world.SeedStoredRun(Guid.NewGuid(), PlaybookRunState.Completed, PlaybookRunWorld.CallerOid, ("sprk_analysis", analysisId), all);
+        world.SeedAnalysisAnchor(analysisId, anchor);
+        world.CallerReadsAnalysis(analysisId, anchor, string.Concat(Enumerable.Repeat("# Überschrift\n" + new string('é', 2_000) + "\n", 40)));
+        world.CallerReadsDocuments(all.Select(id => (id, new string('文', 850))).ToArray());
+
+        var result = await world.ResultsToolAsync(world.CallerContext(), runId);
+
+        result.IsError.Should().NotBe(true, result.StructuredContent?.ToString());
+        Encoding.UTF8.GetByteCount(Serialized(result)).Should().BeLessThan(MaxResultBytes);
+        var query = world.DocumentQueries.Should().ContainSingle().Subject;
+        System.Text.RegularExpressions.Regex.Matches(query, "sprk_documentid eq ").Count.Should().BeLessThanOrEqualTo(PlaybookRunLimits.MaxDocuments);
+        var body = Body(result);
+        body.GetProperty("documents").GetArrayLength().Should().Be(PlaybookRunLimits.MaxDocuments);
+        body.GetProperty("documents").EnumerateArray().First().GetProperty("documentId").GetString().Should().Be(anchor.ToString("D"));
+        body.GetProperty("moreDocuments").GetInt32().Should().Be(40);
+    }
+
     // ---- NFR-02: every result under 64 KiB ---------------------------------------------------------------------------------------
 
     [Fact(DisplayName = "037b size: a working document far past the cap, all non-ASCII, with 20 long-named documents, is cut under 64 KiB with a 'more in Spaarke' link")]

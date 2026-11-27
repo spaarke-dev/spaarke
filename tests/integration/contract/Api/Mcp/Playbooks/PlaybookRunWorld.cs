@@ -54,7 +54,7 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
 
     private readonly ServiceProvider _root;
 
-    private PlaybookRunWorld(PlaybookAuthHost host)
+    private PlaybookRunWorld(PlaybookAuthHost host, bool aiDisabled = false)
     {
         Host = host;
         Engine.Setup(e => e.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
@@ -90,7 +90,16 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
         services.AddSingleton(host.Nodes.Object);
 
         services.AddHttpContextAccessor();
-        services.AddSingleton(Engine.Object);
+        if (aiDisabled)
+        {
+            // Task 037 review K-1: AI off, as AnalysisServicesModule registers it (the null engine).
+            services.AddSingleton<IPlaybookOrchestrationService, NullPlaybookOrchestrationService>();
+        }
+        else
+        {
+            services.AddSingleton(Engine.Object);
+        }
+
         services.AddSingleton(Graph.Object);
         services.AddSingleton(DataverseUser.Object);
         services.AddSingleton(new HandoffUrlBuilder(EnvironmentUrl));
@@ -146,9 +155,9 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
     /// <summary>Held closed by <see cref="GatedRun"/> until the test opens it: the run is "slow" until then.</summary>
     public TaskCompletionSource Gate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public static async Task<PlaybookRunWorld> StartAsync()
+    public static async Task<PlaybookRunWorld> StartAsync(bool aiDisabled = false)
     {
-        var world = new PlaybookRunWorld(await PlaybookAuthHost.StartAsync());
+        var world = new PlaybookRunWorld(await PlaybookAuthHost.StartAsync(), aiDisabled);
         world.Script = world.GatedRun;
         return world;
     }
@@ -204,8 +213,11 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
                 return row;
             });
 
-    /// <summary>The caller's own OBO read of the analysis row: its name, its document and (when selected) its working document.</summary>
-    public void CallerReadsAnalysis(Guid analysisId, Guid documentId, string? workingDocument) =>
+    /// <summary>
+    /// The caller's own OBO read of the analysis row: its name, its document and (when selected) its working document and
+    /// <c>statuscode</c> (<paramref name="statusCode"/>: 2 once the run's save finalized it, the create's 1 when it never did).
+    /// </summary>
+    public void CallerReadsAnalysis(Guid analysisId, Guid documentId, string? workingDocument, int statusCode = 2) =>
         DataverseUser
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_analysises({analysisId:D})", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) =>
@@ -220,6 +232,11 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
                 if (path.Contains("sprk_workingdocument", StringComparison.Ordinal))
                 {
                     row["sprk_workingdocument"] = workingDocument;
+                }
+
+                if (path.Contains("statuscode", StringComparison.Ordinal))
+                {
+                    row["statuscode"] = statusCode;
                 }
 
                 return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(row));
@@ -237,6 +254,7 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
             .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) =>
             {
+                DocumentQueries.Enqueue(path);
                 var rows = readable
                     .Where(r => path.Contains(r.Id.ToString("D"), StringComparison.OrdinalIgnoreCase))
                     .Select(r => new Dictionary<string, object?> { ["sprk_documentid"] = r.Id.ToString("D"), ["sprk_documentname"] = r.Name })
@@ -252,6 +270,9 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
 
     /// <summary>Every path the caller's OBO reads of the analysis row asked for, in order.</summary>
     public ConcurrentQueue<string> AnalysisReads { get; } = new();
+
+    /// <summary>Every path of the caller's OBO document queries, in order.</summary>
+    public ConcurrentQueue<string> DocumentQueries { get; } = new();
 
     /// <summary>
     /// A run this process does not hold: the engine's status (<see cref="StoredRuns"/>) and its <c>sprk_playbookrun</c> row (regarding and
