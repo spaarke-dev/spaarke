@@ -5,7 +5,9 @@
  *   - the list is scoped to the user's CONTACT (sprk_assignedto is a contact lookup), not the systemuser id;
  *   - before the contact resolves (or when there is none) the scope matches no to-dos;
  *   - an `openTodos` launch narrows the list to the parent record; other launches do not;
- *   - creates go through the BFF helper (`createTodoThroughBff`), so the server sets the owner.
+ *   - creates go through the BFF helper (`createTodoThroughBff`), so the server sets the owner;
+ *   - status changes (dismiss, restore) go through the BFF helper (`updateTodoThroughBff`, ontology task 234), and a
+ *     refusal reaches the board in the service's plain words.
  */
 
 import * as React from 'react';
@@ -15,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 const mockUseTodoItems = jest.fn((_options: unknown) => ({ items: [], isLoading: false, error: null, refetch: jest.fn() }));
 const mockUseCurrentContactId = jest.fn((_options: unknown) => ({ contactId: 'contact-1' as string | null, contactName: null }));
 const mockServiceCtor = jest.fn();
+const mockDismissTodo = jest.fn(async (_id: string): Promise<unknown> => ({ success: true }));
 
 jest.mock('@spaarke/smart-todo-components', () => ({
   TodoDataverseService: class {
@@ -22,7 +25,7 @@ jest.mock('@spaarke/smart-todo-components', () => ({
       mockServiceCtor(...args);
     }
     createTodo = jest.fn(async () => ({ success: true, data: 'new-id' }));
-    dismissTodo = jest.fn(async () => ({ success: true }));
+    dismissTodo = (id: string) => mockDismissTodo(id);
     updateTodoStatus = jest.fn(async () => ({ success: true }));
   },
   useCurrentContactId: (options: unknown) => mockUseCurrentContactId(options),
@@ -41,8 +44,10 @@ jest.mock('../useLaunchContext', () => ({
 }));
 
 const mockCreateTodoThroughBff = jest.fn();
+const mockUpdateTodoThroughBff = jest.fn();
 jest.mock('../../services/childRecordWrites', () => ({
   createTodoThroughBff: (...args: unknown[]) => mockCreateTodoThroughBff(...args),
+  updateTodoThroughBff: (...args: unknown[]) => mockUpdateTodoThroughBff(...args),
 }));
 
 import { useSmartTodoBridge, type ISmartTodoBridgeResult } from '../useSmartTodoBridge';
@@ -125,6 +130,26 @@ describe('useSmartTodoBridge', () => {
     expect(webApi).toBe(WEB_API);
     createFn({ sprk_name: 'x' });
     expect(mockCreateTodoThroughBff).toHaveBeenCalledWith({ sprk_name: 'x' });
+  });
+
+  it('builds the service with the BFF status-update helper, so complete / dismiss / restore reach the BFF (task 234)', () => {
+    renderBridge();
+    const updateFn = mockServiceCtor.mock.calls[0][2] as ((id: string, p: unknown) => unknown) | undefined;
+    expect(typeof updateFn).toBe('function');
+    updateFn!('t-1', { statecode: 1, statuscode: 659490002 });
+    expect(mockUpdateTodoThroughBff).toHaveBeenCalledWith('t-1', { statecode: 1, statuscode: 659490002 });
+  });
+
+  it("a refused dismiss of an open inquiry's To Do reaches the board in the service's plain words (task 234)", async () => {
+    mockDismissTodo.mockResolvedValueOnce({
+      success: false,
+      error: { code: 'TODO_INQUIRY_DISPOSITION_REQUIRED', message: 'Record the outcome on the inquiry first.' },
+    });
+    renderBridge();
+    await expect(latest.current!.onDismissTodo('t-1')).resolves.toEqual({
+      success: false,
+      error: { message: 'Record the outcome on the inquiry first.' },
+    });
   });
 
   it('adapts the service results to the board’s mutation results', async () => {

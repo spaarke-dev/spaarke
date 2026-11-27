@@ -9,12 +9,13 @@
 
 jest.mock('@spaarke/ui-components', () => ({
   ...jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal'),
+  ...jest.requireActual('../../Spaarke.UI.Components/src/components/TodoDetail/types'),
 }));
 
 import * as React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { TodoDataverseService, type ITodoWebApi } from '../src/services';
+import { TodoDataverseService, INQUIRY_TODO_CLOSE_REFUSED_MESSAGE, type ITodoWebApi } from '../src/services';
 import {
   buildActiveTodosQuery,
   buildTodoScopeClause,
@@ -206,7 +207,7 @@ describe('TodoDataverseService', () => {
   it('createTodo sends an Open, owner-less record through the injected create function', async () => {
     const createTodoRecord = jest.fn(async () => 'todo-1');
     const webApi = fakeWebApi();
-    const service = new TodoDataverseService(webApi, createTodoRecord);
+    const service = new TodoDataverseService(webApi, createTodoRecord, jest.fn());
     const result = await service.createTodo('  Draft reply  ');
     expect(result).toEqual({ success: true, data: 'todo-1' });
     expect(createTodoRecord).toHaveBeenCalledWith({ sprk_name: 'Draft reply', statecode: 0, statuscode: 1 });
@@ -215,7 +216,7 @@ describe('TodoDataverseService', () => {
 
   it('createTodo rejects a blank title without calling the create function', async () => {
     const createTodoRecord = jest.fn();
-    const result = await new TodoDataverseService(fakeWebApi(), createTodoRecord).createTodo('   ');
+    const result = await new TodoDataverseService(fakeWebApi(), createTodoRecord, jest.fn()).createTodo('   ');
     expect(result.success).toBe(false);
     expect(createTodoRecord).not.toHaveBeenCalled();
   });
@@ -223,7 +224,8 @@ describe('TodoDataverseService', () => {
   it('createTodo returns a failure (does not throw) when the BFF call rejects', async () => {
     const service = new TodoDataverseService(
       fakeWebApi(),
-      jest.fn(async () => Promise.reject(new Error('403')))
+      jest.fn(async () => Promise.reject(new Error('403'))),
+      jest.fn()
     );
     const result = await service.createTodo('x');
     expect(result.success).toBe(false);
@@ -231,11 +233,73 @@ describe('TodoDataverseService', () => {
 
   it('dismissTodo and restore set the right status/state codes', async () => {
     const webApi = fakeWebApi();
-    const service = new TodoDataverseService(webApi, jest.fn());
+    const updateTodoRecord = jest.fn(async () => undefined);
+    const service = new TodoDataverseService(webApi, jest.fn(), updateTodoRecord);
     await service.dismissTodo('t1');
     await service.updateTodoStatus('t1', 'Open');
-    expect(webApi.updateRecord).toHaveBeenNthCalledWith(1, 'sprk_todo', 't1', { statecode: 1, statuscode: 659490002 });
-    expect(webApi.updateRecord).toHaveBeenNthCalledWith(2, 'sprk_todo', 't1', { statecode: 0, statuscode: 1 });
+    expect(updateTodoRecord).toHaveBeenNthCalledWith(1, 't1', { statecode: 1, statuscode: 659490002 });
+    expect(updateTodoRecord).toHaveBeenNthCalledWith(2, 't1', { statecode: 0, statuscode: 1 });
+  });
+
+  // Ontology task 234 (#3279, D-233): every status change goes through the BFF update (PATCH
+  // /api/v1/child-records/sprk_todo/{id}), which refuses closing an open inquiry's outcome To Do. Never Xrm.WebApi.
+  describe('status changes go through the BFF update, never Xrm.WebApi (task 234)', () => {
+    it.each([
+      ['dismiss', (s: TodoDataverseService) => s.dismissTodo('t1'), { statecode: 1, statuscode: 659490002 }],
+      ['complete', (s: TodoDataverseService) => s.updateTodoStatus('t1', 'Completed'), { statecode: 1, statuscode: 2 }],
+      ['restore', (s: TodoDataverseService) => s.updateTodoStatus('t1', 'Open'), { statecode: 0, statuscode: 1 }],
+    ])(
+      '%s of an ordinary To Do writes the same columns as before, through the BFF (must-not-fire)',
+      async (_name, act, columns) => {
+        const webApi = fakeWebApi();
+        const updateTodoRecord = jest.fn(async () => undefined);
+        const result = await act(new TodoDataverseService(webApi, jest.fn(), updateTodoRecord));
+        expect(result).toEqual({ success: true, data: undefined });
+        expect(updateTodoRecord).toHaveBeenCalledTimes(1);
+        expect(updateTodoRecord).toHaveBeenCalledWith('t1', columns);
+        expect(webApi.updateRecord).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      ['dismiss', (s: TodoDataverseService) => s.dismissTodo('t1')],
+      ['complete', (s: TodoDataverseService) => s.updateTodoStatus('t1', 'Completed')],
+    ])("%s of an open inquiry's outcome To Do is refused in plain words", async (_name, act) => {
+      const refusal = Object.assign(
+        new Error('This to-do is completed by recording how the budget inquiry turned out.'),
+        {
+          status: 409,
+          reasonCode: 'inquiry.disposition_required',
+        }
+      );
+      const webApi = fakeWebApi();
+      const result = await act(
+        new TodoDataverseService(
+          webApi,
+          jest.fn(),
+          jest.fn(async () => Promise.reject(refusal))
+        )
+      );
+      expect(result.success).toBe(false);
+      expect(!result.success && result.error.code).toBe('TODO_INQUIRY_DISPOSITION_REQUIRED');
+      expect(!result.success && result.error.message).toBe(INQUIRY_TODO_CLOSE_REFUSED_MESSAGE);
+      expect(INQUIRY_TODO_CLOSE_REFUSED_MESSAGE).toMatch(/^Record the outcome on the inquiry first\./);
+      expect(webApi.updateRecord).not.toHaveBeenCalled();
+    });
+
+    it('any other failed update keeps its own message and code, and never falls back to Xrm.WebApi', async () => {
+      const webApi = fakeWebApi();
+      const result = await new TodoDataverseService(
+        webApi,
+        jest.fn(),
+        jest.fn(async () => Promise.reject(new Error('Network down')))
+      ).dismissTodo('t1');
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: 'TODO_STATUS_UPDATE_ERROR', message: 'Network down' },
+      });
+      expect(webApi.updateRecord).not.toHaveBeenCalled();
+    });
   });
 
   it('getActiveTodos maps formatted values onto plain fields', async () => {
@@ -250,7 +314,7 @@ describe('TodoDataverseService', () => {
         ],
       })),
     });
-    const result = await new TodoDataverseService(webApi, jest.fn()).getActiveTodos({
+    const result = await new TodoDataverseService(webApi, jest.fn(), jest.fn()).getActiveTodos({
       kind: 'assignedTo',
       contactId: 'c',
     });
@@ -262,7 +326,7 @@ describe('TodoDataverseService', () => {
 
   it('saveUserPreferences updates the existing record, or creates one bound to the user', async () => {
     const webApi = fakeWebApi();
-    const service = new TodoDataverseService(webApi, jest.fn());
+    const service = new TodoDataverseService(webApi, jest.fn(), jest.fn());
     expect(await service.saveUserPreferences(USER_ID, 100000000, '{}', 'pref-1')).toEqual({
       success: true,
       data: 'pref-1',
