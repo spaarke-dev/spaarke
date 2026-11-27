@@ -104,6 +104,14 @@ class GateTests(unittest.TestCase):
         self.assertIn("file-count", r)
         self.assertIn("hidden-files", r)
 
+    def test_skill_md_over_20000_characters_is_refused(self):
+        pad = "\nFiller line for the size check.\n"
+        room = gates.MAX_SKILL_MD_CHARS - len(VALID_MD)
+        self.put("SKILL.md", VALID_MD + pad * (room // len(pad)))
+        self.assertNotIn("skill-md-size", self.rules(), "at or under the limit passes")
+        self.put("SKILL.md", VALID_MD + "x" * (room + 1))
+        self.assertIn("skill-md-size", self.rules(), "one character over fails (probe v0.5 upload, 2026-11-27)")
+
     def test_file_size(self):
         with open(os.path.join(self.skill, "assets", "big.bin"), "wb") as f:
             f.write(b"0" * (gates.MAX_FILE + 1))

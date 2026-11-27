@@ -12,13 +12,14 @@ Owner tests WP-0 to WP-2 and WP-5 (tier-test-script.md, "Word plugin tests"). Th
                              JavaScript on the open document. The code makes one tracked replacement and one
                              comment, both carrying an FNV-1a hash no model can work out in its head, so an exact
                              match shows our code ran as written.
-  WP-6 (v0.5): three more instructions-only skills carrying fixed Word JavaScript in the runner's own form
-  (`async function main(context) { ... }`, seen in WP-5 run 3):
+  WP-6 (v0.6; v0.5 was refused at upload): three more instructions-only skills carrying fixed Word JavaScript in
+  the runner's own form (`async function main(context) { ... }`, seen in WP-5 run 3):
   spaarke-word-probe-edits   Copilot fills ONE data line (`const EDITS = [...]`) from the prompt; the fixed code
                              checks each edit, applies it as a tracked change with a hashed comment (WX-5).
   spaarke-word-probe-error   writes nothing; logs one hash and throws an error carrying another, to learn whether
                              errors or console output reach Copilot (WX-6).
-  spaarke-word-probe-size-*  the same small job padded with data to about 5, 20 and 60 KB of code, to find the
+  spaarke-word-probe-size-*  the same small job padded with data to about 5, 10 and 17 KB of code (17 KB is the
+                             most a SKILL.md under 20,000 characters can carry; the upload refused 22k and 63k), to find the
                              runner's size limit (WX-4).
 The expected outputs are printed by this build and written to EXPECTED.txt beside the zip (not in it).
 Stdlib only; no network, no model calls.
@@ -38,7 +39,7 @@ import gates  # noqa: E402
 from build_accelerator import make_icons, write, zip_dir  # noqa: E402
 
 PACKAGE = "spaarke-word-probe"
-VERSION = "0.5.0"
+VERSION = "0.6.0"   # 0.5 was refused at upload (two SKILL.md over 20,000 chars)
 # Word's code runner refuses code that uses these (WP-5 run 1, 2026-11-26: "rejected ... because it uses
 # toString"). The others are guesses at the same denylist; the probe avoids them all.
 JS_FORBIDDEN = ("toString", "padStart", "eval", "Function", "constructor", "prototype", "__proto__",
@@ -49,7 +50,7 @@ JS_CODE = "WPJ-1126-A"
 EDITS_CODE = "WPE-1127-A"
 ERROR_CODE = "WPX-1127-A"
 SIZE_CODE = "WPZ-1127-A"
-SIZES_KB = (5, 20, 60)
+SIZES_KB = (5, 10, 17)   # 17 KB: the most code a SKILL.md under 20,000 characters can carry
 GUARDRAILS = os.path.join(ROOT, "core", "shared-references", "guardrails.md")
 
 BASE, EXPONENT, MODULUS = 7, 1_112_202_611, 1_000_000_007
@@ -102,7 +103,7 @@ JS_PROBE = f"""Word.run(async (context) => {{
   return "Spaarke JS probe ran: " + marker;
 }});"""
 
-# ---- WP-6 (v0.5) -------------------------------------------------------------------------------------------
+# ---- WP-6 (v0.6) -------------------------------------------------------------------------------------------
 # Written in the form Word's runner used in WP-5 run 3, so no wrapper change should be needed. The FNV-1a helper
 # sits inside main() so each skill's code is one function, as the runner expects.
 JS_FNV = """  function fnv(s) {
@@ -440,7 +441,7 @@ def build(out):
           f"JavaScript probe returns: Spaarke JS probe ran: {js_marker()}\n"
           f"JavaScript probe document: last paragraph 'Spaarke JavaScript probe: alpha [bravo deleted][charlie "
           f"inserted] delta. {js_marker()}', one comment on 'charlie': 'Spaarke JS probe comment {js_marker()}'\n"
-          f"\nWP-6 (v0.5)\n"
+          f"\nWP-6 (v{VERSION[:3]})\n"
           f"Edit probe, prompt edits: {edits}\n"
           f"  returns / paragraph ends: [{mark}]\n"
           + "".join(f"  comment {i}: 'Spaarke edit {i}/3 {EDITS_CODE} {h}' on '{r}'\n"
