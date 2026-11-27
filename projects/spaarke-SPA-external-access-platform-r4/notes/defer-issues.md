@@ -529,3 +529,11 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 **Why it matters.** A full `npm test` on a busy machine shows false failures, so a real regression can be dismissed as flaky.
 
 **Fix.** Copy the warm-up into each file, or a suite-level warm-up (owner decision if `vitest.config.ts` changes). Entry-point: `src/client/external-spa/tests/no-mock-identity.test.tsx` (the `beforeAll`). Status: **Superseded → D-29 (#2964)**, which already tracked these files. #3309 closed as a duplicate 2026-11-27, and the task 044 result was added to #2964.
+
+## D-46 — Contact store: a thrown read logs the exception's full text (https://github.com/spaarke-dev/spaarke/issues/3313)
+
+**What.** `DataverseContactIdentityStore.GetAsync` logs the whole exception object (type, message, stack) when a read throws. A transport exception carries no body, but a token-source fault's text is logged as-is, and credential-library messages can name directory or application identifiers. Found by task 045, which removed response bodies from the store's failed-read and failed-write logs.
+
+**Why it matters.** NFR-04: external-plane logs carry no tenant, oid, UPN, email or token. Not yet checked whether such a message can carry a tenant id.
+
+**Fix.** Log the exception type and the fixed label (as `AssignTaskRecipientGate` does), or scrub the message and keep the stack; first check that no alert depends on the text. Effort: one to two hours plus a log-assertion test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3313 (board Type=Idea).

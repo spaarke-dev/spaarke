@@ -345,7 +345,16 @@ public class AssignTaskRecipientGate
 
         // ONE principal per decision, the one the portal builds for this contact's sign-in plane: the matter Read and the
         // events list's per-row rule below are asked of the same composition.
-        var composed = await ComposePortalPrincipalAsync(contact, plane, ct).ConfigureAwait(false);
+        ContactPrincipalComposition composed;
+        try
+        {
+            composed = await ComposePortalPrincipalAsync(contact, plane, ct).ConfigureAwait(false);
+        }
+        catch (HomeTenantUnreadableException ex)
+        {
+            // Never an empty-tenant principal: the WorkforceHome composition needs the stored tenant (r4 task 045, #2499).
+            return Refuse(AssignTaskRefusal.Unverified, contact.ContactId, taskId, ex.Message);
+        }
 
         var rights = ContactRights(composed, grantTable, core.Id);
         if (rights is not { } answered)
@@ -479,20 +488,46 @@ public class AssignTaskRecipientGate
     /// home sign-in (<see cref="WorkforcePrincipalStrategy.ComposeAsync"/> over the ContactOnly principal
     /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.WorkforcePrincipalResolver"/> builds for it), else a CIAM sign-in
     /// (<see cref="CiamContactPrincipalStrategy.ComposeAsync"/>). An evaluator fault propagates (the decision is Unverified).
+    /// The WorkforceHome principal carries the STORED home tenant (<see cref="IContactIdentityStore.ReadHomeTenantAsync"/>, as
+    /// <see cref="HomeLinkAsync"/> reads it; r4 task 045, #2499): <paramref name="contact"/> is the <c>GetContactAsync</c> row,
+    /// whose select leaves the A9 column out, so its <c>RawExternalTenantId</c> is always empty in production. A tenant that is
+    /// missing, unparseable or whose read throws throws <see cref="HomeTenantUnreadableException"/> (the decision turns it into
+    /// Unverified): an empty-tenant principal is never composed. Cancellation propagates.
     /// </summary>
-    internal virtual Task<ContactPrincipalComposition> ComposePortalPrincipalAsync(
+    internal virtual async Task<ContactPrincipalComposition> ComposePortalPrincipalAsync(
         ContactBindingRow contact, ExternalContactPlane plane, CancellationToken ct)
     {
         var oid = contact.Binding.Oid?.ToString("D");
         if (plane == ExternalContactPlane.WorkforceHome)
         {
-            var principal = WorkforcePrincipalResolution.ForContact(
-                contact.ContactId, oid ?? string.Empty, contact.RawExternalTenantId?.Trim() ?? string.Empty).Principal!;
-            return WorkforcePrincipalStrategy.ComposeAsync(_accessibleSet, principal, contact.Email, ct);
+            var homeTenant = await ReadStoredHomeTenantAsync(contact.ContactId, ct).ConfigureAwait(false);
+            var principal = WorkforcePrincipalResolution.ForContact(contact.ContactId, oid ?? string.Empty, homeTenant.ToString("D")).Principal!;
+            return await WorkforcePrincipalStrategy.ComposeAsync(_accessibleSet, principal, contact.Email, ct).ConfigureAwait(false);
         }
 
-        return CiamContactPrincipalStrategy.ComposeAsync(_accessibleSet, contact.ContactId, contact.Email, oid, ct);
+        return await CiamContactPrincipalStrategy.ComposeAsync(_accessibleSet, contact.ContactId, contact.Email, oid, ct).ConfigureAwait(false);
     }
+
+    /// <summary>The contact's stored home tenant, or <see cref="HomeTenantUnreadableException"/> (fail closed; the same
+    /// <c>when</c> filter as <see cref="HomeLinkAsync"/>, so the caller's cancellation still propagates).</summary>
+    private async Task<Guid> ReadStoredHomeTenantAsync(Guid contactId, CancellationToken ct)
+    {
+        try
+        {
+            var tenant = await _identities.ReadHomeTenantAsync(contactId, ct).ConfigureAwait(false);
+            if (tenant.HomeTenantId is { } homeTenant && homeTenant != Guid.Empty)
+                return homeTenant;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new HomeTenantUnreadableException($"the home tenant read threw ({ex.GetType().Name})");
+        }
+
+        throw new HomeTenantUnreadableException("the stored home tenant is missing or unreadable");
+    }
+
+    /// <summary>A WorkforceHome contact's stored home tenant could not be read: the portal's principal cannot be composed.</summary>
+    internal sealed class HomeTenantUnreadableException(string reason) : Exception(reason);
 
     /// <summary>The contact's rights on the record in <paramref name="composed"/> (the set the portal composed for the record's
     /// table: the grant term and vetoes, plus the two derived-member terms on the workforce plane); null when that set is
