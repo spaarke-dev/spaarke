@@ -4,7 +4,7 @@
     <title>Phase 0 deploy to dev + engine-hosting spike report (start latency, golden comparison, A2 checks, Clean-copy-with-prior-markup finding)</title>
     <phase>0 Foundations and cleanup</phase>
     <gate>blocked — tasks 001–006 complete (007 merged); owner OK before any Azure resource creation or Dataverse change</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment and integration verification (deploy tag); creates a report file; no new code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -108,7 +108,7 @@
     <criterion testable="true">Negative: no resource was created and no Dataverse change made before the owner's recorded OK; no real NDA or `answer-key/` content was used.</criterion>
   </acceptance-criteria>
 
-  <notes>The threaded-reply live test send (task 006 acceptance c) can be done in step 4's deploy window if it was pending, with the same owner OK.</notes>
+  <notes>STATUS 2026-11-27 (b4f59264c1; notes/spikes/phase0-spike-report.md): engine spike DONE on dev. Engine UAMI, both queues, Container Apps env + Job, intake-staging + 7-day lifecycle, AcrPull: deployed through a dev-only wrapper (notes/spikes/dev-intake-engine.bicep; dev is not a customer.bicep stamp), what-if clean each step. Spike image spike-9bad3f4815 (az acr run, Trivy gate 0 fixable HIGH/CRITICAL; the CI dispatch push is master-only by OIDC design). 3/3 NDAs completed, check_outputs passed, 9/9 .docx byte-identical to local; A2 duplicate + malformed checks pass; Clean copy on nda-02 has no revisions or comments (owner decision holds). Latency: replica start ~47-50 s dominates; ~2.2-2.5 min per NDA (segment + redline). Action row seeded. OPEN, after merge to master (dev BFF deploys only from master via the uac-r2 gate): BFF deploy + readback; Seed-PlaybookConsumers for the agreement-edit-plan Binding (held: health-check drift until the BFF has the constant); swap the spike image for the CI latest.json digest; ServiceBus__IntakeEngineCompletionQueueName with task 014. 015 may proceed: its dependency on 008 (Clean-copy finding) is met. The threaded-reply live test send (task 006 acceptance c) can be done in step 4's deploy window if it was pending, with the same owner OK.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
