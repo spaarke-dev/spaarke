@@ -4,7 +4,12 @@
     <title>FR-07: Intake run orchestrator — IJobHandler stage machine (Receive … Record), resume without re-running AI, atomic claim, terminal-last, per-door/per-harness kill switches, correlationId</title>
     <phase>1 Pipeline core and first doors</phase>
     <gate>blocked — tasks 004, 010, 011, 012</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Completed 2026-11-27 (d494aba9a4 … 22d2ff128d + Task 182 entry). Run ownership routed via IRecordOwnershipResolver;
+         dev: sprk_createdbyperson on sprk_processingjob + prvReadsprk_ProcessingJob on the Secure Record Owners role (refusal 403 →
+         apply → Verify 41/41 → 204). F1 claim heartbeat. Task 182: RoleSetNotInLineage entry, path (b) chosen by uac-r2.
+         ArchTests 2845/2845. Follow-up #3310 (run does not follow an MDA Assign of its request). Detail: notes/013-orchestrator-core.md. -->
+
     <rigor>FULL</rigor>
     <rigor-reason>New BFF IJobHandler with idempotency and resume guarantees (fail-open and duplicate-output risks, NFR-01); depends on 3+ tasks; tags bff-api, worker.</rigor-reason>
     <model-tier>opus</model-tier>

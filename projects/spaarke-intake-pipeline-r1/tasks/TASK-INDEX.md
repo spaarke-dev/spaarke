@@ -19,7 +19,7 @@
 | 010 | `sprk_servicerequest` intake columns (FR-05) | 1 | ✅ live on dev (a689958ce8); names agreed with ontology-r1 | none (coordinate ontology first) | P1-A | sonnet / high |
 | 011 | `sprk_processingjob` run extension + `sprk_backgroundjob` description (FR-06) | 1 | ✅ [done] | none | P1-A | sonnet / high |
 | 012 | `requestType` on RoutingContext + intake harness registry (FR-08) | 1 | ✅ [done] | 005 | P1-A | opus / high |
-| 013 | Orchestrator IJobHandler: stages, resume, atomic claim, terminal-last, kill switches (FR-07) | 1 | 🔲 [open] | 004, 010, 011, 012 | P1-B | opus / high |
+| 013 | Orchestrator IJobHandler: stages, resume, atomic claim, terminal-last, kill switches (FR-07) | 1 | ✅ (22d2ff128d + Task 182 entry; dev ownership live; ArchTests 2845/2845; follow-up #3310) | 004, 010, 011, 012 | P1-B | opus / high |
 | 014 | Engine dispatch + completion: blob staging, ids-only dispatch, completion handler, timeout | 1 | 🔲 [open] | 013, 001, 002 | P1-C | sonnet / xhigh |
 | 015 | NDA harness: outputs + clause table, check_outputs, version stamp, prior markup preserved (FR-09) | 1 | 🔲 [open] | 014, 004, 008 | P1-E | opus / high |
 | 016 | Manual-triage path (FR-10) | 1 | 🔲 [open] | 013 | P1-D | sonnet / high |
