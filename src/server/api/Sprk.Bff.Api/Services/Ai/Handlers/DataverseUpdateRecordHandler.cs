@@ -5,6 +5,8 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -293,6 +295,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId,
                     Error(tool, $"Table '{tablename}' has no entity-set name.", ToolErrorCodes.InternalError, startedAt),
                     stopwatch);
+            }
+
+            // Ontology task 234 (#3279, D-233; #1984, D-111): an update that closes a To Do (completes or dismisses it) is checked for
+            // an open budget inquiry with the browser route's own guard (ChildRecordEndpoints.InquiryTodoCloseRefusalAsync, the
+            // worklist's identification, as the caller). The "Record the outcome" To Do of an open inquiry closes only by recording
+            // the inquiry's disposition: refused, nothing written. A lookup fault fails closed. Asked here, after the confirm dialog:
+            // ValidateChat (the pre-confirm gate) does no I/O, so the refusal shows once the person confirms (a known limit).
+            if (string.Equals(tablename, InquiryDispositionService.TodoTable, StringComparison.OrdinalIgnoreCase)
+                && InquiryDispositionService.ClosesTodo(item))
+            {
+                var todoRow = await _dataverse.GetAsync(
+                    $"{entitySetName}({recordId:D})?$select={SignalReadService.TodoNotesColumn},{SignalReadService.TodoMatterColumn}",
+                    cancellationToken).ConfigureAwait(false);
+                if (!todoRow.IsSuccess)
+                {
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, todoRow, startedAt), stopwatch);
+                }
+
+                if (await Sprk.Bff.Api.Api.ChildRecordEndpoints.InquiryTodoCloseRefusalAsync(
+                        _dataverse, recordId, todoRow.Body, _logger, cancellationToken).ConfigureAwait(false) is { } inquiryRefusal)
+                {
+                    return LogOutcome(context, tablename, recordId, InquiryTodoCloseRefused(tool, inquiryRefusal, startedAt), stopwatch);
+                }
             }
 
             // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
@@ -790,6 +815,24 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             "[dataverse.update_record][ADR-015] entity={Entity} recordId={RecordId} outcome={Outcome} decisionId={DecisionId} durationMs={DurationMs}",
             tablename, recordId, result.Success ? "ok" : result.ErrorCode, context.DecisionId, stopwatch.ElapsedMilliseconds);
         return result;
+    }
+
+    /// <summary>
+    /// Task 234: the browser route's inquiry refusal (<see cref="Sprk.Bff.Api.Api.ChildRecordEndpoints.InquiryTodoCloseRefusalAsync"/>)
+    /// in this tool's words — its own detail and reason code (409 <c>inquiry.disposition_required</c>, or 503
+    /// <c>child_record.inquiry_check_unavailable</c> when the check could not be made). Nothing was written either way.
+    /// </summary>
+    private ToolResult InquiryTodoCloseRefused(AnalysisTool tool, IResult refusal, DateTimeOffset startedAt)
+    {
+        var problem = (refusal as Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)?.ProblemDetails;
+        var code = problem?.Extensions.TryGetValue("reasonCode", out var c) == true && c is string reason
+            ? reason
+            : DecisionCommitReasons.InquiryDispositionRequired;
+        var detail = problem?.Detail ?? Sprk.Bff.Api.Api.ChildRecordEndpoints.InquiryDispositionRequiredDetail;
+        var message = code == DecisionCommitReasons.InquiryDispositionRequired
+            ? $"The update was NOT written: record the outcome on the inquiry first. {detail} Do NOT retry this update ({code})."
+            : $"The update was NOT written: {detail} ({code}).";
+        return Error(tool, message, code, startedAt);
     }
 
     private ToolResult MapClientError(AnalysisTool tool, DataverseUserResponse response, DateTimeOffset startedAt) =>

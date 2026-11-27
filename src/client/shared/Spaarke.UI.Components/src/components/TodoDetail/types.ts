@@ -180,6 +180,36 @@ export interface ITodoFieldUpdates {
 }
 
 // ---------------------------------------------------------------------------
+// Save result
+// ---------------------------------------------------------------------------
+
+/**
+ * What a host's `onSaveTodo` / `onDismissTodo` answers. `reasonCode` is the server's stable refusal code when the
+ * write went through the BFF and was refused (the ProblemDetails `reasonCode`, e.g. `ChildRecordWriteError.reasonCode`);
+ * the component turns the codes it knows into plain words and otherwise shows `error`.
+ */
+export interface ITodoSaveResult {
+  success: boolean;
+  error?: string;
+  reasonCode?: string;
+}
+
+/**
+ * The BFF's 409 for closing the "Record the outcome" To Do of an open budget inquiry (ontology task 228, #1984, D-111):
+ * that To Do is completed only by recording the inquiry's outcome, which completes it.
+ */
+export const INQUIRY_DISPOSITION_REQUIRED_REASON = 'inquiry.disposition_required';
+
+/**
+ * Ontology tasks 228 and 234 (#1984, #3279, D-233): the one message shown when the server refuses to complete or dismiss
+ * the "Record the outcome" To Do of an open budget inquiry ({@link INQUIRY_DISPOSITION_REQUIRED_REASON}), by TodoDetail
+ * and by the Smart To Do service. That To Do is completed by recording the inquiry's outcome.
+ */
+export const INQUIRY_TODO_CLOSE_MESSAGE =
+  'Record the outcome on the inquiry first. This To Do is completed by recording how the budget inquiry turned out: ' +
+  'open it from the Worklist and record the outcome. Nothing was saved.';
+
+// ---------------------------------------------------------------------------
 // Picker option types
 // ---------------------------------------------------------------------------
 

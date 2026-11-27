@@ -1123,6 +1123,45 @@ public sealed class AssignTaskNotifierTests
         h.SystemSends.Should().BeEmpty();
     }
 
+    // ── ISS-010 part E (#3184): the in-request sends defer their post-send work; the job's own send does not ─────────────
+
+    [Fact]
+    public async Task TheAssignersSend_DefersItsPostSendWork()
+    {
+        var h = new Harness();
+
+        (await h.NotifyAsync()).Should().BeEmpty();
+
+        h.UserSends.Should().ContainSingle().Which.DeferPostSend.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TheExternalSend_DefersItsPostSendWork_TheFallbackJobsSendDoesNot_MustNotFire()
+    {
+        var h = new Harness { SystemSendFault = new SdapProblemException("GRAPH_SEND_FAILED", "Send failed", "graph 500", 502) };
+        h.MakeExternal();
+
+        await h.NotifyAsync();
+        h.SystemSends.Should().ContainSingle().Which.Request.DeferPostSend.Should().BeTrue();
+        var job = h.Queued.Should().ContainSingle().Which;
+        h.SystemSends.Clear();
+        h.SystemSendFault = null;
+        (await h.Handler().ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        h.SystemSends.Should().ContainSingle().Which.Request.DeferPostSend.Should().BeFalse("the job already runs off the request");
+    }
+
+    [Fact]
+    public async Task ADeferredSendThatFails_AndCannotFallBack_StillReturnsTheNotSentWarning()
+    {
+        var h = new Harness { UserSendFault = new HttpRequestException("graph 500"), EnqueueFault = new ServiceBusException("down", ServiceBusFailureReason.ServiceCommunicationProblem) };
+
+        var warnings = await h.NotifyAsync();
+
+        h.UserSends.Should().ContainSingle().Which.DeferPostSend.Should().BeTrue();
+        warnings.Should().Equal(AssignTaskNotifier.EmailNotSentWarning);
+    }
+
     // ── Read-back through the REAL send path (review findings 2 and 4) ───────────────────────────────────────────────────
 
     [Fact]

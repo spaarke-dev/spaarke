@@ -33,15 +33,17 @@ interface IWizards {
   openLinkedWizardFromSubGrid(primaryControl: unknown, selectedControl: unknown): void;
   openCreateMatterWizard(primaryControl: unknown): void;
   openCreateProjectWizard(primaryControl: unknown): void;
+  openCreateReportCardFromForm(primaryControl: unknown): void;
 }
 
 interface IHarness {
   wizards: IWizards;
   pages: Array<{ name: string; data: string; title: string }>;
+  alerts: Array<{ title: string; text: string }>;
 }
 
 function harness(): IHarness {
-  const h: IHarness = { wizards: undefined as unknown as IWizards, pages: [] };
+  const h: IHarness = { wizards: undefined as unknown as IWizards, pages: [], alerts: [] };
   const context: Record<string, unknown> = {
     console: { warn: () => undefined, error: () => undefined, log: () => undefined },
     Promise,
@@ -59,6 +61,10 @@ function harness(): IHarness {
           ),
       },
       Navigation: {
+        openAlertDialog: (a: { title: string; text: string }) => {
+          h.alerts.push(a);
+          return Promise.resolve();
+        },
         navigateTo: (page: { webresourceName: string; data: string }, options: { title: string }) => {
           h.pages.push({ name: page.webresourceName, data: page.data, title: options.title });
           return Promise.resolve();
@@ -235,5 +241,78 @@ describe('sprk_wizard_commands.js — the form-level Create launchers send the r
     expect(sent.entityType).toBe(host);
     expect(sent.entityId.toLowerCase()).toBe(HOST_ID); // the host cleans case (launchAssociationFromParams)
     expect(sent.recordName).toBe('Acme & Co');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// field-mapping-server-write-path-r1 task 051 r1 (owner OQ-1, 2026-11-26): the Report Card form's "+New Report Card".
+// ---------------------------------------------------------------------------------------------------------------------
+
+function reportCardForm(lookups: Record<string, { id: string; name: string; entityType: string } | null>) {
+  return {
+    data: {
+      refresh: jest.fn(),
+      entity: { getId: () => '{RC}', getEntityName: () => 'sprk_reportcard', getPrimaryAttributeValue: () => 'RC' },
+    },
+    getAttribute: (name: string) =>
+      name in lookups ? { getValue: () => (lookups[name] ? [lookups[name]] : null) } : null,
+  };
+}
+
+describe('sprk_wizard_commands.js - the Report Card form opens the Report Card wizard under its parent (owner OQ-1)', () => {
+  it('opens sprk_createreportcardwizard filed under the matter the form names', async () => {
+    const h = harness();
+    h.wizards.openCreateReportCardFromForm(
+      reportCardForm({
+        sprk_regardingmatter: {
+          id: '{AB12CD34-0000-4000-8000-000000000001}',
+          name: 'Acme v. Beta',
+          entityType: 'sprk_matter',
+        },
+        sprk_regardingproject: null,
+      })
+    );
+    await flush();
+    expect(h.alerts).toEqual([]);
+    expect(h.pages).toHaveLength(1);
+    expect(h.pages[0].name).toBe('sprk_createreportcardwizard');
+    expect(h.pages[0].title).toBe('Create New Report Card');
+    expect(dataOf(h.pages[0].data)).toMatchObject({
+      entityType: 'sprk_matter',
+      entityId: 'ab12cd34-0000-4000-8000-000000000001',
+      recordName: 'Acme v. Beta',
+      bffBaseUrl: 'https://bff.example',
+    });
+  });
+
+  it('falls back to the project the form names when it names no matter', async () => {
+    const h = harness();
+    h.wizards.openCreateReportCardFromForm(
+      reportCardForm({
+        sprk_regardingmatter: null,
+        sprk_regardingproject: { id: 'P1', name: 'Proj', entityType: 'sprk_project' },
+      })
+    );
+    await flush();
+    expect(dataOf(h.pages[0].data)).toMatchObject({ entityType: 'sprk_project', entityId: 'p1', recordName: 'Proj' });
+  });
+
+  it('opens nothing and says so when the form names no parent (there is no unfiled report card)', async () => {
+    const h = harness();
+    h.wizards.openCreateReportCardFromForm(reportCardForm({ sprk_regardingmatter: null, sprk_regardingproject: null }));
+    await flush();
+    expect(h.pages).toEqual([]);
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0].text).toMatch(/created from its matter/);
+  });
+
+  it('is on the Create-privilege launcher list for sprk_reportcard', () => {
+    const launchers = JSON.parse(
+      fs.readFileSync(
+        path.join(REPO, 'infrastructure', 'dataverse', 'ribbon', 'CreatePrivilegeRibbons', 'create-launchers.json'),
+        'utf8'
+      )
+    );
+    expect(launchers.launchers['Spaarke.Commands.Wizards.openCreateReportCardFromForm']).toBe('sprk_reportcard');
   });
 });

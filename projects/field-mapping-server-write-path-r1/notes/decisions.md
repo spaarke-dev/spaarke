@@ -1172,3 +1172,27 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - **Owner of the rule.** One refusal in the re-file core, so it holds for every writer: the filing route, the AI update tools, push, Office reconcile, thread moves and inbound association. Placement and authorship are agreed with UAC-r2 before code.
 - **A participant who wants the record's team to see something** sends an ordinary message on the record.
 - **Follow-up, not built here:** invite-only conversations, where participants may add named people who each pass the record-access check. The conversation then widens only by invitation, never by filing. Filed for `messages-enhancements-r1`.
+
+## 2026-11-26 — Owner answers on 051 scope and the 4b/4c copy rule
+
+- **051 OQ-1:** memo and analysis New stay native. Report card New goes to the existing report card wizard if a launcher fits cleanly; budget and KPI assessment New stay native until their wizards are built (separate work, owner). No placeholder page in 051.
+- **051 home grid:** report card, budget and KPI assessment are created only in their parent matter's context: the platform New is hidden on their home grid and kept on the record command bar and subgrid. The seven redirected tables get the "+New X" launcher on the home grid.
+- **051 OQ-2 / OQ-3:** unchanged (invoice-family, ontology and service-request keep native New with Assign hidden; `sprk_procedureversion` stays in the 23).
+- **051 dev import:** approved ("yes can import 051").
+- **4b/4c reconfirmed:** "the copy should happen no matter of appendto - the mapping is a data consistency rule so should happen regardless of user's permissions." The 2026-10-27 decision stands and was never implemented (the create still drops a mapped ordinary lookup that fails the caller's AppendTo or field security). New task 064 implements it inside the 2026-10-27 boundaries: a mapped FILING lookup keeps the caller's AppendTo check (refuse); BFF-owned invariant columns are never copied; a field-secured source value is never copied into a non-field-secured target; the FR-04 source Read check stays as the caller.
+
+## 2026-11-26 — Owner: budget and KPI subgrid "+ New" stays the BFF create-then-open
+
+- The owner's answer was "Yes, keep it". On a matter or report card, the budget and KPI assessment subgrid "+ New" creates the row through `POST /api/v1/child-records/{table}`, so mapping and owner stay server-side, and then opens it. This is the behaviour before 051; the earlier "subgrid native" wording was corrected. Their form New stays native, and their home-grid New stays hidden.
+- Still open, and not blocking 051:
+  - OQ-4: should the home-grid and subgrid New close further?
+  - OQ-5: keep both "Add KPI Assessment" and "New KPI Assessment" on the KPI subgrid?
+
+## 2026-11-26 — Owner: a mapped field copies whatever its field security; 051 OQ-4 and OQ-5 closed
+
+- **Field-secured sources (supersedes "never copied until a same-profile-set rule exists"):** "if two records are related and there is field mapping then the field should copy write - security does not matter." A mapped value from the caller's filing parent is copied even when its source column is field-secured. This needs a follow-up task: today `FieldSecuredSourceRule` drops these values on create and on push. The other 064 boundaries are unchanged: the filing lookup, the invariant and access-conferring columns, sources outside the filing chain, the source Read check as the caller, and the secure-source owner rule. Not built yet. The access logic changes, so it goes to UAC-r2's gate before merge.
+  - **Consequence (owner-accepted):** a copied value is readable by whoever can read the target column. If that column is not field-secured, that is anyone who can read the new record, including the BFF's app-only read paths. An admin who wants the copy kept restricted secures the target column too. This joins the existing target-side known limit.
+  - **Bounds:** a copy reads only the caller's own filing parent, never another record.
+- **Post-mapping defaults:** the owner asked what this meant, so it is not decided yet. In code, the only default is the Office add-in create's "Assigned To = the creator's own contact", used when mapping leaves it empty. It is an access-conferring column, so it keeps the caller's checks under any answer. No mapping rule on dev sets a fixed value: all 57 are Copy rules.
+- **051 OQ-4:** closed. The owner knows of no other places to close New.
+- **051 OQ-5:** "only +New is required". The KPI subgrid keeps "New KPI Assessment" (the BFF create-then-open). "Add KPI Assessment" (`sprk.matter.subgrid.kpi.AddKpiButton`) is to be removed. This is a ribbon change; the dev import needs the owner's go.

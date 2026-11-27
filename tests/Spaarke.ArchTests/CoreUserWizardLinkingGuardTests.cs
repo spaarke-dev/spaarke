@@ -334,18 +334,20 @@ public class CoreUserWizardLinkingGuardTests
         ["sprk_ProjectType_Ref"] = "Read=Global AppendTo=Global",
         ["sprk_RecordType_Ref"] = "Read=Global AppendTo=Global",
         ["sprk_EventType_Ref"] = "Read=Global AppendTo=Global", // Read Deep -> Global: ISS-042
-        ["sprk_Matter"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_Project"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_Invoice"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_WorkAssignment"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
+        // #3245 (owner 2026-11-26): Core User holds no Assign on Spaarke tables but sprk_Event (communication create-task); see
+        // FeatureRolePrivilegeGuardTests.MustNotHold and config/feature-role-privileges.json removals, gap ASSIGN-3245.
+        ["sprk_Matter"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
+        ["sprk_Project"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
+        ["sprk_Invoice"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
+        ["sprk_WorkAssignment"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
         ["sprk_Event"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_ServiceRequest"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_Budget"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
-        ["sprk_analysis"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
+        ["sprk_ServiceRequest"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
+        ["sprk_Budget"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
+        ["sprk_analysis"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
         // G1 (field-mapping-server-write-path-r1 task 046b, owner 2026-11-05): the Report Card wizard's Create and Append, and
         // AppendTo for a KPI assessment filed under a report card (config/feature-role-privileges.json).
         ["sprk_ReportCard"] = "Create=Deep Read=Deep Append=Deep AppendTo=Deep",
-        ["sprk_Todo"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Assign=Deep Share=Deep",
+        ["sprk_Todo"] = "Create=Deep Read=Deep Write=Deep Delete=Deep Append=Deep AppendTo=Deep Share=Deep",
     };
 
     /// <summary>The differences between the role's privileges on the owned tables and <see cref="PinnedCoreUserPrivileges"/>.</summary>

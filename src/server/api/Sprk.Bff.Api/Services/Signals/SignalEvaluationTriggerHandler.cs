@@ -17,6 +17,11 @@ public enum SignalTriggerKind
 
     /// <summary>A communication was filed to a core record (association confirmed, D-48).</summary>
     AssociationConfirmed,
+
+    /// <summary>Task 228 (#1991, DI-101): an inquiry's disposition was recorded and its "Record the outcome" To Do completed. The
+    /// subject is that To Do; its open Do-lane Signal no longer holds. The one kind that evaluates the Do lane
+    /// (<see cref="SignalEvaluationTrigger.IncludesDoLane"/>).</summary>
+    InquiryDisposition,
 }
 
 /// <summary>Stable <see cref="EventId"/>s for the event triggers (task 032). Kept beside the trigger, not in
@@ -82,8 +87,9 @@ public class SignalEvaluationTrigger
     }
 
     /// <summary>Queues an evaluation of the Decide-lane policies for one subject (<paramref name="subjectEntity"/>,
-    /// <paramref name="subjectId"/>). <paramref name="sourceId"/> is the record that raised it (the communication or the
-    /// revision) and only names the job. Returns whether the job was queued.</summary>
+    /// <paramref name="subjectId"/>); for <see cref="SignalTriggerKind.InquiryDisposition"/> (task 228) the Do-lane policies too, so the
+    /// completed inquiry To Do's Signal closes now (<see cref="IncludesDoLane"/>). <paramref name="sourceId"/> is the record that raised
+    /// it (the communication, the revision or the inquiry) and only names the job. Returns whether the job was queued.</summary>
     public virtual async Task<bool> EnqueueAsync(
         SignalTriggerKind kind, string subjectEntity, Guid subjectId, Guid sourceId, string? correlationId = null, CancellationToken ct = default)
     {
@@ -136,14 +142,24 @@ public class SignalEvaluationTrigger
         SignalTriggerKind.Classification => "classification",
         SignalTriggerKind.BudgetRevision => "budget-revision",
         SignalTriggerKind.AssociationConfirmed => "association-confirmed",
+        SignalTriggerKind.InquiryDisposition => "inquiry-disposition",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown trigger kind."),
     };
+
+    /// <summary>
+    /// Task 228 (#1991): whether a trigger of <paramref name="kindName"/> also evaluates the Do-lane policies about its subject. Only
+    /// <see cref="SignalTriggerKind.InquiryDisposition"/>: its subject is a To Do just completed by the disposition route, and its Do-lane
+    /// Signal is what must close (D-12's cadence is otherwise unchanged: every other trigger evaluates the Decide lane only).
+    /// </summary>
+    internal static bool IncludesDoLane(string kindName) =>
+        string.Equals(kindName, KindName(SignalTriggerKind.InquiryDisposition), StringComparison.Ordinal);
 
     internal sealed record TriggerPayload(string Kind, string SubjectEntity, Guid SubjectId, Guid SourceId);
 }
 
 /// <summary>
-/// The ADR-004 <see cref="IJobHandler"/> behind the three event triggers (task 032; D-12, D-48). It evaluates the Decide-lane
+/// The ADR-004 <see cref="IJobHandler"/> behind the event triggers (task 032; D-12, D-48; task 228's inquiry disposition, which also
+/// evaluates the Do lane, <see cref="SignalEvaluationTrigger.IncludesDoLane"/>). It evaluates the Decide-lane
 /// policies for ONE subject by calling <see cref="SignalReevaluationJob.EvaluateSubjectAsync"/> - the nightly job's own
 /// evaluate, plan and write path, so the episode-scoped key, the re-raise rule, secure-child ownership (D-33) and the
 /// "never close a Resolved Signal" rule apply exactly as nightly. It contains no evaluation logic of its own.
@@ -185,7 +201,8 @@ public sealed class SignalEvaluationTriggerHandler : IJobHandler
 
         try
         {
-            var result = await _job.EvaluateSubjectAsync(subjectEntity, subjectId, ct).ConfigureAwait(false);
+            var result = await _job.EvaluateSubjectAsync(
+                subjectEntity, subjectId, ct, includeDoLane: SignalEvaluationTrigger.IncludesDoLane(kind)).ConfigureAwait(false);
             if (result.NeedsRetry)
             {
                 _logger.LogError(SignalTriggerEvents.HandlerFailed,

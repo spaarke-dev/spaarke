@@ -9,6 +9,7 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
+  Tooltip,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 import { DOCUMENT_SUMMARY_STATUS_MESSAGES } from '../services/documentProfileChoices';
@@ -82,6 +83,10 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
     marginBottom: tokens.spacingVerticalXS,
+  },
+  // Task 141 (owner point 6): the profile's one action sits to the right of the "Profile" label, icon only.
+  sectionTitleAction: {
+    marginLeft: 'auto',
   },
   card: {
     display: 'flex',
@@ -162,6 +167,12 @@ export interface DocumentProfileSectionProps {
   mode?: 'generate' | 'refresh';
   /** Task 099: called when Refresh is pressed, after this section starts its own profile re-read. */
   onRefresh?: () => void;
+  /**
+   * Task 141 (owner point 5): `false` hides the "Document type" row — for an email, whose type is always "Email". It is a
+   * fixed field of the profile (`sprk_documenttype`), not part of the AI output text, so hiding it removes nothing else.
+   * Default `true`: a Word document keeps it.
+   */
+  showDocumentType?: boolean;
 }
 
 /** Splits the comma-separated `sprk_filekeywords` value into individual chip labels. */
@@ -178,6 +189,7 @@ export function DocumentProfileSection({
   onProfileGenerated,
   mode = 'generate',
   onRefresh,
+  showDocumentType = true,
 }: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
   const { outcome, generateProfile, isGenerating, generateError, refetch, waitTimedOut } =
@@ -252,42 +264,50 @@ export function DocumentProfileSection({
   // document that already has a profile.
   const isDisabled = !documentId || isGenerating;
 
+  // Task 141 (owner point 6): the action is an icon-only button with a tooltip, to the right of the "Profile" label, in
+  // both modes. Its accessible name is the label it used to show (and the tooltip says the same), so the busy and disabled
+  // states read as before.
+  const refreshBusy = !documentId || outcome.kind === 'loading';
+  const actionLabel = mode === 'refresh' ? 'Refresh' : isGenerating ? 'Generating…' : 'Generate Profile';
+
   return (
     <div className={styles.section}>
       <div className={styles.sectionTitle}>
         <Text weight="semibold">Profile</Text>
+        <Tooltip content={actionLabel} relationship="label">
+          {mode === 'refresh' ? (
+            <Button
+              appearance="subtle"
+              size="small"
+              className={styles.sectionTitleAction}
+              aria-label={actionLabel}
+              icon={outcome.kind === 'loading' ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+              // disabledFocusable: the button keeps focus while the re-read runs (ADR-021 focus management).
+              disabledFocusable={refreshBusy}
+              onClick={() => {
+                refetch();
+                onRefresh?.();
+              }}
+            />
+          ) : (
+            <Button
+              appearance="subtle"
+              size="small"
+              className={styles.sectionTitleAction}
+              aria-label={actionLabel}
+              icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+              disabled={isDisabled}
+              onClick={() => {
+                void generateProfile().then(accepted => {
+                  if (accepted) onProfileGenerated?.();
+                });
+              }}
+            />
+          )}
+        </Tooltip>
       </div>
       <div className={styles.card}>{renderBody()}</div>
       <div className={styles.actions}>
-        {mode === 'refresh' ? (
-          <Button
-            appearance="secondary"
-            size="small"
-            icon={outcome.kind === 'loading' ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
-            // disabledFocusable: the button keeps focus while the re-read runs (ADR-021 focus management).
-            disabledFocusable={!documentId || outcome.kind === 'loading'}
-            onClick={() => {
-              refetch();
-              onRefresh?.();
-            }}
-          >
-            Refresh
-          </Button>
-        ) : (
-          <Button
-            appearance="secondary"
-            size="small"
-            icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
-            disabled={isDisabled}
-            onClick={() => {
-              void generateProfile().then(accepted => {
-                if (accepted) onProfileGenerated?.();
-              });
-            }}
-          >
-            {isGenerating ? 'Generating…' : 'Generate Profile'}
-          </Button>
-        )}
         {!documentId && (
           <Text size={200} className={styles.disabledReason}>
             This document is not yet in Spaarke. Save it first to generate a profile.
@@ -344,16 +364,18 @@ export function DocumentProfileSection({
         const keywords = splitKeywords(outcome.keywords);
         return (
           <>
-            <div className={styles.fieldContainer}>
-              <Text className={styles.fieldLabel}>Document type</Text>
-              {outcome.documentType ? (
-                <Text>{outcome.documentType}</Text>
-              ) : (
-                <Text size={200} className={styles.emptyValue}>
-                  Not classified.
-                </Text>
-              )}
-            </div>
+            {showDocumentType && (
+              <div className={styles.fieldContainer}>
+                <Text className={styles.fieldLabel}>Document type</Text>
+                {outcome.documentType ? (
+                  <Text>{outcome.documentType}</Text>
+                ) : (
+                  <Text size={200} className={styles.emptyValue}>
+                    Not classified.
+                  </Text>
+                )}
+              </div>
+            )}
 
             <div className={styles.fieldContainer}>
               <Text className={styles.fieldLabel}>TL;DR</Text>

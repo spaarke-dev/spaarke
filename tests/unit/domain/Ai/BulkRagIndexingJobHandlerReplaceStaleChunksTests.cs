@@ -359,6 +359,55 @@ public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
     }
 
     /// <summary>Captures the structured state of the handler's "completed" log line.</summary>
+    private static readonly Guid RowDocumentId = Guid.Parse(DocumentId);
+
+    /// <summary>
+    /// GitHub #3223: a document the resolver read and found filed under no record is a DECIDED "no parent": the re-index
+    /// replaces the parent the chunks carry (the document left its record).
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_ADocumentRowThatNamesNoRecord_ReplacesTheStoredParentWithNone()
+    {
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", RowDocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", RowDocumentId));
+        var (handler, fileIndexingMock, _) = CreateSut(parentResolver: TestDocumentIndexParentResolver.Over(dataverse.Object));
+        FileIndexRequest? captured = null;
+        fileIndexingMock
+            .Setup(f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 2 });
+
+        await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.ParentEntity.Should().BeNull();
+        captured.ReplaceParentEntity.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// GitHub #3223: a row that cannot be read decided nothing. Writing "no parent" from it would un-file the document with
+    /// the sweep counting a success, so the document fails (an error is recorded; the next sweep picks it up) and the index
+    /// is not written.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_AnUnreadableDocumentRow_FailsTheDocumentAndWritesNothing()
+    {
+        var logger = new CompletionCapturingLogger();
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", RowDocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse throttled"));
+        var (handler, fileIndexingMock, _) = CreateSut(logger, parentResolver: TestDocumentIndexParentResolver.Over(dataverse.Object));
+
+        await handler.ProcessAsync(MakeJob(forceReindex: true), CancellationToken.None);
+
+        fileIndexingMock.Verify(
+            f => f.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        logger.Completion.Should().NotBeNull();
+        logger.Completion!["Errors"].Should().Be(1);
+        logger.Completion["Processed"].Should().Be(0);
+    }
+
     private sealed class CompletionCapturingLogger : ILogger<BulkRagIndexingJobHandler>
     {
         public Dictionary<string, object?>? Completion { get; private set; }

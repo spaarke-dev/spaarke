@@ -63,13 +63,9 @@ if (-not $ToolTip) {
     $ToolTip = "Add a $($Labels[$Entity]) to this secure record (saved by Spaarke so it stays as private as the record)"
 }
 
-# Task 147 r1c: Spaarke's OWN subgrid creates of a table that also open a parent-prefilled create (quick create) - they
-# carry the same secure rule as the platform "+ New", so under a secure host only the BFF command shows. "+ Add KPI"
-# (src/solutions/SpaarkeCore/entities/sprk_matter/RibbonDiff/add-kpi-ribbon.xml, sprk_/scripts/kpi_ribbon_actions.js) opens
-# the KPI assessment quick create with the matter / project prefilled. Guarded when the export carries it.
-$AlsoGuardedCommands = @{
-    sprk_kpiassessment = @('sprk.matter.subgrid.kpi.AddKpiButton.Command', 'sprk.project.subgrid.kpi.AddKpiButton.Command')
-}
+# Task 147 r1c once added the NativeNewAllowed rule to Spaarke's own "+ Add KPI" button. That button was removed by
+# field-mapping-server-write-path-r1 task 066 (the KPI subgrid's "+ New" is its one create), so this script adds the rule to the
+# platform "+ New" only.
 
 $NativeCommandId = 'Mscrm.AddNewRecordFromSubGridStandard'
 $RuleId = "sprk.SecureChild.$Entity.NativeNewAllowed.EnableRule"
@@ -130,20 +126,6 @@ if ($existingNative) {
     }
 } else {
     [void] $commandDefinitions.AppendChild($ribbon.ImportNode($templateNative, $true))
-}
-
-# Spaarke's own parent-prefilled creates of this table (r1c): the same rule reference, the command otherwise untouched.
-foreach ($guardedId in @($AlsoGuardedCommands[$Entity])) {
-    if (-not $guardedId) { continue }
-    $guarded = $commandDefinitions.SelectSingleNode("*[local-name()='CommandDefinition' and @Id='$guardedId']")
-    if (-not $guarded) { continue }
-    $rules = Get-OrCreateChild $guarded 'EnableRules'
-    if (-not $rules.SelectSingleNode("*[local-name()='EnableRule' and @Id='$RuleId']")) {
-        $ref = $ribbon.CreateElement('EnableRule', $rules.NamespaceURI)
-        $ref.SetAttribute('Id', $RuleId)
-        [void] $rules.AppendChild($ref)
-    }
-    Write-Host "Added $RuleId to Spaarke's own parent-prefilled create $guardedId."
 }
 
 $map = @{

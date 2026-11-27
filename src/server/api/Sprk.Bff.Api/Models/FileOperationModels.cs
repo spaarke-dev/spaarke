@@ -74,7 +74,17 @@ public record DocumentIdentityResponse(
     /// although the document is not unfiled. The pane then treats the record as unknown — never "not filed", never a
     /// filing offer. Null (not <c>false</c>) in every other case; older clients ignore it.
     /// </summary>
-    bool? RelatedRecordWithheld = null
+    bool? RelatedRecordWithheld = null,
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 141: on <c>resolve-email-identity</c> only, the names of the saved <c>.eml</c>'s child
+    /// documents the caller may read (each child's <c>sprk_documentname</c> and <c>sprk_filename</c> — the name rule of
+    /// <c>EmailAttachmentAddPlanner.IsAlreadySaved</c>), so the pane can mark which attachments are saved: an attachment is saved
+    /// when its file name is one of these, case-insensitive. Omitted when nothing can be said (the other identity routes, or the
+    /// child read failed): an older pane, and a failed read, behave as before. Empty = no saved child.
+    /// </summary>
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? SavedAttachmentNames = null
 )
 {
     public static DocumentIdentityResponse NoIdentity(string reason) => new(false, null, null, null, null, reason);

@@ -4,7 +4,7 @@
     <title>Binder faults answer 503 and the SPA retries; ProjectPage 404 folded into 403 (FR-28, #2269)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 038 (P3 deploy); the ProjectPage fold also needs ebilling-r1's task-130 batch on master</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api and auth; modifies the caller-principal deny mapping (.cs) and the SPA sign-in path (.ts/.tsx)</rigor-reason>
     <model-tier>opus</model-tier>

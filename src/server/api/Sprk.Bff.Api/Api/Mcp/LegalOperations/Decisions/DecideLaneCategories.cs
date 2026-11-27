@@ -114,6 +114,22 @@ internal static class DecideLaneCategories
     }
 
     /// <summary>
+    /// How many of <paramref name="items"/> fall in each category, for every key of <see cref="Keys"/> (zero when none): the same partition
+    /// as <see cref="Partition"/>, but without that method's rule that <c>invoiceDecisions</c> and <c>other</c> exist only when they hold an
+    /// item, because a count of items closed today is wanted for a card that has nothing open. <c>all</c> is every Decide-lane item.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> CountsByKey(IEnumerable<DecideLaneMember> items)
+    {
+        var counts = Keys.ToDictionary(k => k, _ => 0, StringComparer.Ordinal);
+        foreach (var card in Partition(items))
+        {
+            counts[card.Key] = card.Count;
+        }
+
+        return counts;
+    }
+
+    /// <summary>
     /// The one non-<c>all</c> card <paramref name="item"/> is counted in: <c>invoiceDecisions</c> for a billing item, its work type when it
     /// is a Decide work type, else <c>other</c>; null when the item is not in the Decide lane.
     /// </summary>

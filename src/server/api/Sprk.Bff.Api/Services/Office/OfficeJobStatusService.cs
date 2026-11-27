@@ -322,6 +322,11 @@ public class OfficeJobStatusService
             }
             : FromPipelineColumns(row, createdAt);
 
+        if (saved is not null)
+        {
+            view = WithAttachmentsAddOutcome(view, row);
+        }
+
         if (view.Status is JobStatus.Queued or JobStatus.Running && now - createdAt > MaxSaveDuration)
         {
             return view with
@@ -338,6 +343,42 @@ public class OfficeJobStatusService
         }
 
         return view;
+    }
+
+    /// <summary>
+    /// Task 141 review (F2): an attachments add's job (task 138 and 141) is recorded Completed by the SAVE when it queues the
+    /// worker (<see cref="EmailAttachmentAddPlanner.AttachmentsQueuedPhase"/>); the documents are created after that. The
+    /// save's view stays authoritative for the status (a later save under the same key must still see this job as performed,
+    /// never as a new attempt), but its PHASE reports the worker's outcome once the worker has recorded one: the stage
+    /// <see cref="EmailAttachmentAddPlanner.AttachmentsAddedPhase"/>, or, when the worker's row is Failed
+    /// (<see cref="EmailAttachmentAddPlanner.AttachmentsIncompletePhase"/>, or a failed finalization),
+    /// <see cref="EmailAttachmentAddPlanner.AttachmentsIncompletePhase"/> with the row's error. Until then the phase stays
+    /// <c>AttachmentsQueued</c>. Every other job is unchanged.
+    /// </summary>
+    private static JobStatusResponse WithAttachmentsAddOutcome(JobStatusResponse view, ProcessingJobRecord row)
+    {
+        if (!string.Equals(view.CurrentPhase, EmailAttachmentAddPlanner.AttachmentsQueuedPhase, StringComparison.Ordinal))
+        {
+            return view;
+        }
+
+        if (MapDataverseStatusToJobStatus(row.Status) == JobStatus.Failed)
+        {
+            return view with
+            {
+                CurrentPhase = EmailAttachmentAddPlanner.AttachmentsIncompletePhase,
+                Error = new JobError
+                {
+                    Code = row.ErrorCode ?? EmailAttachmentAddPlanner.AttachmentsNotCreatedErrorCode,
+                    Message = row.ErrorMessage ?? "Not every attachment was added.",
+                    Retryable = true,
+                },
+            };
+        }
+
+        return string.Equals(row.CurrentStage, EmailAttachmentAddPlanner.AttachmentsAddedPhase, StringComparison.Ordinal)
+            ? view with { CurrentPhase = EmailAttachmentAddPlanner.AttachmentsAddedPhase }
+            : view;
     }
 
     /// <summary>A row written before task 060: no save view, so the pipeline columns are all there is.</summary>

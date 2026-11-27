@@ -85,6 +85,50 @@ public sealed partial class SignalReadRouteTests
     public async Task ContractBaseline_Worklist_200_DecidedAndEmpty() =>
         VerifyWorklist("worklist.200.decided-empty", await ObserveAsync(await GetAsync(new World(), Alice, "?set=decided")), 200);
 
+    /// <summary>Task 226 (#2015, D-231): the Decided set read record-first. A Signal reviewed twice (an inquiry, then the decision) is
+    /// two items, each with its own record; an email-gate record on the same matter is in the group's <c>records</c> with its summary;
+    /// a gate record with no core record whose communication the caller reads is a Not filed group with only <c>records</c>.</summary>
+    [Fact]
+    public async Task ContractBaseline_Worklist_200_Decided()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice], name: "Acme v Widget", number: "MAT-0042");
+        var inquiry = world.Decision(readers: [Alice], number: "DR-00010", decidedOn: "2026-10-01T09:00:00Z", steps: StepsEnvelope);
+        var decision = world.Decision(readers: [Alice], number: "DR-00011", decidedOn: "2026-10-12T09:00:00Z");
+        var s = world.Signal(Decide, core: (MatterType, m), shortName: "Budget gap", title: "Fee change without a budget revision",
+            firstDetected: "2026-09-30T09:00:00Z", sets: ["closedEarlier", "decided"], resolvedOn: world.Now.AddDays(-2), decisionRecord: decision);
+        world.Resolves(inquiry, s);
+        world.GateDecision(readers: [Alice], core: (MatterType, m), number: "DR-00900", decidedOn: "2026-10-14T09:30:00Z");
+        world.GateDecision(readers: [Alice], communication: world.Record("sprk_communication", [Alice]), number: "DR-00901",
+            name: "Judgement: denied (recipient outside the matter)", decidedOn: "2026-10-13T09:30:00Z");
+
+        VerifyWorklist("worklist.200.decided", await ObserveAsync(await GetAsync(world, Alice, "?set=decided")), 200);
+    }
+
+    /// <summary>Task 235 (#3283, D-234): the Decided set lists the writer's Record Procedure, billing and assign-firm records that resolved
+    /// no Signal in their core record's <c>records</c> (D-236: invoice-level billing codes only, never a line decision), with their summary
+    /// and confirming user and no item to open, beside a Signal's item on the same matter; on a project with no item they are a group of
+    /// their own. The existing Decided baseline above is unchanged.</summary>
+    [Fact]
+    public async Task ContractBaseline_Worklist_200_Decided_SignalLessRecords()
+    {
+        const string NoSignal = "{\"reviewId\":\"0b7a9b5e-5555-4c2e-9a54-000000000235\",\"resolvedSignalIds\":[],\"steps\":[]}";
+        var world = new World();
+        var m = world.Matter(readers: [Alice], name: "Acme v Widget", number: "MAT-0042");
+        var p = world.Record("sprk_project", [Alice], new() { ["sprk_projectname"] = "Office move", ["sprk_projectnumber"] = "PRJ-0007" });
+        var decision = world.Decision(readers: [Alice], number: "DR-00011", decidedOn: "2026-10-12T09:00:00Z");
+        world.Signal(Decide, core: (MatterType, m), shortName: "Budget gap", title: "Fee change without a budget revision",
+            firstDetected: "2026-09-30T09:00:00Z", sets: ["closedEarlier", "decided"], resolvedOn: world.Now.AddDays(-2), decisionRecord: decision);
+        world.Decision(readers: [Alice], number: "DR-00700", decidedOn: "2026-10-14T09:30:00Z", name: "Judgement: Assign Procedure",
+            core: (MatterType, m), actionCode: "assign-procedure", steps: NoSignal);
+        world.Decision(readers: [Alice], number: "DR-00701", decidedOn: "2026-10-13T09:30:00Z", name: "Judgement: Set firm",
+            core: (MatterType, m), actionCode: "assign-firm", steps: NoSignal);
+        world.Decision(readers: [Alice], number: "DR-00702", decidedOn: "2026-10-11T09:30:00Z", name: "Judgement: Approve invoice",
+            core: (ProjectType, p), actionCode: "approve-invoice", steps: NoSignal);
+
+        VerifyWorklist("worklist.200.decided-signal-less", await ObserveAsync(await GetAsync(world, Alice, "?set=decided")), 200);
+    }
+
     [Fact]
     public async Task ContractBaseline_Worklist_400_UnknownSet() =>
         VerifyWorklist("worklist.400.unknown-set", await ObserveAsync(await GetAsync(new World(), Alice, "?set=everything")), 400);

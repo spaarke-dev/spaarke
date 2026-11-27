@@ -36,7 +36,7 @@
  */
 
 import type { IUploadService, UploadOptions, UploadResult } from '../../types/serviceInterfaces';
-import type { AuthenticatedFetch } from './bffDataServiceAdapter';
+import type { ResponseFetchFn } from '../fetchTypes';
 
 /**
  * Optional callback that returns a Bearer token string for XHR requests.
@@ -102,7 +102,7 @@ export type GetBearerToken = () => Promise<string>;
  * ```
  */
 export function createBffUploadService(
-  authenticatedFetch: AuthenticatedFetch,
+  authenticatedFetch: ResponseFetchFn,
   bffBaseUrl: string,
   getBearerToken?: GetBearerToken
 ): IUploadService {

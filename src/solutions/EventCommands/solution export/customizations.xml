@@ -137,6 +137,9 @@
               <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule" />
             </DisplayRules>
             <Actions>
+              <JavaScriptFunction FunctionName="isNaN" Library="$webresource:sprk_/scripts/bff_auth.js" />
+              <JavaScriptFunction FunctionName="isNaN" Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" />
+              <JavaScriptFunction FunctionName="isNaN" Library="$webresource:sprk_/scripts/secure_child_ribbon.js" />
               <JavaScriptFunction FunctionName="Spaarke.Event.AddMemo" Library="$webresource:sprk_event_ribbon_commands.js">
                 <CrmParameter Value="PrimaryControl" />
               </JavaScriptFunction>

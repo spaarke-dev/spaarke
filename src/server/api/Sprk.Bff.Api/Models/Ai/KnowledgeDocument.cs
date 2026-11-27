@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Indexes.Models;
@@ -209,12 +211,12 @@ public class KnowledgeDocument
     /// </summary>
     /// <remarks>
     /// Used for entity-scoped semantic search. Nullable to support documents
-    /// indexed before parent entity tracking was implemented. Suppressed from JSON when null
-    /// (session-files index lacks this field).
+    /// indexed before parent entity tracking was implemented. Written through
+    /// <see cref="ParentEntityTypeWire"/>: omitted from JSON when null (session-files index lacks this field),
+    /// unless <see cref="ReplaceParentEntity"/> asks for an explicit null.
     /// </remarks>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
-    [JsonPropertyName("parentEntityType")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore]
     public string? ParentEntityType { get; set; }
 
     /// <summary>
@@ -222,12 +224,12 @@ public class KnowledgeDocument
     /// </summary>
     /// <remarks>
     /// Combined with ParentEntityType for entity-scoped filtering.
-    /// Nullable to support legacy documents without entity association. Suppressed from JSON
-    /// when null (session-files index lacks this field).
+    /// Nullable to support legacy documents without entity association. Written through
+    /// <see cref="ParentEntityIdWire"/>: omitted from JSON when null (session-files index lacks this field),
+    /// unless <see cref="ReplaceParentEntity"/> asks for an explicit null.
     /// </remarks>
     [SimpleField(IsFilterable = true)]
-    [JsonPropertyName("parentEntityId")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore]
     public string? ParentEntityId { get; set; }
 
     /// <summary>
@@ -235,13 +237,74 @@ public class KnowledgeDocument
     /// </summary>
     /// <remarks>
     /// Searchable field to allow finding documents by entity name.
-    /// Nullable to support legacy documents without entity association. Suppressed from JSON
-    /// when null (session-files index lacks this field).
+    /// Nullable to support legacy documents without entity association. Written through
+    /// <see cref="ParentEntityNameWire"/>: omitted from JSON when null (session-files index lacks this field),
+    /// unless <see cref="ReplaceParentEntity"/> asks for an explicit null.
     /// </remarks>
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
-    [JsonPropertyName("parentEntityname")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore]
     public string? ParentEntityName { get; set; }
+
+    /// <summary>
+    /// True when this write is the COMPLETE answer to "which record is this document filed under": a null
+    /// <see cref="ParentEntityType"/> / <see cref="ParentEntityId"/> / <see cref="ParentEntityName"/> is then sent as an
+    /// explicit JSON null, so the merge-or-upload REPLACES the parent a previous index left on the chunk instead of
+    /// keeping it. False (default) keeps the omit-when-null behaviour every other writer relies on.
+    /// </summary>
+    /// <remarks>
+    /// Why a flag and not a blanket "write nulls": a merge-or-upload omits a property that is absent from the JSON, and
+    /// <c>System.Text.Json</c> cannot choose between "omit" and "null" per instance. Writers that must NOT touch the parent
+    /// share this model — the session-files and discovery chunks (<c>RagIndexingPipeline</c>, whose session-files index lacks
+    /// the fields and rejects a document that names them) and the body of <c>POST /api/ai/rag/index</c> — so only the full
+    /// re-index (<c>FileIndexingService</c>, which has just decided the parent) opts in. Never read from or written to JSON.
+    /// </remarks>
+    [JsonIgnore]
+    public bool ReplaceParentEntity { get; set; }
+
+    // ── wire shape of the three parent fields ───────────────────────────────────────────────────────────────────────────
+    // A property of type JsonElement is omitted while it is default(JsonElement) (WhenWritingDefault) and written as
+    // given otherwise, which lets one instance choose omit, a string or an explicit null. The public string? properties
+    // above stay the only surface the rest of the code reads and writes.
+
+    private static readonly JsonElement JsonNull = JsonDocument.Parse("null").RootElement.Clone();
+
+    /// <summary>JSON form of <see cref="ParentEntityType"/> (<c>parentEntityType</c>). Serialization only; use the string property.</summary>
+    [JsonPropertyName("parentEntityType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public JsonElement ParentEntityTypeWire
+    {
+        get => ToWire(ParentEntityType);
+        set => ParentEntityType = FromWire(value);
+    }
+
+    /// <summary>JSON form of <see cref="ParentEntityId"/> (<c>parentEntityId</c>). Serialization only; use the string property.</summary>
+    [JsonPropertyName("parentEntityId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public JsonElement ParentEntityIdWire
+    {
+        get => ToWire(ParentEntityId);
+        set => ParentEntityId = FromWire(value);
+    }
+
+    /// <summary>JSON form of <see cref="ParentEntityName"/> (<c>parentEntityname</c>, the index's spelling). Serialization only; use the string property.</summary>
+    [JsonPropertyName("parentEntityname")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public JsonElement ParentEntityNameWire
+    {
+        get => ToWire(ParentEntityName);
+        set => ParentEntityName = FromWire(value);
+    }
+
+    private JsonElement ToWire(string? value) =>
+        value is not null ? JsonSerializer.SerializeToElement(value)
+        : ReplaceParentEntity ? JsonNull
+        : default;
+
+    private static string? FromWire(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>
     /// Record id of the matter type (<c>sprk_mattertype</c>) of the matter or project this document belongs to.

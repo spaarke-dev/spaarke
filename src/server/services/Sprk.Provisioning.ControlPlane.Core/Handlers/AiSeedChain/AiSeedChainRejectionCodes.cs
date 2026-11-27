@@ -85,6 +85,22 @@ public static class AiSeedChainRejectionCodes
     /// </summary>
     public const string SeedManifestInvocationFailed = "seed-manifest-invocation-failed";
 
+    /// <summary>
+    /// The embedded AI content set (scripts/seed-data/ai-content) has a missing
+    /// dependency — a lookup, N:N link or canvas that points at a row the set
+    /// does not carry or at a table written later — or cannot be read. Refused
+    /// before any Dataverse call, so nothing was written: Resumable once the
+    /// content is fixed in git and the Worker redeployed.
+    /// </summary>
+    public const string AiContentMissingDependency = "ai-content-missing-dependency";
+
+    /// <summary>
+    /// A Dataverse call of the AI content seed failed part-way. The seed is
+    /// create-if-missing and re-reads every table, so rows already created are
+    /// found and skipped on resume: Resumable.
+    /// </summary>
+    public const string AiContentSeedFailed = "ai-content-seed-failed";
+
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "concurrent-write-conflict";
 

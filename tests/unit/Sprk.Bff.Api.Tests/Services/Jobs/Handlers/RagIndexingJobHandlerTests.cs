@@ -643,9 +643,13 @@ public class RagIndexingJobHandlerTests
         indexed()!.ParentEntity.Should().Be(new ParentEntityContext("project", FiledProject.ToString(), "Harbor Expansion"));
     }
 
-    /// <summary>The row cannot be read: the file is still indexed, without a parent, and the job succeeds.</summary>
+    /// <summary>
+    /// GitHub #3223: the row cannot be read (Dataverse throttled or timed out), so nothing was decided about the parent. Writing
+    /// "no parent" from that would un-file the document with the job reported as a success and nothing retrying: the job
+    /// FAILS (retryable) and nothing is written to the index.
+    /// </summary>
     [Fact]
-    public async Task Issue1510_AnUnreadableDocumentRow_IndexesWithoutAParent_AndTheJobSucceeds()
+    public async Task Issue3223_AnUnreadableDocumentRow_FailsTheJobForRetry_AndWritesNothing()
     {
         SetupSuccessfulIdempotencyFlow();
         var indexed = CaptureIndexRequest();
@@ -655,8 +659,109 @@ public class RagIndexingJobHandlerTests
 
         var result = await _handler.ProcessAsync(ParentlessJobFor(FiledDocument), CancellationToken.None);
 
+        result.Status.Should().Be(JobStatus.Failed, "a failed outcome is what the job runner retries; Completed would never be retried");
+        indexed().Should().BeNull("the index is not written when the parent is undecided");
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>GitHub #3223: a decided "no parent" (the row names no record) replaces the parent the chunks carry.</summary>
+    [Fact]
+    public async Task Issue3223_ADocumentRowThatNamesNoRecord_ReplacesTheParentWithNone()
+    {
+        SetupSuccessfulIdempotencyFlow();
+        var indexed = CaptureIndexRequest();
+        _dataverseServiceMock
+            .Setup(x => x.RetrieveAsync("sprk_document", FiledDocument, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", FiledDocument));
+
+        var result = await _handler.ProcessAsync(ParentlessJobFor(FiledDocument), CancellationToken.None);
+
         result.Status.Should().Be(JobStatus.Completed);
         indexed()!.ParentEntity.Should().BeNull();
+        indexed()!.ReplaceParentEntity.Should().BeTrue("the row was read and names no record: that is a decided answer");
+    }
+
+    /// <summary>GitHub #3223: a decided parent replaces the old one.</summary>
+    [Fact]
+    public async Task Issue3223_ADecidedParent_ReplacesTheOldOne()
+    {
+        SetupSuccessfulIdempotencyFlow();
+        var indexed = CaptureIndexRequest();
+        _dataverseServiceMock
+            .Setup(x => x.RetrieveAsync("sprk_document", FiledDocument, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", FiledDocument)
+            {
+                ["sprk_project"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_project", FiledProject) { Name = "Harbor Expansion" },
+            });
+
+        await _handler.ProcessAsync(ParentlessJobFor(FiledDocument), CancellationToken.None);
+
+        indexed()!.ReplaceParentEntity.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// GitHub #3223: a payload that names neither a document nor a parent decided nothing about the parent, so a re-index of
+    /// the same item must leave the parent the chunks already carry (the queue route is reachable with such a payload).
+    /// </summary>
+    [Fact]
+    public async Task Issue3223_APayloadWithNeitherADocumentNorAParent_LeavesTheStoredParentAlone()
+    {
+        SetupSuccessfulIdempotencyFlow();
+        var indexed = CaptureIndexRequest();
+        var payload = new RagIndexingJobPayload
+        {
+            TenantId = TestTenantId,
+            DriveId = TestDriveId,
+            ItemId = TestItemId,
+            FileName = TestFileName,
+            Source = "UnitTest",
+        };
+        var job = new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = RagIndexingJobHandler.JobTypeName,
+            SubjectId = TestItemId,
+            Attempt = 1,
+            MaxAttempts = 3,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload)),
+        };
+
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        result.Status.Should().Be(JobStatus.Completed);
+        indexed()!.ParentEntity.Should().BeNull();
+        indexed()!.ReplaceParentEntity.Should().BeFalse("nothing decided the parent, so an index write must not clear it");
+    }
+
+    /// <summary>GitHub #3223: a parent named in the payload is a decided answer and replaces the old one.</summary>
+    [Fact]
+    public async Task Issue3223_AParentNamedInThePayload_ReplacesTheOldOne()
+    {
+        SetupSuccessfulIdempotencyFlow();
+        var indexed = CaptureIndexRequest();
+        var payload = new RagIndexingJobPayload
+        {
+            TenantId = TestTenantId,
+            DriveId = TestDriveId,
+            ItemId = TestItemId,
+            FileName = TestFileName,
+            Source = "UnitTest",
+            ParentEntity = new ParentEntityContext("matter", FiledProject.ToString(), "Acme"),
+        };
+        var job = new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = RagIndexingJobHandler.JobTypeName,
+            SubjectId = TestItemId,
+            Attempt = 1,
+            MaxAttempts = 3,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload)),
+        };
+
+        await _handler.ProcessAsync(job, CancellationToken.None);
+
+        indexed()!.ReplaceParentEntity.Should().BeTrue();
     }
 
     #endregion

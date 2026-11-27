@@ -22,6 +22,7 @@ import {
 } from '@fluentui/react-icons';
 import type { AttachmentInfo } from '@shared/adapters/types';
 import { MAX_ATTACHMENT_BYTES } from '../services/emailContentCapture';
+import type { AttachmentSavedState } from '../services/savedEmailAttachments';
 
 /**
  * Styles using Fluent UI v9 design tokens (ADR-021).
@@ -78,6 +79,23 @@ const useStyles = makeStyles({
   },
   attachmentItemError: {
     borderLeft: `3px solid ${tokens.colorPaletteRedBorder2}`,
+  },
+  // Task 141: a row that cannot be ticked because of what it IS (saved, or not determined) — not greyed like a disabled row.
+  attachmentItemStatic: {
+    cursor: 'default',
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+  },
+  // Task 141: the saved mark sits where the checkbox would be, so the names line up.
+  savedMark: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '32px',
+    flexShrink: 0,
+    fontSize: '20px',
+    color: tokens.colorPaletteGreenForeground1,
   },
   attachmentIcon: {
     display: 'flex',
@@ -281,6 +299,20 @@ export interface AttachmentSelectorProps {
   label?: string;
   /** Whether to show the header with count */
   showHeader?: boolean;
+  /**
+   * Task 141: each attachment's saved state (keyed by attachment id), for an email already saved in Spaarke. A `saved`
+   * attachment shows a check mark labelled "Saved" instead of a checkbox and cannot be ticked; an `unknown` one (the pane
+   * was not told) shows neither and cannot be ticked; an `unsaved` one is a checkbox as usual. A `notSaveable` one (task
+   * 141 review: no email save creates a document for it) shows "Can't be saved" and cannot be ticked. An `adding` one (a
+   * queued add names it and its job has not finished) shows "Adding…" and cannot be ticked. Absent: every
+   * attachment is a checkbox, as before.
+   */
+  savedStates?: ReadonlyMap<string, AttachmentSavedState>;
+  /**
+   * Task 141: attachments shown without a checkbox although not saved — nothing the pane can do would save them (the saved
+   * email is not filed to a record, or the stored email does not hold them).
+   */
+  nonSelectableIds?: ReadonlySet<string>;
   /** Accessible label for screen readers */
   'aria-label'?: string;
   /** Class name for custom styling */
@@ -329,6 +361,8 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
     errorMessage,
     label = 'Attachments',
     showHeader = true,
+    savedStates,
+    nonSelectableIds,
     'aria-label': ariaLabel,
     className,
   } = props;
@@ -352,10 +386,26 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
   // Check if total size exceeds limit
   const isTotalSizeExceeded = totalSelectedSize > MAX_TOTAL_SIZE;
 
+  // Task 141: whether a row can be ticked at all — not when it is saved, being added, not determined, never saveable, or
+  // marked non-selectable.
+  const isSelectable = useCallback(
+    (attachmentId: string) => {
+      const state = savedStates?.get(attachmentId);
+      if (state === 'saved' || state === 'unknown' || state === 'notSaveable' || state === 'adding') return false;
+      return !nonSelectableIds?.has(attachmentId);
+    },
+    [savedStates, nonSelectableIds]
+  );
+  const selectableCount = useMemo(
+    () => attachments.filter(att => isSelectable(att.id)).length,
+    [attachments, isSelectable]
+  );
+
   // Handle individual attachment toggle
   const handleToggle = useCallback(
     (attachmentId: string) => {
       if (disabled) return;
+      if (!isSelectable(attachmentId)) return;
 
       const validation = validationResults.get(attachmentId);
       if (!validation?.isValid) return;
@@ -368,7 +418,7 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
       }
       onSelectionChange(newSelected);
     },
-    [disabled, validationResults, selectedIds, onSelectionChange]
+    [disabled, isSelectable, validationResults, selectedIds, onSelectionChange]
   );
 
   // Handle keyboard navigation
@@ -418,9 +468,12 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
               <div className={styles.headerLeft}>
                 <Text weight="semibold">{label}</Text>
               </div>
-              <Badge appearance="filled" color="informative" className={styles.attachmentCount}>
-                {selectedIds.size}/{attachments.length}
-              </Badge>
+              {/* Task 141: the count is of what can be ticked; with nothing tickable there is no count. */}
+              {selectableCount > 0 && (
+                <Badge appearance="filled" color="informative" className={styles.attachmentCount}>
+                  {selectedIds.size}/{savedStates || nonSelectableIds ? selectableCount : attachments.length}
+                </Badge>
+              )}
             </div>
           }
         />
@@ -431,7 +484,9 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
         {attachments.map(attachment => {
           const validation = validationResults.get(attachment.id);
           const isValid = validation?.isValid ?? true;
-          const isSelected = selectedIds.has(attachment.id);
+          const savedState = savedStates?.get(attachment.id);
+          const selectable = isSelectable(attachment.id);
+          const isSelected = selectable && selectedIds.has(attachment.id);
           const isDisabled = disabled || !isValid;
 
           return (
@@ -439,23 +494,31 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
               key={attachment.id}
               className={mergeClasses(
                 styles.attachmentItem,
-                isDisabled && styles.attachmentItemDisabled,
-                !isValid && styles.attachmentItemError
+                selectable ? isDisabled && styles.attachmentItemDisabled : styles.attachmentItemStatic,
+                !isValid && selectable && styles.attachmentItemError
               )}
               role="listitem"
-              tabIndex={isDisabled ? -1 : 0}
+              tabIndex={isDisabled || !selectable ? -1 : 0}
               onClick={() => handleToggle(attachment.id)}
               onKeyDown={e => handleKeyDown(e, attachment.id)}
-              aria-selected={isSelected}
-              aria-disabled={isDisabled}
+              {...(selectable ? { 'aria-selected': isSelected, 'aria-disabled': isDisabled } : {})}
+              data-saved-state={savedState}
             >
-              <Checkbox
-                checked={isSelected}
-                disabled={isDisabled}
-                onChange={() => handleToggle(attachment.id)}
-                aria-label={`Select ${attachment.name}`}
-                tabIndex={-1}
-              />
+              {savedState === 'saved' ? (
+                <span className={styles.savedMark}>
+                  <CheckmarkCircleRegular role="img" aria-label="Saved" />
+                </span>
+              ) : selectable ? (
+                <Checkbox
+                  checked={isSelected}
+                  disabled={isDisabled}
+                  onChange={() => handleToggle(attachment.id)}
+                  aria-label={`Select ${attachment.name}`}
+                  tabIndex={-1}
+                />
+              ) : (
+                <span className={styles.savedMark} aria-hidden="true" />
+              )}
 
               <div className={styles.attachmentIcon}>{getAttachmentIcon(attachment.contentType, attachment.name)}</div>
 
@@ -470,8 +533,18 @@ export const AttachmentSelector: React.FC<AttachmentSelectorProps> = props => {
                       Inline
                     </Badge>
                   )}
+                  {savedState === 'adding' && (
+                    <Badge appearance="outline" size="small">
+                      Adding…
+                    </Badge>
+                  )}
+                  {savedState === 'notSaveable' && (
+                    <Badge appearance="outline" size="small">
+                      Can&apos;t be saved
+                    </Badge>
+                  )}
                 </div>
-                {!isValid && validation?.errorMessage && (
+                {!isValid && selectable && validation?.errorMessage && (
                   <span className={styles.attachmentError}>
                     <ErrorCircleRegular style={{ marginRight: '4px' }} />
                     {validation.errorMessage}

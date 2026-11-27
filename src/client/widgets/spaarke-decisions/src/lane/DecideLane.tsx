@@ -6,8 +6,9 @@
  * (`decideLaneFetch.ts`). The panel is not in the Worklist barrel, so it is imported by deep path (ADR-012).
  *
  *  - Counts: the lane is read to the end before it is shown, so the heading count and the cards describe the whole lane, as the Console's
- *    do. "Done today" is not shown: no tool returns the items closed today (the Console reads that set from a route the widget has no tool
- *    for), so the All card carries no progress line until one does (`doneToday` is an optional prop for that day).
+ *    do. "Done today" is the optional `doneToday` prop: the shell passes `closedToday.all` of `spaarke_show_decisions` (DEF-001, FR-13), the
+ *    count the Console's closed-today set gives, and the All card then says "n of m done today". Absent (an older server, or a read that
+ *    did not answer), the card carries no progress line, as the Console's does not.
  *  - A billing Work Item (its row carries `invoiceReview`) is decided only in Invoice Review (EB-D-194). Its row is replaced, through the
  *    panel's `renderItem` seam, by a "Finding" row with a link out (`billingLinkOut.ts`) that the host opens (`openLink`). It has no decide
  *    action, never raises `onOpenWizard`, and is left out of Start review and of the wizard's browse set.
@@ -70,7 +71,7 @@ export interface DecideLaneProps {
   openLink: (url: string) => Promise<boolean>;
   /** A non-billing row was opened, or Start review stepped. Task 032 opens the wizard; absent, nothing opens. */
   onOpenWizard?: (event: OpenWizardEvent) => void;
-  /** Items finished today, for the All card's progress line; no tool provides it yet, so absent shows none. */
+  /** Items finished today, for the All card's progress line (`closedToday.all` of `spaarke_show_decisions`); absent shows none. */
   doneToday?: number;
   /** "Now" for ages; tests inject a fixed date. Defaults to the time the lane was read. */
   today?: Date;

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.FieldMapping;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
 namespace Sprk.Bff.Api.Api.FieldMappings;
 
@@ -58,6 +59,33 @@ internal static class FieldMappingPushLookups
 
     /// <summary>Filtered in memory, so no metadata <c>$filter</c> support is assumed.</summary>
     internal const string AttributeMetadataQuery = "$select=LogicalName,AttributeType,IsValidODataAttribute";
+
+    /// <summary>
+    /// DI-051 (#3258): the push SOURCE's catalog also carries each column's <c>IsSecured</c>, so the one read decides both which
+    /// rule fields can be selected and which rules read a field-secured column (<see cref="SecuredColumns"/>).
+    /// </summary>
+    internal const string SourceAttributeMetadataQuery = AttributeMetadataQuery + "," + FieldSecuredSourceRule.IsSecuredProperty;
+
+    /// <summary>
+    /// DI-051 (#3258): the source columns that count as field-secured under <see cref="FieldSecuredSourceRule.CountsAsSecured"/>
+    /// (anything but an explicit <c>IsSecured == false</c>), from the catalog read with <see cref="SourceAttributeMetadataQuery"/>.
+    /// A column the catalog does not list is never selected (its rule is skipped as not found), so it is not listed here.
+    /// </summary>
+    internal static IReadOnlySet<string> SecuredColumns(IEnumerable<Dictionary<string, JsonElement>> rows)
+    {
+        var secured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            if (TryGetString(row, "LogicalName", out var name)
+                && FieldSecuredSourceRule.CountsAsSecured(
+                    row.TryGetValue(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
+            {
+                secured.Add(name);
+            }
+        }
+
+        return secured;
+    }
 
     /// <summary>
     /// The many-to-one relationship columns read for the parent lookup AND for lookup writes — one read of the target's

@@ -728,6 +728,22 @@ public sealed class ExternalRegistrationEndpointsTests : IClassFixture<ExternalR
         _store.Contacts.Should().BeEmpty();
     }
 
+    // R4 task 043 (FR-28): a home link or contact lookup that cannot be read is retryable, as on /me - not a 403.
+    [Theory]
+    [InlineData("link")]
+    [InlineData("contact")]
+    public async Task FailedHomeLookup_BeforeRegistering_Is503Unavailable_NotA403_NothingWritten(string step)
+    {
+        if (step == "link") _store.HomeLinkLookupStatus = LookupStatus.Failed;
+        else _store.HomeContactLookupStatus = LookupStatus.Failed;
+
+        var response = await Post(Body());
+
+        await ShouldBeProblem(response, HttpStatusCode.ServiceUnavailable, ExternalRegistrationEndpoints.ErrorUnavailable);
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task FailedOwnerTeamRead_Is503Unavailable_NothingCreated()
     {

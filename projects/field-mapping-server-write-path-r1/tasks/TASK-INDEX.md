@@ -85,7 +85,7 @@
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | ✅ |
-| 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
+| 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | ✅ |
 | 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 (033 dropped; its Repair metadata-reader wiring is in scope here) | 🔄 split into 052a–e. 052a is on master via #2629, 052b via #2790, 052c and 052d via #2898; 052e (cascade design) approved 2026-11-18; 052f merged to the work branch 2026-11-18; 052g merged to the work branch 2026-11-19 (UAC-r2 PASS). The pass stays off (go-live unset). Owner: exclude task and account; contacts go to the `ExternalAccess:CustomerBusinessUnitId` default team (fail closed), also for the chat contact create. 052b job waits on 032b-1 (shared gates); then 052c trigger, 052d report, 052e cascade design |
 | 052b | [Scheduled repair pass job, contact owner rule, chat contact create](052b-repair-job.poml) | FR-25, FR-09 | opus / high | FULL | W5-B | 052a | ✅ on master via #2790 (merge 4f9e77e9c0, 2026-11-13; work-branch merge b18d4fc394; UAC-r2 PASS); in the dev BFF builds since, off (go-live unset) |
 | 052c | [Repair pass on-demand admin trigger: one table, one bounded window](052c-repair-on-demand-trigger.poml) | FR-25, NFR-01 | opus / high | FULL | W5-B | 052b | ✅ on master via #2898 (merge a3ff45b853, 2026-11-18; work-branch merge cb86030700; Opus + Sonnet passes, fix round 1, re-check: no F1/F2); dev BFF deploy is UAC-r2's on the owner's word; go-live unset |
@@ -105,7 +105,10 @@
 | 060 | [Ownership matrix + exception assessment](060-ownership-matrix-and-exception-assessment.poml) | FR-26 | opus / high | STANDARD | W6 | 033, 034 | ✅ 2026-11-08 on the work branch (merge 99e3e4a260; `task/fm-060` bc4e904f28): §5.2 matrix with 25 rows; outbox and gate record kept; DI-023 #2636 filed. A role-depth observation went to UAC-r2 privately |
 | 061 | [Census and client guards](061-census-and-client-guards.poml) | FR-27 | sonnet / high | FULL | W6 | 035, 036 | 🔲 |
 | 062 | [Docs rewrite + root CLAUDE.md + CHANGELOG (main session)](062-docs-rewrite-and-root-claude-md.poml) | FR-28 | sonnet / high | MINIMAL | none | 040, 053, 060 | 🔲 |
-| 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | 🔲 |
+| 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | ✅ 2026-11-26: adapter + dead event builder deleted; issues updated (#1318 closed, #3245 filed); DI-045..047 |
+| 064 | [Copy ordinary mapped values regardless of caller rights (owner 4b/4c)](064-copy-mapped-values-regardless-of-caller-rights.poml) | FR-08 amendment (owner 2026-10-27, reconfirmed 2026-11-26) | opus / high | FULL | W6 | none (UAC-r2 diff review) | ✅ |
+| 065 | [Copy a mapped value from the filing parent even when its source column is field-secured (owner 2026-11-26)](065-copy-field-secured-source-values.poml) | FR-08 amendment (owner 2026-11-26) | opus / high | FULL | W6 | UAC-r2 diff review | ✅ |
+| 066 | [Remove the "Add KPI Assessment" subgrid button (051 OQ-5)](066-remove-add-kpi-assessment-button.poml) | 051 OQ-5 (owner 2026-11-26) | sonnet / high | STANDARD | W6 | owner go for the dev import | ✅ |
 
 ## Phase 7 — W7 Record family service and Family tool (spec amendment 2026-10-27; design.md §12)
 

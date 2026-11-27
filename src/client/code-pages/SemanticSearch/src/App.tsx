@@ -135,6 +135,33 @@ function deriveSearchDomain(fragment: SearchRequestFragment | null | undefined):
   }
 }
 
+/** Names shown when a kind of record has no index in the list (#3195). */
+const DOMAIN_LABELS: Record<SearchDomain, string> = {
+  documents: 'Documents',
+  matters: 'Matters',
+  projects: 'Projects',
+  invoices: 'Invoices',
+};
+
+function domainOfRow(row: AiSearchIndexRow): SearchDomain {
+  return deriveSearchDomain(buildSearchRequestFragment(row));
+}
+
+/**
+ * The index to search for a domain: the default row when it is of that domain; else a general one
+ * (tenant-wide or Document — an Events or Work Assignment index also derives to 'documents' but
+ * searches less); else the first in display order. Undefined when the list has no index of that
+ * domain. Used for a `domain` in the URL (#3171) and for a saved search (#3195).
+ */
+function pickIndexForDomain(rows: AiSearchIndexRow[], domain: SearchDomain): AiSearchIndexRow | undefined {
+  const domainRows = rows.filter(r => domainOfRow(r) === domain);
+  const isGeneral = (r: AiSearchIndexRow): boolean => {
+    const fragment = buildSearchRequestFragment(r);
+    return fragment.scope === 'all' || fragment.entityType === 'document';
+  };
+  return domainRows.find(r => r.sprk_isdefault === true) ?? domainRows.find(isGeneral) ?? domainRows[0];
+}
+
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -258,7 +285,21 @@ export const App: React.FC<AppProps> = ({
   // `activeDomain` derivation used for grid/view defaults.
   const [searchIndexes, setSearchIndexes] = useState<AiSearchIndexRow[]>([]);
   const [isLoadingSearchIndexes, setIsLoadingSearchIndexes] = useState<boolean>(true);
-  const [selectedSearchIndexId, setSelectedSearchIndexId] = useState<string>('');
+  const [selectedSearchIndexId, setSelectedSearchIndexIdState] = useState<string>('');
+  // Mirrors of the loaded list (null until it loads) and the selection, written synchronously, so a
+  // handler that runs before React re-renders sees them (a saved search chosen just as the list
+  // arrives, #3195).
+  const loadedIndexesRef = useRef<AiSearchIndexRow[] | null>(null);
+  const selectedSearchIndexIdRef = useRef('');
+  const setSelectedSearchIndexId = useCallback((id: string) => {
+    selectedSearchIndexIdRef.current = id;
+    setSelectedSearchIndexIdState(id);
+  }, []);
+  // The page searches a domain the list has no index of (#3195): nothing is selected, the search
+  // goes to the standard index for that kind of record, and the selector says so.
+  const [unindexedDomain, setUnindexedDomain] = useState<SearchDomain | null>(null);
+  // A saved search chosen before the list loaded: the list then selects an index of its domain.
+  const savedSearchDomainRef = useRef<SearchDomain | null>(null);
 
   // `activeDomain` is now DERIVED from the selected row's fragment. We still
   // keep it as state so existing code that branches on the domain (grid
@@ -425,14 +466,25 @@ export const App: React.FC<AppProps> = ({
   }, [searchIndexes, selectedSearchIndexId]);
 
   const executeSearch = useCallback(
-    (searchQuery: string, searchFilters: SearchFilters, domain: SearchDomain) => {
+    (
+      searchQuery: string,
+      searchFilters: SearchFilters,
+      domain: SearchDomain,
+      // The index the caller has just chosen, before `selectedSearchIndexId` state catches up (a saved
+      // search on another domain, #3195). `{ row: null }` = the list has no index of this domain: no index
+      // row is sent, so the search goes to the URL's index when the domain is the URL's own, else to the
+      // standard index for that kind of record (see `envelopeSearchIndexName` below).
+      selection?: { row: AiSearchIndexRow | null }
+    ) => {
       setSelectedIds([]);
 
       // Phase G — dropdown-derived fragment is the single source of truth for
       // scope/entityType/searchIndexName. When unavailable (catalog still
       // loading or empty), the hooks fall back to legacy URL-envelope behavior.
-      const fragment = currentFragment;
-      const envelopeSearchIndexName = urlParams?.searchIndexName ?? null;
+      const fragment = selection ? (selection.row ? buildSearchRequestFragment(selection.row) : null) : currentFragment;
+      // The URL's index belongs to the URL's domain: a search of another domain (a saved search of
+      // another kind of record, with no index of that kind selected) never sends it (#3195).
+      const envelopeSearchIndexName = domain === initialDomain ? (urlParams?.searchIndexName ?? null) : null;
 
       // Phase G hot-fix (2026-06-10): Document-target dropdown rows are *file
       // indexes* — the user's intent when switching among them is "search this
@@ -477,7 +529,16 @@ export const App: React.FC<AppProps> = ({
         );
       }
     },
-    [searchDocuments, searchRecords, hasUserInitiatedSearch, initialScope, initialEntityId, urlParams, currentFragment]
+    [
+      searchDocuments,
+      searchRecords,
+      hasUserInitiatedSearch,
+      initialScope,
+      initialEntityId,
+      initialDomain,
+      urlParams,
+      currentFragment,
+    ]
   );
 
   // =============================================
@@ -501,6 +562,7 @@ export const App: React.FC<AppProps> = ({
       const newDomain = deriveSearchDomain(fragment);
       setSelectedSearchIndexId(row.sprk_aisearchindexid);
       setActiveDomain(newDomain);
+      setUnindexedDomain(null);
       setSelectedIds([]);
 
       // Phase G hot-fix (2026-06-10): Document-target rows preserve the URL-
@@ -536,7 +598,7 @@ export const App: React.FC<AppProps> = ({
         );
       }
     },
-    [query, filters, urlParams, initialScope, initialEntityId, searchDocuments, searchRecords]
+    [query, filters, urlParams, initialScope, initialEntityId, searchDocuments, searchRecords, setSelectedSearchIndexId]
   );
 
   const handleFiltersChange = useCallback((newFilters: SearchFilters) => {
@@ -611,8 +673,9 @@ export const App: React.FC<AppProps> = ({
 
   const handleSelectSavedSearch = useCallback(
     (search: SavedSearch) => {
+      const domain = search.searchDomain;
       setCurrentSearchName(search.name);
-      setActiveDomain(search.searchDomain);
+      setActiveDomain(domain);
       setFilters(search.filters);
       setViewMode(search.viewMode);
       setQuery(search.query);
@@ -622,9 +685,27 @@ export const App: React.FC<AppProps> = ({
         setTreemapGroupBy(search.graphClusterBy);
         setTimelineColorBy(search.graphClusterBy);
       }
-      executeSearch(search.query, search.filters, search.searchDomain);
+
+      // The search runs against an index of the saved search's domain (#3195). Before, a saved Matters
+      // search chosen while a Documents index was selected ran a record search against that index.
+      // The current index is kept when it is already of that domain (the user picked it).
+      // Read the list through its synchronous mirror: React may not have re-rendered since it arrived.
+      const rows = loadedIndexesRef.current;
+      if (rows === null) {
+        // The list is not loaded yet: it selects an index of this domain when it arrives.
+        savedSearchDomainRef.current = domain;
+      }
+      if (rows === null || rows.length === 0) {
+        executeSearch(search.query, search.filters, domain);
+        return;
+      }
+      const currentRow = rows.find(r => r.sprk_aisearchindexid === selectedSearchIndexIdRef.current);
+      const row = currentRow && domainOfRow(currentRow) === domain ? currentRow : pickIndexForDomain(rows, domain);
+      setSelectedSearchIndexId(row?.sprk_aisearchindexid ?? '');
+      setUnindexedDomain(row ? null : domain);
+      executeSearch(search.query, search.filters, domain, { row: row ?? null });
     },
-    [executeSearch]
+    [executeSearch, setSelectedSearchIndexId]
   );
 
   // Cancel handler — clear AI Search query + filters + saved-search selection.
@@ -665,7 +746,8 @@ export const App: React.FC<AppProps> = ({
   //
   // Default-selection precedence (spec §6):
   //   1. URL envelope `searchIndexName` matches a row → select that row
-  //   2. URL envelope `domain` has rows of that domain → select one of them (#3171)
+  //   2. URL envelope `domain` (or a saved search chosen before the list loaded) → select an
+  //      index of that domain (#3171); with none, stay on the domain and select nothing (#3195)
   //   3. Row with `sprk_isdefault === true` → select it
   //   4. First row in `sprk_displayorder` order → select it
   //   Empty list → leave `selectedSearchIndexId === ''` (UI disables)
@@ -683,6 +765,7 @@ export const App: React.FC<AppProps> = ({
       const rows = await listActiveSearchIndexes();
       if (cancelled) return;
 
+      loadedIndexesRef.current = rows;
       setSearchIndexes(rows);
       setIsLoadingSearchIndexes(false);
 
@@ -693,11 +776,15 @@ export const App: React.FC<AppProps> = ({
         return;
       }
 
-      // 1. URL envelope match
+      // A saved search chosen before the list arrived (#3195) asks for its own domain.
+      const savedSearchDomain = savedSearchDomainRef.current;
+      savedSearchDomainRef.current = null;
+
+      // 1. URL envelope match (unless a saved search of another domain was chosen meanwhile)
       const envelopeName = urlParams?.searchIndexName?.trim() ?? '';
       if (envelopeName.length > 0) {
         const envelopeRow = rows.find(r => r.sprk_searchindexname === envelopeName);
-        if (envelopeRow) {
+        if (envelopeRow && (!savedSearchDomain || domainOfRow(envelopeRow) === savedSearchDomain)) {
           setSelectedSearchIndexId(envelopeRow.sprk_aisearchindexid);
           // Update activeDomain to match the row so the first auto-fire
           // search (below) routes to the correct hook.
@@ -711,22 +798,17 @@ export const App: React.FC<AppProps> = ({
       //    when it is one; else a general one (tenant-wide or Document — an Events or Work
       //    Assignment index also derives to 'documents' but searches less); else the first in
       //    display order. Without this, step 3 replaced the requested domain with the default
-      //    index's domain once the list loaded (#3171). With no index for that domain, fall
-      //    through: the catalog decides what is searchable.
-      const requestedDomain = urlParams?.domain;
+      //    index's domain once the list loaded (#3171). A saved search chosen meanwhile asks the
+      //    same way. With no index for that domain, the page stays on it and selects nothing:
+      //    the search goes to the standard index for that kind of record and the selector says
+      //    so. Before, the default index took over and the results already shown vanished (#3195).
+      const requestedDomain = savedSearchDomain ?? urlParams?.domain;
       if (requestedDomain) {
-        const domainRows = rows.filter(r => deriveSearchDomain(buildSearchRequestFragment(r)) === requestedDomain);
-        if (domainRows.length > 0) {
-          const isGeneral = (r: AiSearchIndexRow): boolean => {
-            const fragment = buildSearchRequestFragment(r);
-            return fragment.scope === 'all' || fragment.entityType === 'document';
-          };
-          const domainRow =
-            domainRows.find(r => r.sprk_isdefault === true) ?? domainRows.find(isGeneral) ?? domainRows[0];
-          setSelectedSearchIndexId(domainRow.sprk_aisearchindexid);
-          setActiveDomain(requestedDomain);
-          return;
-        }
+        const domainRow = pickIndexForDomain(rows, requestedDomain);
+        setSelectedSearchIndexId(domainRow?.sprk_aisearchindexid ?? '');
+        setActiveDomain(requestedDomain);
+        setUnindexedDomain(domainRow ? null : requestedDomain);
+        return;
       }
 
       // 3. `sprk_isdefault === true`
@@ -750,7 +832,7 @@ export const App: React.FC<AppProps> = ({
     // urlParams identity is stable (memoized at App boundary by parent); the
     // effect runs once on mount regardless. Including it in deps so React's
     // exhaustive-deps lint is happy.
-  }, [urlParams]);
+  }, [urlParams, setSelectedSearchIndexId]);
 
   // =============================================
   // Auto-search on load (FR-13)
@@ -860,6 +942,7 @@ export const App: React.FC<AppProps> = ({
           selectedSearchIndexId={selectedSearchIndexId}
           isLoadingSearchIndexes={isLoadingSearchIndexes}
           onSelectSearchIndex={handleSelectSearchIndex}
+          unindexedDomainLabel={unindexedDomain ? DOMAIN_LABELS[unindexedDomain] : undefined}
           filters={filters}
           onFiltersChange={handleFiltersChange}
           onSearch={handleFilterSearch}
