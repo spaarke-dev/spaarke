@@ -1992,10 +1992,15 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 _logger.LogWarning(
                     "Email attachments add: the record's documents are no longer kept where .eml document {DocumentId} is; refusing",
                     plan.EmlDocumentId);
+                // Task 143 review (F5): an add that names no record goes where the CALLER's documents are kept, so its refusal
+                // does not speak of a record.
                 return (SavedEmailRefusal(
                     OfficeErrorCodes.AccessDenied,
-                    "This record's documents are now kept somewhere else, so attachments can't be added to this saved email. "
-                    + "Nothing was saved.",
+                    request.TargetEntity is null
+                        ? "This saved email's documents are kept in a different place than yours, so attachments can't be added to it. "
+                          + "Nothing was saved."
+                        : "This record's documents are now kept somewhere else, so attachments can't be added to this saved email. "
+                          + "Nothing was saved.",
                     retryable: false), null);
             }
         }
