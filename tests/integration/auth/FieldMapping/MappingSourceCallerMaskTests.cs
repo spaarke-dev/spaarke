@@ -386,6 +386,106 @@ public class MappingSourceCallerMaskTests
         masked.Contains("sprk_confidentialnote").Should().BeFalse("a field-secured column the caller cannot read is never copied");
     }
 
+    // ── Task 067 (owner 2026-11-27): the row's own filing parent is not masked, except its access-model columns ─────────────
+
+    private static Task<Entity?> Lift(bool filingParent, MappingSourceCallerReadDouble caller, Entity appRead,
+        IReadOnlyCollection<string>? mapped = null) =>
+        MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(
+            filingParent, caller, Table, SourceId, appRead, mapped ?? Mapped, NullLogger.Instance, CancellationToken.None);
+
+    [Fact]
+    public async Task ApplyOrLift_ForTheFilingParent_KeepsAColumnTheCallerCannotRead_AndMakesNoCallerRead()
+    {
+        var appRead = AppRead();
+        appRead.FormattedValues["sprk_stage"] = "Discovery";
+        var caller = CallerSeeing(appRead);
+        caller.Secured.Add("sprk_secretfee");
+        caller.Secured.Add("sprk_client");
+
+        var lifted = await Lift(true, caller, appRead);
+
+        lifted!.GetAttributeValue<Money>("sprk_secretfee").Value.Should().Be(125000m);
+        lifted.GetAttributeValue<EntityReference>("sprk_client").Id.Should().Be(ClientId);
+        lifted.FormattedValues["sprk_stage"].Should().Be("Discovery");
+        caller.Paths.Should().BeEmpty("no access-model column is mapped, so no caller read is needed");
+    }
+
+    /// <summary>Task 067 C2, must not fire: a source that is not the filing parent is masked exactly as <c>ApplyAsync</c> masks
+    /// it.</summary>
+    [Fact]
+    public async Task ApplyOrLift_ForASourceThatIsNotTheFilingParent_IsTheMask()
+    {
+        var appRead = AppRead();
+        var caller = CallerSeeing(appRead);
+        caller.Secured.Add("sprk_secretfee");
+
+        var masked = await Lift(false, caller, appRead);
+
+        masked!.Contains("sprk_secretfee").Should().BeFalse();
+        masked.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
+        caller.Paths.Should().ContainSingle();
+    }
+
+    /// <summary>Task 067 C3, must fire: from the filing parent an access-model column is still judged by the caller's read.</summary>
+    [Theory]
+    [InlineData("sprk_externalobjectid")]
+    [InlineData("adx_identity_passwordhash")]
+    [InlineData("sprk_identitycollisionnote")]
+    public async Task ApplyOrLift_ForTheFilingParent_AnAccessModelColumnTheCallerCannotRead_IsRemoved_TheRestKept(string accessColumn)
+    {
+        var appRead = AppRead();
+        appRead[accessColumn] = "value";
+        var caller = CallerSeeing(appRead);
+        caller.Secured.Add(accessColumn);
+        caller.Secured.Add("sprk_secretfee");
+
+        var lifted = await Lift(true, caller, appRead, [.. Mapped, accessColumn]);
+
+        lifted!.Contains(accessColumn).Should().BeFalse();
+        lifted.GetAttributeValue<Money>("sprk_secretfee").Value.Should().Be(125000m, "a business column of the filing parent is kept");
+        caller.Paths.Should().ContainSingle("the access-model columns get the one caller read");
+    }
+
+    [Fact]
+    public async Task ApplyOrLift_ForTheFilingParent_AnAccessModelColumnTheCallerCanRead_IsKept()
+    {
+        var appRead = AppRead();
+        appRead["sprk_externalobjectid"] = "value";
+
+        var lifted = await Lift(true, CallerSeeing(appRead), appRead, [.. Mapped, "sprk_externalobjectid"]);
+
+        lifted!.GetAttributeValue<string>("sprk_externalobjectid").Should().Be("value");
+    }
+
+    [Fact]
+    public async Task ApplyOrLift_ForTheFilingParent_WhenTheAccessModelCallerReadFails_ThoseColumnsCopyNothing_TheRestDo()
+    {
+        var appRead = AppRead();
+        appRead["sprk_externalobjectid"] = "value";
+        var caller = CallerSeeing(appRead);
+        caller.FailWithStatus = 500;
+
+        var lifted = await Lift(true, caller, appRead, [.. Mapped, "sprk_externalobjectid"]);
+
+        lifted!.Contains("sprk_externalobjectid").Should().BeFalse("a failed caller read never falls back to the app-read value");
+        lifted.GetAttributeValue<string>("sprk_clientreference").Should().Be("ACME-REF");
+    }
+
+    /// <summary>Task 067 C4: the lifted row holds only mapped columns of kinds the mask copies; an unmapped column of the app read
+    /// (a gate column such as the owner) is never in it.</summary>
+    [Fact]
+    public async Task ApplyOrLift_ForTheFilingParent_KeepsOnlyMappedColumnsOfACopyableKind()
+    {
+        var appRead = AppRead();
+        appRead["ownerid"] = new EntityReference("systemuser", Guid.NewGuid());
+        appRead["sprk_issecure"] = true;
+        appRead["sprk_blob"] = new byte[] { 1, 2 };
+
+        var lifted = await Lift(true, CallerSeeing(appRead), appRead, ["sprk_clientreference", "sprk_blob"]);
+
+        lifted!.Attributes.Keys.Should().BeEquivalentTo("sprk_clientreference");
+    }
+
     [Fact]
     public async Task ApplyAsync_ForATableWithNoEntitySetMapping_TheSourceIsUnavailable()
     {
