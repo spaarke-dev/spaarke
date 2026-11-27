@@ -154,7 +154,22 @@ internal static class NodeRunAnalysisSave
             return writer;
         }
 
-        if (services?.GetService(typeof(AnalysisResultPersistence)) is not AnalysisResultPersistence persistence)
+        // Task 037 re-check K3: the engine builds this writer before its try, so a resolution fault must not escape. If it did, the
+        // run's channel would never complete and the detached drain would wait for the 50-minute cap. A fault means no save (logged).
+        AnalysisResultPersistence? persistence;
+        try
+        {
+            persistence = services?.GetService(typeof(AnalysisResultPersistence)) as AnalysisResultPersistence;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(
+                "Playbook run analysis persistence could not be resolved - Outcome: {Outcome}, RunId: {RunId}, ErrorType: {ErrorType}",
+                SaveUnavailableOutcome, runId, ex.GetType().Name);
+            return writer;
+        }
+
+        if (persistence is null)
         {
             logger.LogWarning(
                 "Playbook run has an analysis to save to, but no analysis persistence is available - Outcome: {Outcome}, RunId: {RunId}",

@@ -229,6 +229,22 @@ public sealed class PlaybookRunAnalysisSaveTests
         ((Guid)written.Arguments[0]).Should().NotBe(Guid.Empty).And.NotBe(AnalysisId);
     }
 
+    [Fact(DisplayName = "037 re-check K3: a fault resolving the analysis persistence gives the run's own writer, so the run still ends")]
+    public void SavingWriter_PersistenceResolutionFaults_ReturnsTheRunWriterAndLogsTheTypeOnly()
+    {
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<PlaybookStreamEvent>();
+        var services = new Mock<IServiceProvider>();
+        services.Setup(s => s.GetService(typeof(AnalysisResultPersistence)))
+            .Throws(new InvalidOperationException("secret detail that must not be logged"));
+        var logger = new CapturingLogger();
+
+        var writer = NodeRunAnalysisSave.SavingWriter(channel.Writer, AnalysisId, services.Object, Guid.NewGuid(), logger);
+
+        writer.Should().BeSameAs(channel.Writer, "a resolution fault must not escape before the engine's try, or the channel never completes");
+        logger.Lines.Should().Contain(l => l.Contains(NodeRunAnalysisSave.SaveUnavailableOutcome) && l.Contains(nameof(InvalidOperationException)));
+        logger.Lines.Should().NotContain(l => l.Contains("secret detail"));
+    }
+
     // ── Harness ─────────────────────────────────────────────────────────────────────────────────────────────
 
     private async Task<List<PlaybookStreamEvent>> RunAsync(

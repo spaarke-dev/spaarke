@@ -350,16 +350,17 @@ internal sealed class RunPlaybookTool : McpToolDefinition
             { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code, Status: StatusCodes.Status403Forbidden }
                 when code == FinanceAuthorizationFilter.SystemFailureReasonCode => new McpToolError(
                 code, "Spaarke could not check access right now, so the JPS playbook run was not started. Try again shortly.", StatusCodes.Status403Forbidden),
-            // Task 037 review K-2: the owner rule's refusal (the analysis would be filed under a secure record) is not "may not create".
+            // Task 037 review K-2: the secure-record rule's refusal is not "may not create". Re-check: the rule (SecureDesignationRemoval)
+            // is about secure protection changing, so the text names the secure-record rule without saying which way it would change.
             { Outcome: AnalysisStartOutcome.Refused, ReasonCode: SecureDesignationRemoval.NotPermittedReasonCode } => new McpToolError(
                 SecureDesignationRemoval.NotPermittedReasonCode,
-                "The JPS playbook run was not started: the analysis that holds its results would be filed under a secure record, and only "
-                + "someone with Full Access to that secure record can do that. Nothing is running.",
+                "The JPS playbook run was not started: filing the analysis that holds its results would change a secure record's "
+                + "protection, and only someone with Full Access to that secure record can do that. Nothing is running.",
                 analysis.Status),
             { Outcome: AnalysisStartOutcome.Refused, ReasonCode: SecureDesignationRemoval.PermissionUnverifiableReasonCode } => new McpToolError(
                 SecureDesignationRemoval.PermissionUnverifiableReasonCode,
-                "The JPS playbook run was not started: Spaarke could not confirm the signed-in user's access to the secure record that the "
-                + "analysis holding its results would be filed under. Nothing is running.",
+                "The JPS playbook run was not started: Spaarke could not confirm the signed-in user's access to the secure record that "
+                + "filing the analysis holding its results would affect. Nothing is running.",
                 analysis.Status),
             { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code, Status: StatusCodes.Status403Forbidden } => new McpToolError(
                 code,

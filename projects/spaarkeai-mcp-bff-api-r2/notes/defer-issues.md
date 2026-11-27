@@ -349,3 +349,15 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 - **Failure scenario:** D-28 makes `statuscode` authoritative. The demo loader writes, and the seeded Events grid filters on, a column that the owner will remove after the task-066 inventory. When that column goes, the demo load fails and the Events grid's status chip filters on nothing. Until then, the unit suite stays red for every branch that merges master.
 - **Fix:** move both scripts to `statuscode` and its option values (`EventStatusCode`), or, if the owner wants the old column kept for the demo, list them as approved exceptions in the test.
 - **Title**: `Demo-data and Events grid seed read deprecated sprk_eventstatus (EventStatusDeprecationTests red on master)`. Labels: bug; Type=Bug.
+
+## D-037-2 — `UpdateWorkingDocumentAsync` logs the whole exception (ADR-015) (found 2026-11-27, task 037 review)
+
+- **Status**: filed as #3302 (https://github.com/spaarke-dev/spaarke/issues/3302).
+- **Where**: `Services/Ai/WorkingDocumentService.cs` `UpdateWorkingDocumentAsync`, the legacy streaming path that 037 left unchanged. It calls `LogWarning(ex, …)`, and a Dataverse message can echo request text.
+- **Fix**: log the type and an outcome code only, as 037's `TryUpdateWorkingDocumentAsync` does, or move its callers to the Try variant.
+
+## D-037-3 — `FinalizeAnalysisAsync` swallows its own failures (found 2026-11-27, task 037 review)
+
+- **Status**: filed as #3303 (https://github.com/spaarke-dev/spaarke/issues/3303).
+- **Failure**: the write succeeds and the finalize fails. The analysis then stays `statuscode` 1 with content: the Console shows it as still in progress, while the results tool shows the content as available.
+- **Fix**: a Try variant with an outcome code; consider one retry.

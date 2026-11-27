@@ -525,8 +525,22 @@ sends RunFailed through the saving writer, which has seen no text, so it writes 
 
 ### 7.7 Left open (not fixed here)
 
-- `WorkingDocumentService.UpdateWorkingDocumentAsync` (unchanged, legacy streaming path) still logs the exception object, which may carry Dataverse message
+- (#3302) `WorkingDocumentService.UpdateWorkingDocumentAsync` (unchanged, legacy streaming path) still logs the exception object, which may carry Dataverse message
   text (an ADR-015 question).
-- `FinalizeAnalysisAsync` still swallows its own failures: a failed finalize after a saved write leaves the analysis at statuscode 1, which the reader shows
+- (#3303) `FinalizeAnalysisAsync` still swallows its own failures: a failed finalize after a saved write leaves the analysis at statuscode 1, which the reader shows
   as `available` because there is text.
-- K-4's reporting impact on matter-regarding views is not assessed.
+- K-4's reporting impact: checked 2026-11-27 by the main session. No sprk_playbookrun saved view filters on the regarding columns, and no code under src/ queries a run by its regarding record. So nothing reads the matter link today, and no issue is needed. The specialist-legal-agents-r1 session is told.
+
+## 8. Close-out (main session, 2026-11-27)
+
+- **Reviews:** two opus adversarial passes over 037a-c (security tag), one fix round (§7), then a scoped Sonnet re-check of the fix diff. The re-check found no F-class findings. Two of its K findings were fixed by the main session:
+  - **K3:** `NodeRunAnalysisSave.SavingWriter` now catches a fault resolving `AnalysisResultPersistence` and returns the run's own writer, logging the type only. Built before the engine's try, an escaping fault would have left the channel uncompleted until the 50-minute cap. Test: `SavingWriter_PersistenceResolutionFaults_ReturnsTheRunWriterAndLogsTheTypeOnly`.
+  - **K (403 wording):** the two `SecureDesignationRemoval` refusal texts in `RunPlaybookTool.ErrorOf(AnalysisStartResult)` now name the secure-record rule without saying which way the protection would change.
+- **Left as known limits (no fix):**
+  - the Console wrapper does not tell its SSE client when the content write failed: the SSE contract is unchanged, and the analysis is no longer falsely finalized;
+  - `TryUpdateWorkingDocumentAsync` copies the old method's body (they differ on cancellation; #3302 tracks the old method's logging);
+  - the exception-path save runs with `CancellationToken.None`, bounded by the HTTP client timeout.
+- **Filed:** #3302 (old `UpdateWorkingDocumentAsync` logs the exception object) and #3303 (`FinalizeAnalysisAsync` swallows its failures).
+- **CAPABILITY-INDEX:** row 47 and row 50 edited; rows 54, 55 and 56 added.
+- **Owner question still open:** whether to delete an analysis whose run never started (§4.6). With AI switched off this no longer happens (K-1); it remains for a launch timeout, the service being unavailable, or a caller cancel.
+- **Not verified:** live rendering in Chat and Cowork, light and dark (039/043 after the deploy).

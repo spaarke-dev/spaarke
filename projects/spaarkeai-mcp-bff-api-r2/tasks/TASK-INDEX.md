@@ -39,7 +39,7 @@
 | 032 | `spaarke_get_matter_summary` (cached, else start a run) | 2 | 🔲 [open] | 012, 020, 030 | Group I | sonnet / high | FULL |
 | 035 | Search results widget | 2 | ✅ [done] | 021, 022, 034 | Group I | sonnet / high | FULL |
 | 038 | `spaarke_run_playbook`: optional `instructions` argument (owner Q18, added 2026-11-26) | 2 | ✅ [done] | 030 | Group I | sonnet / high | FULL |
-| 037 | Playbook run results in Copilot: run widget + app-only results tool (owner Q17, added 2026-11-26) | 2 | 🔄 [wip] | 030, 035, 038 | Group I | opus / high | FULL |
+| 037 | Playbook run results in Copilot: run widget + app-only results tool (owner Q17, added 2026-11-26) | 2 | ✅ [done] | 030, 035, 038 | Group I | opus / high | FULL |
 | 039 | Deploy Phase 2 to dev; FR-13 restart check; routing-eval run B | 2 | 🔲 [open] | 029, 030–038 | Group J (alone) | sonnet / high | STANDARD |
 | 040 | Email: compose widget, `spaarke_compose_email`, app-only `spaarke_send_email` | 3 | 🔲 [open] | 011, 021, 023, 035, 039 | Group K (alone) | opus / high | FULL |
 | 041 | Routing eval runs A/B/C and description fixes | 3 | 🔲 [open] | 029 (runs B, C wait for 039, 049) | Group L (spans phases) | sonnet / high | STANDARD |

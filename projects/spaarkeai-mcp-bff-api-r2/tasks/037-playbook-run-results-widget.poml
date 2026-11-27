@@ -4,7 +4,7 @@
     <title>Playbook run results in Copilot: the run widget (ui://spaarke/playbook-run.html) and an app-only results tool</title>
     <phase>2 Long-running work, AI, widgets, task writes</phase>
     <gate>Owner decision 2026-11-26 (notes/decisions.md D-owner-answers-2026-11-26 #17: "yes add these feature capabilities; present in modern UI/UX"). Needs 030 (done). Serialise after 035 and before 040: it shares McpModule.cs, Sprk.Bff.Api.csproj (widget embeds) and publish-bff-artifact.yml. Before starting, merge origin/work/spaarkeai-mcp-bff-api-r2 and origin/master into the branch (merge, never rebase).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New app-only tool that returns AI output for a run, a new widget resource, embed and CI changes; ADR-015 data exposure decision</rigor-reason>
     <model-tier>opus</model-tier>
