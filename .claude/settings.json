@@ -109,6 +109,11 @@
             "type": "command",
             "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/quality-alert-banner.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/scripts/quality/runaway-processes.py\" banner",
+            "timeout": 10
           }
         ]
       }

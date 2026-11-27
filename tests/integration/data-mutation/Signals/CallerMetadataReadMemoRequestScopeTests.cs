@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
@@ -200,6 +201,66 @@ public sealed class CallerMetadataReadMemoRequestScopeTests
         await memo.PatchAsync("sprk_todos(c0430000-0000-4000-8000-000000000051)", "{}", default);
         await memo.GetAsync(Metadata, default);
         other.Gets[Metadata].Should().Be(3, "once more for the new memo, and once again after the write");
+    }
+
+    /// <summary>A caller-client view (<see cref="ICallerClientView"/>) over whatever client it is given: the shape of the access window's view.</summary>
+    private sealed class ViewOver : IDataverseUserClient, ICallerClientView
+    {
+        private readonly IDataverseUserClient _inner;
+
+        public ViewOver(IDataverseUserClient inner) => _inner = inner;
+
+        public IDataverseUserClient Inner => _inner;
+
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) => _inner.GetAsync(relativePath, cancellationToken);
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
+            _inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken) =>
+            _inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+
+        public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
+            _inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+
+        public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, long expectedVersion, CancellationToken cancellationToken) =>
+            _inner.PatchAsync(relativePath, jsonBody, expectedVersion, cancellationToken);
+
+        public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
+            _inner.DeleteAsync(relativePath, cancellationToken);
+    }
+
+    [Fact]
+    public async Task AViewOverAClientThatIsNotTheDataverseUserClient_GetsNoSharedAnswers_EvenInARequestWithAScope()
+    {
+        var scope = CallerMetadataReadMemo.RequestScope.Of(AmbientRequest());
+        var other = new OtherClient();
+        var otherToo = new OtherClient();
+
+        await CallerMetadataReadMemo.For(new ViewOver(other), scope).GetAsync(Metadata, default); // would enter the request's store if shared
+        await CallerMetadataReadMemo.For(new ViewOver(otherToo), scope).GetAsync(Metadata, default);
+        var real = await CallerMetadataReadMemo.For(_rig.NewClient(_wire), scope).GetAsync(Metadata, default);
+
+        other.Gets[Metadata].Should().Be(1);
+        otherToo.Gets[Metadata].Should().Be(1, "a second view over another non-DataverseUserClient does not see the first one's answer");
+        _wire.Gets[Metadata].Should().Be(1, "the real client's memo asked for itself: the views' answers never entered the request's store");
+        real.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TheAccessWindowsViewOverTheDataverseUserClient_SharesTheRequestsStore_WithTheClientItself()
+    {
+        var http = AmbientRequest();
+        var scope = CallerMetadataReadMemo.RequestScope.Of(http);
+        using var window = DecisionAccessWindow.Open(http, Guid.NewGuid());
+
+        var viaView = window.CallerClient(_rig.NewClient(_wire));
+        viaView.Should().BeOfType<DecisionAccessWindowCallerClient>().Which.Should().BeAssignableTo<ICallerClientView>();
+        await CallerMetadataReadMemo.For(viaView, scope).GetAsync(Metadata, default);
+        await CallerMetadataReadMemo.For(window.CallerClient(_rig.NewClient(_wire)), scope).GetAsync(Metadata, default);
+        await CallerMetadataReadMemo.For(_rig.NewClient(_wire), scope).GetAsync(Metadata, default);
+
+        _wire.Gets[Metadata].Should().Be(1, "the window's views over the real client and the real client share one store per request");
     }
 
     [Fact]

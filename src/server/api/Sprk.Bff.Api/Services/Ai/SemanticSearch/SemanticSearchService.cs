@@ -106,11 +106,16 @@ public sealed class SemanticSearchService : ISemanticSearchService
             var preprocessResult = await _queryPreprocessor.ProcessAsync(request, tenantId, cancellationToken);
             var processedRequest = preprocessResult.ProcessedRequest;
 
+            // GitHub #3239 (same defect as record search): a query of just "*" is Azure AI Search's match-all, not text to
+            // embed. Embedded, it would go out as "*" plus a query vector — a PURE VECTOR query, on which Azure rejects the
+            // highlight option (400). It is treated like the empty query (the Refresh / initial-load path): no embedding.
+            var matchAll = MatchAllQuery.IsMatchAll(processedRequest.Query);
+
             // Step 2: Generate embedding for vector modes
             ReadOnlyMemory<float> queryEmbedding = default;
             var embeddingFailed = false;
 
-            if (hybridMode != HybridSearchMode.KeywordOnly && !string.IsNullOrWhiteSpace(processedRequest.Query))
+            if (hybridMode != HybridSearchMode.KeywordOnly && !matchAll && !string.IsNullOrWhiteSpace(processedRequest.Query))
             {
                 embeddingStopwatch.Start();
                 try
@@ -168,10 +173,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 filter,
                 limit,
                 offset,
-                includeHighlights);
+                includeHighlights,
+                matchAll);
 
             // Step 6: Execute search
-            var searchText = hybridMode != HybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(processedRequest.Query)
+            var searchText = !matchAll && hybridMode != HybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(processedRequest.Query)
                 ? processedRequest.Query
                 : "*";
 
@@ -207,7 +213,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // (no semantic intent to rank against). Applying a 0.5 threshold to those
             // wipes EVERYTHING, leaving the user with an empty grid for what should be a
             // "show me everything in scope" query.
-            var hasQuery = !string.IsNullOrWhiteSpace(processedRequest.Query);
+            var hasQuery = !string.IsNullOrWhiteSpace(processedRequest.Query) && !matchAll;
             if (minScore > 0.0 && hasQuery)
             {
                 var beforeCount = results.Count;
@@ -361,7 +367,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
         string filter,
         int limit,
         int offset,
-        bool includeHighlights)
+        bool includeHighlights,
+        bool matchAll)
     {
         var searchOptions = new Azure.Search.Documents.SearchOptions
         {
@@ -400,8 +407,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
             }
         }
 
-        // Enable semantic ranking for hybrid and keyword modes
-        if (useKeyword)
+        // Enable semantic ranking for hybrid and keyword modes (not for a match-all "*": nothing for the ranker to rank)
+        if (useKeyword && !matchAll)
         {
             searchOptions.QueryType = SearchQueryType.Semantic;
             searchOptions.SemanticSearch = new SemanticSearchOptions
@@ -411,8 +418,10 @@ public sealed class SemanticSearchService : ISemanticSearchService
             };
         }
 
-        // Enable highlighting
-        if (includeHighlights)
+        // Enable highlighting — only when a keyword query runs. A vector-only request is sent with the match-all text "*",
+        // i.e. a pure vector query, and Azure AI Search rejects highlighting on those (400).
+        // A match-all has no terms to mark.
+        if (includeHighlights && useKeyword && !matchAll)
         {
             searchOptions.HighlightFields.Add("content");
         }

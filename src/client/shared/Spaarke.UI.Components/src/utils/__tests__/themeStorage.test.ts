@@ -463,6 +463,39 @@ describe('themeStorage', () => {
       expect(resolveCodePageTheme()).toBe(webDarkTheme);
     });
 
+    // Task 195 fix round 1 (F2): the Console passes its own resolved theme to the Invoice Review frame as `theme=` BESIDE `data`. That
+    // frame is two frames below the model-driven app, out of reach of the navbar check (one parent frame), so this parameter is how
+    // a user with no stored theme (or "auto") and a dark app gets a dark page.
+    it('uses a direct theme=dark parameter when nothing is stored, beside the data envelope (the Invoice Review frame URL)', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      setMockLocation({ search: '?data=invoiceId%3D11111111-1111-1111-1111-111111111111&theme=dark' });
+      expect(resolveCodePageTheme()).toBe(webDarkTheme);
+    });
+
+    it('uses theme=dark when nothing is stored at all (null) and the navbar is not reachable', () => {
+      localStorageMock.getItem.mockReturnValue(null);
+      setMockLocation({ search: '?data=x&theme=dark' });
+      expect(resolveCodePageTheme()).toBe(webDarkTheme);
+    });
+
+    it('theme=light is honoured too, and the parameter comes before the navbar check', () => {
+      localStorageMock.getItem.mockReturnValue('auto');
+      setMockLocation({ search: '?data=x&theme=light' });
+      const mockNavbar = document.createElement('div');
+      querySelectorSpy.mockReturnValue(mockNavbar);
+      getComputedStyleSpy.mockReturnValue({ backgroundColor: 'rgb(10, 10, 10)' }); // a dark navbar
+      expect(resolveCodePageTheme()).toBe(webLightTheme);
+    });
+
+    it('negative: an explicit stored preference still wins over theme=', () => {
+      setMockLocation({ search: '?data=x&theme=dark' });
+      localStorageMock.getItem.mockReturnValue('light');
+      expect(resolveCodePageTheme()).toBe(webLightTheme);
+      localStorageMock.getItem.mockReturnValue('dark');
+      setMockLocation({ search: '?data=x&theme=light' });
+      expect(resolveCodePageTheme()).toBe(webDarkTheme);
+    });
+
     it('should use navbar detection when no preference and no URL', () => {
       localStorageMock.getItem.mockReturnValue('auto');
       const mockNavbar = document.createElement('div');

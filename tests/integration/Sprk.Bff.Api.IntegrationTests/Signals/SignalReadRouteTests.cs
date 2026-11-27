@@ -2560,7 +2560,8 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             Guid? createdOnBehalfBy = null,
             string? name = null,
             (Guid Type, Guid Id)? core = null,
-            Guid? communication = null)
+            Guid? communication = null,
+            string? actionCode = null)
         {
             var id = Guid.NewGuid();
             DecisionRecordCreator[id] = createdBy ?? WriterUser;
@@ -2584,9 +2585,16 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             {
                 row["_sprk_corerecordtype_value"] = pair.Type == Guid.Empty ? null : pair.Type;
                 row["sprk_corerecordid"] = pair.Id == Guid.Empty ? null : pair.Id.ToString("D");
+                // Task 235: as the writer, the typed lineage lookup of the core table (sprk_matter, sprk_project, sprk_workassignment).
+                if (pair.Id != Guid.Empty && Catalog.TryGetValue(pair.Type, out var coreType)
+                    && DecisionRecordWriter.LineageColumnByCoreEntity.TryGetValue(coreType.Logical, out var lineage))
+                {
+                    row[$"_{lineage}_value"] = pair.Id;
+                }
             }
 
             if (communication is { } c) row["_sprk_regardingcommunication_value"] = c;
+            if (actionCode is not null) row["sprk_actioncode"] = actionCode;
             DecisionRecords[id] = (readers, row);
             return id;
         }
@@ -3048,21 +3056,36 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 // like / not-like (a null never matches either), a not-null / null lookup, and an INNER link to sprk_communication, which
                 // Dataverse trims by the caller's read of the linked row.
                 var conditions = drFetch.Root!.Element("entity")!.Elements("filter").Descendants("condition")
-                    .Where(c => (string?)c.Attribute("attribute") is "sprk_steps" or "sprk_regardingcommunication" or "sprk_confirmedby" or "sprk_policyversion")
-                    .Select(c => ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string?)c.Attribute("value"))).ToList();
+                    .Where(c => (string?)c.Attribute("attribute") is "sprk_steps" or "sprk_regardingcommunication" or "sprk_confirmedby" or "sprk_policyversion"
+                        or "sprk_actioncode")
+                    .ToList();
                 var emailJoined = drFetch.Descendants("link-entity").Any(l => (string?)l.Attribute("name") == "sprk_communication"
                     && (string?)l.Attribute("to") == "sprk_regardingcommunication" && (string?)l.Attribute("link-type") == "inner");
                 // Fix round 2: a caller with no Read on sprk_communication is refused the query that inner-joins it, as Dataverse refuses it.
                 if (emailJoined && TableDenied.TryGetValue(me2, out var joinDenied) && joinDenied.Contains("sprk_communication"))
                     return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
-                bool Matches(Dictionary<string, object?> row) => conditions.All(c => c switch
-                {
-                    ("sprk_steps", "like", var p) => row.GetValueOrDefault("sprk_steps") is string s && SqlLike(s, p!),
-                    ("sprk_steps", "not-like", var p) => row.GetValueOrDefault("sprk_steps") is string s && !SqlLike(s, p!),
-                    (var a, "not-null", _) => row.GetValueOrDefault($"_{a}_value") is not null,
-                    (var a, "null", _) => row.GetValueOrDefault($"_{a}_value") is null,
-                    _ => throw new InvalidOperationException($"The fake does not evaluate {c}."),
-                });
+                // Task 235: the kind reads' INNER link from the record's typed lineage lookup to its core table, which Dataverse trims by the
+                // caller's read of the core row, and refuses whole (403) when the caller has no Read on that table.
+                var coreJoin = drFetch.Root!.Element("entity")!.Elements("link-entity").FirstOrDefault(l => (string?)l.Attribute("link-type") == "inner"
+                    && (string?)l.Attribute("name") is "sprk_matter" or "sprk_project" or "sprk_workassignment");
+                if (coreJoin is not null && (string?)coreJoin.Attribute("from") != $"{(string)coreJoin.Attribute("name")!}id")
+                    throw new InvalidOperationException($"The fake does not evaluate {coreJoin}.");
+                if (coreJoin is not null && TableDenied.TryGetValue(me2, out var coreDenied) && coreDenied.Contains((string)coreJoin.Attribute("name")!))
+                    return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied");
+                bool Matches(Dictionary<string, object?> row) => conditions.All(c =>
+                    ((string)c.Attribute("attribute")!, (string)c.Attribute("operator")!, (string?)c.Attribute("value")) switch
+                    {
+                        ("sprk_steps", "like", var p) => row.GetValueOrDefault("sprk_steps") is string s && SqlLike(s, p!),
+                        ("sprk_steps", "not-like", var p) => row.GetValueOrDefault("sprk_steps") is string s && !SqlLike(s, p!),
+                        ("sprk_actioncode", "in", _) => row.GetValueOrDefault("sprk_actioncode") is string code
+                            && c.Elements("value").Any(v => string.Equals(v.Value, code, StringComparison.OrdinalIgnoreCase)),
+                        (var a, "not-null", _) => row.GetValueOrDefault($"_{a}_value") is not null,
+                        (var a, "null", _) => row.GetValueOrDefault($"_{a}_value") is null,
+                        _ => throw new InvalidOperationException($"The fake does not evaluate {c}."),
+                    });
+                bool CoreReadable(Dictionary<string, object?> row) => coreJoin is null
+                    || (row.GetValueOrDefault($"_{(string)coreJoin.Attribute("to")!}_value") is Guid core
+                        && Records.TryGetValue(core, out var r) && r.Table == (string)coreJoin.Attribute("name")! && r.Readers.Contains(me2));
                 bool EmailReadable(Dictionary<string, object?> row) => !emailJoined
                     || (row.GetValueOrDefault("_sprk_regardingcommunication_value") is Guid email
                         && Records.TryGetValue(email, out var r) && r.Table == "sprk_communication" && r.Readers.Contains(me2));
@@ -3073,7 +3096,7 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                     // Task 223 (DI-144): and the createdonbehalfby-is-empty half of WriterCreatedRecord, as Dataverse evaluates it.
                     .Where(r => !onBehalfOfEmpty || !DecisionRecordOnBehalfOf.ContainsKey(r.Key))
                     .Select(r => (r.Key, Row: RecordRow(r.Key, r.Value.Row)))
-                    .Where(r => Matches(r.Row) && EmailReadable(r.Row))
+                    .Where(r => Matches(r.Row) && EmailReadable(r.Row) && CoreReadable(r.Row))
                     .OrderByDescending(r => (string)r.Row["sprk_decidedon"]!).ThenBy(r => r.Key)
                     // Like Dataverse, a column comes back only when the query selects it (the name only through the confirming-user link).
                     .Select(r => r.Row

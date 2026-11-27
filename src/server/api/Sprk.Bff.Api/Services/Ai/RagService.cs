@@ -169,9 +169,12 @@ public partial class RagService : IRagService
                 _telemetry?.RecordPrivilegeFilterApplied(groupCount: 0);
             }
 
-            // Step 1: Get embedding for query (with caching)
+            // Step 1: Get embedding for query (with caching).
+            // A "*" query is a keyword match-all over the filters (#3239 family): the star is never embedded, so no
+            // vector leg is built, and the search below carries neither highlights nor semantic ranking.
+            var matchAll = MatchAllQuery.IsMatchAll(query);
             ReadOnlyMemory<float> queryEmbedding = default;
-            if (options.UseVectorSearch)
+            if (options.UseVectorSearch && !matchAll)
             {
                 embeddingStopwatch.Start();
 
@@ -259,10 +262,10 @@ public partial class RagService : IRagService
             }
 
             // Step 3: Build hybrid search options with privilege filter applied
-            var searchOptions = BuildSearchOptions(options, queryEmbedding, userGroupIds);
+            var searchOptions = BuildSearchOptions(options, queryEmbedding, userGroupIds, matchAll);
 
             // Step 4: Execute search (with optional resilience)
-            var searchText = options.UseKeywordSearch ? query : "*";
+            var searchText = options.UseKeywordSearch && !matchAll ? query : "*";
 
             // Log structured RetrievalQuery event before executing search.
             // QueryText is truncated to MaxQueryTextLength — never log full content (PII/compliance).
@@ -1123,7 +1126,8 @@ public partial class RagService : IRagService
     private SearchOptions BuildSearchOptions(
         RagSearchOptions options,
         ReadOnlyMemory<float> queryEmbedding,
-        IReadOnlyList<string>? userGroupIds = null)
+        IReadOnlyList<string>? userGroupIds = null,
+        bool matchAll = false)
     {
         // R5 task 002 / FR-09 — under session-scoped routing, use the session-files
         // semantic configuration (the knowledge index's `knowledge-semantic-config` does
@@ -1138,14 +1142,19 @@ public partial class RagService : IRagService
         {
             Size = options.TopK,
             IncludeTotalCount = true,
-            QueryType = SearchQueryType.Semantic,
-            SemanticSearch = new SemanticSearchOptions
+        };
+
+        // A match-all ("*") has nothing for the semantic ranker to rank, so it stays a plain keyword search (#3239 family).
+        if (!matchAll)
+        {
+            searchOptions.QueryType = SearchQueryType.Semantic;
+            searchOptions.SemanticSearch = new SemanticSearchOptions
             {
                 SemanticConfigurationName = semanticConfigName,
                 QueryCaption = new QueryCaption(QueryCaptionType.Extractive),
                 QueryAnswer = new QueryAnswer(QueryAnswerType.None)
-            }
-        };
+            };
+        }
 
         // Add vector search if enabled — both indexes use the same `contentVector3072`
         // field name (3072-dim text-embedding-3-large) per task 001 schema.
@@ -1335,8 +1344,13 @@ public partial class RagService : IRagService
             }
         }
 
-        // Enable highlighting
-        searchOptions.HighlightFields.Add("content");
+        // Enable highlighting — except on a pure vector query (a vector leg with no keyword text, which this
+        // service runs as "*"): the index refuses highlights there with a 400 (#3239 family). A match-all has no terms to mark.
+        var pureVector = searchOptions.VectorSearch is not null && !(options.UseKeywordSearch && !matchAll);
+        if (!pureVector && !matchAll)
+        {
+            searchOptions.HighlightFields.Add("content");
+        }
 
         return searchOptions;
     }
