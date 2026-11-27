@@ -16,7 +16,12 @@ export type {
 } from './types';
 export { hasInvoiceReview } from './types';
 // Billing items open Invoice Review as a dialog (task 175, D-207); the launcher is Xrm-coupled and the HOST passes it to the widget.
-export { buildInvoiceReviewLaunch, openInvoiceReview } from './openInvoiceReview';
+export { buildInvoiceReviewLaunch, buildInvoiceReviewUrl, openInvoiceReview } from './openInvoiceReview';
+// Task 195: the same page in-app on the shared modal shell (SprkModal, ADR-050) with "N of M" browse; the HOST supplies the client URL.
+// (a modal, not a row component: the widget mounts it; the barrel exports its props type only, with the row-component guard in Worklist.test.tsx)
+export type { InvoiceReviewModalProps } from './InvoiceReviewModal';
+export { buildInvoiceBrowseSet } from './invoiceReviewBrowse';
+export type { InvoiceBrowseSet } from './invoiceReviewBrowse';
 // The lane count filters are DATA for the existing WorkspaceShell/MetricCardRow (D-24); no new card component.
 export { bucketLaneItems, buildLaneCountCards, filterLaneItems, resolveLaneFilterKey } from './laneCountFilters';
 export type { BuildLaneCountCardsOptions, LaneCountBucket, LaneFilterKey } from './laneCountFilters';

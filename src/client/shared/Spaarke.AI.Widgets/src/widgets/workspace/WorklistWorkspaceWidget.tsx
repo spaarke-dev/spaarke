@@ -15,6 +15,9 @@
  *   - `openInvoiceReview` - billing Work Items are decided only in the eBilling Invoice Review page (D-207, task 175): the shared opener
  *                      shows it as a dialog (`Xrm.Navigation.navigateTo`) and the widget reads the lists again when it closes. Without Xrm
  *                      it rejects and the widget says "Invoice Review could not be opened"; it never opens the wizard for a billing item.
+ *   - `invoiceReviewClientUrl` - task 195 (ADR-050 launch rule): the org client URL, read from Xrm here (the shared widget has none, ADR-012).
+ *                      With it the page opens in-app on the shared modal shell with "N of M" browse and `openInvoiceReview` is only the
+ *                      fallback; without it (no Xrm) the `navigateTo` path runs as before.
  *
  * The narrative slot is not filled here either: the shared widget asks `service.narrate` for the Assistant's summary of the list's counts
  * (task 062), shows it while no filter is on, and a host-supplied `narrative` would win. This host supplies none.
@@ -31,6 +34,7 @@ import {
   XrmDataverseClient,
   createWorklistService,
   createXrmNavigationService,
+  getClientUrl,
   getXrm,
   openInvoiceReview,
 } from '@spaarke/ui-components';
@@ -85,6 +89,9 @@ export const WorklistWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
     [navigation, webApi]
   );
   const openRecord = React.useMemo(() => (navigation ? createWorklistOpenRecord(navigation) : undefined), [navigation]);
+  // Task 195 (ADR-050 launch rule): the org client URL, so a billing Work Item opens Invoice Review in-app on the shared modal shell with
+  // "N of M" browse. Undefined when Xrm cannot be read (a non-MDA dev shell): the widget then falls back to `openInvoiceReview` below.
+  const invoiceReviewClientUrl = React.useMemo(() => getClientUrl() || undefined, []);
 
   const openEmailReview = React.useCallback(() => {
     dispatch('workspace', { type: 'widget_load', widgetType: RECONCILIATION_WIDGET_TYPE });
@@ -103,6 +110,7 @@ export const WorklistWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
         openLookup={openLookup}
         openRecord={openRecord}
         openInvoiceReview={openInvoiceReview}
+        invoiceReviewClientUrl={invoiceReviewClientUrl}
         aggregateRow={aggregateRow}
       />
     </div>

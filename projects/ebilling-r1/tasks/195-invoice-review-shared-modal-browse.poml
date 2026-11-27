@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="195" project="ebilling-r1">
+  <metadata>
+    <title>Invoice Review opens in-app on the shared modal shell (SprkModal, ADR-050) with "N of M" browse in its header; compact one-row count cards</title>
+    <phase>Owner request after the 095d-3 dev check; added 2026-11-26</phase>
+    <gate>Owner's go typed in the ebilling-r1 session 2026-11-26 ("Yes, both together"). Dev deploys (Console bundle, Invoice Review page) are separate owner gos.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes .ts/.tsx in a shared library consumed by the Console, plus a code page; cross-frame messaging.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified composition of existing shared parts (SprkModal nav, the dirty-check protocol, MetricCardRow) with a named reference implementation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>175, 095d</deps>
+    <tags>frontend, react, fluent-ui, shared-components, modal, code-page</tags>
+  </metadata>
+
+  <prompt>
+The owner checked Invoice Review on dev (2026-11-26) and found two problems:
+
+1. It does not follow the modal standard (ADR-050). The Console's Worklist opens it with Xrm.Navigation.navigateTo (target 2): the title bar, expand and close are Dataverse platform chrome, light-only, and there is no record browse ("N of M" with previous/next) in the header. ADR-050's launch rule: a Spaarke React surface (the Console) opens modals in-app on the SprkModal family; the shell's header owns the browse nav group.
+2. The five count cards (All lines, Processing, To decide, Clean, Decided) wrap to two rows. They must fit one row at typical resolutions, as smaller rectangles.
+
+Build both.
+  </prompt>
+
+  <design>
+    <item id="A">New shared component in src/client/shared/Spaarke.UI.Components/src/components/Worklist/ (name: InvoiceReviewModal): composes SprkModal DIRECTLY (not BrowseModal: BrowseModal is fixed at size "lg" with a metadata grid and a Close footer, which a full review page cannot use), size "xl", padded false, the shell's own `nav` prop for "N of M" + previous/next, title "Invoice Review". The body is an iframe of the Invoice Review code page filling the body edge to edge. Reference implementation to copy for the iframe-in-SprkModal composition: src/client/shared/Spaarke.UI.Components/src/components/FindSimilarViewer/FindSimilarViewerDialog.tsx (non-embedded path: frameWrap/frame styles, SprkModal composed directly). No hand-rolled overlay, no new envelope, tokens only.</item>
+    <item id="B">The iframe URL is built by a pure shared helper next to the existing opener (src/client/shared/Spaarke.UI.Components/src/components/Worklist/openInvoiceReview.ts): given the org client URL and an InvoiceReviewTarget, return `{clientUrl}/WebResources/sprk_invoicereviewpage?data={encodeURIComponent("invoiceId=...&amp;lineId=...")}` using the same cleanGuid + data shape as buildInvoiceReviewLaunch (the page's launch.ts parses it; read src/solutions/InvoiceReview/src/services/launch.ts). The component never touches Xrm (ADR-012): the HOST supplies the client URL.</item>
+    <item id="C">WorklistWidget (src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistWidget.tsx, openReview at about :277) gets a new optional prop through which the host supplies the org client URL (or a URL builder). When it is supplied, activating a billing item opens InvoiceReviewModal in-app; when it is absent, the existing `openInvoiceReview` (navigateTo) path runs unchanged. On close the lanes are read again (today's reload()), exactly as when the navigateTo promise settles.</item>
+    <item id="D">Browse set: the billing items (items with `invoiceReview`) the user currently sees in the list the item was activated from (same lane, same active count filter, same order), de-duplicated by invoiceId (keep the first item's lineId for that invoice). The clicked item's invoice is the start index. Previous/next move through that set; changing the record swaps the iframe src. The set is captured when the modal opens (a lane reload while it is open does not reshuffle it). If the set has one invoice, nav shows "1 of 1" with both buttons disabled (the shell does this from index/total).</item>
+    <item id="E">Unsaved work is not lost on browse. Use the existing cross-frame protocol (RecordNavigationModalShell types: DIRTY_CHECK_REQUEST_TYPE / DIRTY_CHECK_RESULT_TYPE, IDirtyCheckRequest / IDirtyCheckResponse; read its README "Cross-frame dirty-check protocol"). Parent side: the modal's nav.onBeforeNavigate posts a request to the iframe's contentWindow with a correlationId, accepts only a response from that window, from window.location.origin, with that correlationId; timeout 1000 ms = clean (protocol rule). If dirty, show the shared ConfirmModal ("Discard what you haven't saved?" style; Cancel keeps the record, confirm moves). If RecordNavigationModalShell already has an internal query function, export and reuse it rather than writing a second one. Page side (src/solutions/InvoiceReview): answer the request (origin must equal window.location.origin; reply to event.source with the request's correlationId) with dirty=true while any of: a note box holds unsaved text, a line correction/reduce entry has an unsaved change, the decision wizard is open, or a write is in flight. Find these states in InvoiceReviewPage.tsx and its children; do not invent new ones.</item>
+    <item id="F">Hosts: both Console mounts pass the client URL: src/solutions/LegalWorkspace/src/sections/worklist.registration.ts (passes openInvoiceReview at about :148) and src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorklistWorkspaceWidget.tsx (about :105). The client URL comes from Xrm (getXrm()... getGlobalContext().getClientUrl(), the way other Console hosts get it; find an existing helper in @spaarke/ui-components before writing one). If it cannot be read, pass nothing (the navigateTo fallback runs). Keep passing openInvoiceReview as the fallback.</item>
+    <item id="G">Count cards (src/solutions/InvoiceReview/src/components/InvoiceReviewPage.tsx about :1025, `MetricCardRow layout="wide"`): all five cards on ONE row in the page's cards area at 1280 px and wider viewports (inside the modal at size xl), as shorter rectangles (target card height about 72 px or less; the count, label and the "n of m done today" progress line stay readable). Do it without changing the shared MetricCard/MetricCardRow defaults that other screens use. Prefer the row's existing `className` prop with a page-local makeStyles class. Only if the card itself cannot be made shorter that way, add an opt-in additive layout value to the shared types (default unchanged), with a root CLAUDE.md §11 justification in the notes. Tokens only, no hex, no '1px'.</item>
+    <item id="H">Shared library version: bump @spaarke/ui-components minor (3.1.0 to 3.2.0) and note it, as 095f-2e2b did.</item>
+  </design>
+
+  <constraints>
+    <constraint>ADR-050: SprkModal is composed, never forked or re-enveloped. Do NOT edit SprkModal.tsx, BrowseModal.tsx, RecordNavigationModalShell.tsx behaviour, MetricCard.tsx or MetricCardRow.tsx defaults (an export-only change to RecordNavigationModalShell to reuse its query function is allowed). An open stale PR (#1293) edits SprkModal.tsx.</constraint>
+    <constraint>ADR-012: shared components take no Xrm, no ComponentFramework context. Hosts build URLs.</constraint>
+    <constraint>ADR-021: Fluent v9 semantic tokens only; zero hex, zero '1px', no inline colour styles.</constraint>
+    <constraint>Do not change the Copilot Decide lane link-out (src/client/widgets/spaarke-decisions/src/lane/billingLinkOut.ts) or the BFF. No BFF file is touched.</constraint>
+    <constraint>Keep the existing navigateTo opener (openInvoiceReview) and its tests working: it is the fallback when no client URL is supplied.</constraint>
+    <constraint>Firm-facing UI never shows internal reason codes (unchanged pages; do not add any).</constraint>
+    <constraint>Never run git stash, --no-verify, python, python3 or python -. Do not deploy anything. Commit on your worktree branch only.</constraint>
+    <constraint>npm in src/solutions/*: `npm install --legacy-peer-deps --no-audit --no-fund` (not npm ci). Shared library changes must be built (npm run build in Spaarke.UI.Components) before building a consumer.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Activating a billing item in WorklistWidget with a client URL supplied renders InvoiceReviewModal (an SprkModal dialog, title "Invoice Review") whose iframe src equals the helper's URL for that item's invoice and line; navigateTo / openInvoiceReview is NOT called.</criterion>
+    <criterion testable="true">Without a client URL, the existing openInvoiceReview path runs as before (existing WorklistInvoiceReview tests still pass unchanged or with only additive cases).</criterion>
+    <criterion testable="true">The header shows "N of M" over the de-duplicated billing items of the activating lane/filter in display order; next/previous change the iframe src to the neighbouring invoice (with its first item's lineId); at the ends the matching button is disabled; a one-invoice set shows "1 of 1".</criterion>
+    <criterion testable="true">Closing the modal (×) reads the lanes again (reload called once).</criterion>
+    <criterion testable="true">Dirty check: frame answers dirty=true then Cancel: src unchanged; confirm: src moves. Frame answers dirty=false or does not answer within 1000 ms (fake timers): src moves without a prompt. A response from another window, another origin or with the wrong correlationId is ignored (treated as no answer).</criterion>
+    <criterion testable="true">Page side: the Invoice Review page answers a same-origin request with dirty=true while a note box has unsaved text and while the decision wizard is open, and dirty=false on a fresh load; a request from another origin gets no answer.</criterion>
+    <criterion testable="true">The URL helper: GUIDs cleaned (braces stripped, lower case), lineId omitted when absent, data value URI-encoded once; a trailing slash on the client URL does not produce a double slash.</criterion>
+    <criterion testable="true">Count cards: the page passes a page-local class to MetricCardRow that lays out the five cards in one row (assert the class's grid template in the rendered style or the className presence plus a style snapshot of the rule); no change to MetricCardRow/MetricCard defaults (git diff of those files is empty unless the opt-in fallback in design G was needed and justified).</criterion>
+    <criterion testable="true">Token scan of every new or changed .tsx: no hex colour, no '1px', no inline color style.</criterion>
+    <criterion testable="true">Builds and tests green: Spaarke.UI.Components `npm run build` and the jest suites for Worklist, SprkModal and RecordNavigationModalShell; Spaarke.AI.Widgets jest for WorklistWorkspaceWidget; InvoiceReview `npx jest` (all suites) and `npm run build`; a typecheck of src/solutions/LegalWorkspace (and src/solutions/SpaarkeAi if LegalWorkspace has no standalone tsc config).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/InvoiceReviewModal.tsx (new) + tests</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/openInvoiceReview.ts (URL helper), WorklistWidget.tsx, index.ts, types.ts as needed</file>
+    <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/index.ts (export only, if reused)</file>
+    <file>src/client/shared/Spaarke.UI.Components/package.json (3.2.0)</file>
+    <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorklistWorkspaceWidget.tsx</file>
+    <file>src/solutions/LegalWorkspace/src/sections/worklist.registration.ts</file>
+    <file>src/solutions/InvoiceReview/src/** (dirty-check responder, compact cards) + tests</file>
+    <file>projects/ebilling-r1/notes/195-invoice-review-shared-modal-browse.md</file>
+  </outputs>
+
+  <notes>
+    <note>Deploy path (not this task): the Worklist change reaches dev only with a Console (sprk_spaarkeai) deploy; the cards and the dirty responder with an Invoice Review page deploy. Both are owner gos after the master merge.</note>
+    <note>The Invoice Review page already registers the Navigator side pane and themes itself through src/solutions/_ebilling-shared (useCodePageBootstrap); check that the theme resolves the same inside an in-app iframe as inside the navigateTo dialog, and record what you found.</note>
+  </notes>
+</task>
