@@ -71,7 +71,8 @@ import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
 import { getClientUrl } from "../services/nextStepLauncher";
-import { getAuthProvider, authenticatedFetch as spaarkeAuthenticatedFetch, buildBffApiUrl } from "@spaarke/auth";
+import { requestFindSimilarIndexing } from "../services/findSimilarIndexing";
+import { getAuthProvider, authenticatedFetch as spaarkeAuthenticatedFetch } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -628,6 +629,7 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
     const [showViewer, setShowViewer] = React.useState(false);
     const [isIndexing, setIsIndexing] = React.useState(false);
     const [tenantId, setTenantId] = React.useState<string>("");
+    const [indexWarning, setIndexWarning] = React.useState<string | null>(null);
 
     // Resolve tenantId asynchronously from MSAL account on mount
     React.useEffect(() => {
@@ -673,30 +675,30 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
         const driveId = fileResult?.createResult?.driveId;
         const itemId = fileResult?.createResult?.itemId;
 
-        // Trigger indexing if we have file metadata
+        // Trigger indexing if we have file metadata. The request names the tenant and the document (#3299); a
+        // refusal is shown, and the viewer still opens (the upload's own indexing may already have run).
+        setIndexWarning(null);
         if (driveId && itemId) {
             setIsIndexing(true);
             try {
-                await spaarkeAuthenticatedFetch(buildBffApiUrl(bffBaseUrl, '/ai/rag/index-file'), {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        driveId,
-                        itemId,
-                        fileName: fileResult?.fileName ?? "document",
-                    }),
-                });
-            } catch (err) {
-                console.warn("[FindSimilar] Indexing trigger failed (non-critical):", err);
+                const indexed = await requestFindSimilarIndexing(
+                    spaarkeAuthenticatedFetch,
+                    bffBaseUrl,
+                    { documentId: selectedDocumentId, driveId, itemId, fileName: fileResult?.fileName ?? "document" },
+                    async () => tenantId || (await getAuthProvider().getTenantId()),
+                );
+                if (!indexed) {
+                    setIndexWarning(
+                        "This document could not be sent for indexing, so similar-document results may not include it yet.",
+                    );
+                }
             } finally {
                 setIsIndexing(false);
             }
         }
 
         setShowViewer(true);
-    }, [selectedDocumentId, successfulFiles, bffBaseUrl]);
+    }, [selectedDocumentId, successfulFiles, bffBaseUrl, tenantId]);
 
     return (
         <div className={styles.dynamicStepRoot}>
@@ -741,6 +743,12 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
                         Find Similar Documents
                     </Button>
                 </div>
+            )}
+
+            {indexWarning && (
+                <MessageBar intent="warning">
+                    <MessageBarBody>{indexWarning}</MessageBarBody>
+                </MessageBar>
             )}
 
             {/* Inline Find Similar viewer overlay (#714 rename: FindSimilarDialog → FindSimilarViewerDialog) */}
