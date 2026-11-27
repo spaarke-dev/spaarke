@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="237" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ClosesTodo recognises statecode/statuscode sent as a string or a non-integer JSON number, so the open-inquiry guard cannot be skipped (uac-r2 note on #3293)</title>
+    <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs on a write-refusal guard (bff-api).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One static method plus tests; reference implementation is the method itself.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-d-2026-11-27</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only InquiryDispositionService.ClosesTodo and its tests.</parallel-reason>
+    <deps>234</deps>
+    <tags>bff-api, signals, inquiry</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>uac-r2 (access gate for dev candidate d9595dd98e, 2026-11-27): InquiryDispositionService.ClosesTodo only treats statecode/statuscode as closing when the JSON value is a Number that TryGetInt64 accepts. A body sending "statecode": "1" or 1.0 skips the open-inquiry guard on both the browser PATCH (ChildRecordEndpoints.UpdateAsync) and the chat update tool (DataverseUpdateRecordHandler). Make the check fail closed.</prompt>
+  <role>Implementer agent, worktree off origin/master, PR to master.</role>
+  <goal>Any update body whose statecode or statuscode names an Inactive state of a To Do, in any JSON form Dataverse could accept, is treated as closing it; an unreadable statecode/statuscode value is treated as closing (the open-inquiry check then decides).</goal>
+  <context><background>ClosesTodo is a pure no-I/O predicate; a true result only triggers the open-inquiry read, which refuses only when an open inquiry exists. Over-matching therefore costs one read; under-matching skips the guard.</background></context>
+  <constraints>
+    <constraint source="D-233">Do not change InquiryTodoCloseRefusalAsync, the route or the chat handler beyond what the predicate needs.</constraint>
+    <constraint source="public repo">No environment ids in code, tests, commits or PR.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Number values: accept an integral value (TryGetInt64, else TryGetDouble with an integral check, e.g. 1.0, 1e0).</step>
+    <step order="2">String values: trim and parse an integer (invariant culture).</step>
+    <step order="3">Any other value kind, or an unparseable string or non-integral number, on a statecode/statuscode key: treat as closing (fail closed). Null stays not-closing.</step>
+    <step order="4">Unit tests: must-fire for "1", " 1 ", 1.0, 1e0, "2" and "659490002" statuscode, true/garbage string on statecode; must-not-fire for 0, "0", null, statuscode 1, other column names.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">New tests fail before the change and pass after.</criterion>
+    <criterion testable="true">--filter "FullyQualifiedName~Signals|FullyQualifiedName~ChildRecord|FullyQualifiedName~DataverseUpdateRecordHandler" passes; ArchTests pass.</criterion>
+    <criterion testable="true">Publish-size delta recorded (expected ~0) in the PR.</criterion>
+  </acceptance-criteria>
+</task>

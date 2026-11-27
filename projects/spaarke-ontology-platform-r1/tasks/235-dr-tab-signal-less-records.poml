@@ -4,7 +4,7 @@
     <title>Signal-less billing, Record Procedure and assign-firm Decision Records appear on the Decision Records tab under their core record, without Open (#3283, DI-180)</title>
     <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>

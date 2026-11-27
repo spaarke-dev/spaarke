@@ -4,7 +4,7 @@
     <title>A system-closed (ConditionCleared) Decision Record derives its privilege flag with WorkItemPrivilege, app-only (#3275, DI-177)</title>
     <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
