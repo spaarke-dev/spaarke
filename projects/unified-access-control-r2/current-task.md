@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-27 ~21:00Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-27 ~21:32Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -33,7 +33,7 @@
 - **intake-pipeline-r1 (PR #3253 draft, head 9bad3f4815):** asked for a dev BFF deploy ~16:00Z on a go from THEIR session. Declined: merge base 24d53fb333 is far behind live (5cd40984b0 / 765a199922 / 6f4d7bc7e4 not ancestors, would roll back gated work); the go must be the owner's here on an exact SHA. Path given: master merge + their task 013 → send access-relevant src/server diff to me (EmailChannelSender createReply, Communication services, DocumentProcessingJobHandler removal, OfficeJobStatusService, app-only IAgreementAi) → merge to master → I batch it into the next candidate.
 
 ## LIVE NOW: `af8a5547ef` since ~20:57Z 2026-11-27 (owner in session: "Go BFF deploy af8a5547ef")
-- `C:/wtdep33`, 42.17 MB, live DLL SHA-256 CE2229C1… = local. IsSecured re-checked 20:50Z: 0 non-boolean. Smoke: healthz 200, preview-url 403, bogus 404, MCP init 200, tools/list 9 (5 decision + 4 spike). LIVE sent to the 8. **NEXT: final 30-min gate `gate-now.ps1 2026-11-27T20:57:00Z` at/after 21:27Z, then GATE notices to the 8.**
+- `C:/wtdep33`, 42.17 MB, live DLL SHA-256 CE2229C1… = local. IsSecured re-checked 20:50Z: 0 non-boolean. Smoke: healthz 200, preview-url 403, bogus 404, MCP init 200, tools/list 9 (5 decision + 4 spike). LIVE sent to the 8. **30-min gate PASS 21:28Z** (22 req, 0 5xx, no external; 16+16 usual container_ancestor_unresolved/ambiguous refusals, same kinds as every gate). GATE sent to the 8.
 
 ## Previous: master `d9595dd98e` ~20:19Z–20:52Z (owner in session: "Go BFF deploy d9595dd98e") — 30-min gate PASS 20:49Z (69 req, one 500 = #3307, no external, 12 usual container refusals)
 - `C:/wtdep32`, 42.14 MB, live DLL SHA-256 10974E94… = local (`deploy/api-publish`). Pre-deploy IsSecured: 18 tables, 0 non-boolean. Smoke: healthz 200, catalog 503 (old), preview-url 403, bogus 404, spike route 404, tools/list 5 (spike tools gone, as announced). Rollback: `5cd40984b0` (`C:/wtdep31`).
@@ -60,3 +60,10 @@
 - Scratchpad: `livecheck.ps1 -LocalDll <dll>` (live hash), `after30.ps1` (smoke), `gate-now.ps1 <t0>`, `gate29x.ps1` (exception detail, t0 18:00Z), `cand29.sh`, `asg1.ps1`/`asg2.ps1`/`asg3.ps1` (audit queries), `pr3245.md`.
 - The untracked 0-byte `tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs`: leave it alone.
 - Peer pipe addresses: ebilling `cc-msg-c8f5bbc4…`, mcp-r1 `cc-msg-6ad27070…`, word-add-in `cc-msg-6723e836…`, field-mapping `cc-msg-833ddee7…`, spa-r4 `cc-msg-0fe1b7fa…`, ontology `cc-msg-c1a1d83c…` (or by bare name for spa-r4/ontology-r1/mcp-r1/specialist-legal-agents-r1).
+
+## Open since the af8a5547ef deploy (2026-11-27 ~21:30Z)
+- **Next candidate inputs:** ontology #3308 (task 237: ClosesTodo fails closed on string/non-integer statecode; the bypass reproduced live via the child-records PATCH) → review its src/server diff on the merge SHA. Live is a spike tip, so the next deploy is a spike re-merge or master alone (coordinate with specialist-legal-agents-r1).
+- **spa-r4 task 047 (9f819b9daa, FR-31c #2578): APPROVED** (log level only; note: a WhoAmI that throws becomes report.Fault). The PR (044+047) is theirs.
+- **mcp-r1 #3242:** RequireMcpOriginCheck in NotAuthorizationForms agreed.
+- **intake-pipeline-r1 task 013:** chose (b), a RoleSetNotInLineage entry for sprk_processingjob (reason text given). Asked for: can a service request's owner change after its run is created? (the run's stagestatus holds AI-derived content; if yes, file an issue). Dev change (theirs, owner go there): prvReadsprk_ProcessingJob Basic on the Secure Record Owners role, verify 41/41. Review their access diff before the master merge.
+- field-mapping-r1 SpaarkeMaster import 20:22–21:16Z: I wrote no components in that window.
