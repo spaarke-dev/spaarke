@@ -342,7 +342,7 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 
 ## D-037-1 — master's demo-data and grid-seed scripts read the deprecated `sprk_eventstatus` column; `EventStatusDeprecationTests` fails on master (found 2026-11-27 merging master into 037)
 
-- **Status**: needs a GitHub issue (the main session files it). Pre-existing on `origin/master` 6f4d7bc7e4; this project did not touch these files.
+- **Status**: already filed as #3246 (also #3182, #3175); the grid-seed offender was added to #3246 as a comment on 2026-11-27. Pre-existing on `origin/master` 6f4d7bc7e4; this project did not touch these files.
 - **Failure:** `Sprk.Bff.Api.Tests.Api.Events.EventStatusDeprecationTests.NoSourceFile_ReadsOrWrites_TheDeprecatedColumn` fails with three offenders:
   - `scripts/demo-data/DemoDataLib.ps1:100` (`status = @{ Column = 'sprk_eventstatus' }`) and `scripts/demo-data/reference-names.json`, from #3243;
   - `scripts/seed-data/reference/sprk_gridconfiguration.json` (the Events grid's filter-chip allowlist names `sprk_eventstatus`), from #3244.

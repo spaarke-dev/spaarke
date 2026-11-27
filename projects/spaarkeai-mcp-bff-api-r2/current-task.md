@@ -8,7 +8,7 @@
 |---|---|
 | **Active work** | `/project-pipeline` Step 5, Phase 2. Sub-agents run in isolated worktrees (`C:\code_files\spaarke\.claude\worktrees\agent-*`, branch `worktree-agent-<id>`). The main session merges each branch (never rebase), runs the verifiers (opus adversarial passes: two for auth/security tasks, one otherwise; a scoped re-check of the fix diff), applies `.claude/` edits and files issues. At most 4 sub-agents at once. |
 | **State** | Done: 005, 008, 030, 033, 038 (board 25 of 38). **033:** review fixes merged (c696b857ca → 5f7adf0290), CAPABILITY-INDEX row 53. **038 + #3268:** the owner approved fix (a). UserContext now reaches the prompt as a fenced "User focus" block (escaped, 2,000-character cap in `PromptContextHelper.BuildUserFocusBlock`, absent means byte-identical). Merged at cd12bb4c2f after one opus pass (no F in the code; one F2 test deleted; K1/K2/K4 hardened). The builders that still ignore the focus are filed as #3281. **037 running** (implementer, opus/high). Step 1 is a spike that STOPS with options if outputs are not caller-readable by run id. File-probe spike: **`spike/spe-file-probe-on-specialist` 9e8f0ca8e0** (on dev's SHA d307d67e36); the master-based `spike/spe-file-probe` e05c209fda is unused. Worktree C:\tmp\wtprobe (remove with Remove-WorktreeSafe.ps1 after the test). Draft PR #3259 (consumer typecheck CI, not for merge). |
-| **Next (exact)** | (1) 037: the owner chose option 1a on 2026-11-27 (D-037-results). A fresh implementer (opus/high) builds steps 2-6. Then merge it, run two opus passes (`security` tag), fix, close it and apply its CAPABILITY-INDEX row; uac-r2 reviews the PlaybookParameterPolicy change. (2) Owner: deploy go for file-probe 9e8f0ca8e0 through uac-r2 (tell uac-r2 it layers on d307d67e36). (3) Still open: #3181 a/b, E1, NFR-05 wording, 032 option, the process-guard card. (4) Read the PR #3259 typecheck result. |
+| **Next (exact)** | (1) 037: the owner chose option 1a on 2026-11-27 (D-037-results). The implementer stopped before code (037-decisions §3): draining the wrapper loses the run (G1 legacy playbooks get no run, G2 run id, G3 parameters, G4 counts). Owner question: option B, an engine edit (AnalysisId on PlaybookRunRequest; the engine saves Deliver Output through AnalysisResultPersistence; it also fixes #3285), needs an ADR-039 exception like #3268. On a yes, a fresh implementer builds B plus steps 2-6, then two opus passes. Master merged at 710302979d (via 8edc92c225). (2) Owner: deploy go for file-probe 9e8f0ca8e0 through uac-r2 (tell uac-r2 it layers on d307d67e36). (3) Still open: #3181 a/b, E1, NFR-05 wording, 032 option, the process-guard card. (4) Read the PR #3259 typecheck result. |
 | **Uncommitted** | None. |
 | **Branch state** | The 033 fix branch brought in master's provisioning commits (#3244, #3251). Full ArchTests on the merged tree: 2867 at 5f7adf0290. Merged-tree unit filter: 10,815 passed at cd12bb4c2f. |
 
@@ -16,7 +16,7 @@
 - ✅ **Phase 0:** 001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011. 012: the registry PATCH is applied; the live check is still owed.
 - ✅ **Phase 1 code:** 020, 021, 022, 023, 024, 025, 026, 027. 029 (deploy) waits on 019 and the owner's go.
 - ✅ **Phase 2 done:** 030, 031, 033, 034, 035, 038.
-- 🔄 **In progress:** 037 (owner chose option 1a, D-037-results; build running).
+- 🔄 **Owner-gated:** 037 (option 1a chosen; the engine-edit question for option B is open, 037-decisions §3).
 - 🔲 **Blocked on owner:** 032 (option), 036 (#3181). 040 waits on 039.
 
 ## Open owner questions
