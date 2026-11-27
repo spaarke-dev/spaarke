@@ -119,6 +119,10 @@ export const InvoiceReviewModal: React.FC<InvoiceReviewModalProps> = ({
     },
     []
   );
+  // The host keeps this mounted after it closes (#2658), so closing must settle a pending ask too, and take the confirm down with it.
+  React.useEffect(() => {
+    if (!open && pendingAnswer.current) settle(false);
+  }, [open, settle]);
 
   const urlRef = React.useRef(url);
   urlRef.current = url;

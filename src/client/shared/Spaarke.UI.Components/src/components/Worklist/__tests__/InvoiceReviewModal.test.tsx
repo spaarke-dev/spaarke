@@ -9,7 +9,7 @@
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { buildInvoiceBrowseSet, buildInvoiceReviewUrl } from '..';
@@ -320,6 +320,21 @@ describe('the dirty check before browse (design E)', () => {
     expect(screen.queryByText("Discard what you haven't saved?")).not.toBeInTheDocument();
     expect(src()).toBe(urlOf(TARGETS[0]));
     expect(screen.getByText('1 of 3')).toBeInTheDocument();
+  });
+
+  it('#2658: the host closing the modal (open false, still mounted) with the discard prompt up takes the prompt down; nothing moves', async () => {
+    const { rerender, onClose } = renderModal();
+    const post = watchFrame();
+    fireEvent.click(next());
+    act(() => answer(lastRequest(post), true));
+    await screen.findByText("Discard what you haven't saved?");
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <InvoiceReviewModal open={false} onClose={onClose} clientUrl={CLIENT} targets={TARGETS} startIndex={0} />
+      </FluentProvider>
+    );
+    await waitFor(() => expect(screen.queryByText("Discard what you haven't saved?")).not.toBeInTheDocument());
+    expect(screen.queryByText('2 of 3')).not.toBeInTheDocument();
   });
 
   it('a dirty answer then confirm moves to the next record', async () => {

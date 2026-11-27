@@ -184,7 +184,15 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
   // reload under it cannot reshuffle "N of M".
   // `theme` is what THIS frame (the Console) resolved when it opened, handed to the page so a dark Console never gets a light page (the
   // page is two frames below the model-driven app, out of reach of the navbar check that only walks one parent frame).
-  const [reviewModal, setReviewModal] = React.useState<{ browse: InvoiceBrowseSet; theme: 'dark' | 'light' } | null>(null);
+  // It stays mounted after it closes (#2658: a Fluent Dialog unmounted or re-keyed while open leaves the page aria-hidden until
+  // reload). It closes with `open: false`; `seq` keys each opening and changes only when opening from closed, so every opening mounts
+  // a fresh modal on its own start index.
+  const [reviewModal, setReviewModal] = React.useState<{
+    browse: InvoiceBrowseSet;
+    theme: 'dark' | 'light';
+    open: boolean;
+    seq: number;
+  } | null>(null);
   // Every open takes the next sequence number; a lookup that returns after a later open is stale and is dropped, so a slow lookup can
   // never put a picker on top of the wizard (or the picker of another To Do) the person opened since. `pendingTodoId` is the To Do whose
   // lookup is the latest in flight (a second click on it is ignored). An object, not a `let`: set across an await, which control-flow
@@ -305,10 +313,18 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
       // items of the list it was activated from). Without it, the navigateTo path below runs as before.
       if (invoiceReviewClientUrl) {
         // The shared resolver, run in this (the Console's) frame: stored preference, URL flag, then the navbar of the frame above.
-        setReviewModal({
-          browse: browse ?? buildInvoiceBrowseSet([review], review),
-          theme: getEffectiveDarkMode() ? 'dark' : 'light',
-        });
+        // An opening while the modal is already open keeps it as it is: re-keying an open modal is the #2658 leak, and the modal
+        // covers the lanes, so this is not reachable from them.
+        setReviewModal(prev =>
+          prev?.open
+            ? prev
+            : {
+                browse: browse ?? buildInvoiceBrowseSet([review], review),
+                theme: getEffectiveDarkMode() ? 'dark' : 'light',
+                open: true,
+                seq: (prev?.seq ?? 0) + 1,
+              }
+        );
         return;
       }
       if (!openInvoiceReview) {
@@ -327,7 +343,7 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
 
   // The in-app Invoice Review modal closed: read the lanes again, exactly as when the navigateTo promise settles.
   const closeReviewModal = React.useCallback(() => {
-    setReviewModal(null);
+    setReviewModal(prev => (prev ? { ...prev, open: false } : prev));
     if (opens.current.mounted) reload();
   }, [reload]);
 
@@ -542,7 +558,8 @@ export const WorklistWidget: React.FC<WorklistWidgetProps> = ({
 
       {reviewModal && invoiceReviewClientUrl && (
         <InvoiceReviewModal
-          open
+          key={reviewModal.seq}
+          open={reviewModal.open}
           onClose={closeReviewModal}
           clientUrl={invoiceReviewClientUrl}
           targets={reviewModal.browse.targets}

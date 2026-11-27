@@ -208,7 +208,9 @@ describe('with a client URL (design C)', () => {
     await ready();
     // Select the Coming due count filter, then activate an item: the set is the two Coming due invoices, in the order shown.
     fireEvent.click(await screen.findByRole('button', { name: /^Coming due/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Coming due/ })).toHaveAttribute('aria-pressed', 'true'));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Coming due/ })).toHaveAttribute('aria-pressed', 'true')
+    );
     await userEvent.click(line(DO_B3, 'Do'));
     await screen.findByRole('dialog', undefined, SETTLE);
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
@@ -225,7 +227,9 @@ describe('with a client URL (design C)', () => {
     await ready();
     await userEvent.click(line(INV_LINE));
     await screen.findByRole('dialog');
-    expect(frame().getAttribute('src')).toBe(buildInvoiceReviewUrl(CLIENT, { invoiceId: INVOICE_1, lineId: LINE_1 }, 'dark'));
+    expect(frame().getAttribute('src')).toBe(
+      buildInvoiceReviewUrl(CLIENT, { invoiceId: INVOICE_1, lineId: LINE_1 }, 'dark')
+    );
   });
 
   it('the theme follows the resolver: a stored light preference gives light; none stored and no flag gives light', async () => {
@@ -270,6 +274,21 @@ describe('with a client URL (design C)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(lanesReads(service)).toBe(2);
   });
+
+  it('#2658: closing leaves no dialog or frame, and the next opening starts fresh on the item activated then', async () => {
+    renderWidget({ invoiceReviewClientUrl: CLIENT }, doLane());
+    await ready();
+    await userEvent.click(line(DO_B1, 'Do'));
+    await screen.findByRole('dialog', undefined, SETTLE);
+    expect(screen.getByText('1 of 3')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument(), SETTLE);
+    expect(document.querySelector('iframe')).toBeNull();
+    await userEvent.click(line(DO_B3, 'Do'));
+    await screen.findByRole('dialog', undefined, SETTLE);
+    expect(screen.getByText('3 of 3')).toBeInTheDocument();
+    expect(frame().getAttribute('src')).toBe(urlFor(INVOICE_5));
+  }, 15000); // two full opens: under the whole-package run this takes longer than jest's 5 s default
 });
 
 describe('without a client URL (the fallback)', () => {
