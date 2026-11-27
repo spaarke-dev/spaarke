@@ -318,3 +318,102 @@ Tests:
 - **Q1 (part c).** Whether the widget renders section Markdown or plain text: the tool returns the Markdown as stored.
 - **Q2 (owner, carried from §4.6).** An analysis created at the start whose run never started shows "none" here; its cleanup is still
   open.
+
+## 6. Task 037c: the run widget and its wiring (built 2026-11-27)
+
+Paths are under `src/server/api/Sprk.Bff.Api/` unless they start with `src/client/`, `tests/`, `scripts/` or `.github/`.
+
+### 6.1 What was built
+
+| # | Change | Where |
+|---|---|---|
+| 1 | The widget `ui://spaarke/playbook-run.html`, copied from 035's scaffold (Vite single file, `check-bundle-size.mjs`, jest, surface guard). No new npm package | `src/client/widgets/spaarke-playbook-run/` |
+| 2 | The resource, a copy of 035's shape: registered only in `McpModule`'s resource collection, `_meta.ui.csp` empty, embedded with `Condition=Exists` (logical name `Sprk.Bff.Api.Widgets.playbook-run.html`), not built → a JSON-RPC error (never stale HTML), one startup warning, `Mcp:Enabled=false` → 503 | `Api/Mcp/LegalOperations/Playbooks/PlaybookRunWidgetResource.cs`, `Infrastructure/DI/McpModule.cs`, `Api/Mcp/McpEndpoints.cs`, `Sprk.Bff.Api.csproj` |
+| 3 | `_meta.ui.resourceUri` on `spaarke_run_playbook` and `spaarke_get_playbook_run`. Nothing else on either changed: their text and `structuredContent` are pinned byte for byte, and their descriptors without `_meta` by SHA-256 (`PlaybookRunToolsContractTests.Frozen_*`, committed before the change and passing on both sides of it) | `RunPlaybookTool.cs`, `GetPlaybookRunTool.cs` |
+| 4 | CI, mirroring every place the search results widget appears: build + size gate + embed check (publish and deploy), the built-case gate, the tier-1 build and jest steps and path filters, the conformance script and `Deploy-BffApi.ps1`'s widget loop | `.github/workflows/publish-bff-artifact.yml`, `deploy-bff-api.yml`, `ci-tier1-blocking.yml`, `tests/integration/Mcp.Conformance.Host/run-conformance.sh`, `scripts/Deploy-BffApi.ps1` |
+| 5 | The shared transport guard lists the new widget's files, so it is proven to scan them (no fetch, no MSAL, no storage, no raw colour) | `src/client/widgets/shared/mcp/__tests__/widgetMcpTransport.test.ts` |
+
+### 6.2 The widget
+
+- **Opens from** the start result `{ runId, status, consoleLink }` or a status result `{ runId, status, progress?, result? }` (the host's `structuredContent`). An
+  opening failure body (`{ reasonCode, message, status: <number> }`) is shown in plain words and nothing is called.
+- **Header:** the playbook's name (from the results tool; "Playbook run" until then, because the status tool carries no name) and a state badge
+  (Queued, Running, Completed, Failed, Stopped = cancelled, Interrupted), Fluent `Badge` palette colours.
+- **While queued or running:** a `ProgressBar` from the status tool's `progress` (indeterminate when absent) and a line from its counts.
+- **Poll schedule (bounded):** `spaarke_get_playbook_run { runId }` after 2, 3, 5, 8, 13 and 20 s, then every 30 s; never past the run's 50-minute cap
+  (`PlaybookRunLimits.MaxRunDuration`) counted from `result.startedAt`, or from when the widget first saw the run when no start time is known (a start time in
+  the widget's future is not trusted). The last poll lands on the cap. At most about 110 polls a run. It stops on a terminal state (`completed` / `failed`),
+  on the uniform not-found, after 5 failed polls in a row, at the cap, on a new opening result and on unmount. After the cap or the failures it says why and
+  offers "Check again" (one poll per press past the cap; the schedule resumes before it).
+- **Once terminal:** `spaarke_get_playbook_run_results` ONCE per run (K1). The reader can ask again only after an error ("Try again") or a `pending` answer
+  ("Check again"); neither is polled.
+- **Results:** a Fluent `Accordion` (multiple, collapsible, the first section open); a section without a heading is "Results" (one section) or "Part N". A
+  cut section says "This section was shortened. The full text is in Spaarke."; a truncated result says so and shows "More in Spaarke" (the `moreLink`,
+  read only when `truncated` is true). "Open in Spaarke" is the `consoleLink`. The source documents are listed, each name a link-styled button when it has a link.
+- **Plain-word states:** `none` ("The run finished but saved no results to show here."), not-found ("This playbook run was not found, or you can no longer open
+  it."), errors by class (401: sign in again; a transport `widget.*` code: the host did not answer; others: Spaarke could not read the run) — never the server's text.
+- **Links:** every link is a button that calls the host's `openLink` with an http(s) URL; the widget renders no anchor at all. A refused link shows a warning.
+- **Theme and keyboard:** `FluentProvider` with the host theme; semantic tokens only. Every control is a native button (accordion headers, actions, document
+  links), so it is keyboard operable (NFR-09); the progress line is a `role="status"` live region; errors are `role="alert"`.
+
+### 6.3 Q1: how section Markdown is rendered (decided)
+
+**A small safe subset, rendered as React text only** (`src/run/markdown.tsx`, about 300 lines, no dependency). Blocks: ATX headings (shown one level below the
+section title), bullet and numbered lists, fenced code, block quotes, table rows (shown preformatted, as text), thematic breaks, and paragraphs whose lines are
+kept with line breaks. Inline: bold, italic, inline code; `[text](url)` is shown as "text (url)", never as a clickable link (the widget's links are the
+server-built ones). `__` and `_` inside a word are literal. Every string reaches the DOM as a text child: there is no `dangerouslySetInnerHTML`, no HTML parser
+and no Markdown library (the surface guard forbids the first, and fails the build on it). Tests render `<script>`, `<img onerror>`, `<iframe>`, `<style>`, an
+HTML and a Markdown `javascript:` link, and HTML inside code: no element, attribute or handler is created and the characters show as written. Rejected:
+`react-markdown`/`marked` (+40-120 KB and an HTML-or-sanitizer path for a feature the subset covers) and plain text (analysis output is headed and listed, so it
+would read as raw Markdown).
+
+### 6.4 Sizes
+
+- **Bundle:** 928,100 bytes (0.89 MB), under the 1 MB aim and the 3 MB ceiling.
+- **Publish size (all of 037, ADR-029):** two fresh worktrees, `C:\wt037m` (`origin/master` e140b01761) and `C:\wt037b` (this branch at 3808732bf5,
+  with 037a, b and c and `origin/master` merged), `dotnet publish -c Release`, zipped with `Compress-Archive -CompressionLevel Optimal` (all files). Only this
+  widget's `dist/` was present (in `wt037b`); no other widget was built on either side, so their embeds count on neither.
+
+  | Build | Zip | Folder | Files |
+  |---|---|---|---|
+  | master | 43,719,619 bytes (41.69 MB) | 144,846,487 | 194 |
+  | this branch | 43,641,929 bytes (41.62 MB) | 145,005,183 | 186 |
+
+  Delta: **-77,690 bytes zipped (-0.07 MB)**, +158,696 bytes in the folder. The file counts differ by 8, all on master's side: `Microsoft.Agents.*` (7 dlls)
+  and `AdaptiveCards.dll`, 1,029,704 bytes, which r2 task 001 removed with the legacy agent gateway (8a92da8751). Every other file is on both sides. The branch
+  is the whole unmerged r2 project, so the delta is r2's, not 037's alone; 037's own share is the C# (a few KB) and this widget's embed (928,100 bytes raw,
+  about 0.25 MB zipped by 035's ratio): `Sprk.Bff.Api.dll` is 30,533,120 bytes against master's 29,325,824. Under the 5 MB justification line; 41.62 MB total,
+  under 55 MB. The embed was confirmed in the branch's published dll (`Sprk.Bff.Api.Widgets.playbook-run.html`).
+- **CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: no vulnerable packages. No package was added.
+
+### 6.5 Placement Justification (CLAUDE.md §10; `.claude/constraints/bff-extensions.md`)
+
+One more static, state-free `ui://` resource on the existing `/mcp/legal-operations` host, registered in `McpModule`'s resource collection (the one
+sanctioned place), and a `_meta.ui.resourceUri` on two existing tool descriptors. No package, endpoint, DI registration, store, schema or background work; no
+AI-internal type. Component justification is in `PlaybookRunWidgetResource.cs` (a fourth copy of the widget-resource shape; the shared factory is #3227/#3228).
+
+### 6.6 Tests
+
+- **Widget (jest, 107 pass):** `App.test.tsx` 24 (the schedule's exact poll times, the stop on a finished run with the results tool called once, the cap counted
+  from `startedAt` and from first sight, 5 failures then "Check again", not-found, a new opening result, unmount; every results state; links through `openLink`
+  and no anchor; a refused link; truncation and `moreLink`; HTML in a section inert; host theme; buttons), `markdown.test.tsx` 13 (the subset, six inert
+  payloads, HTML in code), `playbookRun.test.ts` 22 (the three shapes, the schedule's bound), `widgetSurface.test.ts` 48 (source and built page; must-fire
+  rows). `npm run build` (tsc, vite, size gate, built-page scan) passes.
+- **Fail-before (widget, each restored):** `dangerouslySetInnerHTML` in `MarkdownText` → 10 fail; no cap in `nextPoll` → 2 App tests fail (and the bound test in
+  `playbookRun.test.ts` never ends); polling resumed after a terminal state → 1 fails; `moreLink` read without `truncated` → 2 fail.
+- **Shared transport guard:** `widgetMcpTransport.test.ts` + `hostTheme.test.ts`, 45 pass, the new files listed.
+- **Server:** `PlaybookRunWidgetResourceTests` (8 + the build-dependent pair: the built case ran and passed here; the not-built case ran and passed with `dist/`
+  moved away), `PlaybookRunToolsContractTests.Frozen_*` (3, committed first, pass before and after), `DecisionsWidgetResourceTests` (resource list),
+  `PlaybookRunResultsToolTests.RealHost_PublishesTheToolAppOnly` (now expects the two links). Fail-before: with the `McpModule` entry removed and the tools'
+  `resourceUri` renamed, 4 fail (resource list x2, built read, both descriptors); the frozen tests still pass under that change, as they should.
+- **Runs:** `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "WidgetResource|Playbook|McpHostContract|McpCallerPath|Api.Mcp"`: 2,022 passed, 0 failed,
+  4 skipped (each widget's other build-dependent twin). ArchTests `Mcp|RouteAuthorization`: 117 passed. `dotnet build -warnaserror`: 0 warnings.
+  `check-changed-cs-format.sh origin/master`: clean.
+
+### 6.7 Known limits and open questions
+
+- **K3.** The playbook's name appears only once the run has finished (the status tool has no name, and the results tool is called once, K1).
+- **K4.** A widget opened from a status result (not the start) has no console link while the run is running (the status result carries none).
+- **K5.** The cap is counted on the widget's clock against the server's `startedAt`; a clock running behind the server's polls a little past the cap, one
+  running ahead stops a little early ("Check again" covers it).
+- **Q3.** Live rendering in Copilot Chat and Cowork, light and dark, is unverified until the dev deploy (039/043's E2E record), as for 035.
