@@ -87,29 +87,35 @@ public sealed class Issue3223_ReindexReplacesParentEntityTests
             new DocumentMatterTypeResolver(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), TestDocumentIndexParentResolver.Over(), NullLogger<DocumentMatterTypeResolver>.Instance));
     }
 
-    private static ContentIndexRequest ContentRequest(ParentEntityContext? parent) => new()
+    // The production path: a file index request through IndexFileAppOnlyAsync (the app-only job handlers) / IndexFileAsync (the OBO
+    // seams) both build the chunk documents in the same place, so the request's own flag is what the wire shows.
+    private async Task<FileIndexingResult> IndexAsync(FileIndexRequest request)
     {
-        Content = "some content",
-        FileName = "doc.txt",
-        TenantId = Tenant,
-        SpeFileId = SpeFileId,
-        ParentEntity = parent,
-    };
+        _spe.Setup(s => s.DownloadFileAsync("drive", "item-3223", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream("x"u8.ToArray()));
+        _extractor
+            .Setup(e => e.ExtractAsync(It.IsAny<Stream>(), "doc.txt", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TextExtractionResult.Succeeded("some content", TextExtractionMethod.Native));
+        return await CreateService().IndexFileAppOnlyAsync(request);
+    }
+
+    /// <summary>A request as a producer builds it: only what it decided. <paramref name="replaceParent"/> null leaves the flag at its default.</summary>
+    private static FileIndexRequest Request(ParentEntityContext? parent, bool? replaceParent) => replaceParent is { } replace
+        ? new FileIndexRequest { DriveId = "drive", ItemId = "item-3223", FileName = "doc.txt", TenantId = Tenant, ParentEntity = parent, ReplaceParentEntity = replace }
+        : new FileIndexRequest { DriveId = "drive", ItemId = "item-3223", FileName = "doc.txt", TenantId = Tenant, ParentEntity = parent };
 
     private static readonly ParentEntityContext Matter = new("matter", "3223b000-0000-4000-8000-000000000001", "Old Matter");
 
     [Fact]
-    public async Task Reindex_WhoseParentIsNowNone_SendsTheParentFieldsAsExplicitNullsSoTheOldParentIsCleared()
+    public async Task Reindex_WhoseParentIsDecidedNone_SendsTheParentFieldsAsExplicitNullsSoTheOldParentIsCleared()
     {
-        var service = CreateService();
-
-        await service.IndexContentAsync(ContentRequest(Matter));
+        (await IndexAsync(Request(Matter, replaceParent: true))).Success.Should().BeTrue();
         _wire.Documents.Should().NotBeEmpty();
         _wire.Documents.Should().OnlyContain(d => d.GetProperty("parentEntityType").GetString() == "matter");
         _wire.Documents.Clear();
 
-        // The same file again, now filed under nothing (left its record, or the parent decision is withheld).
-        var result = await service.IndexContentAsync(ContentRequest(parent: null));
+        // The same file again, now filed under nothing (left its record, or the parent decision is withheld): a decided answer.
+        var result = await IndexAsync(Request(parent: null, replaceParent: true));
 
         result.Success.Should().BeTrue();
         _wire.Documents.Should().HaveCount(2);
@@ -125,12 +131,26 @@ public sealed class Issue3223_ReindexReplacesParentEntityTests
     }
 
     [Fact]
-    public async Task Reindex_UnderAnotherRecord_ReplacesAllThreeParentFields()
+    public async Task Reindex_WithADefaultRequestThatNamesNoParent_KeepsTheParentFieldsOffTheWire()
     {
-        var service = CreateService();
+        // A request that never decided a parent (/index-file with neither a document nor a parent, the Office add-in worker, the
+        // queue route) must not read its silence as "no parent": the default request leaves the stored parent alone.
+        var result = await IndexAsync(Request(parent: null, replaceParent: null));
 
-        await service.IndexContentAsync(ContentRequest(new ParentEntityContext("project", "3223b000-0000-4000-8000-000000000002", "New Project")));
+        result.Success.Should().BeTrue();
+        _wire.Documents.Should().NotBeEmpty();
+        _wire.Documents.Should().OnlyContain(d => !NamesAParentField(d));
+    }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [InlineData(null)]
+    public async Task Reindex_UnderAnotherRecord_ReplacesAllThreeParentFieldsWhateverTheFlag(bool? replaceParent)
+    {
+        await IndexAsync(Request(new ParentEntityContext("project", "3223b000-0000-4000-8000-000000000002", "New Project"), replaceParent));
+
+        _wire.Documents.Should().NotBeEmpty();
         _wire.Documents.Should().OnlyContain(d =>
             d.GetProperty("parentEntityType").GetString() == "project"
             && d.GetProperty("parentEntityId").GetString() == "3223b000-0000-4000-8000-000000000002"
@@ -140,38 +160,12 @@ public sealed class Issue3223_ReindexReplacesParentEntityTests
     [Fact]
     public async Task Reindex_ClearingTheParent_LeavesTheMatterTypeFieldsAsTheyWereWritten()
     {
-        var service = CreateService();
-
-        await service.IndexContentAsync(ContentRequest(parent: null));
+        await IndexAsync(Request(parent: null, replaceParent: true));
 
         // Matter type keeps its own contract (#3165): a resolved "none" is the empty string, never a null.
+        _wire.Documents.Should().NotBeEmpty();
         _wire.Documents.Should().OnlyContain(d =>
             d.GetProperty("matterTypeId").GetString() == string.Empty && d.GetProperty("matterTypeSourceId").GetString() == string.Empty);
-    }
-
-    [Fact]
-    public async Task Reindex_FromAProducerThatNamesNoParent_KeepsTheParentFieldsOffTheWire()
-    {
-        // The Office add-in worker never decides a parent. Its re-index must not erase the one another path stamped.
-        var service = CreateService();
-        var content = new MemoryStream("x"u8.ToArray());
-        _spe.Setup(s => s.DownloadFileAsync("drive", "item-3223", It.IsAny<CancellationToken>())).ReturnsAsync(content);
-        _extractor
-            .Setup(e => e.ExtractAsync(It.IsAny<Stream>(), "doc.txt", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(TextExtractionResult.Succeeded("some content", TextExtractionMethod.Native));
-
-        var result = await service.IndexFileAppOnlyAsync(new FileIndexRequest
-        {
-            DriveId = "drive",
-            ItemId = "item-3223",
-            FileName = "doc.txt",
-            TenantId = Tenant,
-            ReplaceParentEntity = false,
-        });
-
-        result.Success.Should().BeTrue();
-        _wire.Documents.Should().NotBeEmpty();
-        _wire.Documents.Should().OnlyContain(d => !NamesAParentField(d));
     }
 
     private static bool NamesAParentField(JsonElement document) =>

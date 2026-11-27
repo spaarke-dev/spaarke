@@ -531,5 +531,13 @@ public sealed record IndexParentDecision(ParentEntityContext? Parent, IReadOnlyL
     public static readonly IndexParentDecision NothingNamed = new(null, Array.Empty<ParentEntityContext>(), Decided: true);
 
     /// <summary>The row could not be read: no parent, and no substitute.</summary>
-    public static readonly IndexParentDecision Undecided = new(null, Array.Empty<ParentEntityContext>(), Decided: false);
+    public static readonly IndexParentDecision Undecided = new(null, Array.Empty<ParentEntityContext>(), Decided: false) { RowUnreadable = true };
+
+    /// <summary>
+    /// <c>true</c> when the document's row could not be read, so NOTHING was decided about its parent. A <c>null</c>
+    /// <see cref="Parent"/> with this <c>false</c> is an answer ("no parent", including the fail-closed secure-state one) that an
+    /// index write may replace the stored parent with; with this <c>true</c> it is only the absence of an answer, and an index
+    /// write must leave the stored parent alone (or fail and retry).
+    /// </summary>
+    public bool RowUnreadable { get; init; }
 }

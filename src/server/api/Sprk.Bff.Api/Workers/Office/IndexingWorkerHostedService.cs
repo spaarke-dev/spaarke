@@ -169,9 +169,6 @@ public class IndexingWorkerHostedService : BackgroundService
                     FileName = payload.FileName,
                     TenantId = payload.TenantId,
                     DocumentId = payload.DocumentId.ToString(),
-                    // This worker never decides a parent (it names none). A re-index must not read that silence as "no
-                    // parent" and erase the one Send-to-Index or another producer stamped on the chunks (#3223).
-                    ReplaceParentEntity = false,
                     Metadata = new Dictionary<string, string>
                     {
                         ["source"] = "OfficeAddIn",

@@ -146,20 +146,21 @@ public sealed record FileIndexRequest
     public ParentEntityContext? ParentEntity { get; init; }
 
     /// <summary>
-    /// When true (the default), <see cref="ParentEntity"/> is the COMPLETE answer to "which record is this document filed
-    /// under": a null parent is written to the index as "no parent", replacing the parent a previous index left on the
-    /// document's chunks. When false, a null parent leaves whatever parent the chunks already carry (a non-null parent
-    /// always replaces it).
+    /// When true, <see cref="ParentEntity"/> is the COMPLETE answer to "which record is this document filed under": a null
+    /// parent is written to the index as "no parent", replacing the parent a previous index left on the document's chunks.
+    /// When false (the default), a null parent leaves whatever parent the chunks already carry (a non-null parent always
+    /// replaces it).
     /// </summary>
     /// <remarks>
-    /// Every producer that has decided the parent (<c>DocumentIndexParentResolver</c>: Send-to-Index, <c>/index-file</c>, the
-    /// RAG job handlers, the post-upload seam, bulk indexing) leaves this true — a document that is no longer filed under a
-    /// record, or whose parent the resolver now withholds, must not stay findable under the record it used to have. A producer
-    /// that names no parent at all because it never asks (the Office add-in worker) sets false so it cannot erase a parent
-    /// another path stamped. Server-set only: it is never read from a request body or a queue payload.
+    /// Opt in only where the parent answer was actually DECIDED: an explicit parent was given, or
+    /// <c>DocumentIndexParentResolver</c> answered about the document's row (a decided "none", including its fail-closed
+    /// secure-state answer, replaces the old parent; a row it could not read decides nothing and does not). A request that
+    /// names no parent because it never asked (<c>/index-file</c> with neither a document nor a parent, the Office add-in
+    /// worker) must not read that silence as "no parent" and erase one another path stamped. Server-set only: it is never
+    /// read from a request body or a queue payload.
     /// </remarks>
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool ReplaceParentEntity { get; init; } = true;
+    public bool ReplaceParentEntity { get; init; }
 
     // No index name (field-mapping-server-write-path-r1 task 041, FR-40): the index follows the content type, so a request
     // cannot name one. A JSON body or queued payload that still carries "searchIndexName" binds and the value is ignored.
