@@ -25,6 +25,7 @@ Answered 2026-11-26: see notes/decisions.md D-owner-answers-2026-11-26 (1, 2, 3,
 2. **019 / runbook E1:** not done. The owner does E1 (both "Spaarke AI" Registry rows: uninstall, then delete), then gives a go for the SHA through uac-r2. #3186 is a code follow-up.
 3. **NFR-05 and oid in logs:** recommendation: an oid is an opaque id, not a claim. Narrow NFR-05 to "no tokens, names, emails, UPNs, roles or other claim values; oid/tid allowed as audit ids".
 4. **032 matter summary (escalation, notes/032-decisions.md):** the matter-summary Binding is not a playbook (SUM-CHAT@v1, chat-session dispatch), so 030's run path cannot start it. Option 2 (recommended now): read-only v1, which needs an FR-10 amendment to drop "starts a run". Option 1 (later): author a matter-subject JPS playbook. Option 3 rejected.
+6. **037 empty analysis (from 037a):** if the analysis create succeeds but the run launch fails (not accepted within 5 s, unavailable, or caller cancel), an empty sprk_analysis is left. Delete it or leave it? Ask with the 037 close-out.
 5. **Stray-process prevention:** a watchdog plus a Bash pre-check (proposal sent to the owner).
 
 ## Issues filed this wave
