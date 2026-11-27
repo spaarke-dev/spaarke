@@ -106,7 +106,79 @@ tool arguments or HTTP parameters.
   needs no change and no uac-r2 review.
 - Under A or C, if the id travels in parameters, it must be a server-owned key refused from HTTP callers (D-037-results).
 
-## 4. Not done
+## 4. Task 037a: the engine and start-path foundation (built 2026-11-27, D-037-engine option B)
 
-Steps 2-6 (the results read, the app-only tool, the widget, `_meta.ui` and the CI wiring) wait on §3. No `.claude/` change and no
-CAPABILITY-INDEX row are proposed yet, because nothing new was added.
+Parts b (the results read tool) and c (the widget, `_meta.ui`, the CI wiring and the publish-size delta) are not built here.
+
+### 4.1 What was built
+
+| # | Change | Where (under `src/server/api/Sprk.Bff.Api/`) |
+|---|---|---|
+| 1 | `PlaybookRunRequest.AnalysisId` (`Guid?`, init). Only the Copilot start sets it | `Services/Ai/IPlaybookOrchestrationService.cs` |
+| 2 | The analysis create core moved, unchanged, out of `Api/Ai/AnalysisEndpoints` into `AnalysisStartService : IAnalysisStartAi`, a PublicContracts facade. `AnalysisStartResult` and `AnalysisStartOutcome` moved with it, and `AnalysisStartReasonCodes` is new. The route handler calls `AnalysisStartService.CreateAnalysisRecordAsync`. `spaarke_start_analysis` and `DetachedPlaybookRunner` call `IAnalysisStartAi.StartAsCallerAsync`. The route's payload (`BuildCreatePayload`) and its refusal rendering (`CreateRefusalResult`, now `internal`) stay on the route. The route's bytes are unchanged (the analysis contract and auth suites pass unchanged) | `Services/Ai/AnalysisStartService.cs`, `Services/Ai/PublicContracts/IAnalysisStartAi.cs` |
+| 3 | The Copilot start creates the caller's `sprk_analysis` after 007's authorization and the pre-warm, before the launch. It is created on `documentIds[0]`, with the playbook, and named `Copilot playbook run {yyyy-MM-dd HH:mm} UTC` (fixed text and the start time, no record text).<br>A create that does not return Created answers `PlaybookRunStartOutcome.AnalysisRefused`, with the create's result on `PlaybookRunStartResult.Analysis`, and nothing runs. `spaarke_run_playbook` maps it to `isError` with the create's `reasonCode` and status: `analysis.create_failed` and 500 when the create carries no code.<br>The ADR-052 amendment conditions are unchanged: the same helper, the cap of 3 (a refusal releases its reservation), the 50-minute cap, fail-closed and the pre-warm | `Services/Ai/PlaybookRuns/DetachedPlaybookRunner.cs`, `Api/Mcp/LegalOperations/Playbooks/RunPlaybookTool.cs` |
+| 4 | The wrapper's node-branch save moved into one shared method, `AnalysisResultPersistence.SaveNodeRunAsync`, over `NodeRunResultCollector`. The wrapper calls it, and its output is unchanged. A characterization test, written before the move, proves it: `AnalysisNodeRunSaveTests` | `Services/Ai/AnalysisResultPersistence.cs`, `Services/Ai/NodeRunAnalysisSave.cs` |
+| 5 | The engine: only the two changes in §4.3 | `Services/Ai/PlaybookOrchestrationService.cs` |
+| 6 | The run record's existing regarding columns, through `PlaybookRunRecordStore.LinkRunsToAnalysis(analysisId)` (state on the scoped store). `DetachedPlaybookRunner.RunDetachedAsync` calls it on the detached scope's store before the engine starts. Every `sprk_playbookrun` write of that run then carries `sprk_regardingentitytype = sprk_analysis` and `sprk_regardingrecordid = {analysisId}`. There is no engine change and no schema change, and `PlaybookParameterPolicy` is unchanged | `Services/Ai/PlaybookRuns/PlaybookRunRecordStore.cs` |
+
+### 4.2 The both-present rule
+
+A run that has an `AnalysisId` **and** a record parameter (`matterId`, `projectId` and so on) is regarding **the analysis**:
+- The analysis is the run's output record, and the only place the caller can read the results from. Part b reads it.
+- The regarding columns hold one target, so one has to win. The record parameter is not lost: it stays in the run's parameters,
+  and the engine uses it as before. The analysis is filed under the document.
+- A run the engine starts inside the same detached scope is linked too. The legacy wrapper starts none; a future nested run would
+  belong to the same analysis, which is accurate.
+
+Tests:
+- `PlaybookRunPersistenceTests.ExecuteAsync_LinkedToAnalysis_RegardingIsTheAnalysis_OverTheRecordParameter`: the real engine, with
+  `matterId` and the link, checked on both writes.
+- `WriteRunAsync_NoLink_WritesTheRunsOwnRegarding`.
+- `LinkRunsToAnalysis_SetOnce`.
+
+### 4.3 The engine diff (12 lines added, 2 removed; ADR-039 Path C, owner-approved)
+
+- **(a)** In `ExecuteLegacyModeAsync`, the `PlaybookExecuteRequest` handed to the wrapper gets `AnalysisId = request.AnalysisId`
+  (#3285). It is `null` for every entry except the Copilot start, so the wrapper mints its own id as before.
+- **(b)** In the node branch of `ExecuteInternalAsync`, the writer passed to `ExecuteNodeBasedModeAsync` is
+  `NodeRunAnalysisSave.SavingWriter(writer, request.AnalysisId, context.HttpContext?.RequestServices, context.RunId, _logger)`.
+  - With no `AnalysisId`, it returns `writer` itself.
+  - With one, it returns a decorator that watches the events. On the first terminal event (RunCompleted or RunFailed) it awaits
+    `SaveNodeRunAsync` once, then forwards the event. The working document is therefore written before the reader sees the run end.
+  - A save failure is logged (`playbook_run_analysis_save_failed`, with the exception type only) and never changes the run.
+  - `AnalysisResultPersistence` is resolved from the run's request services, because the engine's constructor is already at the
+    ADR-010 parameter limit.
+- Nothing else changes: no executor, node, graph, control-flow or routing change, and the `ExecuteNodeBasedModeAsync` signature is
+  the same.
+
+### 4.4 Security: how `AnalysisId` is kept from callers
+
+- `PlaybookRunRequest` is built in handlers, never bound from a request. ArchTest
+  `PlaybookRunAnalysisIdGuardTests.NoApiCodeBindsThePlaybookRunRequest` checks that no method in `Sprk.Bff.Api.Api` takes one
+  (lambdas included) and that no Api type carries one.
+- Only `DetachedPlaybookRunner.StartReservedAsync` sets the field (an IL scan, `OnlyTheCopilotStartSetsTheAnalysisId`). It uses the id
+  that `IAnalysisStartAi.StartAsCallerAsync` has just returned for this caller.
+- Only `RunDetachedAsync` links the run records (`OnlyTheDetachedRunLinksTheRunRecords`).
+- Must-fire and must-not-fire fixtures: `Detector_MustFireAndMustNotFire`.
+- `spaarke_run_playbook` refuses an `analysisId` argument, and its schema has none
+  (`PlaybookRunToolsContractTests.Start_AnalysisIdArgument_IsRefused`).
+
+So the app-only save writes only to the analysis the server has just created for this caller.
+
+### 4.5 Placement (CLAUDE.md §10; `.claude/constraints/bff-extensions.md`)
+
+- Everything stays in the BFF, next to the code it moves or extends.
+- `IAnalysisStartAi` sits in `Services/Ai/PublicContracts`, because bff-extensions says an MCP tool reaches AI services only through
+  that facade. It references no Api type.
+- `AnalysisStartService` reads two internal helpers on `AnalysisEndpoints`: the payload helper and the refusal helper. Other
+  Services/Ai code reads `Api.Filters` in the same way (for example `DetachedPlaybookRunner`).
+- No package, endpoint, store, schema or background work is added.
+- There is one new singleton registration, `IAnalysisStartAi` (stateless). The ADR-010 1:1 ceiling is raised from 172 to 173 for
+  it, with an entry that gives the reason.
+
+### 4.6 Known limits
+
+- **An analysis with no run.** The create can succeed and the launch then fail to start: NotAccepted after 5 s, Unavailable, or the
+  caller cancelling. The empty analysis stays. It is the caller's own record and does no harm. Part b should show it as "no results".
+  Cleanup (delete it as the caller, or leave it) is an owner question.
+- **A retry with a new idempotency key creates a second analysis**, as `spaarke_start_analysis` does today.
