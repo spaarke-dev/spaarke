@@ -4,7 +4,7 @@
     <title>A spend or budget Threshold Signal recalculates that matter's or project's stored finance roll-up, so the form agrees with the Signal (#1767, #1663)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -60,5 +60,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt232); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-27: PR #3288 squash-merged to master (fae8f453d6; #1767, #1663; D-230) after an independent Opus adversarial review (no F-class) and an ebilling-r1 review with one fix round (money compared at half a unit of the record currency's precision, strict tolerance). A spend, budget or utilization Threshold Signal created on a matter or project recalculates that one record's roll-up through FinanceRollupService once per pass; FinanceRollupService skips a write whose stored values already match. Known limits: a failed recalculation is logged and not retried; Signals already open at deploy are not recalculated (a one-off recalculate-route call needs an owner go). On dev with the uac-r2 dev BFF deploy of 5cd40984b0 (2026-11-27, master 765a199922).</completion>
 </task>

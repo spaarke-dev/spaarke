@@ -4,7 +4,7 @@
     <title>The Decision Records tab reads Decision Records first, so both reviews of a Signal and email-gate records appear (#2015, DI-104)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -63,5 +63,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt226); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-27: PR #3277 squash-merged to master (17be3da07a; Closes #2015) after two independent Opus adversarial reviews and two fix rounds. The Decision Records tab reads Decision Records first: Signal-backed records under their Signal, email-gate records under their matter with no Open action (D-231), through two bounded caller-trimmed reads (the capped-read 503 risk was removed by splitting the reads). Known limit filed: DI-180 #3283 (Procedure, billing and assign-firm records with no Signal are not listed; owner decision). On dev with the uac-r2 dev BFF deploy of 5cd40984b0 (2026-11-27, master 765a199922).</completion>
 </task>

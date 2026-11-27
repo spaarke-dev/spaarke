@@ -4,7 +4,7 @@
     <title>Repo-deployed system playbooks are read-only in the BFF: canvas save, JIT sync and the per-node routes refuse to change them (#1698, #1498)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -60,5 +60,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt230); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-27: PR #3278 squash-merged to master (ab86cb4f58; Closes #1698 and #1498; cherry-picks #1497) after an independent Opus adversarial review; uac-r2 approved its contract-test change. System playbooks are read-only on the canvas and the node routes. Superseded PR #1497 to be closed on the owner's go. On dev with the uac-r2 dev BFF deploy of 5cd40984b0 (2026-11-27, master 765a199922).</completion>
 </task>

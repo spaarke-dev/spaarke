@@ -4,7 +4,7 @@
     <title>An open budget inquiry's To Do cannot be completed without a disposition, and recording one closes its Signal promptly (#1984, #1991 DI-101)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -62,5 +62,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt228); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-27: PR #3273 squash-merged to master (6a5af9baf8; Closes #1991, Refs #1984) after an independent Opus adversarial review and fix round. Completing an inquiry's outcome To Do through the BFF PATCH without a disposition returns 409 inquiry.disposition_required; the re-evaluation writes no human-resolution Decision Record (BR-1), only the one Routine ConditionCleared record the nightly would write (D-145b). Known limit filed: DI-179 #3279 (SmartTodo, LegalWorkspace, the chat tool and the form's Deactivate still close it; owner decision). On dev with the uac-r2 dev BFF deploy of 5cd40984b0 (2026-11-27, master 765a199922).</completion>
 </task>

@@ -4,7 +4,7 @@
     <title>Held-email admin alert and last-day grant-expiry reminder write a valid appnotification priority and are delivered (#1697)</title>
     <phase>13 Deferred-issue triage group C (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -60,5 +60,5 @@
   <execution>
     <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt231); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
   </execution>
-  <completion></completion>
+  <completion>Done 2026-11-27: PR #3286 squash-merged to master (fb2fdf3c61; #1697) after an independent Opus adversarial review and one fix round (snapshot test renamed; opt-in live metadata test, run by the main session read-only against dev: 1 passed). App notifications use the valid priority, toast type and icon type option values. Superseded PR #1494 to be closed on the owner's go. On dev with the uac-r2 dev BFF deploy of 5cd40984b0 (2026-11-27, master 765a199922).</completion>
 </task>
