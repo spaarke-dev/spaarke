@@ -30,6 +30,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
@@ -121,7 +122,7 @@ public class EventDateOnlyTests
 
             DataverseWebApiService.BuildUpdateEventStatusPayload(EventStatusCode.Completed, new DateOnly(2026, 10, 5))
                 ["sprk_completeddate"].Should().Be("2026-10-05");
-            EventEndpoints.BuildCreatePayload(
+            EventsCapability.BuildCreatePayload(
                 new ApiCreateEventRequest(
                     "Filing", DueDate: new DateOnly(2026, 10, 20), ScheduledStart: new DateOnly(2026, 10, 1)),
                 regarding: null,

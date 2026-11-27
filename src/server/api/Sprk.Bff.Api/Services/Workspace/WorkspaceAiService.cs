@@ -379,7 +379,7 @@ public sealed class WorkspaceAiService
         {
             PlaybookId = playbookId,
             DocumentIds = [],
-            UserContext = entityDescription,
+            // UserContext (#3268) is the run's user focus and now reaches the prompt; a system-derived entity description is not user text.
             Parameters = new Dictionary<string, string>
             {
                 ["entity_type"] = request.EntityType,

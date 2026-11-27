@@ -7,10 +7,12 @@
 //     (WebApplicationFactory<Program>) and shows BOTH outcomes on that route: the refusal for a caller who may not, and
 //     success for one who may. ChatContextAuthorizationContractTests pins the full deny/allow tables, but over a SLIM
 //     host (WebApplication.CreateBuilder + the real mappers), which is not the real Program pipeline. This file is the
-//     real-Program counterpart for S-24, S-18 and S-78.
+//     real-Program counterpart for S-24. (Its S-18 and S-78 proofs went with the legacy M365 Copilot agent routes,
+//     spaarkeai-mcp-bff-api-r2 task 001; tests/integration/regression/LegacyAgentRouteRetirementTests.cs pins their
+//     absence. The fixture below is shared with AiSpendLimitContractTests, which drives the stub agent.)
 //
-// What is REAL: Program's whole pipeline — RequireAuthorization, AgentAuthorizationFilter, AiAuthorizationFilter's
-// chat-context evaluation, AiAuthorizationService, the handlers, ChatSessionManager over the host's tenant cache.
+// What is REAL: Program's whole pipeline — RequireAuthorization, AiAuthorizationFilter's chat-context evaluation,
+// AiAuthorizationService, the handlers, ChatSessionManager over the host's tenant cache.
 // Substituted (module boundaries only, ADR-038 §4): what Dataverse answers about the caller's rights (CallerAccessSeam),
 // the chat session repository, the agent construction seam (SprkChatAgentFactory → a stub agent: the LLM boundary) and
 // the playbook run-status store (IPlaybookOrchestrationService). No Mock<HttpMessageHandler>, no DI-registration
@@ -48,8 +50,7 @@ using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
-/// Both outcomes of S-24 (<c>POST /api/ai/chat/sessions</c>), S-18 (<c>POST /api/agent/message</c>) and S-78
-/// (<c>GET /api/agent/playbooks/status/{jobId:guid}</c>), each in one test, over the REAL app.
+/// Both outcomes of S-24 (<c>POST /api/ai/chat/sessions</c>) in one test, over the REAL app.
 /// </summary>
 public sealed class ChatAgentRouteProofTests : IClassFixture<ChatAgentRouteProofFixture>
 {
@@ -89,80 +90,6 @@ public sealed class ChatAgentRouteProofTests : IClassFixture<ChatAgentRouteProof
             It.IsAny<CancellationToken>()), Times.Once());
         _fixture.Access.DocumentChecks.Select(c => c.ResourceId).Should().Contain([unreadable.ToString(), readable.ToString()],
             "both documents were decided as the caller through the access data boundary");
-    }
-
-    /// <summary>
-    /// S-18: the same chat-context evaluation decides the agent body's DocumentId. An unreadable document is the uniform
-    /// 403 before any session is created or any agent turn runs; a readable one runs the turn end to end — 200 with the
-    /// agent's answer and a session minted on that document.
-    /// </summary>
-    [Fact]
-    public async Task ProvenByTest_AgentMessage_UnreadableBodyDocumentIs403_ReadableOneRunsTheTurnAnd200()
-    {
-        _fixture.ResetBoundaries();
-        var unreadable = Guid.NewGuid();
-        var readable = Guid.NewGuid();
-        _fixture.Access.Grant(readable, AccessRights.Read);
-        using var client = _fixture.CreateCallerClient();
-
-        var denied = await client.PostAsJsonAsync("/api/agent/message", new { message = "Summarize this", documentId = unreadable });
-
-        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await denied.Content.ReadAsStringAsync()).Should().NotContain(unreadable.ToString());
-        _fixture.Repo.Verify(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()), Times.Never());
-        _fixture.Agents.CreatedFor.Should().BeEmpty("no agent turn runs for a refused caller");
-
-        var allowed = await client.PostAsJsonAsync("/api/agent/message", new { message = "Summarize this", documentId = readable });
-
-        allowed.StatusCode.Should().Be(HttpStatusCode.OK, await allowed.Content.ReadAsStringAsync());
-        var answer = JsonNode.Parse(await allowed.Content.ReadAsStringAsync())!;
-        answer["responseText"]!.GetValue<string>().Should().Be(ChatAgentRouteProofFixture.AgentAnswer, "the turn ran");
-        _fixture.Agents.CreatedFor.Should().Equal([readable.ToString()], "the agent was built on the authorized document");
-        _fixture.Repo.Verify(r => r.CreateSessionAsync(
-            It.Is<ChatSession>(s => s.DocumentId == readable.ToString()), It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    /// <summary>
-    /// S-78: the handler compares the run's recorded owner (PlaybookRunStatus.StartedByOid) with the caller. Another
-    /// user's run is the uniform 404 that never echoes the job id; the caller's own run is 200 with its status.
-    /// </summary>
-    [Fact]
-    public async Task ProvenByTest_AgentPlaybookStatus_AnotherUsersRunIs404_TheCallersOwnRunIs200()
-    {
-        _fixture.ResetBoundaries();
-        var foreignRun = Guid.NewGuid();
-        var ownRun = Guid.NewGuid();
-        _fixture.Runs.Setup(o => o.GetRunStatusAsync(foreignRun, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookRunStatus
-            {
-                RunId = foreignRun,
-                State = PlaybookRunState.Completed,
-                StartedAt = DateTimeOffset.UtcNow,
-                StartedByOid = "ffffffff-0000-4000-8000-0000000000aa",
-            });
-        _fixture.Runs.Setup(o => o.GetRunStatusAsync(ownRun, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookRunStatus
-            {
-                RunId = ownRun,
-                State = PlaybookRunState.Completed,
-                StartedAt = DateTimeOffset.UtcNow,
-                StartedByOid = RouteSweepAuthorizationFixture.CallerObjectId,
-            });
-        using var client = _fixture.CreateCallerClient();
-
-        var denied = await client.GetAsync($"/api/agent/playbooks/status/{foreignRun}");
-
-        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await denied.Content.ReadAsStringAsync()).Should().NotContain(foreignRun.ToString());
-
-        var allowed = await client.GetAsync($"/api/agent/playbooks/status/{ownRun}");
-
-        allowed.StatusCode.Should().Be(HttpStatusCode.OK, await allowed.Content.ReadAsStringAsync());
-        var status = JsonNode.Parse(await allowed.Content.ReadAsStringAsync())!;
-        status["jobId"]!.GetValue<Guid>().Should().Be(ownRun);
-        status["status"]!.GetValue<string>().Should().Be("Completed");
-        _fixture.Runs.Verify(o => o.GetRunStatusAsync(foreignRun, It.IsAny<CancellationToken>()), Times.Once(),
-            "the refusal came from the owner comparison on a loaded run, not from a missing run");
     }
 }
 

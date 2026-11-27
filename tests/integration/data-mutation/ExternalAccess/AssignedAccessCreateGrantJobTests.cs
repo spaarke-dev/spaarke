@@ -529,7 +529,7 @@ public sealed class AssignedAccessCreateGrantJobTests : TypedToolHandlerTestFixt
             .Returns(Task.CompletedTask);
         var handler = new DataverseCreateRecordHandler(
             dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(),
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Services.Ai.Handoff.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(

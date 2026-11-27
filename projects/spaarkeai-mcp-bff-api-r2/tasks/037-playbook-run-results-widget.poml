@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Playbook run results in Copilot: the run widget (ui://spaarke/playbook-run.html) and an app-only results tool</title>
+    <phase>2 Long-running work, AI, widgets, task writes</phase>
+    <gate>Owner decision 2026-11-26 (notes/decisions.md D-owner-answers-2026-11-26 #17: "yes add these feature capabilities; present in modern UI/UX"). Needs 030 (done). Serialise after 035 and before 040: it shares McpModule.cs, Sprk.Bff.Api.csproj (widget embeds) and publish-bff-artifact.yml. Before starting, merge origin/work/spaarkeai-mcp-bff-api-r2 and origin/master into the branch (merge, never rebase).</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New app-only tool that returns AI output for a run, a new widget resource, embed and CI changes; ADR-015 data exposure decision</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Step 1 is a design spike (where each playbook kind's outputs land and how the caller reads them); the rest follows 034/035's widget scaffold</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares McpModule.cs, the csproj widget embeds and publish-bff-artifact.yml with 040; may extend IPlaybookRunAi with 038 (run 038 first, or merge carefully)</parallel-reason>
+    <deps>030, 035</deps>
+    <tags>bff-api, api, ai, react, typescript, frontend, fluent-ui, security</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Today a Copilot user who starts a playbook run learns only that it finished: spaarke_get_playbook_run returns status and node counts (ADR-015 minimal output), and its Console link opens the first document because the Console has no run view. Give the user the run's results inside Copilot Chat and Cowork in a modern MCP App widget. (1) Spike: for the playbooks a user can run (spaarke_list_playbooks), map where a finished run's outputs land (analysis record and outputs, document fields, work-product disposition, or nowhere persisted) and how the CALLER can read them by run id. Write notes/037-decisions.md §1. If outputs are not durably reachable as the caller for the main playbook kinds, STOP and report options before writing code. (2) Add an app-only tool (visibility app, like spaarke_send_email in the spec) that returns a finished run's results to the widget only, read as the caller, with the same not-found rule as spaarke_get_playbook_run. (3) Add the widget ui://spaarke/playbook-run.html: it opens from spaarke_run_playbook and spaarke_get_playbook_run, shows live progress (polls the status tool, bounded), then the results (sections per output, readable text, the source documents with open links), using Fluent v9 and the host theme. Keep the model-visible text of both existing tools unchanged.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP Apps widgets, Fluent v9, the JPS playbook engine's output dispositions and ADR-015.</role>
+  <goal>After a run finishes, the user sees what it found, in the Copilot conversation, without leaving it; the model sees no more than it does today; a caller who cannot read the run or its subject gets the uniform not-found.</goal>
+
+  <context>
+    <background>Spec FR-05, FR-14, FR-16 (widgets), NFR-02 (64 KiB per result), NFR-03, NFR-09. Owner Q17 (current-task.md). 030: Services/Ai/PublicContracts/IPlaybookRunAi.cs (StartAsCallerAsync, ReadAsCallerAsync, RunConsoleLink), Services/Ai/PlaybookRuns/DetachedPlaybookRunner.cs, Api/Mcp/LegalOperations/Playbooks/{RunPlaybookTool,GetPlaybookRunTool}.cs; notes/030-decisions.md. 005: the run record keeps node TextContent/StructuredData OUT of the store (notes/005-schema.md §3) — do not add them to sprk_playbookrun / sprk_playbooknoderun. Widget scaffold: src/client/widgets/spaarke-search-results/ (035) and spaarke-briefing/ (034), shared transport src/client/widgets/shared/mcp/ (021).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/GetPlaybookRunResultsTool.cs (app-only)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/PlaybookRunWidgetResource.cs</file>
+      <file role="new">src/client/widgets/spaarke-playbook-run/ (copy spaarke-search-results' shape)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Playbooks/RunPlaybookTool.cs and GetPlaybookRunTool.cs (_meta.ui resource link only; text unchanged)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IPlaybookRunAi.cs (a results read member, if step 1 needs one)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Playbooks.cs (ledger entry)</file>
+      <file role="modify">.github/workflows/publish-bff-artifact.yml, ci-tier1-blocking.yml (build, size and jest for the new widget, as 035)</file>
+      <file role="new">tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunResultsToolTests.cs; tests/integration/auth/Mcp/Playbooks/ (must-not-leak: another caller's run, unreadable subject)</file>
+      <file role="canonical-reference">src/client/widgets/spaarke-search-results/ (035)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunWorld.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="completed">run start and status</dependency>
+      <dependency task="035" status="completed">widget scaffold to copy</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Read every result as the caller (IDataverseUserClient / OBO, or 007's AuthorizePlaybookRunAsync and the record's own read rule). A run of another caller, or a run whose subject the caller can no longer read, returns the same not-found as spaarke_get_playbook_run. No app-only read of output content.</constraint>
+    <constraint source="ADR-015">The results tool is app-only (visibility app; not in the model's tool list). The model-visible text and structuredContent of spaarke_run_playbook and spaarke_get_playbook_run stay exactly as today (frozen tests). No output content in logs (tool name, latency, outcome, sizes, correlation id only). Each result under 64 KiB (NFR-02): truncate long sections with a "more in Spaarke" link.</constraint>
+    <constraint source="project">No new store, table or column for outputs, and no output content added to the run record (005 decision). If step 1 finds outputs are not persisted anywhere the caller can read, STOP: report options (for example the run writes an analysis record, or the widget shows only node summaries) and the owner decides.</constraint>
+    <constraint source="ADR-039 + owner D-037-engine 2026-11-27">No edits to executors or node graphs. The ONE approved PlaybookOrchestrationService edit is option B (notes/037-decisions.md §3): forward a server-set AnalysisId and save Deliver Output through AnalysisResultPersistence; nothing else in the engine changes.</constraint>
+    <constraint source="owner D-037-results 2026-11-27">Option 1a: the Copilot start creates the caller's sprk_analysis (reuse the Workspace create core and AnalysisAuthorizationFilter rules), the detached runner drains IAnalysisOrchestrationService.ExecutePlaybookAsync with that id, the run links to it through its existing regarding columns, and the results tool reads sprk_workingdocument as the caller. The analysis id the wrapper writes to app-only is bound by the server; a caller-supplied analysis id never chooses which analysis is overwritten.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only, host light/dark theme, keyboard operable, no hard-coded colours. Modern, clean layout: a header with the playbook name and state, a progress bar while running, then results in collapsible sections; empty and error states with plain words.</constraint>
+    <constraint source="project">The widget polls the status tool with a bounded schedule (backoff, stop at the run's 50-minute cap) and never calls fetch or MSAL (shared transport only, guard in widgetMcpTransport.test.ts). All links open through the host's openLink.</constraint>
+    <constraint source="ADR-029">Every change under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification citing .claude/constraints/bff-extensions.md, and the PR records the publish-size delta against a fresh master build (.claude/rules/bff-hygiene.md item 4).</constraint>
+    <constraint source="ADR-038">Tests live on KEEP paths (tests/integration/{auth,contract}/**, tests/unit/domain/**), mock only at module boundaries, no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;. Widget logic gets jest tests in its folder.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress. Sub-agents cannot write .claude/: propose the CAPABILITY-INDEX row in notes/capability-index-pending.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-015-data-governance.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/030-decisions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/035-decisions.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Spike (no code): map output dispositions for the runnable playbooks and how the caller reads them by run id; record in notes/037-decisions.md §1 with file:line evidence. Stop if the escalation trigger fires.</step>
+    <step order="2">Results read: the narrowest PublicContracts member (or reuse of an existing caller-scoped read) that returns a finished run's results as the caller; tests first (must-not-leak, uniform not-found, fail-before).</step>
+    <step order="3">App-only tool GetPlaybookRunResultsTool + ledger entry; validate visibility app at startup like the other app-only tool.</step>
+    <step order="4">Widget src/client/widgets/spaarke-playbook-run/: progress view, results view, empty/error states; jest tests; bundle-size check.</step>
+    <step order="5">Widget resource + _meta.ui links on the two existing tools (their text unchanged, frozen tests pass); CI build/size/jest wiring as 035.</step>
+    <step order="6">Build, affected tests, ArchTests (Mcp, RouteAuthorization, DetachedHttpContextGuard), format check, publish-size delta; notes/037-decisions.md; CAPABILITY-INDEX row proposal.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Step 1 finds a main playbook kind whose outputs are not persisted anywhere the caller can read by run id.</trigger>
+    <trigger>Showing results would need output content in the run record, an app-only read of content, or an engine edit.</trigger>
+    <trigger>A result cannot fit 64 KiB without losing what the user needs.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spaarke_get_playbook_run (status only); the Console's analysis views; widget scaffold 034/035; IPlaybookRunAi.</existing>
+    <extension>The status tool cannot carry results: ADR-015 keeps its model-visible output minimal, so results go to an app-only tool the widget calls; the widget reuses 035's scaffold and the shared transport.</extension>
+    <cost-of-doing-nothing>A Copilot user who runs a playbook learns that it finished but not what it found, and must leave Copilot (owner Q17).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">A finished run's results render in the widget in Chat and Cowork, light and dark (screenshots in 039/043's E2E record).</criterion>
+    <criterion testable="true">The results tool is not in the model's tool list (visibility app) and is refused at startup if declared otherwise.</criterion>
+    <criterion testable="true">Another caller's run id, an unknown id and a run whose subject the caller cannot read all return the same not-found (auth tests).</criterion>
+    <criterion testable="true">spaarke_run_playbook and spaarke_get_playbook_run model-visible text and structuredContent are byte-identical to before (frozen tests).</criterion>
+    <criterion testable="true">Every results payload is under 64 KiB; logs carry no output content.</criterion>
+    <criterion testable="true">Negative: no new table/column, no output content in sprk_playbookrun/sprk_playbooknoderun, no edit to the engine, no fetch/MSAL in the widget.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner Q17, 2026-11-26. Live rendering is verified in 039/043.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the full protocol.</protocol>
+  </execution>
+</task>

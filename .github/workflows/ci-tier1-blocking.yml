@@ -219,6 +219,15 @@ jobs:
               - 'src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs'
               - 'tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs'
               - 'src/client/widgets/spaarke-decisions/**'
+              - 'src/client/widgets/spaarke-briefing/**'
+              - 'src/client/widgets/spaarke-search-results/**'
+              - 'src/client/widgets/shared/**'
+              - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
+              # The briefing widget's build shims re-export deep paths of the shared library, so a change there changes the built page.
+              - 'src/client/shared/Spaarke.UI.Components/src/**'
+              - 'src/client/shared/Spaarke.DailyBriefing.Components/**'
+              # The search results widget imports the Console's SearchResultsWidget by relative path (task 035).
+              - 'src/client/shared/Spaarke.AI.Widgets/src/**'
               - 'tests/integration/Mcp.Conformance.Host/**'
               - 'tests/integration/contract/Api/Mcp/McpProgramHostFactory.cs'
               - '.github/workflows/**'
@@ -268,7 +277,7 @@ jobs:
             echo "| reporting_surface | ${{ steps.filter.outputs.reporting_surface }} |"
             echo "| datagrid_gate (Spaarke.UI.Components, CI workflows) | ${{ steps.filter.outputs.datagrid_gate }} |"
             echo "| xrm_guard (src/client, src/solutions, CI workflows) | ${{ steps.filter.outputs.xrm_guard }} |"
-            echo "| mcp_conformance (MCP route, decisions widget, conformance host, CI workflows) | ${{ steps.filter.outputs.mcp_conformance }} |"
+            echo "| mcp_conformance (MCP route, widgets, conformance host, CI workflows) | ${{ steps.filter.outputs.mcp_conformance }} |"
             echo ""
             echo "**BFF changed (from router)**: ${{ inputs.bff_changed }}"
             echo "**Smoke namespaces**: ${{ steps.derive-namespaces.outputs.value }}"
@@ -1217,6 +1226,33 @@ jobs:
         run: |
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
+
+      # Each widget's `build` runs only its widgetSurface guard; its behaviour suites (App, host, parsing) run here. Nothing else runs them.
+      - name: Test the decisions widget
+        working-directory: src/client/widgets/spaarke-decisions
+        run: npx jest --ci
+
+      # spaarkeai-mcp-bff-api-r2 task 034: the briefing widget is embedded the same way (ui://spaarke/briefing.html).
+      - name: Build the briefing widget
+        working-directory: src/client/widgets/spaarke-briefing
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
+      - name: Test the briefing widget
+        working-directory: src/client/widgets/spaarke-briefing
+        run: npx jest --ci
+
+      # spaarkeai-mcp-bff-api-r2 task 035: the search results widget is embedded the same way (ui://spaarke/search-results.html).
+      - name: Build the search results widget
+        working-directory: src/client/widgets/spaarke-search-results
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
+      - name: Test the search results widget
+        working-directory: src/client/widgets/spaarke-search-results
+        run: npx jest --ci
 
       - name: Conformance suite against the real BFF MCP route
         shell: bash

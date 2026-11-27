@@ -3,7 +3,9 @@
  *
  * Source guard for the widget's isolation rules (task 030; spec FR-12, ADR-021): it declares no network origin, holds no token, stores
  * no theme, and uses semantic tokens only. The widget talks to the server only through `callServerTool`, so a fetch, XHR, socket or
- * beacon anywhere in its source is a defect; the one function named fetch is the shim in mcpFetch.ts, which must not call the network either.
+ * beacon anywhere in its source is a defect. This file scans the widget's own `src/` only, which holds thin re-exports of the shared widget
+ * code (`src/mcp/*.ts`), not the shared code itself: the real fetch shim and transport live in `../shared/mcp/` and are scanned (with the
+ * same patterns, over every widget) by `shared/mcp/__tests__/widgetMcpTransport.test.ts`. `npm run build` runs both files, so PR CI runs both.
  * Must-fire controls prove each pattern matches what it is meant to catch.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -83,7 +85,7 @@ describe('widget source surface', () => {
     );
   });
 
-  it('calls fetch, XMLHttpRequest, sockets or beacons nowhere, including inside the shim', () => {
+  it('calls fetch, XMLHttpRequest, sockets or beacons nowhere in this widget src/ (the shared shim and transport are scanned by widgetMcpTransport.test.ts)', () => {
     expect(files.filter(f => NETWORK.test(code(f))).map(label)).toEqual([]);
   });
 

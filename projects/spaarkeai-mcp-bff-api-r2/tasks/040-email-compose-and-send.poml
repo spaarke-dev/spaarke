@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Email: compose widget, spaarke_compose_email (model-visible), app-only spaarke_send_email</title>
+    <phase>3 Email, evaluation and E2E</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The project's only irreversible write (email send) behind CommunicationService's filters; new widget; tags include security and auth</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Irreversible send path: app-only visibility, idempotency against double send, reuse of CommunicationAuthorizationFilter / CommunicationRecordAuthorizationFilter checks without copying; project brief raises 040</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Last of the serialised widget tasks (shares McpModule.cs, Sprk.Bff.Api.csproj and publish-bff-artifact.yml with 034/035); also edits the communication filters</parallel-reason>
+    <deps>011, 021, 023, 035, 039</deps>
+    <tags>bff-api, api, security, auth, react, typescript, frontend, fluent-ui, integration-test</tags>
+    <estimated-effort>10-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add email to Copilot within the owner's v1 scope: spaarke_compose_email (model-visible, no side effect) opens a compose widget pre-filled with a draft (To/Cc, subject, rich body, regarding matter, suggested documents); the widget src/client/widgets/spaarke-email-compose/ renders EmailComposer with task 011's MCP host over task 021's transport; spaarke_send_email is app-only, takes an idempotency key, applies the POST /api/communications/send authorization through a shared method (not a copy), sends through CommunicationService.SendAsync as the caller and archives to the matter with the attachments.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke communication core (ADR-045), MCP Apps visibility and Fluent v9.</role>
+  <goal>The model can draft but never send; the user's Send in the widget sends once (retry with the same key does not double-send), archived to the regarding matter with the chosen matter documents; disabled senders and refused recipients return the service's reasonCode and send nothing; REST /api/communications/send bytes are unchanged.</goal>
+
+  <context>
+    <background>Spec FR-12, FR-16, NFR-01 (send p95 ≤ 15 s), NFR-06 (send app-only + idempotency key). REST: Api/CommunicationEndpoints.cs POST /api/communications/send (:111) with CommunicationAuthorizationFilter and AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Send) — caller must read every attached document and hold AppendTo on every association; filters in Api/Filters/Communication*.cs. Service: Services/Communication/CommunicationService.cs SendAsync (:2412; request model Services/Communication/Models/SendCommunicationRequest.cs: To, Cc, Subject, Body, BodyFormat, Associations, SendMode, ArchiveToSpe, AttachmentDocumentIds, CorrelationId). No idempotency key exists on the send path today. Task 011: createMcpEmailComposeHandlers / useMcpEmailHostProps / McpToolCaller. Task 023: spaarke_list_documents for the attachment picker. Widget scaffold: tasks 034/035.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/CommunicationAuthorizationFilter.cs and CommunicationRecordAuthorizationFilter.cs (Send checks exposed as one shared method; filters call it)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Email/ComposeEmailTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Email/SendEmailTool.cs (visibility ["app"])</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Email/EmailComposeWidgetResource.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="modify">.github/workflows/publish-bff-artifact.yml</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Email.cs</file>
+      <file role="new">tests/integration/contract/Api/Communication/CommunicationSendContractBaselineTests.cs (frozen REST bytes, recorded before the extraction)</file>
+      <file role="new">tests/integration/auth/Mcp/Email/SendEmailToolAuthTests.cs (app-only visibility; each REST refusal mirrored)</file>
+      <file role="new">tests/integration/data-mutation/Mcp/Email/SendEmailToolTests.cs (one send per key; archive to matter with attachments)</file>
+      <file role="new">src/client/widgets/spaarke-email-compose/** (scaffold copied from spaarke-search-results)</file>
+      <file role="new">src/client/widgets/spaarke-email-compose/src/__tests__/App.test.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs (app-only, idempotent write)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/useMcpEmailHostProps.ts (task 011)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Signals/SignalRoutesContractBaselineTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">EmailComposer MCP host</dependency>
+      <dependency task="021" status="pending">Shared widget transport</dependency>
+      <dependency task="023" status="pending">spaarke_list_documents for attachments</dependency>
+      <dependency task="035" status="pending">Shared-file ordering (McpModule, csproj, workflow)</dependency>
+      <dependency task="039" status="pending">Phase 2 on dev</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only identity fallback; never pass or log the token). The Send checks of both communication filters move into one shared method the filters and SendEmailTool call; the tool adds none; refusals map with the REST reasonCode (for example sdap.communication.*). The frozen-bytes baseline for POST /api/communications/send is written and green before the extraction and passes after.</constraint>
+    <constraint source="project">spaarke_send_email: visibility ["app"] only (never listed to the model), readOnlyHint false, destructiveHint true, idempotentHint true; required idempotencyKey; a retry with the same key and caller returns the first result and calls SendAsync once (key handling per r1's CompleteDecisionTool; a new store needs escalation). Regarding matter is required; AttachmentDocumentIds must belong to that matter (checked through the shared method's document-read check plus a same-matter check against spaarke_list_documents' source); archive to the matter (ArchiveToSpe/associations as the Console send does).</constraint>
+    <constraint source="project">Idempotency key semantics (task 011 D4 and its verifier passes): store only successful or outcome-unknown attempts under the key; a definite 4xx refusal does not consume it. Bind the key to the payload: a reused key with a different payload (the user edited after an outcome-unknown failure) is refused with a clear reasonCode, never answered by replaying the first result. Reserve the key atomically so two overlapping sends with one key deliver once. Return status as an integer 400-599 in structuredContent (the client host does not clamp it). The widget must display the picker error outcome ({error, reference}) from task 011 and give the transport (task 021) a callTool timeout.</constraint>
+    <constraint source="project">spaarke_compose_email: model-visible, readOnlyHint true, no write; returns the draft in structuredContent and _meta.ui.resourceUri ui://spaarke/email-compose.html. No model-visible tool can send (asserted). Nothing relies on a host consent prompt (NFR-06).</constraint>
+    <constraint source="project">Widget: EmailComposer through 011's useMcpEmailHostProps over 021's transport; v1 controls only (To/Cc, subject, rich body, regarding matter pre-set, attachments from the matter); _meta.ui.csp empty; no fetch/MSAL/Xrm; Fluent v9 semantic tokens; host light/dark; keyboard operable; bundle &lt; 1 MB target, 3 MB hard. Mcp:Enabled=false removes both tools and the resource (ADR-032).</constraint>
+    <constraint source="ADR-015">Model-visible: draft fields the model supplied plus document names; never the sent body back, never other mailbox content. Logs: tool name, latency, recipient count, outcome/reasonCode, correlation id; never addresses, subject or body (NFR-05).</constraint>
+    <constraint source="ADR-045">Send goes through CommunicationService.SendAsync only (the communication core); no direct Graph call.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**, or the widget's own jest suite), mocks only at module boundaries (Graph sender), and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Node install: npm install --legacy-peer-deps --no-audit --no-fund (not npm ci). Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the r1 gate and 011, 021, 023, 035, 039; read the send handler, both filters and SendAsync; record how the Console send sets Associations/ArchiveToSpe.</step>
+    <step order="2">Write CommunicationSendContractBaselineTests and confirm it passes unchanged.</step>
+    <step order="3">Expose the Send checks as one shared method; filters call it; the baseline still passes.</step>
+    <step order="4">Write SendEmailTool (app-only, idempotent) and ComposeEmailTool; ledger rows; auth and data-mutation tests.</step>
+    <step order="5">Write EmailComposeWidgetResource, register it, add the embed and CI steps; scaffold spaarke-email-compose with 011's host; widget tests; check-bundle-size.mjs.</step>
+    <step order="6">Run communication, EmailComposer, MCP suites, ArchTests and conformance; measure the publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Send checks cannot be shared without changing REST bytes, STOP and escalate.</trigger>
+    <trigger>If double-send protection needs a new store, STOP and escalate with the §11 answers (spec requires the key; storage is the open choice).</trigger>
+    <trigger>If the host does not honour visibility ["app"] (the model can call send), STOP: do not ship the send tool; escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CommunicationService.SendAsync and POST /api/communications/send with CommunicationAuthorizationFilter + CommunicationRecordAuthorizationFilter (CAPABILITY-INDEX communication core, ADR-045); EmailComposer + 011's MCP host; 021's transport; r1's app-only idempotent CompleteDecisionTool; notes/reuse-scan.md rows "Email compose component" and "Email send".</existing>
+    <extension>The service, filters (extended in place with a shared method), component and transport are reused; the two tools, one resource and one widget folder are the minimal new surface (one widget per component, owner Q5; send must be app-only, NFR-06).</extension>
+    <cost-of-doing-nothing>Copilot users cannot compose or send matter email from Spaarke (FR-12 fails), and without the shared method the tool would copy filter checks, which the spec forbids.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Compose and send in Copilot Chat">
+      <steps>
+        <step>After deploy 049, ask "Draft an email to the client on matter {test matter} about the hearing date" with the Spaarke MCP source</step>
+        <step>Verify the compose widget opens pre-filled (To, subject, body, regarding matter) and the attachment picker lists only that matter's documents</step>
+        <step>Press Send with the keyboard; verify one email is sent and archived to the matter with the chosen attachment</step>
+        <step>Ask the model to "send it now" without the widget; verify it cannot</step>
+        <step>Check the widget console for errors</step>
+      </steps>
+      <expected>Model drafts only; the user's Send sends once and archives; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host to dark theme</step>
+        <step>Verify the composer follows the host theme</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+    <tool name="npm">build, jest and check-bundle-size in src/client/widgets/spaarke-email-compose</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Email/ComposeEmailTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Email/SendEmailTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Email/EmailComposeWidgetResource.cs</output>
+    <output type="code">src/client/widgets/spaarke-email-compose/</output>
+    <output type="test">tests/integration/contract/Api/Communication/CommunicationSendContractBaselineTests.cs</output>
+    <output type="test">tests/integration/auth/Mcp/Email/SendEmailToolAuthTests.cs</output>
+    <output type="test">tests/integration/data-mutation/Mcp/Email/SendEmailToolTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CommunicationSendContractBaselineTests pass before and after the extraction.</criterion>
+    <criterion testable="true">tools/list as seen by the model contains spaarke_compose_email and not spaarke_send_email; spaarke_send_email carries visibility ["app"].</criterion>
+    <criterion testable="true">A send with a new key calls SendAsync once with the regarding-matter association, archive on, and the chosen document ids; a retry with the same key calls it zero more times and returns the first result.</criterion>
+    <criterion testable="true">Negative: a disabled sender, a refused recipient, a document the caller cannot read and a document from another matter each return isError with the service/filter reasonCode and send nothing.</criterion>
+    <criterion testable="true">Negative: a send without a regarding matter is refused before SendAsync.</criterion>
+    <criterion testable="true">Widget jest: v1 controls only; Send calls spaarke_send_email through the transport; zero fetch/Xrm calls. check-bundle-size.mjs ≤ 3 MB (recorded).</criterion>
+    <criterion testable="true">Logs captured in tests contain no address, subject or body text.</criterion>
+    <criterion testable="true">ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12, FR-16, NFR-01, NFR-05, NFR-06. Two adversarial-verifier passes (security, auth). uac-r2 reviews the filter extraction.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

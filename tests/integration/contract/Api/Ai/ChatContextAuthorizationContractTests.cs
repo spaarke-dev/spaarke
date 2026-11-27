@@ -18,7 +18,6 @@ using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -41,10 +40,11 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
 /// The chat-family per-record authorization of unified-access-control-r2 task 164 (fix round 1, owner round 16 item 2),
-/// exercised through the REAL <c>MapChatEndpoints</c>, <c>MapDispatchSessionEndpoint</c> and <c>MapAgentEndpoints</c>:
+/// exercised through the REAL <c>MapChatEndpoints</c> and <c>MapDispatchSessionEndpoint</c>:
 /// <c>POST /api/ai/chat/sessions</c> (sweep #24), <c>PATCH /api/ai/chat/sessions/{sessionId}/context</c> (#23),
-/// <c>POST /api/ai/chat/sessions/{sessionId}/messages</c> (#25), <c>POST /api/ai/chat/sessions/{sessionId}/dispatch</c>
-/// (#53) and <c>POST /api/agent/message</c> (#18), plus the owner-round-12-item-6 chat playbook list.
+/// <c>POST /api/ai/chat/sessions/{sessionId}/messages</c> (#25) and <c>POST /api/ai/chat/sessions/{sessionId}/dispatch</c>
+/// (#53), plus the owner-round-12-item-6 chat playbook list. (Sweep #18, the legacy M365 Copilot agent's message route,
+/// was removed with that agent in spaarkeai-mcp-bff-api-r2 task 001; its rows here went with it.)
 /// </summary>
 /// <remarks>
 /// <para><b>What is real and what is substituted.</b> The endpoint mappers, <see cref="SessionOwnershipFilterExtensions"/>,
@@ -825,7 +825,7 @@ public class ChatContextAuthorizationContractTests
     // =========================================================================================
 
     [Fact]
-    public async Task Revocation_ASessionCreatedWhileTheCallerHeldRead_IsDeniedOnItsNextMessagesDispatchAndAgentTurn()
+    public async Task Revocation_ASessionCreatedWhileTheCallerHeldRead_IsDeniedOnItsNextMessagesAndDispatch()
     {
         await using var host = await ChatAuthHost.StartAsync();
         var matter = host.Readable(Matters);
@@ -837,64 +837,8 @@ public class ChatContextAuthorizationContractTests
 
         (await host.SendAsync(Message(sessionId))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await host.SendAsync(Dispatch(sessionId))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await host.SendAsync(AgentMessage(conversationReference: sessionId))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         host.VerifyNoTurnRan();
         host.Dispatch.Calls.Should().Be(0);
-    }
-
-    // =========================================================================================
-    // POST /api/agent/message  (sweep #18, F12)
-    // =========================================================================================
-
-    [Fact]
-    public async Task AgentMessage_ABodyDocumentTheCallerCannotRead_IsTheUniform403_BeforeAnySessionIsCreated()
-    {
-        await using var host = await ChatAuthHost.StartAsync();
-        var unreadable = Guid.NewGuid();
-
-        var response = await host.SendAsync(AgentMessage(documentId: unreadable));
-
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await response.Content.ReadAsStringAsync()).Should().NotContain(unreadable.ToString());
-        host.VerifyNoSessionCreated();
-        host.VerifyNoTurnRan();
-    }
-
-    [Fact]
-    public async Task AgentMessage_AResumedSessionWithAnUnreadableStoredHost_IsTheUniform403()
-    {
-        await using var host = await ChatAuthHost.StartAsync();
-        var session = host.SeedSession(hostContext: Host("sprk_project", Guid.NewGuid()));
-
-        (await host.SendAsync(AgentMessage(conversationReference: session))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        host.VerifyNoSessionCreated();
-    }
-
-    [Fact]
-    public async Task AgentMessage_AReferenceToAnotherUsersSession_IsNotResumed_SoItsStoredContextIsNeitherCheckedNorUsed()
-    {
-        await using var host = await ChatAuthHost.StartAsync();
-        var foreign = host.SeedSession(hostContext: Host("sprk_matter", Guid.NewGuid()), ownerOid: OtherOid);
-        var document = host.Readable(Documents);
-
-        var response = await host.SendAsync(AgentMessage(documentId: document, conversationReference: foreign));
-
-        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
-        host.Access.Calls.Should().NotContain(c => c.Path == AccessPath.Record, "the foreign session's host is never consulted");
-        host.Repo.Verify(r => r.CreateSessionAsync(It.Is<ChatSession>(s => s.HostContext == null), It.IsAny<CancellationToken>()), Times.Once(),
-            "the handler mints a fresh session instead of resuming another user's");
-    }
-
-    [Fact]
-    public async Task AgentMessage_AReaderOfTheBodyDocument_IsLetThrough()
-    {
-        await using var host = await ChatAuthHost.StartAsync();
-        var document = host.Readable(Documents);
-
-        var response = await host.SendAsync(AgentMessage(documentId: document));
-
-        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
-        host.Repo.Verify(r => r.CreateSessionAsync(It.Is<ChatSession>(s => s.DocumentId == document.ToString()), It.IsAny<CancellationToken>()), Times.Once());
     }
 
     // =========================================================================================
@@ -968,13 +912,6 @@ public class ChatContextAuthorizationContractTests
     {
         var request = Authenticated(HttpMethod.Post, $"/api/ai/chat/sessions/{sessionId}/dispatch");
         request.Content = JsonContent.Create(new { bindingId = Guid.NewGuid().ToString() });
-        return request;
-    }
-
-    private static HttpRequestMessage AgentMessage(Guid? documentId = null, string? conversationReference = null)
-    {
-        var request = Authenticated(HttpMethod.Post, "/api/agent/message");
-        request.Content = JsonContent.Create(new { message = "Summarize this", documentId, conversationReference });
         return request;
     }
 
@@ -1126,7 +1063,6 @@ public class ChatContextAuthorizationContractTests
 
             _app.MapChatEndpoints();
             _app.MapDispatchSessionEndpoint();
-            _app.MapAgentEndpoints();
 
             await _app.StartAsync();
             _client = _app.GetTestClient();

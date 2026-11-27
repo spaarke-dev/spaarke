@@ -10,6 +10,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 using ApiEventStatusCode = Spaarke.Dataverse.EventStatusCode;
@@ -85,7 +86,7 @@ public class EventRegardingPayloadTests
             "Dataverse refuses a statuscode written with a statecode it does not belong to (Completed is ACTIVE live)");
     }
 
-    // ── Write shape: create (EventEndpoints.BuildCreatePayload — the payload RecordCreationService receives) ────
+    // ── Write shape: create (EventsCapability.BuildCreatePayload — the payload RecordCreationService receives) ────
 
     [Theory]
     [MemberData(nameof(RegardingTypes))]
@@ -145,7 +146,7 @@ public class EventRegardingPayloadTests
     [Fact]
     public void CreatePayload_NoRegarding_WritesNoRegardingColumns()
     {
-        var payload = EventEndpoints.BuildCreatePayload(new ApiCreateEventRequest("x"), regarding: null, assignedToContactId: null);
+        var payload = EventsCapability.BuildCreatePayload(new ApiCreateEventRequest("x"), regarding: null, assignedToContactId: null);
 
         payload.Keys.Should().NotContain(k => k.StartsWith("sprk_regarding", StringComparison.Ordinal));
     }
@@ -153,7 +154,7 @@ public class EventRegardingPayloadTests
     [Fact]
     public void CreatePayload_DefaultStatusIsTheLiveOpenWithItsStatecode()
     {
-        var payload = EventEndpoints.BuildCreatePayload(new ApiCreateEventRequest("x"), regarding: null, assignedToContactId: null);
+        var payload = EventsCapability.BuildCreatePayload(new ApiCreateEventRequest("x"), regarding: null, assignedToContactId: null);
 
         payload["statuscode"].Should().Be(659490001);
         payload["statecode"].Should().Be(0);
@@ -270,9 +271,9 @@ public class EventRegardingPayloadTests
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Dictionary<string, object?> Create(int type, Guid? recordTypeRef) =>
-        EventEndpoints.BuildCreatePayload(
+        EventsCapability.BuildCreatePayload(
             new ApiCreateEventRequest("Hearing"),
-            new EventEndpoints.RegardingFields(
+            new EventsCapability.RegardingFields(
                 type, TargetId, recordTypeRef, "Target", "/main.aspx?pagetype=entityrecord&etn=x&id=y", Number: null),
             assignedToContactId: null);
 

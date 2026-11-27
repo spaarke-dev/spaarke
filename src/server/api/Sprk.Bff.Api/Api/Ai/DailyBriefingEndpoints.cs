@@ -110,13 +110,77 @@ public static class DailyBriefingEndpoints
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        // The route's rules live in RenderCoreAsync, shared with the MCP tool spaarke_get_briefing (RenderForCallerAsync). This handler
+        // only maps the answer: the 200 body, or the exact failure result the route has always returned.
+        var result = await RenderCoreAsync(request, loggerFactory, composite, entityService, httpContext, cancellationToken)
+            .ConfigureAwait(false);
+        return result.Briefing is not null ? TypedResults.Ok(result.Briefing) : result.Failure!;
+    }
+
+    /// <summary>
+    /// The rendered briefing of <c>POST /api/ai/daily-briefing/render</c> for a host that is not the route: the MCP tool
+    /// <c>spaarke_get_briefing</c> (spaarkeai-mcp-bff-api-r2 task 034, spec FR-09). It runs THE route's rules
+    /// (<see cref="RenderCoreAsync"/>: the caller's systemuserid from the token's oid, the same windows clamp, the same composite, so the
+    /// briefing is the one the Console shows the same user) and reads the services the route's handler is given from
+    /// <paramref name="httpContext"/>'s request services, so a caller outside <c>Services/Ai</c> names none of them (ADR-013).
+    /// <list type="bullet">
+    /// <item><b>No caller.</b> A null context, a principal with no authenticated identity, or no request services is
+    /// <see cref="DailyBriefingRenderOutcome.UserContextRequired"/> (401) before anything is read. Nothing falls back to app-only.</item>
+    /// <item><b>Any other failure</b> carries the outcome and the HTTP status the route answers for it; the exception text is never part
+    /// of the result (the route's own 503 detail for an unconfigured Binding is the route's, not this method's).</item>
+    /// <item>Only a cancellation of <paramref name="cancellationToken"/> propagates.</item>
+    /// </list>
+    /// Pass the request's own context (<c>IHttpContextAccessor.HttpContext</c>) only: the principal and the services must come from the
+    /// same validated request.
+    /// </summary>
+    public static async Task<DailyBriefingRenderResult> RenderForCallerAsync(
+        HttpContext? httpContext,
+        RenderDailyBriefingRequest? request,
+        CancellationToken cancellationToken = default)
+    {
+        if (httpContext?.User is not { } user
+            || !user.Identities.Any(i => i.IsAuthenticated)
+            || httpContext.RequestServices is not { } services)
+        {
+            return DailyBriefingRenderResult.UserContextRequired;
+        }
+
+        return await RenderCoreAsync(
+            request,
+            services.GetRequiredService<ILoggerFactory>(),
+            services.GetRequiredService<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>(),
+            services.GetRequiredService<Spaarke.Dataverse.IGenericEntityService>(),
+            httpContext,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// THE rules of <c>POST /api/ai/daily-briefing/render</c> (the route and <see cref="RenderForCallerAsync"/> both run them): resolve the
+    /// caller's systemuserid, clamp the windows, render through the composite, and classify a failure. <see cref="DailyBriefingRenderResult.Failure"/>
+    /// is the exact result the route returns for it (status, title and detail unchanged).
+    /// </summary>
+    private static async Task<DailyBriefingRenderResult> RenderCoreAsync(
+        RenderDailyBriefingRequest? request,
+        ILoggerFactory loggerFactory,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService composite,
+        Spaarke.Dataverse.IGenericEntityService entityService,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
 
         var identity = await ResolveSystemUserIdAsync(entityService, httpContext, logger, "render", cancellationToken)
             .ConfigureAwait(false);
         if (identity.Failure is not null)
         {
-            return identity.Failure;
+            var identityOutcome = (identity.Failure as IStatusCodeHttpResult)?.StatusCode switch
+            {
+                StatusCodes.Status401Unauthorized => DailyBriefingRenderOutcome.UserContextRequired,
+                StatusCodes.Status403Forbidden => DailyBriefingRenderOutcome.NotADataverseUser,
+                _ => DailyBriefingRenderOutcome.IdentityLookupFailed,
+            };
+            return DailyBriefingRenderResult.Failed(
+                identityOutcome, (identity.Failure as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status500InternalServerError, identity.Failure);
         }
 
         // r5 settings-wiring (2026-07-09): the client passes the user's Display Parameters
@@ -129,26 +193,32 @@ public static class DailyBriefingEndpoints
         {
             var response = await composite.RenderAsync(
                 identity.SystemUserId, GetTenantId(httpContext), windows, cancellationToken).ConfigureAwait(false);
-            return TypedResults.Ok(response);
+            return DailyBriefingRenderResult.Rendered(response);
         }
         catch (FeatureDisabledException ex)
         {
             logger.LogDebug(
                 "Daily briefing render called while AI feature disabled. ErrorCode={ErrorCode}", ex.ErrorCode);
-            return ex.AsFeatureDisabled503();
+            return DailyBriefingRenderResult.Failed(
+                DailyBriefingRenderOutcome.Unavailable, StatusCodes.Status503ServiceUnavailable, ex.AsFeatureDisabled503());
         }
         catch (Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingDispatchUnconfiguredException ex)
         {
             logger.LogWarning(ex, "Daily briefing render dispatch unconfigured.");
-            return Results.Problem(statusCode: 503, title: "Service Unavailable", detail: ex.Message);
+            return DailyBriefingRenderResult.Failed(
+                DailyBriefingRenderOutcome.Unavailable,
+                StatusCodes.Status503ServiceUnavailable,
+                Results.Problem(statusCode: 503, title: "Service Unavailable", detail: ex.Message));
         }
         catch (OpenAiCircuitBrokenException ex)
         {
             logger.LogWarning(
                 "OpenAI circuit breaker open for daily briefing render. RetryAfter={RetryAfter}s",
                 ex.RetryAfter.TotalSeconds);
-            return ProblemDetailsHelper.AiUnavailable(
-                "AI briefing service is temporarily unavailable.", httpContext.TraceIdentifier);
+            return DailyBriefingRenderResult.Failed(
+                DailyBriefingRenderOutcome.Unavailable,
+                StatusCodes.Status503ServiceUnavailable,
+                ProblemDetailsHelper.AiUnavailable("AI briefing service is temporarily unavailable.", httpContext.TraceIdentifier));
         }
         catch (OperationCanceledException)
         {
@@ -157,10 +227,13 @@ public static class DailyBriefingEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Daily briefing render failed for systemuserid {SystemUserId}", identity.SystemUserId);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to render daily briefing.");
+            return DailyBriefingRenderResult.Failed(
+                DailyBriefingRenderOutcome.Failed,
+                StatusCodes.Status500InternalServerError,
+                Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "Failed to render daily briefing."));
         }
     }
 
@@ -339,6 +412,12 @@ public static class DailyBriefingEndpoints
                     detail: "Caller is not a Dataverse user in this environment."));
             }
             return (lookup.Entities[0].GetAttributeValue<Guid>("systemuserid"), null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // An aborted request or an exhausted tool budget is not a lookup failure: let the caller see the cancellation instead of
+            // logging an error and answering 500. (Every non-cancelled outcome below is unchanged.)
+            throw;
         }
         catch (Exception ex)
         {
@@ -1262,4 +1341,47 @@ public record NarrativeBulletReferenceDto
     /// </summary>
     [JsonPropertyName("mentioned")]
     public bool Mentioned { get; init; }
+}
+
+/// <summary>
+/// How a render of the caller's daily briefing ended (spaarkeai-mcp-bff-api-r2 task 034): the classification of the failures
+/// <c>POST /api/ai/daily-briefing/render</c> answers, for a host that does not return the route's HTTP result (the MCP tool).
+/// </summary>
+public enum DailyBriefingRenderOutcome
+{
+    /// <summary>The briefing was rendered.</summary>
+    Rendered,
+
+    /// <summary>There is no signed-in caller, or the token has no valid Entra object id (the route's 401).</summary>
+    UserContextRequired,
+
+    /// <summary>The token's oid is not an active Dataverse user in this environment (the route's 403).</summary>
+    NotADataverseUser,
+
+    /// <summary>The systemuser lookup faulted (the route's 500 "Failed to resolve caller identity").</summary>
+    IdentityLookupFailed,
+
+    /// <summary>The AI briefing is switched off, not configured or its provider is unavailable (the route's 503).</summary>
+    Unavailable,
+
+    /// <summary>Any other fault while rendering (the route's 500 "Failed to render daily briefing").</summary>
+    Failed,
+}
+
+/// <summary>
+/// The answer of the render rules of <c>POST /api/ai/daily-briefing/render</c>: the briefing, or how it failed with the exact HTTP result the
+/// route returns for that failure (<see cref="Failure"/>) and its status. A host that is not the route maps <see cref="Outcome"/> and
+/// <see cref="Status"/> and never reads <see cref="Failure"/>'s detail, which can carry exception text on the route's own 503.
+/// </summary>
+public sealed record DailyBriefingRenderResult(DailyBriefingRenderOutcome Outcome, DailyBriefingNarrateResponse? Briefing, int Status, IResult? Failure)
+{
+    /// <summary>No signed-in caller: nothing was read.</summary>
+    public static DailyBriefingRenderResult UserContextRequired { get; } =
+        new(DailyBriefingRenderOutcome.UserContextRequired, null, StatusCodes.Status401Unauthorized, null);
+
+    internal static DailyBriefingRenderResult Rendered(DailyBriefingNarrateResponse briefing) =>
+        new(DailyBriefingRenderOutcome.Rendered, briefing, StatusCodes.Status200OK, null);
+
+    internal static DailyBriefingRenderResult Failed(DailyBriefingRenderOutcome outcome, int status, IResult failure) =>
+        new(outcome, null, status, failure);
 }

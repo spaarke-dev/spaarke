@@ -155,7 +155,7 @@ public class RegardingPairTypeImpliesIdGuardTests
                      "src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs",
                      "src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs",
                      "src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs",
-                     "src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs",
+                     "src/server/api/Sprk.Bff.Api/Services/Events/EventsCapability.cs",
                      "src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs",
                      "src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs",
                  })

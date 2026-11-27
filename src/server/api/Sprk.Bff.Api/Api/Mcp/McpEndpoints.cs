@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Briefing;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.DI;
 
@@ -48,10 +50,11 @@ public static class McpEndpoints
 
         // One startup warning when the server is on but this build carries no widget (a local or CI build that skipped the widget build):
         // tools/call still works, but resources/read answers an error and Copilot shows no decisions widget.
-        WarnIfWidgetMissing(
-            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(McpEndpoints).FullName!),
-            app.Services.GetRequiredService<IOptions<McpOptions>>().Value.Enabled,
-            DecisionsWidgetResource.IsEmbedded);
+        var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(McpEndpoints).FullName!);
+        var mcpEnabled = app.Services.GetRequiredService<IOptions<McpOptions>>().Value.Enabled;
+        WarnIfWidgetMissing(startupLogger, mcpEnabled, DecisionsWidgetResource.IsEmbedded);
+        WarnIfWidgetMissing(startupLogger, mcpEnabled, BriefingWidgetResource.IsEmbedded, "briefing", BriefingWidgetResource.Uri, "spaarke-briefing");
+        WarnIfWidgetMissing(startupLogger, mcpEnabled, SearchResultsWidgetResource.IsEmbedded, "search-results", SearchResultsWidgetResource.Uri, "spaarke-search-results");
 
         // The policy name is a literal on purpose: the health-probe policy guard (RouteAuthorizationGuardTests) reads only string literals.
         // Keep it equal to RateLimitingModule.McpPolicyName.
@@ -66,14 +69,18 @@ public static class McpEndpoints
     }
 
     /// <summary>One Warning when the server is enabled but this build embeds no widget (<paramref name="embedded"/> false); nothing otherwise.</summary>
-    internal static void WarnIfWidgetMissing(ILogger logger, bool enabled, bool embedded)
+    internal static void WarnIfWidgetMissing(ILogger logger, bool enabled, bool embedded) =>
+        WarnIfWidgetMissing(logger, enabled, embedded, "decisions", DecisionsWidgetResource.Uri, "spaarke-decisions");
+
+    /// <summary>The same warning for any widget: its short <paramref name="widget"/> name, resource URI and source folder under <c>src/client/widgets/</c>.</summary>
+    internal static void WarnIfWidgetMissing(ILogger logger, bool enabled, bool embedded, string widget, string resourceUri, string folder)
     {
         if (enabled && !embedded)
         {
             logger.LogWarning(
-                "Mcp:Enabled is true but the decisions widget is not embedded in this build ({Resource}); resources/read will fail and hosts will show no widget. "
-                + "Build src/client/widgets/spaarke-decisions before publishing the BFF.",
-                DecisionsWidgetResource.Uri);
+                "Mcp:Enabled is true but the {Widget} widget is not embedded in this build ({Resource}); resources/read will fail and hosts will show no widget. "
+                + "Build src/client/widgets/{Folder} before publishing the BFF.",
+                widget, resourceUri, folder);
         }
     }
 

@@ -1,0 +1,42 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "isolatedModules": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "types": ["node", "jest", "@testing-library/jest-dom"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@spaarke/daily-briefing-components": ["../../shared/Spaarke.DailyBriefing.Components/src/index.ts"],
+      "@spaarke/daily-briefing-components/*": ["../../shared/Spaarke.DailyBriefing.Components/src/*"],
+      "@spaarke/auth": ["src/shims/spaarkeAuth.ts"],
+      "@spaarke/ui-components": ["src/shims/uiComponents.ts"],
+      "@spaarke/ui-components/services": ["src/shims/uiServices.ts"],
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/src/*"],
+      "react": ["node_modules/@types/react"],
+      "react/*": ["node_modules/@types/react/*"],
+      "react-dom": ["node_modules/@types/react-dom"],
+      "react-dom/*": ["node_modules/@types/react-dom/*"],
+      "@fluentui/react-components": ["node_modules/@fluentui/react-components"],
+      "@fluentui/react-icons": ["node_modules/@fluentui/react-icons"],
+      "lexical": ["node_modules/lexical"],
+      "@lexical/*": ["node_modules/@lexical/*"],
+      "@modelcontextprotocol/ext-apps/react-with-deps": [
+        "node_modules/@modelcontextprotocol/ext-apps/dist/src/react/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src", "../shared"]
+}

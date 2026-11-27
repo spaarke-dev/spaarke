@@ -1,4 +1,5 @@
 ## SharePoint Embedded + Graph
+- [Long-running OBO vs held assertion](long-running-obo-vs-held-assertion-2026-11-26.md) — REC held token + pre-warm OBO; Graph 55-min TTL defect; 30 s = connector req
 - [agentConnectors plugin package](agentconnectors-plugin-package-2026-11-20.md) — 1.30 newest GA; max 10 connectors; admin=Agents>Tools>Registry>Upload
 - [SPE container permission user identity](spe-container-permission-user-identity-2026-10-19.md) — grantedToV2.user id/email/UPN in
 - [SPE inactive container auto-delete](spe-container-inactive-autodelete-2026-10-16.md) — 24h auto-delete documented; customProperties

@@ -204,14 +204,15 @@ function Test-HealthCheck {
     return $healthy
 }
 
-function Test-DecisionsWidgetEmbedded {
-    param([string]$PublishDir)
+function Test-WidgetEmbedded {
+    # $Name is the widget's short name: "decisions", "briefing" or "search-results" (the manifest name is Sprk.Bff.Api.Widgets.<name>.html).
+    param([string]$PublishDir, [string]$Name)
 
     $dll = Join-Path $PublishDir "Sprk.Bff.Api.dll"
     if (-not (Test-Path $dll)) { return $false }
     # Latin1 (code page 28591; the ::Latin1 property is null in Windows PowerShell 5.1) maps every byte to one char, so a byte search for the ASCII/UTF-8 resource name is a plain substring search.
     $text = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($dll))
-    return $text.Contains("Sprk.Bff.Api.Widgets.decisions.html")
+    return $text.Contains("Sprk.Bff.Api.Widgets.$Name.html")
 }
 
 # --- Step 1: Build ---
@@ -229,27 +230,31 @@ if (-not $SkipBuild) {
     # (Sprk.Bff.Api.csproj, EmbeddedResource Condition=Exists). It must be built BEFORE `dotnet publish`, or the deployed BFF answers an
     # error for resources/read of ui://spaarke/decisions.html. `npm run build` type-checks, builds, and runs scripts/check-bundle-size.mjs
     # (fails above 3 MB, or when the page is not self-contained). Same steps as publish-bff-artifact.yml.
-    $WidgetDir = "$RepoRoot\src\client\widgets\spaarke-decisions"
-    Push-Location $WidgetDir
-    try {
-        # npm writes warnings to stderr; do not let them become terminating errors, judge by the exit code.
-        $ErrorActionPreference = "Continue"
-        Write-Host "  Building the decisions widget (npm install + build)..." -ForegroundColor Gray
-        $npmOutput = & npm install --legacy-peer-deps --no-audit --no-fund 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $npmOutput | ForEach-Object { Write-Host "    $_" }
-            throw "Widget npm install failed with exit code $LASTEXITCODE"
+    # spaarkeai-mcp-bff-api-r2 task 034 added the Daily Briefing widget (ui://spaarke/briefing.html), built and embedded the same way.
+    # Task 035 added the search results widget (ui://spaarke/search-results.html), built and embedded the same way.
+    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
+        $WidgetDir = "$RepoRoot\src\client\widgets\spaarke-$WidgetName"
+        Push-Location $WidgetDir
+        try {
+            # npm writes warnings to stderr; do not let them become terminating errors, judge by the exit code.
+            $ErrorActionPreference = "Continue"
+            Write-Host "  Building the $WidgetName widget (npm install + build)..." -ForegroundColor Gray
+            $npmOutput = & npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $npmOutput | ForEach-Object { Write-Host "    $_" }
+                throw "Widget npm install failed with exit code $LASTEXITCODE ($WidgetName)"
+            }
+            $npmOutput = & npm run build 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $npmOutput | ForEach-Object { Write-Host "    $_" }
+                throw "Widget build failed with exit code $LASTEXITCODE (${WidgetName}: type-check, vite build or the 3 MB size gate)"
+            }
+            $npmOutput | Select-Object -Last 1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
         }
-        $npmOutput = & npm run build 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $npmOutput | ForEach-Object { Write-Host "    $_" }
-            throw "Widget build failed with exit code $LASTEXITCODE (type-check, vite build or the 3 MB size gate)"
+        finally {
+            $ErrorActionPreference = "Stop"
+            Pop-Location
         }
-        $npmOutput | Select-Object -Last 1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
-    }
-    finally {
-        $ErrorActionPreference = "Stop"
-        Pop-Location
     }
 
     Push-Location $ApiProject
@@ -275,18 +280,22 @@ if (-not $SkipBuild) {
     # The csproj embeds the widget only when dist/index.html exists (Condition=Exists), so a skipped or failed-open widget build would
     # publish a BFF that serves an error for ui://spaarke/decisions.html. Fail here instead. The logical name is stored as UTF-8 in the
     # assembly's manifest-resource table, so a byte search of the published dll finds it (same check as publish-bff-artifact.yml).
-    if (-not (Test-DecisionsWidgetEmbedded -PublishDir $PublishPath)) {
-        throw "The published Sprk.Bff.Api.dll does not embed the decisions widget (Sprk.Bff.Api.Widgets.decisions.html). The widget build did not produce src\client\widgets\spaarke-decisions\dist\index.html."
+    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
+        if (-not (Test-WidgetEmbedded -PublishDir $PublishPath -Name $WidgetName)) {
+            throw "The published Sprk.Bff.Api.dll does not embed the $WidgetName widget (Sprk.Bff.Api.Widgets.$WidgetName.html). The widget build did not produce src\client\widgets\spaarke-$WidgetName\dist\index.html."
+        }
+        Write-Host "  The $WidgetName widget is embedded" -ForegroundColor Green
     }
-    Write-Host "  Decisions widget is embedded" -ForegroundColor Green
 } else {
     Write-Host "[$stepNum/$totalSteps] Skipping build (using existing publish)" -ForegroundColor Gray
     if (-not (Test-Path $PublishPath)) {
         throw "Publish folder not found at '$PublishPath'. Run without -SkipBuild first."
     }
     # -SkipBuild keeps its meaning (deploy what is there), so a publish made before the widget existed is a warning, not a failure.
-    if (-not (Test-DecisionsWidgetEmbedded -PublishDir $PublishPath)) {
-        Write-Host "  WARNING: the existing publish does not embed the decisions widget; resources/read for ui://spaarke/decisions.html will answer an error. Re-run without -SkipBuild to build it." -ForegroundColor Yellow
+    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
+        if (-not (Test-WidgetEmbedded -PublishDir $PublishPath -Name $WidgetName)) {
+            Write-Host "  WARNING: the existing publish does not embed the $WidgetName widget; resources/read for ui://spaarke/$WidgetName.html will answer an error. Re-run without -SkipBuild to build it." -ForegroundColor Yellow
+        }
     }
 }
 
