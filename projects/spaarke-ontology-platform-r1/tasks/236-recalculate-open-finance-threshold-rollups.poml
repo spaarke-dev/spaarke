@@ -4,7 +4,7 @@
     <title>One-off: recalculate the stored finance roll-up of each matter or project with a finance Threshold Signal open from before task 232 (D-235, #1767)</title>
     <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Operational dev data step through an existing route; no code change.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -32,5 +32,5 @@
   <acceptance-criteria>
     <criterion testable="true">Count of subjects listed, count recalculated (200), count unchanged, count failed recorded in notes/task-236-notes.md.</criterion>
   </acceptance-criteria>
-  <completion></completion>
+  <completion>Done 2026-11-27 (main session, dev BFF 5cd40984b0 with task 232): read-only listing found no spend, budget or utilization Threshold policy on dev (676 open Signals, 7 policies, 10 policy versions; none names a derived finance column), so 0 subjects needed recalculation and no call or write was made. Notes: notes/task-236-notes.md.</completion>
 </task>

@@ -314,7 +314,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 233 | [A system-closed (ConditionCleared) Decision Record derives its privilege flag with WorkItemPrivilege, app-only (#3275, DI-177)](233-condition-cleared-dr-privilege-flag.poml) | FULL | opus/high | none | group-d-2026-11-27 | Owner 2026-11-27 D-232 (option A), "continue with the next work items". PR to master |
 | 🔲 234 | [An open inquiry's outcome To Do closes only through the BFF from SmartTodo, LegalWorkspace and the chat update tool (#3279 DI-179, #1984)](234-inquiry-todo-close-via-bff-everywhere.poml) | FULL | opus/high | none | group-d-2026-11-27 | Owner 2026-11-27 D-233 (option A). PR to master; SmartTodo/LegalWorkspace owners notified |
 | 🔲 235 | [Signal-less billing, Record Procedure and assign-firm Decision Records appear on the Decision Records tab under their core record, without Open (#3283, DI-180)](235-dr-tab-signal-less-records.poml) | FULL | opus/high | none | group-d-2026-11-27 | Owner 2026-11-27 D-234. PR to master |
-| 🔲 236 | [One-off: recalculate the stored finance roll-up of each matter or project with a finance Threshold Signal open from before task 232 (D-235, #1767)](236-recalculate-open-finance-threshold-rollups.poml) | STANDARD | opus/high | 232 | group-d-2026-11-27 | Owner 2026-11-27 D-235 "you can run it automatically". Main session, dev data |
+| ✅ 236 | [One-off: recalculate the stored finance roll-up of each matter or project with a finance Threshold Signal open from before task 232 (D-235, #1767)](236-recalculate-open-finance-threshold-rollups.poml) | STANDARD | opus/high | 232 | group-d-2026-11-27 | Owner 2026-11-27 D-235 "you can run it automatically". Main session, dev data |
 
 ### Phase 5 — The worklist surface
 
