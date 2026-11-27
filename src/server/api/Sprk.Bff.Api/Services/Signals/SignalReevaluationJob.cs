@@ -1,11 +1,13 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
@@ -41,6 +43,13 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// Signal and decides no episode or closure. <i>Extension</i> — the job reuses the ADR-036 seam, the validator gate, the writer
 /// and uac-r2's resolver rather than adding a scheduler or an ownership path. <i>Cost of doing nothing</i> — no Signal is ever
 /// raised, a cleared condition is never closed, and a resolved Signal can never return (FR-11, FR-15, D-13).</para>
+/// <para><b>Finance roll-up (task 232, D-230, #1767).</b> A base-derived Threshold (spend, budget or utilization of a matter or project,
+/// <see cref="SignalEvaluation.DerivedThresholdField"/>) is judged from the invoice and budget rows, while the form shows the stored roll-up
+/// columns. After this pass CREATES such a Signal (a first raise or a re-raise), it recalculates that one subject's stored roll-up through
+/// ebilling-r1's <see cref="FinanceRollupService"/> (reused, not forked; it writes with the BFF application identity, as on its own routes,
+/// and skips a write whose values are unchanged). Nothing else triggers it: an open Signal the pass leaves as it is, a closed one, a
+/// dedupe-race reconcile, a skip and every other rule write nothing to the subject (D-61). A recalculation fault is logged and never undoes
+/// or fails the Signal.</para>
 /// </remarks>
 public sealed class SignalReevaluationJob : IScheduledJob
 {
@@ -68,6 +77,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     private readonly DecisionRecordWriter _records;
     private readonly IGenericEntityService _entities;
     private readonly IDistributedCache _cache;
+    private readonly IServiceScopeFactory _scopes;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SignalReevaluationJob> _logger;
 
@@ -79,6 +89,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         DecisionRecordWriter records,
         IGenericEntityService entities,
         IDistributedCache cache,
+        IServiceScopeFactory scopes,
         TimeProvider timeProvider,
         ILogger<SignalReevaluationJob> logger)
     {
@@ -89,6 +100,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _scopes = scopes ?? throw new ArgumentNullException(nameof(scopes));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -438,7 +450,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     "resolution time is unknown), so they stay un-raised.", policy.Code, plan.NoDatedEvidence);
             }
 
-            var closedNow = await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
+            var closedNow = await ApplyAsync(policy, spec, plan, counts, ct, RollupSubjectOf(evaluation)).ConfigureAwait(false);
             // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
             await RedactStoredEvidenceAsync(policy.Code, outOfScope.Count == 0 ? existing : existing.Concat(outOfScope).ToList(), counts, ct)
                 .ConfigureAwait(false);
@@ -691,9 +703,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
     }
 
+    /// <param name="rollupSubject">Task 232: <c>sprk_matter</c> or <c>sprk_project</c> when the policy is a base-derived finance Threshold
+    /// (<see cref="RollupSubjectOf"/>): each subject a create here raises gets its stored roll-up recalculated. Null for every other policy.</param>
     /// <returns>Task 153: every Signal this pass closed as ConditionCleared, with the time it was closed.</returns>
     private async Task<IReadOnlyDictionary<Guid, DateTime>> ApplyAsync(
-        PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
+        PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct, string? rollupSubject = null)
     {
         // Task 145 (D-123, #1747 finding e): a Signal never carries the subject or sender of a witness in another (or an undetermined)
         // secure family. Every write below can create a row (a reconcile creates when its row is gone), so both take the filtered lines.
@@ -704,6 +718,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         // Ids of the Signals this pass actually closed. A re-file's new episode is created only when its predecessor closed.
         var closedIds = new HashSet<Guid>();
+        // Task 232: the subjects a create below raised a finance Threshold Signal for (each recalculated once, after the creates).
+        var raised = new HashSet<Guid>();
         var closedAt = new Dictionary<Guid, DateTime>();
         foreach (var signal in plan.Closes)
         {
@@ -804,10 +820,60 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 else if (!result.Created) counts.Updated++;
                 else if (create.Episode > 1) counts.Reraised++;
                 else counts.Written++;
+                // Task 232 (D-230): only a Signal this create raised. A dedupe-race reconcile (Created false) met a row another pass
+                // raised, and that pass recalculated.
+                if (result.Created && rollupSubject is not null) raised.Add(create.Hit.SubjectId);
             }).ConfigureAwait(false);
         }
 
+        if (rollupSubject is not null)
+        {
+            await RecalculateFinanceRollupsAsync(policy, rollupSubject, raised, ct).ConfigureAwait(false);
+        }
+
         return closedAt;
+    }
+
+    /// <summary>Task 232 (D-230): the subject table whose stored roll-up a raise of this evaluation's Signals recalculates: the matter or
+    /// project of a base-derived Threshold (spend, budget or utilization), else null.</summary>
+    internal static string? RollupSubjectOf(SignalEvaluation evaluation) =>
+        evaluation.DerivedThresholdField is not null
+        && evaluation.SubjectEntity is FinanceBaseValues.MatterEntity or FinanceBaseValues.ProjectEntity
+            ? evaluation.SubjectEntity
+            : null;
+
+    /// <summary>
+    /// Task 232 (D-230, #1767, #1663): recalculates the stored roll-up of each matter or project this pass raised a finance Threshold
+    /// Signal for, one record at a time, through ebilling-r1's <see cref="FinanceRollupService"/> (scoped, so resolved per pass). It is
+    /// targeted (only <paramref name="subjectIds"/>, never the policy's other subjects; D-61) and the service writes nothing when the
+    /// stored values already agree. A fault is logged as a Warning and goes no further: the Signal stays raised and the run's outcome
+    /// is unchanged (the form keeps its previous figures until the next recalculation). The caller's cancellation propagates.
+    /// </summary>
+    private async Task RecalculateFinanceRollupsAsync(PolicyRow policy, string subjectEntity, IReadOnlyCollection<Guid> subjectIds, CancellationToken ct)
+    {
+        if (subjectIds.Count == 0)
+        {
+            return;
+        }
+
+        await using var scope = _scopes.CreateAsyncScope();
+        foreach (var subjectId in subjectIds)
+        {
+            try
+            {
+                var rollup = scope.ServiceProvider.GetRequiredService<FinanceRollupService>();
+                _ = subjectEntity == FinanceBaseValues.MatterEntity
+                    ? await rollup.RecalculateMatterAsync(subjectId, ct).ConfigureAwait(false)
+                    : await rollup.RecalculateProjectAsync(subjectId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "Policy {PolicyCode}: a Signal was raised on {SubjectEntity} {SubjectId}, but its stored finance roll-up could not be " +
+                    "recalculated ({ExceptionType}); the Signal stands and the form keeps its previous figures until the next recalculation.",
+                    policy.Code, subjectEntity, subjectId, ex.GetType().Name);
+            }
+        }
     }
 
     /// <summary>Task 153: how long after its close a Do-lane ConditionCleared Signal whose record could not be written or linked is still
@@ -1269,13 +1335,17 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// Task 032 (D-12, D-48): the event-triggered pass. Evaluates every enabled <b>Decide-lane</b> policy about
     /// <paramref name="subjectEntity"/> for the ONE subject, through <see cref="EvaluatePolicyAsync"/> - the SAME evaluation,
     /// episode planner and writer path as the nightly pass (a second path is how the two come to disagree). Do-lane policies
-    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A policy limited to a matter (task 102b) is evaluated only
+    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>) unless <paramref name="includeDoLane"/> (task 228). A policy limited to a matter (task 102b) is evaluated only
     /// when the trigger's subject is that matter (otherwise it is not applicable); a tenant-scoped or mis-scoped policy is skipped with
     /// the nightly Warning and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
     /// revision recorded through a decision leaves its Acted Signal Acted.
+    /// <para>Task 228 (#1991): <paramref name="includeDoLane"/> also evaluates the Do-lane policies about the subject (the inquiry
+    /// disposition trigger, whose subject is the To Do it just completed), through the same path: a Do-lane Signal closed as
+    /// ConditionCleared gets D-145b's one Routine closure record, exactly as on the nightly run.</para>
     /// </summary>
     /// <exception cref="InvalidOperationException">The enabled policies could not be read; the caller must retry.</exception>
-    internal async Task<SubjectEvaluationResult> EvaluateSubjectAsync(string subjectEntity, Guid subjectId, CancellationToken ct)
+    internal async Task<SubjectEvaluationResult> EvaluateSubjectAsync(
+        string subjectEntity, Guid subjectId, CancellationToken ct, bool includeDoLane = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectEntity);
         if (subjectId == Guid.Empty) throw new ArgumentException("A subject id is required.", nameof(subjectId));
@@ -1297,7 +1367,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         var scope = new SubjectScope(subjectEntity, subjectId);
-        foreach (var policy in policies.Where(p => p.Lane == SignalWriter.LaneDecide))
+        foreach (var policy in policies.Where(p => p.Lane == SignalWriter.LaneDecide || (includeDoLane && p.Lane == SignalWriter.LaneDo)))
         {
             ct.ThrowIfCancellationRequested();
             await EvaluatePolicyAsync(policy, counts, ct, scope).ConfigureAwait(false);

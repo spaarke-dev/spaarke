@@ -273,7 +273,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/useEmailWorkspaceRecord.ts": {
@@ -1269,11 +1269,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 14
     },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts": {
     "no-restricted-syntax": {
       "count": 1
     }

@@ -22,6 +22,7 @@
 
 import { daysBetweenLocalMidnight, parseDueDate } from '../../utils/dateLocal';
 import type { MetricCardConfig } from '../WorkspaceShell/types';
+import { formatDueDay } from './composeIssueLine';
 import { hasInvoiceReview } from './types';
 import type { WorkType, WorklistItem, WorklistLane } from './types';
 
@@ -99,10 +100,29 @@ export function filterLaneItems(
   return bucket ? bucket.items : [];
 }
 
-/** Decide: "oldest 4 days" (calendar days since the oldest `raisedOn`). Do: "3 past due". Otherwise no note. */
+/** How many of the items are past their due date (calendar days from the viewer's `today`). Items with no due date are not. */
+function countPastDue(items: readonly WorklistItem[], today: Date): number {
+  let pastDue = 0;
+  for (const item of items) {
+    const due = parseDueDate(item.dueDate);
+    if (due && daysBetweenLocalMidnight(today, due) < 0) pastDue += 1;
+  }
+  return pastDue;
+}
+
+/**
+ * The card's one-line note, as the approved prototype words it (HANDOFF @ ae1cc9f, W-7):
+ *  - Decide: "2 overdue" when any item is past its due date, else "oldest 4 days" (calendar days since the oldest `raisedOn`).
+ *  - Do, Coming due: "next due 2 Oct" (the earliest due date of the card's items that is today or later; "N past due" when every
+ *    dated item is already past due, as such an item awaits the nightly re-evaluation; "next due —" when none carries a date).
+ *  - Do, other cards: "3 past due", or no note.
+ * An empty card has no note.
+ */
 function noteFor(bucket: LaneCountBucket, lane: WorklistLane, today: Date): string | undefined {
   if (bucket.items.length === 0) return undefined;
   if (lane === 'Decide') {
+    const overdue = countPastDue(bucket.items, today);
+    if (overdue > 0) return `${overdue} overdue`;
     let oldest: number | null = null;
     for (const item of bucket.items) {
       const raised = parseDueDate(item.raisedOn);
@@ -114,11 +134,22 @@ function noteFor(bucket: LaneCountBucket, lane: WorklistLane, today: Date): stri
     if (oldest === 0) return 'oldest today';
     return oldest === 1 ? 'oldest 1 day' : `oldest ${oldest} days`;
   }
-  let pastDue = 0;
-  for (const item of bucket.items) {
-    const due = parseDueDate(item.dueDate);
-    if (due && daysBetweenLocalMidnight(today, due) < 0) pastDue += 1;
+  if (bucket.key === 'comingDue') {
+    // An item stays here until the nightly re-evaluation moves it, so one may already be past due: "next" is the earliest date
+    // that is today or later, never a date that has gone (the row says "1d overdue"; the card must not say "next due" for it).
+    let next: Date | null = null;
+    let dated = 0;
+    for (const item of bucket.items) {
+      const due = parseDueDate(item.dueDate);
+      if (!due) continue;
+      dated += 1;
+      if (daysBetweenLocalMidnight(today, due) >= 0 && (next === null || due.getTime() < next.getTime())) next = due;
+    }
+    if (next) return `next due ${formatDueDay(next)}`;
+    if (dated === 0) return 'next due —';
+    return `${countPastDue(bucket.items, today)} past due`;
   }
+  const pastDue = countPastDue(bucket.items, today);
   return pastDue > 0 ? `${pastDue} past due` : undefined;
 }
 
@@ -147,10 +178,15 @@ export function buildLaneCountCards(options: BuildLaneCountCardsOptions): Metric
   return buckets.map(bucket => {
     const count = bucket.items.length;
     const note = noteFor(bucket, lane, today);
+    const progress =
+      bucket.key === 'all' && doneToday !== undefined ? { done: doneToday, total: doneToday + count } : undefined;
     const card: MetricCardConfig = {
       id: `${lane}-${bucket.key}`,
       label: bucket.label,
-      ariaLabel: `${bucket.label}, ${count} ${lane} ${count === 1 ? 'item' : 'items'}${note ? `, ${note}` : ''}`,
+      // The card draws "n of m done today" as text beside the bar; the label says it too, or a screen reader never hears it.
+      ariaLabel:
+        `${bucket.label}, ${count} ${lane} ${count === 1 ? 'item' : 'items'}${note ? `, ${note}` : ''}` +
+        (progress && progress.total > 0 ? `, ${progress.done} of ${progress.total} done today` : ''),
       value: count,
       selected: bucket.key === resolved,
       note,
@@ -158,9 +194,7 @@ export function buildLaneCountCards(options: BuildLaneCountCardsOptions): Metric
       disableWhenEmpty: bucket.key !== 'all',
       onClick: () => onSelectKey(bucket.key === resolved && bucket.key !== 'all' ? 'all' : bucket.key),
     };
-    if (bucket.key === 'all' && doneToday !== undefined) {
-      card.progress = { done: doneToday, total: doneToday + count };
-    }
+    if (progress) card.progress = progress;
     return card;
   });
 }

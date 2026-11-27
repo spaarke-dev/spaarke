@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -63,6 +64,11 @@ public sealed record SignalEvaluation(
 {
     internal static SignalEvaluation Invalid { get; } =
         new(false, null, default, PredicateCompiler.DefaultQuietWindowDays, Array.Empty<SignalHit>());
+
+    /// <summary>Task 232 (D-230, #1767): the matter or project column a base-derived Threshold compared (spend, budget or utilization,
+    /// <see cref="FinanceBaseValues.IsDerived"/>), judged from the invoice and budget rows; null for every other rule. The job recalculates
+    /// the stored roll-up of each subject it raises such a Signal for, so the form shows the figure the Signal states.</summary>
+    public string? DerivedThresholdField { get; init; }
 }
 
 /// <summary>
@@ -104,14 +110,15 @@ public sealed class SignalEvaluator
     /// <summary>Days each Date Only relative bound is widened by before the per-item judgement (zones span UTC-12..UTC+14).</summary>
     internal const int DateOnlyWideningDays = 2;
 
-    /// <summary>The contact column naming who an item is FOR (D-25), on the Do-lane subjects that have one (verified live,
-    /// task 031: To Do, event and work assignment all carry <c>sprk_assignedto</c>).</summary>
+    /// <summary>The contact column naming who an item is FOR (D-25), on the Do-lane subjects that have one. To Do and event carry
+    /// <c>sprk_assignedto</c>; a work assignment's individual is its Assigned To Internal (D-129, task 227), read from
+    /// <see cref="OwnedChildWrite.ForPersonColumns"/> so the evaluator and the worklist's "mine" test cannot diverge.</summary>
     internal static readonly FrozenDictionary<string, string> AssigneeColumnBySubject =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["sprk_todo"] = "sprk_assignedto",
             ["sprk_event"] = "sprk_assignedto",
-            ["sprk_workassignment"] = "sprk_assignedto",
+            ["sprk_workassignment"] = OwnedChildWrite.ForPersonColumns["sprk_workassignment"].Column,
         }.ToFrozenDictionary();
 
     /// <summary>The witness row's display text and source columns per related table (FR-48). A table not listed gives a
@@ -323,7 +330,7 @@ public sealed class SignalEvaluator
                 CoreRefusalCause: refusalCause));
         }
 
-        return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits, missing);
+        return new SignalEvaluation(true, subject, anchor, compiled.QuietWindowDays, hits, missing) { DerivedThresholdField = derived?.Field };
     }
 
     // ── Base-derived Threshold (task 025b, D-122) ─────────────────────────────────────────────────────────────────

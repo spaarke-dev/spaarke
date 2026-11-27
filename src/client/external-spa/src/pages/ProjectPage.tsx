@@ -7,6 +7,7 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
   Badge,
   TabList,
   Tab,
@@ -27,6 +28,7 @@ import {
   Sparkle20Regular,
 } from '@fluentui/react-icons';
 import { getProjectById, ODataProject } from '../api/web-api-client';
+import { BINDER_FAULT_MESSAGE, BinderFaultError, withBinderFaultRetry } from '../api/me-client';
 import { ApiError } from '../types';
 import { AccessLevel } from '../types';
 import { ACCESS_LEVEL_LABELS } from '../components/record/recordAccess';
@@ -377,7 +379,13 @@ export const ProjectPage: React.FC = () => {
 
   const [project, setProject] = React.useState<ODataProject | null>(null);
   const [loadingProject, setLoadingProject] = React.useState<boolean>(true);
-  const [projectError, setProjectError] = React.useState<{ status: number; message: string } | null>(null);
+  // `binderFault`: the caller's sign-in could not be finished after the automatic retries (R4 FR-28, #2269). A partner
+  // opening a project link has no gate before this page, so this read can be their first BFF call.
+  const [projectError, setProjectError] = React.useState<
+    { kind: 'status'; status: number } | { kind: 'binderFault' } | null
+  >(null);
+  // Retry bumps this, which runs the read (and its automatic retries) again.
+  const [projectAttempt, setProjectAttempt] = React.useState(0);
   const [activeTab, setActiveTab] = React.useState<TabValue>('overview');
 
   // ---------------------------------------------------------------------------
@@ -394,16 +402,17 @@ export const ProjectPage: React.FC = () => {
       setProjectError(null);
 
       try {
-        const data = await getProjectById(id);
+        // A binder fault (FR-28) is retried 3x (1 s, 2 s, 4 s) behind the spinner before it surfaces.
+        const data = await withBinderFaultRetry(() => getProjectById(id));
         if (!cancelled) {
           setProject(data);
         }
       } catch (err) {
         if (!cancelled) {
-          if (err instanceof ApiError) {
-            setProjectError({ status: err.statusCode, message: err.message });
+          if (err instanceof BinderFaultError) {
+            setProjectError({ kind: 'binderFault' });
           } else {
-            setProjectError({ status: 0, message: 'An unexpected error occurred loading the project.' });
+            setProjectError({ kind: 'status', status: err instanceof ApiError ? err.statusCode : 0 });
           }
         }
       } finally {
@@ -418,7 +427,7 @@ export const ProjectPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, projectAttempt]);
 
   // ---------------------------------------------------------------------------
   // Guard: missing URL param
@@ -453,7 +462,24 @@ export const ProjectPage: React.FC = () => {
   // ---------------------------------------------------------------------------
 
   if (projectError) {
-    if (projectError.status === 403) {
+    if (projectError.kind === 'binderFault') {
+      return (
+        <PageContainer>
+          <MessageBar intent="warning">
+            <MessageBarBody>{BINDER_FAULT_MESSAGE}</MessageBarBody>
+            <MessageBarActions>
+              <Button appearance="primary" onClick={() => setProjectAttempt(n => n + 1)}>
+                Retry
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        </PageContainer>
+      );
+    }
+
+    // One "no access" path (R4 task 043): since ebilling-r1's task-130 batch a stale grant answers 403, not 404, and a
+    // 404 (a project removed or never shared) means the same thing to the caller, so both show the access message.
+    if (projectError.status === 403 || projectError.status === 404) {
       return (
         <PageContainer>
           <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Access Denied' }]} />
@@ -467,24 +493,12 @@ export const ProjectPage: React.FC = () => {
       );
     }
 
-    if (projectError.status === 404) {
-      return (
-        <PageContainer>
-          <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Project Not Found' }]} />
-          <MessageBar intent="error">
-            <MessageBarBody>
-              The project could not be found. It may have been closed or the link may be incorrect.
-            </MessageBarBody>
-          </MessageBar>
-        </PageContainer>
-      );
-    }
-
     return (
       <PageContainer>
         <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Error' }]} />
         <MessageBar intent="error">
-          <MessageBarBody>Failed to load project: {projectError.message}</MessageBarBody>
+          {/* A fixed sentence: the server's response body (ProblemDetails JSON) is never shown (task 043 review). */}
+          <MessageBarBody>Failed to load project. Please try again later.</MessageBarBody>
         </MessageBar>
       </PageContainer>
     );

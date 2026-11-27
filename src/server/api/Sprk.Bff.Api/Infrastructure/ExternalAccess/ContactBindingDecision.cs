@@ -787,8 +787,9 @@ public sealed record CreateAroundRemovalDecision(
 public static class ContactBindingDecision
 {
     // ── Deny codes (auth.md: {domain}.{area}.{action}.{reason}) ─────────────────────────────────────
-    // Each deny has its OWN code: on every plane the HTTP answer is the same 403, so the code is the only
-    // thing in the audit trail that tells an outage from an identity conflict from an ordinary non-contact.
+    // Each deny has its OWN code, the only thing in the audit trail that tells one cause from another. On every
+    // plane the HTTP answer is a 403, EXCEPT the three faults (lookup, create, bind failed), which the caller
+    // resolver answers with a retryable 503 (CallerPrincipalResolution.IsBinderFault; R4 FR-28, ADR-028).
 
     /// <summary>The caller's own oid is unusable.</summary>
     public const string DenyUnidentifiableCaller = "sdap.access.deny.unidentifiable_caller";
@@ -1199,6 +1200,9 @@ public static class ContactBindingDecision
     /// </summary>
     private static BindingDecision DecideIntent(BindingRequest request, BindIntentLookup intent, Guid contactId)
     {
+        // A stamp read for ANOTHER contact is an inconsistent read (a race between the two reads), not an outage; it shares
+        // lookup_failed, so since R4 task 043 the caller gets the retryable 503, which a retry resolves. This decision is pure
+        // (no logger), so the audit trail shows only the code; telling a race from a fault apart is tracked in #3264.
         if (intent.ContactId != contactId
             || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
         {

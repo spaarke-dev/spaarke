@@ -3,8 +3,10 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
 
@@ -72,9 +74,14 @@ public sealed class InquiryDispositionTests
                 : DataverseUserResponse.Fail(TallyStatus, DataverseUserClientErrorCodes.AccessDenied, "no"));
         }
 
+        /// <summary>Task 228: runs after the To Do PATCH is recorded (e.g. the client aborting once the writes are done).</summary>
+        public Action? OnTodoPatch { get; set; }
+
         public Task<DataverseUserResponse> PatchAsync(string p, string j, CancellationToken ct)
         {
             Patches.Add((p, j, null));
+            if (p.StartsWith("sprk_todos("))
+                OnTodoPatch?.Invoke();
             return Task.FromResult(p.StartsWith("sprk_todos(") && TodoPatchStatus != 204
                 ? DataverseUserResponse.Fail(TodoPatchStatus, "X", "x")
                 : DataverseUserResponse.Ok(204, null));
@@ -106,8 +113,12 @@ public sealed class InquiryDispositionTests
             + (version is null ? "" : ",\"versionnumber\":" + version) + "}";
     }
 
-    private static InquiryDispositionService Sut(FakeUser user) =>
-        new(user, Now, NullLogger<InquiryDispositionService>.Instance);
+    private static InquiryDispositionService Sut(FakeUser user, Mock<SignalEvaluationTrigger>? trigger = null) =>
+        new(user, Now, NullLogger<InquiryDispositionService>.Instance, (trigger ?? Trigger()).Object);
+
+    /// <summary>Task 228: the event-trigger enqueue (a mock: nothing is queued), answering <paramref name="queued"/>.</summary>
+    private static Mock<SignalEvaluationTrigger> Trigger(bool queued = true) =>
+        Sprk.Bff.Api.Tests.Domain.Signals.FilingSignalDoubles.Trigger(queued);
 
     private static FakeUser Open(string? reply = null, string? row = null)
     {
@@ -170,6 +181,82 @@ public sealed class InquiryDispositionTests
 
         result.Outcome.Should().Be(InquiryResolutionOutcome.Resolved);
         result.TodoCompleted.Should().BeFalse();
+    }
+
+    // ---- task 228 (#1991, DI-101): the completed To Do's Signal is re-evaluated now, not at the nightly run ----------
+
+    [Fact]
+    public async Task A_completed_todo_queues_the_evaluation_of_that_todo_through_the_event_trigger()
+    {
+        var user = Open();
+        var trigger = Trigger();
+
+        var result = await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000001, default);
+
+        result.TodoCompleted.Should().BeTrue();
+        result.SignalRefreshQueued.Should().BeTrue("the client may then say the row leaves shortly");
+        trigger.Verify(t => t.EnqueueAsync(SignalTriggerKind.InquiryDisposition, "sprk_todo", InquiryDispositionService.TodoIdFor(Inquiry),
+            Inquiry, null, It.IsAny<CancellationToken>()), Times.Once);
+        trigger.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task A_client_abort_after_the_writes_neither_skips_the_queue_nor_faults_the_recorded_disposition()
+    {
+        var user = Open();
+        var trigger = Trigger();
+        CancellationToken passed = default;
+        trigger.Setup(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<SignalTriggerKind, string, Guid, Guid, string?, CancellationToken>((_, _, _, _, _, token) => passed = token)
+            .ReturnsAsync(true);
+        using var request = new CancellationTokenSource();
+        user.OnTodoPatch = () => request.Cancel(); // the client goes away once the To Do is written
+
+        var result = await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000001, request.Token);
+
+        result.Outcome.Should().Be(InquiryResolutionOutcome.Resolved);
+        result.SignalRefreshQueued.Should().BeTrue();
+        passed.CanBeCanceled.Should().BeFalse("the enqueue runs on CancellationToken.None: the disposition is already written");
+    }
+
+    [Theory]
+    [InlineData(404)]
+    [InlineData(403)]
+    public async Task A_todo_that_was_not_completed_queues_nothing(int todoStatus)
+    {
+        var user = Open();
+        user.TodoPatchStatus = todoStatus;
+        var trigger = Trigger();
+
+        var result = await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000003, default);
+
+        result.SignalRefreshQueued.Should().BeFalse();
+        trigger.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task A_refused_disposition_queues_nothing()
+    {
+        var user = Open(row: Json.Row(disposition: 100000000));
+        var trigger = Trigger();
+
+        var result = await Sut(user, trigger).RecordDispositionAsync(Inquiry, Reply, 100000001, default);
+
+        result.Outcome.Should().Be(InquiryResolutionOutcome.AlreadyResolved);
+        trigger.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task An_enqueue_that_fails_does_not_undo_the_recorded_disposition()
+    {
+        var user = Open();
+
+        var result = await Sut(user, Trigger(queued: false)).RecordDispositionAsync(Inquiry, Reply, 100000001, default);
+
+        result.Outcome.Should().Be(InquiryResolutionOutcome.Resolved, "the nightly run closes the Signal when the enqueue failed");
+        result.TodoCompleted.Should().BeTrue();
+        result.SignalRefreshQueued.Should().BeFalse("the client must keep the nightly wording");
     }
 
     // ---- the refusals: nothing is written ------------------------------------------------------------------------
@@ -333,6 +420,19 @@ public sealed class InquiryDispositionTests
             Inquiry, new RecordDispositionRequest(Reply, disposition), Sut(user), new DefaultHttpContext(), default);
 
         ((IStatusCodeHttpResult)result).StatusCode.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task The_200_body_says_whether_the_signal_refresh_was_queued(bool queued)
+    {
+        var result = await InquiryEndpoints.RecordDispositionAsync(
+            Inquiry, new RecordDispositionRequest(Reply, 100000001), Sut(Open(), Trigger(queued)), new DefaultHttpContext(), default);
+
+        var body = ((IValueHttpResult)result).Value.Should().BeOfType<InquiryEndpoints.RecordDispositionResponse>().Subject;
+        body.TodoCompleted.Should().BeTrue();
+        body.SignalRefreshQueued.Should().Be(queued, "the Worklist says 'leaves shortly' only when the refresh was queued (task 228)");
     }
 
     // ---- criterion 5 (negative): two vocabularies, two columns ----------------------------------------------------

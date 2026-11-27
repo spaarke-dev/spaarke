@@ -1195,6 +1195,21 @@ public sealed class OfficeVersionSaveWorld
 
         /// <summary>Task 138: the row's <c>sprk_parentdocument</c> (an email attachment's <c>.eml</c>), written in the create.</summary>
         public Guid? ParentDocumentId { get; set; }
+
+        /// <summary>Task 141 review: the row's <c>sprk_emailmessageid</c>, written by the email save's update.</summary>
+        public string? EmailMessageId { get; set; }
+
+        /// <summary>Task 141 review: the row's <c>sprk_relatedcommunication</c>, written in the create.</summary>
+        public Guid? RelatedCommunicationId { get; set; }
+
+        /// <summary>Task 141 review (F3): the row's <c>sprk_isemailarchive</c>, written by the email save's update.</summary>
+        public bool? IsEmailArchive { get; set; }
+
+        /// <summary>Task 141 review (F4): the row's <c>sprk_emailconversationindex</c>, written by the email save's update.</summary>
+        public string? EmailConversationIndex { get; set; }
+
+        /// <summary>Task 141 review (F5): the row's invoice-submission marker (<c>sprk_restrictedbysubmission</c>), written in the create.</summary>
+        public bool RestrictedBySubmission { get; set; }
     }
 
     public sealed class SpeItem
@@ -1424,10 +1439,25 @@ public sealed class OfficeVersionSaveWorld
                         document["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matterId);
                     if (row.RelatedMatterId is { } relatedMatterId)
                         document["sprk_relatedmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", relatedMatterId);
+                    // Task 141 review: the named add compares the row's own message id and takes its communication.
+                    if (row.EmailMessageId is { } emailMessageId)
+                        document["sprk_emailmessageid"] = emailMessageId;
+                    if (row.RelatedCommunicationId is { } communicationId)
+                        document["sprk_relatedcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", communicationId);
+                    // Task 141 review (F4, F5): the named add takes the row's conversation index and refuses a submission's .eml.
+                    if (row.EmailConversationIndex is { } conversationIndex)
+                        document["sprk_emailconversationindex"] = conversationIndex;
+                    if (row.RestrictedBySubmission)
+                        document["sprk_restrictedbysubmission"] = true;
                     return document;
                 }
             }
         }
+
+        // Task 141 review: a communication registered by Message-ID, read back with that Message-ID.
+        if (entity == "sprk_communication"
+            && CommunicationsByMessageId.FirstOrDefault(c => c.Value == id) is { Key: { } internetMessageId })
+            return new Microsoft.Xrm.Sdk.Entity("sprk_communication", id) { ["sprk_internetmessageid"] = internetMessageId };
 
         return null;
     }
@@ -1462,6 +1492,8 @@ public sealed class OfficeVersionSaveWorld
                 FileName = request.Name,
                 DocumentName = request.Name,
                 ParentDocumentId = request.ParentDocumentLookup,
+                RelatedCommunicationId = request.RelatedCommunicationId,
+                RestrictedBySubmission = request.RestrictedBySubmission,
             };
             // Field-mapping task 030b: the save's association moved from the follow-up update into the CREATE
             // (CreateDocumentRequest.Association), so the world files the row to its matter here, as Dataverse does.
@@ -1505,6 +1537,10 @@ public sealed class OfficeVersionSaveWorld
             row.FileSize = update.FileSize ?? row.FileSize;
             row.FilePath = update.FilePath ?? row.FilePath;
             row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
+            row.EmailMessageId = update.EmailMessageId ?? row.EmailMessageId;
+            // Task 141 review (F3, F4): the email save's update flags the archive and stores its conversation index.
+            row.IsEmailArchive = update.IsEmailArchive ?? row.IsEmailArchive;
+            row.EmailConversationIndex = update.EmailConversationIndex ?? row.EmailConversationIndex;
             // Task 055: the ASSOCIATION the save writes. (Since field-mapping task 030b the save puts it on the CREATE,
             // read above; this line stays for any update that still carries one.) DocumentAssociationMap.TryApply put it on the
             // UPDATE (Spaarke.Dataverse/Models.cs:78-110) and DataverseServiceClientImpl:922-931 writes it to
@@ -1534,6 +1570,7 @@ public sealed class OfficeVersionSaveWorld
                     FileName = row.FileName,
                     GraphDriveId = row.DriveId,
                     GraphItemId = row.ItemId,
+                    IsEmailArchive = row.IsEmailArchive,
                 }
                 : null;
         }
@@ -2115,6 +2152,13 @@ public sealed class OfficeVersionSaveWorld
     public bool WorkersFinishInstantly { get; set; } = true;
 
     /// <summary>
+    /// Runs inside the Service Bus send, BEFORE the message is recorded, with the message's JSON. A test uses it to look at the
+    /// job row at the moment the save queues (what the worker would find) or to record a worker's outcome on that row (a worker
+    /// that finishes before the save's own request returns); a throw is a queue that failed.
+    /// </summary>
+    public Action<string>? OnFinalizationSend { get; set; }
+
+    /// <summary>
     /// Task 138 (H2): makes the saved job look <paramref name="age"/> old to the code that reads it back. The effective view
     /// takes its age from the save's own view (<c>sprk_result</c>, <c>createdAt</c>), not from the row's <c>createdon</c>, so
     /// it is the view that is rewritten.
@@ -2386,6 +2430,7 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                 // and added about 1.8 s to each test that queues a finalization.
                 .Returns(async (ServiceBusMessage message, CancellationToken _) =>
                 {
+                    world.OnFinalizationSend?.Invoke(message.Body.ToString());
                     var messageKey = world.RecordFinalization(message.Body.ToString());
                     if (world.WorkersFinishInstantly && messageKey is not null)
                         await MarkFinalizationProcessedAsync(messageKey);

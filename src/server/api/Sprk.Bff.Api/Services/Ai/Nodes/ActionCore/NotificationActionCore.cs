@@ -65,7 +65,7 @@ internal sealed class NotificationActionCore
     /// Dataverse <c>toasttype</c> option-set value for "Hidden" — the notification produces no visible toast.
     /// Hidden-toast notifications skip <c>data.actions[]</c> population (FR-18).
     /// </summary>
-    private const int ToastTypeHidden = 100_000_000;
+    private const int ToastTypeHidden = Sprk.Bff.Api.Services.AppNotificationOptions.ToastType.Hidden;
 
     private readonly IGenericEntityService _entityService;
     private readonly ILogger _logger;

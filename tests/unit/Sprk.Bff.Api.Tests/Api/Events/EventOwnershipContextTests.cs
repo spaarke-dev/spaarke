@@ -20,7 +20,6 @@ using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
-using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 

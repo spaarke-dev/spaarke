@@ -47,6 +47,7 @@ public sealed class ReferenceRowIdLiteralGuardTests
 
     private const string BaselineFile = "tests/Spaarke.ArchTests/ReferenceRowIdLiteral.baseline.txt";
     private const string SeedDirectory = "scripts/seed-data/reference";
+    private const string SystemLayoutsFile = "scripts/system-layouts.json";
     private const string SolutionDirectory = "src/dataverse/solutions";
 
     /// <summary>
@@ -231,6 +232,19 @@ public sealed class ReferenceRowIdLiteralGuardTests
             foreach (var row in doc.RootElement.GetProperty("rows").EnumerateArray())
             {
                 ids.Add(row.GetProperty(key).GetString()!.ToLowerInvariant());
+            }
+        }
+
+        // ISS-045: system workspace layouts that declare a fixed "id" in scripts/system-layouts.json are created with that
+        // primary key by the H12b workspace-layout seeder, so every stamp has them.
+        using (var layouts = JsonDocument.Parse(File.ReadAllText(Abs(SystemLayoutsFile))))
+        {
+            foreach (var layout in layouts.RootElement.GetProperty("layouts").EnumerateArray())
+            {
+                if (layout.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                {
+                    ids.Add(id.GetString()!.ToLowerInvariant());
+                }
             }
         }
 

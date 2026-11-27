@@ -1277,7 +1277,7 @@ internal sealed class CountingUserClient(IDataverseUserClient inner) : IDatavers
 
 /// <summary>
 /// The event as the service's one app-only create wrote it (Web API logical names). <see cref="Payload"/> reads the body the way
-/// <c>DataverseWebApiService.BuildCreateEventPayload</c> was read by the contract assertions: a lookup is its
+/// the deleted Web API event builder was read by the contract assertions: a lookup is its
 /// <c>{navigation}@odata.bind</c> path, a number an <see cref="int"/>, a string a string.
 /// </summary>
 internal sealed class CapturedEventCreate(string table, Guid id, IReadOnlyDictionary<string, object?> fields)
