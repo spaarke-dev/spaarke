@@ -173,7 +173,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 filter,
                 limit,
                 offset,
-                includeHighlights);
+                includeHighlights,
+                matchAll);
 
             // Step 6: Execute search
             var searchText = !matchAll && hybridMode != HybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(processedRequest.Query)
@@ -366,7 +367,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
         string filter,
         int limit,
         int offset,
-        bool includeHighlights)
+        bool includeHighlights,
+        bool matchAll)
     {
         var searchOptions = new Azure.Search.Documents.SearchOptions
         {
@@ -405,8 +407,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
             }
         }
 
-        // Enable semantic ranking for hybrid and keyword modes
-        if (useKeyword)
+        // Enable semantic ranking for hybrid and keyword modes (not for a match-all "*": nothing for the ranker to rank)
+        if (useKeyword && !matchAll)
         {
             searchOptions.QueryType = SearchQueryType.Semantic;
             searchOptions.SemanticSearch = new SemanticSearchOptions
@@ -418,7 +420,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
         // Enable highlighting — only when a keyword query runs. A vector-only request is sent with the match-all text "*",
         // i.e. a pure vector query, and Azure AI Search rejects highlighting on those (400).
-        if (includeHighlights && useKeyword)
+        // A match-all has no terms to mark.
+        if (includeHighlights && useKeyword && !matchAll)
         {
             searchOptions.HighlightFields.Add("content");
         }

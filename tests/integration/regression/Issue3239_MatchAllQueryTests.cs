@@ -226,6 +226,9 @@ public sealed class Issue3239_MatchAllQueryTests
         var call = calls.Should().ContainSingle().Subject;
         call.SearchText.Should().Be("*");
         call.Options.VectorSearch.Should().BeNull("a match-all has no text to embed");
+        call.Options.HighlightFields.Should().BeEmpty("a match-all has no terms to mark");
+        call.Options.SemanticSearch.Should().BeNull("a match-all has nothing for the semantic ranker to rank");
+        call.Options.QueryType.Should().NotBe(SearchQueryType.Semantic);
         _openAi.Verify(
             o => o.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
