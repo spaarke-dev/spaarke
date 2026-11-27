@@ -27,9 +27,9 @@ An unreadable or empty flag, a secure root, and **any other host** (an event, a 
 BFF decides the owner from what the row is filed under. The Create privilege is **not** removed (owner round 28); a create
 from outside the product is re-owned by the reconcile job's recent-changes pass every 2 minutes.
 
-Spaarke's own **"+ Add KPI"** (`add-kpi-ribbon.xml`) does NOT carry this rule. It used to open the KPI assessment quick create, which
-needed the secure guard; since field-mapping-server-write-path-r1 task 051 (FR-24) it creates through the BFF (`Spaarke.SecureChild.Ribbon.newChild`)
-for a secure host and an ordinary one alike, so the rule would only hide the button for good. The merge script no longer adds it.
+The KPI assessment subgrid has one create, "+ New" (the BFF create-then-open this README describes). The second button, Spaarke's own
+"Add KPI Assessment" (an earlier `add-kpi-ribbon.xml` fragment), was removed by field-mapping-server-write-path-r1 task 066 (owner: only "+ New"
+is required). `native-create-surfaces.json` lists it as `mustBeAbsent`, and `Merge-NativeCreateRibbon.ps1` strips it from a fresh export.
 
 ## Files
 
@@ -47,7 +47,7 @@ ebilling-r1 task 096b (EB-D-201) hides its platform "+ New", "New", and "Save & 
 `sprk_BillingEvent` RibbonDiff, because lines are created only by submission and Add line. `SecureChildNewCommandAgreementTests` (ArchTests)
 keeps the script, the merge script and the deploy script on one table list, every ownership-child subgrid of the live
 inventory covered, the party hosts exactly the identity tables, the create-then-open tables on the BFF route and stamped
-with the creator person, and the "+ Add KPI" command free of the native-New rule (it creates through the BFF).
+with the creator person, and the KPI subgrid's "+ New" kept as its one create (no second "Add KPI" button).
 
 ## Deployment (MANUAL GATE G147-6 — main session)
 
