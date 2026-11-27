@@ -182,7 +182,7 @@ public sealed class RecordSearchService : IRecordSearchService
         // text to embed. Sent with a query vector it becomes a PURE VECTOR query, and Azure rejects highlighting on one
         // (400 "Parameter 'highlight' is not supported for search requests with pure vector queries"), which surfaced as a
         // 500. So it runs as a plain keyword "*" search: no embedding, no highlights, no semantic ranking.
-        var matchAll = IsMatchAll(request.Query);
+        var matchAll = MatchAllQuery.IsMatchAll(request.Query);
         if (matchAll)
         {
             hybridMode = RecordHybridSearchMode.KeywordOnly;
@@ -502,9 +502,6 @@ public sealed class RecordSearchService : IRecordSearchService
 
         return searchOptions;
     }
-
-    /// <summary>True for a query that is only "*" (after trimming): the match-all request, not text to search for.</summary>
-    private static bool IsMatchAll(string? query) => query is not null && query.Trim() == "*";
 
     /// <summary>
     /// Processes search results into RecordSearchResult format.

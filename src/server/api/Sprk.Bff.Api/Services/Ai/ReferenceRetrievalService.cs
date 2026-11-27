@@ -152,17 +152,24 @@ public sealed partial class ReferenceRetrievalService
             // Step 1: Get embedding for query (with caching)
             embeddingStopwatch.Start();
 
-            ReadOnlyMemory<float> queryEmbedding;
-            var cachedEmbedding = await _embeddingCache.GetEmbeddingForContentAsync(query, cancellationToken);
-            if (cachedEmbedding.HasValue)
+            // A "*" query is a keyword match-all over the tenant/domain filters (#3239 family): the star is never embedded,
+            // and the search carries no vector leg, highlights or semantic ranking (the index answers 400 to that mix).
+            var matchAll = MatchAllQuery.IsMatchAll(query);
+
+            ReadOnlyMemory<float> queryEmbedding = default;
+            if (!matchAll)
             {
-                queryEmbedding = cachedEmbedding.Value;
-                embeddingCacheHit = true;
-            }
-            else
-            {
-                queryEmbedding = await _openAiClient.GenerateEmbeddingAsync(query, cancellationToken: cancellationToken);
-                await _embeddingCache.SetEmbeddingForContentAsync(query, queryEmbedding, cancellationToken);
+                var cachedEmbedding = await _embeddingCache.GetEmbeddingForContentAsync(query, cancellationToken);
+                if (cachedEmbedding.HasValue)
+                {
+                    queryEmbedding = cachedEmbedding.Value;
+                    embeddingCacheHit = true;
+                }
+                else
+                {
+                    queryEmbedding = await _openAiClient.GenerateEmbeddingAsync(query, cancellationToken: cancellationToken);
+                    await _embeddingCache.SetEmbeddingForContentAsync(query, queryEmbedding, cancellationToken);
+                }
             }
 
             embeddingStopwatch.Stop();
@@ -175,7 +182,7 @@ public sealed partial class ReferenceRetrievalService
             var searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.RagReferencesIndexName);
 
             // Step 3: Build hybrid search options
-            var searchOptions = BuildSearchOptions(options, queryEmbedding);
+            var searchOptions = BuildSearchOptions(options, queryEmbedding, matchAll);
 
             // Step 4: Execute search
             LogReferenceRetrievalQuery(
@@ -185,7 +192,7 @@ public sealed partial class ReferenceRetrievalService
                 topK: options.TopK);
 
             var searchResponse = await searchClient.SearchAsync<KnowledgeDocument>(
-                query, searchOptions, cancellationToken);
+                matchAll ? "*" : query, searchOptions, cancellationToken);
             var searchResults = searchResponse.Value;
             searchStopwatch.Stop();
 
@@ -264,20 +271,25 @@ public sealed partial class ReferenceRetrievalService
 
     #region Private Methods
 
-    private SearchOptions BuildSearchOptions(ReferenceSearchOptions options, ReadOnlyMemory<float> queryEmbedding)
+    private SearchOptions BuildSearchOptions(ReferenceSearchOptions options, ReadOnlyMemory<float> queryEmbedding, bool matchAll = false)
     {
         var searchOptions = new SearchOptions
         {
             Size = options.TopK,
             IncludeTotalCount = true,
-            QueryType = SearchQueryType.Semantic,
-            SemanticSearch = new SemanticSearchOptions
+        };
+
+        // A match-all has nothing for the semantic ranker to rank: it stays a plain keyword search.
+        if (!matchAll)
+        {
+            searchOptions.QueryType = SearchQueryType.Semantic;
+            searchOptions.SemanticSearch = new SemanticSearchOptions
             {
                 SemanticConfigurationName = SemanticConfigurationName,
                 QueryCaption = new QueryCaption(QueryCaptionType.Extractive),
                 QueryAnswer = new QueryAnswer(QueryAnswerType.None)
-            }
-        };
+            };
+        }
 
         // Vector search (3072-dim text-embedding-3-large)
         if (queryEmbedding.Length > 0)
@@ -346,8 +358,11 @@ public sealed partial class ReferenceRetrievalService
             searchOptions.SearchFields.Add(field);
         }
 
-        // Enable highlighting
-        searchOptions.HighlightFields.Add("content");
+        // Enable highlighting (a match-all carries no vector leg, so nothing here conflicts with it; it has no terms to mark).
+        if (!matchAll)
+        {
+            searchOptions.HighlightFields.Add("content");
+        }
 
         return searchOptions;
     }

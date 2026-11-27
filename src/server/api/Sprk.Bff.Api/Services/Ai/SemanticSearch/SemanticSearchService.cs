@@ -109,7 +109,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // GitHub #3239 (same defect as record search): a query of just "*" is Azure AI Search's match-all, not text to
             // embed. Embedded, it would go out as "*" plus a query vector — a PURE VECTOR query, on which Azure rejects the
             // highlight option (400). It is treated like the empty query (the Refresh / initial-load path): no embedding.
-            var matchAll = processedRequest.Query is { } rawQuery && rawQuery.Trim() == "*";
+            var matchAll = MatchAllQuery.IsMatchAll(processedRequest.Query);
 
             // Step 2: Generate embedding for vector modes
             ReadOnlyMemory<float> queryEmbedding = default;
