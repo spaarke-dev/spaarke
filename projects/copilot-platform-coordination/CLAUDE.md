@@ -24,12 +24,12 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
   - The runner does not pass the return value back.
   - It refuses `toString` and a top-level `await`.
   - Detail: accelerator PR #3266.
-- **Admin-center plugin upload: likely refuses an app version starting with "0"** ("We couldn't validate this manifest file", accelerator Word Probe, 2026-11-27).
-  - v0.5 (0.5.0, with two `SKILL.md` over 20,000 characters) and v0.6 (0.6.0, no oversize file) were both refused in the admin center.
-  - v0.4 (0.4.0) went in through Cowork's own upload.
-  - `atk validate --package-file` (Agents Toolkit CLI 1.1.18) failed v0.6 only on "App version should not start with '0'".
-  - So the version is the likelier cause, and the size limit is unproven. Learn's published Cowork validation rules list no `SKILL.md` size limit.
-  - Start admin-deployed packages at 1.0.0 or above. v0.7 (1.7.0) tests this, and its result is in `notes/tenant-inventory.md` P1.
+- **Admin-center plugin upload refused the Word Probe three times; cause unknown** ("We couldn't validate this manifest file", 2026-11-27).
+  - The refused versions were v0.5 (0.5.0, two `SKILL.md` over 20,000 characters), v0.6 (0.6.0) and v0.7 (1.7.0, passes all atk rules).
+  - So neither file size nor a 0.x version explains all three.
+  - v0.4 went in through Cowork's own upload; spaarke-decisions (no scripts, fresh app id) installed through the admin center.
+  - Two candidates remain: skills that ship scripts, or reusing an app id already used by Cowork personal uploads.
+  - Learn documents neither. The current test is in `notes/tenant-inventory.md` P1.
 - Local validation:
   - `atk validate` checks the Teams manifest only, not `agentSkills` or `SKILL.md`.
   - Learn says `wiqd plugin validate --mode deep` runs the full upload rules. It is not installed on this machine (2026-11-27), and installing it is a download that needs the owner's OK.
