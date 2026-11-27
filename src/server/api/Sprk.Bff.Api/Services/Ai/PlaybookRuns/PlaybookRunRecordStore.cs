@@ -335,6 +335,45 @@ public sealed class PlaybookRunRecordStore
             Nodes: nodes);
     }
 
+    /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 037b: what a stored run is regarding and the documents it ran on, for the caller who started it
+    /// (the same owner rule as <see cref="GetOwnedRunAsync"/>: <c>sprk_triggeredby</c>'s oid must be <paramref name="callerOid"/>), or
+    /// <see langword="null"/> when there is no such run, it is not a playbook run, or it is another caller's. Identifiers only (ADR-015):
+    /// no node row, no output. Read app-only, as every read of this store is; the results it points at are read as the caller.
+    /// </summary>
+    public async Task<PlaybookRunLink?> GetOwnedRunLinkAsync(Guid runId, string callerOid, CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(RunEntity)
+        {
+            ColumnSet = new ColumnSet(PlaybookColumn, TriggeredByColumn, InputContextColumn, RegardingEntityTypeColumn, RegardingRecordIdColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(RunIdColumn, ConditionOperator.Equal, runId);
+
+        var rows = await _dataverse.RetrieveMultipleAsync(query, cancellationToken).ConfigureAwait(false);
+        var row = rows.Entities.FirstOrDefault();
+        if (row?.GetAttributeValue<EntityReference>(PlaybookColumn) is not { } playbook || playbook.Id == Guid.Empty)
+        {
+            return null;
+        }
+
+        var startedByOid = await ReadTriggeredByOidAsync(
+            row.GetAttributeValue<EntityReference>(TriggeredByColumn), cancellationToken).ConfigureAwait(false);
+        if (!IsSameOid(startedByOid, callerOid))
+        {
+            return null;
+        }
+
+        var regardingType = row.GetAttributeValue<string>(RegardingEntityTypeColumn);
+        var regarding = !string.IsNullOrWhiteSpace(regardingType)
+                        && Guid.TryParse(row.GetAttributeValue<string>(RegardingRecordIdColumn), out var regardingId)
+                        && regardingId != Guid.Empty
+            ? new PlaybookRunRegarding(regardingType, regardingId)
+            : null;
+
+        return new PlaybookRunLink(regarding, ReadDocumentIds(row.GetAttributeValue<string>(InputContextColumn)));
+    }
+
     /// <summary>Same Entra object id: both parse as GUIDs and are equal (case and format insensitive).</summary>
     internal static bool IsSameOid(string? storedOid, string callerOid) =>
         Guid.TryParse(storedOid, out var stored) && Guid.TryParse(callerOid, out var caller) && stored == caller;
@@ -569,6 +608,12 @@ public sealed record PlaybookNodeRunRecord
     /// <summary>The <c>sprk_analysisaction</c> the row stands for (a prompted or coded run).</summary>
     public Guid? ActionId { get; init; }
 }
+
+/// <summary>
+/// Task 037b: what a stored run is regarding and the documents it ran on (identifiers only), from <c>sprk_regardingentitytype</c> /
+/// <c>sprk_regardingrecordid</c> and <c>sprk_inputcontextjson</c>.
+/// </summary>
+public sealed record PlaybookRunLink(PlaybookRunRegarding? Regarding, Guid[] DocumentIds);
 
 /// <summary>A node row read back from <c>sprk_playbooknoderun</c>.</summary>
 public sealed record StoredPlaybookNodeRun(

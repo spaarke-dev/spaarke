@@ -29,5 +29,14 @@ public partial class RouteAuthorizationGuardTests
             + "the caller whose oid started it (this process's run table, then GetRunStatusAsync: in memory, then task 005's durable "
             + "record by StartedByOid); another caller's run and an unknown id are one not-found. Bare [Authorize]."),
         // --- end task 030 ---
+
+        // --- task 037b (spaarke_get_playbook_run_results) ---
+        new McpTool("GetPlaybookRunResultsTool", "", "IPlaybookRunAi",
+            "037b, read-only and app-only (McpToolAuthorization.AppOnlyTools): IPlaybookRunAi.ReadResultsAsCallerAsync with exactly "
+            + "IHttpContextAccessor.HttpContext answers only the caller whose oid started the run (ReadAsCallerAsync, then the record's "
+            + "owner check), follows only the server-written regarding link to the run's analysis, applies the analysis-read rule and "
+            + "reads the working document and document names as the caller over IDataverseUserClient (OBO). Another caller's run, an "
+            + "unknown id, an unreadable subject or analysis: one not-found. Bare [Authorize]."),
+        // --- end task 037b ---
     };
 }

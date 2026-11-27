@@ -159,6 +159,55 @@ public enum PlaybookRunStartOutcome
 public sealed record PlaybookRunStartResult(
     PlaybookRunStartOutcome Outcome, PlaybookRunAuthorization? Authorization, PlaybookRunView? Run, AnalysisStartResult? Analysis = null);
 
+/// <summary>Whether a run's results can be shown (task 037b; 037-decisions §5).</summary>
+public enum PlaybookRunResultsState
+{
+    /// <summary>The run is still running: no content is read or returned yet.</summary>
+    Pending,
+
+    /// <summary>The run has finished and its analysis's working document holds text: <see cref="PlaybookRunResults.WorkingDocument"/>.</summary>
+    Available,
+
+    /// <summary>
+    /// The run has finished and there is nothing to show: it has no linked analysis (a run started before task 037a, or a run started
+    /// outside the Copilot start), or its analysis's working document is empty (a playbook that wrote to a record and not to the analysis,
+    /// or a run that failed before its output was saved).
+    /// </summary>
+    None,
+}
+
+/// <summary>One of a run's source documents the caller can read (its own row read as the caller), with its "open in Spaarke" link.</summary>
+/// <param name="DocumentId">The <c>sprk_document</c> id.</param>
+/// <param name="Name">The document's name as the caller reads it (<c>sprk_documentname</c>); empty when it has none.</param>
+/// <param name="ConsoleLink">Where the caller may open the document in the Spaarke Console (<see cref="IPlaybookRunAi.RunConsoleLink"/>).</param>
+public sealed record PlaybookRunSourceDocument(Guid DocumentId, string Name, string? ConsoleLink);
+
+/// <summary>
+/// A finished (or still running) run's results as its starter may read them (task 037b). Every value that is not an identifier was read
+/// AS THE CALLER (<c>IDataverseUserClient</c>, OBO): the analysis's working document, the playbook's name and the documents' names.
+/// </summary>
+/// <param name="Run">The run, as <see cref="IPlaybookRunAi.ReadAsCallerAsync"/> answers it.</param>
+/// <param name="State">Whether there is anything to show.</param>
+/// <param name="AnalysisId">The analysis the run saved its results to (the run record's regarding), when it has one.</param>
+/// <param name="PlaybookName">The JPS playbook's name, when the caller can read it.</param>
+/// <param name="WorkingDocument">
+/// The analysis's <c>sprk_workingdocument</c>, unbounded and unformatted: only when <see cref="State"/> is
+/// <see cref="PlaybookRunResultsState.Available"/>. The host bounds it (NFR-02) and never logs it (ADR-015).
+/// </param>
+/// <param name="Documents">The run's source documents the caller can read, in the run's order (the analysis's own document first).</param>
+/// <param name="ConsoleLink">
+/// Where the caller opens the results in Spaarke: the analysis in the Console (<c>HandoffUrlBuilder.BuildAnalysisWorkspaceUrl</c>) when the
+/// run has one, else <see cref="IPlaybookRunAi.RunConsoleLink"/> for its first readable document; <c>null</c> when this host builds no links.
+/// </param>
+public sealed record PlaybookRunResults(
+    PlaybookRunView Run,
+    PlaybookRunResultsState State,
+    Guid? AnalysisId,
+    string? PlaybookName,
+    string? WorkingDocument,
+    IReadOnlyList<PlaybookRunSourceDocument> Documents,
+    string? ConsoleLink);
+
 /// <summary>
 /// The one seam through which a host other than the REST run routes starts and reads a JPS playbook run (spaarkeai-mcp-bff-api-r2
 /// task 030): today the MCP tools <c>spaarke_run_playbook</c> and <c>spaarke_get_playbook_run</c>.
@@ -199,6 +248,19 @@ public interface IPlaybookRunAi
 
     /// <summary>The caller's run <paramref name="runId"/>, or <c>null</c> when it is unknown or another caller's.</summary>
     Task<PlaybookRunView?> ReadAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 037b (D-037-results): the results of the caller's run <paramref name="runId"/>, read as the caller; <c>null</c> (the one uniform
+    /// not-found) when the run is unknown or another caller's (<see cref="ReadAsCallerAsync"/>), when the run's analysis fails the
+    /// analysis-read rule (its document or other anchor is unreadable, or the external narrowing hides it), when the caller's own read of
+    /// the analysis row is refused, or, for a run with no analysis, when the caller cannot read the run's first document.
+    /// </summary>
+    /// <remarks>
+    /// The analysis id comes only from the run record's regarding columns (<c>sprk_regardingentitytype = sprk_analysis</c>), which the
+    /// server wrote at the Copilot start (task 037a); no caller argument names it. A fault that is not a refusal throws: the host answers
+    /// "could not read", never the not-found.
+    /// </remarks>
+    Task<PlaybookRunResults?> ReadResultsAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken);
 
     /// <summary>
     /// The run-link member (task 020 verifier F2): where the caller may open the run's subject in the Spaarke Console, built by
