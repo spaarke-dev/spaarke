@@ -99,7 +99,8 @@ public sealed class NodeRunResultCollector
 /// <summary>
 /// What <see cref="AnalysisResultPersistence.SaveNodeRunAsync"/> saved: the content (the working document), the analysis status the
 /// wrapper reports (<c>Completed</c>, <c>CompletedWithWarnings</c> or <c>Failed</c>), the partial-storage flag and message the wrapper's
-/// done chunk carries, and the run's token counts.
+/// done chunk carries, and the run's token counts. <see cref="ContentSaved"/> (task 037 review F-A) is <c>false</c> when the working
+/// document write failed: the analysis was then not finalized.
 /// </summary>
 public sealed record NodeRunSaveOutcome(
     string Content,
@@ -107,7 +108,8 @@ public sealed record NodeRunSaveOutcome(
     bool? PartialStorage,
     string? StorageMessage,
     int TokensIn,
-    int TokensOut)
+    int TokensOut,
+    bool ContentSaved = true)
 {
     /// <summary>The status of a run that saved its text and finished (no node failed, or none with content lost).</summary>
     public const string CompletedStatus = "Completed";
@@ -132,6 +134,9 @@ internal static class NodeRunAnalysisSave
 {
     /// <summary>Outcome code logged when the analysis save fails. The run is not affected.</summary>
     internal const string SaveFailedOutcome = "playbook_run_analysis_save_failed";
+
+    /// <summary>The <c>ErrorType</c> logged with <see cref="SaveFailedOutcome"/> when the working document write reported a failure.</summary>
+    internal const string WriteFailedErrorType = "WorkingDocumentWriteFailed";
 
     /// <summary>Outcome code logged when the run carries an AnalysisId but this host has no analysis persistence. Nothing is saved.</summary>
     internal const string SaveUnavailableOutcome = "playbook_run_analysis_save_unavailable";
@@ -212,7 +217,14 @@ internal static class NodeRunAnalysisSave
         {
             try
             {
-                await _persistence.SaveNodeRunAsync(_analysisId, _run, cancellationToken).ConfigureAwait(false);
+                var saved = await _persistence.SaveNodeRunAsync(_analysisId, _run, cancellationToken).ConfigureAwait(false);
+                if (!saved.ContentSaved)
+                {
+                    // Task 037 review F-A: the working document write failed (the analysis was not finalized); the run is unchanged.
+                    _logger.LogWarning(
+                        "Playbook run analysis save failed; the run continues - Outcome: {Outcome}, RunId: {RunId}, AnalysisId: {AnalysisId}, ErrorType: {ErrorType}",
+                        SaveFailedOutcome, _runId, _analysisId, WriteFailedErrorType);
+                }
             }
             catch (Exception ex)
             {

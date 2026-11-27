@@ -1,7 +1,8 @@
 // spaarkeai-mcp-bff-api-r2 task 037a (owner decision D-037-engine, option B).
 //
 // The node-branch save of the Analysis wrapper (AnalysisOrchestrationService.ExecutePlaybookAsync): Deliver Output, then
-// AnalysisResultPersistence.UpdateWorkingDocumentAsync, then FinalizeAnalysisAsync. These tests were written BEFORE that save
+// IWorkingDocumentService.TryUpdateWorkingDocumentAsync (task 037 review F-A: a write that reports a failure; it was
+// UpdateWorkingDocumentAsync), then FinalizeAnalysisAsync. These tests were written BEFORE that save
 // moved into one shared method (the engine calls it too, for a run that carries an AnalysisId), and they pin the wrapper's
 // output (its stream chunks) and its writes (sprk_workingdocument and the finalize) so the move changes neither.
 //
@@ -55,8 +56,9 @@ public sealed class AnalysisNodeRunSaveTests
             .ReturnsAsync(new DocumentEntity { Id = DocumentId.ToString(), Name = "NDA.pdf", Status = DocumentStatus.Active });
         _nodes.Setup(x => x.GetNodesAsync(PlaybookId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([new PlaybookNodeDto { Id = NodeId, Name = "Deliver", ActionId = Guid.NewGuid(), OutputVariable = "deliver" }]);
-        _workingDocument.Setup(x => x.UpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        // Task 037 review F-A: the save writes through the reporting write; true = written.
+        _workingDocument.Setup(x => x.TryUpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         _workingDocument.Setup(x => x.FinalizeAnalysisAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }
@@ -70,7 +72,7 @@ public sealed class AnalysisNodeRunSaveTests
             Completed(Deliver("# NDA summary")),
             RunCompleted(tokensIn: 11, tokensOut: 22));
 
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(AnalysisId, "# NDA summary", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "# NDA summary", It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.Verify(x => x.FinalizeAnalysisAsync(AnalysisId, 11, 22, It.IsAny<CancellationToken>()), Times.Once);
         Snapshot(chunks).Should().Be(
             Expected(
@@ -90,7 +92,7 @@ public sealed class AnalysisNodeRunSaveTests
             Completed(new NodeOutput { NodeId = NodeId, OutputVariable = "deliver", Success = true, TextContent = "not delivered", Metrics = new NodeExecutionMetrics() }),
             RunCompleted(tokensIn: 3, tokensOut: 4));
 
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(AnalysisId, "first second", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "first second", It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.Verify(x => x.FinalizeAnalysisAsync(AnalysisId, 3, 4, It.IsAny<CancellationToken>()), Times.Once);
         chunks[^1].Should().Be(AnalysisStreamChunk.Completed(AnalysisId, new TokenUsage(3, 4)));
     }
@@ -103,7 +105,7 @@ public sealed class AnalysisNodeRunSaveTests
             Completed(Deliver("# Partial")),
             RunCompleted(tokensIn: 5, tokensOut: 6));
 
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(AnalysisId, "# Partial", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "# Partial", It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.Verify(x => x.FinalizeAnalysisAsync(AnalysisId, 5, 6, It.IsAny<CancellationToken>()), Times.Once);
         chunks[^1].Should().Be(AnalysisStreamChunk.Completed(
             AnalysisId, new TokenUsage(5, 6), partialStorage: true,
@@ -115,7 +117,7 @@ public sealed class AnalysisNodeRunSaveTests
     {
         var chunks = await RunWrapperAsync(RunCompleted(tokensIn: 1, tokensOut: 2));
 
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _workingDocument.Verify(x => x.FinalizeAnalysisAsync(AnalysisId, 1, 2, It.IsAny<CancellationToken>()), Times.Once);
         chunks[^1].Should().Be(AnalysisStreamChunk.FromError("Node-based execution produced no output"));
     }
@@ -128,9 +130,25 @@ public sealed class AnalysisNodeRunSaveTests
             PlaybookStreamEvent.RunFailed(RunId, PlaybookId, "Node 'Extract' failed: model refused"),
             RunCompleted(tokensIn: 9, tokensOut: 9));
 
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(AnalysisId, "part", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "part", It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.Verify(x => x.FinalizeAnalysisAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         chunks[^1].Should().Be(AnalysisStreamChunk.FromError("Node 'Extract' failed: model refused"));
+    }
+
+    [Fact(DisplayName = "037 review F-A wrapper node save: a working-document write that fails is not followed by the finalize; the chunks are unchanged")]
+    public async Task WriteFails_TheAnalysisIsNotFinalized_AndTheChunksAreUnchanged()
+    {
+        _workingDocument.Setup(x => x.TryUpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var chunks = await RunWrapperAsync(
+            Completed(Deliver("# NDA summary")),
+            RunCompleted(tokensIn: 11, tokensOut: 22));
+
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "# NDA summary", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.FinalizeAnalysisAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never,
+            "an analysis whose content was not written is not marked Completed");
+        chunks[^1].Should().Be(AnalysisStreamChunk.Completed(AnalysisId, new TokenUsage(11, 22)));
     }
 
     // ── Harness ─────────────────────────────────────────────────────────────────────────────────────────────
