@@ -53,3 +53,20 @@ def read_parts(path):
 
 def parse(data):
     return etree.fromstring(data, PARSER)
+
+
+FIXED_DATE_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest zip date: no clock, no time zone in the output
+
+
+def write_parts(path, parts):
+    """Write {part name: bytes} as a .docx, byte-identical for identical parts on any machine and clock:
+    [Content_Types].xml first (Word expects it), then the other parts in name order, every entry with a fixed
+    date and the same attributes. (Only the zlib version could still change the compressed bytes.)"""
+    names = sorted(parts, key=lambda n: (n != "[Content_Types].xml", n))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
+        for n in names:
+            info = zipfile.ZipInfo(n, date_time=FIXED_DATE_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 0
+            info.external_attr = 0
+            zo.writestr(info, parts[n])

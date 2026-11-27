@@ -96,22 +96,28 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
 
         try
         {
-            // Step 1: Generate embedding for query
-            ReadOnlyMemory<float> queryEmbedding;
-            try
+            // Step 1: Generate embedding for query. A "*" query is a keyword match-all over the tenant/matter filters
+            // (#3239 family): the star is never embedded and the search carries no vector leg, highlights or semantic
+            // ranking (the index answers 400 to highlights on star plus vector queries).
+            var matchAll = IsMatchAll(query);
+            ReadOnlyMemory<float> queryEmbedding = default;
+            if (!matchAll)
             {
-                queryEmbedding = await RequireAi().GenerateEmbeddingAsync(
-                    query,
-                    model: "text-embedding-3-large",
-                    dimensions: 3072,
-                    cancellationToken: cancellationToken);
+                try
+                {
+                    queryEmbedding = await RequireAi().GenerateEmbeddingAsync(
+                        query,
+                        model: "text-embedding-3-large",
+                        dimensions: 3072,
+                        cancellationToken: cancellationToken);
 
-                _logger.LogDebug("Generated query embedding: {Dimensions} dimensions", queryEmbedding.Length);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to generate embedding for query: {Error}", ex.Message);
-                throw new InvalidOperationException("Failed to generate query embedding. Search cannot proceed.", ex);
+                    _logger.LogDebug("Generated query embedding: {Dimensions} dimensions", queryEmbedding.Length);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to generate embedding for query: {Error}", ex.Message);
+                    throw new InvalidOperationException("Failed to generate query embedding. Search cannot proceed.", ex);
+                }
             }
 
             // Step 2: Get SearchClient for the index
@@ -122,11 +128,11 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
             var filter = BuildFilter(tenantId, matterId);
 
             // Step 4: Build search options (hybrid search with semantic reranking)
-            var searchOptions = BuildSearchOptions(queryEmbedding, filter, top);
+            var searchOptions = BuildSearchOptions(queryEmbedding, filter, top, matchAll);
 
             // Step 5: Execute search
             var response = await searchClient.SearchAsync<InvoiceSearchDocument>(
-                query, searchOptions, cancellationToken);
+                matchAll ? "*" : query, searchOptions, cancellationToken);
             var searchResults = response.Value;
 
             // Step 6: Process results
@@ -189,15 +195,23 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
     private static Azure.Search.Documents.SearchOptions BuildSearchOptions(
         ReadOnlyMemory<float> queryEmbedding,
         string? filter,
-        int top)
+        int top,
+        bool matchAll = false)
     {
         var searchOptions = new Azure.Search.Documents.SearchOptions
         {
             Filter = filter,
             Size = top,
             IncludeTotalCount = true,
-            QueryType = SearchQueryType.Semantic
         };
+
+        // A match-all is a plain keyword search over the filters: no vector leg, semantic ranking or highlights.
+        if (matchAll)
+        {
+            return searchOptions;
+        }
+
+        searchOptions.QueryType = SearchQueryType.Semantic;
 
         // Add vector search
         searchOptions.VectorSearch = new VectorSearchOptions
@@ -230,6 +244,12 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
 
         return searchOptions;
     }
+
+    /// <summary>
+    /// True for a query that is only "*" (after trimming): the match-all request, not text to search for. Same rule as the
+    /// AI services' <c>MatchAllQuery</c>; kept local because non-AI code reaches the AI services only through PublicContracts.
+    /// </summary>
+    private static bool IsMatchAll(string? query) => query is not null && query.Trim() == "*";
 
     /// <summary>
     /// Process search results into response format.

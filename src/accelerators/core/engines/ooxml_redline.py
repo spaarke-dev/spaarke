@@ -6,6 +6,7 @@ xml.etree for writing (ElementTree rewrites namespace prefixes and breaks mc:Ign
 Usage:
   python ooxml_redline.py PLAN.json ORIGINAL.docx REDLINE.docx
          [--external EXTERNAL.docx] [--clean CLEAN.docx] [--dry-run]
+         [--skip-unplaceable REPORT.json]
 
 Outputs:
   REDLINE    tracked changes + one margin comment per commented edit + bookmarks
@@ -34,7 +35,21 @@ Rules:
   - List edits within one paragraph right to left (later text first).
   - Optional "ratings": [{"topic", "title", "rating", "action"}] (one per playbook topic; rating is a key of
     RATING_FILLS) is not applied here; summary_table.py renders it as the page-1 "Review summary".
-Exit codes: 0 ok, 2 bad input/plan, 3 plan does not fit the document.
+Exit codes: 0 ok, 2 bad input/plan, 3 plan does not fit the document. On exit 3 stderr holds one JSON line
+{"error": "...", "code": ..., "edit": i} ("bookmark": name instead of "edit" for a bookmark); "code" is one of
+the refusal codes below, absent when the plan breaks the contract. "error" may quote clause text: don't log it.
+Outputs are reproducible: identical inputs give byte-identical .docx files (safe_docx.write_parts).
+
+Skip and report (--skip-unplaceable REPORT.json), for unattended runs where nobody can repair the plan:
+  each edit (and bookmark) is tried on its own; one that does not fit leaves its paragraph exactly as it was and
+  is listed in REPORT.json, and the run goes on. Exit 0 once the outputs are written, even if every edit was
+  refused (read the report); 2 bad input; 3 only when the plan breaks the contract (validate_plan). Refusals
+  print nothing on stderr. REPORT.json holds indexes, bookmark names and codes only, never document text:
+    {"engine": "ooxml_redline", "report_version": 1, "edits_total": 24, "edits_applied": 22,
+     "refused": [{"edit": 7, "code": "not_unique"}],               # edit = 0-based index into plan.edits
+     "bookmarks_refused": [{"bookmark": "NDA_Sec10", "code": "para_not_unique"}]}
+  Codes: EDIT_REFUSAL_CODES and BOOKMARK_REFUSAL_CODES below. summary_table.py and check_outputs.py take the
+  same file with --refused. With --dry-run only REPORT.json is written. Without the flag nothing changes.
 """
 import argparse
 import copy
@@ -103,7 +118,81 @@ def norm(s):
 
 
 class PlanError(Exception):
-    """The plan does not fit the document, or breaks the plan contract (exit 3)."""
+    """The plan does not fit the document, or breaks the plan contract (exit 3).
+
+    code: why one edit or bookmark does not fit (a key of EDIT_REFUSAL_CODES / BOOKMARK_REFUSAL_CODES);
+    None when the plan itself breaks the contract, which skip mode never skips.
+    """
+
+    def __init__(self, message, code=None, edit=None, bookmark=None):
+        super().__init__(message)
+        self.code, self.edit, self.bookmark = code, edit, bookmark
+
+    def as_json(self):
+        """The exit-3 stderr line: the message plus, for a placement failure, the same code (and edit index or
+        bookmark name) skip mode reports, so a caller can classify it without parsing the quoted text."""
+        out = {"error": str(self)}
+        out.update({k: v for k, v in (("code", self.code), ("edit", self.edit), ("bookmark", self.bookmark))
+                    if v is not None})
+        return out
+
+
+# Why an edit could not be placed -> plain words for the "Changes to make by hand" table (summary_table.py).
+# A closed set: intake-pipeline-r1 logs these codes, so add one only with a message to that project.
+EDIT_REFUSAL_CODES = {
+    "para_not_found": "the clause could not be found",
+    "para_not_unique": "the clause text appears in more than one paragraph",
+    "not_found": "the text to change could not be found in the clause",
+    "not_unique": "the text to change appears more than once in the clause",
+    "in_existing_markup": "the text sits inside an existing tracked change, link or content control",
+    "word_boundary": "the text to change starts or ends in the middle of a word",
+    "old_not_in_find": "the edit plan is inconsistent for this change",
+    "crosses_markup": "the change would cross an existing tracked change, link or content control",
+    "crosses_field_or_drawing": "the change would cross a field or a picture",
+    "in_field_result": "the text is a field result that Word recalculates",
+    "nothing_after_heading": "the clause has no text after its number and heading",
+}
+BOOKMARK_REFUSAL_CODES = {"para_not_found", "para_not_unique", "bookmark_exists"}
+REPORT_KEYS = {"engine", "report_version", "edits_total", "edits_applied", "refused", "bookmarks_refused"}
+
+
+def read_refusals(report, plan):
+    """Check a skip-mode report against its plan; return ({edit index: code}, {bookmark name: code}).
+
+    Raises ValueError when the report is not one ooxml_redline.py wrote for this plan.
+    """
+    if not isinstance(report, dict) or set(report) != REPORT_KEYS:
+        raise ValueError(f"refusal report needs exactly {sorted(REPORT_KEYS)}")
+    if report["engine"] != "ooxml_redline" or type(report["report_version"]) is not int or report["report_version"] != 1:
+        raise ValueError("refusal report is not an ooxml_redline version 1 report")
+    if any(type(report[k]) is not int for k in ("edits_total", "edits_applied")):  # True == 1 and 1.0 == 1
+        raise ValueError("refusal report: edits_total and edits_applied must be integers")
+    edits = plan.get("edits") or []
+    if report["edits_total"] != len(edits):
+        raise ValueError(f"refusal report counts {report['edits_total']} edits; the plan has {len(edits)}")
+    edits_refused, marks_refused = {}, {}
+    for r in report["refused"] if isinstance(report["refused"], list) else [None]:
+        if not isinstance(r, dict) or set(r) != {"edit", "code"} or type(r["edit"]) is not int \
+                or not isinstance(r["code"], str):
+            raise ValueError("each refused edit needs exactly an integer 'edit' and a string 'code'")
+        if not 0 <= r["edit"] < len(edits) or r["edit"] in edits_refused:
+            raise ValueError(f"refused edit {r['edit']} is out of range or listed twice")
+        if r["code"] not in EDIT_REFUSAL_CODES:
+            raise ValueError(f"refused edit {r['edit']}: unknown code {r['code']!r}")
+        edits_refused[r["edit"]] = r["code"]
+    if report["edits_applied"] != len(edits) - len(edits_refused):
+        raise ValueError("refusal report: edits_applied does not equal edits_total minus refused")
+    names = set((plan.get("bookmarks") or {}).values())
+    for r in report["bookmarks_refused"] if isinstance(report["bookmarks_refused"], list) else [None]:
+        if not isinstance(r, dict) or set(r) != {"bookmark", "code"} or not isinstance(r["bookmark"], str) \
+                or not isinstance(r["code"], str):
+            raise ValueError("each refused bookmark needs exactly a string 'bookmark' and a string 'code'")
+        if r["bookmark"] not in names or r["bookmark"] in marks_refused:
+            raise ValueError(f"refused bookmark {r['bookmark']!r} is not in the plan or is listed twice")
+        if r["code"] not in BOOKMARK_REFUSAL_CODES:
+            raise ValueError(f"refused bookmark {r['bookmark']!r}: unknown code {r['code']!r}")
+        marks_refused[r["bookmark"]] = r["code"]
+    return edits_refused, marks_refused
 
 
 def validate_plan(plan):
@@ -148,6 +237,10 @@ def validate_plan(plan):
                 errors.append(f"edit {i}: {k!r} must be a string")
         if not e.get("para"):
             errors.append(f"edit {i}: 'para' is required")
+        # blank text can never be located; refused here so skip mode can't mistake a broken plan for a refusal
+        for k in ("para", "find", "old", "after"):
+            if k in e and isinstance(e[k], str) and not e[k].strip():
+                errors.append(f"edit {i}: {k!r} must not be blank")
         has_find, has_after = "find" in e, "after" in e
         if has_find == has_after:
             errors.append(f"edit {i}: exactly one of 'find' or 'after' is required")
@@ -249,7 +342,8 @@ class Redliner:
         key = norm(key)
         hits = [p for p in self.paras() if key in self.full_text(p)]
         if len(hits) != 1:
-            raise PlanError(f"paragraph key {key!r} matched {len(hits)} paragraphs")
+            raise PlanError(f"paragraph key {key!r} matched {len(hits)} paragraphs",
+                            "para_not_found" if not hits else "para_not_unique")
         return hits[0]
 
     @staticmethod
@@ -296,8 +390,8 @@ class Redliner:
         for r, s, t in self.runs(p):
             if s < off < s + len(t):
                 tnode = r.find(q("t"))
-                if tnode is None:  # tab/br are one character; cannot be split inside
-                    raise PlanError("cannot split inside a non-text run")
+                if tnode is None:  # tab/br are one character; cannot be split inside (unreachable after atomize)
+                    raise PlanError("cannot split inside a non-text run", "crosses_markup")
                 k = off - s
                 r2 = copy.deepcopy(r)
                 self._fresh_ids(r2)
@@ -331,7 +425,7 @@ class Redliner:
         self._split(p, e)
         rs = [r for r, rs_, t in self.runs(p) if t and rs_ >= s and rs_ + len(t) <= e]
         if not rs:
-            raise PlanError("empty span")
+            raise PlanError("empty span", "not_found")
         span, el = [], rs[0]
         while el is not None:
             span.append(el)
@@ -342,12 +436,14 @@ class Redliner:
         for el in span:
             if el.tag == q("r"):
                 if any(d.tag in UNSAFE_IN_RUN for d in el.iter()):
-                    raise PlanError("span crosses a field or drawing; narrow the edit")
+                    raise PlanError("span crosses a field or drawing; narrow the edit", "crosses_field_or_drawing")
                 if el in in_field:
-                    raise PlanError("span is inside a field result (it would be lost when Word updates fields)")
+                    raise PlanError("span is inside a field result (it would be lost when Word updates fields)",
+                                    "in_field_result")
             elif el.tag not in START_MARKERS | END_MARKERS:
                 raise PlanError(f"span crosses existing {etree.QName(el).localname} "
-                                "(revision, hyperlink, content control...); narrow the edit or anchor next to it")
+                                "(revision, hyperlink, content control...); narrow the edit or anchor next to it",
+                                "crosses_markup")
         return span
 
     @staticmethod
@@ -414,23 +510,30 @@ class Redliner:
         txt = self.text(p)
         vis = self.visible_text(p)
         if vis.count(needle) != 1:
-            raise PlanError(f"{what} {needle[:50]!r} occurs {vis.count(needle)} times in the visible paragraph text")
+            raise PlanError(f"{what} {needle[:50]!r} occurs {vis.count(needle)} times in the visible paragraph text",
+                            "not_found" if not vis.count(needle) else "not_unique")
         if txt.count(needle) != 1:
             raise PlanError(f"{what} {needle[:50]!r} is not in the paragraph's editable text "
-                            "(inside an existing revision, hyperlink or content control)")
+                            "(inside an existing revision, hyperlink or content control)", "in_existing_markup")
         s = txt.index(needle)
         if not word_edge_ok(txt, s, s + len(needle)):
-            raise PlanError(f"{what} {needle[:50]!r} starts or ends inside a word; extend it to whole words")
+            raise PlanError(f"{what} {needle[:50]!r} starts or ends inside a word; extend it to whole words",
+                            "word_boundary")
         return txt, s
 
     # ---------- edit primitives ----------
     def apply(self, e):
+        """Apply one edit. If it does not fit, the paragraph is put back exactly as it was before the
+        PlanError propagates, so skip mode never leaves a half-applied edit or split runs behind."""
         p = self.find_para(e["para"])
+        before = copy.deepcopy(p)
         self.atomize(p)
         try:
             self._apply(p, e)
-        finally:
-            self.coalesce(p)
+        except PlanError:
+            p.getparent().replace(p, before)
+            raise
+        self.coalesce(p)
 
     def _apply(self, p, e):
         if "after" in e:
@@ -440,7 +543,7 @@ class Redliner:
             prev = [r for r, rs_, t in self.runs(p) if t and rs_ + len(t) <= off][-1]
             if prev in self._in_field(p):  # same rule as _span: Word drops field-result text on update
                 raise PlanError("anchor ends inside a field result (the insertion would be lost when Word "
-                                "updates fields); anchor on text after the field")
+                                "updates fields); anchor on text after the field", "in_field_result")
             ins = etree.Element(q("ins"), self._rev_attrs())
             ins.append(self._new_run(e["insert"], prev.find(q("rPr"))))
             prev.addnext(ins)
@@ -453,16 +556,16 @@ class Redliner:
             lead = LEAD_RE.match(whole)
             find = whole[lead.end():] if lead else whole
             if not find.strip():
-                raise PlanError("find '*' left nothing after the section number and heading")
+                raise PlanError("find '*' left nothing after the section number and heading", "nothing_after_heading")
         else:
             find = e["find"]
         txt, s = self._locate(p, find, "find")
         old = e.get("old", find)
         if find.count(old) != 1:
-            raise PlanError(f"old {old!r} must occur exactly once inside find {find!r}")
+            raise PlanError(f"old {old!r} must occur exactly once inside find {find!r}", "old_not_in_find")
         s += find.index(old)
         if not word_edge_ok(txt, s, s + len(old)):
-            raise PlanError(f"old {old!r} starts or ends inside a word")
+            raise PlanError(f"old {old!r} starts or ends inside a word", "word_boundary")
         span = self._span(p, s, s + len(old))
         runs = [r for r in span if r.tag == q("r")]
         if "replace" not in e:
@@ -498,7 +601,7 @@ class Redliner:
         if not BOOKMARK_RE.match(name):
             raise PlanError(f"bookmark name {name!r} must start with a letter, <=40 chars, letters/digits/_")
         if name in self.bookmark_names:
-            raise PlanError(f"bookmark {name!r} already exists in the document; choose another name")
+            raise PlanError(f"bookmark {name!r} already exists in the document; choose another name", "bookmark_exists")
         p = self.find_para(key)
         bid = self._id()
         bs = etree.Element(q("bookmarkStart"), {q("id"): bid, q("name"): name})
@@ -590,10 +693,7 @@ class Redliner:
         elif comments is None:
             self._drop_comment_parts(out)
         self._set_tracking(out, tracking)
-        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zo:
-            # [Content_Types].xml first, as Word expects
-            for n in sorted(out, key=lambda n: n != "[Content_Types].xml"):
-                zo.writestr(n, out[n])
+        safe_docx.write_parts(path, out)  # reproducible: same input, same bytes, on any machine
 
     @staticmethod
     def _strip_comment_marks(root, ids=None):
@@ -695,24 +795,45 @@ def accept_all(root):
     return root
 
 
-def run(plan, src, dst, external=None, clean=None, dry_run=False):
+def run(plan, src, dst, external=None, clean=None, dry_run=False, skip_unplaceable=False):
+    """Apply the plan. With skip_unplaceable, an edit or bookmark that does not fit is left out and recorded;
+    the result then carries "refused" (a count) and "report" (the REPORT.json content)."""
     validate_plan(plan)
     rl = Redliner(src, plan.get("author", "Reviewer"), plan.get("initials", ""),
                   plan.get("date", "2026-01-01T00:00:00Z"))
+    refused, marks_refused = [], []
+
+    def placement_failure(ex):
+        return skip_unplaceable and ex.code is not None  # a contract break (code None) is never skipped
+
     for key, name in (plan.get("bookmarks") or {}).items():  # before edits change the text
-        rl.bookmark(key, name)
-    for i, e in enumerate(plan.get("edits", [])):
+        try:
+            rl.bookmark(key, name)
+        except PlanError as ex:
+            if not placement_failure(ex):
+                raise PlanError(str(ex), ex.code, bookmark=name if ex.code else None) from None
+            marks_refused.append({"bookmark": name, "code": ex.code})
+    edits = plan.get("edits", [])
+    for i, e in enumerate(edits):
         try:
             rl.apply(e)
         except PlanError as ex:
-            raise PlanError(f"edit {i}: {ex}") from None
+            if not placement_failure(ex):
+                raise PlanError(f"edit {i}: {ex}", ex.code, edit=i) from None
+            refused.append({"edit": i, "code": ex.code})
     if not dry_run:
         rl.save_redline(dst)
         if external:
             rl.save_external(external)
         if clean:
             rl.save_clean(clean, strip=plan.get("strip_drawings_in_clean", False))
-    return {"edits": len(plan.get("edits", [])), **rl.stats, "dry_run": dry_run}
+    result = {"edits": len(edits), **rl.stats, "dry_run": dry_run}
+    if skip_unplaceable:
+        result["refused"] = len(refused)
+        result["report"] = {"engine": "ooxml_redline", "report_version": 1, "edits_total": len(edits),
+                            "edits_applied": len(edits) - len(refused), "refused": refused,
+                            "bookmarks_refused": marks_refused}
+    return result
 
 
 def main(argv=None):
@@ -723,6 +844,8 @@ def main(argv=None):
     ap.add_argument("--external")
     ap.add_argument("--clean")
     ap.add_argument("--dry-run", action="store_true", help="validate the plan against the document; write nothing")
+    ap.add_argument("--skip-unplaceable", metavar="REPORT", help="apply every edit that fits, list the rest in "
+                    "REPORT (JSON, codes only) and exit 0; for unattended runs")
     a = ap.parse_args(argv)
     try:
         with open(a.plan, encoding="utf-8") as f:
@@ -730,10 +853,16 @@ def main(argv=None):
     except (OSError, ValueError) as ex:
         print(json.dumps({"error": f"cannot read plan: {ex}"}), file=sys.stderr)
         return 2
+    skip = a.skip_unplaceable is not None
     try:
-        result = run(plan, a.original, a.redline, a.external, a.clean, a.dry_run)
+        if skip and os.path.exists(a.skip_unplaceable):  # a failed run must not leave an earlier run's report
+            os.remove(a.skip_unplaceable)
+        result = run(plan, a.original, a.redline, a.external, a.clean, a.dry_run, skip_unplaceable=skip)
+        if skip:
+            with open(a.skip_unplaceable, "w", encoding="utf-8") as f:
+                json.dump(result.pop("report"), f, indent=1)
     except PlanError as ex:
-        print(json.dumps({"error": str(ex)}), file=sys.stderr)
+        print(json.dumps(ex.as_json()), file=sys.stderr)
         return 3
     except (OSError, ValueError, zipfile.BadZipFile, etree.XMLSyntaxError) as ex:
         print(json.dumps({"error": str(ex)}), file=sys.stderr)

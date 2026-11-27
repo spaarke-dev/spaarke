@@ -193,6 +193,79 @@ public sealed class DataverseWebApiWorkspaceLayoutSeederTests
         dailyBriefing.SectionId.Should().Be("daily-briefing");
     }
 
+    // ---------- T10 fixed primary keys (ISS-045) ----------
+    //
+    // surfaceLaunchRegistry.ts opens the "Daily Briefing" and "Smart To Do List" layouts by row id and the
+    // renderer gets no name fallback, so a stamp whose row has a server-generated id opens nothing.
+
+    private const string DailyBriefingId = "6d41d537-fe55-f111-a824-3833c5ed9c11";
+    private const string SmartTodoId = "a49f9e3a-fe55-f111-a824-7ced8dd899c3";
+
+    [Fact]
+    public void ReadEmbeddedLayouts_DeclaresTheFixedIdsProductCodeOpensByIdAndNoOtherLayoutHasOne()
+    {
+        var layouts = DataverseWebApiWorkspaceLayoutSeeder.ReadEmbeddedLayouts();
+
+        layouts.Single(l => l.Name == "Daily Briefing").Id.Should().Be(Guid.Parse(DailyBriefingId));
+        layouts.Single(l => l.Name == "Smart To Do List").Id.Should().Be(Guid.Parse(SmartTodoId));
+        layouts.Where(l => l.Name is not ("Daily Briefing" or "Smart To Do List"))
+            .Should().OnlyContain(l => l.Id == null, "only layouts that product code opens by id carry a fixed id");
+    }
+
+    [Fact]
+    public async Task SeedAsync_CreatesAFixedIdLayoutWithItsPrimaryKey_AndOthersWithoutOne()
+    {
+        var fake = new FakeDataverseHandler
+        {
+            OnGet = _ => JsonResponse(HttpStatusCode.OK, EmptyValueJson()),
+            OnPost = _ => JsonResponse(HttpStatusCode.Created, "{}"),
+        };
+
+        var result = await BuildSeeder(fake).SeedAsync(BuildInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok);
+        var bodies = fake.Requests.Where(r => r.Method == HttpMethod.Post)
+            .Select(r => JsonDocument.Parse(r.Body!).RootElement.Clone())
+            .ToList();
+        var ids = bodies.ToDictionary(
+            b => b.GetProperty("sprk_name").GetString()!,
+            b => b.TryGetProperty("sprk_workspacelayoutid", out var id) ? id.GetString() : null);
+
+        ids["Daily Briefing"].Should().Be(DailyBriefingId);
+        ids["Smart To Do List"].Should().Be(SmartTodoId);
+        ids.Where(kv => kv.Key is not ("Daily Briefing" or "Smart To Do List"))
+            .Should().OnlyContain(kv => kv.Value == null);
+    }
+
+    [Fact]
+    public async Task SeedAsync_ExistingFixedIdLayoutWithAnotherId_IsSkippedAndTheMismatchIsReported()
+    {
+        // A stamp provisioned before ISS-045: the row exists under a server-generated id, which cannot be changed.
+        var fake = new FakeDataverseHandler
+        {
+            OnGet = _ => JsonResponse(HttpStatusCode.OK, ValueJson(("44444444-4444-4444-4444-444444444444", "whatever"))),
+        };
+
+        var result = await BuildSeeder(fake).SeedAsync(BuildInput(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok);
+        fake.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+        result.Diagnostic.Should().Contain($"NOT the fixed id {DailyBriefingId}");
+    }
+
+    [Fact]
+    public async Task SeedAsync_ExistingFixedIdLayoutWithTheFixedId_IsSkippedWithoutAMismatchNote()
+    {
+        var fake = new FakeDataverseHandler
+        {
+            OnGet = _ => JsonResponse(HttpStatusCode.OK, ValueJson((DailyBriefingId, "Daily Briefing"))),
+        };
+
+        var result = await BuildSeeder(fake).SeedAsync(BuildInput(), CancellationToken.None);
+
+        result.Diagnostic.Should().NotContain($"NOT the fixed id {DailyBriefingId}");
+    }
+
     // ---------- T9 standalone seed scripts vs the provisioning list (ISS-037) ----------
     //
     // A system workspace seeded only by a standalone scripts/seed-*-workspace-layout.ps1 exists on

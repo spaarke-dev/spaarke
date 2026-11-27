@@ -40,14 +40,19 @@ public class EmailAttachmentAddPlannerSelectionTests
     private static readonly Guid MatterId = Guid.Parse("13813813-0138-4138-8138-0000000000a1");
 
     [Fact]
-    public async Task ZeroByteAttachment_IsNeverMissing_SoTheSelectionOfItAddsNothing()
+    public async Task ZeroByteAttachment_IsNeverMissing_SoTheSelectionOfItAddsNothing_AndReportsItNotSaveable()
     {
         var fixture = new Fixture(attachments: new[] { Attachment(A, 20_000), Attachment(Empty, 0, "application/octet-stream") });
         fixture.Children.Add(Child(A));
 
         var plan = await fixture.PlanAsync(selection: new List<string> { A, Empty });
 
-        plan.Should().BeNull("the worker skips an attachment with no content, so it can never become a child");
+        // The worker skips an attachment with no content, so it can never become a child: nothing is added. Task 141 review
+        // (finding 3): the name is reported as not saveable instead of being answered as "nothing to add".
+        plan.Should().NotBeNull();
+        plan!.AttachmentNames.Should().BeEmpty("the worker skips an attachment with no content, so it can never become a child");
+        plan.NotSaveable.Should().Equal(Empty);
+        plan.NotStored.Should().BeEmpty();
     }
 
     [Fact]

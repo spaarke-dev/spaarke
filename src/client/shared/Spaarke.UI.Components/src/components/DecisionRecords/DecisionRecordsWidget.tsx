@@ -1,8 +1,10 @@
 /**
- * DecisionRecordsWidget - the Console's Decision Record tab (task 045, D-47; reconciliation W-18): the decided items with the
- * Decision Record that closed each, filtered by record class (All / Judgements / Routine / Dismissals). A row's one action is Open,
- * which reopens the item in the decision wizard READ-ONLY (D-26); there is no edit or delete anywhere (FR-21, R-13: `RecordRow`
- * has neither, and the tab adds none).
+ * DecisionRecordsWidget - the Console's Decision Record tab (task 045, D-47; reconciliation W-18): the Decision Records the caller
+ * can read, one row each, filtered by record class (All / Judgements / Routine / Dismissals). A row's one action is Open, which
+ * reopens the item the record resolved in the decision wizard READ-ONLY (D-26), replaying THAT record (an item reviewed twice has a
+ * row per review, task 226). A record that resolved no item (an email-gate record, D-231; a Record Procedure, invoice-level billing
+ * or assign-firm record, D-234/D-236) is listed with its summary and no Open.
+ * There is no edit or delete anywhere (FR-21, R-13: `RecordRow` has neither, and the tab adds none).
  *
  * Data: `GET /api/v1/signals/worklist?set=decided` through the worklist service (task 038/059) and nowhere else (D-15): the route
  * reads every record AS THE CALLER, so a Decision Record on a Secure matter reaches only that matter's members and a no-core item
@@ -135,21 +137,26 @@ export const DecisionRecordsWidget: React.FC<DecisionRecordsWidgetProps> = ({
     async (row: DecisionRecordRow) => {
       setNotice(null);
       // The wizard asks only for ids of the list it was given; the item is built from the answer already held (it never re-reads).
+      // An item reviewed more than once has a row per record: the clicked row's item carries the record that row shows, so it wins;
+      // any other item on the list opens with its newest record (the first row for it).
       const loadItem: DecisionItemLoader = async signalId => {
-        const found = rows.find(r => r.item.signalId === signalId);
-        if (!found) throw new Error('This item is no longer on the list. Close the wizard and refresh the list.');
+        const source = row.item?.signalId === signalId ? row : rows.find(r => r.item?.signalId === signalId);
+        const found = source?.item;
+        if (!source || !found)
+          throw new Error('This item is no longer on the list. Close the wizard and refresh the list.');
         return buildWizardItem({
-          item: found.item,
-          group: { core: found.core, items: [found.item] },
+          item: found,
+          group: { core: source.core, items: [found] },
           set: 'decided',
           today: new Date(),
         });
       };
+      if (!row.item) return;
       try {
         const result = await launchWizard({
           itemId: row.item.signalId,
           core: row.core ? { recordType: row.core.recordType, recordId: row.core.recordId } : null,
-          visibleList: rows.map(r => r.item.signalId),
+          visibleList: [...new Set(rows.flatMap(r => (r.item ? [r.item.signalId] : [])))],
           loadItem,
           lookup,
         });
@@ -236,15 +243,15 @@ export const DecisionRecordsWidget: React.FC<DecisionRecordsWidgetProps> = ({
       ) : (
         <ul className={styles.list} aria-label={`${label} decision records`}>
           {rows.map(row => (
-            <li key={row.item.signalId}>
+            <li key={`${row.decision.recordId}:${row.item?.signalId ?? ''}`}>
               <RecordRow
                 recordId={row.decision.number ?? row.decision.recordId}
                 title={rowTitle(row)}
                 state={resolveDecisionRecordState(row.decision.outcome, row.decision.recordClass)}
                 recordClass={row.decision.recordClass}
                 decidedBy={row.decision.decidedByName}
-                decidedOn={row.decision.decidedOn ?? row.item.resolvedOn}
-                onOpen={() => void open(row)}
+                decidedOn={row.decision.decidedOn ?? row.item?.resolvedOn}
+                onOpen={row.item ? () => void open(row) : undefined}
               />
             </li>
           ))}

@@ -1,0 +1,147 @@
+{
+  "case": "worklist.200.decided",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"set\":\"decided\",\"lanes\":[{\"lane\":\"Decide\",\"groups\":[{\"core\":{\"recordType\":\"sprk_matter\",\"recordId\":\"<guid-1>\",\"typeLabel\":\"Matter\",\"name\":\"Acme v Widget\",\"number\":\"MAT-0042\"},\"notFiled\":false,\"items\":[{\"signalId\":\"<guid-2>\",\"lane\":\"Decide\",\"status\":\"Resolved\",\"title\":\"Fee change without a budget revision\",\"subjectName\":null,\"ruleShortName\":\"Budget gap\",\"workType\":\"askOutsideCounsel\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-09-30T09:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":null,\"policyVersionId\":\"<guid-3>\",\"resolvedOn\":\"2026-10-12T12:00:00+00:00\",\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":null,\"subjectRecordType\":null,\"subjectRecordId\":null,\"decision\":{\"recordId\":\"<guid-4>\",\"number\":\"DR-00011\",\"recordClass\":\"Judgement\",\"outcome\":\"Authorized\",\"decidedOn\":\"2026-10-12T09:00:00+00:00\",\"decidedByName\":\"Dana Decider\",\"reason\":null,\"steps\":null,\"followOns\":[],\"summary\":null},\"invoiceReview\":null},{\"signalId\":\"<guid-2>\",\"lane\":\"Decide\",\"status\":\"Resolved\",\"title\":\"Fee change without a budget revision\",\"subjectName\":null,\"ruleShortName\":\"Budget gap\",\"workType\":\"askOutsideCounsel\",\"pastDueWording\":\"overdue\",\"raisedOn\":\"2026-09-30T09:00:00+00:00\",\"dueDate\":null,\"evidenceRefs\":null,\"policyVersionId\":\"<guid-3>\",\"resolvedOn\":\"2026-10-12T12:00:00+00:00\",\"resolutionType\":null,\"suppressedUntil\":null,\"sentence\":null,\"subjectRecordType\":null,\"subjectRecordId\":null,\"decision\":{\"recordId\":\"<guid-5>\",\"number\":\"DR-00010\",\"recordClass\":\"Judgement\",\"outcome\":\"Authorized\",\"decidedOn\":\"2026-10-01T09:00:00+00:00\",\"decidedByName\":\"Dana Decider\",\"reason\":null,\"steps\":[{\"code\":\"reassign\",\"taken\":true,\"values\":{\"person\":\"p-1\",\"note\":\"over to Sam\"},\"status\":\"Done\"},{\"code\":\"extend\",\"taken\":false,\"values\":null,\"status\":\"Skipped\"}],\"followOns\":[],\"summary\":null},\"invoiceReview\":null}],\"records\":[{\"recordId\":\"<guid-6>\",\"number\":\"DR-00900\",\"recordClass\":\"Judgement\",\"outcome\":\"Authorized\",\"decidedOn\":\"2026-10-14T09:30:00+00:00\",\"decidedByName\":null,\"reason\":\"policy.allow\",\"steps\":null,\"followOns\":[],\"summary\":\"Judgement: Send the reply\"}]},{\"core\":null,\"notFiled\":true,\"items\":[],\"records\":[{\"recordId\":\"<guid-7>\",\"number\":\"DR-00901\",\"recordClass\":\"Judgement\",\"outcome\":\"Authorized\",\"decidedOn\":\"2026-10-13T09:30:00+00:00\",\"decidedByName\":null,\"reason\":\"policy.allow\",\"steps\":null,\"followOns\":[],\"summary\":\"Judgement: denied (recipient outside the matter)\"}]}]},{\"lane\":\"Do\",\"groups\":[]}]}",
+  "bodyPretty": {
+    "set": "decided",
+    "lanes": [
+      {
+        "lane": "Decide",
+        "groups": [
+          {
+            "core": {
+              "recordType": "sprk_matter",
+              "recordId": "<guid-1>",
+              "typeLabel": "Matter",
+              "name": "Acme v Widget",
+              "number": "MAT-0042"
+            },
+            "notFiled": false,
+            "items": [
+              {
+                "signalId": "<guid-2>",
+                "lane": "Decide",
+                "status": "Resolved",
+                "title": "Fee change without a budget revision",
+                "subjectName": null,
+                "ruleShortName": "Budget gap",
+                "workType": "askOutsideCounsel",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-09-30T09:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": null,
+                "policyVersionId": "<guid-3>",
+                "resolvedOn": "2026-10-12T12:00:00+00:00",
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": null,
+                "subjectRecordType": null,
+                "subjectRecordId": null,
+                "decision": {
+                  "recordId": "<guid-4>",
+                  "number": "DR-00011",
+                  "recordClass": "Judgement",
+                  "outcome": "Authorized",
+                  "decidedOn": "2026-10-12T09:00:00+00:00",
+                  "decidedByName": "Dana Decider",
+                  "reason": null,
+                  "steps": null,
+                  "followOns": [],
+                  "summary": null
+                },
+                "invoiceReview": null
+              },
+              {
+                "signalId": "<guid-2>",
+                "lane": "Decide",
+                "status": "Resolved",
+                "title": "Fee change without a budget revision",
+                "subjectName": null,
+                "ruleShortName": "Budget gap",
+                "workType": "askOutsideCounsel",
+                "pastDueWording": "overdue",
+                "raisedOn": "2026-09-30T09:00:00+00:00",
+                "dueDate": null,
+                "evidenceRefs": null,
+                "policyVersionId": "<guid-3>",
+                "resolvedOn": "2026-10-12T12:00:00+00:00",
+                "resolutionType": null,
+                "suppressedUntil": null,
+                "sentence": null,
+                "subjectRecordType": null,
+                "subjectRecordId": null,
+                "decision": {
+                  "recordId": "<guid-5>",
+                  "number": "DR-00010",
+                  "recordClass": "Judgement",
+                  "outcome": "Authorized",
+                  "decidedOn": "2026-10-01T09:00:00+00:00",
+                  "decidedByName": "Dana Decider",
+                  "reason": null,
+                  "steps": [
+                    {
+                      "code": "reassign",
+                      "taken": true,
+                      "values": {
+                        "person": "p-1",
+                        "note": "over to Sam"
+                      },
+                      "status": "Done"
+                    },
+                    {
+                      "code": "extend",
+                      "taken": false,
+                      "values": null,
+                      "status": "Skipped"
+                    }
+                  ],
+                  "followOns": [],
+                  "summary": null
+                },
+                "invoiceReview": null
+              }
+            ],
+            "records": [
+              {
+                "recordId": "<guid-6>",
+                "number": "DR-00900",
+                "recordClass": "Judgement",
+                "outcome": "Authorized",
+                "decidedOn": "2026-10-14T09:30:00+00:00",
+                "decidedByName": null,
+                "reason": "policy.allow",
+                "steps": null,
+                "followOns": [],
+                "summary": "Judgement: Send the reply"
+              }
+            ]
+          },
+          {
+            "core": null,
+            "notFiled": true,
+            "items": [],
+            "records": [
+              {
+                "recordId": "<guid-7>",
+                "number": "DR-00901",
+                "recordClass": "Judgement",
+                "outcome": "Authorized",
+                "decidedOn": "2026-10-13T09:30:00+00:00",
+                "decidedByName": null,
+                "reason": "policy.allow",
+                "steps": null,
+                "followOns": [],
+                "summary": "Judgement: denied (recipient outside the matter)"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "lane": "Do",
+        "groups": []
+      }
+    ]
+  }
+}

@@ -24,6 +24,15 @@
 // is created with the pack's id (stable across stamps; on the two tables with no alternate
 // key a repeated POST is refused instead of duplicating a row). Nothing is ever updated.
 //
+// BILLING CODES (data-setup plan D5): the same pack carries the UTBMS code sets and codes
+// (sprk_billingcodeset, sprk_billingcode) and the default code set of the matter types and
+// practice areas (sprk_defaultbillingcodeset). The code sets come first in the pack, then
+// the codes (each bound to its set through the sprk_codeset lookup — the set membership),
+// then the matter types and practice areas. A lookup is bound only when a row is created,
+// to the id the target row has in this environment (a set the stamp already holds by name
+// keeps its own id), and a code is matched within its set (the alternate key is set + code).
+// A present row's lookups are never read or written.
+//
 // SEMANTICS (data-setup-plan.md §2 Tier 1, owner decision A: report only):
 //   - Row absent  -> POST with the source primary key in the body. A create can
 //     never update: if a row with that id appears between the read and the POST,
@@ -236,9 +245,12 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
         var pack = new PackOutcome(input.ReferenceDataPack);
         try
         {
+            // pack id → the id the row has in THIS environment (its own id when created here; the existing row's when matched by
+            // code or name), so a lookup in a later table binds to a row that exists. Tables run in pack order, targets first.
+            var actualIds = new Dictionary<Guid, Guid>();
             foreach (var table in packTables)
             {
-                await SeedPackTableAsync(envUri, token.Token, table, pack, cancellationToken).ConfigureAwait(false);
+                await SeedPackTableAsync(envUri, token.Token, table, pack, actualIds, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -309,25 +321,35 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
     /// or with its name (trimmed, case-insensitive; active or inactive) — nothing is written and nothing is reported unless the
     /// present row's columns differ, which goes in the diagnostic only. An absent row is created with the pack's id. There is no
     /// update path: the customer owns these rows once they exist.
+    /// <para>
+    /// Lookups (data-setup plan D5) are bound only when a row is CREATED, to the id the target row has in this environment
+    /// (<paramref name="actualIds"/>: the pack's id when this run created it, the existing row's id when it matched one by code or
+    /// name). A present row's lookups are never read or written, so a stamp that already has a matter type keeps whatever default
+    /// code set it has — or none.
+    /// </para>
     /// </summary>
     private async Task SeedPackTableAsync(
-        Uri envUri, string bearerToken, ReferenceTable table, PackOutcome pack, CancellationToken cancellationToken)
+        Uri envUri, string bearerToken, ReferenceTable table, PackOutcome pack, Dictionary<Guid, Guid> actualIds,
+        CancellationToken cancellationToken)
     {
         var existing = await ReadExistingAsync(envUri, bearerToken, table, cancellationToken).ConfigureAwait(false);
-        var byCode = IndexByColumn(table.NaturalKey, existing);
-        var byName = IndexByColumn(table.NameColumn, existing);
+        var scope = table.NaturalKeyScope;
+        var byCode = IndexByColumn(table.NaturalKey, existing, scope);
+        var byName = IndexByColumn(table.NameColumn, existing, scope);
         pack.Tables++;
 
         foreach (var row in table.Rows)
         {
             pack.Rows++;
+            var scopeId = scope is null ? (Guid?)null : ActualId(actualIds, table, row, scope);
             JsonElement current = default;
             var found = existing.TryGetValue(row.Id, out current)
-                        || (ValueKey(table.NaturalKey, row.Values) is { } code && byCode.TryGetValue(code, out current))
-                        || (ValueKey(table.NameColumn, row.Values) is { } name && byName.TryGetValue(name, out current));
+                        || (ValueKey(table.NaturalKey, row.Values, scopeId) is { } code && byCode.TryGetValue(code, out current))
+                        || (ValueKey(table.NameColumn, row.Values, scopeId) is { } name && byName.TryGetValue(name, out current));
             if (found)
             {
                 pack.Present++;
+                actualIds[row.Id] = Guid.Parse(current.GetProperty(table.PrimaryKey).GetString()!, CultureInfo.InvariantCulture);
                 var differing = DifferingColumns(table, row, current);
                 if (differing.Count > 0)
                 {
@@ -337,10 +359,22 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
                 continue;
             }
 
-            await CreateAsync(envUri, bearerToken, table, row, cancellationToken).ConfigureAwait(false);
+            await CreateAsync(envUri, bearerToken, table, row, cancellationToken, actualIds).ConfigureAwait(false);
+            actualIds[row.Id] = row.Id;
             pack.Created.Add($"{table.Table}/{row.Id} '{PackLabel(table, row)}'");
         }
     }
+
+    /// <summary>The environment's id for the row a lookup of <paramref name="row"/> points at (a build defect when it is not known yet).</summary>
+    private static Guid ActualId(IReadOnlyDictionary<Guid, Guid> actualIds, ReferenceTable table, ReferenceRow row, string lookupColumn)
+        => row.Lookups.TryGetValue(lookupColumn, out var packId) && actualIds.TryGetValue(packId, out var actual)
+            ? actual
+            : throw new InvalidOperationException(
+                $"{table.Table} '{PackLabel(table, row)}': lookup '{lookupColumn}' points at a row that was not seeded before it (the target table must come first in the pack).");
+
+    /// <summary>A match key, qualified by the scope row's id when the table scopes its codes (a billing code is unique within its set).</summary>
+    private static string ScopedKey(Guid? scopeId, string key)
+        => scopeId is { } id ? $"{id:D}|{key}" : key;
 
     private static string PackLabel(ReferenceTable table, ReferenceRow row)
         => table.NameColumn is { } column && row.Values.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.String
@@ -348,7 +382,7 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
             : row.DisplayName;
 
     /// <summary>Existing rows indexed by a column's normalised value (first wins on a duplicate); empty when the column is null.</summary>
-    private static Dictionary<string, JsonElement> IndexByColumn(string? column, Dictionary<Guid, JsonElement> existing)
+    private static Dictionary<string, JsonElement> IndexByColumn(string? column, Dictionary<Guid, JsonElement> existing, string? scopeLookup = null)
     {
         var index = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         if (column is null)
@@ -358,17 +392,33 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
 
         foreach (var row in existing.Values)
         {
-            if (row.TryGetProperty(column, out var value) && Normalise(value) is { } key)
+            if (!row.TryGetProperty(column, out var value) || Normalise(value) is not { } key)
             {
-                index.TryAdd(key, row);
+                continue;
             }
+
+            Guid? scopeId = null;
+            if (scopeLookup is not null)
+            {
+                // A row with no scope (an orphan) cannot be matched by code: it belongs to no set.
+                if (!row.TryGetProperty($"_{scopeLookup}_value", out var scopeValue)
+                    || scopeValue.ValueKind != JsonValueKind.String
+                    || !Guid.TryParse(scopeValue.GetString(), CultureInfo.InvariantCulture, out var parsed))
+                {
+                    continue;
+                }
+
+                scopeId = parsed;
+            }
+
+            index.TryAdd(ScopedKey(scopeId, key), row);
         }
 
         return index;
     }
 
-    private static string? ValueKey(string? column, IReadOnlyDictionary<string, JsonElement> values)
-        => column is not null && values.TryGetValue(column, out var value) ? Normalise(value) : null;
+    private static string? ValueKey(string? column, IReadOnlyDictionary<string, JsonElement> values, Guid? scopeId = null)
+        => column is not null && values.TryGetValue(column, out var value) && Normalise(value) is { } key ? ScopedKey(scopeId, key) : null;
 
     private async Task<Dictionary<Guid, JsonElement>> ReadExistingAsync(
         Uri envUri, string bearerToken, ReferenceTable table, CancellationToken cancellationToken)
@@ -378,6 +428,7 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
         var select = string.Join(
             ",",
             new[] { table.PrimaryKey }.Concat(table.Columns).Append(table.NaturalKey ?? table.PrimaryKey).Append(table.NameColumn ?? table.PrimaryKey).Append("statecode")
+                .Concat(table.Lookups.Select(l => $"_{l.Column}_value")) // only a scoped table reads them back (the match scope)
                 .Distinct(StringComparer.Ordinal));
         Uri? next = new Uri(envUri, $"/api/data/v9.2/{table.EntitySet}?$select={select}");
         var existing = new Dictionary<Guid, JsonElement>();
@@ -408,7 +459,8 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
     }
 
     private async Task CreateAsync(
-        Uri envUri, string bearerToken, ReferenceTable table, ReferenceRow row, CancellationToken cancellationToken)
+        Uri envUri, string bearerToken, ReferenceTable table, ReferenceRow row, CancellationToken cancellationToken,
+        IReadOnlyDictionary<Guid, Guid>? actualIds = null)
     {
         var body = new Dictionary<string, object?> { [table.PrimaryKey] = row.Id.ToString() };
         foreach (var column in table.Columns)
@@ -417,6 +469,16 @@ public sealed class DataverseWebApiReferenceDataSeeder : IAppConfigSeeder
             if (value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
             {
                 body[column] = value;
+            }
+        }
+
+        // Lookups (starter packs): bind to the target row's id in THIS environment, which may differ from the pack's when the
+        // customer already held a row with that code or name.
+        foreach (var lookup in table.Lookups)
+        {
+            if (row.Lookups.ContainsKey(lookup.Column))
+            {
+                body[$"{lookup.NavigationProperty}@odata.bind"] = $"/{lookup.TargetEntitySet}({ActualId(actualIds ?? new Dictionary<Guid, Guid>(), table, row, lookup.Column):D})";
             }
         }
 

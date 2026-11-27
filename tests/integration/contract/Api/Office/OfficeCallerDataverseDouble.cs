@@ -517,6 +517,9 @@ public sealed partial class OfficeCallerDataverseDouble : IDataverseUserClient
             ["sprk_createdbyperson"] = ("Lookup", true),
             ["sprk_client"] = ("Lookup", true),
             ["sprk_ai_search_index"] = ("Lookup", true),
+            // A mapping SOURCE column the suites' matter rules read (task 064c: a source column the catalog does not answer
+            // counts as field-secured, so the double answers it as the live catalog does).
+            ["sprk_primarycontact"] = ("Lookup", true),
             ["ownerid"] = ("Owner", true),
         };
         Columns["sprk_project"] = new(StringComparer.Ordinal)
@@ -532,6 +535,12 @@ public sealed partial class OfficeCallerDataverseDouble : IDataverseUserClient
             ["sprk_regardingrecordid"] = ("String", true),
             ["sprk_issecure"] = ("Boolean", true),
             ["sprk_projecttype_ref"] = ("Lookup", true),
+            // Mapping SOURCE columns the suites' project rules read (task 064c: a source column the catalog does not answer
+            // counts as field-secured, so the double answers them as the live catalog does). sprk_notonsource is a column the
+            // source row holds no value in.
+            ["sprk_mattertype"] = ("Lookup", true),
+            ["sprk_notonsource"] = ("String", true),
+            ["sprk_feearrangement"] = ("String", true),
             ["sprk_assignedtointernal"] = ("Lookup", true),
             ["sprk_createdbyperson"] = ("Lookup", true),
             ["sprk_regardingrecordtype"] = ("Lookup", true),

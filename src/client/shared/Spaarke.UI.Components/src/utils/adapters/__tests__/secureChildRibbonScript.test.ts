@@ -31,6 +31,13 @@ interface IRibbon {
   TABLES: string[];
   WIZARDS: Record<string, { page: string }>;
   CREATE_THEN_OPEN: Record<string, unknown>;
+  NATIVE_NEW_REDIRECTED: Record<string, boolean>;
+  hostOf(primaryControl: unknown): { entity: string; id: string } | null;
+  createChild(
+    table: string,
+    host: { entity: string; id: string },
+    selectedControl: unknown
+  ): Promise<{ id: string } | null>;
 }
 
 interface IHarness {
@@ -42,6 +49,8 @@ interface IHarness {
   posts: Array<{ url: string; body: Record<string, unknown> }>;
   metadataUrls: string[];
   warnings: string[];
+  /** The sandbox the script ran in (a second web resource can be run in the same one, as the ribbon loads libraries in order). */
+  context: Record<string, unknown>;
 }
 
 function harness(options: {
@@ -60,6 +69,7 @@ function harness(options: {
     posts: [],
     metadataUrls: [],
     warnings: [],
+    context: {},
   };
   const flag = options.flag;
   const context: Record<string, unknown> = {
@@ -156,6 +166,7 @@ function harness(options: {
   vm.createContext(context);
   vm.runInContext(SCRIPT, context);
   h.ribbon = (context.Spaarke as { SecureChild: { Ribbon: IRibbon } }).SecureChild.Ribbon;
+  h.context = context;
   return h;
 }
 
@@ -226,15 +237,17 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
 
   // ebilling-r1 task 096b (EB-D-201): the invoice's platform "+ New" is closed on EVERY host; the Invoice wizard is the one "New" on a core-record host.
   it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment'])(
-    'a %s read as NOT secure offers NO platform "+ New" for an invoice and shows the Invoice wizard command (must fire); a to-do keeps the platform one (must not fire)',
+    'a %s read as NOT secure offers NO platform "+ New" for an invoice and shows the Invoice wizard command (must fire); a table outside the redirected set keeps the platform one (must not fire)',
     async root => {
       const h = harness({ flag: false });
       await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_invoice'))).resolves.toBe(false);
       await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_invoice'))).resolves.toBe(true);
       expect(h.reads).toEqual([]); // the answer does not depend on the flag
 
-      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_todo'))).resolves.toBe(true);
-      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_todo'))).resolves.toBe(false);
+      // Task 051 (FR-24): a to-do is now redirected too (see the redirected-tables describe below); sprk_analysis is neither closed
+      // nor redirected (its platform "+ New" is hidden by AnalysisRibbons), so the flag still decides for it.
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_analysis'))).resolves.toBe(true);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_analysis'))).resolves.toBe(false);
     }
   );
 
@@ -438,5 +451,100 @@ describe('sprk_secure_child_ribbon.js — nav-prop discovery follows the shared 
 
     expect(h.forms).toHaveLength(1);
     expect(h.warnings.some(w => w.includes('zero entries'))).toBe(false);
+  });
+});
+
+// field-mapping-server-write-path-r1 task 051 (FR-24): the platform subgrid "+ New" of a served table is redirected on every host
+// that can own it - secure or not - so no native create (no mapping, no owner rule, no stamp) is offered from the subgrid.
+describe('sprk_secure_child_ribbon.js — the platform "+ New" is redirected for the FR-24 tables (task 051)', () => {
+  const REDIRECTED = [
+    'sprk_todo',
+    'sprk_event',
+    'sprk_reportcard',
+    'sprk_document',
+    'sprk_communication',
+    'sprk_budget',
+    'sprk_kpiassessment',
+  ];
+
+  it('lists exactly the served tables other than the invoice (which is closed outright)', () => {
+    const h = harness({ flag: false });
+    expect(Object.keys(h.ribbon.NATIVE_NEW_REDIRECTED).sort()).toEqual([...REDIRECTED].sort());
+    expect(h.ribbon.TABLES.filter(t => t !== 'sprk_invoice').sort()).toEqual([...REDIRECTED].sort());
+  });
+
+  it.each(REDIRECTED)(
+    'a %s subgrid on a root read as NOT secure hides the platform "+ New" and shows the BFF command (must fire)',
+    async table => {
+      const h = harness({ flag: false });
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_matter'), table))).resolves.toBe(false);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf('sprk_matter'), table))).resolves.toBe(true);
+      expect(h.reads).toEqual([]); // the answer does not depend on the flag: no read
+    }
+  );
+
+  it.each(REDIRECTED)(
+    'a %s subgrid on a child host shows the BFF command on every saved host, never the platform one',
+    async table => {
+      const h = harness({ flag: false });
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_event'), table))).resolves.toBe(false);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf('sprk_event'), table))).resolves.toBe(true);
+    }
+  );
+
+  it.each(REDIRECTED)(
+    'a %s subgrid on a party host keeps the platform "+ New" (never an ownership parent; must not fire)',
+    async table => {
+      const h = harness({ flag: 'throw' });
+      expect(h.ribbon.nativeNewAllowed(formOf('contact'), table)).toBe(true);
+      expect(h.ribbon.newChildAvailable(formOf('contact'), table)).toBe(false);
+    }
+  );
+
+  it('a call that names no table behaves as before: a root read as not secure keeps the platform "+ New" (must not fire)', async () => {
+    const h = harness({ flag: false });
+    await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_matter')))).resolves.toBe(true);
+    await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf('sprk_matter')))).resolves.toBe(false);
+  });
+
+  it('the AP export batch still offers no "New" for a redirected table', () => {
+    const h = harness({ flag: false });
+    expect(h.ribbon.nativeNewAllowed(formOf('sprk_billingexport'), 'sprk_communication')).toBe(false);
+    expect(h.ribbon.newChildAvailable(formOf('sprk_billingexport'), 'sprk_communication')).toBe(false);
+  });
+});
+
+describe('sprk_secure_child_ribbon.js — createChild creates through the BFF only (task 051: Add Memo)', () => {
+  it('creates a memo through POST /api/v1/child-records/sprk_memo, filed under the host, and resolves its id (no form, no Xrm create)', async () => {
+    const h = harness({ flag: true });
+    const host = h.ribbon.hostOf(formOf('sprk_matter'))!;
+    const created = await h.ribbon.createChild('sprk_memo', host, null);
+
+    expect(created).toEqual({ id: NEW_ID });
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0].url).toBe('https://bff.example/api/v1/child-records/sprk_memo');
+    expect(h.posts[0].body['sprk_Matter@odata.bind']).toBe(`/sprk_matters(${HOST_ID})`);
+    expect(Object.keys(h.posts[0].body).some(k => /^ownerid/i.test(k))).toBe(false);
+    expect(h.forms).toEqual([]); // createChild opens nothing: the caller decides
+  });
+
+  it('resolves null and tells the user when the BFF refuses (nothing created)', async () => {
+    const h = harness({ flag: true, bffStatus: 403, bffBody: { detail: 'You cannot add to this record.' } });
+    const created = await h.ribbon.createChild('sprk_memo', h.ribbon.hostOf(formOf('sprk_matter'))!, null);
+
+    expect(created).toBeNull();
+    expect(h.alerts).toHaveLength(1);
+    expect(h.alerts[0].text).toContain('You cannot add to this record.');
+    expect(h.alerts[0].text).toContain('Nothing was created.');
+  });
+
+  it('resolves null, sends nothing and says so when the sign-in helper is not loaded (never an unauthenticated call)', async () => {
+    const h = harness({ flag: true });
+    (h.context.Spaarke as { BffAuth?: unknown }).BffAuth = undefined;
+    const created = await h.ribbon.createChild('sprk_memo', h.ribbon.hostOf(formOf('sprk_matter'))!, null);
+
+    expect(created).toBeNull();
+    expect(h.posts).toEqual([]);
+    expect(h.alerts[0].text).toContain('Nothing was created.');
   });
 });

@@ -5,57 +5,75 @@
   "match": "naturalKey",
   "naturalKey": "sprk_mattertypecode",
   "nameColumn": "sprk_mattertypename",
+  "lookups": [
+    {
+      "column": "sprk_defaultbillingcodeset",
+      "navigationProperty": "sprk_DefaultBillingCodeSet",
+      "targetTable": "sprk_billingcodeset",
+      "targetEntitySet": "sprk_billingcodesets"
+    }
+  ],
   "columns": ["sprk_mattertypecode", "sprk_mattertypename"],
   "rows": [
     {
       "sprk_mattertype_refid": "11aed095-30da-f011-8406-7ced8d1dc988",
       "sprk_mattertypecode": "LITG",
-      "sprk_mattertypename": "Litigation"
+      "sprk_mattertypename": "Litigation",
+      "sprk_defaultbillingcodeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63"
     },
     {
       "sprk_mattertype_refid": "6cedd99b-30da-f011-8406-7ced8d1dc988",
       "sprk_mattertypecode": "CMRCL",
-      "sprk_mattertypename": "Commercial"
+      "sprk_mattertypename": "Commercial",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_mattertype_refid": "cdbf53b0-30da-f011-8406-7ced8d1dc988",
       "sprk_mattertypecode": "EMPL",
-      "sprk_mattertypename": "Employment"
+      "sprk_mattertypename": "Employment",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     },
     {
       "sprk_mattertype_refid": "46c35aa2-30da-f011-8406-7ced8d1dc988",
       "sprk_mattertypecode": "PAT",
-      "sprk_mattertypename": "Patent"
+      "sprk_mattertypename": "Patent",
+      "sprk_defaultbillingcodeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4"
     },
     {
       "sprk_mattertype_refid": "60c35aa2-30da-f011-8406-7ced8d1dc988",
       "sprk_mattertypecode": "TMRK",
-      "sprk_mattertypename": "Trademark"
+      "sprk_mattertypename": "Trademark",
+      "sprk_defaultbillingcodeset": "b80f82de-21b2-5251-8985-931010ea2971"
     },
     {
       "sprk_mattertype_refid": "498f0f74-c1d3-4597-a5c4-7dbbf63f58ad",
       "sprk_mattertypecode": "CORPMA",
-      "sprk_mattertypename": "Corporate / M&A"
+      "sprk_mattertypename": "Corporate / M&A",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_mattertype_refid": "7bf238a3-8744-4600-8ed9-1e798be9d746",
       "sprk_mattertypecode": "REGCOMP",
-      "sprk_mattertypename": "Regulatory & Compliance"
+      "sprk_mattertypename": "Regulatory & Compliance",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     },
     {
       "sprk_mattertype_refid": "5d3f4a96-cf2f-47a5-9e6e-bd8b323138af",
       "sprk_mattertypecode": "REALEST",
-      "sprk_mattertypename": "Real Estate"
+      "sprk_mattertypename": "Real Estate",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_mattertype_refid": "98613dbe-101b-4b66-931f-b8033632852e",
       "sprk_mattertypecode": "FINBNK",
-      "sprk_mattertypename": "Finance & Banking"
+      "sprk_mattertypename": "Finance & Banking",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_mattertype_refid": "90143114-5542-46b5-97e0-3f65bf010b2c",
       "sprk_mattertypecode": "PRIVACY",
-      "sprk_mattertypename": "Privacy & Data Protection"
+      "sprk_mattertypename": "Privacy & Data Protection",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     },
     {
       "sprk_mattertype_refid": "9c77dac4-f44c-48ca-8b31-0d29dbed2aed",
@@ -70,12 +88,14 @@
     {
       "sprk_mattertype_refid": "30ea58a9-ec65-48c6-b652-fe1d260a2fc6",
       "sprk_mattertypecode": "BANKRPT",
-      "sprk_mattertypename": "Bankruptcy & Restructuring"
+      "sprk_mattertypename": "Bankruptcy & Restructuring",
+      "sprk_defaultbillingcodeset": "f506ec3d-a145-53ed-a665-719fdcd663e5"
     },
     {
       "sprk_mattertype_refid": "322fef06-2f4b-4c8e-b2bc-a8eab1ce318b",
       "sprk_mattertypecode": "GENADV",
-      "sprk_mattertypename": "General Advisory"
+      "sprk_mattertypename": "General Advisory",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     }
   ]
 }

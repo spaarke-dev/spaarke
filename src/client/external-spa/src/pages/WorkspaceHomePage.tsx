@@ -24,7 +24,16 @@
  * Fluent v9 semantic tokens only — zero hardcoded hex (ADR-021).
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text, Spinner } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  Spinner,
+  Button,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+} from '@fluentui/react-components';
 import {
   PortalWorkspaceShell,
   QuickStartPane,
@@ -35,6 +44,8 @@ import {
 } from '../components/shell';
 import {
   fetchMeEntitlements,
+  BinderFaultError,
+  BINDER_FAULT_MESSAGE,
   OwnerUnconfiguredError,
   OWNER_UNCONFIGURED_MESSAGE,
   OWNER_UNCONFIGURED_TITLE,
@@ -108,6 +119,10 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   const [meDeniedDetail, setMeDeniedDetail] = React.useState<string | null>(null);
   // ISS-005 (#1673): the denied state is the organization's unfinished set-up, not a permission problem - its own title.
   const [meOwnerUnconfigured, setMeOwnerUnconfigured] = React.useState(false);
+  // R4 FR-28 (#2269): the sign-in could not be finished after fetchMeEntitlements' automatic retries. Retry bumps
+  // `meAttempt`, which runs the whole sequence (the request and its three retries) again.
+  const [meBinderFault, setMeBinderFault] = React.useState(false);
+  const [meAttempt, setMeAttempt] = React.useState(0);
   React.useEffect(() => {
     let cancelled = false;
     fetchMeEntitlements(teamsHost)
@@ -116,6 +131,10 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        if (err instanceof BinderFaultError) {
+          setMeBinderFault(true);
+          return;
+        }
         // ISS-005 (#1673): the organization's sign-in is not configured. Same denied state as a 403, with a FIXED
         // sentence (the server text is never shown) - not a default workspace whose widgets would all 500.
         if (err instanceof OwnerUnconfiguredError) {
@@ -132,7 +151,7 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
     return () => {
       cancelled = true;
     };
-  }, [teamsHost]);
+  }, [teamsHost, meAttempt]);
 
   // Assistant dock: default LEFT per the AI-maturity theory (design.md §12 / ux
   // refinement #5 — the assistant migrates from far-right accessory to first-class
@@ -229,6 +248,27 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
             'You do not have access to this workspace. If you believe this is an error, please contact your Spaarke administrator.'
           }
         />
+      </div>
+    );
+  }
+
+  if (meBinderFault) {
+    return (
+      <div className={s.statusRoot}>
+        <MessageBar intent="warning">
+          <MessageBarBody>{BINDER_FAULT_MESSAGE}</MessageBarBody>
+          <MessageBarActions>
+            <Button
+              appearance="primary"
+              onClick={() => {
+                setMeBinderFault(false);
+                setMeAttempt(n => n + 1);
+              }}
+            >
+              Retry
+            </Button>
+          </MessageBarActions>
+        </MessageBar>
       </div>
     );
   }

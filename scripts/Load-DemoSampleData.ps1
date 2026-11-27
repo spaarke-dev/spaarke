@@ -52,6 +52,17 @@
 .PARAMETER Reset
     Delete the tagged demo rows instead of loading. Honours -WhatIf.
 
+.PARAMETER Redate
+    Keep the loaded dates current instead of loading: shift every date column the loader wrote, on tagged rows only, forward
+    by whole days so the dataset reads as if it were loaded today (a demo loaded weeks ago otherwise shows overdue
+    deadlines). A DRY RUN unless -Apply is given: it prints the plan (rows x date columns, the shift in days) and writes
+    nothing. Idempotent (a second run on the same day finds a shift of 0 and writes nothing) and needs no record of the
+    load day: it is read from the rows themselves (see "Redate" in scripts/demo-data/DemoDataLib.ps1). A row whose date
+    columns no longer move together (edited by hand) is skipped and reported. Same demo guard as a load. Not with -Reset.
+
+.PARAMETER Apply
+    With -Redate: actually write the shifted dates. Without it -Redate only prints the plan. -WhatIf still wins over -Apply.
+
 .PARAMETER AllowNonDemo
     Operator override for a target the registry does not mark as an active Demo environment. Warns. Never overrides Production.
 
@@ -83,6 +94,14 @@
 .EXAMPLE
     .\Load-DemoSampleData.ps1 -CustomerId acme -Reset
     # Remove the tagged demo rows (children first).
+
+.EXAMPLE
+    .\Load-DemoSampleData.ps1 -CustomerId acme -Redate
+    # Dry run: print which tagged rows and date columns would move, and by how many days. Writes nothing.
+
+.EXAMPLE
+    .\Load-DemoSampleData.ps1 -CustomerId acme -Redate -Apply
+    # Shift the tagged dates to today. Running it again the same day changes nothing.
 #>
 
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
@@ -97,6 +116,8 @@ param(
     [string]$DataFile,
 
     [switch]$Reset,
+    [switch]$Redate,
+    [switch]$Apply,
     [switch]$AllowNonDemo,
 
     [string]$OwnerBusinessUnitName,
@@ -111,6 +132,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($DryRun) { $WhatIfPreference = $true }
+# -Redate is a dry run until -Apply says otherwise (a load and a reset write by default; a date shift is the one mode that does not).
+if ($Redate -and -not $Apply) { $WhatIfPreference = $true }
 
 . (Join-Path $PSScriptRoot 'demo-data' 'DemoDataLib.ps1')
 
@@ -150,7 +173,7 @@ function Invoke-Dv {
     param(
         [Parameter(Mandatory)][string]$Url,
         [Parameter(Mandatory)][string]$PathAndQuery,
-        [ValidateSet('GET', 'POST', 'DELETE')][string]$Method = 'GET',
+        [ValidateSet('GET', 'POST', 'DELETE', 'PATCH')][string]$Method = 'GET',
         $Body,
         [switch]$ReturnHeaders
     )
@@ -162,7 +185,9 @@ function Invoke-Dv {
         'OData-Version'    = '4.0'
         Prefer             = 'odata.include-annotations="*"'
     }
-    if ($Method -eq 'POST') { $headers['Prefer'] = 'return=minimal' }
+    if ($Method -in 'POST', 'PATCH') { $headers['Prefer'] = 'return=minimal' }
+    # If-Match: * makes a PATCH update-only: a row deleted since it was read is an error, never re-created by the PATCH (upsert).
+    if ($Method -eq 'PATCH') { $headers['If-Match'] = '*' }
     $params = @{ Uri = $uri; Method = $Method; Headers = $headers }
     if ($null -ne $Body) { $params['Body'] = ($Body | ConvertTo-Json -Depth 6 -Compress); $params['ContentType'] = 'application/json; charset=utf-8' }
     for ($attempt = 1; ; $attempt++) {
@@ -180,8 +205,8 @@ function Invoke-Dv {
 }
 
 function Invoke-DvWrite {
-    <# POST or DELETE. Refuses under -WhatIf even if a caller forgot ShouldProcess: a dry run never writes. #>
-    param([string]$Url, [string]$PathAndQuery, [ValidateSet('POST', 'DELETE')][string]$Method, $Body, [switch]$ReturnHeaders)
+    <# POST, PATCH or DELETE. Refuses under -WhatIf even if a caller forgot ShouldProcess: a dry run never writes. #>
+    param([string]$Url, [string]$PathAndQuery, [ValidateSet('POST', 'PATCH', 'DELETE')][string]$Method, $Body, [switch]$ReturnHeaders)
     if ($WhatIfPreference) { throw 'Internal error: a write was attempted under -WhatIf.' }
     return Invoke-Dv -Url $Url -PathAndQuery $PathAndQuery -Method $Method -Body $Body -ReturnHeaders:$ReturnHeaders
 }
@@ -330,6 +355,8 @@ Write-Host '  Spaarke demo data loader (dataset v2)' -ForegroundColor Cyan
 Write-Host '========================================' -ForegroundColor Cyan
 
 if ([bool]$CustomerId -eq [bool]$DataverseUrl) { throw 'Give exactly one of -CustomerId or -DataverseUrl.' }
+if ($Redate -and $Reset) { throw '-Redate and -Reset are different modes: give one.' }
+if ($Apply -and -not $Redate) { throw '-Apply belongs to -Redate (a load and a reset write by default; use -WhatIf for a dry run of those).' }
 if (-not (Test-Path $DataFile)) { throw "Data file not found: $DataFile" }
 
 # 1. Dataset
@@ -377,8 +404,10 @@ else { Write-Host 'Registry:    (registry read OK, no row for this URL)' -Foregr
 
 foreach ($w in $guard.Warnings) { Write-Host "WARNING: $w" -ForegroundColor Yellow }
 
-if ($WhatIfPreference) { Write-Host 'Mode:        WHATIF (reads only, writes nothing)' -ForegroundColor Yellow }
+if ($Redate -and $WhatIfPreference) { Write-Host 'Mode:        REDATE DRY RUN (reads only, writes nothing; add -Apply to write)' -ForegroundColor Yellow }
+elseif ($WhatIfPreference) { Write-Host 'Mode:        WHATIF (reads only, writes nothing)' -ForegroundColor Yellow }
 elseif ($Reset) { Write-Host 'Mode:        RESET (deletes tagged demo rows)' -ForegroundColor Yellow }
+elseif ($Redate) { Write-Host 'Mode:        REDATE (-Apply: shifts the dates of tagged demo rows)' -ForegroundColor Yellow }
 else { Write-Host 'Mode:        LOAD' -ForegroundColor Green }
 
 # 4. Sections in scope
@@ -387,6 +416,8 @@ if ($SkipDocuments) { $skip += 'documents' }
 if ($SkipCommunications) { $skip += 'communications' }
 $specs = @(Get-DemoTableSpecs | Where-Object { $_.Section -notin $skip })
 if ($Reset) { $specs = @(Get-DemoResetOrder | Where-Object { $_ -notin $skip } | ForEach-Object { $s = $_; Get-DemoTableSpecs | Where-Object { $_.Section -eq $s } }) }
+# Only the tables the loader writes a date column on (taken from the same table specs the load writes by).
+if ($Redate) { $specs = @($specs | Where-Object { @($_.Dates).Count -gt 0 }) }
 
 # 5. The target must have the product
 try { $null = Invoke-Dv -Url $targetUrl -PathAndQuery 'sprk_matters?$top=1&$select=sprk_matterid' }
@@ -426,6 +457,28 @@ if ($Reset) {
         $result = Invoke-DemoResetSection -Spec $spec -Get $reader -Delete $deleter -Approve $confirmer -Gone $gone -Say $say
         $summary[$spec.Section] = $result.Counts
         foreach ($k in $result.Kept) { $keptParents.Add($k) }
+    }
+}
+
+# ============================================================================
+# REDATE
+# ============================================================================
+
+elseif ($Redate) {
+    # The whole redate runs in DemoDataLib.ps1 (Invoke-DemoRedateSection) against these callbacks, as the reset does. A PATCH
+    # happens only inside -Patch, which the lib calls only after -Approve (ShouldProcess; false for a dry run) said yes, and
+    # only for rows found by the tag filter.
+    $patcher = { param($Spec, $Row, $Body) Invoke-DvWrite -Url $targetUrl -PathAndQuery "$($Spec.EntitySet)($($Row.Id))" -Method PATCH -Body $Body }
+    $confirmer = { param($Target, $Action) $PSCmdlet.ShouldProcess($Target, $Action) }
+    $say = { param($Text, $Color) Write-Host $Text -ForegroundColor $Color }
+    $redateToday = (Get-Date).ToUniversalTime().Date
+    Write-Host "Today (UTC): $($redateToday.ToString('yyyy-MM-dd'))"
+    $redatePlans = New-Object System.Collections.Generic.List[object]
+    foreach ($spec in $specs) {
+        Write-Section "Redate: $($spec.Section) ($($spec.EntitySet))"
+        $result = Invoke-DemoRedateSection -Spec $spec -DatasetRows @($dataset.($spec.Section)) -Get $reader -Patch $patcher -Approve $confirmer -Today $redateToday -Say $say
+        $summary[$spec.Section] = $result.Counts
+        foreach ($p in $result.Plans) { $redatePlans.Add($p) }
     }
 }
 
@@ -581,7 +634,19 @@ foreach ($name in $summary.Keys) {
 Write-Host ("  {0,-15} {1}" -f 'TOTAL', (($totals.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '  '))
 if ($WhatIfPreference) {
     if ($Reset) { Write-Host '  (WhatIf: WouldDelete = would be deleted; nothing was deleted.)' -ForegroundColor Yellow }
+    elseif ($Redate) { Write-Host '  (Dry run: WouldShift = would be shifted; nothing was written. Add -Apply to write.)' -ForegroundColor Yellow }
     else { Write-Host '  (WhatIf: Planned = would be created; nothing was written.)' -ForegroundColor Yellow }
+}
+if ($Redate) {
+    # The plan in one line: rows x date values, and the shift in days.
+    Write-Host ''
+    if ($redatePlans.Count -eq 0) { Write-Host '  Redate plan: nothing to shift.' }
+    else {
+        $dayValues = @($redatePlans | ForEach-Object { $_.Days })
+        $columnTotal = [int](($redatePlans | Measure-Object -Property Columns -Sum).Sum)
+        $range = if (($dayValues | Measure-Object -Minimum).Minimum -eq ($dayValues | Measure-Object -Maximum).Maximum) { "+$($dayValues[0])" } else { "+$(($dayValues | Measure-Object -Minimum).Minimum) to +$(($dayValues | Measure-Object -Maximum).Maximum)" }
+        Write-Host "  Redate plan: $($redatePlans.Count) row(s), $columnTotal date value(s), shift $range day(s) (to $($redateToday.ToString('yyyy-MM-dd')) UTC)."
+    }
 }
 if ($Reset) {
     # Kept parents: tagged rows the reset did not delete, and why. Does not change the exit code (a kept row is the safe outcome).

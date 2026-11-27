@@ -235,7 +235,11 @@ public sealed class DataverseWebApiWorkspaceLayoutSeeder : IAppConfigSeeder
                 // Default (no -Force) behavior of the source script — skip an
                 // existing record rather than refresh it (see file header).
                 var existingId = values[0].GetProperty("sprk_workspacelayoutid").GetString()!;
-                return (null, $"skipped (exists: {existingId})");
+                // A row that predates the fixed id keeps its server-generated primary key (a key cannot be changed),
+                // so say so: product code that opens this layout by id will not find it until the row is recreated.
+                return layout.Id is Guid wanted && !string.Equals(existingId, wanted.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                    ? (null, $"skipped (exists: {existingId}; NOT the fixed id {wanted:D}, recreate the row so id-based launches resolve)")
+                    : (null, $"skipped (exists: {existingId})");
             }
         }
 
@@ -248,6 +252,10 @@ public sealed class DataverseWebApiWorkspaceLayoutSeeder : IAppConfigSeeder
             ["sprk_sortorder"] = layout.SortOrder,
             ["sprk_issystem"] = true,
         };
+        if (layout.Id is Guid fixedId)
+        {
+            createBody["sprk_workspacelayoutid"] = fixedId;
+        }
 
         var postUri = new Uri(envUri, "/api/data/v9.2/sprk_workspacelayouts");
         using var postRequest = BuildRequest(HttpMethod.Post, postUri, bearerToken);
@@ -343,7 +351,17 @@ public sealed class DataverseWebApiWorkspaceLayoutSeeder : IAppConfigSeeder
             var sortOrder = element.GetProperty("sortOrder").GetInt32();
             var isDefault = element.TryGetProperty("isDefault", out var isDefaultEl) && isDefaultEl.GetBoolean();
 
-            result.Add(new LayoutSeedItem(name, sectionId, layoutTemplateId, sortOrder, isDefault));
+            // Optional fixed primary key (ISS-045): product code that opens a system layout by id
+            // (surfaceLaunchRegistry.ts) needs the same id on every stamp, so the row is created with it.
+            Guid? fixedId = null;
+            if (element.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String)
+            {
+                fixedId = Guid.TryParse(idEl.GetString(), out var parsedId)
+                    ? parsedId
+                    : throw new InvalidOperationException($"system-layouts.json layout '{name}' has an 'id' that is not a GUID.");
+            }
+
+            result.Add(new LayoutSeedItem(name, sectionId, layoutTemplateId, sortOrder, isDefault, fixedId));
         }
         return result;
     }
@@ -368,5 +386,5 @@ public sealed class DataverseWebApiWorkspaceLayoutSeeder : IAppConfigSeeder
         => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
 
     /// <summary>One parsed row from <c>system-layouts.json</c>. Exposed <c>internal</c> so tests can construct fixtures directly.</summary>
-    internal sealed record LayoutSeedItem(string Name, string SectionId, string LayoutTemplateId, int SortOrder, bool IsDefault);
+    internal sealed record LayoutSeedItem(string Name, string SectionId, string LayoutTemplateId, int SortOrder, bool IsDefault, Guid? Id = null);
 }

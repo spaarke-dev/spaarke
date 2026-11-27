@@ -111,25 +111,76 @@ public class SecureChildNewCommandAgreementTests
             + string.Join(", ", uncovered));
     }
 
-    [Fact]
-    public void SpaarkesOwnAddKpiQuickCreate_CarriesTheSecureRule_InTheAuthoredRibbon_AndTheMergeScript()
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 066 (owner 2026-11-26, 051 OQ-5: "only +New is required"): the KPI assessment subgrid has ONE
+    /// create, "+ New" (the SecureChild create-then-open through the BFF). The second button, "Add KPI Assessment", is retired: no ribbon
+    /// source may define or name it. Returns the files whose text names the button id.
+    /// </summary>
+    private const string RetiredKpiButton = "sprk.matter.subgrid.kpi.AddKpiButton";
+
+    private static string[] FilesNamingTheRetiredButton(IEnumerable<(string Name, string Text)> files) =>
+        files.Where(f => f.Text.Contains(RetiredKpiButton, StringComparison.Ordinal)).Select(f => f.Name).ToArray();
+
+    /// <summary>Every ribbon-bearing XML source of the repo: the SpaarkeMaster solution, the ribbon scripts and the SpaarkeCore ribbon fragments.</summary>
+    private static IEnumerable<(string Name, string Text)> RibbonXmlSources()
     {
-        // "+ Add KPI" opens the KPI assessment QUICK CREATE with the matter prefilled — the "quick create with the parent
-        // prefilled" round 28 item 2 names. Under a secure host only the BFF command may show.
-        var kpi = XDocument.Load(Path.Combine(Root, "src", "solutions", "SpaarkeCore", "entities", "sprk_matter", "RibbonDiff",
-            "add-kpi-ribbon.xml"));
-        const string rule = "sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule";
-        var command = kpi.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == "sprk.matter.subgrid.kpi.AddKpiButton.Command");
-        Assert.Contains(command.Descendants("EnableRule"), r => (string?)r.Attribute("Id") == rule);
-        var definition = kpi.Descendants("EnableRule").Single(r => (string?)r.Attribute("Id") == rule && r.Elements("CustomRule").Any());
-        Assert.Equal("Spaarke.SecureChild.Ribbon.nativeNewAllowed", definition.Element("CustomRule")!.Attribute("FunctionName")!.Value);
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules", "bin", "obj", "dist", ".git" };
+        IEnumerable<string> Walk(string dir) =>
+            Directory.EnumerateFiles(dir, "*.xml")
+                .Concat(Directory.EnumerateDirectories(dir).Where(d => !skip.Contains(Path.GetFileName(d))).SelectMany(Walk));
+        foreach (var root in new[]
+                 {
+                     Path.Combine(Root, "src", "dataverse"),
+                     Path.Combine(Root, "src", "solutions"),
+                     Path.Combine(Root, "infrastructure", "dataverse", "ribbon"),
+                 })
+        {
+            foreach (var file in Walk(root)) yield return (Path.GetRelativePath(Root, file), File.ReadAllText(file));
+        }
+    }
 
-        var merge = File.ReadAllText(MergeFile);
-        Assert.Contains("'sprk.matter.subgrid.kpi.AddKpiButton.Command'", merge, StringComparison.Ordinal);
+    [Fact]
+    public void TheKpiAssessmentSubgrid_KeepsItsOneNew_AndNoRepoRibbonCarriesTheAddKpiButton()
+    {
+        // No ribbon source in the repo defines or names the retired button.
+        Assert.Empty(FilesNamingTheRetiredButton(RibbonXmlSources()));
 
-        // The script's own check: the Quick Create opens only for a record read as NOT secure.
-        var actions = File.ReadAllText(Path.Combine(Root, "src", "solutions", "webresources", "sprk_kpi_ribbon_actions.js"));
-        Assert.Contains("row.sprk_issecure === false", actions, StringComparison.Ordinal);
+        // The config says it must be absent (so -Verify and the merge enforce it) and no longer requires it.
+        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(
+            Path.Combine(Root, "infrastructure", "dataverse", "ribbon", "NativeCreateRibbons", "native-create-surfaces.json")));
+        var kpiEntry = config.RootElement.GetProperty("tables").EnumerateArray()
+            .Single(e => e.GetProperty("table").GetString() == "sprk_kpiassessment");
+        Assert.Contains(RetiredKpiButton, kpiEntry.GetProperty("mustBeAbsent").EnumerateArray().Select(e => e.GetString()));
+        Assert.False(kpiEntry.TryGetProperty("alsoPresent", out _), "sprk_kpiassessment must not require any button to be present.");
+
+        // The subgrid's "+ New" (SecureChild create-then-open) and its platform-New rule are unchanged.
+        var ribbon = XDocument.Load(Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_KPIAssessment", "RibbonDiff.xml"));
+        var button = ribbon.Descendants("Button").Single(b => (string?)b.Attribute("Id") == "sprk.SecureChild.sprk_kpiassessment.SubGrid.New");
+        Assert.Equal("sprk.SecureChild.sprk_kpiassessment.New.Command", (string?)button.Attribute("Command"));
+        Assert.Single(ribbon.Descendants("CommandDefinition"), c => (string?)c.Attribute("Id") == "sprk.SecureChild.sprk_kpiassessment.New.Command");
+        var native = ribbon.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == "Mscrm.AddNewRecordFromSubGridStandard");
+        Assert.Contains(native.Descendants("EnableRule"),
+            r => (string?)r.Attribute("Id") == "sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule");
+        // The retired command's library is not loaded by any command of the table.
+        Assert.DoesNotContain(ribbon.Descendants("JavaScriptFunction"),
+            a => ((string?)a.Attribute("Library") ?? "").Contains("kpi_ribbon_actions", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheRetiredButtonCheck_Fires_ForARibbonThatStillCarriesIt_AndStaysQuiet_ForTheEditedRibbon()
+    {
+        // Must fire: the button as it shipped (its CustomAction, and a command or label that only names it).
+        var withButton = ("RibbonDiff.xml", "<CustomAction Id=\"" + RetiredKpiButton + ".CustomAction\"><Button Id=\"" + RetiredKpiButton + "\" /></CustomAction>");
+        Assert.Equal(new[] { "RibbonDiff.xml" }, FilesNamingTheRetiredButton(new[] { withButton }));
+        Assert.NotEmpty(FilesNamingTheRetiredButton(new[] { ("RibbonDiff.xml", "<CommandDefinition Id=\"" + RetiredKpiButton + ".Command\" />") }));
+
+        // Must not fire: the edited KPI ribbon, and the Add Memo ribbon (a button of the same kind that stays).
+        var master = Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities");
+        Assert.Empty(FilesNamingTheRetiredButton(new[]
+        {
+            ("sprk_KPIAssessment", File.ReadAllText(Path.Combine(master, "sprk_KPIAssessment", "RibbonDiff.xml"))),
+            ("sprk_Event", File.ReadAllText(Path.Combine(master, "sprk_Event", "RibbonDiff.xml"))),
+        }));
     }
 
     [Fact]
@@ -297,6 +348,119 @@ public class SecureChildNewCommandAgreementTests
         var command = invoiceRibbon.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == "sprk.SecureChild.sprk_invoice.New.Command");
         Assert.Equal(new[] { "sprk.SecureChild.sprk_invoice.NewAvailable.EnableRule" }, command.Descendants("EnableRule").Select(r => (string)r.Attribute("Id")!));
         Assert.Contains(command.Descendants("StringParameter"), p => (string?)p.Attribute("Value") == "sprk_invoice");
+    }
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 051 r1 (F1/F4): the script answers for the redirected tables (NATIVE_NEW_REDIRECTED) only
+    /// when a rule hands it the table, as a StringParameter. A rule that names no table gives the script <c>table === undefined</c>, so
+    /// the redirect is never consulted and the platform subgrid "+ New" falls through to a create with no field mapping or owner rule.
+    /// The table-less rules shipped once (seven tables), so every <c>sprk.SecureChild.&lt;t&gt;.*</c> rule must carry its own table.
+    /// </summary>
+    private static string[] SecureChildRulesWithoutTheirTable(XDocument ribbon) =>
+        ribbon.Descendants("EnableRule")
+            .Select(rule => (Rule: rule, Match: Regex.Match((string?)rule.Attribute("Id") ?? "", @"^sprk\.SecureChild\.(?<t>sprk_[a-z]+)\.(NativeNewAllowed|NewAvailable)\.EnableRule$")))
+            .Where(r => r.Match.Success)
+            .SelectMany(r => r.Rule.Elements("CustomRule")
+                .Where(c => ((string?)c.Attribute("FunctionName") ?? "").StartsWith("Spaarke.SecureChild.Ribbon.", StringComparison.Ordinal))
+                .Where(c => !c.Elements("StringParameter").Any(p => (string?)p.Attribute("Value") == r.Match.Groups["t"].Value))
+                .Select(_ => (string)r.Rule.Attribute("Id")!))
+            .ToArray();
+
+    [Fact]
+    public void EverySecureChildRule_InTheSpaarkeMasterRibbons_PassesItsOwnTableToTheScript()
+    {
+        var entities = Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities");
+        var withRules = Directory.GetFiles(entities, "RibbonDiff.xml", SearchOption.AllDirectories)
+            .Select(file => (File: file, Doc: XDocument.Load(file)))
+            .Where(x => x.Doc.Descendants("EnableRule").Any(r => ((string?)r.Attribute("Id") ?? "").StartsWith("sprk.SecureChild.", StringComparison.Ordinal)))
+            .ToList();
+
+        // Guard against a scan that matches nothing: every served table's ribbon is among the files read.
+        var tablesCovered = withRules
+            .SelectMany(x => x.Doc.Descendants("EnableRule"))
+            .Select(r => Regex.Match((string?)r.Attribute("Id") ?? "", @"^sprk\.SecureChild\.(?<t>sprk_[a-z]+)\.").Groups["t"].Value)
+            .Where(t => t.Length > 0).Distinct().OrderBy(t => t, StringComparer.Ordinal).ToArray();
+        Assert.Equal(ScriptTables(), tablesCovered);
+
+        var missing = withRules.SelectMany(x => SecureChildRulesWithoutTheirTable(x.Doc).Select(id => $"{Path.GetFileName(Path.GetDirectoryName(x.File))}: {id}")).ToList();
+        Assert.True(missing.Count == 0, "A secure-child rule passes no table (the script then never consults NATIVE_NEW_REDIRECTED): " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void TheTableCheck_Fires_ForARuleWithNoTable_OrAnotherTable_AndStaysQuiet_ForOneWithItsOwn()
+    {
+        static XDocument Ribbon(string parameters) => XDocument.Parse(
+            "<RibbonDiffXml><RuleDefinitions><EnableRules>"
+            + "<EnableRule Id=\"sprk.SecureChild.sprk_todo.NativeNewAllowed.EnableRule\">"
+            + "<CustomRule Library=\"$webresource:sprk_/scripts/secure_child_ribbon.js\" FunctionName=\"Spaarke.SecureChild.Ribbon.nativeNewAllowed\" Default=\"false\">"
+            + "<CrmParameter Value=\"PrimaryControl\" />" + parameters + "</CustomRule></EnableRule>"
+            + "</EnableRules></RuleDefinitions></RibbonDiffXml>");
+
+        // Must fire: the shipped defect (no StringParameter), and a copy-paste of another table's rule.
+        Assert.Equal(new[] { "sprk.SecureChild.sprk_todo.NativeNewAllowed.EnableRule" }, SecureChildRulesWithoutTheirTable(Ribbon("")));
+        Assert.NotEmpty(SecureChildRulesWithoutTheirTable(Ribbon("<StringParameter Value=\"sprk_event\" />")));
+        // Must not fire: the rule names its own table.
+        Assert.Empty(SecureChildRulesWithoutTheirTable(Ribbon("<StringParameter Value=\"sprk_todo\" />")));
+        // Must not fire: a rule outside the secure-child family needs no table.
+        Assert.Empty(SecureChildRulesWithoutTheirTable(XDocument.Parse(
+            "<RibbonDiffXml><RuleDefinitions><EnableRules><EnableRule Id=\"sprk.Other.EnableRule\"><CustomRule FunctionName=\"x\" /></EnableRule></EnableRules></RuleDefinitions></RibbonDiffXml>")));
+    }
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 051 r1 (F2/F4): the libraries a ribbon command loads must be web resources that exist
+    /// UNDER THAT NAME. "Add Memo" and the (since retired) "+ Add KPI" shipped naming <c>sprk_event_ribbon_commands</c> and
+    /// <c>sprk_/scripts/kpi_ribbon_actions.js</c>; the web resource is <c>sprk_event_ribbon_commands.js</c>, so the button would load nothing. Returns the libraries of a command's actions that name no
+    /// known web resource.
+    /// </summary>
+    private static string[] LibrariesNamingNoWebResource(XElement command, ISet<string> webResourceNames) =>
+        command.Descendants("JavaScriptFunction")
+            .Select(a => ((string?)a.Attribute("Library") ?? "").Replace("$webresource:", "", StringComparison.OrdinalIgnoreCase))
+            .Where(name => !webResourceNames.Contains(name))
+            .ToArray();
+
+    private static string[] LibrariesOf(XElement command) =>
+        command.Descendants("JavaScriptFunction")
+            .Select(a => ((string?)a.Attribute("Library") ?? "").Replace("$webresource:", "", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+    [Fact]
+    public void AddMemo_InTheSpaarkeMasterRibbon_LoadsItsHelpersInOrder_UnderTheWebResourceNamesThatExist()
+    {
+        var master = Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster");
+        var names = Directory.GetFiles(Path.Combine(master, "WebResources"), "*.data.xml", SearchOption.AllDirectories)
+            .Select(file => (string?)XDocument.Load(file).Root?.Element("Name"))
+            .Where(n => !string.IsNullOrEmpty(n)).Select(n => n!).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("sprk_event_ribbon_commands.js", names);
+
+        var helpers = new[] { "sprk_/scripts/bff_auth.js", "sprk_/scripts/assignedaccess_postsave.js", "sprk_/scripts/secure_child_ribbon.js" };
+        foreach (var (folder, commandId, code, rule) in new[]
+                 {
+                     ("sprk_Event", "Spaarke.Event.AddMemo.Command", "sprk_event_ribbon_commands.js", "sprk.CreatePrivilege.sprk_memo.DisplayRule"),
+                 })
+        {
+            var ribbon = XDocument.Load(Path.Combine(master, "Entities", folder, "RibbonDiff.xml"));
+            var command = ribbon.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == commandId);
+            Assert.Equal(helpers.Append(code).ToArray(), LibrariesOf(command));
+            Assert.Empty(LibrariesNamingNoWebResource(command, names));
+            Assert.Contains(command.Descendants("DisplayRule"), r => (string?)r.Attribute("Id") == rule);
+            // Add Memo creates through the BFF: no native-New rule may close the button.
+            Assert.DoesNotContain(command.Descendants("EnableRule"), r => ((string?)r.Attribute("Id") ?? "").Contains("NativeNewAllowed", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void TheWebResourceNameCheck_Fires_ForAnUnknownLibraryName_AndStaysQuiet_ForKnownOnes()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal) { "sprk_event_ribbon_commands.js", "sprk_/scripts/bff_auth.js" };
+        static XElement Command(string library) => XElement.Parse(
+            "<CommandDefinition Id=\"x\"><Actions><JavaScriptFunction Library=\"" + library + "\" FunctionName=\"f\" /></Actions></CommandDefinition>");
+
+        // Must fire: the shipped names (no .js; a path the web resource never had).
+        Assert.Equal(new[] { "sprk_event_ribbon_commands" }, LibrariesNamingNoWebResource(Command("$webresource:sprk_event_ribbon_commands"), names));
+        Assert.Equal(new[] { "sprk_/scripts/kpi_ribbon_actions.js" }, LibrariesNamingNoWebResource(Command("$webresource:sprk_/scripts/kpi_ribbon_actions.js"), names));
+        // Must not fire: the names as they are.
+        Assert.Empty(LibrariesNamingNoWebResource(Command("$webresource:sprk_event_ribbon_commands.js"), names));
+        Assert.Empty(LibrariesNamingNoWebResource(Command("$webresource:sprk_/scripts/bff_auth.js"), names));
     }
 
     [Fact]

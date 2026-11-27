@@ -208,32 +208,7 @@
     <RolePrivilege name="prvAssignSLA" level="Basic" />
     <RolePrivilege name="prvAssignSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAssignSocialProfile" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_Agreement" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_analysis" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_billingexport" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Budget" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Communication" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_CommunicationAccount" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationAttachment" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationChannelRef" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationParticipant" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_CommunicationThread" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_Document" level="Deep" />
     <RolePrivilege name="prvAssignsprk_Event" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_externalidentifier" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_invoiceapproval" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_invoicesubmission" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_KPIAssessment" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Matter" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Memo" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_NavItem" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_notificationoutbox" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Project" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Report" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_ServiceRequest" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Todo" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvAssignSyncError" level="Basic" />
     <RolePrivilege name="prvAssignUserEntityInstanceData" level="Basic" />
     <RolePrivilege name="prvAssignUserForm" level="Basic" />

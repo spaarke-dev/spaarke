@@ -1,0 +1,22 @@
+{
+  "relationship": "sprk_playbooknode_skill",
+  "source": "sprk_playbooknode",
+  "navigationProperty": "sprk_playbooknode_skill",
+  "target": "sprk_analysisskill",
+  "pairs": [
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "052ce5ab-70d9-f011-8406-7ced8d1dc988" },
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "1c434c23-d310-f111-8342-7ced8d1dc988" },
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "1e434c23-d310-f111-8342-7ced8d1dc988" },
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "3e5984a8-70d9-f011-8406-7c1e525abd8b" },
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "3f5984a8-70d9-f011-8406-7c1e525abd8b" },
+    { "source": "72f0c9dd-a119-f111-8343-7ced8d1dc988", "target": "62518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "72f0c9dd-a119-f111-8343-7ced8d1dc988", "target": "63518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "a2ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "1f434c23-d310-f111-8342-7ced8d1dc988" },
+    { "source": "a2ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "2c96aea9-70d9-f011-8406-7c1e520aa4df" },
+    { "source": "a2ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "3f5984a8-70d9-f011-8406-7c1e525abd8b" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "1f434c23-d310-f111-8342-7ced8d1dc988" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "3e5984a8-70d9-f011-8406-7c1e525abd8b" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "62518925-d310-f111-8342-7c1e520aa4df" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "80f63e16-eee9-f011-8406-7c1e520aa4df" }
+  ]
+}

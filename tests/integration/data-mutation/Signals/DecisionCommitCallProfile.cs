@@ -256,7 +256,7 @@ internal sealed class DecisionCommitCallProfile
             if (name.StartsWith('<') && Between(name) is { Length: > 0 } lambdaOwner)
                 name = lambdaOwner;
             // The memo and the caller client are pass-through wrappers: the site is the method that asked them.
-            if ((skipProbe && type.Name == nameof(CallerRecordAccessProbe)) || type.Name is "CallerMetadataReadMemo" or nameof(DataverseUserClient))
+            if ((skipProbe && type.Name == nameof(CallerRecordAccessProbe)) || type.Name is "CallerMetadataReadMemo" or nameof(DataverseUserClient) or "DecisionAccessWindowCallerClient")
                 continue;
             return $"{type.Name}.{name}";
         }
@@ -422,6 +422,10 @@ internal sealed class DecisionCommitCallProfile
         /// <summary>Records the caller is denied every right on.</summary>
         public HashSet<Guid> NoRights { get; } = new();
 
+        /// <summary>ISS-010 C (A3): called at the probe's <c>RetrievePrincipalAccess</c> wire, with the entity set and record, before it
+        /// is answered (a test observes the wire order and the asking stack; it changes nothing).</summary>
+        public Action<string, Guid>? OnPrincipalAccess { get; set; }
+
         public override Task<AccessRights> GetCallerRightsAsync(string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
             EnterProbe();
@@ -469,6 +473,7 @@ internal sealed class DecisionCommitCallProfile
             await _profile.RecordAsync("caller access (probe)", "GET", $"RetrievePrincipalAccess {set}",
                 "RetrievePrincipalAccess " + GuidPattern.Replace(Uri.UnescapeDataString(url), "{id}")).ConfigureAwait(false);
             var record = GuidPattern.Matches(Uri.UnescapeDataString(url)).Select(m => Guid.Parse(m.Value)).LastOrDefault();
+            OnPrincipalAccess?.Invoke(set, record);
             return (HttpStatusCode.OK, NoRights.Contains(record)
                 ? "{\"AccessRights\":\"None\"}"
                 : "{\"AccessRights\":\"ReadAccess, WriteAccess, AppendAccess, AppendToAccess, CreateAccess, DeleteAccess, ShareAccess, AssignAccess\"}");

@@ -136,17 +136,23 @@ afterAll(() => {
 });
 
 describe('SaveFlow — an Outlook email already in Spaarke (task 120)', () => {
-  it('filed: the box and the card name the record; View Document + Copy Link; nothing to send, no version mode', () => {
+  it('filed: the box names the record; View Document + Copy Link; nothing to send, no version mode', () => {
     render(<OutlookPane initial={savedEmail(FILED_RECORD)} />);
 
     expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument();
-    expect(screen.getAllByText('Gamma Merger').length).toBeGreaterThanOrEqual(2);
+    // Task 141: one section — the record named once, with its number; no separate "Filed to" card.
+    expect(screen.getByText('Gamma Merger')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'View Document' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
     // Nothing to send: no Save, no Cancel, no attachment choice, no "Related to" picker.
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
-    expect(screen.queryByText('Exhibit A.pdf')).toBeNull();
+    // Task 141: the attachments are listed. This identity says nothing about which are saved (no savedAttachmentNames), so
+    // none is marked or offered — no checkbox, no "Saved" mark, no "Unsaved attachments" warning.
+    expect(screen.getByText('Exhibit A.pdf')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('img', { name: 'Saved' })).toBeNull();
+    expect(screen.queryByText('Unsaved attachments')).toBeNull();
     expect(screen.queryByTestId('related-to-picker')).toBeNull();
     // Never a version of an email.
     expect(screen.queryByText(/new version/i)).toBeNull();

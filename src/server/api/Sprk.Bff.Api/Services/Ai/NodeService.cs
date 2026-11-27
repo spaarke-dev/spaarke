@@ -23,6 +23,9 @@ public class NodeService : INodeService
     private const string EntitySetName = "sprk_playbooknodes";
     private const string EntityLogicalName = "sprk_playbooknode";
 
+    // sprk_analysisplaybook.sprk_playbooktype option value for Notification (same value as PlaybookSchedulerJob).
+    private const int NotificationPlaybookType = 2;
+
     // N:N relationship names
     private const string SkillRelationship = "sprk_playbooknode_skill";
     private const string KnowledgeRelationship = "sprk_playbooknode_knowledge";
@@ -167,10 +170,9 @@ public class NodeService : INodeService
         {
             payload["sprk_conditionjson"] = request.ConditionJson;
         }
-        if (!string.IsNullOrEmpty(request.ConfigJson))
-        {
-            payload["sprk_configjson"] = request.ConfigJson;
-        }
+        // #1498: a node written here carries __canvasNodeId like a Designer node, so it never makes its (user-authored)
+        // playbook look repo-deployed to EnsureCanvasSyncAllowedAsync.
+        payload["sprk_configjson"] = WithCanvasNodeId(request.ConfigJson, existingCanvasNodeId: null);
         if (request.TimeoutSeconds.HasValue)
         {
             payload["sprk_timeoutseconds"] = request.TimeoutSeconds.Value;
@@ -247,7 +249,12 @@ public class NodeService : INodeService
         }
         if (request.ConfigJson != null)
         {
-            payload["sprk_configjson"] = request.ConfigJson;
+            // #1498: a replaced config keeps the node's __canvasNodeId (or gets one), so the update cannot turn a
+            // user-authored playbook into one that looks repo-deployed.
+            var existingCanvasNodeId = ExtractCanvasNodeId(request.ConfigJson) is null
+                ? await GetCanvasNodeIdAsync(nodeId, cancellationToken)
+                : null;
+            payload["sprk_configjson"] = WithCanvasNodeId(request.ConfigJson, existingCanvasNodeId);
         }
         if (request.TimeoutSeconds.HasValue)
         {
@@ -370,6 +377,11 @@ public class NodeService : INodeService
             errors.Add("RetryCount cannot be negative");
         }
 
+        if (!IsConfigJsonObjectOrEmpty(request.ConfigJson))
+        {
+            errors.Add(ConfigJsonMustBeObjectMessage);
+        }
+
         var result = errors.Count == 0
             ? NodeValidationResult.Success()
             : NodeValidationResult.Failure(errors.ToArray());
@@ -378,11 +390,80 @@ public class NodeService : INodeService
     }
 
     /// <inheritdoc />
+    public async Task<CanvasSyncPermit> EnsureCanvasSyncAllowedAsync(Guid playbookId, CancellationToken cancellationToken = default)
+    {
+        string? name = null;
+        try
+        {
+            await EnsureAuthenticatedAsync(cancellationToken);
+
+            var url = $"sprk_analysisplaybooks({playbookId})?$select=sprk_name,sprk_issystemplaybook,sprk_playbooktype";
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var playbook = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+            if (playbook.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException("Playbook record was not a JSON object.");
+
+            name = playbook.TryGetProperty("sprk_name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+
+            if (playbook.TryGetProperty("sprk_issystemplaybook", out var sys) && sys.ValueKind == JsonValueKind.True)
+                Refuse(playbookId, name, ProtectedPlaybookReason.SystemFlag);
+
+            if (playbook.TryGetProperty("sprk_playbooktype", out var type)
+                && type.ValueKind == JsonValueKind.Number && type.GetInt32() == NotificationPlaybookType)
+                Refuse(playbookId, name, ProtectedPlaybookReason.NotificationType);
+
+            var nodes = await GetNodesRawAsync(playbookId, cancellationToken);
+            if (nodes.Any(e => ExtractCanvasNodeId(e.ConfigJson) == null))
+                Refuse(playbookId, name, ProtectedPlaybookReason.RepoDeployedNodes);
+
+            return new CanvasSyncPermit(playbookId, nodes);
+        }
+        catch (ProtectedPlaybookCanvasSyncException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail closed: if protection cannot be ruled out, do not let the sync delete anything.
+            _logger.LogWarning(ex, "Could not verify canvas-sync eligibility for playbook {PlaybookId}; refusing", playbookId);
+            throw new ProtectedPlaybookCanvasSyncException(playbookId, name, ProtectedPlaybookReason.Unverifiable);
+        }
+    }
+
+    private void Refuse(Guid playbookId, string? name, ProtectedPlaybookReason reason)
+    {
+        _logger.LogWarning(
+            "Canvas sync refused for protected playbook {PlaybookId} ('{PlaybookName}'): {Reason}",
+            playbookId, name, reason);
+        throw new ProtectedPlaybookCanvasSyncException(playbookId, name, reason);
+    }
+
+    /// <inheritdoc />
     public async Task SyncCanvasToNodesAsync(
         Guid playbookId,
         CanvasLayoutDto canvasLayout,
         CancellationToken cancellationToken = default)
     {
+        // D-97 / PB-08: refuse before any delete/create/update for repo-deployed system playbooks.
+        var permit = await EnsureCanvasSyncAllowedAsync(playbookId, cancellationToken);
+        await SyncCanvasToNodesAsync(permit, canvasLayout, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task SyncCanvasToNodesAsync(
+        CanvasSyncPermit permit,
+        CanvasLayoutDto canvasLayout,
+        CancellationToken cancellationToken = default)
+    {
+        var playbookId = permit.PlaybookId;
+        var existingEntities = (NodeEntity[])permit.NodeSnapshot;
+
         await EnsureAuthenticatedAsync(cancellationToken);
 
         var nodes = canvasLayout.Nodes;
@@ -392,8 +473,7 @@ public class NodeService : INodeService
             "Syncing canvas to nodes for playbook {PlaybookId}: {NodeCount} canvas nodes, {EdgeCount} edges",
             playbookId, nodes.Length, edges.Length);
 
-        // Step 1: Load existing Dataverse node records for this playbook
-        var existingEntities = await GetNodesRawAsync(playbookId, cancellationToken);
+        // Step 1: Existing Dataverse node records = the snapshot the guard read (no second read).
         var existingByCanvasId = BuildCanvasIdMap(existingEntities);
 
         _logger.LogDebug("Found {ExistingCount} existing nodes, {MappedCount} with canvas IDs",
@@ -1047,6 +1127,56 @@ public class NodeService : INodeService
         }
 
         return JsonSerializer.Serialize(config, JsonOptions);
+    }
+
+    internal const string ConfigJsonMustBeObjectMessage = "ConfigJson must be a JSON object";
+
+    /// <summary>
+    /// True when <paramref name="configJson"/> is empty or a JSON object: the only shapes a per-node write can stamp
+    /// with <c>__canvasNodeId</c> (#1498).
+    /// </summary>
+    internal static bool IsConfigJsonObjectOrEmpty(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson)) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The config a per-node write stores (#1498): <paramref name="configJson"/> with a <c>__canvasNodeId</c>. A marker
+    /// already in the config is kept; otherwise the node's existing marker, otherwise a new one. Every other key is
+    /// kept as sent. Throws <see cref="ArgumentException"/> when the config is not a JSON object (callers validate
+    /// first with <see cref="IsConfigJsonObjectOrEmpty"/>).
+    /// </summary>
+    private static string WithCanvasNodeId(string? configJson, string? existingCanvasNodeId)
+    {
+        if (!IsConfigJsonObjectOrEmpty(configJson))
+            throw new ArgumentException(ConfigJsonMustBeObjectMessage, nameof(configJson));
+
+        if (ExtractCanvasNodeId(configJson) is not null)
+            return configJson!;
+
+        var config = string.IsNullOrWhiteSpace(configJson)
+            ? new System.Text.Json.Nodes.JsonObject()
+            : System.Text.Json.Nodes.JsonNode.Parse(configJson)!.AsObject();
+        config["__canvasNodeId"] = existingCanvasNodeId ?? $"api-{Guid.NewGuid():N}";
+        return config.ToJsonString();
+    }
+
+    /// <summary>The node's stored <c>__canvasNodeId</c>, or null when it has none.</summary>
+    private async Task<string?> GetCanvasNodeIdAsync(Guid nodeId, CancellationToken cancellationToken)
+    {
+        var response = await _httpClient.GetAsync($"{EntitySetName}({nodeId})?$select=sprk_configjson", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var entity = await response.Content.ReadFromJsonAsync<NodeEntity>(JsonOptions, cancellationToken);
+        return ExtractCanvasNodeId(entity?.ConfigJson);
     }
 
     /// <summary>

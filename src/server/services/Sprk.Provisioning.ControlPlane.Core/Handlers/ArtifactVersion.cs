@@ -9,7 +9,7 @@
 //   H2b  aisearch-{customerId}-{v}   v = the index schema set it PUTs
 //   H4   kv-{customerId}-{v}         v = the embedded secret-catalog manifest
 //   H4b  appsettings-{env}-{v}       v = the same manifest (same bytes ⇒ same v)
-//   H12a h12a-{customerId}-{v}       v = the seed manifest (FileSeedManifestReader)
+//   H12a h12a-{customerId}-{v}       v = the seed manifest (FileSeedManifestReader) + the embedded AI content set
 //
 // Before T245b the first four read their version from a run parameter nothing
 // wrote (`bicepVer` / `indexVer` / `secretsVer`), so every real run stopped at

@@ -11,7 +11,8 @@ public static class OfficeVersionSaveAuthorizationFilterExtensions
 {
     /// <summary>
     /// Requires <c>write</c> on the existing <c>sprk_document</c> that an FR-11 version save targets
-    /// (<c>SaveRequest.Document.ExistingDocumentId</c>). Every other save passes through untouched.
+    /// (<c>SaveRequest.Document.ExistingDocumentId</c>), and (task 141) on the saved email an attachments add names
+    /// (<c>SaveRequest.Email.SavedDocumentId</c>). Every other save passes through untouched.
     /// </summary>
     public static TBuilder AddOfficeVersionSaveAuthorizationFilter<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
@@ -41,7 +42,9 @@ public static class OfficeVersionSaveAuthorizationFilterExtensions
 /// give a filter that answers "may you file TO this record" a second, unrelated reason to change.</para>
 /// <para><b>Scope.</b> Acts only when <see cref="OfficeService.IsVersionSave"/> is true — the SAME predicate
 /// <c>OfficeService.SaveAsync</c> branches on, so the gate and the write can never disagree about what a
-/// version save is. Email and Attachment saves never reach the delegate, whatever their body carries.</para>
+/// version save is — or (task 141) when <see cref="OfficeService.SavedEmailAttachmentAddDocumentId"/> names the saved email an
+/// attachments add writes children under: the same "write" on that document, by the same predicate the service adds under.
+/// Every other save passes through untouched, whatever its body carries.</para>
 /// <para><b>An unknown id is answered 403, like a denied one.</b> The access data source fails closed to
 /// <c>AccessRights.None</c> for a row that does not exist, so "no such document" and "not yours" are the same
 /// answer here — deliberately, as in <see cref="EntityAccessFilter"/>: separating them would be a
@@ -64,7 +67,18 @@ public sealed class OfficeVersionSaveAuthorizationFilter : IEndpointFilter
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var request = context.Arguments.OfType<SaveRequest>().FirstOrDefault();
-        if (request is null || !OfficeService.IsVersionSave(request))
+        if (request is null)
+        {
+            return await next(context);
+        }
+
+        // Task 141: the existing document this save writes to — a version save's target, or the saved email an attachments add
+        // names (OfficeService.SavedEmailAttachmentAddDocumentId: it creates children under it). Both are WRITES to an
+        // existing document the request names, so both need "write" on it. The predicates are the service's own.
+        var existingDocumentId = OfficeService.IsVersionSave(request)
+            ? request.Document!.ExistingDocumentId!.Value
+            : OfficeService.SavedEmailAttachmentAddDocumentId(request);
+        if (existingDocumentId is not { } documentId)
         {
             return await next(context);
         }
@@ -84,7 +98,7 @@ public sealed class OfficeVersionSaveAuthorizationFilter : IEndpointFilter
 
         // ADR-044: bare-lowercase ("D" formatting of a typed Guid). This value becomes an OData key predicate
         // inside the access data source (sprk_documents({id})), so the canonical form is load-bearing here.
-        routeValues[DocumentIdRouteKey] = request.Document!.ExistingDocumentId!.Value.ToString("D");
+        routeValues[DocumentIdRouteKey] = documentId.ToString("D");
 
         return await new DocumentAuthorizationFilter(_authorizationService, Operation).InvokeAsync(context, next);
     }

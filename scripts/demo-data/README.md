@@ -6,7 +6,7 @@ realistic legal-department story, and removes it again. Data plan D6
 
 | File | Purpose |
 |---|---|
-| `scripts/Load-DemoSampleData.ps1` | The operator script: load, dry run, reset. |
+| `scripts/Load-DemoSampleData.ps1` | The operator script: load, dry run, reset, redate. |
 | `scripts/demo-data/demo-records.json` | The dataset (`datasetVersion` 2.0.0). |
 | `scripts/demo-data/DemoDataLib.ps1` | Pure functions (table specs, validation, payloads, guard, reset order). No network. Dot-sourced by the loader and the tests. |
 | `scripts/demo-data/reference-names.json` | The reference values no seed file carries: choice labels (English) and record types. Taxonomy names and event types are NOT copied here: they are read from the D4 pack (`scripts/seed-data/reference/packs/legal-standard/*.json`) and the event-type seed (`scripts/seed-data/reference/sprk_eventtype_ref.json`) by `Get-DemoSeedReference`, so they cannot drift. |
@@ -30,6 +30,10 @@ never reads a secret.
 # 3. Remove the demo rows (only the ones this script tagged), children first.
 .\scripts\Load-DemoSampleData.ps1 -CustomerId acme -Reset -WhatIf
 .\scripts\Load-DemoSampleData.ps1 -CustomerId acme -Reset
+
+# 4. Keep the dates current on a demo that has been loaded for a while (see "Keeping the dates current"). A dry run by default.
+.\scripts\Load-DemoSampleData.ps1 -CustomerId acme -Redate           # prints the plan, writes nothing
+.\scripts\Load-DemoSampleData.ps1 -CustomerId acme -Redate -Apply    # writes
 ```
 
 `-CustomerId` looks the stamp up in the environment registry (`sprk_dataverseenvironment`, `sprk_customerid`).
@@ -102,6 +106,45 @@ any row this reset does not delete still points at it:
 Re-running a load matches existing rows by **tag + natural key** (matter number, project number, organization name,
 contact email, event/to-do/communication/document name). It never adopts or changes an untagged row; if an untagged
 row already uses a key, the create is reported as an error.
+
+## Keeping the dates current (`-Redate`)
+
+A load writes every date as an offset from the load day (`-3d`, `+14d 09:30`), so a demo loaded weeks ago shows deadlines in
+the past and "upcoming" items that are not. `-Redate` moves the dates forward so the dataset reads as if it were loaded today,
+without a reset and reload (demo plan W7).
+
+```powershell
+.\scripts\Load-DemoSampleData.ps1 -CustomerId acme -Redate           # dry run: the plan, nothing written
+.\scripts\Load-DemoSampleData.ps1 -CustomerId acme -Redate -Apply    # shift the dates
+```
+
+- **Dry run by default.** Without `-Apply` it prints, per row, which date columns move and to what, then one line: how many
+  rows and date values, and the shift in days. `-Apply -WhatIf` is still a dry run. `-Redate` cannot be combined with `-Reset`;
+  `-Apply` is only for `-Redate`.
+- **Same guard as a load.** The target's registry row must be an active Demo stamp (`Assert-DemoTargetAllowed`, the same call, run
+  before anything is read from the target); a Production row is refused even with `-AllowNonDemo`.
+- **What it touches.** Only rows carrying the tag (`importsequencenumber = 2026112501`, read with the tag filter) and only the
+  date columns the dataset row sets under `dates`, which are the columns the loader wrote (`Dates` in `Get-DemoTableSpecs`):
+  matters, projects, events, to-dos and communications (organizations, contacts and documents have no date column). Nothing
+  else on the row is written, and an untagged row is never read for a shift or patched. The update is a PATCH with
+  `If-Match: *`, so a row deleted since it was read is an error, never re-created.
+- **Whole days; time of day kept.** Every value moves by the same whole number of days. A date-only column stays date-only, a
+  date-time column keeps its time (UTC) exactly.
+- **The load day needs no record.** Nothing is stored, and nothing needs to be: a column the loader wrote as offset `N` now
+  holds `D + N`, where `D` is the day its dates are currently counted from, so `D = current date - N` and the shift is
+  `today (UTC) - D`. That has three consequences. It works on data loaded before this mode existed. It is idempotent by
+  construction: after a shift `D` is today, so the next run on the same day finds a shift of 0 and writes nothing, and a
+  later day shifts only by the days since the last shift. And each row uses its own `D`, so rows loaded on different days
+  (a re-run that completed a partial load) are each brought to today. After a redate every row reads exactly as a fresh load
+  today would write it.
+- **What it skips, and says so.** A row whose date columns no longer agree on one `D` (someone edited a date), a row whose
+  dates are later than a load today would write (nothing is ever moved backwards), a row whose columns are all empty or
+  unreadable, and a tagged row no dataset row names (renamed by a user, so its offsets are unknown). A date column a person
+  cleared is left empty. A row with a single date column (all 12 to-dos) cannot be told apart from an unedited one: a hand-edited
+  date there is moved to what the dataset says.
+- **Exit code** is 1 when any PATCH or read failed (a failed row is simply picked up by the next run); skipped rows do not fail it.
+- Run it as a System Administrator, as for a load: Dataverse hides rows the operator cannot read, and those would not be shifted
+  (the next run, by an administrator, completes them).
 
 ## Who owns the rows
 

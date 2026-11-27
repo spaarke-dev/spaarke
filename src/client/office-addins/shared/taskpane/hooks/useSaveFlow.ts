@@ -20,8 +20,11 @@ import {
   type EmailFilingProblem,
 } from '../services/emailFilingNotice';
 import {
+  describeAttachmentsNotSaveable,
   describeAttachmentsNotStored,
+  readAttachmentsAdded,
   readAttachmentsAddedCount,
+  readAttachmentsNotSaveable,
   readAttachmentsNotStored,
 } from '../services/attachmentsAddedNotice';
 
@@ -149,6 +152,18 @@ export interface SaveResponse {
    * first time), so they cannot be added. OMITTED when there are none. Read through {@link readAttachmentsNotStored}.
    */
   attachmentsNotStored?: string[];
+  /**
+   * Task 141 review: the file names the save was asked to add that the stored email holds but no email save ever creates a
+   * document for (a calendar file, a blocked type, an inline or signature image, no content). OMITTED when there are none.
+   * Read through {@link readAttachmentsNotSaveable}.
+   */
+  attachmentsNotSaveable?: string[];
+  /**
+   * The saved document. Task 141: an add to a saved email that adds nothing (every name already saved, or only names the
+   * stored email does not hold) answers 200 with `duplicate: true`, NO job, and this naming the saved `.eml` — the save
+   * completes on it directly.
+   */
+  artifact?: JobResultArtifact;
 }
 
 /**
@@ -198,9 +213,23 @@ export interface EmailRecipient {
  * - `version` — a new SPE version of the EXISTING `sprk_document` task 013 resolved, via task 023's
  *   server path (`document.existingDocumentId` + `document.isNewVersion: true`). One row before and after.
  *
- * Only the Document branch reads it; an Outlook (Email) save never carries version fields.
+ * - `addAttachments` — task 141: add attachments to an email ALREADY saved in Spaarke, as children of its `.eml`
+ *   (`email.savedDocumentId`). Nothing else is saved: no `.eml`, no upload, no re-filing. `record` is the record the
+ *   `.eml` is filed to (sent as `targetEntity`; `entityType` is the friendly type, e.g. `Matter`), and
+ *   `attachmentFileNames` are exactly the names to add (the ticked, unsaved ones) — sent as
+ *   `email.selectedAttachmentFileNames`. Only the Email branch reads it.
+ *
+ * Only the Document branch reads `version`; an Outlook (Email) save never carries version fields.
  */
-export type SaveTarget = { mode: 'create' } | { mode: 'version'; existingDocumentId: string };
+export type SaveTarget =
+  | { mode: 'create' }
+  | { mode: 'version'; existingDocumentId: string }
+  | {
+      mode: 'addAttachments';
+      savedDocumentId: string;
+      record: { entityType: string; id: string; name: string };
+      attachmentFileNames: string[];
+    };
 
 /**
  * Save flow context data.
@@ -301,7 +330,33 @@ export interface UseSaveFlowOptions {
   onError?: (error: ErrorMessage) => void;
   /** Callback on duplicate detected */
   onDuplicate?: (documentId: string, message: string) => void;
+  /**
+   * Task 141 review (F2): called once an add-attachments save's job has FINISHED creating documents — its status read
+   * reports phase `AttachmentsAdded` or `AttachmentsIncomplete`, or a status of Failed / Cancelled; nothing else finishes it
+   * (round 2: a watch that stops waiting reports `onAttachmentsAddUnconfirmed` instead). `names` are the names that add's answer said it queued. The
+   * save itself completed earlier (`onComplete`), when the add was queued: only now can the saved names be re-read.
+   */
+  onAttachmentsAddFinished?: (documentId: string, names: string[]) => void;
+  /**
+   * Task 141 review (round 2): called once when an add's watch STOPPED WAITING without seeing a final phase — its read cap, or
+   * repeated failed reads. The job may well have finished (or failed): nothing is known. The caller must not report the names
+   * as added or as failed; it keeps them "Adding…" with a neutral message, re-reads what is saved, and may resume the watch
+   * ({@link UseSaveFlowResult.watchAttachmentsAdd}).
+   */
+  onAttachmentsAddUnconfirmed?: (documentId: string, names: string[], jobId: string) => void;
 }
+
+/**
+ * Task 141 review (F2): how many status reads an add's watch makes, at the polling interval, before it stops waiting and
+ * reports the add finished anyway (the caller then re-reads what is saved, which is the truth whatever the job says).
+ */
+export const ATTACHMENTS_ADD_WATCH_MAX_POLLS = 40;
+
+/**
+ * Task 141 review (round 2): the phases that say an add's worker has finished — the ONLY ones (with a job status of Failed or
+ * Cancelled) that finish a watch. `AttachmentsQueued`, and any phase this build does not know, keep it watching.
+ */
+const ATTACHMENTS_ADD_FINAL_PHASES: readonly string[] = ['AttachmentsAdded', 'AttachmentsIncomplete'];
 
 /**
  * Hook result.
@@ -349,6 +404,27 @@ export interface UseSaveFlowResult {
   savedDocumentId: string | null;
   /** Document URL after successful save */
   savedDocumentUrl: string | null;
+  /**
+   * Task 141 review: what the SERVER answered about the attachments of the last save that completed: the names it is adding
+   * (`attachmentsAdded`) and the names it can never save (`attachmentsNotSaveable`), each empty when it said none. Never
+   * what the pane sent: the server may dedup to an existing document or leave names out. A stable function, safe to call
+   * from a callback.
+   */
+  getAttachmentsAnswer: () => SaveAttachmentsAnswer;
+  /**
+   * Round 2: (re)starts the watch of an add's job — for a pane that was left and came back (the hook, and its watches, were
+   * unmounted while the add was still queued) or an add that stopped waiting without a final phase. A no-op while that job is
+   * already being watched. Finishes through `onAttachmentsAddFinished` / `onAttachmentsAddUnconfirmed` like any watch.
+   */
+  watchAttachmentsAdd: (jobId: string, documentId: string, names: string[]) => void;
+}
+
+/** Task 141 review: the server's answer about a save's attachments (see {@link UseSaveFlowResult.getAttachmentsAnswer}). */
+export interface SaveAttachmentsAnswer {
+  added: string[];
+  notSaveable: string[];
+  /** Round 2: the job creating `added`, present only when the save is an add that queued names (kept so a watch can resume). */
+  jobId?: string;
 }
 
 /**
@@ -436,13 +512,29 @@ export interface VersionIdempotencyParts {
 }
 
 /**
+ * Task 141: the parts of an ADD-ATTACHMENTS save that make its idempotency key distinct. The route's response cache
+ * replays an answer for a repeated `X-Idempotency-Key`, so without these an add could share the key of an ordinary save
+ * of the same email to the same record with the same ticks and be answered with THAT save's response. `failedAttempts`
+ * plays the same part as in {@link VersionIdempotencyParts}: a retry after a failed add is a new attempt.
+ */
+export interface AddAttachmentsIdempotencyParts {
+  savedDocumentId: string;
+  attachmentFileNames: string[];
+  failedAttempts: number;
+}
+
+/**
  * The canonical string an idempotency key is the SHA-256 of. Exported for its unit tests.
  *
- * For every save that is NOT a version save the string is byte-for-byte what it was before task 024 (the
- * `version` member is absent, and `JSON.stringify` emits nothing for it), matching task 023's rule that
- * "the canonical string for every other request is unchanged".
+ * For every save that is NOT a version save (or, task 141, an add-attachments save) the string is byte-for-byte what it
+ * was before task 024 (the `version` / `addAttachments` members are absent, and `JSON.stringify` emits nothing for them),
+ * matching task 023's rule that "the canonical string for every other request is unchanged".
  */
-export function buildIdempotencyCanonical(request: SaveRequest, version?: VersionIdempotencyParts): string {
+export function buildIdempotencyCanonical(
+  request: SaveRequest,
+  version?: VersionIdempotencyParts,
+  addAttachments?: AddAttachmentsIdempotencyParts
+): string {
   return JSON.stringify({
     sourceType: request.sourceType,
     associationType: request.associationType,
@@ -458,6 +550,15 @@ export function buildIdempotencyCanonical(request: SaveRequest, version?: Versio
             fileName: version.fileName,
             contentSha256: version.contentSha256,
             ...(version.failedAttempts > 0 ? { failedAttempts: version.failedAttempts } : {}),
+          },
+        }
+      : {}),
+    ...(addAttachments
+      ? {
+          addAttachments: {
+            savedDocumentId: addAttachments.savedDocumentId,
+            attachmentFileNames: [...addAttachments.attachmentFileNames].sort(),
+            ...(addAttachments.failedAttempts > 0 ? { failedAttempts: addAttachments.failedAttempts } : {}),
           },
         }
       : {}),
@@ -487,8 +588,12 @@ async function sha256Hex(text: string): Promise<string> {
 /**
  * Compute idempotency key (SHA-256 of the canonical payload — see {@link buildIdempotencyCanonical}).
  */
-export async function computeIdempotencyKey(request: SaveRequest, version?: VersionIdempotencyParts): Promise<string> {
-  return sha256Hex(buildIdempotencyCanonical(request, version));
+export async function computeIdempotencyKey(
+  request: SaveRequest,
+  version?: VersionIdempotencyParts,
+  addAttachments?: AddAttachmentsIdempotencyParts
+): Promise<string> {
+  return sha256Hex(buildIdempotencyCanonical(request, version, addAttachments));
 }
 
 /**
@@ -503,6 +608,8 @@ interface DuplicateSaveResponse {
   message?: string;
   /** Task 138: names the re-save asked to add that the stored email does not hold (read through `readAttachmentsNotStored`). */
   attachmentsNotStored?: unknown;
+  /** Task 141 review: names no email save ever creates (read through `readAttachmentsNotSaveable`). */
+  attachmentsNotSaveable?: unknown;
 }
 
 function isDuplicateSaveResponse(value: unknown): value is DuplicateSaveResponse {
@@ -555,6 +662,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     onComplete,
     onError,
     onDuplicate,
+    onAttachmentsAddFinished,
+    onAttachmentsAddUnconfirmed,
   } = options;
 
   // State
@@ -600,7 +709,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // The existing document an in-flight VERSION save targets. By contract (task 023) a version save's resulting
   // document IS that document, so completion can name it even when the job record carries no artifact — which
   // the synchronous save path never sets (only the AI workers do, later, over SSE).
+  // Task 141: the same fallback serves an ADD-ATTACHMENTS save — its resulting document is the saved .eml it named.
   const activeVersionDocumentIdRef = useRef<string | null>(null);
+  // Task 141: whether the save in flight is an add-attachments save, and how many have FAILED in this pane session (its
+  // key's failedAttempts, as for a version save; never reset).
+  const activeAddSaveRef = useRef(false);
+  const addFailuresRef = useRef(0);
+  // Task 141 review: the server's answer about the current save's attachments (see getAttachmentsAnswer). Cleared with
+  // emailFilingProblemRef.
+  const attachmentsAnswerRef = useRef<SaveAttachmentsAnswer>({ added: [], notSaveable: [] });
+  const getAttachmentsAnswer = useCallback(() => attachmentsAnswerRef.current, []);
   // Task 131 (#2171): the refused / failed email filing the CURRENT save's 202 reported, handed to onComplete when the job
   // completes. Null = nothing to tell the user. Cleared when a save starts and on reset.
   const emailFilingProblemRef = useRef<EmailFilingProblem | null>(null);
@@ -609,8 +727,86 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const attachmentsAddedRef = useRef(0);
   // Task 138 (#2209): the names the CURRENT save was asked to add that the stored email does not hold. Empty = none.
   const attachmentsNotStoredRef = useRef<string[]>([]);
+  // Task 141 review (F2): the job of the CURRENT add-attachments save, when its answer queued names; read (and cleared)
+  // when that save completes, to start watching the job until the add has finished. Cleared when a save starts.
+  const pendingAddJobRef = useRef<{ jobId: string; names: string[] } | null>(null);
+  // Task 141 review (F2): the add jobs being watched, by job id → the timer of the next read. Several adds can be watched at
+  // once; a new save never stops an earlier add's watch. Stopped by reset() and on unmount.
+  const addWatchesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const onAttachmentsAddFinishedRef = useRef(onAttachmentsAddFinished);
+  onAttachmentsAddFinishedRef.current = onAttachmentsAddFinished;
+  const onAttachmentsAddUnconfirmedRef = useRef(onAttachmentsAddUnconfirmed);
+  onAttachmentsAddUnconfirmedRef.current = onAttachmentsAddUnconfirmed;
+  const stopAddWatches = useCallback(() => {
+    for (const timer of addWatchesRef.current.values()) clearTimeout(timer);
+    addWatchesRef.current.clear();
+  }, []);
+  // Task 141 review (F2): reads an add's job until its worker has finished, then reports it. The first read is immediate
+  // (the worker may be done already). Round 2: ONLY a final phase finishes it (ATTACHMENTS_ADD_FINAL_PHASES, or a job status
+  // of Failed / Cancelled); any other phase keeps watching. Stopping at ATTACHMENTS_ADD_WATCH_MAX_POLLS reads, or after
+  // `maxPollingRetries` failed reads in a row, is NOT an outcome: it reports `onAttachmentsAddUnconfirmed` (the job may
+  // have finished or failed — nothing is known), never "finished", so the caller cannot claim success or failure from it.
+  const watchAttachmentsAdd = useCallback(
+    (jobId: string, documentId: string, names: string[]) => {
+      if (addWatchesRef.current.has(jobId)) return;
+      let reads = 0;
+      let failuresInARow = 0;
+      const finish = () => {
+        addWatchesRef.current.delete(jobId);
+        onAttachmentsAddFinishedRef.current?.(documentId, names);
+      };
+      const giveUp = () => {
+        addWatchesRef.current.delete(jobId);
+        onAttachmentsAddUnconfirmedRef.current?.(documentId, names, jobId);
+      };
+      const read = async () => {
+        reads += 1;
+        let finished = false;
+        try {
+          const accessToken = await getAccessToken();
+          const response = await authenticatedJsonFetch(`${apiBaseUrl}/api/office/jobs/${jobId}`, {}, accessToken, {
+            getRetryToken: getAccessToken,
+          });
+          if (!addWatchesRef.current.has(jobId)) return; // stopped while reading
+          if (response.ok) {
+            failuresInARow = 0;
+            const job = (await response.json()) as JobStatus;
+            finished =
+              job.status === 'Failed' ||
+              job.status === 'Cancelled' ||
+              (typeof job.currentPhase === 'string' && ATTACHMENTS_ADD_FINAL_PHASES.includes(job.currentPhase));
+          } else {
+            failuresInARow += 1;
+          }
+        } catch {
+          if (!addWatchesRef.current.has(jobId)) return;
+          failuresInARow += 1;
+        }
+        if (finished) {
+          finish();
+          return;
+        }
+        if (failuresInARow >= maxPollingRetries || reads >= ATTACHMENTS_ADD_WATCH_MAX_POLLS) {
+          giveUp();
+          return;
+        }
+        addWatchesRef.current.set(
+          jobId,
+          setTimeout(() => void read(), pollingIntervalMs)
+        );
+      };
+      addWatchesRef.current.set(
+        jobId,
+        setTimeout(() => void read(), 0)
+      );
+    },
+    [apiBaseUrl, getAccessToken, pollingIntervalMs]
+  );
   const notifyComplete = useCallback(
     (documentId: string, documentUrl: string) => {
+      const addJob = pendingAddJobRef.current;
+      pendingAddJobRef.current = null;
+      if (addJob) watchAttachmentsAdd(addJob.jobId, documentId, addJob.names);
       const problem = emailFilingProblemRef.current;
       const added = attachmentsAddedRef.current;
       const notStored = attachmentsNotStoredRef.current;
@@ -620,7 +816,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       else if (problem) onComplete?.(documentId, documentUrl, problem);
       else onComplete?.(documentId, documentUrl);
     },
-    [onComplete]
+    [onComplete, watchAttachmentsAdd]
   );
 
   // Computed values
@@ -675,6 +871,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // Reset state
   const reset = useCallback(() => {
     cleanup();
+    stopAddWatches();
+    pendingAddJobRef.current = null;
     setFlowState('idle');
     setSelectedAttachmentIds(new Set());
     setIncludeBody(true);
@@ -687,8 +885,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     emailFilingProblemRef.current = null;
     attachmentsAddedRef.current = 0;
     attachmentsNotStoredRef.current = [];
+    attachmentsAnswerRef.current = { added: [], notSaveable: [] };
     savedContextRef.current = null;
-  }, [cleanup]);
+  }, [cleanup, stopAddWatches]);
 
   // Task 060 (#1084): a job reported Completed that names no document, on a save with no version target to fall back
   // on. It matched neither completion branch, so the pane sat on "processing" forever with no error. It is a terminal
@@ -780,6 +979,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         if (activeVersionSaveRef.current) {
           versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
         }
+        if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
         const errorMsg: ErrorMessage = {
           title: 'Processing Failed',
           message: (data.message as string) || (data.errorMessage as string) || 'An error occurred during processing.',
@@ -914,6 +1114,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             if (activeVersionSaveRef.current) {
               versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
             }
+            if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
             const errorMsg: ErrorMessage = {
               title: 'Processing Failed',
               message: status.error?.message || 'An error occurred during processing.',
@@ -1041,6 +1242,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       let isVersionAttempt = false;
       activeVersionSaveRef.current = false;
       activeVersionDocumentIdRef.current = null;
+      activeAddSaveRef.current = false;
+      attachmentsAnswerRef.current = { added: [], notSaveable: [] };
+      pendingAddJobRef.current = null;
       emailFilingProblemRef.current = null;
       attachmentsAddedRef.current = 0;
       attachmentsNotStoredRef.current = [];
@@ -1090,11 +1294,28 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         activeVersionSaveRef.current = isVersionAttempt;
         activeVersionDocumentIdRef.current = existingDocumentId ?? null;
 
+        // Task 141: an ADD-ATTACHMENTS save names the saved .eml and the record it is filed to. Only the Email branch
+        // carries it. ADR-044: the id is canonicalized before it leaves the client; an id that is not a GUID, or an add with
+        // no names, is refused here — it never falls back to saving the email again.
+        const addTarget =
+          contentType === 'Email' && context.saveTarget?.mode === 'addAttachments' ? context.saveTarget : undefined;
+        const savedEmailDocumentId = addTarget ? cleanGuid(addTarget.savedDocumentId) : undefined;
+        if (addTarget) {
+          if (!savedEmailDocumentId || !CANONICAL_GUID.test(savedEmailDocumentId)) {
+            throw new Error('The saved email could not be identified, so no attachments were added.');
+          }
+          if (addTarget.attachmentFileNames.length === 0) {
+            throw new Error('Select at least one attachment to add.');
+          }
+          activeAddSaveRef.current = true;
+          activeVersionDocumentIdRef.current = savedEmailDocumentId;
+        }
+
         // The "Related to" record actually sent. NOT on a version save: that path writes to the existing
         // document's own item and never re-associates it (task 023 D-4/D-5), so a picker selection would be
         // inert — and would add an unrelated authorization check (EntityAccessFilter) that could refuse a
-        // legitimate version save.
-        const sentEntity = versionTarget ? null : selectedEntity;
+        // legitimate version save. Task 141: NOT the picker's either on an add — it is filed to the saved email's record.
+        const sentEntity = versionTarget || addTarget ? null : selectedEntity;
         let documentFileName: string | undefined;
         // Task 045: the bytes actually sent for a Document save — resolved below, at submission time,
         // from `context.captureDocumentContent()` when supplied (the live path) or the plain
@@ -1128,6 +1349,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             entityId: sentEntity.id,
             displayName: sentEntity.name,
           };
+        } else if (addTarget) {
+          // Task 141: the record the saved .eml is filed to. The route checks the caller may file to it, and the server
+          // refuses (OFFICE_009) when the .eml is not filed to it.
+          serverRequest.targetEntity = {
+            entityType: addTarget.record.entityType,
+            entityId: cleanGuid(addTarget.record.id),
+            displayName: addTarget.record.name,
+          };
         }
 
         // Add content-type-specific metadata
@@ -1150,20 +1379,29 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           // A read failure THROWS here, inside the existing try/catch, so it surfaces as an ordinary save error and
           // nothing is sent. Attachments that cannot be carried (too large, cloud links) come back in
           // `captured.skipped`, which the provider (SaveView) shows; the rest of the save goes ahead.
+          //
+          // Task 141: an ADD reads the body only — no attachment bytes. The server creates the children from the STORED
+          // .eml and never from request bytes; the body is sent so the server's own content check (it falls back to a
+          // Graph read when the body is absent) takes the client-content path, as for every pane save.
           const captured: EmailContentCapture | undefined = captureEmailContent
-            ? await captureEmailContent(context.attachments, selectedAttachmentIds)
+            ? addTarget
+              ? await captureEmailContent([], new Set())
+              : await captureEmailContent(context.attachments, selectedAttachmentIds)
             : undefined;
 
           // Which attachments become Documents. Always sent when the email has attachments (an empty array means
           // "create no Documents"); undefined only when it has none at all. With a capture, these are the names
           // of the attachments actually sent (a skipped one is not in the .eml, so it cannot become a Document).
-          const selectedAttachmentFileNames = captured
-            ? captured.selectedAttachmentFileNames
-            : context.attachments.length > 0
-              ? Array.from(selectedAttachmentIds)
-                  .map(id => context.attachments.find(a => a.id === id)?.name)
-                  .filter((name): name is string => !!name)
-              : undefined;
+          // Task 141: an add sends exactly the names it was given (the ticked, unsaved ones).
+          const selectedAttachmentFileNames = addTarget
+            ? [...addTarget.attachmentFileNames]
+            : captured
+              ? captured.selectedAttachmentFileNames
+              : context.attachments.length > 0
+                ? Array.from(selectedAttachmentIds)
+                    .map(id => context.attachments.find(a => a.id === id)?.name)
+                    .filter((name): name is string => !!name)
+                : undefined;
 
           const typedEmailName = context.documentName?.trim();
           serverRequest.email = {
@@ -1185,7 +1423,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             // Task 116a: read in the add-in. Undefined only without a reader — the server then fetches from Graph.
             body: captured?.body,
             isBodyHtml: true,
-            ...(captured ? { attachments: captured.attachments } : {}),
+            // Task 141: an add carries no attachment bytes (see the capture above).
+            ...(captured && !addTarget ? { attachments: captured.attachments } : {}),
             // Task 121: the RFC Message-ID, exactly as Quick Save sends it. The server stores it on the .eml
             // (Message-ID header, sprk_emailmessageid), keys the communication record and its idempotency on it, and
             // links the save to the communication that captured the same email. Absent when Office gives none (a
@@ -1195,6 +1434,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             // when no content was captured.
             ...(context.itemId ? { exchangeItemId: context.itemId } : {}),
             selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
+            // Task 141: the saved .eml this save adds the attachments to. Absent on every other save.
+            ...(savedEmailDocumentId ? { savedDocumentId: savedEmailDocumentId } : {}),
           };
         } else if (contentType === 'Document') {
           // Task 045: capture the document's bytes HERE — at the moment this save is actually
@@ -1273,6 +1514,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             failedAttempts: versionFailuresRef.current,
           });
           serverRequest.idempotencyKey = idempotencyKey;
+        } else if (addTarget && savedEmailDocumentId) {
+          // Task 141: an add keys on the saved .eml, its names and its failed attempts — never the key of an ordinary
+          // save of the same email (see AddAttachmentsIdempotencyParts). Header only: the server needs no earlier job.
+          idempotencyKey = await computeIdempotencyKey(request, undefined, {
+            savedDocumentId: savedEmailDocumentId,
+            attachmentFileNames: addTarget.attachmentFileNames,
+            failedAttempts: addFailuresRef.current,
+          });
         } else {
           idempotencyKey = await computeIdempotencyKey(request);
         }
@@ -1327,7 +1576,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           const notStoredNotice = describeAttachmentsNotStored(
             readAttachmentsNotStored(responseData.attachmentsNotStored)
           );
-          const duplicateMessage = [responseData.message || 'This item was previously saved.', notStoredNotice]
+          // Task 141 review: and names no save can ever create.
+          const notSaveableNotice = describeAttachmentsNotSaveable(
+            readAttachmentsNotSaveable(responseData.attachmentsNotSaveable)
+          );
+          const duplicateMessage = [
+            responseData.message || 'This item was previously saved.',
+            notStoredNotice,
+            notSaveableNotice,
+          ]
             .filter(Boolean)
             .join(' ');
           setDuplicateInfo({
@@ -1345,6 +1602,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             if (isVersionAttempt) {
               versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
             }
+            if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
             // A refused VERSION save is described in terms of the existing document and — when the refusal is
             // about that document — offers "Save as new document" as the way forward (task 024). A refused
             // CREATE save (task 025) is described in terms of the collision and offers the two-option choice
@@ -1372,6 +1630,31 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Task 138 (#2209): a re-save that added attachments to the already-saved email — counted for onComplete.
         attachmentsAddedRef.current = readAttachmentsAddedCount(saveResponse?.attachmentsAdded);
         attachmentsNotStoredRef.current = readAttachmentsNotStored(saveResponse?.attachmentsNotStored);
+        // Task 141 review: the names the server says it is adding, and the ones it can never save — the pane's only
+        // source for marking attachments after an add.
+        attachmentsAnswerRef.current = {
+          added: readAttachmentsAdded(saveResponse?.attachmentsAdded),
+          notSaveable: readAttachmentsNotSaveable(saveResponse?.attachmentsNotSaveable),
+        };
+
+        // Task 141: an answer with NO job that names the saved document completes here — nothing was queued to track
+        // (an add whose names were all saved already, or none of which the stored email holds).
+        const artifactId = saveResponse?.artifact?.id;
+        if (!saveResponse?.jobId && typeof artifactId === 'string' && artifactId) {
+          terminalOutcomeAppliedRef.current = true;
+          setSavedDocumentId(artifactId);
+          setSavedDocumentUrl(saveResponse.artifact?.webUrl || null);
+          setFlowState('complete');
+          notifyComplete(artifactId, saveResponse.artifact?.webUrl || '');
+          return;
+        }
+
+        // Task 141 review (F2): an add that queued names is watched, once its save completes, until its worker finished.
+        if (activeAddSaveRef.current && saveResponse?.jobId && attachmentsAnswerRef.current.added.length > 0) {
+          pendingAddJobRef.current = { jobId: saveResponse.jobId, names: attachmentsAnswerRef.current.added };
+          attachmentsAnswerRef.current = { ...attachmentsAnswerRef.current, jobId: saveResponse.jobId };
+        }
+
         await startJobTracking(saveResponse.jobId, saveResponse.streamUrl);
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
@@ -1383,6 +1666,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           // writes one more identical SPE version of the same document — never a second row (task 023).
           versionFailuresRef.current += 1;
         }
+        if (activeAddSaveRef.current) addFailuresRef.current += 1; // the same for an add (task 141)
 
         const errorMsg = createErrorFromException(err, 'Failed to save. Please try again.');
         setError(errorMsg);
@@ -1396,6 +1680,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       cleanup,
       getAccessToken,
       includeBody,
+      notifyComplete,
       onDuplicate,
       onError,
       processingOptions,
@@ -1416,8 +1701,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   useEffect(() => {
     return () => {
       cleanup();
+      stopAddWatches();
     };
-  }, [cleanup]);
+  }, [cleanup, stopAddWatches]);
 
   return {
     flowState,
@@ -1441,5 +1727,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     retry,
     savedDocumentId,
     savedDocumentUrl,
+    getAttachmentsAnswer,
+    watchAttachmentsAdd,
   };
 }

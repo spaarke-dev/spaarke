@@ -2674,6 +2674,15 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 153: the real Decision Record writer, over the same two seams (its creates land in <see cref="WriterOrg.DecisionRecordRows"/>).</summary>
         public DecisionRecordWriter Records { get; }
 
+        /// <summary>Task 232: the scopes the job and the writer resolve their scoped services from.</summary>
+        public IServiceScopeFactory Scopes { get; }
+
+        /// <summary>Task 232: ebilling-r1's <see cref="FinanceRollupService"/> at its virtual seam, recording each recalculation the job asks
+        /// for (built on first use).</summary>
+        public RollupRecorder Rollup => _rollup ??= new RollupRecorder();
+
+        private RollupRecorder? _rollup;
+
         public Harness(DateTimeOffset? runAt = null, string? writerClientId = null, IDistributedCache? cache = null)
         {
             Cache = cache ?? new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
@@ -2701,7 +2710,12 @@ public partial class SignalReevaluationJobTests
             services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SecureChildReconciler(
                 Sysadmin, Ownership, sp.GetRequiredService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(), ReownApi,
                 configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing));
+            // Task 232: the job resolves ebilling-r1's scoped FinanceRollupService per pass; here its virtual seam (Rollup).
+            services.AddScoped<FinanceRollupService>(_ => Rollup);
+            // Task 233 (D-232): the job resolves the shared privilege rule per pass for its condition-cleared records (app-only read).
+            services.AddScoped(_ => new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance));
             var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+            Scopes = scopes;
             Writer = new SignalWriter(writerClient, Sysadmin,
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
@@ -2716,7 +2730,7 @@ public partial class SignalReevaluationJobTests
                 Sysadmin,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
                 Clock, Logger<DecisionRecordWriter>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
-            Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
+            Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, scopes, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
         }
@@ -2948,6 +2962,9 @@ public partial class SignalReevaluationJobTests
 
         /// <summary>Task 153: the attribution reads the Decision Record writer made (the subject read with its <c>changedby</c> link).</summary>
         public int ChangedByReads { get; private set; }
+
+        /// <summary>Task 233: each app-only privilege read of <c>sprk_communication</c> (the condition-cleared record's flag).</summary>
+        public List<QueryExpression> PrivilegeReads { get; } = new();
 
         /// <summary>Task 153: an enabled, interactive person (access mode Read-Write, no application id).</summary>
         public Guid Person(Guid id)
@@ -3418,6 +3435,15 @@ public partial class SignalReevaluationJobTests
                 case "sprk_project" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
                                           && Value("sprk_projectid") is Guid projectId && _rows.TryGetValue(("sprk_project", projectId), out var project):
                     result.Entities.Add(project);
+                    break;
+                // Task 233 (D-232): the condition-cleared record's privilege read, app-only: the id and classification of the communications
+                // the closed Signals name, by an In list. A communication not stubbed is absent, as in Dataverse.
+                case "sprk_communication" when query.ColumnSet.Columns.Contains("sprk_privilegeclassification"):
+                    PrivilegeReads.Add(query);
+                    var asked = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_communicationid" && c.Operator == ConditionOperator.In)
+                        .Values.OfType<Guid>().ToHashSet();
+                    foreach (var communication in _rows.Where(r => r.Key.Entity == "sprk_communication" && asked.Contains(r.Key.Id)))
+                        result.Entities.Add(Project(query, communication.Value));
                     break;
                 case "sprk_communication" when query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_communicationid") is { } byId:
                     if (FailWitnessReads) throw new InvalidOperationException("Simulated failure reading a witness row.");
