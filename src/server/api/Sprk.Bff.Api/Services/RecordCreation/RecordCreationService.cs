@@ -265,7 +265,8 @@ internal sealed partial class RecordCreationService
         LogDroppedSearchIndex(table, id, decision, correlationId);
         var warnings = new List<string>();
         SecureRootInheritResult? isolatedCompletion = null;
-        var removed = await AfterCreateAsync(table, id, rule, decision, noun, correlationId, warnings, s => isolatedCompletion = s)
+        var removed = await AfterCreateAsync(table, id, rule, decision, noun, correlationId, warnings, s => isolatedCompletion = s,
+                request.OwnerConfigurationReads)
             .ConfigureAwait(false);
         if (removed is not null)
         {
@@ -524,7 +525,7 @@ internal sealed partial class RecordCreationService
         MappedSourceGate? mappingGate = null;
         Task<(Guid? TeamId, string? Refusal)>? secureOwnerTeamAnswer = null;
         Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamOnce(CancellationToken token) =>
-            secureOwnerTeamAnswer ??= _shares.SecureOwnerTeamAsync(token);
+            secureOwnerTeamAnswer ??= _shares.SecureOwnerTeamAsync(token, request.OwnerConfigurationReads); // ISS-010 D1: the request's R1/R2
         var copiedDefaults = new List<(string Column, string Source)>();
 
         // Task 022 fix round 3: the columns step 3 mapped, as step 3 left them. A copied default whose source is one of these
@@ -842,7 +843,7 @@ internal sealed partial class RecordCreationService
             if (request.SecureFromCreation)
             {
                 var gate = await SecureFromCreationGateAsync(table, rule, item, user!, creatorPerson, ownerContextObjectId,
-                    requestedBy, noun, trace.CorrelationId, ct).ConfigureAwait(false);
+                    requestedBy, noun, trace.CorrelationId, ct, request.OwnerConfigurationReads).ConfigureAwait(false);
                 if (gate.Refusal is { } gateRefusal)
                     return Decision.Refuse(gateRefusal);
                 earlyStampPlan = gate.Planned;
@@ -894,7 +895,7 @@ internal sealed partial class RecordCreationService
         if (isolatedTeam is null)
         {
             var decided = await DecideOwnerAsync(
-                    table, rule, item, planned.Plan, ownerContextObjectId, callerSystemUserId, requestedBy, noun, ct)
+                    table, rule, item, planned.Plan, ownerContextObjectId, callerSystemUserId, requestedBy, noun, ct, request.OwnerConfigurationReads)
                 .ConfigureAwait(false);
             if (decided.Refusal is { } ownerRefusal)
                 return Decision.Refuse(ownerRefusal);
@@ -1384,7 +1385,7 @@ internal sealed partial class RecordCreationService
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> DecideOwnerAsync(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
         IReadOnlyDictionary<string, object>? stampPlan, Guid? callerObjectId, Guid? callerSystemUserId,
-        RecordRequester? requestedBy, string noun, CancellationToken ct)
+        RecordRequester? requestedBy, string noun, CancellationToken ct, RecordOwnerLookupCache? ownerLookups = null)
     {
         var parents = OwnedChildWrite.ParentsOf(table, item);
         if (rule.OwnershipException is { } exception && parents.Count == 0)
@@ -1409,7 +1410,8 @@ internal sealed partial class RecordCreationService
                 .Concat(RecordThreadFiling.FilingLookupsOf(threadParents))
                 .ToList();
             var resolved = await ResolveOwnerOverAsync(
-                    table, filed, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct)
+                    table, filed, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct,
+                    ownerLookups: ownerLookups)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)
                 return (null, undetermined);
@@ -1446,7 +1448,7 @@ internal sealed partial class RecordCreationService
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> ResolveOwnerOverAsync(
         string table, IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> filed, bool pairInvalidId, string? pairIdText,
         Guid? pairTypeId, Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, CancellationToken ct,
-        string? subjectPairId = null)
+        string? subjectPairId = null, RecordOwnerLookupCache? ownerLookups = null)
     {
         // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
         var pairParent = pairInvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
@@ -1479,6 +1481,9 @@ internal sealed partial class RecordCreationService
                 callerObjectId, callerSystemUserId) with
             {
                 RequestedBy = requestedBy,
+                // ISS-010 D1: a create of a child-records request asks over that request's configuration answers (R1, R4, R7);
+                // Repair and every other create name none (null), exactly as before.
+                LookupCache = ownerLookups,
             },
             ct).ConfigureAwait(false);
         return (owner, null);
@@ -2386,7 +2391,7 @@ internal sealed partial class RecordCreationService
     /// grants it later.</remarks>
     private async Task<RecordCreationRefusal?> AfterCreateAsync(
         string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings,
-        Action<SecureRootInheritResult> isolatedCompleted)
+        Action<SecureRootInheritResult> isolatedCompleted, RecordOwnerLookupCache? ownerLookups = null)
     {
         if (rule.AutonumberColumn is { } numberColumn)
             await WarnIfNumberMissingAsync(table, id, numberColumn, noun, warnings).ConfigureAwait(false);
@@ -2472,7 +2477,7 @@ internal sealed partial class RecordCreationService
         {
             await AfterCreateStepAsync("secure record's sharee mirror", table, id, async () =>
             {
-                var result = await _shares.SyncChildAsync(table, id, CancellationToken.None).ConfigureAwait(false);
+                var result = await _shares.SyncChildAsync(table, id, CancellationToken.None, ownerLookups).ConfigureAwait(false);
                 if (result.Status is SecureChildShareSyncStatus.Failed or SecureChildShareSyncStatus.Incomplete)
                 {
                     _logger.LogWarning(
@@ -2787,6 +2792,19 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     /// <c>HttpContext</c> of its own and runs off-request too, so the route that owns the request names the scope. Cost of doing
     /// nothing: the decision commit's four creates read 21 distinct metadata paths 37 times (25 with the scope).</remarks>
     public CallerMetadataReadMemo.RequestScope? MetadataReads { get; init; }
+
+    /// <summary>
+    /// ISS-010 part D1 (#3184): the HTTP request's business-unit and team configuration answers (<see cref="RecordOwnerLookupCache"/>:
+    /// the Secure Record business unit and owner team, whether a team can be it, each unit's default owner team, the acting user's
+    /// unit) that this create's owner question, copy gate and share sync share with every other create of the same request;
+    /// <see langword="null"/> (every off-route caller, Repair, a job) reads them as before. Set by <c>ChildRecordEndpoints.CreateAsync</c>
+    /// only (<c>RecordOwnerLookupCache.ForRequest</c>). Configuration only: never a caller-access answer, a row or a failure.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md §11). Existing: <see cref="MetadataReads"/> (the caller's schema answers per
+    /// request) and the reconciler's per-pass <see cref="RecordOwnerLookupCache"/>. Extension: this hands the same cache type, one
+    /// per request, to the create's owner question; the service has no <c>HttpContext</c>, so the route names the scope. Cost of
+    /// doing nothing: the four-action decision commit reads 3 distinct business-unit and team rows 14 times.</remarks>
+    public RecordOwnerLookupCache? OwnerConfigurationReads { get; init; }
 
     /// <summary>
     /// Task 014: the field mapping this create asks for (step 3), or <c>null</c> for none — step 3 then does nothing and
