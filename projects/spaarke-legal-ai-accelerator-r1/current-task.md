@@ -8,7 +8,9 @@ From the W4/W5/W6 comparison (`results.md`): the skill upgraded 2 of 4 fallback 
 
 **Word reach (owner question 2026-11-26):** `/nda-review` is a OneDrive skill folder, not a plugin, which is why Word doesn't show it. Word desktop shows plugins (Spaarke decisions, our probe incl. a .py skill) and follows their instructions; **WP-1 done 2026-11-26: Word desktop does not load a skill that ships scripts** (2 tries, answered from the instructions skill). So a Word edition needs the mechanics server-side as MCP tools (Harvey model). Related: specialist-legal-agents-r1 already has server-side NDA *review* on dev (`spike_review_nda`: documentText in, structured review out, BFF Action, no redline). Open: owner decides whether to draft the Word-edition design (engines as MCP tools, coordinated with specialist-legal-agents-r1); a redline needs the .docx, which is the same file-delivery problem as #3257 gap 1.
 
-## 2026-11-26: WP-5 JavaScript probe built (PR #3266)
+## 2026-11-26: WP-5 JavaScript probe (PR #3266) — PASSED with v0.4 (2026-11-27)
+
+**Result:** Word desktop ran our fixed Office.js as written (hash `d81beac6` in the document; runner form `async function main(context) {…}`, return value not passed back). Pending: owner confirms by eye the tracked deletion/insertion, the comment, and that Track Changes was restored; then removes the probe plugin (tell copilot-platform-coordination). Open: whether to design a Word edition on this route (fixed JS applies an edit list) and the coordination v0.1 question. Details: `results.md` "WP-5 run 3".
 
 Probe plugin v0.2 adds `spaarke-word-probe-js` (fixed Office.js in SKILL.md; marker `WPJ-1126-A d81beac6`). Branch `test/accelerator-word-js-probe`, worktree `C:\code_files\spaarke-wt-accelerator-word-js-probe`; zip in its `src/accelerators/build/out/word-probe/` (sent to owner). Owner steps: `tier-test-script.md` WP-5. copilot-platform-coordination got the row before upload; on removal, tell it. After merge, sync `build_word_probe.py` + `tests/test_package.py` from master.
 

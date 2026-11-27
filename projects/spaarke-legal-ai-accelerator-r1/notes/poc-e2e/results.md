@@ -787,3 +787,26 @@ rewriting the code. (2) Word's code runner checks code before running it and ref
 top-level `await`: it doesn't run code as an async module. Next: v0.4 calls `Word.run(...)` without `await`, and
 lets Copilot adjust only the outer wrapper line, reporting exactly what it changed, so we learn the form the
 runner expects while the inner code (which computes the hash) stays as written.
+
+**WP-5 run 3 (owner, Word desktop, 2026-11-27, probe v0.4, Spaarke MCP off): our code ran.** Copilot: "The probe
+ran, but the code's return line wasn't passed back to me", so, as the skill directs, it quoted the last paragraph:
+`Spaarke JavaScript probe: alpha charlie delta. WPJ-1126-A d81beac6`. It said it replaced "bravo" with "charlie" as
+a tracked change and attached a comment, did not write the line itself, and changed only the wrapper: first line
+`Word.run(async (context) => {` became `async function main(context) {`, last line `});` became `}`.
+**Findings:**
+1. **Word desktop runs fixed Office.js that an instructions-only plugin skill supplies, as written.** The hash
+   `d81beac6` is FNV-1a of "WPJ-1126-A Spaarke", worked out by the code at run time; it is stored nowhere in the
+   plugin (a build test checks this), and a model can't work it out in its head.
+2. **The runner's form:** a function `async function main(context) { ... }`. It supplies a ready `context` (no
+   `Word.run`), and the function's return value doesn't reach Copilot. Code we ship for Word should be written in
+   that form and report through the document (or Copilot reads the document afterwards), not through `return`.
+3. Its pre-run checks (run 1: `toString` refused; run 2: top-level `await` refused) are a filter our code must pass.
+   `JS_FORBIDDEN` and the no-top-level-await test in `build_word_probe.py` hold what we know.
+**Still to confirm by eye (owner):** in the document, "bravo" shows as a tracked deletion and "charlie" as a
+tracked insertion (the quoted text shows the accepted view), the comment on "charlie" reads
+`Spaarke JS probe comment WPJ-1126-A d81beac6`, and Track Changes is back to its earlier setting.
+**What it means:** a Word edition can make real tracked changes and comments in the open document with our own
+code, carried in an instructions-only skill, with no Office add-in and no server round trip for the edit itself.
+Deciding *which* edits to make still needs either the model (reading the playbook) or our engines server-side; the
+skill's fixed code would apply an edit list. Not yet known: a size limit on supplied code, and whether the runner
+accepts a data block (the edit list) the model fills in while the code stays fixed.
