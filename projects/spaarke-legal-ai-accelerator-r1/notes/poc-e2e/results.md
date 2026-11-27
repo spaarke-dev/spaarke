@@ -816,8 +816,11 @@ edit documents itself (it described it as "JavaScript that edits the open docume
 code. So it is real (hash-proven, checked by eye) but **not a documented extension point**: Microsoft can change
 that tool's rules or its willingness to run supplied code without notice. Route 1 matches the Spaarke MCP server
 we already have, and confirms why server tools alone can't redline in Word. Route 3 is a candidate for showing a
-review summary or dashboard in the Word pane (untested). Route 2 is the documented way to run our own Office.js;
-add-ins are out of scope for this project (owner directive).
+review summary or dashboard in the Word pane (untested). **Correction (surfaces spike, same day):** route 2 is no
+longer documented: Microsoft cancelled add-in functions as agent actions on 2026-06-17
+(OfficeDev/office-js-docs-pr#5799) and pointed developers to Office.js inside a skill, documented for Excel only, in
+preview. So no documented route runs our own Office.js in Word today. Full picture:
+`notes/research/office-surfaces-2026-11/00-synthesis.md`.
 **What it means:** a Word edition can make real tracked changes and comments in the open document with our own
 code, carried in an instructions-only skill, with no Office add-in and no server round trip for the edit itself.
 Deciding *which* edits to make still needs either the model (reading the playbook) or our engines server-side; the

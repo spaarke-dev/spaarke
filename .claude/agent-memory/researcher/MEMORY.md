@@ -89,6 +89,9 @@
 - EXO: [sidecar identity](exo-sidecar-identity-2026-10-03.md) (MI-FIC) · [RBAC-for-Apps](exo-rbac-for-apps-design-2026-10-04.md) · [DC-write error](exo-apponly-dc-write-error-2026-10-04.md) (-Organization)
 
 ## AI platform / models / competitors
+- [Copilot in Word/Excel/PPT (11-27)](office-apps-copilot-edit-code-skills-2026-11-27.md) — Edit GA; code docs Excel-only; MCP connectors documented in apps; Word skills undocumented
+- [Chat/Cowork/agents surfaces (11-27)](chat-cowork-agents-surfaces-2026-11-27.md) — Chat skills GA Premium, closed sandbox; Cowork runtime undocumented; no Office.js; IB tenants blocked
+- [Extension routes by surface (11-27)](copilot-extension-routes-by-surface-2026-11-27.md) — federated MCP connector only route documented in Office apps; add-in agent actions cancelled 06-17; MCP cert needs secret
 - [Cowork vs SPE file bytes (11-26)](cowork-access-to-spe-file-bytes-2026-11-26.md) — no native path; base64 contract is input-only; stage to OneDrive
 - [Declarative agents in Word (2026-11-09)](declarative-agents-in-word-2026-11-09.md) — DA v1.9; plain-text doc, tables lost; no text edit; 1 DA + skills > many DAs
 - [Word saved playbooks (11-06)](word-saved-playbooks-org-sharing-2026-11-06.md) — per-review .docx only; no org library
