@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-26 — Runaway-process scanner and SessionStart banner (FAILURE-MODES G-26)
+
+- **New `scripts/quality/runaway-processes.py`**: lists processes that Claude Code sessions left running, with the owning session (from the `claude.exe --resume=<id>` ancestor, or a session path on a child's command line) or, for orphans, the session or worktree their command lines point to; verdicts safe-to-stop / likely-leaked / check / busy (protected) / idle-leftover. A live session's processes are at most `check`. `kill <pid>` rescans, stops only a still-stoppable tree by explicit PIDs (`check`/`busy` need `--force`), and never stops a Claude session; nothing is stopped automatically. Controls: `scripts/quality/tests/test_runaway_processes.py`.
+- **`.claude/settings.json`**: `SessionStart` (`startup|resume`) also runs `runaway-processes.py banner` (cached report, background refresh after 10 minutes).
+- **New `scripts/quality/Register-RunawayScan.ps1`**: registers (or `-Unregister`s) a per-user scheduled task that runs `runaway-processes.py notify` every 15 minutes under `pythonw`, from the main checkout; it shows one Windows notification per new spinning tree and never stops anything.
+- **`.claude/FAILURE-MODES.md`**: G-26.
+- **Root `CLAUDE.md` §16**: one sentence added to the existing `startup|resume` bullet. **Budget:** 219 lines (unchanged), 22,232 → 22,522 bytes (**+290 bytes**, LF), under the 30 KB ceiling.
+
 ###### 2026-11-25 — ADR-004 A2: queue consumers outside the BFF
 
 The `spaarke-intake-pipeline-r1` design review found that ADR-004's "MUST implement handlers as `IJobHandler`" could not be met by any Service Bus consumer outside the BFF. A1 made every queue consumer ADR-004 work, but `IJobHandler`/`JobContract`/`JobOutcome` live only in `Sprk.Bff.Api`, which ADR-052 forbids non-BFF hosts to reference.
