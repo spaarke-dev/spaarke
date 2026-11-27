@@ -143,7 +143,11 @@ public sealed partial class SignalReadRouteTests
         }
 
         // Every other kind has nothing to read, so the 503 is this kind's own bound (the truncation signal: never a shorter history).
+        var kind = SignalReadService.SignalLessKinds.Single(k => k.Codes.Contains(code)).Name;
+        _factory.Logs.Warnings.Clear();
         (await GetAsync(world, Alice, "?set=decided")).StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains($"pages of {kind} Decision Records for one caller", StringComparison.Ordinal),
+            "the 503 is this kind's own bound, not another step's fault");
     }
 
     [Fact]

@@ -94,3 +94,55 @@ file. `--filter DecidedSet|ContractBaseline_Worklist`: **10 failed, 37 passed**.
 (3 theory cases), the core-join and 403 tests, the secure-family test (Bob's listing) and the new baseline. Passing on master: the two
 must-not-fire controls master already had (Signal-backed billing listed once; no-core/no-kind/window/forged) and all task-226 tests.
 The static pin test does not compile on master. Files restored afterwards; no stash.
+
+## Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- IntegrationTests `--filter FullyQualifiedName~Signals`: 234 passed, 2 skipped (live), 0 failed (12 new regression cases, 1 new
+  contract baseline; the other decided baselines unchanged).
+- Unit tests `Sprk.Bff.Api.Tests --filter FullyQualifiedName~Signals`: 5622 passed, 6 skipped, 0 failed.
+- ArchTests (full, built first): 2860 passed, 0 failed.
+- Client (doc comments only, 3 files): `client-lint check --package ui-components` ok; jest DecisionRecords + Worklist: 15 suites,
+  333 tests passed.
+- Publish size (`dotnet publish -c Release`, fresh `origin/master` 6f4d7bc7e4 via `git archive` vs this branch, same Python zip):
+  194 vs 194 files; raw +10,356 bytes; zip 40.68 MB -> 40.69 MB (+7,367 bytes). No package change.
+
+## Review (Step 9.5, one adversarial pass, opus)
+
+- **OPEN F1 (owner decision needed): billing line volume can 503 the whole tab.** The billing kind includes the line codes
+  (`accept-line`, `reduce-line`, `disallow-line`, `add-line`). `InvoiceLineDecisionService` writes one record per line, and a line
+  with no Signal stores `resolvedSignalIds: []` (`ResolvedSignalIds: ... : null`, then `?? []` in the writer). The core join trims
+  little here: matter Read is broad (Deep for root-BU principals), so every row is one the caller could be shown. Past
+  `MaxPages` x 5,000 = 25,000 such records on readable matters in 90 days, that read answers 503, and `ReadDecidedRecordsAsync`
+  returns the first failure, so the whole tab 503s (including the Signal-backed and gate rows) until the volume ages out. The POML's
+  "same cap and truncation signal the existing reads use" (503) and its goal "without bringing back the capped-read 503" conflict at
+  this volume. Options, for the owner:
+  - (a) list only the invoice-level billing codes (exclude the line codes), so volume grows with invoices, not lines;
+  - (b) make a kind read's overflow non-fatal: list the newest up to the cap with a truncation flag (contract field, baseline and a
+    client notice);
+  - (c) accept the 503 at that volume (status quo of this PR).
+  The escalation trigger (no bounded read that avoids the 503 for a kind) is reported to the main session; not decided here.
+- K4: 9 extra reads on the Decided path (4-permit gate, about 3 waves; leading-wildcard LIKE on a memo column). Not measured. If slow:
+  per kind one read with three outer core links and an OR of not-null aliases, after a live check that an outer link to an unreadable
+  row comes back null.
+- K2: `sprk_servicerequest` is a core type with no typed lineage lookup on `sprk_decisionrecord`, so a kind record on a service request
+  could never be listed. Not reachable today (Procedure subjects are matter/project/work assignment; invoice cores never resolve to a
+  service request). Fails closed.
+- K4: kind records are admitted by the caller's read of the core (not of the invoice or line); no exposure beyond the record read
+  Dataverse already grants (D-144 Deep read).
+- K3 (fixed): the bound theory now also asserts the kind's own "more than N pages" log, so a 503 from another step cannot pass it.
+- K4: a caller with no Read on `sprk_project` or `sprk_workassignment` logs up to 6 "records are omitted" warnings per Decided call.
+
+## Known limits (K-class)
+
+- The typed lineage lookup and the core pair are written together at create from one core and never updated (D-34); the join uses the
+  first, the listing rule the second. A record lacking the lookup is not listed (fails closed). The lookup predates both entries.
+- A kind record with no core pair, or a half pair, is never listed (D-234: under the core record only).
+- ADR check: no new endpoint, service, DI registration or package (ADR-001/010 unaffected); reads run as the caller through the existing
+  user client (ADR-028 caller trim); no plugin or write path (ADR-002). Clean.
+
+## Found, not fixed
+
+- None outside this change beyond the review items above.
+
+rework: none task 235
