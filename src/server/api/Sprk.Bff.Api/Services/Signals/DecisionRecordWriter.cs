@@ -1419,10 +1419,10 @@ public sealed class DecisionRecordWriter
     // ── ebilling-r1 task 074 (D-100, owner-approved section 6.5 path B): the billing entry ─────────────────────────────
 
     /// <summary>The line table: the subject of a line decision (D-75).</summary>
-    private const string BillingLineEntity = "sprk_billingevent";
+    internal const string BillingLineEntity = "sprk_billingevent";
 
     /// <summary>The invoice table: the subject of an invoice decision and of an override (D-75, D-101).</summary>
-    private const string BillingInvoiceEntity = "sprk_invoice";
+    internal const string BillingInvoiceEntity = "sprk_invoice";
 
     /// <summary>The prefix of a system decision's <see cref="BillingDecisionRecordRequest.DeciderRole"/>, as the gate's and the closure's
     /// decider roles carry it. The only case a billing record may have no confirmer.</summary>

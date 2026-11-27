@@ -9,6 +9,8 @@
 // record of a secure family the caller is not in, a record on a core record the caller cannot read (neither listed nor counted), a record
 // that resolved a Signal (listed once, under its Signal), a record with no core record, and a record of no kind. Bound: each kind's read is
 // its own, as the caller, paged to MaxPages and then 503, never a shorter list.
+// D-236 (owner, option a of review F1): the billing kind is the invoice-level codes only. A line decision (accept, reduce, disallow, add
+// line) is written one record per line, so it is not listed; a pin keeps a new line code from joining the listed kind.
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
@@ -22,7 +24,7 @@ namespace Sprk.Bff.Api.IntegrationTests.Signals;
 public sealed partial class SignalReadRouteTests
 {
     private const string ProcedureCode = "assign-procedure";
-    private const string BillingCode = "accept-line";
+    private const string BillingCode = "approve-invoice"; // an invoice-level code (D-236: line codes are not listed)
     private const string NoSignalEnvelope = "{\"reviewId\":\"0b7a9b5e-5555-4c2e-9a54-000000000235\",\"resolvedSignalIds\":[],\"steps\":[]}";
 
     /// <summary>A writer record of one of D-234's kinds: it resolved no Signal, carries its catalog code, and is filed with its core.</summary>
@@ -41,7 +43,7 @@ public sealed partial class SignalReadRouteTests
         var procedure = KindDecision(world, ProcedureCode, [Alice], (MatterType, m), "DR-00700", decidedOn: "2026-10-12T09:30:00Z");
         var firm = KindDecision(world, InvoiceAssignFirmService.AssignFirmActionCode, [Alice], (MatterType, m), "DR-00701",
             name: "Judgement: Set firm", decidedOn: "2026-10-13T09:30:00Z");
-        var billing = KindDecision(world, BillingCode, [Alice], (ProjectType, p), "DR-00702", name: "Judgement: Accept line");
+        var billing = KindDecision(world, BillingCode, [Alice], (ProjectType, p), "DR-00702", name: "Judgement: Approve invoice");
 
         var body = await OkAsync(world, Alice, "?set=decided");
 
@@ -57,7 +59,7 @@ public sealed partial class SignalReadRouteTests
         project.GetProperty("core").GetProperty("recordType").GetString().Should().Be("sprk_project");
         var listed = project.GetProperty("records").EnumerateArray().Single();
         listed.GetProperty("recordId").GetGuid().Should().Be(billing);
-        listed.GetProperty("summary").GetString().Should().Be("Judgement: Accept line");
+        listed.GetProperty("summary").GetString().Should().Be("Judgement: Approve invoice");
         listed.GetProperty("decidedByName").GetString().Should().Be("Dana Decider", "the record's own confirming user");
         listed.GetProperty("steps").ValueKind.Should().Be(JsonValueKind.Null, "nothing replays a record with no Open");
         listed.GetProperty("followOns").GetArrayLength().Should().Be(0);
@@ -219,7 +221,7 @@ public sealed partial class SignalReadRouteTests
         var firm = SignalReadService.SignalLessKinds.Single(k => k.Codes.Contains(InvoiceAssignFirmService.AssignFirmActionCode));
         firm.Codes.Should().Equal(InvoiceAssignFirmService.AssignFirmActionCode);
         var billing = SignalReadService.SignalLessKinds.Single(k => k.Codes.Contains(BillingCode));
-        billing.Codes.Should().BeEquivalentTo(DecisionActionCatalog.BillingActions.Select(d => d.Code).Where(c => c != "assign-firm"));
+        billing.Codes.Should().NotContain(InvoiceAssignFirmService.AssignFirmActionCode);
         SignalReadService.SignalLessKinds.SelectMany(k => k.Codes).Should().OnlyHaveUniqueItems();
         SignalReadService.SignalLessKinds.Select(k => k.TooMany).Should().OnlyHaveUniqueItems();
 
@@ -238,5 +240,39 @@ public sealed partial class SignalReadRouteTests
                 foreach (var code in kind.Codes) fetch.Should().Contain($"<value>{code}</value>");
             }
         }
+    }
+
+    [Fact]
+    public void D236_TheBillingKind_IsTheInvoiceLevelCodes_AndNoLineCodeCanJoinIt()
+    {
+        // D-236 (option a of review F1): the billing kind is the catalog's billing set minus Set firm minus every code the writer files
+        // under the LINE. A new billing code therefore lands in exactly one of the two sets; a new line code (filed under the line) can
+        // never silently join the listed kind, and this exact-set pin fails when the line set changes, so it is decided here.
+        var billing = SignalReadService.SignalLessKinds.Single(k => k.Codes.Contains(BillingCode)).Codes;
+        var all = DecisionActionCatalog.BillingActions.Select(d => d.Code).ToList();
+        var line = all.Where(c => DecisionRecordWriter.BillingSubjectEntityOf(c) == DecisionRecordWriter.BillingLineEntity).ToList();
+
+        line.Should().BeEquivalentTo(["accept-line", "reduce-line", "disallow-line", "add-line"]);
+        billing.Should().NotIntersectWith(line);
+        billing.Concat(line).Append(InvoiceAssignFirmService.AssignFirmActionCode).Should().BeEquivalentTo(all);
+        billing.Should().OnlyContain(c => DecisionRecordWriter.BillingSubjectEntityOf(c) == DecisionRecordWriter.BillingInvoiceEntity);
+    }
+
+    [Theory]
+    [InlineData("accept-line")]
+    [InlineData("reduce-line")]
+    [InlineData("disallow-line")]
+    [InlineData("add-line")]
+    public async Task D236_MustNotFire_ASignalLessLineDecisionRecord_IsNotListed_ButAnInvoiceLevelOneIs(string lineCode)
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        KindDecision(world, lineCode, [Alice], (MatterType, m), "DR-00780", name: "Judgement: line decision");
+        var invoiceLevel = KindDecision(world, BillingCode, [Alice], (MatterType, m), "DR-00781", name: "Judgement: Approve invoice");
+
+        var body = await OkAsync(world, Alice, "?set=decided");
+
+        AllRecords(body).Select(r => r.GetProperty("recordId").GetGuid()).Should().Equal(invoiceLevel);
+        body.ToString().Should().NotContain("DR-00780");
     }
 }

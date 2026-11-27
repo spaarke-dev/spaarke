@@ -106,8 +106,9 @@ public sealed partial class SignalReadRouteTests
     }
 
     /// <summary>Task 235 (#3283, D-234): the Decided set lists the writer's Record Procedure, billing and assign-firm records that resolved
-    /// no Signal in their core record's <c>records</c>, with their summary and confirming user and no item to open, beside a Signal's item on
-    /// the same matter; on a project with no item they are a group of their own. The existing Decided baseline above is unchanged.</summary>
+    /// no Signal in their core record's <c>records</c> (D-236: invoice-level billing codes only, never a line decision), with their summary
+    /// and confirming user and no item to open, beside a Signal's item on the same matter; on a project with no item they are a group of
+    /// their own. The existing Decided baseline above is unchanged.</summary>
     [Fact]
     public async Task ContractBaseline_Worklist_200_Decided_SignalLessRecords()
     {
@@ -122,8 +123,8 @@ public sealed partial class SignalReadRouteTests
             core: (MatterType, m), actionCode: "assign-procedure", steps: NoSignal);
         world.Decision(readers: [Alice], number: "DR-00701", decidedOn: "2026-10-13T09:30:00Z", name: "Judgement: Set firm",
             core: (MatterType, m), actionCode: "assign-firm", steps: NoSignal);
-        world.Decision(readers: [Alice], number: "DR-00702", decidedOn: "2026-10-11T09:30:00Z", name: "Judgement: Accept line",
-            core: (ProjectType, p), actionCode: "accept-line", steps: NoSignal);
+        world.Decision(readers: [Alice], number: "DR-00702", decidedOn: "2026-10-11T09:30:00Z", name: "Judgement: Approve invoice",
+            core: (ProjectType, p), actionCode: "approve-invoice", steps: NoSignal);
 
         VerifyWorklist("worklist.200.decided-signal-less", await ObserveAsync(await GetAsync(world, Alice, "?set=decided")), 200);
     }

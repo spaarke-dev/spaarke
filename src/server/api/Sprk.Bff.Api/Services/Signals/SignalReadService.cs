@@ -58,7 +58,8 @@ public enum WorklistSet
     /// Signals is listed once under each of them the caller's worklist read admits (the configuration's <c>closedEarlier</c> query, narrowed
     /// to those Signals, under every rule of the other sets), so each review of a Signal reviewed twice is its own row; a record none of
     /// whose Signals is admitted is absent. An email-gate record (it resolves none) is in its group's <see cref="WorklistGroup.Records"/>,
-    /// and so, since task 235 (D-234), is a Record Procedure, billing or assign-firm record that resolved none, under its core record only;
+    /// and so, since task 235 (D-234), is a Record Procedure, invoice-level billing (D-236: not a line decision) or assign-firm record that
+    /// resolved none, under its core record only;
     /// any other record that resolved no Signal is not listed.
     /// </summary>
     Decided,
@@ -98,9 +99,10 @@ public sealed record WorklistLaneGroups(string Lane, IReadOnlyList<WorklistGroup
 /// <param name="Records">Task 226 (D-231): <see cref="WorklistSet.Decided"/> only. The email-gate Decision Records in this group (D-139:
 /// they resolve no Signal), each listed with its summary and no Open: there is no Work Item behind it to reopen. Read AS THE CALLER, only
 /// when the caller's own read returns the communication the record was made on, and kept by the record's own core-record stamp (the
-/// caller's read of the core returns it); with no core record, in a Not filed group. Task 235 (D-234): also the Record Procedure, billing
-/// and assign-firm Decision Records that resolved no Signal, read AS THE CALLER only when the caller's own read returns their core record,
-/// kept by the same core-record rule, and never in a Not filed group. Carried without its steps or follow-ons.
+/// caller's read of the core returns it); with no core record, in a Not filed group. Task 235 (D-234): also the Record Procedure,
+/// invoice-level billing (D-236: never a line decision) and assign-firm Decision Records that resolved no Signal, read AS THE CALLER only
+/// when the caller's own read returns their core record, kept by the same core-record rule, and never in a Not filed group. Carried
+/// without its steps or follow-ons.
 /// Null, and not serialized, in every other set and when the group has none.</param>
 public sealed record WorklistGroup(
     WorklistCoreRecord? Core,
@@ -420,8 +422,9 @@ public sealed class SignalReadService
             // that resolved Signals, decided in the window, names the Signals read at (4): exactly those the records resolved, through the
             // configuration's query narrowed to them, so every rule below still decides whether each Signal is shown. No record, no Signal
             // query. The gate records are read beside them (their own bound, only those whose email the caller reads), and so are the
-            // Record Procedure, billing and assign-firm records (task 235, D-234: a bound per kind and core table, only those whose core
-            // record the caller reads; not for a one-Work-Item read, which lists none of them); all are admitted at (10b).
+            // Record Procedure, invoice-level billing and assign-firm records (task 235, D-234, D-236: a bound per kind and core table,
+            // only those whose core record the caller reads; not for a one-Work-Item read, which lists none of them); all are admitted
+            // at (10b).
             DecidedRecords? decided = null;
             if (set == WorklistSet.Decided)
             {
@@ -1679,7 +1682,7 @@ public sealed class SignalReadService
 
     /// <summary>One record of the Decided set as the caller's read returned it.</summary>
     /// <param name="SignalIds">The Signals it resolved (its <c>sprk_steps</c> <c>resolvedSignalIds</c>, as the writer stored them); empty for an
-    /// email-gate, Record Procedure, billing or assign-firm record that resolved none. Never the Signal's own <c>sprk_decisionrecord</c> lookup, which a user can write and a later review overwrites.</param>
+    /// email-gate, Record Procedure, invoice-level billing or assign-firm record that resolved none. Never the Signal's own <c>sprk_decisionrecord</c> lookup, which a user can write and a later review overwrites.</param>
     /// <param name="CoreTypeId">The record's core-record stamp type, with <paramref name="CoreId"/>; both null for a half pair or none.</param>
     /// <param name="HasNoCore">Neither half of the stamp is present.</param>
     private sealed record DecidedRecord(WorklistDecisionRecord Record, IReadOnlyList<Guid> SignalIds, Guid? CoreTypeId, Guid? CoreId, bool HasNoCore);
@@ -1755,16 +1758,22 @@ public sealed class SignalReadService
     internal sealed record SignalLessKind(string Name, string TooMany, IReadOnlyList<string> Codes);
 
     /// <summary>Task 235 (D-234): the Record Procedure decisions (<c>DecisionRecordWriter.WriteRecordProcedureDecisionAsync</c>, which always
-    /// writes <c>resolvedSignalIds: []</c>), the billing decisions other than Set firm (<c>WriteBillingDecisionAsync</c>, through
-    /// <c>BillingDecisionRecorder</c>), and Set firm (<see cref="InvoiceAssignFirmService.AssignFirmActionCode"/>, a billing code that never
-    /// resolves a Signal), each its own read so one kind's volume never fills another's bound.</summary>
+    /// writes <c>resolvedSignalIds: []</c>), the INVOICE-level billing decisions other than Set firm (<c>WriteBillingDecisionAsync</c>,
+    /// through <c>BillingDecisionRecorder</c>), and Set firm (<see cref="InvoiceAssignFirmService.AssignFirmActionCode"/>, a billing code
+    /// that never resolves a Signal), each its own read so one kind's volume never fills another's bound. D-236 (owner, option a of the
+    /// review's F1): a billing code the writer files under the LINE (<see cref="DecisionRecordWriter.BillingSubjectEntityOf"/> is
+    /// <see cref="DecisionRecordWriter.BillingLineEntity"/>: accept, reduce, disallow, add line) is not listed. The line entry writes one
+    /// record per line, so listing them would let a few large invoices pass the read's bound and 503 the whole tab; the invoice-level
+    /// codes grow with invoices, not lines.</summary>
     internal static readonly IReadOnlyList<SignalLessKind> SignalLessKinds =
     [
         new("Record Procedure", "too_many_procedure_decision_records",
             [.. DecisionActionCatalog.RecordProcedureActions.Select(d => d.Code).Order(StringComparer.Ordinal)]),
         new("billing", "too_many_billing_decision_records",
             [.. DecisionActionCatalog.BillingActions.Select(d => d.Code)
-                .Where(c => c != InvoiceAssignFirmService.AssignFirmActionCode).Order(StringComparer.Ordinal)]),
+                .Where(c => c != InvoiceAssignFirmService.AssignFirmActionCode
+                    && DecisionRecordWriter.BillingSubjectEntityOf(c) == DecisionRecordWriter.BillingInvoiceEntity)
+                .Order(StringComparer.Ordinal)]),
         new("assign-firm", "too_many_assign_firm_decision_records", [InvoiceAssignFirmService.AssignFirmActionCode]),
     ];
 
@@ -2007,8 +2016,8 @@ public sealed class SignalReadService
     /// <summary>
     /// (10b) Task 226 (D-231): the records of <paramref name="decided"/> that resolved no Signal: the gate records (D-139), each back through
     /// the caller's own read of its communication (<see cref="GateRecordsFetch"/>'s inner join), and, task 235 (D-234), the Record Procedure,
-    /// billing and assign-firm records, each back through the caller's own read of its core record (<see cref="SignalLessRecordsFetch"/>'s
-    /// inner join). Each is then kept by the record's OWN core stamp, as the worklist keeps a Signal: with a core record (D-34/D-36), only
+    /// invoice-level billing (D-236) and assign-firm records, each back through the caller's own read of its core record
+    /// (<see cref="SignalLessRecordsFetch"/>'s inner join). Each is then kept by the record's OWN core stamp, as the worklist keeps a Signal: with a core record (D-34/D-36), only
     /// when the caller's own batched read of that core returns it (a type outside uac-r2's core taxonomy is dropped); with a half pair, never;
     /// with no core record (D-35/D-39), a gate record is listed Not filed (the communication read above is its rule) and no other is. Each is
     /// listed once (by id), newest decision first (stable: records decided at the same time keep the order they were read in), with no steps
@@ -2754,7 +2763,8 @@ public sealed class SignalReadService
             {
                 // Task 226 (D-231): the Decided set's records with no Signal join their core record's Decide group (a new group after the
                 // others when it has no item), in the records' order; those with no core record (gate records only) form a Not filed
-                // group, last. Task 235 (D-234): Record Procedure, billing and assign-firm records join their core's group the same way.
+                // group, last. Task 235 (D-234, D-236): Record Procedure, invoice-level billing and assign-firm records join their core's
+                // group the same way.
                 foreach (var listed in records)
                 {
                     var group = built.FirstOrDefault(b => SameCore(b.Core, listed.Core));

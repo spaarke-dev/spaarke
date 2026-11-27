@@ -12,7 +12,8 @@ Branch `fix/ontology-235-dr-tab-signal-less` from `origin/master` (6f4d7bc7e4). 
     `DecisionActionCatalog.RecordProcedureActions`; `resolvedSignalIds` is always `[]`; filed under the core record itself (matter,
     project or work assignment, `InvoiceFamilyCoreRecordGuard.FilingCoreTables`).
   - **Billing** (`WriteBillingDecisionAsync`, through `BillingDecisionRecorder`): `sprk_actioncode` is one of
-    `DecisionActionCatalog.BillingActions`; filed under the line or invoice, with the core pair derived from it.
+    `DecisionActionCatalog.BillingActions`; filed under the line or invoice, with the core pair derived from it. Since D-236 only the
+    invoice-level codes are listed (see "D-236" below).
   - **Assign firm** (`InvoiceAssignFirmService` → `BillingDecisionRecorder.RecordAsync` → the billing entry): the billing code
     `assign-firm` (`InvoiceAssignFirmService.AssignFirmActionCode`). It never resolves a Signal (decisions.md 095d-1 amendment: its
     `ResolvedSignalIds` is empty because the firm_missing Signal is shared).
@@ -99,7 +100,9 @@ The static pin test does not compile on master. Files restored afterwards; no st
 
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
 - IntegrationTests `--filter FullyQualifiedName~Signals`: 234 passed, 2 skipped (live), 0 failed (12 new regression cases, 1 new
-  contract baseline; the other decided baselines unchanged).
+  contract baseline; the other decided baselines unchanged). After D-236 (fix round 1): 239 passed, 2 skipped, 0 failed (+5: the
+  line-code theory and the pin); unit Signals 5622 passed, 6 skipped; ArchTests 2860 passed; BFF build 0 warnings; client-lint ok;
+  jest 333 passed.
 - Unit tests `Sprk.Bff.Api.Tests --filter FullyQualifiedName~Signals`: 5622 passed, 6 skipped, 0 failed.
 - ArchTests (full, built first): 2860 passed, 0 failed.
 - Client (doc comments only, 3 files): `client-lint check --package ui-components` ok; jest DecisionRecords + Worklist: 15 suites,
@@ -109,19 +112,12 @@ The static pin test does not compile on master. Files restored afterwards; no st
 
 ## Review (Step 9.5, one adversarial pass, opus)
 
-- **OPEN F1 (owner decision needed): billing line volume can 503 the whole tab.** The billing kind includes the line codes
-  (`accept-line`, `reduce-line`, `disallow-line`, `add-line`). `InvoiceLineDecisionService` writes one record per line, and a line
-  with no Signal stores `resolvedSignalIds: []` (`ResolvedSignalIds: ... : null`, then `?? []` in the writer). The core join trims
-  little here: matter Read is broad (Deep for root-BU principals), so every row is one the caller could be shown. Past
-  `MaxPages` x 5,000 = 25,000 such records on readable matters in 90 days, that read answers 503, and `ReadDecidedRecordsAsync`
-  returns the first failure, so the whole tab 503s (including the Signal-backed and gate rows) until the volume ages out. The POML's
-  "same cap and truncation signal the existing reads use" (503) and its goal "without bringing back the capped-read 503" conflict at
-  this volume. Options, for the owner:
-  - (a) list only the invoice-level billing codes (exclude the line codes), so volume grows with invoices, not lines;
-  - (b) make a kind read's overflow non-fatal: list the newest up to the cap with a truncation flag (contract field, baseline and a
-    client notice);
-  - (c) accept the 503 at that volume (status quo of this PR).
-  The escalation trigger (no bounded read that avoids the 503 for a kind) is reported to the main session; not decided here.
+- **F1, resolved by D-236 (owner, 2026-11-27, option a): billing line volume could 503 the whole tab.** The billing kind included
+  the line codes (`accept-line`, `reduce-line`, `disallow-line`, `add-line`). `InvoiceLineDecisionService` writes one record per line,
+  and a line with no Signal stores `resolvedSignalIds: []`. Matter Read is broad, so the core join trims little: past `MaxPages` x
+  5,000 = 25,000 such records on readable matters in 90 days the billing read answered 503, and as the first failed read it took the
+  whole tab down until the volume aged out. Options put to the owner: (a) list only invoice-level billing codes; (b) a non-fatal
+  overflow with a truncation flag; (c) accept the 503. The owner chose (a); see "D-236" below.
 - K4: 9 extra reads on the Decided path (4-permit gate, about 3 waves; leading-wildcard LIKE on a memo column). Not measured. If slow:
   per kind one read with three outer core links and an OR of not-null aliases, after a live check that an outer link to an unreadable
   row comes back null.
@@ -132,6 +128,25 @@ The static pin test does not compile on master. Files restored afterwards; no st
   Dataverse already grants (D-144 Deep read).
 - K3 (fixed): the bound theory now also asserts the kind's own "more than N pages" log, so a 503 from another step cannot pass it.
 - K4: a caller with no Read on `sprk_project` or `sprk_workassignment` logs up to 6 "records are omitted" warnings per Decided call.
+
+## D-236 (fix round 1): the billing kind is the invoice-level codes only
+
+- `SignalLessKinds` builds the billing kind from the catalog, not a hand list: `BillingActions` minus Set firm minus every code the
+  writer files under the LINE (`DecisionRecordWriter.BillingSubjectEntityOf(code) == BillingInvoiceEntity`; the writer's two subject
+  constants became `internal` so the read and the pin use the writer's own classification). Listed billing codes are now the invoice
+  decisions (`approve-invoice`, `reject-invoice`, `return-to-firm`), `override-submission`, `add-adjustment`, `remove-adjustment` and
+  `finish-stranded-decision`; the line codes are not listed.
+- **Why the volume now grows with invoices:** every listed billing code is filed under an invoice, and each is a decision about that
+  invoice as a whole (one approve, reject or return per invoice, plus the occasional override or adjustment). The line entry, which
+  writes one record per line (up to 1,000 lines per request), is no longer read, so a few large invoices can no longer fill the bound.
+- Tests: `D236_MustNotFire_ASignalLessLineDecisionRecord_IsNotListed_ButAnInvoiceLevelOneIs` (theory over the 4 line codes; each
+  also lists an `approve-invoice` record, must fire) and `D236_TheBillingKind_IsTheInvoiceLevelCodes_AndNoLineCodeCanJoinIt` (the line
+  set is exactly the four codes; the kind and the line set are disjoint; kind + line + Set firm = the billing set; every listed code is
+  filed under the invoice). A new billing code lands in exactly one set; a new line code fails the exact-set pin, so it is decided
+  there. The regression file's billing fixture is now `approve-invoice`, and so is the contract case (`worklist.200.decided-signal-less`
+  re-recorded: only that record's summary changed).
+- Fail-before (previous commit's `SignalReadService.cs`, `--filter D236_|ContractBaseline_Worklist_200_Decided_SignalLessRecords`):
+  5 failed (4 line-code cases and the pin), 1 passed (the contract case, which needs no line code).
 
 ## Known limits (K-class)
 
@@ -145,4 +160,4 @@ The static pin test does not compile on master. Files restored afterwards; no st
 
 - None outside this change beyond the review items above.
 
-rework: none task 235
+rework: fix-round-1 task 235

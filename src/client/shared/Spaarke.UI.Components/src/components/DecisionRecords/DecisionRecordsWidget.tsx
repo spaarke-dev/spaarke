@@ -2,8 +2,8 @@
  * DecisionRecordsWidget - the Console's Decision Record tab (task 045, D-47; reconciliation W-18): the Decision Records the caller
  * can read, one row each, filtered by record class (All / Judgements / Routine / Dismissals). A row's one action is Open, which
  * reopens the item the record resolved in the decision wizard READ-ONLY (D-26), replaying THAT record (an item reviewed twice has a
- * row per review, task 226). A record that resolved no item (an email-gate record, D-231; a Record Procedure, billing or assign-firm
- * record, D-234) is listed with its summary and no Open.
+ * row per review, task 226). A record that resolved no item (an email-gate record, D-231; a Record Procedure, invoice-level billing
+ * or assign-firm record, D-234/D-236) is listed with its summary and no Open.
  * There is no edit or delete anywhere (FR-21, R-13: `RecordRow` has neither, and the tab adds none).
  *
  * Data: `GET /api/v1/signals/worklist?set=decided` through the worklist service (task 038/059) and nowhere else (D-15): the route
