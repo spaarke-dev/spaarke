@@ -10,6 +10,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const authenticatedFetch = jest.fn();
 const dispatch = jest.fn();
 let xrm: unknown;
+let clientUrl: string | undefined;
 let widgetProps: Record<string, unknown> | undefined;
 let cardProps: Record<string, unknown> | undefined;
 const createWorklistService = jest.fn((opts: unknown) => ({ opts }));
@@ -20,6 +21,7 @@ jest.mock('@spaarke/ui-components', () => ({
   __esModule: true,
   XrmDataverseClient: class {},
   getXrm: () => xrm,
+  getClientUrl: () => clientUrl,
   openInvoiceReview: (target: unknown) => openInvoiceReview(target),
   createWorklistService: (opts: unknown) => createWorklistService(opts),
   createXrmNavigationService: () => navigation,
@@ -60,6 +62,7 @@ describe('WorklistWorkspaceWidget', () => {
     widgetProps = undefined;
     cardProps = undefined;
     xrm = { WebApi: { retrieveMultipleRecords: jest.fn() } };
+    clientUrl = 'https://org.crm.dynamics.com';
   });
 
   it('reads the route over the session fetch and BFF base url', () => {
@@ -97,6 +100,22 @@ describe('WorklistWorkspaceWidget', () => {
     await open({ invoiceId: 'inv-1', lineId: 'line-1' });
     expect(openInvoiceReview).toHaveBeenCalledWith({ invoiceId: 'inv-1', lineId: 'line-1' });
   });
+
+  it('hands the shared widget the org client URL, so Invoice Review opens in-app with browse (task 195); the navigateTo opener stays as the fallback', () => {
+    render(<WorklistWorkspaceWidget {...props} />);
+    expect(widgetProps?.invoiceReviewClientUrl).toBe('https://org.crm.dynamics.com');
+    expect(typeof widgetProps?.openInvoiceReview).toBe('function');
+  });
+
+  it.each([[undefined], ['']])(
+    'when the client URL cannot be read (%p) it passes none, so the navigateTo fallback runs (task 195)',
+    url => {
+      clientUrl = url;
+      render(<WorklistWorkspaceWidget {...props} />);
+      expect(widgetProps?.invoiceReviewClientUrl).toBeUndefined();
+      expect(typeof widgetProps?.openInvoiceReview).toBe('function');
+    }
+  );
 
   it('"Open Email Review" opens the reconciliation tab on the workspace channel', () => {
     render(<WorklistWorkspaceWidget {...props} />);

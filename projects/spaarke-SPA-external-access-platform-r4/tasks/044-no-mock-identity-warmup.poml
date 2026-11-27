@@ -4,7 +4,7 @@
     <title>no-mock-identity test warm-up so a cold run does not time out (FR-29, #2275)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 038 (P3 deploy)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Test-only change (tags testing, unit-test); root CLAUDE.md §8 still requires code-review + adr-check because it modifies tests</rigor-reason>
     <model-tier>sonnet</model-tier>

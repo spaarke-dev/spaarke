@@ -89,6 +89,7 @@ import {
   type SuggestionPlan,
 } from '../services/reviewModel';
 import { isNoteRefusal, noteMember, noteRefusalMessage } from '../services/noteModel';
+import { useDirtyCheckResponder, useReportDirty } from './useDirtyCheck';
 import { LinesGrid } from './LinesGrid';
 import { LineReviewPane, type PaneDecision } from './LineReviewPane';
 import { RuleGroups } from './RuleGroups';
@@ -174,7 +175,34 @@ const useStyles = makeStyles({
     borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     flexWrap: 'wrap',
   },
-  cards: { flex: 1, minWidth: 0 },
+  // The count cards own the toolbar's first row: a 480px basis leaves them the whole row when the tabs and Add line do not fit beside
+  // them (they drop to the next row), so five cards always have room for one row.
+  cards: { flex: '1 1 480px', minWidth: 0 },
+  // Task 195: the five count cards on ONE row as shorter rectangles. Page-local: it re-lays the shared row's grid and tightens each card
+  // through descendant selectors (the row hands no class to its cards), so the shared MetricCard / MetricCardRow defaults every other
+  // screen uses are unchanged. The count and the label share a line; "n of m done today" and its bar sit under them (the All card, about
+  // 62px tall at 1280px and wider; the others fill the same height). Card colours, hover and selected states stay the shared card's.
+  cardsRow: {
+    gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+    gap: tokens.spacingHorizontalS,
+    '& > [role="button"]': {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'baseline',
+      alignContent: 'center',
+      columnGap: tokens.spacingHorizontalS,
+      rowGap: tokens.spacingVerticalXXS,
+      paddingTop: tokens.spacingVerticalXS,
+      paddingBottom: tokens.spacingVerticalXS,
+      paddingLeft: tokens.spacingHorizontalS,
+      paddingRight: tokens.spacingHorizontalS,
+    },
+    '& > [role="button"] > span:first-of-type': {
+      fontSize: tokens.fontSizeBase500,
+      lineHeight: tokens.lineHeightBase500,
+      marginBottom: 0,
+    },
+  },
   paneTabs: { borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`, flexShrink: 0, paddingLeft: tokens.spacingHorizontalS },
   paneBody: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
   paneTop: { flex: '1 1 50%', minHeight: 0, overflowY: 'auto' },
@@ -354,6 +382,12 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const unsureSends = React.useRef(new Set<string>());
 
   const panes = useTwoPanelLayout({ defaultDetailWidth: 560, minPrimaryWidth: 520, minDetailWidth: 420, storageKey: 'sprk-invoice-review-pane' });
+
+  // Task 195: the Console opens this page in an iframe with browse between invoices and asks before it moves. Answer that check (once, for
+  // the whole page: the decision wizard and the banners are children of this page) and report the page-level state here: a write is in
+  // flight. The forms and the wizard report their own unsaved work (`useReportDirty` in the pane, the dialogs and the decision actions).
+  useDirtyCheckResponder();
+  useReportDirty(busy);
 
   const alive = React.useRef(true);
   /** A review has been shown: a later failed re-read keeps it (and says so) instead of replacing the page with an error. */
@@ -1022,7 +1056,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           <div className={s.card} style={{ flex: 1 }} ref={gridRef}>
             <div className={s.toolbar}>
               <div className={s.cards}>
-                <MetricCardRow layout="wide" ariaLabel="Line filters" cards={cards} />
+                <MetricCardRow layout="wide" ariaLabel="Line filters" className={s.cardsRow} cards={cards} />
               </div>
               {resolvedFilter !== 'all' && (
                 <Caption1 className={s.muted}>

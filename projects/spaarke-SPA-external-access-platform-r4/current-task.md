@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-26 ~19:00Z (task 043 done, PR open)
+> **Last Updated**: 2026-11-27 ~14:30Z (task 043 merged and live on dev: BFF + SPA)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -8,12 +8,12 @@
 | Field | Value |
 |-------|-------|
 | **Active** | **Task 043 DONE** (FR-28 #2269), PR open — see In flight. Next task per TASK-INDEX after the owner's go. Full record: `notes/task-043-notes.md`. |
-| **In flight** | Task 043 PR #3267 (pushed; merge only on the owner's go). UAC APPROVED (uac-r2 2026-11-26); its note 1 fixed in 043 (sign-in Forbidden bind/create → 403 create_unavailable), note 2 = comment; #3264 narrowed to the resolver catch arms. After merge: BFF deploy via uac-r2 (owner go per SHA), then SPA deploy (owner's exact-SHA go). |
-| **Next action** | Owner: merge go for the 043 PR; then request the dev BFF deploy through uac-r2 and an SPA deploy SHA go. |
+| **In flight** | Task 043 PR #3267 MERGED (squash `c438119bca`, 2026-11-26 19:54Z). UAC APPROVED (uac-r2 2026-11-26); its note 1 fixed in 043 (sign-in Forbidden bind/create → 403 create_unavailable), note 2 = comment; #3264 narrowed to the resolver catch arms. BFF with 043 LIVE (see below); 30-min gate PASSED 13:45Z. SPA `c438119bca` LIVE (owner's go). |
+| **Next action** | Next task per TASK-INDEX, on the owner's go. Optional: owner E2E of the 503 retry on dev. |
 
 ## Live on dev
-- **BFF:** `d307d67e36` LIVE since ~18:00Z (uac-r2, owner's go); 30-min gate PASSED 18:31Z. Rollback `140c01219a`. Task 042's BFF part live since `6a2a569ac9`. Task 043 NOT deployed (not merged).
-- **SPA:** master `24d53fb333` LIVE since 2026-11-26 ~15:50Z. Rollback tag `external-spa-dev-rollback-0267ee64a2`. Dispatch SPA deploys from tag `external-spa-dev-<sha>` to build exactly the approved SHA; check the run's headSha.
+- **BFF:** master `d9595dd98e` (contains 043) LIVE since 2026-11-27 ~20:19Z (uac-r2, owner's go); gate due ~20:50Z. Previous: `5cd40984b0` (gate PASSED 13:45Z).
+- **SPA:** `c438119bca` (043 merge) LIVE since 2026-11-27 ~14:29Z (run 46016029559, headSha checked, owner's go). Rollback tag `external-spa-dev-24d53fb333`. Dispatch SPA deploys from tag `external-spa-dev-<sha>` to build exactly the approved SHA; check the run's headSha.
 
 ## Owner questions open
 - Track the raw filing-reference footer seen in an older PRJ-000046 system email?

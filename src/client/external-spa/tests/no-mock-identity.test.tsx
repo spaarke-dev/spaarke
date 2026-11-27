@@ -2,7 +2,7 @@
 // task 042, FR-18, #1566). `import.meta.env.DEV` is stubbed to `false` to stand for a built bundle (every `vite build`
 // replaces it with the literal false); the mock flag is stubbed on to prove it no longer opens mock mode there.
 import * as React from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 const h = vi.hoisted(() => ({ loginRedirect: vi.fn(async () => undefined) }));
@@ -34,6 +34,24 @@ const CONTOSO = {
 };
 const MOCK_IDENTITY = /Jane Smith|externalfirm|\(Mock\)|Sam Rivera|Dana Okafor|Alex Reyes/;
 const SLOW = { timeout: 60000 };
+
+// Warm Vite's transform cache (#2275, FR-29). `vi.resetModules()` in load() clears the module registry but not the
+// transform cache, so on a cold cache the first test to import App paid the whole transform cost against its 60 s
+// per-test timeout. Import the same specifiers the tests import once here, under the hook's own timeout, then reset the
+// registry so every test still starts from a clean graph. Runs before any env stub (stubs are per-test, in the tests).
+const WARMUP_TIMEOUT_MS = 180000;
+beforeAll(async () => {
+  await Promise.all([
+    import('../src/dev-mock'),
+    import('../src/auth/backend-selection'),
+    import('../src/auth/msal-auth'),
+    import('../src/auth/bff-client'),
+    import('../src/api/me-client'),
+    import('../src/pages/WorkspaceHomePage'),
+    import('../src/App'),
+  ]);
+  vi.resetModules();
+}, WARMUP_TIMEOUT_MS);
 
 let fetchUrls: string[];
 let nextStatus: number;

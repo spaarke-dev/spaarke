@@ -173,6 +173,12 @@ public sealed class InquiryDispositionService(
     /// the Inactive state (Completed, Dismissed), which Dataverse applies with its state. The To Do of an open inquiry closes only by
     /// recording the inquiry's disposition (<see cref="RecordDispositionAsync"/>); a write that closes it any other way is refused where it
     /// enters the BFF (<c>ChildRecordEndpoints.UpdateAsync</c>, after <see cref="FindOpenInquiryOfTodoAsync"/>). No I/O.
+    /// <para><b>Fails closed (task 237, uac-r2 note on #3293).</b> The body reaches Dataverse as sent, so the value is read in any form
+    /// Dataverse could accept: a JSON number that is integral (<c>1</c>, <c>1.0</c>, <c>1e0</c>) or a string holding an integer
+    /// (<c>"1"</c>, <c>" 1 "</c>, invariant culture). A <c>statecode</c>/<c>statuscode</c> that cannot be read as an integer (a non-integral
+    /// number, an unparseable string, a boolean, an object, an array) counts as closing: the open-inquiry read then decides, and an
+    /// over-match costs one read, an under-match skips the guard. Only <c>null</c> (a clear) and an integer that names no Inactive state
+    /// do not close it.</para>
     /// </summary>
     public static bool ClosesTodo(JsonElement body)
     {
@@ -181,18 +187,44 @@ public sealed class InquiryDispositionService(
 
         foreach (var property in body.EnumerateObject())
         {
-            if (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt64(out var value))
-                continue;
             // Trimmed as DataverseWriteItemMapper.MapCoreAsync trims column names (task 234 K4): " statecode" still closes it.
             var name = property.Name.Trim();
-            if (string.Equals(name, "statecode", StringComparison.OrdinalIgnoreCase) && value == StateInactive)
+            var isState = string.Equals(name, "statecode", StringComparison.OrdinalIgnoreCase);
+            if (!isState && !string.Equals(name, "statuscode", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (property.Value.ValueKind == JsonValueKind.Null)
+                continue;
+
+            if (!TryReadInteger(property.Value, out var value))
                 return true;
-            if (string.Equals(name, "statuscode", StringComparison.OrdinalIgnoreCase)
-                && value is TodoStatusCompleted or TodoStatusDismissed)
+            if (isState ? value == StateInactive : value is TodoStatusCompleted or TodoStatusDismissed)
                 return true;
         }
 
         return false;
+    }
+
+    /// <summary>An integer from a JSON number (integral, in any notation) or a string holding one; false for anything else.</summary>
+    private static bool TryReadInteger(JsonElement value, out long result)
+    {
+        result = 0;
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Number:
+                if (value.TryGetInt64(out result))
+                    return true;
+                // 1.0, 1e0: integral but not an Int64 literal. 2^63 is the first double past long.MaxValue.
+                if (value.TryGetDouble(out var d) && d == Math.Floor(d) && d >= -9223372036854775808.0 && d < 9223372036854775808.0)
+                {
+                    result = (long)d;
+                    return true;
+                }
+                return false;
+            case JsonValueKind.String:
+                return long.TryParse(value.GetString()?.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
+            default:
+                return false;
+        }
     }
 
     /// <summary>

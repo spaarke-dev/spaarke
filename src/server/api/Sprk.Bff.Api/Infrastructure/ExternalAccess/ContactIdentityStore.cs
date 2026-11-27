@@ -296,6 +296,17 @@ public interface IContactIdentityStore
     Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct);
 
     /// <summary>
+    /// For a probe that answered <see cref="BindingReadability.Failed"/>: whether the environment refuses this identity's
+    /// MEMBERSHIP outright, i.e. it answers the identity's own <c>WhoAmI</c> with HTTP 403 and Dataverse error
+    /// <c>0x80072560</c> ("not a member of the organization"; the application user does not exist in that environment).
+    /// True only on that exact answer. False for every other answer (a throttle, a 5xx, a 403 with another code, an
+    /// unreachable host) and for a store that cannot tell, which is the default: a caller that treats a Failed probe as a
+    /// fault keeps doing so. Informational only: it never changes what <see cref="ProbeBindingReadabilityAsync"/> returns,
+    /// and a caller must not decide or write on the strength of it (the environment is still unread).
+    /// </summary>
+    Task<bool> IsEnvironmentMembershipRefusedAsync(CancellationToken ct) => Task.FromResult(false);
+
+    /// <summary>
     /// ADR-028 A9 (r3 task 046): systemusers whose stored home link — the FIELD-SECURED pair <c>sprk_hometenantid</c> /
     /// <c>sprk_homeobjectid</c> — is (<paramref name="homeTenantId"/>, <paramref name="homeObjectId"/>). Any state, two rows.
     /// Read-only. Never filters on the unsecured key mirrors and never on <c>azureactivedirectoryobjectid</c>.
@@ -1792,6 +1803,32 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         var lookup = await ReadContactsAsync(BuildProbePath(), "masking probe", ct).ConfigureAwait(false);
         return ClassifyProbe(lookup, proof);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// One more <c>WhoAmI</c> (the proof's own first read), asked only when a caller already holds a Failed probe, so a healthy
+    /// environment never pays for it. It is a fresh read rather than a reason carried out of the proof, so the shared
+    /// <see cref="SecuredColumnReadProof"/> contract is untouched and the answer also holds when the proof was held and a
+    /// later read is what failed. A labelled read logs the status and the Dataverse error code only, never the body.
+    /// </remarks>
+    public async Task<bool> IsEnvironmentMembershipRefusedAsync(CancellationToken ct)
+    {
+        var (_, code, _, error) = await GetAsync(BuildWhoAmIPath(), ct, logLabel: "membership check").ConfigureAwait(false);
+        return IsMembershipRefusal(code, error);
+    }
+
+    /// <summary>The Dataverse error code for "the user is not a member of the organization".</summary>
+    internal const string NotAMemberErrorCode = "0x80072560";
+
+    /// <summary>
+    /// True when a read's refusal is Dataverse's membership refusal: HTTP 403 whose error text carries
+    /// <see cref="NotAMemberErrorCode"/> (<paramref name="error"/> is the store's <c>"{status}: {body}"</c>). Exact status and
+    /// code, never a range: a 403 with any other code, or the code under another status, is not this refusal. Pure.
+    /// </summary>
+    internal static bool IsMembershipRefusal(HttpStatusCode status, string? error)
+        => status == HttpStatusCode.Forbidden
+           && error is not null
+           && error.Contains(NotAMemberErrorCode, StringComparison.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public async Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)

@@ -138,6 +138,36 @@ describe('worklist section shim (task 156)', () => {
     });
   });
 
+  // Task 195 (fix round 1, F1): with the org client URL the shared widget opens Invoice Review in-app on the shared modal shell, with browse;
+  // without it the navigateTo opener stays. The Console mounts the Worklist through THIS shim, so the URL has to be read here.
+  test('with Xrm: WorklistWidget gets invoiceReviewClientUrl, the org client URL (Invoice Review opens in-app)', () => {
+    const w = window as unknown as { Xrm?: unknown };
+    w.Xrm = { Utility: { getGlobalContext: () => ({ getClientUrl: () => 'https://org.crm.dynamics.com' }) } };
+    try {
+      mountSection();
+      expect(widgetMock.mock.calls[0][0].invoiceReviewClientUrl).toBe('https://org.crm.dynamics.com');
+      expect(widgetMock.mock.calls[0][0].openInvoiceReview).toBe(openInvoiceReview); // the fallback is still passed
+    } finally {
+      delete w.Xrm;
+    }
+  });
+
+  test('without Xrm: invoiceReviewClientUrl is undefined, so the widget falls back to the navigateTo opener', () => {
+    mountSection();
+    expect(widgetMock.mock.calls[0][0].invoiceReviewClientUrl).toBeUndefined();
+  });
+
+  test('negative: an Xrm whose client URL is empty gives undefined, never an empty string', () => {
+    const w = window as unknown as { Xrm?: unknown };
+    w.Xrm = { Utility: { getGlobalContext: () => ({ getClientUrl: () => '' }) } };
+    try {
+      mountSection();
+      expect(widgetMock.mock.calls[0][0].invoiceReviewClientUrl).toBeUndefined();
+    } finally {
+      delete w.Xrm;
+    }
+  });
+
   test('with Xrm: WorklistWidget gets the wizard lookup and the aggregate row', () => {
     withXrm(retrieve => {
       mountSection();
