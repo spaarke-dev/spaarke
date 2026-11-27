@@ -6,13 +6,14 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// field-mapping-server-write-path-r1 DI-051 (#3258; task 064 boundary 3; task 065): the field-secured SOURCE rule of field
 /// mapping has ONE definition, <c>FieldSecuredSourceRule</c> (<c>CountsAsSecured</c>, the predicate; <c>Split</c>, the rule
-/// split). Task 065 (owner 2026-11-26): it applies only to a mapping source that is not the filing parent, so only the unified
-/// create (<c>RecordCreationService.Mapping.cs</c>) asks it; the field-mapping push copies only from its children's filing
-/// parent and does not. If a field-mapping source grew its own reading of <c>IsSecured</c>, it could disagree with the rule
-/// about which value may be copied.
+/// split), asked by both writers that apply mapping rules: the unified create (<c>RecordCreationService.Mapping.cs</c>) and the
+/// field-mapping push (<c>FieldMappingEndpoints.cs</c>, reading its catalog through <c>FieldMappingPushLookups.cs</c>). Task 065
+/// (owner 2026-11-26): each lifts it only for rows filed under the source (the create's filing parent by table and id; the
+/// push's rows filed under the source by a listed Filing edge); every other source keeps it. If a writer grew its own reading
+/// of <c>IsSecured</c>, the two could disagree about which value may be copied.
 /// </summary>
 /// <remarks>
-/// Enforced by: this source scan (CI and the Stop hook). The create must call the shared members, and no field-mapping source
+/// Enforced by: this source scan (CI and the Stop hook). Each writer must call the shared members, and no field-mapping source
 /// file other than the definition may compare an <c>IsSecured</c> value with <c>JsonValueKind</c> itself. Controls:
 /// <see cref="TheDetector_FiresOnAPrivateCopyAndOnAMissingSharedCall"/> (must fire) and
 /// <see cref="TheDetector_StaysQuietOnTheSharedCalls"/> (must not fire) prove the rule can fail and can pass.
@@ -30,6 +31,8 @@ public class FieldSecuredSourceRuleGuardTests
     {
         ["Services/RecordCreation/RecordCreationService.Mapping.cs"] =
             ["FieldSecuredSourceRule.Split(", "FieldSecuredSourceRule.CountsAsSecured("],
+        ["Api/FieldMappings/FieldMappingEndpoints.cs"] = ["FieldSecuredSourceRule.Split(", "FieldMappingPushLookups.SecuredColumns("],
+        ["Api/FieldMappings/FieldMappingPushLookups.cs"] = ["FieldSecuredSourceRule.CountsAsSecured("],
     };
 
     internal static IReadOnlyList<string> Violations(string code, IEnumerable<string> requiredCalls)
@@ -52,8 +55,10 @@ public class FieldSecuredSourceRuleGuardTests
         string.Join('\n', File.ReadAllLines(Path.Combine(BffRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)))
             .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && !l.TrimStart().StartsWith("*", StringComparison.Ordinal)));
 
-    [Theory(DisplayName = "DI-051 / task 065: the create asks ONE field-secured source rule (FieldSecuredSourceRule) and keeps no private copy")]
+    [Theory(DisplayName = "DI-051 / task 065: create and push ask ONE field-secured source rule (FieldSecuredSourceRule) and keep no private copy")]
     [InlineData("Services/RecordCreation/RecordCreationService.Mapping.cs")]
+    [InlineData("Api/FieldMappings/FieldMappingEndpoints.cs")]
+    [InlineData("Api/FieldMappings/FieldMappingPushLookups.cs")]
     public void EachWriter_UsesTheSharedRule_AndKeepsNoPrivateCopy(string relativePath)
     {
         var violations = Violations(CodeOf(relativePath), RequiredCalls[relativePath]);
