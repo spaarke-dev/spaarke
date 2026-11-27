@@ -191,19 +191,19 @@ public sealed class Issue3239_MatchAllOtherSearchServicesTests
             NullLogger<ReferenceRetrievalService>.Instance);
     }
 
-    [Fact]
-    public async Task ReferenceSearch_MatchAllQuery_RunsAsAKeywordStarSearchInsteadOfFailing()
+    [Theory]
+    [InlineData("*")]
+    [InlineData("  *  ")]
+    public async Task ReferenceSearch_MatchAllQuery_ReturnsNoReferencesAndNeverReachesTheIndex(string query)
     {
+        // Grounding with arbitrary tenant-wide chunks is worse than none: the caller runs ungrounded on an empty result.
         var service = CreateReferences();
 
-        var response = await service.SearchReferencesAsync("*", new ReferenceSearchOptions { TenantId = Tenant });
+        var response = await service.SearchReferencesAsync(query, new ReferenceSearchOptions { TenantId = Tenant });
 
         response.Results.Should().BeEmpty();
-        var body = _wire.Searches.Should().ContainSingle().Subject;
-        body.GetProperty("search").GetString().Should().Be("*");
-        body.TryGetProperty("vectorQueries", out _).Should().BeFalse();
-        body.TryGetProperty("highlight", out _).Should().BeFalse();
-        body.GetProperty("filter").GetString().Should().Contain($"tenantId eq '{Tenant}'");
+        response.TotalCount.Should().Be(0);
+        _wire.Searches.Should().BeEmpty("a match-all sends no search request at all");
         EmbeddingWasNeverRequested();
     }
 
