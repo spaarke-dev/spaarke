@@ -72,6 +72,7 @@ import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
 import { getClientUrl } from "../services/nextStepLauncher";
 import { requestFindSimilarIndexing } from "../services/findSimilarIndexing";
+import type { ParentContext } from "@spaarke/ui-components/services/document-upload";
 import { getAuthProvider, authenticatedFetch as spaarkeAuthenticatedFetch } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,8 @@ export interface INextStepsStepProps {
     bffBaseUrl: string;
     /** Token provider for BFF API authentication. */
     bffTokenProvider: () => Promise<string>;
+    /** The parent the upload was given; Find Similar's index request names the same one (#3299). */
+    parentContext: ParentContext;
     /** Registers the Send-Email composer controller so the wizard can guard Finish. */
     onEmailControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
 }
@@ -613,6 +616,8 @@ interface IFindSimilarStepContentProps {
     bffBaseUrl: string;
     /** Token provider for BFF API authentication. */
     bffTokenProvider: () => Promise<string>;
+    /** The parent the upload was given (#3299). */
+    parentContext: ParentContext;
 }
 
 const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
@@ -620,6 +625,7 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
     uploadedDocumentMap,
     bffBaseUrl,
     bffTokenProvider,
+    parentContext,
 }) => {
     const styles = useStyles();
 
@@ -630,6 +636,8 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
     const [isIndexing, setIsIndexing] = React.useState(false);
     const [tenantId, setTenantId] = React.useState<string>("");
     const [indexWarning, setIndexWarning] = React.useState<string | null>(null);
+    // Documents already sent for indexing in this session: the upload indexes them too, so one request each is enough.
+    const indexAttemptedRef = React.useRef(new Set<string>());
 
     // Resolve tenantId asynchronously from MSAL account on mount
     React.useEffect(() => {
@@ -675,22 +683,32 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
         const driveId = fileResult?.createResult?.driveId;
         const itemId = fileResult?.createResult?.itemId;
 
-        // Trigger indexing if we have file metadata. The request names the tenant and the document (#3299); a
-        // refusal is shown, and the viewer still opens (the upload's own indexing may already have run).
+        // Trigger indexing once per document in this wizard session, if we have file metadata. The request is the
+        // upload's own body (tenant, document, parent; #3299). A refusal is shown INSTEAD of opening the viewer, which
+        // is a modal that would hide it; the next click opens the viewer (the upload's own indexing may have run).
         setIndexWarning(null);
-        if (driveId && itemId) {
+        if (driveId && itemId && !indexAttemptedRef.current.has(selectedDocumentId)) {
+            indexAttemptedRef.current.add(selectedDocumentId);
             setIsIndexing(true);
             try {
                 const indexed = await requestFindSimilarIndexing(
                     spaarkeAuthenticatedFetch,
                     bffBaseUrl,
-                    { documentId: selectedDocumentId, driveId, itemId, fileName: fileResult?.fileName ?? "document" },
+                    {
+                        documentId: selectedDocumentId,
+                        driveId,
+                        itemId,
+                        fileName: fileResult?.fileName ?? "document",
+                        parentContext,
+                    },
                     async () => tenantId || (await getAuthProvider().getTenantId()),
                 );
                 if (!indexed) {
                     setIndexWarning(
-                        "This document could not be sent for indexing, so similar-document results may not include it yet.",
+                        "This document could not be sent for indexing, so similar-document results may not include it yet. " +
+                            "Select Find Similar Documents again to see the results anyway.",
                     );
+                    return;
                 }
             } finally {
                 setIsIndexing(false);
@@ -698,7 +716,7 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
         }
 
         setShowViewer(true);
-    }, [selectedDocumentId, successfulFiles, bffBaseUrl, tenantId]);
+    }, [selectedDocumentId, successfulFiles, bffBaseUrl, tenantId, parentContext]);
 
     return (
         <div className={styles.dynamicStepRoot}>
@@ -776,6 +794,8 @@ interface IDynamicStepBuildOptions {
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
     bffBaseUrl: string;
     bffTokenProvider: () => Promise<string>;
+    /** The parent the upload was given (#3299). */
+    parentContext: ParentContext;
     /** Ref that tracks whether analysis has been created (for canAdvance). */
     analysisCreatedRef: React.MutableRefObject<boolean>;
     /** Ref to WizardShell handle — used to call requestUpdate() after analysis creation. */
@@ -838,6 +858,7 @@ function buildDynamicStepConfig(
                 uploadedDocumentMap={options.uploadedDocumentMap}
                 bffBaseUrl={options.bffBaseUrl}
                 bffTokenProvider={options.bffTokenProvider}
+                parentContext={options.parentContext}
             />
         ),
     };
@@ -856,6 +877,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     uploadedFiles,
     bffBaseUrl,
     bffTokenProvider,
+    parentContext,
     onEmailControllerChange,
 }) => {
     const styles = useStyles();
@@ -937,6 +959,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                         uploadedDocumentMap,
                         bffBaseUrl,
                         bffTokenProvider,
+                        parentContext,
                         analysisCreatedRef,
                         wizardShellRef,
                     }),
@@ -952,7 +975,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, onEmailControllerChange, successfulFiles, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, onEmailControllerChange, successfulFiles, uploadedDocumentMap, bffBaseUrl, bffTokenProvider, parentContext]);
 
     return (
         <div className={styles.root}>
