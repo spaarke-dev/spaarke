@@ -370,7 +370,7 @@ def classify(snapshot, projects_dir, previous_hot, exclude_root=None, tasks_dir=
         if info["cwd"]:
             live_cwds.append((norm_path(info["cwd"]), sid))
 
-    rows = {}
+    rows, links = {}, {}
     for p in procs.values():
         if p.pid in excluded or p.name in NEVER_LIST:
             continue
@@ -408,6 +408,7 @@ def classify(snapshot, projects_dir, previous_hot, exclude_root=None, tasks_dir=
                 owner["other_sessions"] = [i["id"] for i in infos if i is not shown]
         owner["live"] = linked_live
         owner["worktree_hint"] = hint_wt
+        links[p.pid] = (active, linked_live)          # kept for every process, flagged or not (tree pass below)
         unowned = not active and not linked_live
 
         spinning = is_spinning(p, hot.get(p.key), now)
@@ -449,6 +450,8 @@ def classify(snapshot, projects_dir, previous_hot, exclude_root=None, tasks_dir=
         # Stopping the root stops its whole live tree, so judge the whole tree, not just the flagged members.
         tree = subtree(procs[e["root_pid"]], children)
         e["tree_pids"] = [m.pid for m in tree]
+        flagged = {m["pid"] for m in e["processes"]}
+        tree_live = False
         for m in tree:
             if m.name == "claude.exe":
                 e["protected"].append("%s %d: a Claude session runs inside this tree" % (m.name, m.pid))
@@ -456,11 +459,16 @@ def classify(snapshot, projects_dir, previous_hot, exclude_root=None, tasks_dir=
             tags = [t for t in protected_tags(m, owners[m.pid][0]) if t != "session-helper"]
             if tags:
                 e["protected"].append("%s %d: %s" % (m.name, m.pid, ", ".join(tags)))
+            # A quiet member (below the CPU or age thresholds, so not flagged) still belongs to its session.
+            m_active, m_live = links.get(m.pid, (False, False))
+            if m_active and m.pid not in flagged:
+                e["protected"].append("%s %d: its session is active" % (m.name, m.pid))
+            tree_live = tree_live or m_live
         # The most restrictive member decides: one process linked to a live session makes the whole tree `check`.
         member_verdicts = {m["verdict"] for m in e["processes"]}
         if e["protected"] or "busy" in member_verdicts:
             e["verdict"] = "busy"
-        elif "check" in member_verdicts:
+        elif "check" in member_verdicts or tree_live:
             e["verdict"] = "check"
         e["processes"].sort(key=lambda m: -m["core_now"])
     entries.sort(key=lambda e: (ORDER.index(e["verdict"]), -sum(m["core_now"] for m in e["processes"])))

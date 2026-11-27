@@ -222,6 +222,29 @@ class LiveSessionsAreNeverStoppable(Base):
         s.add(101, 100, "python.exe", "python %s\\job.py" % WORKTREE, age=8 * HOUR, rate=1.0)  # the session's
         self.assertEqual(self.verdicts(self.classify(s)), {100: "check"})
 
+    def test_quiet_member_of_an_active_session_makes_the_tree_busy(self):
+        self.transcript(idle_s=60)
+        s = Snap().session(10)
+        s.add(100, 999, "node.exe", "node runner.js", age=8 * HOUR, rate=1.0)              # spinning, no evidence
+        s.add(101, 100, "python.exe", "python %s\\job.py" % WORKTREE, age=0.1 * HOUR)      # quiet, the session's
+        report = self.classify(s)
+        self.assertEqual(self.verdicts(report), {100: "busy"})
+        self.assertIn("python.exe 101: its session is active", report["entries"][0]["protected"])
+
+    def test_quiet_member_of_an_idle_live_session_makes_the_tree_check(self):
+        self.transcript(idle_s=2 * HOUR)
+        s = Snap().session(10)
+        s.add(100, 999, "node.exe", "node runner.js", age=8 * HOUR, rate=1.0)
+        s.add(101, 100, "python.exe", "python %s\\job.py" % WORKTREE, age=8 * HOUR)        # quiet
+        self.assertEqual(self.verdicts(self.classify(s)), {100: "check"})
+
+    def test_quiet_unlinked_member_leaves_the_tree_stoppable(self):
+        self.transcript(idle_s=60)
+        s = Snap().session(10)
+        s.add(100, 999, "node.exe", "node runner.js", age=8 * HOUR, rate=1.0)
+        s.add(101, 100, "python.exe", "python C:\\elsewhere\\job.py", age=8 * HOUR)        # quiet, no evidence
+        self.assertEqual(self.verdicts(self.classify(s)), {100: "likely-leaked"})
+
     def test_worktree_match_respects_path_boundaries(self):
         self.transcript(idle_s=2 * HOUR, cwd="C:\\code_files\\spaarke")    # main checkout, not the -wt- folder
         s = Snap().session(10)
@@ -468,6 +491,15 @@ class Kill(Base):
         self.assertIn("check with session", out)
         rc, calls, _ = self.kill([100], s, force=True)
         self.assertEqual((rc, calls), (0, [["taskkill", "/PID", "101", "/PID", "100", "/F"]]))
+
+    def test_tree_with_a_quiet_member_of_an_active_session_is_refused(self):
+        self.transcript(idle_s=60)
+        s = Snap().session(10)
+        s.add(100, 999, "node.exe", "node runner.js", age=8 * HOUR, rate=1.0)
+        s.add(101, 100, "python.exe", "python %s\\job.py" % WORKTREE, age=0.1 * HOUR)
+        rc, calls, out = self.kill([100], s)
+        self.assertEqual((rc, calls), (1, []))
+        self.assertIn("busy", out)
 
     def test_force_never_stops_an_unlisted_pid(self):
         s = self.leak_and_server().add(400, 1, "notepad.exe", "notepad.exe notes.txt", age=2 * HOUR)
