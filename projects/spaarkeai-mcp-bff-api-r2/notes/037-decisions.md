@@ -544,3 +544,32 @@ sends RunFailed through the saving writer, which has seen no text, so it writes 
 - **CAPABILITY-INDEX:** row 47 and row 50 edited; rows 54, 55 and 56 added.
 - **Owner question still open:** whether to delete an analysis whose run never started (§4.6). With AI switched off this no longer happens (K-1); it remains for a launch timeout, the service being unavailable, or a caller cancel.
 - **Not verified:** live rendering in Chat and Cowork, light and dark (039/043 after the deploy).
+
+## 9. 037d — empty analysis cleanup (D-037-cleanup)
+
+Owner decision (answers the open question in §4.6, §5 Q2 and §8): a start that created the caller's analysis but does not end `Started` deletes
+that analysis, in the same request.
+
+- **What changed.** `DetachedPlaybookRunner.StartReservedAsync` now keeps a `started` flag from the moment `IAnalysisStartAi` returns `Created`, and
+  a `finally` runs for every exit that is not the `Started` return. The `finally` first abandons the launch (the existing stop of the detached run;
+  idempotent), then calls the private helper `DeleteEmptyAnalysisAsync`. No new class, interface or registration.
+- **Exits covered.** (1) `TimeoutException` -> `NotAccepted`; (2) the caller's token cancelled while waiting for the accept (the
+  `OperationCanceledException` still propagates); (3) the final `Unavailable` (run id null or not in the run table); (4) any other exception
+  thrown after the create and before the `Started` return. Not covered, because no analysis exists yet: AI switched off (K-1, answered before the
+  create), a 007 refusal, a failed pre-warm, and a refused or failed create.
+- **Caller only.** The delete is `IDataverseUserClient.DeleteAsync("sprk_analysises({id:D})")` on the request's own services, so Dataverse
+  security decides it as the caller (ADR-028 A10). It is never the app-only entity service, and the promote route's compensation is not reused. Only
+  the id returned by this request's create is ever deleted.
+- **Bounded.** The delete runs on its own `CancellationTokenSource` (`EmptyAnalysisDeleteBudget`, 10 s, on the injected `TimeProvider`), never the
+  caller's token (which may be the cancelled one) and never an unbounded one.
+- **When the delete fails** (refused, a null or failed response, an exception, or the budget elapsing): the start's outcome does not change. One
+  warning is logged with `playbook_run_empty_analysis_delete_failed`, the correlation id, the analysis id and the Dataverse error code or the exception
+  type only (no message text, no exception object: ADR-015, NFR-05). The analysis stays, as it did before this task: the caller's own empty record.
+  Success logs `playbook_run_empty_analysis_deleted` at Information.
+- **Known limits.** `PlaybookRunStartResult.Analysis` still carries the id on `NotAccepted` and `Unavailable`; the MCP tool does not surface it for
+  those outcomes (`RunPlaybookTool.ErrorOf`). If a run began writing between its accept and the abandon, its save can race the delete; on
+  `NotAccepted` the engine never accepted the run, so nothing writes.
+- **Tests** (`tests/integration/auth/Ai/DetachedPlaybookRunnerTests.cs`, "037d"): NotAccepted (path, once, run stopped first, caller delegated),
+  caller cancel (non-cancelled bounded token, exception propagates), Unavailable, Started (never), refused create and AI off (never), failed delete
+  (refused / throws / no response: outcome unchanged, no message text), and a hanging delete cut off by its own budget on the fake clock.
+  `PlaybookRunWorld` gives the caller's `DeleteAsync` a default success answer.

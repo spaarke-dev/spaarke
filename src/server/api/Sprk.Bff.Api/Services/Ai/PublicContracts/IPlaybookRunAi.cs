@@ -238,7 +238,8 @@ public sealed record PlaybookRunResults(
 /// once the engine has accepted the run, never waiting for it to finish. Task 037a (D-037-engine): after the authorization and the pre-warm,
 /// and before the run starts, it creates the caller's analysis on the run's first document (<see cref="IAnalysisStartAi"/>, the route's
 /// create); the run saves its output there and its record is regarding it. A refused create starts nothing
-/// (<see cref="PlaybookRunStartOutcome.AnalysisRefused"/>).</para>
+/// (<see cref="PlaybookRunStartOutcome.AnalysisRefused"/>). A start that creates the analysis but does not end
+/// <see cref="PlaybookRunStartOutcome.Started"/> deletes that analysis as the caller, in the same request (D-037-cleanup, task 037d).</para>
 /// <para><b>Read.</b> A run this process is running, else the engine's own status read (in memory, then task 005's durable record), for
 /// the caller who started it only. Another caller's run and an unknown id both read as <c>null</c>.</para>
 /// </remarks>

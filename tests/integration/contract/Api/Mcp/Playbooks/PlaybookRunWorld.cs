@@ -76,6 +76,9 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
             .ReturnsAsync(DataverseUserResponse.Fail(404, "DATAVERSE_NOT_FOUND", "not found"));
         DataverseUser.Setup(d => d.GetAsync("WhoAmI", It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, null));
+        // Task 037d: the caller's delete of an empty analysis succeeds unless a test sets it up otherwise.
+        DataverseUser.Setup(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(204, null));
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(Logs));
