@@ -1422,66 +1422,48 @@ public sealed class SecureChildShareSynchronizer
     /// <c>false</c> when it is not found.</item>
     /// </list>
     /// <para>Any doubt answers <c>false</c>, which costs only the full resolution — never a wrong "not secure".</para>
-    /// <para>ISS-010 D1 (uac-r2 Q2): with a <paramref name="cache"/> (one child-records request's), a DECIDED answer for the team
-    /// is kept per team id and configured team name, both "cannot be" and "could be" (it is team configuration, which nothing
-    /// on the commit path writes); doubt, "not found" and a fault are read again. <see langword="null"/> reads every time, exactly
-    /// as before.</para>
     /// </remarks>
     internal static async Task<bool> CannotBeSecureOwnerTeamAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct, RecordOwnerLookupCache? cache = null)
+        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
     {
         try
         {
-            var teamName = SecureRecordOwnerTeam.OwnerTeamName(configuration);
-            var settingsConfigured = SecureSettingsConfigured(configuration);
-            var decided = cache is null
-                ? await ReadCannotBeSecureOwnerTeamAsync(dataverse, teamName, settingsConfigured, teamId, ct).ConfigureAwait(false)
-                : await cache.CannotBeSecureOwnerTeamAsync(teamId, teamName, settingsConfigured,
-                    () => ReadCannotBeSecureOwnerTeamAsync(dataverse, teamName, settingsConfigured, teamId, ct)).ConfigureAwait(false);
-            return decided ?? false; // doubt: the full resolution decides
+            var named = new QueryExpression("team")
+            {
+                ColumnSet = new ColumnSet("isdefault", "teamtype"),
+                TopCount = 1,
+                NoLock = true,
+            };
+            named.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+            named.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+            var team = (await dataverse.RetrieveMultipleAsync(named, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (team is null)
+            {
+                if (SecureSettingsConfigured(configuration))
+                {
+                    // Another name proves "not the Secure team" only when the configured team name names a team: the Secure
+                    // team carries that name, so a name that finds no team proves nothing about the team that owns the row.
+                    var carrier = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                    carrier.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+                    carrier.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
+                    carrier.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
+                    return (await dataverse.RetrieveMultipleAsync(carrier, ct).ConfigureAwait(false)).Entities.Count > 0;
+                }
+
+                // The compiled defaults: another name when the team exists, unknown (false) when it does not.
+                var byId = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
+                byId.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+                return (await dataverse.RetrieveMultipleAsync(byId, ct).ConfigureAwait(false)).Entities.Count > 0;
+            }
+
+            if (team.GetAttributeValue<bool?>("isdefault") == true)
+                return true;
+            return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type && type.Value != OwnerTeamType;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return false; // doubt: the full resolution decides
         }
-    }
-
-    /// <summary>The reads behind <see cref="CannotBeSecureOwnerTeamAsync"/>: <c>true</c> or <c>false</c> when the team's row (or
-    /// the configured name's carrier) decides it, <see langword="null"/> for doubt or a team not found. A fault propagates.</summary>
-    private static async Task<bool?> ReadCannotBeSecureOwnerTeamAsync(
-        IGenericEntityService dataverse, string teamName, bool settingsConfigured, Guid teamId, CancellationToken ct)
-    {
-        var named = new QueryExpression("team")
-        {
-            ColumnSet = new ColumnSet("isdefault", "teamtype"),
-            TopCount = 1,
-            NoLock = true,
-        };
-        named.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
-        named.Criteria.AddCondition("name", ConditionOperator.Equal, teamName);
-        var team = (await dataverse.RetrieveMultipleAsync(named, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        if (team is null)
-        {
-            if (settingsConfigured)
-            {
-                // Another name proves "not the Secure team" only when the configured team name names a team: the Secure
-                // team carries that name, so a name that finds no team proves nothing about the team that owns the row.
-                var carrier = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
-                carrier.Criteria.AddCondition("name", ConditionOperator.Equal, teamName);
-                carrier.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
-                carrier.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
-                return (await dataverse.RetrieveMultipleAsync(carrier, ct).ConfigureAwait(false)).Entities.Count > 0 ? true : null;
-            }
-
-            // The compiled defaults: another name when the team exists, unknown when it does not.
-            var byId = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 1, NoLock = true };
-            byId.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
-            return (await dataverse.RetrieveMultipleAsync(byId, ct).ConfigureAwait(false)).Entities.Count > 0 ? true : null;
-        }
-
-        if (team.GetAttributeValue<bool?>("isdefault") == true)
-            return true;
-        return team.GetAttributeValue<OptionSetValue>("teamtype") is { } type ? type.Value != OwnerTeamType : null;
     }
 
     /// <summary>
@@ -1497,12 +1479,12 @@ public sealed class SecureChildShareSynchronizer
     /// <c>null</c>, because the settings name a unit or team Dataverse does not find and the real Secure team may own the row.
     /// </remarks>
     internal static async Task<(bool? Secure, string? Undetermined)> IsSecureOwnerTeamAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct, RecordOwnerLookupCache? cache = null)
+        IGenericEntityService dataverse, IConfiguration configuration, Guid teamId, CancellationToken ct)
     {
-        if (await CannotBeSecureOwnerTeamAsync(dataverse, configuration, teamId, ct, cache).ConfigureAwait(false))
+        if (await CannotBeSecureOwnerTeamAsync(dataverse, configuration, teamId, ct).ConfigureAwait(false))
             return (false, null);
 
-        var secure = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct, cache).ConfigureAwait(false);
+        var secure = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
         if (secure.Refusal is { } refusal)
             return (null, refusal);
         if (secure.TeamId is { } secureTeam)

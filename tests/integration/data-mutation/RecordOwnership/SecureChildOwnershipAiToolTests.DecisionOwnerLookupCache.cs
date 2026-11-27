@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// </summary>
 /// <remarks>
 /// <para><b>Must fire.</b> One commit reads the Secure Record business unit (R1), the Secure Record owner team (R2) and the
-/// matter's business unit's default owner team (R4) once each, across its four creates and their share syncs; R3 and R7 at most
+/// matter's business unit's default owner team (R4) once each, across its four creates and their share syncs; R7 at most
 /// once. A cache per create, or none, reads R1 once per create and per share sync.</para>
 /// <para><b>Same answers.</b> The same writes in the same order and the same response with and without the cache (the request
 /// refuses it), and, through the service, the same owner and the same refusal for a team-owned root, a secure child and the
@@ -29,8 +29,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// </remarks>
 public sealed partial class SecureChildOwnershipAiToolTests
 {
-    /// <summary>The business-unit and team configuration reads of one commit (R1, R2, R3, R4, R7), counted at the wire.</summary>
-    private sealed record ConfigurationReads(int SecureUnit, int SecureTeam, int CanBeSecureTeam, int DefaultTeam, int ActingUser, int Total)
+    /// <summary>The business-unit and team configuration reads of one commit (R1, R2, R4, R7), counted at the wire.</summary>
+    private sealed record ConfigurationReads(int SecureUnit, int SecureTeam, int DefaultTeam, int ActingUser, int Total)
     {
         public static ConfigurationReads Of(DecisionCommitCallProfile profile)
         {
@@ -39,7 +39,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
             return new ConfigurationReads(
                 At("businessunit", "SecureRecordOwnerTeam.ReadSecureBusinessUnitAsync"),
                 At("team", "SecureChildShareSynchronizer.ReadSecureOwnerTeamAsync"),
-                At("team", "SecureChildShareSynchronizer.ReadCannotBeSecureOwnerTeamAsync"),
                 At("team", "RecordOwnershipResolver.ReadDefaultOwnerTeamAsync"),
                 At("systemuser", "RecordOwnershipResolver.ReadActingUserAsync"),
                 calls.Count);
@@ -58,7 +57,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
         WriteProfile("four-action commit WITH the request's owner lookups (D1)", w.Profile);
         (reads.SecureUnit, reads.SecureTeam, reads.DefaultTeam).Should().Be((1, 1, 1),
             $"R1, R2 and R4 once per request across four creates and their share syncs: {reads}");
-        reads.CanBeSecureTeam.Should().BeLessThanOrEqualTo(1, $"R3 at most once per team: {reads}");
         reads.ActingUser.Should().BeLessThanOrEqualTo(1, $"R7 at most once: {reads}");
         reads.Total.Should().Be(103, "part C's 114 less the 11 repeated reads");
     }

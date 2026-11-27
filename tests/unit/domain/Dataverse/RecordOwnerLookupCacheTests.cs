@@ -1,20 +1,15 @@
 // ISS-010 part D1 (#3184): the per-request RecordOwnerLookupCache — one read per request of the business-unit and team
 // configuration rows a decision commit's creates ask again and again (R1 the Secure Record business unit by name, R2 the Secure
-// Record owner team, R3 "can this team be it" per team id, R4 a unit's default owner team, R7 the acting user's unit by Entra
-// object id). The binding conditions (uac-r2 and field-mapping-r1, 2026-11-26) are pinned here: only a successful, non-empty
-// answer is kept; a fault, a cancellation, "not found" and a refusal are removed so the next read goes to the wire; concurrent
-// first reads issue one call; two requests share nothing; R1/R2 are keyed on the configured VALUE; R7 is kept per request only;
-// a request's instance keeps nothing a pass keeps besides R1–R4/R7.
+// Record owner team, R4 a unit's default owner team, R7 the acting user's unit by Entra object id). The binding conditions
+// (uac-r2 and field-mapping-r1, 2026-11-26) are pinned here: a request keeps only a successful, non-empty answer; a fault, a
+// cancellation, "not found" and a refusal are removed so the next read goes to the wire; concurrent first reads issue one call;
+// two requests share nothing; R1/R2 are keyed on the configured VALUE; R7 is kept per request only; a request's instance keeps
+// nothing a pass keeps besides R1, R2, R4 and R7. A pass keeps R1 and R4 exactly as before D1 (every answer that did not fault).
 
+using System.Reflection;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
-using Moq;
-using Spaarke.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Dataverse;
-using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 using FakeDirectory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -126,26 +121,6 @@ public class RecordOwnerLookupCacheTests
     }
 
     [Fact]
-    public async Task R3_BothDecidedAnswersAreKept_PerTeamId_ButDoubtIsReadAgain()
-    {
-        var cache = RequestCache();
-        var cannot = new Wire<bool?>(_ => Task.FromResult<bool?>(true));
-        var could = new Wire<bool?>(_ => Task.FromResult<bool?>(false));
-        var doubt = new Wire<bool?>(_ => Task.FromResult<bool?>(null));
-        var other = Guid.NewGuid();
-        var third = Guid.NewGuid();
-
-        for (var i = 0; i < 2; i++)
-        {
-            (await cache.CannotBeSecureOwnerTeamAsync(Team, "Owners", true, cannot.Read)).Should().BeTrue();
-            (await cache.CannotBeSecureOwnerTeamAsync(other, "Owners", true, could.Read)).Should().BeFalse();
-            (await cache.CannotBeSecureOwnerTeamAsync(third, "Owners", true, doubt.Read)).Should().BeNull();
-        }
-
-        (cannot.Calls, could.Calls, doubt.Calls).Should().Be((1, 1, 2), "uac-r2 Q2: keep yes and no; never keep not-found or doubt");
-    }
-
-    [Fact]
     public async Task R4_AnOwnedTeam_IsReadOnce_ButARefusalIsReadAgain()
     {
         var cache = RequestCache();
@@ -185,6 +160,89 @@ public class RecordOwnerLookupCacheTests
             await cache.ActingUserAsync(key, wire.Read);
             wire.Calls.Should().Be(2, $"{row} is not a single user with a unit");
         }
+    }
+
+    // ── A pass keeps what it kept before D1 (review F2) ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task APass_KeepsNotFoundAndAmbiguousR1_AndARefusedR4_AsBefore_ARequestReadsThemAgain()
+    {
+        foreach (var (cache, expected) in new[] { (new RecordOwnerLookupCache(), 1), (RequestCache(), 2) })
+        {
+            var missing = new Wire<(Guid?, bool)>(_ => Task.FromResult<(Guid?, bool)>((null, false)));
+            var ambiguous = new Wire<(Guid?, bool)>(_ => Task.FromResult<(Guid?, bool)>((null, true)));
+            var refused = new Wire<RecordOwnerResolution>(_ =>
+                Task.FromResult(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoDefaultOwnerTeam, "no default team")));
+            for (var i = 0; i < 2; i++)
+            {
+                (await cache.SecureBusinessUnitAsync("Missing", missing.Read)).Id.Should().BeNull();
+                (await cache.SecureBusinessUnitAsync("Twice", ambiguous.Read)).Ambiguous.Should().BeTrue();
+                (await cache.DefaultOwnerTeamAsync(Unit, refused.Read)).IsRefused.Should().BeTrue();
+            }
+
+            (missing.Calls, ambiguous.Calls, refused.Calls).Should().Be((expected, expected, expected),
+                cache.RequestScoped ? "a request reads not-found and refusals again" : "a pass keeps every answer that did not fault");
+        }
+    }
+
+    [Fact]
+    public async Task APass_SeededWithNoSecureUnit_ReadsItNever_ARequestIsNotSeededWithNotFound()
+    {
+        var pass = new RecordOwnerLookupCache();
+        pass.SeedSecureBusinessUnit("Secure Record", (null, false));
+        var wire = new Wire<(Guid?, bool)>(_ => Task.FromResult<(Guid?, bool)>((Unit, false)));
+        (await pass.SecureBusinessUnitAsync("Secure Record", wire.Read)).Id.Should().BeNull("the reconciler's seed, as before");
+        wire.Calls.Should().Be(0, "a pass seeded with no Secure Record unit never reads it (UAC task 194)");
+
+        var request = RequestCache();
+        request.SeedSecureBusinessUnit("Secure Record", (null, false));
+        (await request.SecureBusinessUnitAsync("Secure Record", wire.Read)).Id.Should().Be(Unit);
+        wire.Calls.Should().Be(1, "a request is never seeded with not-found");
+    }
+
+    [Fact]
+    public async Task APass_FaultIsStillNotKept()
+    {
+        var pass = new RecordOwnerLookupCache();
+        var wire = new Wire<(Guid?, bool)>(call => call == 1
+            ? Task.FromException<(Guid?, bool)>(new InvalidOperationException("Dataverse 503"))
+            : Task.FromResult<(Guid?, bool)>((null, false)));
+
+        var first = () => pass.SecureBusinessUnitAsync("Secure Record", wire.Read);
+        await first.Should().ThrowAsync<InvalidOperationException>();
+        await pass.SecureBusinessUnitAsync("Secure Record", wire.Read);
+        await pass.SecureBusinessUnitAsync("Secure Record", wire.Read);
+        wire.Calls.Should().Be(2, "a fault is asked again; the answer after it is kept for the pass");
+    }
+
+    /// <summary>Review F2, through the resolver: in an environment with no Secure Record business unit (supported), a pass asks
+    /// the unit once for all its rows, as before D1; a request asks it per question (not-found is never kept per request).</summary>
+    [Fact]
+    public async Task APass_WithNoSecureUnit_ReadsTheUnitOnce_NotOncePerRow()
+    {
+        const int Rows = 3;
+        var question = new RecordOwnershipContext { CallerObjectId = FakeDirectory.CallerOid };
+
+        async Task<(int UnitReads, Guid? Owner)> Ask(RecordOwnerLookupCache? cache)
+        {
+            var directory = new FakeDirectory()
+                .WithUser(FakeDirectory.CallerUserId, FakeDirectory.CallerOid, FakeDirectory.GeneralBu)
+                .WithBusinessUnit(FakeDirectory.GeneralBu, "Spaarke")
+                .WithTeam(FakeDirectory.GeneralTeam, FakeDirectory.GeneralBu, isDefault: true, teamType: 0, "Spaarke");
+            var resolver = directory.Resolver();
+            RecordOwnerResolution? answer = null;
+            for (var i = 0; i < Rows; i++)
+                answer = await resolver.ResolveOwnerAsync(question with { LookupCache = cache }, CancellationToken.None);
+            return (directory.QueriedEntities.Count(e => e == "businessunit"), answer!.OwningTeamId);
+        }
+
+        var pass = await Ask(new RecordOwnerLookupCache());
+        var request = await Ask(RequestCache());
+        var none = await Ask(null);
+
+        pass.Should().Be((1, FakeDirectory.GeneralTeam), "a pass: the missing Secure Record unit is read once");
+        request.Should().Be((Rows, FakeDirectory.GeneralTeam), "a request reads not-found again on every question");
+        none.Should().Be((Rows, FakeDirectory.GeneralTeam));
     }
 
     // ── Faults, cancellation and concurrency ─────────────────────────────────────────────────────────────────────────
@@ -283,7 +341,7 @@ public class RecordOwnerLookupCacheTests
         pass.Owner.Should().Be(none.Owner);
     }
 
-    /// <summary>A request's instance keeps nothing a pass keeps besides R1–R4/R7: the restricted-content walk is read per question.</summary>
+    /// <summary>A request's instance keeps nothing a pass keeps besides R1, R2, R4 and R7: the restricted-content walk is read per question.</summary>
     [Fact]
     public async Task ARequestCache_DoesNotKeepTheRestrictedContentWalk_APassCacheDoes()
     {
@@ -308,44 +366,21 @@ public class RecordOwnerLookupCacheTests
         (await WalkReads(RequestCache())).Should().Be(4, "a request walks per question, as with no cache");
     }
 
-    /// <summary>R3 through <see cref="SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync"/>: a decided answer is read once
-    /// per request; a fault answers "could be" (as before) and is read again; no cache reads every time.</summary>
+    /// <summary>Review F4 (CLAUDE.md §11): "can this team be the Secure owner" (R3) has no production caller with a request, so
+    /// it is not cached: no R3 reader takes a <see cref="RecordOwnerLookupCache"/>, and the cache has no R3 entry.</summary>
     [Fact]
-    public async Task R3_ThroughTheReader_IsReadOncePerRequest_AndAFaultIsAskedAgain()
+    public void R3_IsNotCached_NoReaderTakesTheCache()
     {
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["SecureRecord:OwnerTeamName"] = "Secure Record Owners",
-        }).Build();
-        var reads = 0;
-        var fault = true;
-        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
-        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Returns(() =>
-            {
-                reads++;
-                if (fault)
-                {
-                    fault = false;
-                    return Task.FromException<EntityCollection>(new InvalidOperationException("Dataverse 503"));
-                }
+        const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
+        var readers = typeof(Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer).GetMethods(All)
+            .Where(m => m.Name is "CannotBeSecureOwnerTeamAsync" or "IsSecureOwnerTeamAsync")
+            .ToList();
 
-                var row = new Entity("team", Team) { ["isdefault"] = true, ["teamtype"] = new OptionSetValue(0) };
-                return Task.FromResult(new EntityCollection(new List<Entity> { row }));
-            });
-        var cache = RequestCache();
-
-        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(entities.Object, configuration, Team, CancellationToken.None, cache))
-            .Should().BeFalse("a fault is doubt, as before");
-        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(entities.Object, configuration, Team, CancellationToken.None, cache))
-            .Should().BeTrue("the fault was not kept: the team's row is read and proves it is a default team");
-        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(entities.Object, configuration, Team, CancellationToken.None, cache))
-            .Should().BeTrue();
-        reads.Should().Be(2);
-
-        (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(entities.Object, configuration, Team, CancellationToken.None))
-            .Should().BeTrue();
-        reads.Should().Be(3, "no cache: read every time, exactly as before");
+        readers.Should().NotBeEmpty("the R3 readers exist; the guard has its signal");
+        readers.SelectMany(m => m.GetParameters()).Should().NotContain(p => p.ParameterType == typeof(RecordOwnerLookupCache),
+            "no production caller passes a cache to the R3 readers");
+        typeof(RecordOwnerLookupCache).GetMethods(All).Should().NotContain(m => m.Name.Contains("CannotBeSecureOwner"),
+            "the cache keeps no R3 answer");
     }
 
     /// <summary>An ended request's <c>Items</c>: every access throws, as a disposed <c>HttpContext</c>'s does.</summary>
