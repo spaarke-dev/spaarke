@@ -12,7 +12,10 @@ namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 /// <remarks>
 /// <para>From the filing parent (table and id) a mapped value copies whatever its source column's field security; it is still
 /// read as the caller, so it copies only when the caller can read it. A copied value is then readable by whoever can read the
-/// target column. The field-mapping push copies only from the children's filing parent, so it does not ask this rule.</para>
+/// target column. The field-mapping push lifts the rule for the rows that name the source through their one parent lookup, so
+/// it does not ask it.</para>
+/// <para>A system-principal mapping (the Repair pass) never copies a field-secured source column, even from the filing parent:
+/// it has no caller to mask the read against.</para>
 /// <para>The ONE definition: the unified create (<c>RecordCreationService</c>, step 3) asks <see cref="Split"/> and
 /// <see cref="CountsAsSecured"/>. <c>FieldSecuredSourceRuleGuardTests</c> keeps the create on it and keeps a second copy of
 /// the predicate out of the field-mapping sources.</para>

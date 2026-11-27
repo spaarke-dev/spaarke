@@ -168,8 +168,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
-        outcome.MappingWarnings.Should().ContainSingle()
-            .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_description");
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappedValueDroppedCode);
+        warning.Column.Should().Be("sprk_description");
+        warning.Detail.Should().Contain(RecordCreationService.SourceColumnFieldSecured);
     }
 
     [Fact]
