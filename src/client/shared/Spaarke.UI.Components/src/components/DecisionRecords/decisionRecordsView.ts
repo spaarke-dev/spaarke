@@ -4,7 +4,8 @@
  *
  * The route is the only source (D-15): it returns, for each item, the Decision Records the CALLER can read (a record the caller
  * cannot read is not returned). Task 226 (D-231): the route reads records first, so an item reviewed twice comes back once per
- * record, and a record that resolved no item (an email-gate record) comes back in its group's `records` with no item: it is listed
+ * record, and a record that resolved no item (an email-gate record; task 235, D-234: a Record Procedure, invoice-level billing
+ * (D-236) or assign-firm record, under its core record) comes back in its group's `records` with no item: it is listed
  * with its own summary and nothing opens it. This module never widens or invents: an item without a record is dropped here as
  * well, so a defect upstream cannot show a row with nothing behind it.
  */
