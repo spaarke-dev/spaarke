@@ -20,7 +20,7 @@ public sealed class SpikeRealHostWiringTests
         using var factory = new CustomWebAppFactory().WithWebHostBuilder(builder => builder.UseSetting("Mcp:Enabled", "true"));
 
         var names = factory.Services.GetRequiredService<McpToolCatalog>().ToolsFor(McpEndpoints.LegalOperationsArea).Select(t => t.ProtocolTool.Name);
-        names.Should().Contain(["spike_get_profile", "spike_review_nda"]);
+        names.Should().Contain(["spike_get_profile", "spike_review_nda", "spike_review_agreement", "spike_review_legal_hold"]);
 
         using var scope = factory.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<ISpecialistProfileSpikeAi>().Should().BeOfType<SpecialistProfileSpikeAi>();

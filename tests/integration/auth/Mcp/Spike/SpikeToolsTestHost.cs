@@ -64,7 +64,7 @@ internal sealed class SpikeToolsTestHost : IAsyncDisposable
     public SpikeAiDouble Spike { get; }
 
     /// <summary>Starts the host over <paramref name="spike"/>, or over <paramref name="facade"/> when given (for example the AI-off Null facade).</summary>
-    public static async Task<SpikeToolsTestHost> StartAsync(SpikeAiDouble? spike = null, ISpecialistProfileSpikeAi? facade = null)
+    public static async Task<SpikeToolsTestHost> StartAsync(SpikeAiDouble? spike = null, ISpecialistProfileSpikeAi? facade = null, Type[]? tools = null)
     {
         spike ??= new SpikeAiDouble();
         var builder = WebApplication.CreateBuilder();
@@ -93,7 +93,7 @@ internal sealed class SpikeToolsTestHost : IAsyncDisposable
             });
         builder.Services.AddAuthorization();
         builder.Services.AddRateLimitingModule();
-        builder.Services.AddMcpModule(builder.Configuration, new[] { typeof(SpikeGetProfileTool), typeof(SpikeReviewNdaTool) });
+        builder.Services.AddMcpModule(builder.Configuration, tools ?? new[] { typeof(SpikeGetProfileTool), typeof(SpikeReviewNdaTool) });
 
         var app = builder.Build();
         app.UseAuthentication();

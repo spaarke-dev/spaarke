@@ -172,6 +172,31 @@ internal sealed class SpikeGetProfileTool : McpToolDefinition
         HttpContext? http, ISpecialistProfileSpikeAi spike, SpikeTestProfileSet profiles, string function, CancellationToken cancellationToken)
     {
         var correlation = http?.TraceIdentifier;
+        var (callerError, systemUserId, reason) = await ResolveCallerAsync(http, spike, cancellationToken);
+        if (callerError != null)
+        {
+            return (callerError, null, reason);
+        }
+
+        var profile = profiles.Find(function, systemUserId!);
+        if (profile == null)
+        {
+            return (SpikeToolCall.Error(SpikeToolCall.NoProfile,
+                $"No {function} test profile is set up for the signed-in user. Stop: do not use a default profile or anyone else's.", 404, correlation), null, null);
+        }
+
+        return (null, profile, null);
+    }
+
+    /// <summary>
+    /// The signed-in caller's systemuserid, or the fail-closed error (<c>CALLER_UNRESOLVED</c>, <c>CALLER_LOOKUP_FAILED</c>,
+    /// <c>AI_DISABLED</c>) with its identifier-only reason. The first step of <see cref="ResolveProfileAsync"/>, and all the G5 routing
+    /// stubs (<see cref="SpikeRoutingStub"/>) need: they serve no profile, but still answer only a resolved Spaarke user.
+    /// </summary>
+    internal static async Task<(CallToolResult? Error, string? SystemUserId, string? Reason)> ResolveCallerAsync(
+        HttpContext? http, ISpecialistProfileSpikeAi spike, CancellationToken cancellationToken)
+    {
+        var correlation = http?.TraceIdentifier;
         if (http == null || http.User?.Identity?.IsAuthenticated != true)
         {
             return (CallerUnresolved(correlation), null, "not-authenticated");
@@ -184,14 +209,7 @@ internal sealed class SpikeGetProfileTool : McpToolDefinition
             return (UnresolvedError(reason, correlation), null, reason);
         }
 
-        var profile = profiles.Find(function, caller.SystemUserId);
-        if (profile == null)
-        {
-            return (SpikeToolCall.Error(SpikeToolCall.NoProfile,
-                $"No {function} test profile is set up for the signed-in user. Stop: do not use a default profile or anyone else's.", 404, correlation), null, null);
-        }
-
-        return (null, profile, null);
+        return (null, caller.SystemUserId, null);
     }
 
     /// <summary>

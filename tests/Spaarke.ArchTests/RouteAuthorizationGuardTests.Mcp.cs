@@ -96,6 +96,18 @@ public partial class RouteAuthorizationGuardTests
             "spike_review_nda (FR-02, model-visible, read-only): the caller's own NDA test profile (same fail-closed lookup) bound as the "
             + "declared inputs of the DEV-only agreement-review-spike Action, run through ISpecialistProfileSpikeAi (IContextBinder + "
             + "IActionRunner) with the profile's tier applied; writes nothing."),
+        new McpTool("SpikeReviewAgreementStubTool", "", "ISpecialistProfileSpikeAi",
+            "spike_review_agreement (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
+            + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
+        new McpTool("SpikeReviewLegalHoldStubTool", "", "ISpecialistProfileSpikeAi",
+            "spike_review_legal_hold (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
+            + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
+        new McpTool("SpikeReviewAgreementStubTool", "", "ISpecialistProfileSpikeAi",
+            "spike_review_agreement (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
+            + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
+        new McpTool("SpikeReviewLegalHoldStubTool", "", "ISpecialistProfileSpikeAi",
+            "spike_review_legal_hold (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
+            + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
         // ── end spike ──
     };
 
