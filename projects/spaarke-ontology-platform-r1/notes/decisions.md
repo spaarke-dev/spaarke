@@ -876,7 +876,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 ## D-232 — A system-closed Decision Record derives its privilege flag app-only (owner, 2026-11-27; #3275, DI-177)
 
-- **Decision (owner, answered in this session):** option A. When the nightly re-evaluation writes the ConditionCleared Decision Record, it derives `sprk_privilegeflagged` with the same `WorkItemPrivilege` rule the commit route uses (D-212, task 225), read app-only as the job's identity; it no longer copies the Signal column nothing writes (DI-64). The flag is a stamp; nothing branches on it, and a reader learns no more than the Decide lane shows (D-142). Task 233.
+- **Decision (owner, answered in this session):** option A. When the nightly re-evaluation writes the ConditionCleared Decision Record, it derives `sprk_privilegeflagged` with the same `WorkItemPrivilege` rule the commit route uses (D-212, task 225), read app-only as the job's identity; it no longer copies the Signal column nothing writes (DI-64). The flag is a stamp; nothing branches on it. It reflects the application's view of every evidence communication, so `false` tells a reader those communications are not classified privileged; their ids are already in the Signal's stored evidence refs, and the commit path (task 225) stamps the decider's view the same way (PR #3292 review). Task 233.
 - **Rejected:** a "not assessed" (null) flag on system closures (B); documenting that system closures are never flagged (C).
 
 ## D-233 — An open inquiry's outcome To Do closes only through the BFF, from SmartTodo, LegalWorkspace and the chat tool (owner, 2026-11-27; #3279, DI-179, #1984)
