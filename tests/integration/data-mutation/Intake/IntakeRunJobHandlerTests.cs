@@ -193,18 +193,22 @@ public sealed class IntakeRunJobHandlerTests
         bed.RequestStage().Should().Be(IntakeRequestStages.AwaitingApproval);
     }
 
-    [Fact]
-    public async Task ProcessAsync_SameMessageRedeliveredWhileTheFirstDeliveryStillRuns_TheOverrunDeliveryWritesNothingMore()
+    // ── Review F1: the claim heartbeat ──────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(20)] // the default
+    [InlineData(5)]  // the shortest the option allows
+    public async Task ProcessAsync_SameMessageRedeliveredWhileTheFirstDeliveryIsInALongAiCall_TheHeartbeatKeepsTheClaimAndTheRedeliveryWritesNothing(
+        int heartbeatSeconds)
     {
         var bed = new IntakeRunTestBed();
+        bed.Options.CurrentValue = new IntakePipelineOptions { ClaimHeartbeatSeconds = heartbeatSeconds };
         var runId = await bed.CreateRunAsync();
         var jobId = Guid.NewGuid();
 
-        // The first delivery is stuck in the AI call past its message lock; Service Bus redelivers the SAME message.
+        // The first delivery is in the AI call for two minutes, past its message lock; Service Bus redelivers the SAME message.
         var firstInAi = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var firstResult = new TaskCompletionSource<AgreementClassifyResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondInAi = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var secondResult = new TaskCompletionSource<AgreementClassifyResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
         bed.AgreementAi.Setup(a => a.ClassifyAsync(It.IsAny<AgreementClassifyRequest>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
@@ -215,28 +219,141 @@ public sealed class IntakeRunJobHandlerTests
                     return firstResult.Task;
                 }
 
+                // Only a delivery that took the run over gets here; it answers at once so the takeover shows as a run.
+                return Task.FromResult(IntakeRunTestBed.Classified());
+            });
+
+        var first = Task.Run(() => bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId, jobId, deliveryCount: 1), CancellationToken.None));
+        await firstInAi.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var owner = bed.Run(runId).State.Claim!.Owner;
+        var claimedAt = bed.Time.GetUtcNow();
+
+        await AdvanceThroughBeatsAsync(bed, owner, TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(heartbeatSeconds));
+
+        var redelivered = await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId, jobId, deliveryCount: 2), CancellationToken.None);
+
+        redelivered.Status.Should().Be(JobStatus.Failed, "the claim is live: the holder is still heartbeating");
+        calls.Should().Be(1, "the redelivery never reaches the AI call");
+        bed.Run(runId).State.Claim!.Owner.Should().Be(owner, "the redelivery did not take the run over");
+        bed.Run(runId).State.Claim!.At.Should().BeAfter(claimedAt, "the holder refreshed its claim while it waited on the AI");
+
+        firstResult.SetResult(IntakeRunTestBed.Classified());
+        (await first.WaitAsync(TimeSpan.FromSeconds(30))).Status.Should().Be(JobStatus.Completed);
+        bed.Harness.StepCalls.Should().OnlyContain(kv => kv.Value == 1);
+        bed.Harness.PersistCalls.Should().Be(1);
+        bed.RequestStage().Should().Be(IntakeRequestStages.AwaitingApproval);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_HolderWhoseHeartbeatsCannotLand_IsTakenOverAfterTheTakeoverAgeAndItsAiCallIsCancelledWithNoFurtherWrite()
+    {
+        var bed = new IntakeRunTestBed();
+        var runId = await bed.CreateRunAsync();
+        var jobId = Guid.NewGuid();
+        var beat = IntakeRunStore.ClaimHeartbeat(bed.Options.CurrentValue.ClaimHeartbeatSeconds);
+
+        var firstInAi = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondInAi = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondResult = new TaskCompletionSource<AgreementClassifyResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        bed.AgreementAi.Setup(a => a.ClassifyAsync(It.IsAny<AgreementClassifyRequest>(), It.IsAny<CancellationToken>()))
+            .Returns((AgreementClassifyRequest _, CancellationToken token) =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    // An AI call that honours its token and never answers on its own.
+                    token.Register(() => firstCancelled.TrySetResult());
+                    firstInAi.SetResult();
+                    return new TaskCompletionSource<AgreementClassifyResult>().Task.WaitAsync(token);
+                }
+
                 secondInAi.SetResult();
                 return secondResult.Task;
             });
 
         var first = Task.Run(() => bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId, jobId, deliveryCount: 1), CancellationToken.None));
         await firstInAi.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        bed.Time.Advance(TimeSpan.FromMinutes(2));
+        var firstOwner = bed.Run(runId).State.Claim!.Owner;
+
+        // The first delivery's heartbeats fail (its Dataverse connection is down); every other write lands.
+        var heartbeatsDown = 1;
+        var refused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bed.Dataverse.RunWriteHook = (state, fields) =>
+        {
+            if (Volatile.Read(ref heartbeatsDown) == 1 && fields.Count == 1 && state.Claim?.Owner == firstOwner)
+            {
+                Volatile.Read(ref refused).TrySetResult();
+                return new TimeoutException("seeded: the holder's Dataverse write timed out");
+            }
+
+            return null;
+        };
+        for (var silent = TimeSpan.Zero; silent < IntakeRunStore.OwnerTakeoverAge; silent += beat)
+        {
+            Volatile.Write(ref refused, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            var thisBeat = Volatile.Read(ref refused).Task;
+            bed.Time.Advance(beat);
+            await thisBeat.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
         var second = Task.Run(() => bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId, jobId, deliveryCount: 2), CancellationToken.None));
         await secondInAi.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        var writesBeforeTheOverrunResumes = bed.Dataverse.Writes.Count;
+        bed.Run(runId).State.Claim!.Owner.Should().NotBe(firstOwner, "a claim with no landed heartbeat for the takeover age is taken over");
+        var writesBeforeTheOverrunBeats = bed.Dataverse.Writes.Count;
 
-        firstResult.SetResult(IntakeRunTestBed.Classified());
-        var overrun = await first;
+        // The holder's connection comes back: its next beat finds the claim taken over, and its AI call is cancelled.
+        Volatile.Write(ref heartbeatsDown, 0);
+        bed.Time.Advance(beat);
+        await firstCancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var overrun = await first.WaitAsync(TimeSpan.FromSeconds(30));
 
         overrun.Status.Should().Be(JobStatus.Failed, "its claim was taken over by the redelivery");
-        bed.Dataverse.Writes.Count.Should().Be(writesBeforeTheOverrunResumes, "the overrun delivery's fence refuses every further write");
+        bed.Dataverse.Writes.Skip(writesBeforeTheOverrunBeats)
+            .Where(w => w.Entity == IntakeRunStore.RunEntity && w.Fields.TryGetValue(IntakeRunStore.RunState, out var json)
+                && IntakeRunState.Parse(json as string).Claim?.Owner == firstOwner)
+            .Should().BeEmpty("the overrun delivery's fence refuses every further write");
 
         secondResult.SetResult(IntakeRunTestBed.Classified());
-        (await second).Status.Should().Be(JobStatus.Completed);
+        (await second.WaitAsync(TimeSpan.FromSeconds(30))).Status.Should().Be(JobStatus.Completed);
+        calls.Should().Be(2);
         bed.Harness.StepCalls.Should().OnlyContain(kv => kv.Value == 1);
         bed.Harness.PersistCalls.Should().Be(1);
         bed.RequestStage().Should().Be(IntakeRequestStages.AwaitingApproval);
+    }
+
+    /// <summary>
+    /// Advances fake time by <paramref name="total"/> one beat at a time and lets each beat's refresh by <paramref name="owner"/>
+    /// land before the next. A beat that does not land within the wait is not failed here: whether the claim stayed live is what
+    /// the caller's assertions decide (and what the seeding proof, heartbeat removed, shows failing).
+    /// </summary>
+    private static async Task AdvanceThroughBeatsAsync(IntakeRunTestBed bed, string owner, TimeSpan total, TimeSpan beat)
+    {
+        for (var elapsed = TimeSpan.Zero; elapsed < total; elapsed += beat)
+        {
+            var target = bed.Time.GetUtcNow() + beat;
+            var landed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            bed.Dataverse.RunWriteHook = (state, _) =>
+            {
+                if (state.Claim is { } claim && claim.Owner == owner && claim.At >= target)
+                {
+                    landed.TrySetResult();
+                }
+
+                return null;
+            };
+            bed.Time.Advance(beat);
+            try
+            {
+                await landed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                // No refresh landed for this beat (see the summary).
+            }
+        }
+
+        bed.Dataverse.RunWriteHook = null;
     }
 
     // ── FR-10: triage slot ───────────────────────────────────────────────────────────────────────

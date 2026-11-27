@@ -30,6 +30,14 @@ public sealed class IntakePipelineOptions
     /// <summary>Per-harness switches, keyed by the harness key (<c>nda</c>), matched case-insensitively. Absent → enabled.</summary>
     public Dictionary<string, bool> Harnesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// How often, in seconds, a delivery refreshes its run claim while it waits on a long step (the AI call, a harness step,
+    /// the persist, the door return), so a redelivery of the same message takes the run over only after the holder fell silent
+    /// (task 013 review F1). Bounded by <c>IntakeRunStore.ClaimHeartbeat</c> to 5 s through a third of the same-job takeover
+    /// age (60 s, so at most 20 s): a refresh can miss twice before a takeover is allowed. Absent or not positive: 20.
+    /// </summary>
+    public int ClaimHeartbeatSeconds { get; set; } = 20;
+
     /// <summary>True unless <see cref="Doors"/> sets <paramref name="door"/> to false.</summary>
     public bool IsDoorEnabled(string door) => IsEnabled(Doors, door);
 

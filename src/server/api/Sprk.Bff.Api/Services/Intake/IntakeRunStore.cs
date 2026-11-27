@@ -24,7 +24,9 @@ namespace Sprk.Bff.Api.Services.Intake;
 /// job id plus a per-delivery nonce), so two deliveries of the same message never share a fence. A claim last refreshed
 /// less than <see cref="ClaimLease"/> ago by another job is refused; a later delivery of the SAME job takes it over once it
 /// is <see cref="OwnerTakeoverAge"/> old (the invoice lock's rule, task 068 #1086: a duplicate send arrives within seconds, a
-/// genuine redelivery only after the message lock expired). Every fenced write refreshes the claim's time.</para>
+/// genuine redelivery only after the message lock expired). Every fenced write refreshes the claim's time, and while a delivery
+/// waits on a long step it refreshes it every <see cref="ClaimHeartbeat"/> (<see cref="RefreshClaimAsync"/>, review F1), so a
+/// same-job takeover happens only once the holder stopped heartbeating.</para>
 /// <para><b>Every later write is fenced.</b> <see cref="WriteRunAsync"/> re-reads the row, refuses
 /// (<see cref="IntakeClaimLostException"/>) when the stored claim is no longer this delivery's, applies the change to the
 /// state AS STORED (so a step result the engine completion recorded meanwhile is kept) and writes conditionally on the
@@ -79,6 +81,30 @@ public class IntakeRunStore
 
     /// <summary>How old a claim of the same job must be before a later delivery of that job takes it over (the invoice lock's value, #1086).</summary>
     internal static readonly TimeSpan OwnerTakeoverAge = TimeSpan.FromMinutes(1);
+
+    /// <summary>The shortest claim heartbeat (<see cref="ClaimHeartbeat"/>): one fenced write per beat, so never a tight loop.</summary>
+    internal static readonly TimeSpan MinClaimHeartbeat = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The longest claim heartbeat: a third of <see cref="OwnerTakeoverAge"/>, so a live holder's claim is never older than the
+    /// takeover age even when two refreshes in a row fail (review F1).
+    /// </summary>
+    internal static readonly TimeSpan MaxClaimHeartbeat = OwnerTakeoverAge / 3;
+
+    /// <summary>
+    /// The heartbeat interval for <c>IntakePipelineOptions.ClaimHeartbeatSeconds</c>: not positive → <see cref="MaxClaimHeartbeat"/>
+    /// (the default, 20 s); otherwise clamped to [<see cref="MinClaimHeartbeat"/>, <see cref="MaxClaimHeartbeat"/>].
+    /// </summary>
+    internal static TimeSpan ClaimHeartbeat(int seconds)
+    {
+        if (seconds <= 0)
+        {
+            return MaxClaimHeartbeat;
+        }
+
+        var interval = TimeSpan.FromSeconds(seconds);
+        return interval < MinClaimHeartbeat ? MinClaimHeartbeat : interval > MaxClaimHeartbeat ? MaxClaimHeartbeat : interval;
+    }
 
     /// <summary>The claim owner of one delivery of <paramref name="jobId"/>: <c>{jobId:N}.{nonce:N}</c>.</summary>
     public static string ClaimOwner(Guid jobId) => $"{jobId:N}.{Guid.NewGuid():N}";
@@ -321,6 +347,14 @@ public class IntakeRunStore
             }
         }
     }
+
+    /// <summary>
+    /// The heartbeat (review F1): refreshes <paramref name="owner"/>'s claim time and nothing else, through the same fenced,
+    /// row-version-conditional write as every other run write (<see cref="WriteRunAsync"/>).
+    /// </summary>
+    /// <exception cref="IntakeClaimLostException">Another delivery took the run over; nothing was written.</exception>
+    public virtual Task RefreshClaimAsync(Guid runId, string owner, CancellationToken ct) =>
+        WriteRunAsync(runId, owner, mutate: null, fields: null, release: false, ct);
 
     /// <summary>Clears this owner's claim, if it still holds it. Best effort: an unreleased claim expires after <see cref="ClaimLease"/>.</summary>
     public virtual async Task ReleaseClaimAsync(Guid runId, string owner, CancellationToken ct)

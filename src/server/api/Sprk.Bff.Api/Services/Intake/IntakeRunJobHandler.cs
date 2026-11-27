@@ -21,7 +21,9 @@ namespace Sprk.Bff.Api.Services.Intake;
 /// no-op Success, a row that is not this request's intake run is Poisoned without a write; (c) <b>terminal first</b>: a
 /// Completed, Failed or Cancelled run is a no-op Success; (d) the <b>atomic claim</b> (<see cref="IntakeRunStore.TryClaimAsync"/>,
 /// a write conditional on the row version read; never <c>IIdempotencyService</c> alone, #984): a delivery that cannot take
-/// it writes nothing and returns Failure (Poisoned on the final delivery); (e) the kill switch is read after the terminal
+/// it writes nothing and returns Failure (Poisoned on the final delivery); the holder refreshes the claim during every long
+/// await (<see cref="WhileHeartbeatingAsync{T}"/>, review F1), so the same message redelivered mid AI call cannot take the
+/// run over while the first delivery is alive; (e) the kill switch is read after the terminal
 /// rule, before the harness is called; (f) <b>resume from stored state</b>: each stage's result is stored on the run
 /// before the run advances, and a stage or harness step whose result is stored is never run again (FR-07a).</para>
 /// <para><b>Write order.</b> Status In Progress ("Processing") is written at Receive, before any AI call. A marker is
@@ -261,13 +263,15 @@ public sealed class IntakeRunJobHandler : IJobHandler
             if (state.ContentDocumentIds.Count > 0)
             {
                 await WriteAsync(d, IntakeRunStage.Classify, null, ct).ConfigureAwait(false);
-                var text = await _text.ReadTextAsync(state.ContentDocumentIds[0], ct).ConfigureAwait(false);
+                var documentId = state.ContentDocumentIds[0];
+                var text = await WhileHeartbeatingAsync(d, t => _text.ReadTextAsync(documentId, t), ct).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(text))
                 {
                     AgreementClassifyResult result;
                     try
                     {
-                        result = await _agreementAi.ClassifyAsync(new AgreementClassifyRequest { DocumentText = text, SubjectId = d.RunId }, ct)
+                        result = await WhileHeartbeatingAsync(
+                                d, t => _agreementAi.ClassifyAsync(new AgreementClassifyRequest { DocumentText = text, SubjectId = d.RunId }, t), ct)
                             .ConfigureAwait(false);
                     }
                     catch (FeatureDisabledException)
@@ -355,7 +359,8 @@ public sealed class IntakeRunJobHandler : IJobHandler
                 continue; // recorded meanwhile (state is the stored state just written): never dispatched or run again
             }
 
-            var outcome = await harness.RunStepAsync(step, harnessRequest, state.Steps, ct).ConfigureAwait(false);
+            var completedSteps = state.Steps;
+            var outcome = await WhileHeartbeatingAsync(d, t => harness.RunStepAsync(step, harnessRequest, completedSteps, t), ct).ConfigureAwait(false);
             switch (outcome.Kind)
             {
                 case IntakeHarnessStepOutcomeKind.Completed when outcome.Result is not null:
@@ -403,7 +408,8 @@ public sealed class IntakeRunJobHandler : IJobHandler
             }
 
             await WriteAsync(d, IntakeRunStage.Persist, null, ct).ConfigureAwait(false);
-            var persisted = await harness.PersistAsync(harnessRequest, state.Steps, ct).ConfigureAwait(false);
+            var stepsToPersist = state.Steps;
+            var persisted = await WhileHeartbeatingAsync(d, t => harness.PersistAsync(harnessRequest, stepsToPersist, t), ct).ConfigureAwait(false);
             var fields = persisted.OutputDocumentId is { } output && output != Guid.Empty
                 ? new Dictionary<string, object> { [IntakeRunStore.RunOutputDocument] = new EntityReference(IntakeRunStore.DocumentEntity, output) }
                 : null;
@@ -441,7 +447,7 @@ public sealed class IntakeRunJobHandler : IJobHandler
 
             var returnKey = MarkerKey("return", d.RunId);
             state = await WriteAsync(d, IntakeRunStage.Return, s => s.Markers["return"] = returnKey, ct).ConfigureAwait(false);
-            await door.ReturnAsync(new IntakeReturnContext
+            var returnContext = new IntakeReturnContext
             {
                 RequestId = d.RequestId,
                 RunId = d.RunId,
@@ -449,7 +455,8 @@ public sealed class IntakeRunJobHandler : IJobHandler
                 DocumentIdsByRole = state.Outputs?.DocumentIdsByRole ?? new Dictionary<string, Guid>(),
                 ReturnDocumentRoles = state.Outputs?.ReturnDocumentRoles ?? Array.Empty<string>(),
                 CorrelationId = d.Job.CorrelationId,
-            }, ct).ConfigureAwait(false);
+            };
+            await WhileHeartbeatingAsync(d, t => door.ReturnAsync(returnContext, t), ct).ConfigureAwait(false);
             state = await WriteAsync(d, IntakeRunStage.Return, s => s.MarkCompleted(IntakeRunStage.Return), ct).ConfigureAwait(false);
         }
 
@@ -585,6 +592,77 @@ public sealed class IntakeRunJobHandler : IJobHandler
         fields ??= new Dictionary<string, object>();
         fields[IntakeRunStore.RunCurrentStage] = stage.ToString();
         return _store.WriteRunAsync(d.RunId, d.Owner, mutate, fields, release, ct);
+    }
+
+    /// <summary>
+    /// Runs one long await (the content read, the AI call, a harness step, the persist, the door return) while this delivery's
+    /// claim is refreshed every <see cref="IntakeRunStore.ClaimHeartbeat"/> through the same fenced, row-version-conditional
+    /// write (<see cref="IntakeRunStore.RefreshClaimAsync"/>, review F1). A live holder's claim therefore never reaches
+    /// <see cref="IntakeRunStore.OwnerTakeoverAge"/>, and a redelivery of the same message takes the run over only after the
+    /// holder stopped heartbeating. The heartbeat is stopped and awaited before the next run write, so a delivery never writes
+    /// its run twice at once. When a beat finds the claim taken over, the step is cancelled and the delivery ends as claim
+    /// lost (it writes nothing more); a beat that fails for any other reason is retried at the next beat.
+    /// </summary>
+    private async Task<T> WhileHeartbeatingAsync<T>(Delivery d, Func<CancellationToken, Task<T>> work, CancellationToken ct)
+    {
+        var interval = IntakeRunStore.ClaimHeartbeat(_options.CurrentValue.ClaimHeartbeatSeconds);
+        using var step = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var stop = new CancellationTokenSource();
+        var beats = HeartbeatAsync(d, interval, step, stop.Token);
+
+        // The step's token is cancelled by the caller's token or by a beat that found the claim taken over: the latter is "lost".
+        bool Lost() => step.IsCancellationRequested && !ct.IsCancellationRequested;
+        try
+        {
+            var result = await work(step.Token).ConfigureAwait(false);
+            return Lost() ? throw new IntakeClaimLostException(d.RunId) : result;
+        }
+        catch (Exception ex) when (ex is not IntakeClaimLostException && Lost())
+        {
+            throw new IntakeClaimLostException(d.RunId);
+        }
+        finally
+        {
+            await stop.CancelAsync().ConfigureAwait(false);
+            await beats.ConfigureAwait(false);
+        }
+    }
+
+    private Task WhileHeartbeatingAsync(Delivery d, Func<CancellationToken, Task> work, CancellationToken ct) =>
+        WhileHeartbeatingAsync(d, async t =>
+        {
+            await work(t).ConfigureAwait(false);
+            return true;
+        }, ct);
+
+    private async Task HeartbeatAsync(Delivery d, TimeSpan interval, CancellationTokenSource step, CancellationToken stop)
+    {
+        using var timer = new PeriodicTimer(interval, _time);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop).ConfigureAwait(false))
+            {
+                try
+                {
+                    await _store.RefreshClaimAsync(d.RunId, d.Owner, stop).ConfigureAwait(false);
+                }
+                catch (IntakeClaimLostException)
+                {
+                    _logger.LogWarning("Intake run {RunId}: the claim was taken over during a long step; the step is cancelled", d.RunId);
+                    await step.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex) when (!stop.IsCancellationRequested)
+                {
+                    // Transient (Dataverse busy, throttled): the claim stays this delivery's; the next beat retries.
+                    _logger.LogWarning("Intake run {RunId}: a claim heartbeat failed ({ExceptionType}); retried at the next beat", d.RunId, ex.GetType().Name);
+                }
+            }
+        }
+        catch (Exception) when (stop.IsCancellationRequested)
+        {
+            // Stopped: the step finished. A beat cut short by the stop writes nothing the next run write does not re-read.
+        }
     }
 
     /// <summary>Another delivery holds the run: write nothing, retry later (Poisoned on the final delivery, as the invoice lock).</summary>

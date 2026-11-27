@@ -254,7 +254,7 @@ internal sealed record WriteRecord(string Entity, Guid Id, IReadOnlyDictionary<s
 /// An in-memory Dataverse: rows by (table, id) with a <c>versionnumber</c> bumped on every write; conditional writes compare
 /// it atomically. <see cref="CrashAfter"/> throws once right after the first run write that makes a condition true (a crash
 /// injected after a stage persisted its result). <see cref="RunReadGate"/> runs after a run row was read and before it is
-/// returned, so a test can hold a delivery on a version that goes stale.
+/// returned, so a test can hold a delivery on a version that goes stale. <see cref="RunWriteHook"/> sees (or refuses) every run write.
 /// </summary>
 internal sealed class InMemoryDataverse
 {
@@ -265,6 +265,13 @@ internal sealed class InMemoryDataverse
 
     public List<WriteRecord> Writes { get; } = new();
     public Func<Task>? RunReadGate { get; set; }
+
+    /// <summary>
+    /// Runs inside every run-row update, before it is applied, with the state the write would store and its fields. A returned
+    /// exception is thrown instead of applying the write (a transient Dataverse fault). Lets a test watch, or refuse, one
+    /// delivery's claim heartbeats (a heartbeat writes the state column alone).
+    /// </summary>
+    public Func<IntakeRunState, IReadOnlyDictionary<string, object>, Exception?>? RunWriteHook { get; set; }
     public Mock<IGenericEntityService> Mock { get; } = new();
     public IGenericEntityService Object => Mock.Object;
 
@@ -364,6 +371,12 @@ internal sealed class InMemoryDataverse
             if (expectedVersion is not null && expectedVersion != Convert.ToString(row["versionnumber"]))
             {
                 throw new DBConcurrencyException("changed since it was read");
+            }
+
+            if (table == IntakeRunStore.RunEntity && RunWriteHook is { } hook
+                && hook(IntakeRunState.Parse(fields.TryGetValue(IntakeRunStore.RunState, out var next) ? next as string : row.GetAttributeValue<string>(IntakeRunStore.RunState)), fields) is { } fault)
+            {
+                throw fault;
             }
 
             var before = table == IntakeRunStore.RunEntity ? IntakeRunState.Parse(row.GetAttributeValue<string>(IntakeRunStore.RunState)) : null;
