@@ -24,11 +24,15 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
   - The runner does not pass the return value back.
   - It refuses `toString` and a top-level `await`.
   - Detail: accelerator PR #3266.
-- Plugin upload refused a package whose `SKILL.md` files were over 20,000 characters ("We couldn't validate this manifest file", accelerator v0.5, 2026-11-27).
-  - Learn's published validation rules (Cowork plugin development, checked 2026-11-27) list no `SKILL.md` size limit, so treat 20,000 characters as observed, not documented.
-  - Learn says `wiqd plugin validate --mode deep` runs the upload rules locally. Use it, or a size gate, before asking the owner to upload.
-  - `wiqd` is not installed on this machine (2026-11-27), and installing it is a download that needs the owner's OK.
-  - `atk validate --package-file` (Agents Toolkit CLI 1.1.18) checks the Teams manifest only, not `agentSkills` or `SKILL.md`. Its "App version should not start with '0'" failure is store-only and doesn't block a tenant upload.
+- **Admin-center plugin upload: likely refuses an app version starting with "0"** ("We couldn't validate this manifest file", accelerator Word Probe, 2026-11-27).
+  - v0.5 (0.5.0, with two `SKILL.md` over 20,000 characters) and v0.6 (0.6.0, no oversize file) were both refused in the admin center.
+  - v0.4 (0.4.0) went in through Cowork's own upload.
+  - `atk validate --package-file` (Agents Toolkit CLI 1.1.18) failed v0.6 only on "App version should not start with '0'".
+  - So the version is the likelier cause, and the size limit is unproven. Learn's published Cowork validation rules list no `SKILL.md` size limit.
+  - Start admin-deployed packages at 1.0.0 or above. v0.7 (1.7.0) tests this, and its result is in `notes/tenant-inventory.md` P1.
+- Local validation:
+  - `atk validate` checks the Teams manifest only, not `agentSkills` or `SKILL.md`.
+  - Learn says `wiqd plugin validate --mode deep` runs the full upload rules. It is not installed on this machine (2026-11-27), and installing it is a download that needs the owner's OK.
 
 ## Key sources
 
