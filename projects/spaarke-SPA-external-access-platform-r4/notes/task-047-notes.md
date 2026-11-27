@@ -3,7 +3,7 @@
 Status: code and tests done in the working tree, NOT committed (the main session runs one review over the wave and commits).
 Rigor FULL, sonnet @ xhigh. Step 9.5 (review), 9.6, 10, 11, the publish-size measurement and `/conflict-check` are the main session's.
 
-**UAC review: pending (main session).**
+**UAC review: APPROVED** (uac-r2, 2026-11-27; see "UAC review (FR-31)" below).
 
 ## What changed (summary)
 
@@ -92,3 +92,22 @@ The membership tests run the REAL `DataverseContactIdentityStore` over a hand-wr
 1. **NFR-04: response bodies in logs on the proof path (pre-existing, real path).** `DataverseContactIdentityStore.GetAsync` logs `Trim(body)` (400 chars) at Warning for every UNLABELLED failed read (`ContactIdentityStore.cs:2537`), and `ReadProofAsync` throws `InvalidOperationException("… did not answer (Failed, 403: {body})")` (`:2358`), whose message `SecuredColumnReadProof` logs with the exception (`SecuredColumnReadProof.cs:172`). A Dataverse 403 body can name the user or app. Scenario: every acme pass writes the 403 body into App Insights twice. Fix is two lines (give the proof read a `logLabel`, put the status and error code only in the exception) but it changes the own environment's log content and sits in files outside this task, so it is for the operator. Not filed (the brief wrote no issue step); needs `/project-defer-issue-tracking`.
 2. **`exceptions`-table rows persist (needs a decision).** The proof's Warning-with-exception (item 2 of the inventory) is still emitted once per 5 minutes for acme. It is Warning severity, so FR-31 c ("logs at Warning") holds, but if task 058's gate counts "acme faults" as rows in `exceptions` regardless of severity, it will still see them. Removing them needs a cooldown (skip the environment for N minutes after a membership refusal: per-environment state in the job, on the injected `TimeProvider`) or a change in the shared proof. Say if the owner wants that.
 3. **The run still reports `Success=false` every 5 minutes while acme is unfixed.** Unchanged on purpose ("the run report still records it"); the job-run record and the heartbeat Warning show it. Task 046's data fix (application user in acme, or the row's `sprk_appservicename`) removes it.
+
+## UAC review (FR-31)
+
+2026-11-27, uac-r2 (cross-session message), **APPROVE** 9f819b9daa from an access-control standpoint:
+
+> Only the log level changes. In ReconcileEnvironmentAsync both branches set ProbeBlocked first and both return before ReconcileSystemUsersAsync, so a foreign membership-refused environment still aborts before any decision or write, exactly as before.
+
+Its non-blocking note: if the extra WhoAmI throws instead of returning a status, the foreign-loop catch records `report.Fault` and logs Error "reconciliation failed" rather than ending ProbeBlocked with an Error. It still fails closed; only the failure's wording changes. No code change.
+
+## Main-session gates (2026-11-27)
+
+- **Publish size:** fresh master `17bb2244fd` zips to 43,731,563 bytes; master merged with 044+047 zips to 43,732,276 bytes. Delta **+713 bytes**; 194 files each side; Compress-Archive; worktrees `C:\wt047m` / `C:\wt047b`. No package change, so no new CVE.
+- **/conflict-check:** none of the 34 open PRs touches the four changed files.
+- **Adversarial review (opus, one pass over 044+047):** approve, no F-class findings.
+  - K1, classifier looseness: `Contains` over the whole error string. Tightened to an exact `error.code` match, carried in task 045's change set (same file).
+  - K4, owner question: the registration default environment (`DATAVERSE_URL`) is also reconciled as a provisioning target, so it gets the Warning too. This is consistent with the POML wording.
+  - K2, test gaps: the foreign-Masked negative test is not load-bearing on `readability == Failed` (Masked and membership cannot co-occur on a real path); the "no Error" assertion watches the job logger only, and the store/proof lines were checked by reading the code.
+  - K4, task 058's gate: the proof's Warning-with-exception still writes an `exceptions` row at Warning severity every run.
+  - The pre-existing body-in-logs defect (NFR-04) is fixed in task 045.

@@ -19,3 +19,6 @@ Both post-change cold runs: 31/31 pass. The "before" run did not time out on thi
 
 ## Found, not fixed
 Other test files (`invite-code`, `workforce-auth`, `teams-real-msal`, `DocumentUploadPage.externalUpload`, `teams-home-auth`, `workforce-home-auth`, `InvoiceSubmitPage`) time out at 60 s on a loaded machine and pass when re-run alone (444/444). Same cold-transform pattern as #2275; out of scope for 044.
+
+
+**Tracking.** The other slow files are D-29 (#2964), which already tracked them. A duplicate D-45 (#3309) was filed and closed into it on 2026-11-27, with this task's result added to #2964.
