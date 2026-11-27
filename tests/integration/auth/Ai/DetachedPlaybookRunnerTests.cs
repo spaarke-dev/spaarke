@@ -453,6 +453,228 @@ public sealed class DetachedPlaybookRunnerTests
 
     // ---- condition 3: memory only ----------------------------------------------------------------------------------------------
 
+    // ---- task 037d (D-037-cleanup): a start that does not start deletes the empty analysis it created, as the caller ---------------
+
+    private const string DeleteSecret = "DELETE-SECRET-037d";
+
+    private static string AnalysisPath => $"sprk_analysises({PlaybookRunWorld.AnalysisId:D})";
+
+    /// <summary>One cleanup delete as the caller's OBO client saw it: the path, whether its token was already cancelled, and whether the run was already stopped.</summary>
+    private sealed record DeleteCall(string Path, CancellationToken Token, bool TokenCancelledAtCall, bool RunStoppedAtCall);
+
+    private static List<DeleteCall> RecordDeletes(PlaybookRunWorld world, TaskCompletionSource? runCancelled)
+    {
+        var calls = new List<DeleteCall>();
+        world.DataverseUser.Setup(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string path, CancellationToken token) =>
+                calls.Add(new DeleteCall(path, token, token.IsCancellationRequested, runCancelled?.Task.IsCompleted ?? false)))
+            .ReturnsAsync(DataverseUserResponse.Ok(204, null));
+        return calls;
+    }
+
+    /// <summary>A start whose engine never accepts, driven to the accept budget on the fake clock (the NotAccepted exit).</summary>
+    private static async Task<PlaybookRunStartResult> StartUntilNotAcceptedAsync(PlaybookRunWorld world, TaskCompletionSource runCancelled)
+    {
+        var (playbookId, documentId) = world.AllowedRun();
+        var engineListening = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Script = NeverAcceptsOnceListening(runCancelled, engineListening);
+        var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+        await engineListening.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await world.Time.TimerArmed(PlaybookRunLimits.AcceptBudget);
+        world.Time.Advance(PlaybookRunLimits.AcceptBudget);
+        return await start.WaitAsync(TimeSpan.FromSeconds(15));
+    }
+
+    /// <summary>
+    /// As <see cref="PlaybookRunWorld.NeverAccepts"/>, and says when the engine is listening on its token (so a test that checks "the run was already
+    /// stopped" is not racing the detached thread's start).
+    /// </summary>
+    private static Func<PlaybookRunRequest, CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>> NeverAcceptsOnceListening(
+        TaskCompletionSource cancelled, TaskCompletionSource listening) =>
+        (_, ct) => ListenAsync(cancelled, listening, ct);
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> ListenAsync(
+        TaskCompletionSource cancelled, TaskCompletionSource listening, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // One registration both records the stop and releases the wait, so the wait cannot end (and dispose the registration) before the stop is recorded.
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using (ct.Register(() =>
+        {
+            cancelled.TrySetResult();
+            stopped.TrySetResult();
+        }))
+        {
+            listening.TrySetResult();
+            await stopped.Task;
+        }
+
+        yield break;
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> EndsWithoutEvents()
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
+
+    [Fact(DisplayName = "037d NotAccepted: the run is stopped, then the created analysis is deleted once as the caller, at exactly its own path; the outcome is unchanged")]
+    public async Task Start_NotAccepted_DeletesTheCreatedAnalysis_AsTheCaller()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var runCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deletes = RecordDeletes(world, runCancelled);
+
+        var result = await StartUntilNotAcceptedAsync(world, runCancelled);
+        await world.RunFinished();
+
+        result.Outcome.Should().Be(PlaybookRunStartOutcome.NotAccepted);
+        var delete = deletes.Should().ContainSingle().Subject;
+        delete.Path.Should().Be(AnalysisPath);
+        delete.RunStoppedAtCall.Should().BeTrue("the run is abandoned BEFORE its analysis is deleted");
+        delete.TokenCancelledAtCall.Should().BeFalse();
+        world.Logs.Entries.Should().Contain(e =>
+            e.Contains(DetachedPlaybookRunner.EmptyAnalysisDeletedOutcome, StringComparison.Ordinal)
+            && e.Contains(PlaybookRunWorld.AnalysisId.ToString("D"), StringComparison.Ordinal)
+            && e.Contains("trace-030", StringComparison.Ordinal));
+        world.Graph.Verify(g => g.ForApp(), Times.Never(), "the cleanup is the caller's delegated delete, never an app-only one");
+    }
+
+    [Fact(DisplayName = "037d caller cancel: the analysis is deleted once on a token that is not the cancelled one, and the cancellation still propagates")]
+    public async Task Start_CallerCancels_DeletesTheCreatedAnalysis_AndStillThrows()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var runCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var engineListening = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Script = NeverAcceptsOnceListening(runCancelled, engineListening);
+        var deletes = RecordDeletes(world, runCancelled);
+        using var caller = new CancellationTokenSource();
+
+        var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, caller.Token);
+        await engineListening.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        await world.Time.TimerArmed(PlaybookRunLimits.AcceptBudget);
+        await caller.CancelAsync();
+
+        await FluentActions.Awaiting(() => start.WaitAsync(TimeSpan.FromSeconds(15))).Should().ThrowAsync<OperationCanceledException>();
+        await world.RunFinished();
+        var delete = deletes.Should().ContainSingle().Subject;
+        delete.Path.Should().Be(AnalysisPath);
+        delete.TokenCancelledAtCall.Should().BeFalse("the delete must not run on the caller's cancelled token");
+        delete.Token.Should().NotBe(caller.Token);
+        delete.Token.CanBeCanceled.Should().BeTrue("and it is bounded, never CancellationToken.None");
+        delete.RunStoppedAtCall.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "037d Unavailable: a run that ended before the engine named it deletes the created analysis once")]
+    public async Task Start_RunEndsUnnamed_IsUnavailable_AndDeletesTheCreatedAnalysis()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        world.Script = (_, _) => EndsWithoutEvents();
+        var deletes = RecordDeletes(world, null);
+
+        var result = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+
+        result.Outcome.Should().Be(PlaybookRunStartOutcome.Unavailable);
+        deletes.Should().ContainSingle().Which.Path.Should().Be(AnalysisPath);
+    }
+
+    [Fact(DisplayName = "037d Started: the analysis is the run's results holder and is NEVER deleted")]
+    public async Task Start_Started_NeverDeletesTheAnalysis()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var deletes = RecordDeletes(world, null);
+
+        var result = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+        world.Gate.SetResult();
+        await world.RunFinished();
+
+        result.Outcome.Should().Be(PlaybookRunStartOutcome.Started);
+        deletes.Should().BeEmpty();
+        world.DataverseUser.Verify(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact(DisplayName = "037d no analysis, no delete: a refused create and AI switched off (answered before the create) never call DeleteAsync")]
+    public async Task Start_NoAnalysisCreated_NeverDeletes()
+    {
+        await using var refused = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = refused.AllowedRun();
+        refused.Analyses
+            .Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnalysisStartResult.Failure(AnalysisStartOutcome.Refused, "insufficient_rights", 403, null));
+        (await refused.Runs.StartAsCallerAsync(refused.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None))
+            .Outcome.Should().Be(PlaybookRunStartOutcome.AnalysisRefused);
+        refused.DataverseUser.Verify(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+
+        await using var aiOff = await PlaybookRunWorld.StartAsync(aiDisabled: true);
+        var (offPlaybook, offDocument) = aiOff.AllowedRun();
+        (await aiOff.Runs.StartAsCallerAsync(aiOff.CallerContext(), offPlaybook, [offDocument], null, null, CancellationToken.None))
+            .Outcome.Should().Be(PlaybookRunStartOutcome.Unavailable);
+        aiOff.DataverseUser.Verify(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Theory(DisplayName = "037d failed delete: the start's outcome is unchanged; the warning carries the outcome code, analysis id, correlation id and the error code or type, and no message text")]
+    [InlineData("refused")]
+    [InlineData("throws")]
+    [InlineData("noResponse")]
+    public async Task Start_CleanupDeleteFails_DoesNotChangeTheAnswer_AndLogsNoMessage(string failure)
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var delete = world.DataverseUser.Setup(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()));
+        switch (failure)
+        {
+            case "refused":
+                delete.ReturnsAsync(DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, DeleteSecret));
+                break;
+            case "throws":
+                delete.ThrowsAsync(new InvalidOperationException(DeleteSecret));
+                break;
+            default:
+                delete.ReturnsAsync((DataverseUserResponse)null!);
+                break;
+        }
+
+        var result = await StartUntilNotAcceptedAsync(world, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        await world.RunFinished();
+
+        result.Outcome.Should().Be(PlaybookRunStartOutcome.NotAccepted, "a failed cleanup never changes the tool's answer");
+        var warning = world.Logs.Entries.Should().ContainSingle(e => e.Contains(DetachedPlaybookRunner.EmptyAnalysisDeleteFailedOutcome, StringComparison.Ordinal)).Subject;
+        warning.Should().StartWith("Warning ")
+            .And.Contain(PlaybookRunWorld.AnalysisId.ToString("D")).And.Contain("trace-030")
+            .And.Contain(failure switch
+            {
+                "refused" => DataverseUserClientErrorCodes.AccessDenied,
+                "throws" => nameof(InvalidOperationException),
+                _ => "NoResponse",
+            });
+        world.Logs.Entries.Should().NotContain(e => e.Contains(DeleteSecret, StringComparison.Ordinal), "no message text and no exception object reach a log (ADR-015)");
+        world.Logs.Entries.Should().NotContain(e => e.Contains(DetachedPlaybookRunner.EmptyAnalysisDeletedOutcome, StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "037d bounded: a cleanup delete that never answers is cut off after its own budget, logged as failed, and the answer is unchanged")]
+    public async Task Start_CleanupDeleteHangs_IsCutOffByItsOwnBudget()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        world.DataverseUser.Setup(d => d.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken ct) =>
+                new TaskCompletionSource<DataverseUserResponse>(TaskCreationOptions.RunContinuationsAsynchronously).Task.WaitAsync(ct));
+        var (playbookId, documentId) = world.AllowedRun();
+        world.Script = PlaybookRunWorld.NeverAccepts(new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+
+        var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+        await world.Time.TimerArmed(PlaybookRunLimits.AcceptBudget);
+        world.Time.Advance(PlaybookRunLimits.AcceptBudget);
+        await world.Time.TimerArmed(DetachedPlaybookRunner.EmptyAnalysisDeleteBudget);
+        start.IsCompleted.Should().BeFalse("the start waits for its cleanup, within the budget");
+        world.Time.Advance(DetachedPlaybookRunner.EmptyAnalysisDeleteBudget);
+
+        (await start.WaitAsync(TimeSpan.FromSeconds(15))).Outcome.Should().Be(PlaybookRunStartOutcome.NotAccepted);
+        world.Logs.Entries.Should().ContainSingle(e =>
+            e.Contains(DetachedPlaybookRunner.EmptyAnalysisDeleteFailedOutcome, StringComparison.Ordinal)
+            && e.Contains("CanceledException", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "030 memory only: the caller's token appears in no log line, cache entry, run view or tool result, across a run and a failed run")]
     public async Task Token_NeverLeavesMemory()
     {

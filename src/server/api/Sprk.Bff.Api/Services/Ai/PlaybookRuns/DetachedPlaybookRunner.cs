@@ -82,6 +82,15 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
     /// <summary>The caller already has <see cref="PlaybookRunLimits.MaxConcurrentRunsPerCaller"/> runs running here. Nothing ran.</summary>
     internal const string RunLimitReasonCode = PlaybookRunReasonCodes.RunLimit;
 
+    /// <summary>Task 037d: a start that did not start deleted the empty analysis it created (as the caller).</summary>
+    internal const string EmptyAnalysisDeletedOutcome = "playbook_run_empty_analysis_deleted";
+
+    /// <summary>Task 037d: that delete failed or timed out; the empty analysis stays (the caller's own record).</summary>
+    internal const string EmptyAnalysisDeleteFailedOutcome = "playbook_run_empty_analysis_delete_failed";
+
+    /// <summary>Task 037d: the bound on the cleanup delete, which runs on its own token (the caller's may be the cancelled one).</summary>
+    internal static readonly TimeSpan EmptyAnalysisDeleteBudget = TimeSpan.FromSeconds(10);
+
     /// <summary>How long a finished run stays in the run table (the durable record answers after that).</summary>
     internal static readonly TimeSpan Retention = TimeSpan.FromHours(1);
 
@@ -237,50 +246,107 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
             return new PlaybookRunStartResult(PlaybookRunStartOutcome.AnalysisRefused, authorization, null, analysis);
         }
 
-        var launch = new Launch(
-            new PlaybookRunRequest
-            {
-                PlaybookId = playbookId,
-                DocumentIds = documentIds,         // the exact instance authorized above
-                Parameters = parameters,           // the exact instance authorized above
-                UserContext = userContext,         // the caller's focus text (task 038): in memory with the request only; never logged here
-                RunUserId = runUserId,             // 007's resolved caller, never Parameters["userId"]
-                StartedBy = PlaybookRunStartedBy.Person,
-                AnalysisId = analysisId,           // task 037a: the analysis created above for this caller, and nothing else
-            },
-            http.User,
-            bearer,
-            http.TraceIdentifier,
-            callerOid,
-            _time,
-            _lifetime.ApplicationStopping);
-
-        // Condition 4: no ExecutionContext flow, so the detached flow's accessor write never touches this request's holder.
-        using (ExecutionContext.SuppressFlow())
-        {
-            _ = Task.Run(() => RunDetachedAsync(launch));
-        }
-
-        Guid? runId;
+        // Task 037d (D-037-cleanup): from here the analysis exists. Every exit that is not the Started return stops the run (when there
+        // is one) and then deletes this analysis as the caller, so a start that does not start leaves nothing behind.
+        Launch? launch = null;
+        var started = false;
         try
         {
-            runId = await launch.Accepted.Task.WaitAsync(PlaybookRunLimits.AcceptBudget, _time, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            launch.Abandon();
-            return new PlaybookRunStartResult(PlaybookRunStartOutcome.NotAccepted, authorization, null, analysis);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // The caller went away before the run was reported to anyone: stop it, so a retry never leaves two runs.
-            launch.Abandon();
-            throw;
-        }
+            launch = new Launch(
+                new PlaybookRunRequest
+                {
+                    PlaybookId = playbookId,
+                    DocumentIds = documentIds,         // the exact instance authorized above
+                    Parameters = parameters,           // the exact instance authorized above
+                    UserContext = userContext,         // the caller's focus text (task 038): in memory with the request only; never logged here
+                    RunUserId = runUserId,             // 007's resolved caller, never Parameters["userId"]
+                    StartedBy = PlaybookRunStartedBy.Person,
+                    AnalysisId = analysisId,           // task 037a: the analysis created above for this caller, and nothing else
+                },
+                http.User,
+                bearer,
+                http.TraceIdentifier,
+                callerOid,
+                _time,
+                _lifetime.ApplicationStopping);
 
-        return runId is { } id && _runs.TryGetValue(id, out var run)
-            ? new PlaybookRunStartResult(PlaybookRunStartOutcome.Started, authorization, run.Snapshot(), analysis)
-            : new PlaybookRunStartResult(PlaybookRunStartOutcome.Unavailable, authorization, null, analysis);
+            // Condition 4: no ExecutionContext flow, so the detached flow's accessor write never touches this request's holder.
+            var detachedLaunch = launch;
+            using (ExecutionContext.SuppressFlow())
+            {
+                _ = Task.Run(() => RunDetachedAsync(detachedLaunch));
+            }
+
+            Guid? runId;
+            try
+            {
+                runId = await launch.Accepted.Task.WaitAsync(PlaybookRunLimits.AcceptBudget, _time, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                return new PlaybookRunStartResult(PlaybookRunStartOutcome.NotAccepted, authorization, null, analysis);
+            }
+
+            // A caller who went away before the run was reported to anyone throws out of the wait above; the finally stops the run, so a
+            // retry never leaves two runs, and deletes the analysis. The run id missing from the table is Unavailable (the finally cleans up).
+            if (runId is { } id && _runs.TryGetValue(id, out var run))
+            {
+                started = true;
+                return new PlaybookRunStartResult(PlaybookRunStartOutcome.Started, authorization, run.Snapshot(), analysis);
+            }
+
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.Unavailable, authorization, null, analysis);
+        }
+        finally
+        {
+            if (!started)
+            {
+                // The run is stopped BEFORE its analysis is deleted (Abandon is idempotent and harmless when the run already ended).
+                launch?.Abandon();
+                await DeleteEmptyAnalysisAsync(http, analysisId).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Task 037d (D-037-cleanup): deletes the analysis THIS start created, as the caller (the caller's OBO <see cref="IDataverseUserClient"/>
+    /// on the request's services; never an app-only delete, ADR-028 A10), because the start did not end <see cref="PlaybookRunStartOutcome.Started"/>
+    /// and so nothing will ever fill it. Never throws and never changes the start's answer: a failed delete is logged (outcome code, correlation
+    /// id, analysis id, error type or Dataverse error code only; never message text, ADR-015) and the analysis stays, which is the caller's own
+    /// empty record. The delete runs on its own bounded token, never the caller's (which may be the cancelled one) and never unbounded.
+    /// </summary>
+    private async Task DeleteEmptyAnalysisAsync(HttpContext http, Guid analysisId)
+    {
+        try
+        {
+            var dataverse = http.RequestServices?.GetService<IDataverseUserClient>();
+            if (dataverse is null)
+            {
+                _logger.LogWarning("Detached playbook run left an empty analysis - Outcome: {Outcome}, AnalysisId: {AnalysisId}, ErrorType: {ErrorType}, CorrelationId: {CorrelationId}",
+                    EmptyAnalysisDeleteFailedOutcome, analysisId, "ClientUnavailable", http.TraceIdentifier);
+                return;
+            }
+
+            using var bound = new CancellationTokenSource(EmptyAnalysisDeleteBudget, _time);
+            var deleted = await dataverse
+                .DeleteAsync($"{PlaybookRunResultsReader.AnalysisEntitySet}({analysisId:D})", bound.Token)
+                .ConfigureAwait(false);
+            if (deleted is { IsSuccess: true })
+            {
+                _logger.LogInformation("Detached playbook run deleted its empty analysis - Outcome: {Outcome}, AnalysisId: {AnalysisId}, CorrelationId: {CorrelationId}",
+                    EmptyAnalysisDeletedOutcome, analysisId, http.TraceIdentifier);
+                return;
+            }
+
+            _logger.LogWarning("Detached playbook run left an empty analysis - Outcome: {Outcome}, AnalysisId: {AnalysisId}, ErrorCode: {ErrorCode}, CorrelationId: {CorrelationId}",
+                EmptyAnalysisDeleteFailedOutcome, analysisId, deleted?.ErrorCode ?? "NoResponse", http.TraceIdentifier);
+        }
+        catch (Exception ex)
+        {
+            // The exception type only (the bounded token's own cancel included): a message is not ours to vouch for.
+            _logger.LogWarning("Detached playbook run left an empty analysis - Outcome: {Outcome}, AnalysisId: {AnalysisId}, ErrorType: {ErrorType}, CorrelationId: {CorrelationId}",
+                EmptyAnalysisDeleteFailedOutcome, analysisId, ex.GetType().Name, http.TraceIdentifier);
+        }
     }
 
     /// <inheritdoc />
