@@ -74,9 +74,9 @@ public class Issue2762_AuthFailureLogTests : IClassFixture<CustomWebAppFactory>
         entry.Level.Should().Be(LogLevel.Warning);
     }
 
-    // The CopilotAuth category has a second writer, the DEBUG "Token on {Method} {Path}" middleware in
-    // MiddlewarePipelineExtensions, which logs the same claims on every /api request. It is tracked separately (#1574) and
-    // is not part of this fix, so this test selects the OnAuthenticationFailed entry by its message.
+    // The CopilotAuth category once had a second writer, a DEBUG "Token on {Method} {Path}" middleware (removed with the
+    // legacy agent; PreAuthTokenClaimLoggingRetirementTests guards it). This test still selects the OnAuthenticationFailed
+    // entry by its message.
     private static bool IsAuthFailureEntry(LogEntry e)
         => e.Category == CopilotAuthCategory && e.Message.StartsWith("JWT auth failed", StringComparison.Ordinal);
 

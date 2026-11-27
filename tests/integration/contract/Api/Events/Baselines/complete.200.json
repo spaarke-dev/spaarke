@@ -1,0 +1,12 @@
+{
+  "case": "complete.200",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"id\":\"e0060000-0000-4000-8000-0000000000a1\",\"previousStatus\":\"Open\",\"newStatus\":\"Completed\",\"actionTimestamp\":\"<volatile>\"}",
+  "bodyPretty": {
+    "id": "e0060000-0000-4000-8000-0000000000a1",
+    "previousStatus": "Open",
+    "newStatus": "Completed",
+    "actionTimestamp": "<volatile>"
+  }
+}

@@ -332,7 +332,8 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
                 templateParameters,
                 context.DownstreamNodes,
                 context.AdditionalKnowledge,
-                context.AdditionalSkills
+                context.AdditionalSkills,
+                userFocus: context.UserContext
             );
 
             var prompt = rendered.PromptText;

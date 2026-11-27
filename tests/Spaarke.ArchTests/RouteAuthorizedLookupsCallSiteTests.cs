@@ -35,9 +35,39 @@ public class RouteAuthorizedLookupsCallSiteTests
     /// <summary>The closed list of call sites that may set the option, each with its route decision.</summary>
     private static readonly IReadOnlyList<(Type Type, string Method, string Reason)> SetterAllowList = new[]
     {
-        (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysis),
-            "POST /api/ai/analysis/create: the playbook AnalysisAuthorizationFilter (AnalysisCreate) authorised for this caller and id."),
+        // spaarkeai-mcp-bff-api-r2 task 031: the route's one create moved, unchanged, into CreateAnalysisRecordAsync, which the route's
+        // handler and the MCP start tool share; its callers are the closed list below (OnlyTheCreateDecisionFeedsTheSharedCreate).
+        (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysisRecordAsync),
+            "POST /api/ai/analysis/create and spaarke_start_analysis: the playbook the create decision (AnalysisAuthorizationFilter, "
+            + "AnalysisCreate) authorised for this caller and id."),
     };
+
+    /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 031: the closed list of callers of the shared create, each passing the create decision's own ids: the
+    /// route handler (the ids its filter recorded) and the caller-facing start (the ids <c>AuthorizeAnalysisCreateAsync</c> returned).
+    /// </summary>
+    private static readonly IReadOnlyList<(Type Type, string Method)> SharedCreateCallers = new[]
+    {
+        (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysis)),
+        (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.StartAnalysisAsCallerAsync)),
+    };
+
+    [Fact(DisplayName = "mcp-r2 031: only the route handler and the caller-facing start call the shared analysis create (both pass the create decision's ids)")]
+    public void OnlyTheCreateDecisionFeedsTheSharedCreate()
+    {
+        var callers = Callers(BffTypes.Value, typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysisRecordAsync))
+            .Distinct()
+            .ToArray();
+
+        var outside = callers
+            .Where(c => !SharedCreateCallers.Any(a => a.Type == c.Type && string.Equals(a.Method, c.Method, StringComparison.Ordinal)))
+            .Select(c => $"{c.Type.FullName}.{c.Method}")
+            .ToArray();
+        Assert.True(outside.Length == 0,
+            "AnalysisEndpoints.CreateAnalysisRecordAsync exempts the playbook its caller names from the create's AppendTo question; only a "
+            + "caller holding the create decision's answer may call it. Not on the list:\n" + string.Join("\n", outside));
+        Assert.Equal(SharedCreateCallers.Count, callers.Length);
+    }
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 

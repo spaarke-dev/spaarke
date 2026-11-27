@@ -228,9 +228,6 @@ builder.Services.AddJobProcessingModule(builder.Configuration, builder.Logging);
 // (the endpoints map unconditionally; their dependencies must too).
 builder.Services.AddSchedulingModule();
 
-// M365 Copilot Agent module (gateway, auth, cards, conversation, playbook invocation, telemetry)
-builder.Services.AddAgentModule(builder.Configuration);
-
 // Compose drafting workspace module (spaarkeai-compose-r1) — registers the three Compose
 // orchestration services (IComposeService, IComposeDocumentService, ComposeSessionService)
 // UNCONDITIONALLY per bff-extensions.md §F.1. The /api/compose/* endpoint group maps

@@ -372,7 +372,8 @@ public sealed class ProjectPreFillService
             {
                 PlaybookId = playbookId,
                 DocumentIds = [],
-                UserContext = documentText,
+                // UserContext (#3268) is the run's user focus and now reaches the prompt: the extracted text is already the document
+                // (Document.ExtractedText below), so it is not repeated there.
                 Document = new DocumentContext
                 {
                     DocumentId = requestId,

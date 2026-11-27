@@ -198,51 +198,11 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
                 + $"{CredentialKind.ManagedIdentityFederated} to {CredentialSelectionOptions.SectionName}:Order.");
         }
 
-        // ── Rule 5 (auth-v4 task 022, FR-B3) ───────────────────────────────────────────────────────
-        // AgentToken:ClientSecret vs the transitional secret the provider actually resolves.
-        //
-        // Before task 022, AgentTokenService built its own confidential client from
-        // AgentToken:ClientSecret specifically. It now takes the client from the ordered provider,
-        // which resolves the transitional secret as AzureAd:ClientSecret → API_CLIENT_SECRET →
-        // AZURE_CLIENT_SECRET — deliberately NOT reading the options-bound AgentToken key. Task 021
-        // excluded it precisely because folding it in silently could change which secret the agent path
-        // presents; task 022's constraint required the question be settled where the change is
-        // observable rather than defaulted.
-        //
-        // It was settled by measurement: on spaarke-bff-dev (2026-08-21) AgentToken__ClientSecret,
-        // API_CLIENT_SECRET, AzureAd__ClientSecret and Dataverse__ClientSecret all hold the same value
-        // — BFF-API-ClientSecret — and AgentToken__ClientId is the BFF app registration.
-        // (The retired old-demo reconcile script wired its environment identically.)
-        //
-        // This rule exists because "identical today" is not "identical forever". If they ever diverge,
-        // the agent OBO would present a different secret than before the migration and fail with
-        // AADSTS7000215 — an error that says nothing about which of two settings is stale. Compared by
-        // FINGERPRINT, never by value, and reported rather than fatal: the divergence is inert while a
-        // secret-free credential is selected, and taking the whole BFF down over the agent endpoint's
-        // credential would be disproportionate.
-        var agentSecret = _configuration["AgentToken:ClientSecret"];
-        var transitionalSecret = FirstNonBlank(
-            _configuration["AzureAd:ClientSecret"],
-            _configuration["API_CLIENT_SECRET"],
-            _configuration["AZURE_CLIENT_SECRET"]);
-
-        if (!string.IsNullOrWhiteSpace(agentSecret)
-            && !string.IsNullOrWhiteSpace(transitionalSecret)
-            && !string.Equals(agentSecret, transitionalSecret, StringComparison.Ordinal))
-        {
-            _logger.LogError(
-                "AgentToken:ClientSecret DIVERGES from the transitional secret the credential provider "
-                + "resolves (fingerprints {AgentFingerprint} vs {ProviderFingerprint}; "
-                + "ClientSecret {InOrder} in {Section}:Order). Since auth-v4 task 022 the agent OBO "
-                + "exchange uses the provider's secret, not this one, so a divergence means the agent "
-                + "path would present a different credential than it did before the migration — "
-                + "surfacing as AADSTS7000215 with no indication of which setting is stale. Reconcile "
-                + "them, or remove AgentToken:ClientSecret (task 033 removes it in any case).",
-                Fingerprint(agentSecret),
-                Fingerprint(transitionalSecret),
-                order.Contains(CredentialKind.ClientSecret) ? "IS" : "is NOT",
-                CredentialSelectionOptions.SectionName);
-        }
+        // ── Rule 5 (auth-v4 task 022, FR-B3) — REMOVED ─────────────────────────────────────────────
+        // It reported a divergence between AgentToken:ClientSecret and the transitional secret the provider
+        // resolves. That key served only the legacy M365 Copilot agent's token exchange, which
+        // spaarkeai-mcp-bff-api-r2 task 001 removed, so nothing reads it. The rule was log-only and decided
+        // nothing about the credential the BFF presents. Rules 1-4 and 6 are unchanged.
 
         // ── Rule 6 (auth-v4 task 062, FR-F3) ───────────────────────────────────────────────────────
         // Outside Development, once the migration is complete, the BFF's identity MUST NOT be able to
@@ -310,13 +270,4 @@ public sealed class IdentityConfigurationValidator : IValidateOptions<Credential
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-
-    /// <summary>
-    /// Short SHA-256 prefix, so two secrets can be compared in a log line without either appearing in
-    /// it. Same construction the provider uses for its cache key.
-    /// </summary>
-    private static string Fingerprint(string value)
-        => Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes(value)))[..16];
 }

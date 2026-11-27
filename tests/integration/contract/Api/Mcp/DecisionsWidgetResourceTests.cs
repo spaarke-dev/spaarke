@@ -31,15 +31,17 @@ public sealed class DecisionsWidgetResourceTests
     // ---- always runs: the registration and the declared metadata ---------------------------------------------------------
 
     [Fact]
-    public async Task ResourcesList_ServesExactlyTheWidget_WithMcpAppMimeType_AndAnEmptyCsp()
+    public async Task ResourcesList_ServesTheDecisionsWidget_WithMcpAppMimeType_AndAnEmptyCsp()
     {
         await using var host = await McpTestHost.StartAsync(mcpEnabled: true);
 
         var list = await host.RpcAsync(McpEndpoints.LegalOperationsRoute, "resources/list", new { }, McpTestHost.MintToken(Caller));
 
         var resources = list.GetProperty("resources").EnumerateArray().ToList();
-        resources.Should().ContainSingle();
-        var widget = resources[0];
+        // The Decisions widget plus the r2 widgets registered so far (task 034: ui://spaarke/briefing.html; task 035: ui://spaarke/search-results.html; their own cases are in
+        // BriefingWidgetResourceTests and SearchResultsWidgetResourceTests).
+        resources.Select(r => r.GetProperty("uri").GetString()).Should().BeEquivalentTo([WidgetUri, "ui://spaarke/briefing.html", "ui://spaarke/search-results.html"]);
+        var widget = resources.Single(r => r.GetProperty("uri").GetString() == WidgetUri);
         widget.GetProperty("uri").GetString().Should().Be(WidgetUri);
         widget.GetProperty("mimeType").GetString().Should().Be(ExpectedMimeType);
         AssertEmptyCsp(widget.GetProperty("_meta"));

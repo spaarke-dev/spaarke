@@ -20,6 +20,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 
@@ -89,7 +90,7 @@ public class EventStatusWritePathTests
     [Fact]
     public void CreatePayload_WritesLiveOpen_Active()
     {
-        var payload = EventEndpoints.BuildCreatePayload(
+        var payload = EventsCapability.BuildCreatePayload(
             new ApiCreateEventRequest("Filing"), regarding: null, assignedToContactId: null);
 
         payload["statuscode"].Should().Be(659490001, "live Open — the former 3 does not exist in the option set");

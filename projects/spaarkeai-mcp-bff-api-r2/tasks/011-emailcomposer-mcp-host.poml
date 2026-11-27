@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>EmailComposer MCP host (sibling of the Xrm host)</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds .ts code to @spaarke/ui-components (shared library consumed by the Console); tags include react and frontend</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Sibling implementation of an existing injected interface with two canonical references to copy (createXrmEmailComposeHandlers.ts, useXrmEmailHostProps.ts)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds new files beside EmailComposer and one export line in its index.ts; no other Group A task touches Spaarke.UI.Components</parallel-reason>
+    <deps>none</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add an MCP host for EmailComposer: a sibling of createXrmEmailComposeHandlers.ts / useXrmEmailHostProps.ts that implements the same injected host interface over an injectable tool-call transport (callTool(name, args)), so task 040's widget can compose and send through app-only MCP tools without Xrm. Keep the transport an injected interface; the real MCP transport is task 021's.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React host-prop injection and the EmailComposer engine.</role>
+  <goal>createMcpEmailComposeHandlers / useMcpEmailHostProps exist beside the Xrm versions, implement the same host contract using a McpToolCaller interface, are unit-tested with a fake caller, and leave the Xrm host and every existing EmailComposer test unchanged.</goal>
+
+  <context>
+    <background>Spec FR-12 / FR-16 ("Email compose: EmailComposer, with an MCP host in place of createXrmEmailComposeHandlers / useXrmEmailHostProps"). Reuse scan row "Email compose component": host injected; Xrm handlers in createXrmEmailComposeHandlers.ts / useXrmEmailHostProps.ts; EmailRecipients.tsx:110 is display-only. v1 email scope (owner): To/Cc, subject, rich body, regarding a matter (required), attachments chosen from that matter's Spaarke documents, archived to the matter. Tool names the host calls (fixed here, implemented in Phase 2–3): spaarke_list_documents (023) for the attachment picker, spaarke_send_email (040, app-only) for Send.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createMcpEmailComposeHandlers.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/useMcpEmailHostProps.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/mcpToolCaller.ts (type McpToolCaller = { callTool(name: string, args: Record&lt;string, unknown&gt;): Promise&lt;McpToolCallResult&gt; } and the result shape: structuredContent, isError, reasonCode)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (export the three)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/createMcpEmailComposeHandlers.test.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/useMcpEmailHostProps.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/useXrmEmailHostProps.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">The MCP host lives in the existing EmailComposer folder of @spaarke/ui-components; it imports no @modelcontextprotocol/* package (McpToolCaller is a local structural type) and no Xrm global.</constraint>
+    <constraint source="project">The MCP host implements the same host-prop contract as useXrmEmailHostProps for the v1 scope only: recipients To/Cc typed entry, subject, rich body, regarding matter (required, pre-set by the host, not user-picked), attachments from the regarding matter's documents (via spaarke_list_documents), Send (via spaarke_send_email with an idempotency key generated once per compose session and reused on retry). Callbacks outside v1 (record lookup dialogs, templates, AI draft, local upload, relationships) are left undefined so the engine hides them.</constraint>
+    <constraint source="project">A tool result with isError maps to the composer's existing send-failure path (describeSendFailure) with the tool's reasonCode; nothing is retried automatically except by the user pressing Send again with the same idempotency key.</constraint>
+    <constraint source="project">The Xrm host files and every existing test under EmailComposer/__tests__/ are unchanged and pass.</constraint>
+    <constraint source="project">Run npm install --legacy-peer-deps --no-audit --no-fund if needed; run the package's jest suite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/reuse-scan.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm email host" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/useXrmEmailHostProps.ts">The host-prop shape to mirror; swap Xrm calls for callTool</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read useXrmEmailHostProps and createXrmEmailComposeHandlers; list which host props are v1 and which are left undefined, in the task notes.</step>
+    <step order="2">Write mcpToolCaller.ts, createMcpEmailComposeHandlers.ts and useMcpEmailHostProps.ts; export them.</step>
+    <step order="3">Write the two test files with a fake McpToolCaller; run the EmailComposer jest suite.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the engine cannot hide an out-of-scope callback when it is undefined (it renders a broken control instead), STOP and escalate rather than changing EmailComposer.tsx's contract.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row "Email compose component": EmailComposer.tsx host injected; Xrm handlers createXrmEmailComposeHandlers.ts / useXrmEmailHostProps.ts; verdict "Extend: add an MCP host implementation". CAPABILITY-INDEX row 12 (communication core) on the server side.</existing>
+    <extension>Yes: a sibling implementation of the existing injected host interface; the engine is not changed.</extension>
+    <cost-of-doing-nothing>The Copilot compose widget (task 040) cannot attach matter documents or send without Xrm, so FR-12's widget send path fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Composer renders with MCP host (harness)">
+      <steps>
+        <step>Mount EmailComposer with useMcpEmailHostProps and a fake caller in the jest/RTL harness</step>
+        <step>Verify To, Cc, subject, body and the matter-documents attachment picker render; template, AI draft and local upload controls do not</step>
+        <step>Check for console errors</step>
+      </steps>
+      <expected>v1 controls only, no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render the harness under the Fluent dark theme</step>
+        <step>Verify backgrounds and text use semantic tokens</step>
+      </steps>
+      <expected>No hard-coded colours</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">jest in src/client/shared/Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createMcpEmailComposeHandlers.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/useMcpEmailHostProps.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/mcpToolCaller.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/createMcpEmailComposeHandlers.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/useMcpEmailHostProps.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Send calls callTool("spaarke_send_email", …) once with To, Cc, subject, body, regarding matter id, selected document ids and an idempotency key; a second Send after a failure reuses the same key.</criterion>
+    <criterion testable="true">The attachment picker lists documents from callTool("spaarke_list_documents", { regarding matter }) only.</criterion>
+    <criterion testable="true">Negative: an isError result with a reasonCode surfaces through the existing send-failure path with that code; no automatic retry happens.</criterion>
+    <criterion testable="true">Negative: the MCP host never reads window.Xrm or calls getXrm (spied in tests).</criterion>
+    <criterion testable="true">Every existing EmailComposer test passes unchanged.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12, FR-16. Task 021's shared transport must satisfy McpToolCaller; task 040 wires them.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -58,8 +58,27 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// </summary>
     private readonly Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? _contextEventEmitter;
 
-    // In-memory run tracking (Phase 1) - replaced with Dataverse in Phase 2
+    // In-memory run tracking. This service is Scoped, so the map holds only the runs this request started; a run
+    // started by another request (or before a restart) is read from the durable record (FR-13, task 005).
     private readonly ConcurrentDictionary<Guid, PlaybookRunContext> _activeRuns = new();
+
+    /// <summary>Outcome code logged when a durable run record write fails (FR-13). The run is not affected.</summary>
+    internal const string PersistFailedOutcome = "playbook_run_persist_failed";
+
+    /// <summary>Outcome code logged when a durable run record read fails; the run reads as not found (FR-13).</summary>
+    internal const string ReadFailedOutcome = "playbook_run_read_failed";
+
+    /// <summary>Upper bound on one durable run record call, so a slow Dataverse cannot stall a run or a status read.</summary>
+    private static readonly TimeSpan RunRecordCallTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// FR-13 (task 005): the durable run record. Optional so existing test fixtures construct without it; null means no
+    /// persistence and no stored-run reads (the in-memory behaviour before FR-13).
+    /// </summary>
+    private readonly PlaybookRuns.PlaybookRunRecordStore? _runRecordStore;
+
+    /// <summary>FR-13 (task 005): the request whose caller a stored run is read for (owner scope).</summary>
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     public PlaybookOrchestrationService(
         INodeService nodeService,
@@ -69,7 +88,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         IInsightsActionRouter insightsRouter,
         ITemplateEngine templateEngine,
         ILogger<PlaybookOrchestrationService> logger,
-        Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
+        Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null,
+        PlaybookRuns.PlaybookRunRecordStore? runRecordStore = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _nodeService = nodeService;
         _executorRegistry = executorRegistry;
@@ -79,6 +100,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         _templateEngine = templateEngine ?? throw new ArgumentNullException(nameof(templateEngine));
         _logger = logger;
         _contextEventEmitter = contextEventEmitter;
+        _runRecordStore = runRecordStore;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -127,7 +150,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             StartedByOid = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(httpContext.User),
             UserId = runUserId is { } resolved && resolved != Guid.Empty ? resolved : null,
-            StartedBy = PlaybookRunStartedBy.Person
+            StartedBy = PlaybookRunStartedBy.Person,
+            CorrelationId = httpContext.TraceIdentifier
         };
 
         // If the caller pre-loaded the document context, attach it so all nodes share it.
@@ -240,7 +264,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     "App-only execution requires node-based playbook. Playbook {PlaybookId} has no nodes.",
                     request.PlaybookId);
 
-                context.MarkFailed("App-only execution requires a node-based playbook (no nodes found).");
+                context.MarkFailed("App-only execution requires a node-based playbook (no nodes found).", "playbook_has_no_nodes");
                 await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                     context.RunId, context.PlaybookId,
                     "App-only execution requires a node-based playbook. Configure nodes in the Playbook Builder."),
@@ -264,12 +288,15 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             _logger.LogError(ex, "App-only playbook execution failed - RunId: {RunId}", context.RunId);
             var failureDetail = ProblemDetailsHelper.Explain("The playbook run failed.", ex);
-            context.MarkFailed(failureDetail);
+            context.MarkFailed(failureDetail, "playbook_run_exception");
             await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                 context.RunId, context.PlaybookId, failureDetail), CancellationToken.None);
         }
         finally
         {
+            // FR-13 (task 005): the run's final state reaches its durable record before the stream ends, so a client
+            // that waits for the end of the stream reads the final state. Never throws (see PersistRunAsync).
+            await PersistRunAsync(context, "complete", isFinal: true);
             writer.Complete();
         }
     }
@@ -317,7 +344,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Playbook execution failed - RunId: {RunId}", context.RunId);
-            context.MarkFailed(ProblemDetailsHelper.Explain("The playbook run failed.", ex));
+            context.MarkFailed(ProblemDetailsHelper.Explain("The playbook run failed.", ex), "playbook_run_exception");
             // ADR-019: this event goes to the caller's SSE stream. The exception stays in the log above; the stream
             // gets the fixed text, the stable code and the trace id that finds the log entry.
             await writer.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
@@ -326,6 +353,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         }
         finally
         {
+            // FR-13 (task 005): the run's final state reaches its durable record before the stream ends, so a client
+            // that waits for the end of the stream reads the final state. Never throws (see PersistRunAsync).
+            await PersistRunAsync(context, "complete", isFinal: true);
             writer.Complete();
         }
     }
@@ -419,7 +449,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <inheritdoc />
-    public Task<PlaybookRunStatus?> GetRunStatusAsync(
+    /// <remarks>
+    /// FR-13 (task 005): the in-memory run when this request started it, else the durable record when the caller
+    /// started it (<see cref="ReadOwnedStoredRunAsync"/>), else <c>null</c>.
+    /// </remarks>
+    public async Task<PlaybookRunStatus?> GetRunStatusAsync(
         Guid runId,
         CancellationToken cancellationToken)
     {
@@ -427,10 +461,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             // Approximate node count from stored outputs
             var nodeCount = context.NodeOutputs.Count;
-            return Task.FromResult<PlaybookRunStatus?>(context.GetStatus(nodeCount));
+            return context.GetStatus(nodeCount);
         }
 
-        return Task.FromResult<PlaybookRunStatus?>(null);
+        var stored = await ReadOwnedStoredRunAsync(runId, cancellationToken).ConfigureAwait(false);
+        return stored?.ToStatus(DateTimeOffset.UtcNow);
     }
 
     /// <inheritdoc />
@@ -503,13 +538,27 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <inheritdoc />
-    public Task<Models.Ai.PlaybookRunDetail?> GetRunDetailAsync(
+    /// <remarks>
+    /// FR-13 (task 005): the in-memory run when this request started it, else the durable record when the caller
+    /// started it (<see cref="ReadOwnedStoredRunAsync"/>), else <c>null</c>.
+    /// </remarks>
+    public async Task<Models.Ai.PlaybookRunDetail?> GetRunDetailAsync(
         Guid runId,
         CancellationToken cancellationToken)
     {
         if (!_activeRuns.TryGetValue(runId, out var context))
         {
-            return Task.FromResult<Models.Ai.PlaybookRunDetail?>(null);
+            var stored = await ReadOwnedStoredRunAsync(runId, cancellationToken).ConfigureAwait(false);
+            if (stored is null)
+            {
+                return null;
+            }
+
+            var storedDetail = stored.ToDetail(DateTimeOffset.UtcNow);
+            _logger.LogDebug(
+                "Retrieved stored run detail for {RunId}: {NodeCount} nodes",
+                runId, storedDetail.NodeDetails.Length);
+            return storedDetail;
         }
 
         var summary = ConvertToRunSummary(context);
@@ -553,7 +602,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             "Retrieved run detail for {RunId}: {NodeCount} nodes",
             runId, nodeDetails.Length);
 
-        return Task.FromResult<Models.Ai.PlaybookRunDetail?>(detail);
+        return detail;
     }
 
     #region Private Methods - Run History Helpers
@@ -596,6 +645,228 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
     #endregion
 
+    #region Private Methods - Durable Run Record (FR-13, task 005)
+
+    /// <summary>
+    /// Reads the durable record of a run that is not in this instance's memory, for the current HTTP caller only.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Owner scope.</b> This service is Scoped and <see cref="_activeRuns"/> is an instance field, so before FR-13 a
+    /// status or detail request could only ever see a run its own request started. The route ledger relies on that
+    /// (<c>RouteAuthorizationGuardTests.Ledger.cs</c>, <c>CallerScopedOnly</c>). The durable record keeps the property:
+    /// it is returned only to the caller whose Entra oid equals the run's <see cref="PlaybookRunStatus.StartedByOid"/>
+    /// (rehydrated from <c>sprk_triggeredby</c>). Any other caller, a request with no caller, and a run with no recorded
+    /// starter get <c>null</c>, which the routes already answer with the same 404 as an unknown run id.
+    /// </para>
+    /// <para>
+    /// <b>Failure.</b> A failed or timed-out read throws (<see cref="ReadFailedOutcome"/> in the message), which the run
+    /// routes answer with their existing 500. It does not read as not found: a 404 is a terminal answer that would tell
+    /// the owner, during a Dataverse fault, that their run does not exist. The read fails before ownership or existence
+    /// is known, so the 500 says nothing about either.
+    /// </para>
+    /// </remarks>
+    private async Task<PlaybookRuns.StoredPlaybookRun?> ReadOwnedStoredRunAsync(Guid runId, CancellationToken cancellationToken)
+    {
+        if (_runRecordStore is null)
+        {
+            return null;
+        }
+
+        var callerOid = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(
+            _httpContextAccessor?.HttpContext?.User);
+        if (callerOid is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await BoundedAsync(
+                ct => _runRecordStore.GetOwnedRunAsync(runId, callerOid, ct), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Wrapped (not logged here) so the route's own error log carries the outcome code once.
+            throw new InvalidOperationException(
+                $"{ReadFailedOutcome}: the durable record of run {runId:D} could not be read ({ex.GetType().Name}).", ex);
+        }
+    }
+
+    /// <summary>
+    /// Runs one durable run record call with a hard upper bound of <see cref="RunRecordCallTimeout"/>: the call's token is
+    /// cancelled at the bound, and the wait ends at the bound even if the Dataverse client ignores its token (the call is
+    /// then abandoned). Throws <see cref="TimeoutException"/> at the bound.
+    /// </summary>
+    private static async Task<T> BoundedAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(RunRecordCallTimeout);
+        return await call(timeout.Token).WaitAsync(RunRecordCallTimeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Task BoundedAsync(Func<CancellationToken, Task> call) =>
+        BoundedAsync(async ct => { await call(ct).ConfigureAwait(false); return true; }, CancellationToken.None);
+
+    /// <summary>
+    /// Writes the run's current state to its durable record (an upsert keyed by the run id). Never throws and never
+    /// changes the run, its events or its in-memory state.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only a <see cref="PlaybookRunStartedBy.Person"/> run is recorded: the record exists so its starter can read the run
+    /// after a restart or on another instance, and a System run (the scheduler's per-user fan-out) has no starter who
+    /// could read it (<see cref="ReadOwnedStoredRunAsync"/>).
+    /// </para>
+    /// <para>
+    /// If the start write fails, the run's node rows are skipped (their parent row may not exist), but the final write
+    /// (<paramref name="isFinal"/>) is always attempted: it is an upsert, so it lands whether the start write failed,
+    /// timed out after Dataverse committed it, or succeeded. A Dataverse outage or missing columns therefore cost two
+    /// failed calls per run.
+    /// </para>
+    /// </remarks>
+    private async Task PersistRunAsync(PlaybookRunContext context, string operation, bool isFinal = false)
+    {
+        if (_runRecordStore is null || context.StartedBy != PlaybookRunStartedBy.Person)
+        {
+            return;
+        }
+
+        var recordState = context.RunRecordState;
+        if (recordState == PlaybookRunContext.RunRecordUnavailable && !isFinal)
+        {
+            return;
+        }
+
+        var record = BuildRunRecord(context);
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await BoundedAsync(ct => _runRecordStore.WriteRunAsync(record, ct)).ConfigureAwait(false);
+            if (recordState == PlaybookRunContext.RunRecordNotWritten)
+            {
+                context.RunRecordState = PlaybookRunContext.RunRecordWritten;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (recordState == PlaybookRunContext.RunRecordNotWritten)
+            {
+                context.RunRecordState = PlaybookRunContext.RunRecordUnavailable;
+            }
+
+            _logger.LogWarning(
+                "Playbook run record write failed; the run continues - Outcome: {Outcome}, Operation: {Operation}, RunId: {RunId}, PlaybookId: {PlaybookId}, ErrorType: {ErrorType}, ElapsedMs: {ElapsedMs}",
+                PersistFailedOutcome, operation, context.RunId, context.PlaybookId, ex.GetType().Name, stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    /// <summary>
+    /// Writes one <c>sprk_playbooknoderun</c> row for a node the run reached. Never throws. A node that stored an output
+    /// is Completed or Failed; a node skipped before it produced one (its output never entered the run) is Skipped.
+    /// </summary>
+    private async Task PersistNodeRunAsync(
+        PlaybookRunContext context,
+        PlaybookNodeDto node,
+        NodeOutput output,
+        int sequence,
+        DateTimeOffset startedAt,
+        DateTimeOffset completedAt)
+    {
+        if (_runRecordStore is null || context.RunRecordState != PlaybookRunContext.RunRecordWritten)
+        {
+            return;
+        }
+
+        var storedInRun = ReferenceEquals(context.GetOutput(node.OutputVariable), output);
+        var outcome = !storedInRun
+            ? PlaybookRuns.PlaybookNodeRunOutcome.Skipped
+            : output.Success ? PlaybookRuns.PlaybookNodeRunOutcome.Completed : PlaybookRuns.PlaybookNodeRunOutcome.Failed;
+
+        var record = new PlaybookRuns.PlaybookNodeRunRecord
+        {
+            RunId = context.RunId,
+            NodeId = node.Id,
+            Name = node.OutputVariable,
+            Outcome = outcome,
+            Sequence = sequence,
+            StartedAt = startedAt,
+            CompletedAt = completedAt,
+            DurationMs = output.Metrics.DurationMs,
+            TokensIn = output.Metrics.TokensIn,
+            TokensOut = output.Metrics.TokensOut,
+            Confidence = output.Confidence,
+            ErrorMessage = output.Success ? null : output.ErrorMessage,
+        };
+
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            await BoundedAsync(ct => _runRecordStore.CreateNodeRunAsync(record, ct)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "Playbook node run record write failed; the run continues - Outcome: {Outcome}, Operation: {Operation}, RunId: {RunId}, PlaybookId: {PlaybookId}, NodeId: {NodeId}, ErrorType: {ErrorType}, ElapsedMs: {ElapsedMs}",
+                PersistFailedOutcome, "node", context.RunId, context.PlaybookId, node.Id, ex.GetType().Name, stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    private static PlaybookRuns.PlaybookRunRecord BuildRunRecord(PlaybookRunContext context)
+    {
+        var metrics = context.GetMetrics(context.NodeOutputs.Count);
+
+        return new PlaybookRuns.PlaybookRunRecord
+        {
+            RunId = context.RunId,
+            PlaybookId = context.PlaybookId,
+            // This service runs the node engine: its rows are Engine runs. It sets none of the Action, Binding or
+            // parent-run references (those belong to prompted and coded runs, written by their own callers).
+            Kind = PlaybookRuns.PlaybookRunKind.Engine,
+            State = context.State,
+            StartedAt = context.StartedAt,
+            CompletedAt = context.CompletedAt,
+            ErrorMessage = context.ErrorMessage,
+            ErrorCode = context.State == PlaybookRunState.Failed ? context.FailureCode : null,
+            TriggeredBy = context.UserId,
+            // The same correlation id the run's failure event carries (BuildRunFailedEvent): the request's trace id,
+            // captured at start; the run id for an app-only run.
+            CorrelationId = context.CorrelationId ?? context.RunId.ToString("D"),
+            Regarding = ResolveRegarding(context.Parameters),
+            DocumentIds = context.DocumentIds,
+            Summary = BuildSummary(context.State, metrics),
+        };
+    }
+
+    /// <summary>
+    /// The run's record subject: the first record-identity parameter (<see cref="PlaybookParameterPolicy.RecordIdentityParameters"/>)
+    /// that holds a GUID — the same parameters the run route authorizes as records. <c>null</c> when the run has none.
+    /// </summary>
+    private static PlaybookRuns.PlaybookRunRegarding? ResolveRegarding(IReadOnlyDictionary<string, string> parameters)
+    {
+        foreach (var (parameterName, entityLogicalName) in PlaybookParameterPolicy.RecordIdentityParameters)
+        {
+            foreach (var (key, value) in parameters)
+            {
+                if (string.Equals(key, parameterName, StringComparison.OrdinalIgnoreCase)
+                    && Guid.TryParse(value, out var recordId)
+                    && recordId != Guid.Empty)
+                {
+                    return new PlaybookRuns.PlaybookRunRegarding(entityLogicalName, recordId);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>A short summary built from counts only — never document content, prompts or model output (ADR-015).</summary>
+    private static string BuildSummary(PlaybookRunState state, PlaybookRunMetrics metrics) =>
+        $"{state}. Nodes: {metrics.CompletedNodes} completed, {metrics.FailedNodes} failed, {metrics.SkippedNodes} skipped. "
+        + $"Tokens: {metrics.TotalTokensIn} in, {metrics.TotalTokensOut} out.";
+
+    #endregion
+
     #region Private Methods - Cleanup
 
     private void ScheduleCleanup(Guid runId)
@@ -628,6 +899,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         await writer.WriteAsync(PlaybookStreamEvent.RunStarted(
             context.RunId, context.PlaybookId, 1), cancellationToken);
 
+        // FR-13 (task 005): a legacy run is Running from here, as a node-based run is (it used to stay Pending until it
+        // ended), and its durable record starts now.
+        context.MarkRunning();
+        await PersistRunAsync(context, "start");
+
         // Create legacy request
         var legacyRequest = new PlaybookExecuteRequest
         {
@@ -640,7 +916,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
         if (context.HttpContext is null)
         {
-            context.MarkFailed("Legacy mode requires HttpContext — use node-based playbook for app-only execution");
+            context.MarkFailed("Legacy mode requires HttpContext — use node-based playbook for app-only execution", "legacy_requires_http_context");
             await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                 context.RunId, context.PlaybookId,
                 "Legacy mode requires HttpContext. Configure nodes in the Playbook Builder for app-only execution."),
@@ -675,7 +951,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 case "error":
                     var legacyError = ProblemDetailsHelper.Redact(chunk.Error) ?? "Unknown error";
-                    context.MarkFailed(legacyError);
+                    context.MarkFailed(legacyError, "legacy_run_error");
                     await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                         context.RunId, context.PlaybookId, legacyError), cancellationToken);
                     return;
@@ -725,6 +1001,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         await writer.WriteAsync(PlaybookStreamEvent.RunStarted(
             context.RunId, context.PlaybookId, totalNodes), cancellationToken);
 
+        // FR-13 (task 005): the durable record of the run starts now (state Running).
+        await PersistRunAsync(context, "start");
+
         // Get execution batches for parallel processing
         var batches = graph.GetExecutionBatches();
 
@@ -759,15 +1038,24 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             {
                 // Acquire throttle slot
                 await throttle.WaitAsync(context.CancellationToken);
+                NodeOutput output;
+                int nodeSequence;
+                DateTimeOffset nodeStartedAt;
                 try
                 {
                     context.CurrentNodeId = node.Id;
-                    return await ExecuteNodeWithRetryAsync(context, node, graph, writer, cancellationToken);
+                    nodeSequence = context.NextNodeSequence();
+                    nodeStartedAt = DateTimeOffset.UtcNow;
+                    output = await ExecuteNodeWithRetryAsync(context, node, graph, writer, cancellationToken);
                 }
                 finally
                 {
                     throttle.Release();
                 }
+
+                // FR-13 (task 005): one durable row per node the run reached. Never throws.
+                await PersistNodeRunAsync(context, node, output, nodeSequence, nodeStartedAt, DateTimeOffset.UtcNow);
+                return output;
             });
 
             // Wait for all nodes in batch to complete
@@ -785,7 +1073,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     failedNode.node.Name, batchNumber);
 
                 var failureDetail = $"Node '{failedNode.node.Name}' failed: {ProblemDetailsHelper.Redact(failedNode.result.ErrorMessage)}";
-                context.MarkFailed(failureDetail);
+                context.MarkFailed(failureDetail, "playbook_node_failed");
 
                 await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                     context.RunId,
