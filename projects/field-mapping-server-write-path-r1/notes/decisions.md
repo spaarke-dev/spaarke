@@ -1187,3 +1187,10 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - Still open, and not blocking 051:
   - OQ-4: should the home-grid and subgrid New close further?
   - OQ-5: keep both "Add KPI Assessment" and "New KPI Assessment" on the KPI subgrid?
+
+## 2026-11-26 — Owner: a mapped field copies whatever its field security; 051 OQ-4 and OQ-5 closed
+
+- **Field-secured sources (supersedes "never copied until a same-profile-set rule exists"):** "if two records are related and there is field mapping then the field should copy write - security does not matter." A mapped value from the caller's filing parent is copied even when its source column is field-secured. This needs a follow-up task: today `FieldSecuredSourceRule` drops these values on create and on push. The other 064 boundaries are unchanged: the filing lookup, the invariant and access-conferring columns, sources outside the filing chain, the source Read check as the caller, and the secure-source owner rule. Not built yet. The access logic changes, so it goes to UAC-r2's gate before merge.
+- **Post-mapping defaults:** the owner asked what this meant, so it is not decided yet. In code, the only default is the Office add-in create's "Assigned To = the creator's own contact", used when mapping leaves it empty. It is an access-conferring column, so it keeps the caller's checks under any answer. No mapping rule on dev sets a fixed value: all 57 are Copy rules.
+- **051 OQ-4:** closed. The owner knows of no other places to close New.
+- **051 OQ-5:** "only +New is required". The KPI subgrid keeps "New KPI Assessment" (the BFF create-then-open). "Add KPI Assessment" (`sprk.matter.subgrid.kpi.AddKpiButton`) is to be removed. This is a ribbon change; the dev import needs the owner's go.
