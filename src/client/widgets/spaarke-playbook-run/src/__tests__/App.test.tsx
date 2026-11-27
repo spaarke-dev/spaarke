@@ -419,6 +419,29 @@ describe('results', () => {
     expect(screen.getByRole('button', { name: 'Open in Spaarke' })).toBeInTheDocument();
   });
 
+  it('"unsaved" (037 review F-A): says the results could not be saved, in plain words, with the console link; never "no results"', async () => {
+    const h = host(status('completed'), {
+      [RESULTS_TOOL]: [ok(results({ results: 'unsaved', resultsReason: 'analysis_save_failed', sections: [] }))],
+    });
+    renderWith(h.connection);
+    await advance(0);
+    expect(
+      screen.getByText(
+        'The run finished but its results could not be saved. Open the analysis in Spaarke or run it again.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText('The run finished but saved no results to show here.')).toBeNull();
+    expect(screen.queryByText(/could not read this playbook run/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open in Spaarke' })).toBeInTheDocument();
+  });
+
+  it('"moreDocuments" (037 review F-D): the documents the server did not list are counted', async () => {
+    const h = host(status('completed'), { [RESULTS_TOOL]: [ok(results({ moreDocuments: 40 }))] });
+    renderWith(h.connection);
+    await advance(0);
+    expect(screen.getByText('And 40 more documents.')).toBeInTheDocument();
+  });
+
   it('a failed run: the Failed badge, the plain sentence, and its (none) results', async () => {
     const h = host(status('failed'), {
       [RESULTS_TOOL]: [ok(results({ status: 'failed', outcome: 'interrupted', results: 'none', sections: [] }))],

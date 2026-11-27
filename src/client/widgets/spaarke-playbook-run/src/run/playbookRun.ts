@@ -34,7 +34,8 @@ export const NOT_FOUND_REASON = 'sdap.access.deny.record_unavailable';
 
 export type RunStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type RunOutcome = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
-export type ResultsState = 'pending' | 'available' | 'none';
+/** `unsaved` (task 037 review F-A): the run completed, but saving its results to the analysis failed. */
+export type ResultsState = 'pending' | 'available' | 'none' | 'unsaved';
 
 /** What the widget knows of the run's state, from a start or a status result. */
 export interface RunState {
@@ -75,6 +76,8 @@ export interface RunResults {
   moreLink: string | null;
   consoleLink: string | null;
   documents: SourceDocument[];
+  /** How many of the run's documents the server did not list (it lists at most 20; task 037 review F-D). */
+  moreDocuments: number;
 }
 
 /** A tool failure, in plain words for the reader. `notFound` is the uniform not-found. */
@@ -106,7 +109,7 @@ function runIdOf(value: unknown): string | null {
 
 const STATUSES: readonly RunStatus[] = ['queued', 'running', 'completed', 'failed'];
 const OUTCOMES: readonly RunOutcome[] = ['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted'];
-const RESULT_STATES: readonly ResultsState[] = ['pending', 'available', 'none'];
+const RESULT_STATES: readonly ResultsState[] = ['pending', 'available', 'none', 'unsaved'];
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | null {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : null;
@@ -226,6 +229,7 @@ export function parseRunResults(
     : [];
 
   const truncated = structured.truncated === true;
+  const moreDocuments = int(structured.moreDocuments);
   return {
     ok: true,
     value: {
@@ -239,6 +243,7 @@ export function parseRunResults(
       moreLink: truncated ? safeLink(structured.moreLink) : null,
       consoleLink: safeLink(structured.consoleLink),
       documents,
+      moreDocuments: moreDocuments !== null && moreDocuments > 0 ? moreDocuments : 0,
     },
   };
 }

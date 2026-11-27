@@ -4,7 +4,7 @@
  */
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { MarkdownText, parseBlocks, parseInline } from '../run/markdown';
+import { MarkdownText, parseBlocks, parseHeading, parseInline } from '../run/markdown';
 
 function renderMarkdown(text: string) {
   return render(
@@ -39,6 +39,54 @@ describe('parseInline', () => {
       { type: 'text', text: ' word' },
     ]);
     expect(parseInline('\\*not italic\\*')).toEqual([{ type: 'text', text: '*not italic*' }]);
+  });
+});
+
+describe('hostile input (037 review F-C): a 36 KB line stays fast', () => {
+  const SIZE = 36 * 1024;
+  const line = (unit: string) => unit.repeat(Math.ceil(SIZE / unit.length)).slice(0, SIZE);
+  const timed = (work: () => unknown) => {
+    const started = Date.now();
+    work();
+    return Date.now() - started;
+  };
+
+  it.each([
+    ['unclosed link openers', line('[')],
+    ['link openers with an unclosed target', line('[a](')],
+    ['unclosed emphasis after spaces', line('*a ')],
+    ['unclosed underscore emphasis', line('_a ')],
+    ['intraword strong markers', ' ' + line('__a')],
+    ['unclosed strong openers', line('** a ')],
+    ['backticks', line('` ')],
+  ])('%s', (_name, hostile) => {
+    expect(hostile.length).toBeGreaterThanOrEqual(SIZE);
+    expect(timed(() => parseInline(hostile))).toBeLessThan(250);
+    expect(timed(() => parseBlocks(hostile))).toBeLessThan(250);
+  });
+
+  it('a heading followed by a long run of spaces', () => {
+    const hostile = '# a' + ' '.repeat(SIZE) + 'x';
+    expect(timed(() => parseBlocks(hostile))).toBeLessThan(250);
+    const [block] = parseBlocks(hostile);
+    expect(block.type).toBe('heading');
+  });
+
+  it('the heading scan reads headings as the old pattern did', () => {
+    expect(parseHeading('# Title')).toEqual({ level: 1, text: 'Title' });
+    expect(parseHeading('###### Six ##')).toEqual({ level: 6, text: 'Six' });
+    expect(parseHeading('####### Seven')).toBeNull();
+    expect(parseHeading('#NoSpace')).toBeNull();
+    expect(parseHeading('    # Indented code')).toBeNull();
+    expect(parseHeading('   # Three spaces')).toEqual({ level: 1, text: 'Three spaces' });
+    expect(parseHeading('# Not closing#')).toEqual({ level: 1, text: 'Not closing#' });
+    expect(parseHeading('# a # b')).toEqual({ level: 1, text: 'a # b' });
+    expect(parseHeading('# ##')).toEqual({ level: 1, text: '##' });
+    expect(parseHeading('# ')).toEqual({ level: 1, text: '' });
+  });
+
+  it('renders a hostile section without hanging', () => {
+    expect(timed(() => renderMarkdown(line('*a [b ')))).toBeLessThan(2_000);
   });
 });
 
