@@ -5,14 +5,14 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-27 ~20:05Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-27 ~20:35Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative: it reviews peers as an access gate and runs EVERY dev deploy. Live actions need the owner's go IN THIS SESSION; a deploy needs the owner to name the exact SHA here. A go relayed by another session is not a go. ≤ 2 agents at once. |
-| **Dev BFF (CURRENT, mine)** | **`5cd40984b0` LIVE ~13:14Z 2026-11-27** (owner in session: "go BFF deploy 5cd40984b0 if it is still the latest"; it was: spike tip = master 765a199922 + spike tools incl. G5 stubs). `C:/wtdep31`, 42.15 MB, live DLL SHA-256 5b9c104d… = local. Pre-deploy IsSecured check: 18 tables, 0 non-boolean. Smoke OK (healthz 200; catalog 503 old; preview-url 403; tools/list 9 incl. 4 spike tools). **30-min gate PASS 13:45Z** (40 req, 0 5xx, no external; 12 known container refusals; 2 Create_Task_From_Email schema 400 = pre-existing #2142/#2776 since 11-25). BEFORE/LIVE/GATE sent to all 7 (word-add-in via its known pipe: a new local session claims that name, unconfirmed). Full test pass NOT run on this SHA (spike session reported build 0/0, MCP 268/1 skip, arch 2860). Rollback `d307d67e36` (`C:/wtdep30`). |
+| **Dev BFF (CURRENT, mine)** | **`d9595dd98e` LIVE ~20:19Z 2026-11-27 (see "LIVE NOW" below). PREVIOUS: `5cd40984b0` ~13:14Z** (owner in session: "go BFF deploy 5cd40984b0 if it is still the latest"; it was: spike tip = master 765a199922 + spike tools incl. G5 stubs). `C:/wtdep31`, 42.15 MB, live DLL SHA-256 5b9c104d… = local. Pre-deploy IsSecured check: 18 tables, 0 non-boolean. Smoke OK (healthz 200; catalog 503 old; preview-url 403; tools/list 9 incl. 4 spike tools). **30-min gate PASS 13:45Z** (40 req, 0 5xx, no external; 12 known container refusals; 2 Create_Task_From_Email schema 400 = pre-existing #2142/#2776 since 11-25). BEFORE/LIVE/GATE sent to all 7 (word-add-in via its known pipe: a new local session claims that name, unconfirmed). Full test pass NOT run on this SHA (spike session reported build 0/0, MCP 268/1 skip, arch 2860). Rollback `d307d67e36` (`C:/wtdep30`). |
 | **Dev SPA** | c438119bca (spa-r4 task 043, live ~14:29Z 2026-11-27, run 46016029559; rollback tag external-spa-dev-24d53fb333). |
 | **Agents running** | None. |
 
@@ -32,8 +32,16 @@
 
 - **intake-pipeline-r1 (PR #3253 draft, head 9bad3f4815):** asked for a dev BFF deploy ~16:00Z on a go from THEIR session. Declined: merge base 24d53fb333 is far behind live (5cd40984b0 / 765a199922 / 6f4d7bc7e4 not ancestors, would roll back gated work); the go must be the owner's here on an exact SHA. Path given: master merge + their task 013 → send access-relevant src/server diff to me (EmailChannelSender createReply, Communication services, DocumentProcessingJobHandler removal, OfficeJobStatusService, app-only IAgreementAi) → merge to master → I batch it into the next candidate.
 
-## NEXT DEV BFF CANDIDATE: master `d9595dd98e` (~20:00Z 2026-11-27) — awaiting the owner's exact-SHA go here
-- Over live (5cd40984b0 spike): #3290 (approved), #3292/#3293/#3295 (ontology 233-235: Opus access review APPROVE w/ notes, notes sent to ontology-r1), #3300 (page only), #3301 search (Opus review APPROVE w/ notes; note 1 = parent CLEARED on a secure/ancestry read fault in DocumentIndexParentResolver, availability only, sent to the search session), #3298 field-mapping 065+066 = 49eece4926 (src identical to approved 46ae0bc33a), #3272 Part C = d9595dd98e (src = approved 18be14d973; #3270 inline share still after accessWindow.Close()). Rollback for Part C without deploy: `Signals__DecisionAccessWindow__Enabled=false` (owner decision).
+## LIVE NOW: master `d9595dd98e` since ~20:19Z 2026-11-27 (owner in session: "Go BFF deploy d9595dd98e")
+- `C:/wtdep32`, 42.14 MB, live DLL SHA-256 10974E94… = local (`deploy/api-publish`). Pre-deploy IsSecured: 18 tables, 0 non-boolean. Smoke: healthz 200, catalog 503 (old), preview-url 403, bogus 404, spike route 404, tools/list 5 (spike tools gone, as announced). Rollback: `5cd40984b0` (`C:/wtdep31`).
+- Interim gate 20:31Z: 35 req, one 500 = POST /api/ai/search/records against a non-records index ("Unknown field 'recordName'"), pre-existing #3307 (search session's probe). **Final 30-min gate: run `gate-now.ps1 2026-11-27T20:19:00Z` at/after 20:49Z, then GATE notices to the 8.**
+- Search session's #3301 DEV checks: all pass (their check 4 not run, it writes data). Note 1 resolved by the owner there: keep clearing, no follow-up PR. Filed by them: #3304, #3305, #3306, #3307.
+- 065 live check PASS (preview only, nothing written): push as testuser1 200 on 3 profiles; no dev rule is Manual Refresh, none has a secured source; K4 premise holds (71/71 secured values null to the caller, set app-only). Positive Filing-edge copy check = field-mapping-r1 asking the owner (needs a temp rule).
+- **Spike re-merge candidate `af8a5547ef`** (= 5cd40984b0 + d9595dd98e merge; diff over d9595dd98e = 23 spike files, patch-id 48c5630a3f21 = reviewed spike): verified; awaiting the owner's exact-SHA go. Expect tools/list 9; rollback d9595dd98e.
+- ontology-r1: 233(b) doesn't hold (SourcesOf reads kind+ref only); 234 statecode fix = their task 237 (PR to come, review here). field-mapping 066 ribbon import on dev from 20:22Z (their owner go, no BFF).
+
+## (was) candidate `d9595dd98e` details
+- Over the previous live (5cd40984b0 spike): #3290 (approved), #3292/#3293/#3295 (ontology 233-235: Opus access review APPROVE w/ notes, notes sent to ontology-r1), #3300 (page only), #3301 search (Opus review APPROVE w/ notes; note 1 = parent CLEARED on a secure/ancestry read fault in DocumentIndexParentResolver, availability only, sent to the search session), #3298 field-mapping 065+066 = 49eece4926 (src identical to approved 46ae0bc33a), #3272 Part C = d9595dd98e (src = approved 18be14d973; #3270 inline share still after accessWindow.Close()). Rollback for Part C without deploy: `Signals__DecisionAccessWindow__Enabled=false` (owner decision).
 - Drops the 6 spike commits (4 spike tools): asked specialist-legal-agents-r1 (a) drop or (b) re-merge spike on master; no answer yet.
 - Before: `issecured.ps1`. After: smoke + 30-min gate + 065 live push check (user without read on a secured column pushes; children unchanged); notify the search session (#3301 checks), field-mapping-r1, mcp-r1, and the 7 peers.
 - Pending client deploy: ebilling #3274 sprk_invoicereviewpage on its merge SHA (owner go here).
