@@ -16,6 +16,7 @@ import {
   Textarea,
   Input,
   Tooltip,
+  Checkbox,
 } from '@fluentui/react-components';
 import {
   DocumentRegular,
@@ -40,6 +41,7 @@ import {
   useSaveFlow,
   type SaveFlowContext,
   type SaveTarget,
+  type AttachmentsOnlyOutcome,
   type StageStatus,
   type UseSaveFlowOptions,
   type SaveAttachmentsAnswer,
@@ -565,6 +567,26 @@ function relatedRecordNumber(view: RelatedRecordView): string | null {
   return view.displayName && view.number ? view.number : null;
 }
 
+/**
+ * Task 143: what an attachments-only save's outcome says. Success only when every attachment was saved; a partial failure
+ * is a warning naming how many were saved (never "all saved"); nothing saved is an error. Exported for its unit tests.
+ */
+export function describeAttachmentsOnlyOutcome(outcome: AttachmentsOnlyOutcome): {
+  intent: 'success' | 'warning' | 'error';
+  title: string;
+} {
+  const saved = outcome.saved.length;
+  const total = saved + outcome.failed.length;
+  const noun = (n: number) => (n === 1 ? 'attachment' : 'attachments');
+  if (outcome.failed.length === 0) {
+    return { intent: 'success', title: `${saved} ${noun(saved)} saved to Spaarke. The email was not saved.` };
+  }
+  if (saved === 0) {
+    return { intent: 'error', title: total === 1 ? 'The attachment was not saved.' : 'No attachments were saved.' };
+  }
+  return { intent: 'warning', title: `${saved} of ${total} attachments saved. These were not saved:` };
+}
+
 /** Task 141: the friendly save type of a record's logical name (the save route takes `Matter` / `Project`). */
 const SAVE_TYPE_BY_LOGICAL_NAME: Record<string, EntityType> = { sprk_matter: 'Matter', sprk_project: 'Project' };
 
@@ -585,6 +607,11 @@ interface SavedEmailAttachmentsView {
   /** Round 2: the jobs creating `addingNames`. */
   addJobs: AttachmentsAddJob[] | undefined;
   record: { entityType: string; id: string; name: string } | null;
+  /**
+   * Task 143: the saved `.eml` is KNOWN to be filed to no record — an add then sends no record (the server accepts it only
+   * for an `.eml` filed to none). False when it is filed, or when its filing is unknown or withheld.
+   */
+  unfiled: boolean;
   filedTo: FiledTo;
   filedToNumber: string | null;
   filedRecord: FiledRecordRef | null;
@@ -690,6 +717,12 @@ export interface SaveFlowProps {
    * override; `undefined` means identity does not apply (Outlook) → a plain create save, as before.
    */
   documentIdentity?: DocumentIdentityState;
+  /**
+   * Task 143: for an email NOT saved as an `.eml`, the names of its attachments saved on their own (the email lookup's
+   * `not_saved` answer). In the first save those show as saved and cannot be ticked. Undefined = nothing can be said: no
+   * saved/unsaved marks (task 141's rule).
+   */
+  standaloneSavedAttachmentNames?: string[];
   /**
    * Task 111: called after the pane FILED the open (already-in-Spaarke, known-unfiled) document to a record, so the
    * host can put that record into its identity state — the card and the confirmation box then show it without a
@@ -830,6 +863,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     captureDocumentContent,
     resolvedDocumentId,
     documentIdentity,
+    standaloneSavedAttachmentNames,
     onRetryDocumentIdentity,
     onDocumentFiled,
     canOpenRecord = false,
@@ -1032,6 +1066,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     retry,
     getAttachmentsAnswer,
     watchAttachmentsAdd,
+    saveAttachmentsOnly,
+    attachmentsOnlyOutcome,
+    clearAttachmentsOnlyOutcome,
   } = useSaveFlow(saveFlowOptions);
   attachmentsAnswerGetterRef.current = getAttachmentsAnswer;
 
@@ -1594,11 +1631,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // user picking the record. `names` is never empty (the button is disabled then; the hook refuses it as well).
   const handleAddAttachments = useCallback(
     (view: SavedEmailAttachmentsView, names: string[]) => {
-      if (!view.record || names.length === 0) return;
+      // Task 143: an .eml known to be filed to no record takes an add too, with no record sent.
+      if ((!view.record && !view.unfiled) || names.length === 0) return;
       const target: SaveTarget = {
         mode: 'addAttachments',
         savedDocumentId: view.documentId,
-        record: view.record,
+        ...(view.record ? { record: view.record } : {}),
         attachmentFileNames: names,
       };
       setSubmittedTarget(target);
@@ -1620,6 +1658,72 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     },
     [buildSaveContext, startSave, announce]
   );
+
+  // Task 143 (owner 2026-11-27): the first save of an email can leave the email out — "Save the email", ticked by default
+  // (ticked = the email save exactly as before). Unticked, Save saves only the ticked attachments, each as its own document,
+  // filed to the picked record or to none. Only in an Outlook first save with attachments.
+  const [saveEmail, setSaveEmail] = useState(true);
+  const firstSaveMode = hostType === 'outlook' && savedDocument === null && !isExistingMode && attachments.length > 0;
+  const attachmentsOnly = firstSaveMode && !saveEmail;
+  // Task 143: the attachments saved on their own (the email lookup's not_saved answer) show as saved, never tickable.
+  // No names → no marks at all (task 141's rule), and every attachment tickable as before.
+  const firstSaveStates = useMemo(
+    () =>
+      standaloneSavedAttachmentNames !== undefined
+        ? classifySavedAttachments(attachments, standaloneSavedAttachmentNames)
+        : undefined,
+    [attachments, standaloneSavedAttachmentNames]
+  );
+  const firstSaveSavedIds = useMemo(
+    () => new Set(attachments.filter(a => firstSaveStates?.get(a.id) === 'saved').map(a => a.id)),
+    [attachments, firstSaveStates]
+  );
+  // A tick on an attachment the server now says is saved is dropped, so it is never sent again.
+  useEffect(() => {
+    if (!firstSaveMode || firstSaveSavedIds.size === 0) return;
+    if ([...selectedAttachmentIds].some(id => firstSaveSavedIds.has(id))) {
+      setSelectedAttachmentIds(new Set([...selectedAttachmentIds].filter(id => !firstSaveSavedIds.has(id))));
+    }
+  }, [firstSaveMode, firstSaveSavedIds, selectedAttachmentIds, setSelectedAttachmentIds]);
+  const tickedAttachmentCount = attachments.filter(
+    a => selectedAttachmentIds.has(a.id) && !firstSaveSavedIds.has(a.id)
+  ).length;
+
+  const handleSaveAttachmentsOnly = useCallback(() => {
+    if (tickedAttachmentCount === 0) return;
+    announce(
+      tickedAttachmentCount === 1 ? 'Saving 1 attachment.' : `Saving ${tickedAttachmentCount} attachments.`,
+      'polite'
+    );
+    void saveAttachmentsOnly(buildSaveContext());
+  }, [tickedAttachmentCount, announce, saveAttachmentsOnly, buildSaveContext]);
+
+  // Task 143: once an attachments-only save ends, say what happened and re-read the email's identity, whose
+  // savedAttachmentNames mark what the server now holds. The email itself was not saved, so no identity is adopted.
+  const reportedOutcomeRef = useRef<object | null>(null);
+  useEffect(() => {
+    if (!attachmentsOnlyOutcome || reportedOutcomeRef.current === attachmentsOnlyOutcome) return;
+    reportedOutcomeRef.current = attachmentsOnlyOutcome;
+    announce(describeAttachmentsOnlyOutcome(attachmentsOnlyOutcome).title, 'polite');
+    if (attachmentsOnlyOutcome.saved.length > 0) onRetryDocumentIdentity?.();
+  }, [attachmentsOnlyOutcome, announce, onRetryDocumentIdentity]);
+
+  const renderAttachmentsOnlyOutcome = () => {
+    if (!attachmentsOnlyOutcome) return null;
+    const { intent, title } = describeAttachmentsOnlyOutcome(attachmentsOnlyOutcome);
+    return (
+      <MessageBar intent={intent} layout="multiline" data-testid="attachments-only-outcome">
+        <MessageBarBody>
+          <MessageBarTitle>{title}</MessageBarTitle>
+          {attachmentsOnlyOutcome.failed.map(f => (
+            <Text key={f.name} size={200} className={styles.savedBarDetail}>
+              {f.name}: {f.message}
+            </Text>
+          ))}
+        </MessageBarBody>
+      </MessageBar>
+    );
+  };
 
   // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
   // the identity's default. Task 088: in the saved state it also leaves that state — the pane returns to an
@@ -2170,9 +2274,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         <MessageBar intent="success" layout="multiline">
           <MessageBarBody>
             <MessageBarTitle>{bar.title}</MessageBarTitle>
+            {/* Task 143 (owner): the item is named as the email, so a subject such as "Document: …" is not read as an
+                attachment. */}
             {bar.itemDetails && showDocumentInfo && itemName && (
-              <Text weight="semibold" className={styles.savedBarDetail}>
-                {itemName}
+              <Text className={styles.savedBarDetail} data-testid="saved-bar-email-subject">
+                <Text size={200}>Email: </Text>
+                <Text weight="semibold">{itemName}</Text>
               </Text>
             )}
             {bar.itemDetails && showDocumentInfo && (senderDisplayName || senderEmail) && (
@@ -2424,6 +2531,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       addingNames: undefined,
       addJobs: undefined,
       record,
+      unfiled: resolvedRelatedRecord.kind === 'unassociated',
       filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
       filedToNumber: resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
       filedRecord: relatedRecordRef(resolvedRelatedRecord),
@@ -2446,6 +2554,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       addingNames: saved.attachmentsAdding,
       addJobs: saved.attachmentsAddJobs,
       record,
+      // A save this pane made with no record (`filedTo` null, not undefined = unknown).
+      unfiled: saved.filedTo === null,
       filedTo: saved.filedTo,
       filedToNumber: saved.filedToNumber ?? null,
       filedRecord: saved.filedRecord ?? null,
@@ -2462,7 +2572,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     // Task 141 review (finding 5): Save-to-add is offered ONLY when the server sent `savedAttachmentNames`. That field is
     // new with the add, so its presence proves the server knows `savedDocumentId`; an older server would ignore it and
     // run a plain email save (a second, attachment-less .eml). `savedNames` is never a list the pane worked out itself.
-    const canAdd = view.record !== null && view.savedNames !== undefined;
+    // Task 143: also for an .eml KNOWN to be filed to no record (the add then sends none) — 141's dead end is gone.
+    const canAdd = (view.record !== null || view.unfiled) && view.savedNames !== undefined;
     const notStored = new Set((view.notStoredNames ?? []).map(name => name.toLowerCase()));
     const nonSelectableIds = new Set(
       attachments.filter(a => !canAdd || notStored.has(a.name.toLowerCase())).map(a => a.id)
@@ -2676,6 +2787,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     const hideForCreate = relatedCreating && (!isExistingMode || showFilingPicker);
     return (
       <>
+        {/* Task 143: what an attachments-only save saved, and each attachment it did not. */}
+        {renderAttachmentsOnlyOutcome()}
+
         {/* Task 111: a document already in Spaarke says so with the same green box a save ends on. */}
         {!hideForCreate && showResolvedBox && resolvedIdentity && renderSavedBar(resolvedBarOf(resolvedIdentity))}
 
@@ -2756,11 +2870,25 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
             {/* Attachment Selector (Outlook only). Task 120: not while the email is shown as already saved — there is
                 nothing to send until the user chooses to save it again. */}
+            {/* Task 143: "Save the email" (ticked = the email save as before); unticked saves only the ticked attachments. */}
+            {firstSaveMode && (
+              <Checkbox
+                checked={saveEmail}
+                onChange={(_e, data) => {
+                  setSaveEmail(data.checked === true);
+                  clearAttachmentsOnlyOutcome();
+                }}
+                label="Save the email"
+                disabled={isSaving}
+                data-testid="save-the-email"
+              />
+            )}
             {hostType === 'outlook' && attachments.length > 0 && !isExistingMode && (
               <AttachmentSelector
                 attachments={attachments}
                 selectedIds={selectedAttachmentIds}
                 onSelectionChange={setSelectedAttachmentIds}
+                {...(firstSaveStates ? { savedStates: firstSaveStates, nonSelectableIds: firstSaveSavedIds } : {})}
                 disabled={isSaving}
                 showHeader
                 label="Attachments"
@@ -2998,7 +3126,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               Open Document
             </Button>
           )}
-          <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid || !activeTarget}>
+          {/* Task 143: with "Save the email" unticked, Save saves the ticked attachments only — never with none ticked. */}
+          <Button
+            appearance="primary"
+            onClick={attachmentsOnly ? handleSaveAttachmentsOnly : handleSave}
+            disabled={isSaving || !isValid || !activeTarget || (attachmentsOnly && tickedAttachmentCount === 0)}
+          >
             {isSaving ? 'Saving...' : 'Save'}
           </Button>
         </div>

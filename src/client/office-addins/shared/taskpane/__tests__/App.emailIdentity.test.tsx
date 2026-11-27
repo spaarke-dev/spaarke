@@ -178,7 +178,7 @@ describe('App — Outlook email identity (task 120)', () => {
 
     await waitFor(() => expect(lastProps(SaveView).documentIdentity).toEqual(SAVED_EMAIL));
     expect(getEmailIdentityKeys).toHaveBeenCalledTimes(1);
-    expect(resolveEmailIdentity).toHaveBeenCalledWith(KEYS);
+    expect(resolveEmailIdentity).toHaveBeenCalledWith(KEYS, expect.any(Function));
     expect(lastProps(SaveView).resolvedDocumentId).toBe(EML_ID);
     expect(resolveDocumentIdentity).not.toHaveBeenCalled();
   });

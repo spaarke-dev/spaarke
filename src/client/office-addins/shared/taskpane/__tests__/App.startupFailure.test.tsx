@@ -370,7 +370,10 @@ describe('the saved-or-not lookup runs after a successful Retry (review F1)', ()
 
     await waitFor(() => expect(screen.getByTestId('save-view')).toBeInTheDocument());
     await waitFor(() => expect(resolveEmailIdentity).toHaveBeenCalledTimes(1));
-    expect(resolveEmailIdentity).toHaveBeenCalledWith({ internetMessageId: '<id@example.com>', itemId: 'item-1' });
+    expect(resolveEmailIdentity).toHaveBeenCalledWith(
+      { internetMessageId: '<id@example.com>', itemId: 'item-1' },
+      expect.any(Function)
+    );
     await waitFor(() => expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument());
   });
 
