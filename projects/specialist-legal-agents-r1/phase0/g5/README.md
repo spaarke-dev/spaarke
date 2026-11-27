@@ -36,17 +36,18 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 | Function | Expected tool name (from `tools/list`) |
 |---|---|
 | NDA review | `spike_review_nda` (task 011; confirm against `tools/list` or the smoke prompt) |
-| Agreement review | **none on dev yet** (see "Status of the function tools") |
-| Legal hold review | **none on dev yet** (see "Status of the function tools") |
+| Agreement review | `spike_review_agreement` (routing stub, spike `5cd40984b0`; confirm against `tools/list`) |
+| Legal hold review | `spike_review_legal_hold` (routing stub, spike `5cd40984b0`; confirm against `tools/list`) |
 
-#### Status of the function tools (task 020, 2026-11-26): a gap that blocks the run
+#### Status of the function tools (updated 2026-11-27)
 
-- The dev BFF (spike `d307d67e36`) exposes two spike tools to the model: `spike_get_profile` and `spike_review_nda`, besides `spaarke_show_decisions`. Only `spike_review_nda` is a G5 function tool (NDA review). `spike_get_profile` is a profile fetch, not a function; it must never count as one, and it never answers a G5 prompt correctly.
-- **Agreement review and legal hold review have no tool.** Task 011 built only the two NDA spike tools, so the server cannot log a correct `tools/call` for A-01 to A-12 or H-01 to H-12. Without them the routing score cannot be computed (BR-7: the BFF row is the evidence).
-- **What is needed before task 023 (not done here; it is a spike-branch and deploy change):** two more read-only, model-visible spike tools on `/mcp/legal-operations`, for example `spike_review_agreement` and `spike_review_legal_hold`. Each takes the document text and may return a fixed, synthetic stub result, because G5 scores routing, not review quality. They need the owner's go, a spike-branch commit (never merged) and a dev deploy through uac-r2 for that SHA.
-- **The package needs no change when they arrive.** It uses dynamic discovery (BR-5), and its instructions describe the three functions by purpose, not by tool name. If a function's tool is missing, the agent says so and uses no other tool, so a missing tool never reads as a wrong route. Record the tool names in the table above from `tools/list`, then run the smoke prompt.
-- Until the tools exist, run only what is meaningful: NDA prompts (N-01 to N-12) and the controls (C-01 to C-12). Do not score the agreement and legal hold prompts as misses; record "no tool on dev".
-- `spike_review_nda` returns no instruction block, so the FR-05 column is "n.a." for G5 unless the new tools return one.
+- **Owner decision 2026-11-26 ("Yes proceed"): add the two stub tools.** They are built on the spike branch (commit `5cd40984b0`, never merged) and are **not on dev yet**. They need the owner's per-SHA go in the uac-r2 session and a uac-r2 dev deploy; until then dev (`d307d67e36`) has only `spike_review_nda` among the three functions.
+- `spike_get_profile` is a profile fetch, not a function. It never counts as one and never answers a G5 prompt correctly.
+- **What the stubs do.** Each is read-only and model-visible, takes one required `documentText` argument, resolves the caller fail closed (as the other spike tools: `CALLER_UNRESOLVED`, `CALLER_LOOKUP_FAILED`, `AI_DISABLED`), and returns a fixed acknowledgement: "the {function} function was reached … This is a test stub: it did not review the document". `structuredContent.stub` is `g5-routing-stub`. No Action, model, profile or Dataverse write. The BFF logs one line per call under the tool's own name (BR-7 evidence).
+- **The three descriptions split the prompt set.** `spike_review_nda` now claims NDAs and confidentiality agreements, mutual or one-way (N-02, N-08, N-10), and excludes other agreement types and legal hold notices; the agreement stub excludes NDAs and confidentiality agreements; the legal hold stub excludes NDAs and other agreements. A branch test pins this.
+- **The package needs no change.** It uses dynamic discovery (BR-5), and its instructions describe the three functions by purpose, not by tool name. Record the tool names above from `tools/list`, then run the smoke prompt.
+- **FR-05 column.** The stubs return an instruction ("tell the user in one sentence … do not review the document yourself and do not call another tool"); record whether the agent followed it for A and H prompts. `spike_review_nda` returns no instruction block, so N prompts are "n.a.".
+- Until the stubs are live on dev, do not run G5; if the owner runs it anyway, score only N and C prompts and record "no tool on dev" for A and H.
 
 #### The package (task 020)
 
@@ -98,7 +99,7 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 | G5-a | `spaarke-legal-g5-area-test` (app id `f7af4143-02b0-4912-b3ee-e73b0e202422`, v1.0.0, built 2026-11-26 by task 020) | App package, one declarative agent, one MCP action on `/mcp/legal-operations`, A1 `reference_id`, dynamic discovery | specialist-legal-agents-r1 | Phase 0 G5: three-function routing | Owner + test user only (R7), org catalog | Owner removes it in admin center when the G5 result is recorded; removal date set when the row is sent |
 | G5-b | *Spaarke Legal Review* (existing) | **No change.** Read only: confirm instructions, send prompts | accelerator r1 (owner of the agent) | G5 baseline | Existing scope | None |
 
-R4 row sent: **not yet, held** (2026-11-26). It waits on the owner decision about the two stub tools (see notes/decisions.md); no upload before it is sent.
+R4 row sent: **not yet** (2026-11-27). The owner chose the stub tools; the row is sent once they are live on dev, and there is no upload before it is sent.
 
 #### R4 row (to send)
 

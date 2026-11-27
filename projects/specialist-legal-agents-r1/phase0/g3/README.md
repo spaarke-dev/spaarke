@@ -10,7 +10,7 @@
 |---|---|
 | Branch | `spike/specialist-agents-phase0` (never merged; no PR) |
 | Cut from | `origin/master` at `6a2a569ac9` (2026-11-26) |
-| Spike commit | `d307d67e36` (pushed to `origin/spike/specialist-agents-phase0`; first cut `ddccee88a6`, then master merged as `603e03e6ab` and the review fixes as `d307d67e36`). `origin/master` is an ancestor (checked 2026-11-26) |
+| Spike commit | live on dev: `d307d67e36`; G5 stubs at `5cd40984b0` (built 2026-11-27, not deployed). `d307d67e36` was pushed to `origin/spike/specialist-agents-phase0`; first cut `ddccee88a6`, then master merged as `603e03e6ab` and the review fixes as `d307d67e36`. `origin/master` is an ancestor (checked 2026-11-26) |
 | Worktree | `C:\wt-sla-spike` |
 | Route | the existing `/mcp/legal-operations` (A10 connector token, `mcp` rate limit, kill switch); no new route, no package |
 
@@ -20,6 +20,7 @@
 |---|---|---|---|
 | `spike_get_profile` | `function`: `nda` or `patent` (required) | the caller's own test profile as a data-guarded `<<<PROFILE … PROFILE>>>` block, then the profile's `returnedInstructions` (C1–C3) as instructions, plus `profileVersion` (text and `structuredContent`) | `CALLER_UNRESOLVED` (no signed-in caller, or no active systemuser); `NO_PROFILE` (no profile keyed to that systemuserid for that function). No default, nearest or other-user profile. |
 | `spike_review_nda` | `documentText` (required, ≤ 60,000 characters) | the `agreement-review-spike` Action's structured review, run through `IActionRunner` with the caller's five NDA positions bound as the declared inputs (`term`, `residuals`, `nonSolicit`, `governingLaw`, `uncappedIndemnityFlag`) and the profile's tier (`Reasoning`) applied explicitly (#1934); plus `profileVersion`, Action code, applied tier and latency | as above, before any Action is read or run; a run that cannot complete is `REVIEW_FAILED` (no review against the generic standard) |
+| `spike_review_agreement`, `spike_review_legal_hold` (G5 routing stubs, commit `5cd40984b0`, not on dev yet) | `documentText` (required, ≤ 60,000 characters) | a fixed acknowledgement naming the function reached (`structuredContent.stub` = `g5-routing-stub`); no Action, model, profile or write | `CALLER_UNRESOLVED`, `CALLER_LOOKUP_FAILED`, `AI_DISABLED`, `INVALID_ARGUMENT`; no profile is needed, so never `NO_PROFILE` |
 
 ### Test profiles (spike branch only)
 

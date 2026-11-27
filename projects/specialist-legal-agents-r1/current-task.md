@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-26 ~19:30Z (checkpoint; task 020 built, coordination checks in progress)
+> **Last Updated**: 2026-11-27 (G5 stub tools built on the spike branch at `5cd40984b0`; awaiting the owner's per-SHA go in uac-r2)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 
@@ -9,14 +9,14 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 0 in execution. `spec.md` (2026-11-25), `plan.md`, project `CLAUDE.md`, 20 POMLs + `tasks/TASK-INDEX.md` (2026-11-26, lint PASS, no drift) |
-| **Active task** | 001–015 ✅; spike `d307d67e36` live on dev (gate + full tests green). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8), G5 held |
+| **Active task** | 001–015 ✅; spike `d307d67e36` live on dev (gate + full tests green). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8). G5 stubs `spike_review_agreement` / `spike_review_legal_hold` built at spike `5cd40984b0` (owner "Yes proceed"; review fixed; tests green), not deployed; G5 R4 row held until they are live |
 | **Stop points** | 010 DEV write (`agreement-review-spike`) needs the owner's go; 015 dev deploy needs the owner's per-SHA go via uac-r2 |
 | **Uncommitted** | see `git status` |
 
 ## Next action (exact)
 
 1. Coordination checks on 020: DONE (d1cf402ec2; test markers, run isolation, R1′ wording; reply sent).
-2. **Owner decision:** whether to add the G5 stub tools `spike_review_agreement` / `spike_review_legal_hold` (a spike change, then review, then a uac-r2 deploy).
+2. **Owner:** give the per-SHA go for spike `5cd40984b0` in the uac-r2 session (a relayed go does not count). Deploy request sent to uac-r2 with rollback target `d307d67e36`. When live: confirm all 4 spike tools in `tools/list`, send the G5 R4 row (`phase0/g5/README.md` "R4 row (to send)") to coordination, then the owner uploads G5. G1 (c) runs after this deploy see the broadened `spike_review_nda` description (notes/decisions.md 2026-11-27).
 3. **Owner:** upload per `phase0/g1-nda/packages/UPLOAD.md` (owner + demo@ only). Remove the G8 artifacts by 2026-11-30.
 4. Then 021/022 runs. The latency p95 check moved into 021.
 
