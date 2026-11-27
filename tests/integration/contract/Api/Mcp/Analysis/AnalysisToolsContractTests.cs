@@ -24,6 +24,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handoff;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Api.Ai;
 using Xunit;
 
@@ -32,6 +33,9 @@ namespace Sprk.Bff.Api.Tests.Api.Mcp.Analysis;
 public sealed class AnalysisToolsContractTests
 {
     internal const string EnvironmentUrl = "https://spaarke-test.crm.dynamics.com";
+
+    /// <summary>THE analysis start the tool is given in production (task 037a: the create core moved here from AnalysisEndpoints).</summary>
+    internal static readonly IAnalysisStartAi Starts = new AnalysisStartService();
     private const string Documents = "sprk_documents";
     private const AccessRights ReadAppendTo = AccessRights.Read | AccessRights.AppendTo;
 
@@ -43,7 +47,7 @@ public sealed class AnalysisToolsContractTests
 
     internal static Task<CallToolResult> StartAsync(AnalysisAuthHost host, object arguments) =>
         host.WithCallerContextAsync(ctx => StartAnalysisTool.RunAsync(
-            Args(arguments), ctx, ctx.RequestServices.GetRequiredService<ITenantCache>(), EnvironmentUrl, NullLogger.Instance, CancellationToken.None));
+            Args(arguments), ctx, ctx.RequestServices.GetRequiredService<ITenantCache>(), Starts, EnvironmentUrl, NullLogger.Instance, CancellationToken.None));
 
     internal static Task<CallToolResult> GetAsync(AnalysisAuthHost host, Guid analysisId) =>
         host.WithCallerContextAsync(ctx => GetAnalysisTool.RunAsync(
@@ -193,7 +197,7 @@ public sealed class AnalysisToolsContractTests
     private static Task<CallToolResult> StartWithAsync(
         AnalysisAuthHost host, object arguments, Func<HttpContext, ITenantCache, ITenantCache> wrap, CancellationToken ct) =>
         host.WithCallerContextAsync(ctx => StartAnalysisTool.RunAsync(
-            Args(arguments), ctx, wrap(ctx, ctx.RequestServices.GetRequiredService<ITenantCache>()), EnvironmentUrl, NullLogger.Instance, ct));
+            Args(arguments), ctx, wrap(ctx, ctx.RequestServices.GetRequiredService<ITenantCache>()), Starts, EnvironmentUrl, NullLogger.Instance, ct));
 
     [Fact(DisplayName = "031 fix F1: a cancelled caller after the create still leaves the retry key, so the same-key retry replays and ONE row exists")]
     public async Task Start_CallerCancelsAfterTheCreate_RetryReplays_OneRow()
@@ -290,7 +294,7 @@ public sealed class AnalysisToolsContractTests
             ctx.User = new ClaimsPrincipal(new ClaimsIdentity(
                 [new Claim("oid", otherOid), new Claim("tid", AnalysisAuthHost.TenantId)], AnalysisAuthzTestAuthHandler.SchemeName));
             return StartAnalysisTool.RunAsync(
-                Args(args), ctx, ctx.RequestServices.GetRequiredService<ITenantCache>(), EnvironmentUrl, NullLogger.Instance, CancellationToken.None);
+                Args(args), ctx, ctx.RequestServices.GetRequiredService<ITenantCache>(), Starts, EnvironmentUrl, NullLogger.Instance, CancellationToken.None);
         });
 
         callerA.IsError.Should().NotBe(true);
@@ -362,7 +366,7 @@ public sealed class AnalysisToolsContractTests
     {
         // A document the caller may only Read: the route's insufficient_rights 403.
         host.Access.Grant(Documents, DocumentId, AccessRights.Read);
-        return await host.WithCallerContextAsync(ctx => AnalysisEndpoints.StartAnalysisAsCallerAsync(ctx, "A", DocumentId, null, CancellationToken.None));
+        return await host.WithCallerContextAsync(ctx => Starts.StartAsCallerAsync(ctx, "A", DocumentId, null, CancellationToken.None));
     }
 
     // ---- get ---------------------------------------------------------------------------------------------------------------

@@ -91,19 +91,26 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
     private readonly IServiceScopeFactory _scopes;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly TimeProvider _time;
+    private readonly IAnalysisStartAi _analyses;
     private readonly ILogger<DetachedPlaybookRunner> _logger;
 
     public DetachedPlaybookRunner(
         IServiceScopeFactory scopes,
         IHostApplicationLifetime lifetime,
         TimeProvider time,
+        IAnalysisStartAi analyses,
         ILogger<DetachedPlaybookRunner> logger)
     {
         _scopes = scopes;
         _lifetime = lifetime;
         _time = time;
+        _analyses = analyses;
         _logger = logger;
     }
+
+    /// <summary>The name of the analysis a Copilot run creates for its results (task 037a): fixed text and the start time, no record text.</summary>
+    internal static string AnalysisNameOf(DateTimeOffset startedAt) =>
+        $"Copilot playbook run {startedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC";
 
     /// <inheritdoc />
     public async Task<PlaybookRunStartResult> StartAsCallerAsync(
@@ -203,6 +210,24 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
             return new PlaybookRunStartResult(PlaybookRunStartOutcome.AuthUnavailable, authorization, null);
         }
 
+        // Task 037a (D-037-engine): the analysis that holds the run's results, created as the caller by the route's own create
+        // (IAnalysisStartAi), on the run's first document (007 refuses an empty list), BEFORE the run starts. A refused create starts
+        // nothing. The id comes only from this create: no caller argument reaches PlaybookRunRequest.AnalysisId.
+        if (documentIds.Length == 0)
+        {
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.Refused, authorization, null);
+        }
+
+        var analysis = await _analyses
+            .StartAsCallerAsync(http, AnalysisNameOf(_time.GetUtcNow()), documentIds[0], playbookId, cancellationToken)
+            .ConfigureAwait(false);
+        if (analysis is not { Outcome: AnalysisStartOutcome.Created, AnalysisId: { } analysisId })
+        {
+            _logger.LogInformation("Detached playbook run not started - Outcome: {Outcome}, AnalysisOutcome: {AnalysisOutcome}, ReasonCode: {ReasonCode}, CorrelationId: {CorrelationId}",
+                nameof(PlaybookRunStartOutcome.AnalysisRefused), analysis.Outcome, analysis.ReasonCode, http.TraceIdentifier);
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.AnalysisRefused, authorization, null, analysis);
+        }
+
         var launch = new Launch(
             new PlaybookRunRequest
             {
@@ -212,6 +237,7 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
                 UserContext = userContext,         // the caller's focus text (task 038): in memory with the request only; never logged here
                 RunUserId = runUserId,             // 007's resolved caller, never Parameters["userId"]
                 StartedBy = PlaybookRunStartedBy.Person,
+                AnalysisId = analysisId,           // task 037a: the analysis created above for this caller, and nothing else
             },
             http.User,
             bearer,
@@ -234,7 +260,7 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         catch (TimeoutException)
         {
             launch.Abandon();
-            return new PlaybookRunStartResult(PlaybookRunStartOutcome.NotAccepted, authorization, null);
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.NotAccepted, authorization, null, analysis);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -244,8 +270,8 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         }
 
         return runId is { } id && _runs.TryGetValue(id, out var run)
-            ? new PlaybookRunStartResult(PlaybookRunStartOutcome.Started, authorization, run.Snapshot())
-            : new PlaybookRunStartResult(PlaybookRunStartOutcome.Unavailable, authorization, null);
+            ? new PlaybookRunStartResult(PlaybookRunStartOutcome.Started, authorization, run.Snapshot(), analysis)
+            : new PlaybookRunStartResult(PlaybookRunStartOutcome.Unavailable, authorization, null, analysis);
     }
 
     /// <inheritdoc />
@@ -373,6 +399,13 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
 
             try
             {
+                // Task 037a: this scope's run records are regarding the analysis the start created (037-decisions §4: the analysis wins
+                // over a record parameter). The store is scoped, so the link stays with this run.
+                if (launch.Request.AnalysisId is { } analysisId)
+                {
+                    scope.ServiceProvider.GetService<PlaybookRunRecordStore>()?.LinkRunsToAnalysis(analysisId);
+                }
+
                 var engine = scope.ServiceProvider.GetRequiredService<IPlaybookOrchestrationService>();
                 await foreach (var evt in engine.ExecuteAsync(launch.Request, detached, token).ConfigureAwait(false))
                 {

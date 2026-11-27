@@ -1,70 +1,12 @@
 namespace Sprk.Bff.Api.Api.Ai;
 
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11), spaarkeai-mcp-bff-api-r2 task 031.
-//   Existing: the analysis routes answer with IResult (ProblemDetails / 201 / 200); AnalysisCreateAuthorization (Api/Filters) is the
-//     create decision's typed answer; no type carries the create's or the read's OUTCOME to a host that is not HTTP.
-//   Extension: these are the result shapes of AnalysisEndpoints.StartAnalysisAsCallerAsync / ReadAnalysisAsCallerAsync, the two
-//     caller-facing methods beside the routes (007/008/024 pattern); no DI registration, no package, no state.
+//   Existing: the analysis routes answer with IResult (ProblemDetails / 201 / 200); no type carries the read's OUTCOME to a host that
+//     is not HTTP.
+//   Extension: these are the result shapes of AnalysisEndpoints.ReadAnalysisAsCallerAsync, the caller-facing read beside the routes
+//     (007/008/024 pattern); no DI registration, no package, no state. (Task 037a moved the start's result types, with the start, to
+//     Services/Ai/PublicContracts/IAnalysisStartAi.cs.)
 //   Cost of doing nothing: the MCP tools would have to parse the routes' IResult, or name Services/Ai types the ADR-013 MCP guard forbids.
-
-/// <summary>What <see cref="AnalysisEndpoints.StartAnalysisAsCallerAsync"/> did. <see cref="UserContextRequired"/> is the zero value.</summary>
-public enum AnalysisStartOutcome
-{
-    /// <summary>No signed-in caller: nothing was read or written.</summary>
-    UserContextRequired = 0,
-
-    /// <summary>The input is malformed (the route's 400).</summary>
-    Invalid = 1,
-
-    /// <summary>Refused with the route's status and <c>reasonCode</c> (403 from the checks; 409 / 503 / 403 from the owner rule).</summary>
-    Refused = 2,
-
-    /// <summary>The create did not complete (the route's bare 500).</summary>
-    Failed = 3,
-
-    /// <summary>The analysis row was created (not run).</summary>
-    Created = 4,
-}
-
-/// <summary>
-/// The answer of <see cref="AnalysisEndpoints.StartAnalysisAsCallerAsync"/>: an outcome, the route's status and <c>reasonCode</c> for a
-/// failure, the route's 400 text for malformed input, and the new analysis id. Never exception text or record text (ADR-015).
-/// </summary>
-public sealed record AnalysisStartResult
-{
-    private AnalysisStartResult(AnalysisStartOutcome outcome, string? reasonCode, int status, string? message, Guid? analysisId, int warningCount)
-    {
-        Outcome = outcome;
-        ReasonCode = reasonCode;
-        Status = status;
-        Message = message;
-        AnalysisId = analysisId;
-        WarningCount = warningCount;
-    }
-
-    public AnalysisStartOutcome Outcome { get; }
-
-    /// <summary>The route's <c>reasonCode</c> for the same failure; <c>null</c> when created or invalid.</summary>
-    public string? ReasonCode { get; }
-
-    /// <summary>The HTTP status the route answers for the same case.</summary>
-    public int Status { get; }
-
-    /// <summary>For <see cref="AnalysisStartOutcome.Invalid"/>: the route's 400 detail (fixed text).</summary>
-    public string? Message { get; }
-
-    /// <summary>The created analysis's id.</summary>
-    public Guid? AnalysisId { get; }
-
-    /// <summary>How many warnings the create returned (the route returns their text; a model-visible host reports only that there were some).</summary>
-    public int WarningCount { get; }
-
-    internal static AnalysisStartResult Failure(AnalysisStartOutcome outcome, string? reasonCode, int status, string? message) =>
-        new(outcome, reasonCode, status, message, null, 0);
-
-    internal static AnalysisStartResult Created(Guid analysisId, int warningCount) =>
-        new(AnalysisStartOutcome.Created, null, StatusCodes.Status201Created, null, analysisId, warningCount);
-}
 
 /// <summary>What <see cref="AnalysisEndpoints.ReadAnalysisAsCallerAsync"/> found. <see cref="UserContextRequired"/> is the zero value.</summary>
 public enum AnalysisReadOutcome

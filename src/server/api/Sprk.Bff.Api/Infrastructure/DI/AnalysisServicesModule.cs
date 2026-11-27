@@ -191,6 +191,12 @@ public static class AnalysisServicesModule
         // Null engine refuses and the start answers Unavailable). Singleton: its run table must outlive a request scope.
         services.AddSingleton<Services.Ai.PublicContracts.IPlaybookRunAi, Services.Ai.PlaybookRuns.DetachedPlaybookRunner>();
 
+        // spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine) — IAnalysisStartAi, THE analysis create shared by
+        // POST /api/ai/analysis/create, spaarke_start_analysis and the Copilot playbook start (IPlaybookRunAi above).
+        // UNCONDITIONAL like its consumers (ADR-032 F.1). Singleton: stateless, it reads every collaborator from the
+        // caller's request services, as the route does.
+        services.AddSingleton<Services.Ai.PublicContracts.IAnalysisStartAi, Services.Ai.AnalysisStartService>();
+
         // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
         // TRULY UNCONDITIONAL, mirroring the always-mapped
         // WorkspaceFileEndpoints.MapWorkspaceFileEndpoints (the non-AI /api/workspace/files/summarize

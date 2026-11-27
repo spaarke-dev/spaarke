@@ -5,7 +5,8 @@
 // WHAT IS REAL: DetachedPlaybookRunner (the one detached-run helper), task 007's PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync with
 // the REAL AuthorizationService / OperationAccessRule / external narrowing over PlaybookAuthHost's substitutes, McpIdempotency, the
 // tools' RunAsync, HttpContextAccessor, HandoffUrlBuilder. SUBSTITUTED at the boundaries only: the engine (IPlaybookOrchestrationService:
-// a scripted event stream and a stored-status table), the Graph and Dataverse OBO factories (the pre-warm), the access-data source and
+// a scripted event stream and a stored-status table), the analysis create (IAnalysisStartAi, task 037a: Created by default), the Graph and
+// Dataverse OBO factories (the pre-warm), the access-data source and
 // WhoAmI probe (PlaybookAuthHost), the clock (FakeTimeProvider) and the host lifetime.
 
 using System.Collections.Concurrent;
@@ -62,11 +63,14 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
                 var accessor = http.RequestServices?.GetService<IHttpContextAccessor>();
                 Calls.Enqueue(new EngineCall(
                     request, http, http.User, http.Request.Headers.Authorization.ToString(), http.TraceIdentifier,
-                    accessor?.HttpContext, ct));
+                    accessor?.HttpContext, ct,
+                    http.RequestServices?.GetService<PlaybookRunRecordStore>()?.LinkedAnalysis));
                 return Script(request, ct);
             });
         Engine.Setup(e => e.GetRunStatusAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid runId, CancellationToken _) => StoredRuns.TryGetValue(runId, out var status) ? status : null);
+        Analyses.Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnalysisStartResult.Created(AnalysisId, 0));
         DataverseUser.Setup(d => d.GetAsync("WhoAmI", It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, null));
 
@@ -90,6 +94,9 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
         services.AddSingleton<ITenantCache>(Cache);
         services.AddSingleton<TimeProvider>(Time);
         services.AddSingleton<IHostApplicationLifetime>(Lifetime);
+        services.AddSingleton(Analyses.Object);
+        services.AddSingleton(RunRecords.Object);
+        services.AddScoped<PlaybookRunRecordStore>();
         services.AddSingleton<IPlaybookRunAi, DetachedPlaybookRunner>();
         _root = services.BuildServiceProvider();
         Runs = _root.GetRequiredService<IPlaybookRunAi>();
@@ -103,6 +110,15 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
     public TestLifetime Lifetime { get; } = new();
 
     public Mock<IPlaybookOrchestrationService> Engine { get; } = new(MockBehavior.Strict);
+
+    /// <summary>The id the analysis create returns by default (task 037a).</summary>
+    public static readonly Guid AnalysisId = Guid.Parse("6f0c1a52-0037-4037-8037-00000000a001");
+
+    /// <summary>The analysis create (task 037a): <see cref="AnalysisId"/> is created unless a test sets it up otherwise.</summary>
+    public Mock<IAnalysisStartAi> Analyses { get; } = new();
+
+    /// <summary>The run record store's Dataverse seam (the engine is substituted, so nothing writes through it here).</summary>
+    public Mock<IGenericEntityService> RunRecords { get; } = new();
 
     public Mock<IGraphClientFactory> Graph { get; } = new();
 
@@ -276,7 +292,8 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
         string Authorization,
         string TraceIdentifier,
         HttpContext? AccessorDuringRun,
-        CancellationToken Token);
+        CancellationToken Token,
+        Guid? LinkedAnalysis);
 
     /// <summary>
     /// A <see cref="FakeTimeProvider"/> that also says when a timer of a given due time has been created, so a test advances the clock

@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Analysis;
 
@@ -17,13 +18,14 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Analysis;
 // spaarkeai-mcp-bff-api-r2 task 031 (spec FR-06, NFR-05, NFR-06, NFR-07; ADR-002, ADR-013, ADR-015, ADR-028).
 //
 // PLACEMENT JUSTIFICATION (CLAUDE.md section 10; .claude/constraints/bff-extensions.md; spec "Placement & New Components"). A thin MCP
-// adapter inside the BFF over AnalysisEndpoints.StartAnalysisAsCallerAsync (the route's create decision and the route's one create) on
-// the /mcp/legal-operations host: no package, no DI registration (found by [McpArea]), no background work, no Services/Ai type (the
-// Analysis Workspace link comes from AnalysisEndpoints.AnalysisWorkspaceLink, ADR-013 Path C).
+// adapter inside the BFF over IAnalysisStartAi (task 037a; the route's create decision and the route's one create, formerly
+// AnalysisEndpoints.StartAnalysisAsCallerAsync) on the /mcp/legal-operations host: no package, no DI registration (found by [McpArea]),
+// no background work, no Services/Ai type outside PublicContracts (the Analysis Workspace link comes from
+// AnalysisEndpoints.AnalysisWorkspaceLink, ADR-013 Path C).
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
 //   Existing: POST /api/ai/analysis/create (AnalysisAuthorizationFilter's create decision, then RecordCreationService.CreateAsync), both
-//     shared with this tool through AnalysisEndpoints.StartAnalysisAsCallerAsync; McpIdempotency, the retry key every model-callable write
+//     shared with this tool through IAnalysisStartAi (AnalysisStartService); McpIdempotency, the retry key every model-callable write
 //     uses (ITenantCache, IdempotencyFilter's store and lock pattern).
 //   Extension: the decision and the create are reused unchanged; this tool adds only the argument check, the retry entry's shape and the
 //     slim result.
@@ -36,7 +38,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Analysis;
 /// analysis. Model-callable reversible write (NFR-06): not destructive, idempotent with a required <c>idempotencyKey</c>.
 /// </summary>
 /// <remarks>
-/// <para><b>One decision, one create.</b> The tool calls <see cref="AnalysisEndpoints.StartAnalysisAsCallerAsync"/> with exactly
+/// <para><b>One decision, one create.</b> The tool calls <see cref="IAnalysisStartAi.StartAsCallerAsync"/> with exactly
 /// <c>IHttpContextAccessor.HttpContext</c> and copies no check: the caller's Create privilege on <c>sprk_analysis</c>, Read and AppendTo
 /// on the document, and use of the playbook are the route filter's decision; the row is the route's one create. A refusal is an
 /// <c>isError</c> result with the route's <c>reasonCode</c> and status; nothing is written.</para>
@@ -159,19 +161,21 @@ internal sealed class StartAnalysisTool : McpToolDefinition
         RequestContext<CallToolRequestParams> request,
         IHttpContextAccessor accessor,
         ITenantCache cache,
+        IAnalysisStartAi starts,
         IOptions<DataverseOptions> dataverse,
         TimeProvider time,
         ILogger<StartAnalysisTool> logger,
         CancellationToken cancellationToken) =>
         DecisionToolCall.LogAroundAsync(
             logger, time, ToolName, accessor.HttpContext,
-            () => RunAsync(request.Params?.Arguments, accessor.HttpContext, cache, dataverse.Value.EnvironmentUrl, logger, cancellationToken),
+            () => RunAsync(request.Params?.Arguments, accessor.HttpContext, cache, starts, dataverse.Value.EnvironmentUrl, logger, cancellationToken),
             result => result.IsError == true ? 0 : 1);
 
     internal static async Task<CallToolResult> RunAsync(
         IDictionary<string, JsonElement>? arguments,
         HttpContext? http,
         ITenantCache cache,
+        IAnalysisStartAi starts,
         string? environmentUrl,
         ILogger logger,
         CancellationToken cancellationToken)
@@ -195,8 +199,8 @@ internal sealed class StartAnalysisTool : McpToolDefinition
             replay: earlier => ResultOf(earlier.AnalysisId, earlier.DocumentId, input.Name, warningCount: null, replayed: true, baseUrl),
             run: async () =>
             {
-                // The route's decision and the route's create (AnalysisEndpoints); nothing is run.
-                var started = await AnalysisEndpoints.StartAnalysisAsCallerAsync(http, input.Name, input.DocumentId, input.PlaybookId, cancellationToken);
+                // The route's decision and the route's create (IAnalysisStartAi, task 037a); nothing is run.
+                var started = await starts.StartAsCallerAsync(http, input.Name, input.DocumentId, input.PlaybookId, cancellationToken);
                 if (started is not { Outcome: AnalysisStartOutcome.Created, AnalysisId: { } analysisId })
                 {
                     return (DocumentToolSupport.Failure(ErrorOf(started), http), null);

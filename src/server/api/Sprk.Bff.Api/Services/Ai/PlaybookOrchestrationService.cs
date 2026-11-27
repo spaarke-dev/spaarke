@@ -328,7 +328,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     "Playbook {PlaybookId} has {NodeCount} nodes - using NodeBased mode",
                     request.PlaybookId, nodes.Length);
 
-                await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
+                // spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine (b), ADR-039 Path C, owner-approved): a run that carries an
+                // AnalysisId saves its Deliver Output to that analysis once, when it ends and before its terminal event is read,
+                // through the Analysis wrapper's own save (AnalysisResultPersistence.SaveNodeRunAsync). No AnalysisId: this writer.
+                await ExecuteNodeBasedModeAsync(
+                    context,
+                    nodes,
+                    NodeRunAnalysisSave.SavingWriter(writer, request.AnalysisId, context.HttpContext?.RequestServices, context.RunId, _logger),
+                    cancellationToken);
             }
         }
         // Only a cancellation the CALLER asked for is a cancelled run: the SSE request token, or the run context's own token
@@ -909,7 +916,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             PlaybookId = request.PlaybookId,
             DocumentIds = request.DocumentIds,
-            AdditionalContext = request.UserContext
+            AdditionalContext = request.UserContext,
+            // spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine (a), #3285): the server-created analysis the wrapper writes to.
+            // null (every entry but the Copilot start): the wrapper mints its own id, as before.
+            AnalysisId = request.AnalysisId
         };
 
         var tokenUsage = new TokenUsage(0, 0);
