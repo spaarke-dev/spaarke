@@ -2849,7 +2849,7 @@ After `onNavigate`, if the focused nav button is now disabled, move focus to the
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress |
+| **Status** | Done (PR #3290 merged to master 2026-11-27, merge commit 6f4d7bc7e4; not yet on dev) |
 | **Urgency** | now |
 | **Filed** | 2026-11-26 (by ontology-r1 as DI-178; taken by ebilling-r1 the same day, owner go) |
 | **Source** | PR #3270 review (ontology task 225). Fix: PR #3290 |
