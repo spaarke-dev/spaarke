@@ -51,7 +51,7 @@ fix the starvation.
 | **Status** | Open |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-26 |
-| **Source** | ACME upgrade run `7a7cbda1-325e-4cad-a1a5-351bb866d414`: all handlers before H13 completed; H13 failed 05:51:52Z with `h13-cost-query-infra-fault` on a single HTTP 429 from Azure Cost Management |
+| **Source** | ACME upgrade run `7a7cbda1-325e-4cad-a1a5-351bb866d414`: all handlers before H13 completed; H13 failed 05:51:52Z with `h13-cost-query-infra-fault` on a single HTTP 429 from Azure Cost Management. Recurred on ACME run `fe9ec82b-1b7c-4fdc-9a65-f02de36064cd` (2026-11-27 15:00:44Z), again resumed once with the owner's OK: 2 of 2 recent runs |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3222 |
 
 **Description**
