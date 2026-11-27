@@ -395,7 +395,7 @@ def expected_line():
     return f"{SCRIPT_CODE} {probe_value()}"
 
 
-def build(out, without_script=False):
+def build(out, without_script=False, fresh_id=False):
     """without_script leaves out the Python skill: a diagnostic for the admin-center upload, which refused v0.5-v0.7
     while admin-deployed spaarke-decisions (no scripts) installed. WP-6 needs no script skill."""
     skills = {n: v for n, v in SKILLS.items() if not (without_script and n.endswith("-script"))}
@@ -420,7 +420,7 @@ def build(out, without_script=False):
         "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
         "manifestVersion": "1.30",
         "version": MANIFEST_VERSION,
-        "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"https://spaarke.com/accelerators/{PACKAGE}")),
+        "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"https://spaarke.com/accelerators/{PACKAGE}" + ("/admin-test" if fresh_id else ""))),
         "developer": {"name": "Spaarke", "websiteUrl": "https://spaarke.com", "privacyUrl": "https://spaarke.com",
                       "termsOfUseUrl": "https://spaarke.com"},
         "name": {"short": "Spaarke Word Probe", "full": "Spaarke Word Probe (test only)"},
@@ -438,7 +438,8 @@ def build(out, without_script=False):
     problems = gates.lint_plugin(os.path.join(stage, "manifest.json"))
     if problems:
         raise SystemExit("plugin gate: " + "; ".join(f"{r}: {m}" for r, m in problems))
-    z = zip_dir(stage, os.path.join(out, f"Spaarke Word probe plugin v{VERSION[:3]}{' no script' if without_script else ''}.zip"))
+    label = ("" if not without_script else " no script") + ("" if not fresh_id else " new id")
+    z = zip_dir(stage, os.path.join(out, f"Spaarke Word probe plugin v{VERSION[:3]}{label}.zip"))
     per, mark = edit_hashes()
     edits = "; ".join(f"'{f}' -> '{r}'" for f, r in EXPECTED_EDITS)
     err, log = error_lines()
@@ -462,9 +463,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default=os.path.join(BUILD, "out", "word-probe"))
     ap.add_argument("--without-script", action="store_true", help="leave out the Python skill (admin-upload diagnostic)")
+    ap.add_argument("--fresh-id", action="store_true",
+                    help="use a new app id (the refused admin uploads reused the id of the Cowork uploads v0.1-v0.4)")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
-    z = build(a.out, a.without_script)
+    z = build(a.out, a.without_script, a.fresh_id)
     print(f"WORD PROBE BUILD OK\n  {z}\n  expected script line starts with: {expected_line()}\n"
           f"  expected JavaScript marker: {js_marker()}\n  expected edit mark: {edit_hashes()[1]}\n"
           f"  sizes: " + ", ".join(f"{kb}k={len(js_size(kb)):,} chars" for kb in SIZES_KB))
