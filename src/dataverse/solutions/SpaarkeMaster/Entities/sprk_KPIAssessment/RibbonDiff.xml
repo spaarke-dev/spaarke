@@ -10,11 +10,6 @@
       </CommandUIDefinition>
     </CustomAction>
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_kpiassessment.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_kpiassessment.NewRecord" />
-    <CustomAction Id="sprk.matter.subgrid.kpi.AddKpiButton.CustomAction" Location="Mscrm.SubGrid.sprk_kpiassessment.MainTab.Management.Controls._children" Sequence="10">
-      <CommandUIDefinition>
-        <Button Id="sprk.matter.subgrid.kpi.AddKpiButton" Alt="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.Alt" Command="sprk.matter.subgrid.kpi.AddKpiButton.Command" LabelText="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.LabelText" ToolTipTitle="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.ToolTipDescription" TemplateAlias="o1" ModernImage="Add" />
-      </CommandUIDefinition>
-    </CustomAction>
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
@@ -61,28 +56,10 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
-    <CommandDefinition Id="sprk.matter.subgrid.kpi.AddKpiButton.Command">
-      <EnableRules />
-      <DisplayRules>
-        <DisplayRule Id="sprk.CreatePrivilege.sprk_kpiassessment.DisplayRule" />
-      </DisplayRules>
-      <Actions>
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="isNaN" />
-        <JavaScriptFunction Library="$webresource:sprk_kpi_ribbon_actions.js" FunctionName="Spaarke.KpiRibbon.openQuickCreate">
-          <CrmParameter Value="PrimaryControl" />
-        </JavaScriptFunction>
-      </Actions>
-    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules>
-      <DisplayRule Id="sprk.CreatePrivilege.sprk_kpiassessment.DisplayRule">
-        <EntityPrivilegeRule EntityName="sprk_kpiassessment" PrivilegeType="Create" PrivilegeDepth="Basic" />
-      </DisplayRule>
-    </DisplayRules>
+    <DisplayRules></DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
@@ -109,26 +86,6 @@
     <LocLabel Id="sprk.SecureChild.sprk_kpiassessment.New.ToolTipDescription">
       <Titles>
         <Title description="Add a KPI Assessment to this secure record (saved by Spaarke so it stays as private as the record)" languagecode="1033" />
-      </Titles>
-    </LocLabel>
-    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.LabelText">
-      <Titles>
-        <Title description="+ Add KPI" languagecode="1033" />
-      </Titles>
-    </LocLabel>
-    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.Alt">
-      <Titles>
-        <Title description="Add KPI Assessment" languagecode="1033" />
-      </Titles>
-    </LocLabel>
-    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.ToolTipTitle">
-      <Titles>
-        <Title description="Add KPI Assessment" languagecode="1033" />
-      </Titles>
-    </LocLabel>
-    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.ToolTipDescription">
-      <Titles>
-        <Title description="Create a new KPI assessment for this matter or project, filed and owned by Spaarke" languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>
