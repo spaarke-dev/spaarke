@@ -163,15 +163,6 @@
     <RolePrivilege name="prvAssignSLA" level="Basic" />
     <RolePrivilege name="prvAssignSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAssignSocialProfile" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_AttachmentArtifact" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_EmailArtifact" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_Event" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Matter" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_Memo" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_ProcessingJob" level="Basic" />
-    <RolePrivilege name="prvAssignsprk_Project" level="Deep" />
-    <RolePrivilege name="prvAssignsprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvAssignSyncError" level="Basic" />
     <RolePrivilege name="prvAssignUserEntityInstanceData" level="Basic" />
     <RolePrivilege name="prvAssignUserForm" level="Basic" />
