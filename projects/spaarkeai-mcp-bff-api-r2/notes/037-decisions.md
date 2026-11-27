@@ -567,8 +567,13 @@ that analysis, in the same request.
   type only (no message text, no exception object: ADR-015, NFR-05). The analysis stays, as it did before this task: the caller's own empty record.
   Success logs `playbook_run_empty_analysis_deleted` at Information.
 - **Known limits.** `PlaybookRunStartResult.Analysis` still carries the id on `NotAccepted` and `Unavailable`; the MCP tool does not surface it for
-  those outcomes (`RunPlaybookTool.ErrorOf`). If a run began writing between its accept and the abandon, its save can race the delete; on
-  `NotAccepted` the engine never accepted the run, so nothing writes.
+  those outcomes (`RunPlaybookTool.ErrorOf`).
+  - Two narrow races (037d review K2): the accept budget fires just as the engine accepts, or the caller's cancel wins inside the wait against
+    an already-set result. The run is then registered and immediately abandoned (`RunCancelled`, no save), and its run record can still name
+    the deleted analysis. Harmless: the caller never receives that run id (no retry entry is stored), a late save is an SDK `Update` that
+    fails on a missing row (never an upsert, so the analysis is not recreated), and the results reader maps a 404 to the uniform not-found.
+  - A run that fails on its first event (for example the node read throws before RunStarted) answers `Started` with a Failed snapshot, so
+    its empty analysis stays, as D-037-cleanup specifies ("does not end Started").
 - **Tests** (`tests/integration/auth/Ai/DetachedPlaybookRunnerTests.cs`, "037d"): NotAccepted (path, once, run stopped first, caller delegated),
   caller cancel (non-cancelled bounded token, exception propagates), Unavailable, Started (never), refused create and AI off (never), failed delete
   (refused / throws / no response: outcome unchanged, no message text), and a hanging delete cut off by its own budget on the fake clock.

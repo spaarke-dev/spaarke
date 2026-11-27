@@ -212,9 +212,13 @@ public sealed class DetachedPlaybookRunnerTests
         await using var world = await PlaybookRunWorld.StartAsync();
         var (playbookId, documentId) = world.AllowedRun();
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        world.Script = PlaybookRunWorld.NeverAccepts(cancelled);
+        // Wait until the engine listens on its token before the clock passes the budget: otherwise the stop can land before the detached
+        // run reaches the engine, and "its run is cancelled" is never observed (a cold-run flake, 037d review K1).
+        var engineListening = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        world.Script = NeverAcceptsOnceListening(cancelled, engineListening);
 
         var start = world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+        await engineListening.Task.WaitAsync(TimeSpan.FromSeconds(15));
         await world.Time.TimerArmed(PlaybookRunLimits.AcceptBudget);
         start.IsCompleted.Should().BeFalse("the start waits out the accept budget on the fake clock");
         world.Time.Advance(PlaybookRunLimits.AcceptBudget);
