@@ -137,7 +137,7 @@ Owner's words verbatim, then what each one means here.
 | 1 | 005: run `Add-PlaybookRunColumns.ps1` on dev; accept acceptance criterion 3 as "identical except the documented differences" | "yes go ahead and run" | Go given. The main session runs the script on dev (spaarkedev1). AC-3 is accepted with the differences listed in notes/005-schema.md §4 items 1–3. |
 | 2 | 012: registry-key PATCH on dev | "yes go ahead to update" | Go given. The main session runs `Set-MatterSummaryTopicRegistryKey.ps1` on dev. |
 | 3 | 008: ADR-028 A10 conflict | "path A" | Path A, a project exception: FR-11 parity wins, and the code is unchanged. Recorded in spec.md ADR Tensions. |
-| 4 | #3181 fix (a) or (b) | "what is #3181 provide details and recommendation" | Explanation sent. Still open until the owner picks (a) or (b). |
+| 4 | #3181 fix (a) or (b) | "what is #3181 provide details and recommendation" | Explanation sent. Answered 2026-11-27: option (b), see D-3181. |
 | 5 | 019: is runbook E1 done? | "no this hasn't been done--need steps" | E1 is not done, so 019 stays blocked. Steps sent to the owner. |
 | 6 | design.md lacks `<hot-path-declaration>` | "yes add it so have complete documentation" | Add the block from spec.md to design.md. The owner's instruction overrides the brief's "do not edit design.md" for this block only. |
 | 7 | Consumer tsc via a draft PR | "ok" | Go: open a draft PR that runs consumer tsc for DailyBriefing and LegalWorkspace. |
@@ -207,3 +207,12 @@ Owner's words verbatim, then what each one means here.
   - The run is abandoned before the delete, so no save follows it. If a late save still reaches a deleted analysis, it fails and is logged (D-037-engine: a failed save never changes the run).
   - Only the analysis this request created is ever deleted; no id from a caller or a record is used.
 - **Task:** 037d (follow-up to 037).
+
+## D-3181 — attaching an event to a record needs Read and AppendTo (owner, 2026-11-27)
+
+- **Owner's words:** "Yes option b". This answers: "#3181: should creating a task need only the matter's Read permission (a), or Read plus AppendTo (b, recommended)?"
+- **Decision:** fix option (b) from #3181. `event.attach_regarding` in `OperationAccessPolicy` requires `Read | AppendTo` on the regarding record, for REST `POST /api/v1/events` and for `IEventsCapability.CreateAsync` (so for `spaarke_create_task`).
+  - A caller with AppendTo but no Read on the regarding record is refused with the same 403 rights answer as today, so the copied name and number can no longer reach them.
+  - This changes who may attach: a caller with AppendTo and no Read on that record could attach before and cannot now. It is intended.
+  - The event create keeps reading the regarding record's name and number app-only after the check, as today; the check now proves the caller may read them.
+- **Task:** lands with 036, before the create tool is exposed (the issue's "must land before" condition). A regression test `Issue3181_*` pins it. uac-r2 reviews the policy change.
