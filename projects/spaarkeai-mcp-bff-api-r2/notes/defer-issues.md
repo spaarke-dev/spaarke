@@ -361,3 +361,9 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 - **Status**: filed as #3303 (https://github.com/spaarke-dev/spaarke/issues/3303).
 - **Failure**: the write succeeds and the finalize fails. The analysis then stays `statuscode` 1 with content: the Console shows it as still in progress, while the results tool shows the content as available.
 - **Fix**: a Try variant with an outcome code; consider one retry.
+
+## D-036-1 — communication create-task copies a regarding record's name with AppendTo only (found 2026-11-27, task 036 review)
+
+- **Status**: filed as #3317 (https://github.com/spaarke-dev/spaarke/issues/3317). Pre-existing, outside 036's diff; sibling of #3181.
+- **Where**: `Api/Filters/CommunicationRecordAuthorizationFilter.cs` `AuthorizeTaskCreateAsync` asks AppendTo only; `TaskActionCore.ReadRegardingNameAsync` then copies the name app-only. Routes: `POST /api/communications/{id}/create-task` and `.../proposals/{reviewLogId}/create-task/apply`.
+- **Fix**: `Read | AppendTo` there, plus a regression pair like `Issue3181_*`. Changes who may create a task from a communication: needs the owner's go.
