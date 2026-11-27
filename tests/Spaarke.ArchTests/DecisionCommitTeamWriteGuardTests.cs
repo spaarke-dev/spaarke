@@ -8,7 +8,7 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// ISS-010 part D1 (#3184), uac-r2 Q3 (binding): the child-records route keeps the business-unit and team CONFIGURATION answers
 /// for one request (<c>RecordOwnerLookupCache.ForRequest</c>: the Secure Record business unit, the Secure Record owner team,
-/// each unit's default owner team, the acting user's unit). That is sound only because nothing the decision commit runs creates,
+/// each unit's default owner team). That is sound only because nothing the decision commit runs creates,
 /// changes or deletes a <c>team</c> or <c>businessunit</c> row, or moves a user to another unit. This guard fails any such write
 /// anywhere in the BFF except the known writers listed in <see cref="KnownWriters"/>, each off the commit path.
 /// </summary>
@@ -25,13 +25,14 @@ namespace Spaarke.ArchTests;
 /// (<c>teams(…)</c>, <c>/api/data/v9.2/businessunits(…)</c>).</item>
 /// <item>A <c>Delete…</c> call whose arguments hold <c>new EntityReference("team" | "businessunit", …)</c> (or its
 /// <c>LogicalName =</c> initializer).</item>
-/// <item><c>new Entity("team" | "businessunit", …)</c> or <c>new Entity { LogicalName = "team" }</c> anywhere (such a row is built
+/// <item><c>new Entity("team" | "businessunit", …)</c>, a target-typed <c>Entity t = new("team")</c>, or <c>new Entity { LogicalName = "team" }</c> anywhere (such a row is built
 /// only to write it), and a <c>CreateRequest</c>, <c>UpdateRequest</c>, <c>UpsertRequest</c> or <c>DeleteRequest</c> whose
 /// <c>Target</c> is either table.</item>
 /// <item>A <c>new OrganizationRequest("Create" | "Update" | "Upsert" | "Delete")</c> (or <c>RequestName =</c>) in a method that sets
 /// a <c>"Target"</c> parameter to a team or business unit.</item>
-/// <item>A <c>new HttpRequestMessage(HttpMethod.Post | Patch | Put | Delete, path)</c>, or a <c>Send…</c>/<c>Execute…</c> call with
-/// such an <c>HttpMethod</c> and a path argument, where the path addresses <c>teams(…)</c> or <c>businessunits(…)</c>.</item>
+/// <item>A <c>new HttpRequestMessage(HttpMethod.Post | Patch | Put | Delete, path)</c>, or ANY call (whatever its name) with such an
+/// <c>HttpMethod</c> (or <c>new HttpMethod("PATCH" | "MERGE")</c>) and a path argument, where the path addresses <c>teams(…)</c> or
+/// <c>businessunits(…)</c>.</item>
 /// <item><c>SetBusinessSystemUser</c> in an identifier or a string.</item>
 /// <item>A <c>systemuser</c> business-unit write: the text <c>businessunitid@odata.bind</c>, an assignment to
 /// <c>x["businessunitid"]</c>, a dictionary initializer <c>["businessunitid"] = …</c> or <c>{ "businessunitid", … }</c>.</item>
@@ -42,7 +43,9 @@ namespace Spaarke.ArchTests;
 /// (trivia). The controls below pin both sides.</para>
 /// <para><b>Known writers.</b> <see cref="KnownWriters"/> lists the files that write a team or business unit today, each with
 /// why it is not on the decision commit's path. A listed file that no longer writes fails (a stale entry), so the list only
-/// shrinks by an edit. A new writer reachable from the commit is not added here: it breaks the per-request cache.</para>
+/// shrinks by an edit. A new writer reachable from the commit is not added here: it breaks the per-request cache. That no
+/// commit-path folder (Signals, RecordCreation, Access, Communication) names a known writer in code is checked too
+/// (<see cref="CommitPathFolders_NeverNameAKnownWriter"/>).</para>
 /// <para><b>Limits.</b> A name match: a write through an <c>Entity</c> variable built elsewhere and passed by name
 /// (<c>UpdateAsync(entity)</c>), through a table name computed at run time, or through a constant built from other constants, is
 /// not seen. Enforced by: this guard (ArchTests in CI and the Stop hook).</para>
@@ -76,7 +79,7 @@ public class DecisionCommitTeamWriteGuardTests
 
     private static readonly HashSet<string> WriteMessages = new(StringComparer.OrdinalIgnoreCase) { "Create", "Update", "Upsert", "Delete" };
 
-    private static readonly HashSet<string> WriteHttpMethods = new(StringComparer.OrdinalIgnoreCase) { "Post", "Patch", "Put", "Delete" };
+    private static readonly HashSet<string> WriteHttpMethods = new(StringComparer.OrdinalIgnoreCase) { "Post", "Patch", "Put", "Delete", "Merge" };
 
     private const string BusinessUnitColumn = "businessunitid";
 
@@ -146,6 +149,15 @@ public class DecisionCommitTeamWriteGuardTests
             "using var m = new HttpRequestMessage(HttpMethod.Delete, $\"{_base}/businessunits({id})\");",
             "using var m = new HttpRequestMessage(new HttpMethod(\"PATCH\"), $\"teams({id})\");",
             "await _client.SendAsync(HttpMethod.Post, \"teams\", body, ct);",
+            // review round 2: any call name with a write HttpMethod, MERGE, and target-typed new(…).
+            "await WriteAsync(HttpMethod.Patch, $\"teams({id})\", body, (\"If-Match\", \"*\"), ct);",
+            "await _store.RunAsync(HttpMethod.Put, $\"{_base}/businessunits({id})/name\", body, ct);",
+            "await _store.RunAsync(new HttpMethod(\"MERGE\"), $\"businessunits({id})\", body, ct);",
+            "Entity t = new(\"team\");",
+            "Microsoft.Xrm.Sdk.Entity? t = new(\"businessunit\") { Id = id };",
+            "await _org.ExecuteAsync(new UpdateRequest { Target = new(\"team\", id) }, ct);",
+            "await _org.ExecuteAsync(new DeleteRequest { Target = new(\"businessunit\", id) }, ct);",
+            "OrganizationRequest r = new(\"Delete\") { [\"Target\"] = new EntityReference(\"team\", id) };",
             "await _web.ExecuteAsync(HttpMethod.Delete, $\"businessunits({id})\", ct);",
             "await _org.ExecuteAsync(new SetBusinessSystemUserRequest { BusinessId = bu, UserId = u }, ct);",
             "var name = \"SetBusinessSystemUser\";",
@@ -199,6 +211,13 @@ public class DecisionCommitTeamWriteGuardTests
             "using var m = new HttpRequestMessage(HttpMethod.Patch, $\"sprk_todos({id})\");",
             "await _client.SendAsync(HttpMethod.Get, $\"businessunits({id})\", ct);",
             "await _client.SendAsync(HttpMethod.Post, \"sprk_todos\", body, ct);",
+            // review round 2: ContactIdentityStore.WriteHomeLinkAsync PATCHes a systemuser's home-link columns, never its unit.
+            "await WriteAsync(HttpMethod.Patch, $\"systemusers({u:D})\", HomeLinkPayload(t, b), (\"If-Match\", \"v\"), ct);",
+            "await WriteAsync(HttpMethod.Get, $\"teams({id})\", ct);",
+            "Entity t = new(\"sprk_todo\") { [\"ownerid\"] = new EntityReference(\"team\", u) };",
+            "EntityReference owner = new(\"team\", t);",
+            "await _org.ExecuteAsync(new RetrieveRequest { Target = new(\"team\", id) }, ct);",
+            "await _org.ExecuteAsync(new UpdateRequest { Target = new(\"sprk_todo\", id) }, ct);",
             "var bu = row.GetAttributeValue<EntityReference>(\"businessunitid\")?.Id;",
             "var columns = new ColumnSet(\"businessunitid\", \"sprk_isexternal\");",
             "await _dataverse.DeleteAsync(\"sprk_todo\", id, ct);",
@@ -235,6 +254,68 @@ public class DecisionCommitTeamWriteGuardTests
             Assert.DoesNotContain("/Services/RecordCreation/", path, StringComparison.Ordinal);
         }
     }
+
+    /// <summary>The folders the decision commit runs in (its executors, the create service, the owner and share code, the
+    /// communication steps). None of them may name a known writer in code, so "off the commit path" is checked, not prose.</summary>
+    private static readonly string[] CommitPathFolders =
+        ["Services/Signals/", "Services/RecordCreation/", "Services/Access/", "Services/Communication/"];
+
+    [Fact(DisplayName = "ISS-010 D1 Q3 review round 2 (F4): no commit-path folder names a known writer in code")]
+    public void CommitPathFolders_NeverNameAKnownWriter()
+    {
+        var writers = KnownWriterTypeNames();
+        Assert.Contains("RegistrationDataverseService", writers);
+        Assert.Contains("FlaggedUserPlacementJob", writers);
+
+        var files = BffSourceFiles().Select(f => (Path: SourceScan.Relative(f).Replace('\\', '/'), File: f))
+            .Where(f => CommitPathFolders.Any(folder => f.Path.Contains("/" + folder, StringComparison.Ordinal)))
+            .ToList();
+        foreach (var folder in CommitPathFolders)
+            Assert.Contains(files, f => f.Path.Contains("/" + folder, StringComparison.Ordinal)); // the scan has its signal
+
+        var problems = files
+            .SelectMany(f => WriterReferences(File.ReadAllText(f.File), writers).Select(r => $"{f.Path}: names {r}"))
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "A known team or business-unit writer is allowlisted because the decision commit never reaches it (ISS-010 D1). A "
+            + "commit-path file that names one breaks that, and breaks the per-request cache:\n  " + string.Join("\n  ", problems));
+    }
+
+    [Fact(DisplayName = "ISS-010 D1 Q3 review round 2 (F4) control: a writer named in code is seen; in a comment, a doc or a string it is not")]
+    public void WriterReferences_Controls()
+    {
+        string[] writers = ["RegistrationDataverseService", "FlaggedUserPlacementJob"];
+        Assert.NotEmpty(WriterReferences("class C { private readonly IRegistrationDataverseService _r; }", writers));
+        Assert.NotEmpty(WriterReferences("class C { void M(IServiceProvider s) => s.GetRequiredService<RegistrationDataverseService>(); }", writers));
+        Assert.NotEmpty(WriterReferences("class C { void M() { var j = new Sprk.Bff.Api.Services.ExternalAccess.FlaggedUserPlacementJob(null!); } }", writers));
+        Assert.NotEmpty(WriterReferences("class C { const int Mode = FlaggedUserPlacementJob.AdministrativeAccessMode; }", writers));
+
+        Assert.Empty(WriterReferences("""
+            /// <summary>The same value as <c>FlaggedUserPlacementJob.AdministrativeAccessMode</c>; see
+            /// <see cref="RegistrationDataverseService"/>.</summary>
+            class C
+            {
+                // RegistrationDataverseService adds team members; FlaggedUserPlacementJob moves users.
+                /* new FlaggedUserPlacementJob() */
+                string Why => "not RegistrationDataverseService";
+                void RegistrationDataverseServiceLike() { }
+            }
+            """, writers));
+    }
+
+    /// <summary>The known writers' type names: each allowlisted file's name (and its <c>I…</c> interface).</summary>
+    private static IReadOnlyList<string> KnownWriterTypeNames() =>
+        KnownWriters.Keys.Select(Path.GetFileNameWithoutExtension).Select(n => n!).ToList();
+
+    /// <summary>The identifiers in <paramref name="source"/>'s code (Roslyn tokens: comments, XML docs and strings are not
+    /// identifiers) that name one of <paramref name="writers"/> or its interface.</summary>
+    private static IReadOnlyList<string> WriterReferences(string source, IReadOnlyList<string> writers) =>
+        CSharpSyntaxTree.ParseText(source).GetRoot().DescendantTokens()
+            .Where(t => t.IsKind(SyntaxKind.IdentifierToken))
+            .Select(t => t.ValueText)
+            .Where(id => writers.Any(w => id == w || id == "I" + w))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
     /// <summary>Every <c>const</c> or <c>static readonly</c> string field with a literal value, by <c>Type.Field</c>, across
     /// <paramref name="sources"/> (so <c>SecureRecordOwnerTeam.TeamEntity</c> resolves in another file). A name two types
@@ -287,9 +368,9 @@ public class DecisionCommitTeamWriteGuardTests
                     problems.Add($"{At(call)} {name}(…) deletes a {target}");
             }
 
-            // review F3: Send…/Execute…(HttpMethod.Patch, "teams(…)", …).
-            if ((name.StartsWith("Send", StringComparison.Ordinal) || name.StartsWith("Execute", StringComparison.Ordinal))
-                && call.ArgumentList.Arguments.Any(a => IsWriteHttpMethod(a.Expression, constants))
+            // review F3 (rounds 1 and 2): ANY call with a write HttpMethod and a team or unit path, whatever its name
+            // (SendAsync, ExecuteAsync, a store's own WriteAsync(HttpMethod.Patch, "teams(…)", …)).
+            if (call.ArgumentList.Arguments.Any(a => IsWriteHttpMethod(a.Expression, constants))
                 && call.ArgumentList.Arguments.Select(a => TextOf(a.Expression, constants)).FirstOrDefault(t => t is not null && NamesTeamOrUnit(t)) is { } path)
                 problems.Add($"{At(call)} {name}(…) writes \"{path}\"");
         }
@@ -493,8 +574,31 @@ public class DecisionCommitTeamWriteGuardTests
 
     private static string? TypeNameOf(BaseObjectCreationExpressionSyntax creation) => creation switch
     {
-        ObjectCreationExpressionSyntax { Type: IdentifierNameSyntax id } => id.Identifier.ValueText,
-        ObjectCreationExpressionSyntax { Type: QualifiedNameSyntax q } => q.Right.Identifier.ValueText,
+        ObjectCreationExpressionSyntax { Type: var type } => SimpleTypeName(type),
+        ImplicitObjectCreationExpressionSyntax target => TargetTypeOf(target), // review round 2: new("team")
+        _ => null,
+    };
+
+    private static string? SimpleTypeName(TypeSyntax type) => type switch
+    {
+        IdentifierNameSyntax id => id.Identifier.ValueText,
+        QualifiedNameSyntax q => q.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax a => a.Name.Identifier.ValueText,
+        NullableTypeSyntax n => SimpleTypeName(n.ElementType),
+        _ => null,
+    };
+
+    /// <summary>The type a target-typed <c>new(…)</c> builds, when the syntax names it: a declaration's type
+    /// (<c>Entity t = new("team")</c>, a field or property initializer), or a write request's <c>Target = new(…)</c>
+    /// (<c>Entity</c> for Create, Update and Upsert, <c>EntityReference</c> for Delete). Otherwise unknown.</summary>
+    private static string? TargetTypeOf(ImplicitObjectCreationExpressionSyntax creation) => creation.Parent switch
+    {
+        EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax declaration } } =>
+            SimpleTypeName(declaration.Type),
+        EqualsValueClauseSyntax { Parent: PropertyDeclarationSyntax property } => SimpleTypeName(property.Type),
+        AssignmentExpressionSyntax { Left: IdentifierNameSyntax { Identifier.ValueText: "Target" }, Parent: InitializerExpressionSyntax { Parent: BaseObjectCreationExpressionSyntax request } }
+            when TypeNameOf(request) is { } requestType && WriteRequests.Contains(requestType) =>
+            requestType == "DeleteRequest" ? "EntityReference" : "Entity",
         _ => null,
     };
 
