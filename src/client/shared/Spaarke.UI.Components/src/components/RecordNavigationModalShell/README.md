@@ -187,6 +187,27 @@ window.addEventListener('message', (ev) => {
 Untrusted-origin requests are silently dropped — the parent shell's timeout
 fallback then fires (treats no-response as clean per spec FR-14).
 
+### Using the round trip without the shell (`queryDirtyState`)
+
+A modal that composes `SprkModal` directly and uses the shell's own `nav` (ADR-050) cannot nest this component's chrome, but it can
+run the same parent-side round trip from `nav.onBeforeNavigate`:
+
+```ts
+import { queryDirtyState } from '@spaarke/ui-components';
+
+const dirty = await queryDirtyState({
+  targetWindow: iframeRef.current?.contentWindow,
+  targetOrigin: frameOrigin,
+  isOriginTrusted: origin => origin === window.location.origin,
+  requireSourceMatch: true, // an answer counts only from the frame's own window
+});
+```
+
+It resolves `false` (clean) with no window, no answer within `timeoutMs` (default 1000) or only untrusted answers. The shell calls the
+same function (with `requireSourceMatch` off, as before). First consumer: `InvoiceReviewModal` (Worklist, task 195), whose page side is
+`src/solutions/InvoiceReview/src/components/useDirtyCheck.ts` (a page-side responder, so the status note above, that no consumer ships
+a responder, no longer holds for Invoice Review).
+
 ### Opting out of dirty-check
 
 Pass `dirtyCheckTargetWindow={null}` (or omit it) to skip the round-trip

@@ -53,7 +53,7 @@ Spaarke.SecureChild = Spaarke.SecureChild || {};
 Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
 (function (ns) {
-    ns.VERSION = "1.0.2";
+    ns.VERSION = "1.1.0";
 
     var LOG = "[SecureChild.Ribbon v" + ns.VERSION + "]";
 
@@ -85,6 +85,20 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.NATIVE_NEW_CLOSED = { sprk_invoice: true };
 
+    /**
+     * field-mapping-server-write-path-r1 task 051 (FR-24): tables whose platform subgrid "+ New" is redirected on EVERY host that
+     * can own them, secure or not. The platform command creates the row as the user, with no field mapping, owner rule or search
+     * default applied; the BFF command creates it through the one server-side create owner. A party host (never an ownership
+     * parent) and a form with no saved record (no parent to file under) keep the platform command, as before. Unlike
+     * NATIVE_NEW_CLOSED, the BFF command is offered on every saved host (not only on the core records), because each of these
+     * tables is filed under whatever host names it. The ribbon passes the table as a string parameter (the secure-child template
+     * does for every entity); a call with none behaves as before.
+     */
+    ns.NATIVE_NEW_REDIRECTED = {
+        sprk_todo: true, sprk_event: true, sprk_reportcard: true, sprk_document: true, sprk_communication: true,
+        sprk_budget: true, sprk_kpiassessment: true
+    };
+
     /** Wizard code pages (envelope: entityType / entityId / bffBaseUrl - sprk_wizard_commands.js). */
     ns.WIZARDS = {
         sprk_todo: { page: "sprk_createtodowizard", title: "Create New To Do" },
@@ -101,7 +115,9 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.CREATE_THEN_OPEN = {
         sprk_budget: { label: "budget" },
-        sprk_kpiassessment: { label: "KPI assessment" }
+        sprk_kpiassessment: { label: "KPI assessment" },
+        // Task 051 (FR-24): the Event form's "Add Memo" (Spaarke.Event.AddMemo) creates the memo through the BFF, not a quick create.
+        sprk_memo: { label: "memo" }
     };
 
     /** Every child table this script serves (the template's per-entity instances must stay within it). */
@@ -170,6 +186,9 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         if (!host || ns.PARTIES[host.entity]) {
             return true;
         }
+        if (table && ns.NATIVE_NEW_REDIRECTED[table]) {
+            return false;
+        }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag === false; });
     };
 
@@ -181,6 +200,9 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         }
         if (!host || ns.PARTIES[host.entity] || ns.NO_NEW_HOSTS[host.entity]) {
             return false;
+        }
+        if (table && ns.NATIVE_NEW_REDIRECTED[table]) {
+            return true;
         }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag !== false; });
     };
@@ -285,9 +307,21 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         });
     }
 
-    /** sprk_budget: create through the BFF (owned by the team the rule names), then open the new record. */
-    function createThenOpen(childTable, host, primaryControl, selectedControl) {
+    /**
+     * Creates a child of the host through POST /api/v1/child-records/{table} (owned by the team the ownership rule names, mapped
+     * and stamped by the server) and resolves { id } of the new row, or null after telling the user why nothing was created.
+     * Never creates through Xrm.WebApi, and never falls back to it. Used by the subgrid commands (createThenOpen) and by
+     * Spaarke.Event.AddMemo / Spaarke.KpiRibbon (task 051, FR-24). `selectedControl` (the subgrid) is optional: without it the
+     * host lookup is found by metadata alone and must be unique.
+     */
+    ns.createChild = function (childTable, host, selectedControl) {
         var label = ns.CREATE_THEN_OPEN[childTable].label;
+        if (!helpersLoaded()) {
+            alert("New " + label,
+                "The sign-in helper for this command is not loaded on this form. Reload the page and try again; if it " +
+                "persists, ask an administrator to check the command's libraries. Nothing was created.");
+            return Promise.resolve(null);
+        }
         return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
             return Spaarke.BffAuth.getToken(baseUrl).then(function (token) {
                 if (!token) {
@@ -313,11 +347,23 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                             });
                         }
                         return response.json().then(function (body) {
-                            refresh(selectedControl, primaryControl);
-                            return Xrm.Navigation.openForm({ entityName: childTable, entityId: cleanId(body.id) });
+                            return { id: cleanId(body.id) };
                         });
                     });
             });
+        }).catch(function (error) {
+            console.error(LOG, "createChild failed:", error);
+            alert("New " + label, "The record could not be created now. Try again in a moment. Nothing was created.");
+            return null;
+        });
+    };
+
+    /** sprk_budget, sprk_kpiassessment: create through the BFF (owned by the team the rule names), then open the new record. */
+    function createThenOpen(childTable, host, primaryControl, selectedControl) {
+        return ns.createChild(childTable, host, selectedControl).then(function (created) {
+            if (!created) return null;
+            refresh(selectedControl, primaryControl);
+            return Xrm.Navigation.openForm({ entityName: childTable, entityId: created.id });
         });
     }
 

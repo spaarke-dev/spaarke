@@ -75,7 +75,7 @@ public sealed class DispositionRoutabilityNotificationSeamTests
         h.OpenAi.RawJsonToReturn =
             "{\"notification\":{\"title\":\"Document ready\",\"body\":\"Your NDA summary is ready to review.\"," +
             "\"recipientId\":\"" + RecipientId + "\",\"category\":\"chat-notification\",\"actionUrl\":\"/main.aspx?id=1\"," +
-            "\"priority\":300000000,\"toastType\":200000000,\"regardingId\":\"" + ActionId + "\",\"regardingType\":\"sprk_matter\"}}";
+            "\"priority\":200000001,\"toastType\":200000000,\"regardingId\":\"" + ActionId + "\",\"regardingType\":\"sprk_matter\"}}";
 
         var chunks = await h.DispatchAsync(new { selectionText = "notify me when the summary is ready" });
 
@@ -103,7 +103,7 @@ public sealed class DispositionRoutabilityNotificationSeamTests
         h.Captured.RecipientId.Should().Be(RecipientId);
         h.Captured.Category.Should().Be("chat-notification");
         h.Captured.ActionUrl.Should().Be("/main.aspx?id=1");
-        h.Captured.Priority.Should().Be(300000000);
+        h.Captured.Priority.Should().Be(200000001);
         h.Captured.ToastType.Should().Be(200000000);
         h.Captured.RegardingId.Should().Be(ActionId);
         h.Captured.RegardingType.Should().Be("sprk_matter");
@@ -138,6 +138,23 @@ public sealed class DispositionRoutabilityNotificationSeamTests
         var stored = await h.GetStoredOutputAsync();
         stored.Should().NotBeNull("the ledger write precedes the routing leg — the entry survives a leg failure");
         stored!.Disposition.Should().Be("notification");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_NotificationDisposition_LlmPriorityOutsideTheLiveSet_ThrowsLoud_AfterLedgerStore()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync();
+        h.GivenBinding(BindingDisposition.Notification, SelectionInputSchema);
+        h.GivenFlatTextAction("ROLE: Draft the notification.", NotificationOutputSchema);
+        // 300000000 is not an appnotification priority option; Dataverse would reject the create.
+        h.OpenAi.RawJsonToReturn =
+            "{\"notification\":{\"title\":\"t\",\"body\":\"b\",\"recipientId\":\"" + RecipientId + "\",\"priority\":300000000}}";
+
+        Func<Task> act = () => h.DispatchToCompletionAsync(new { selectionText = "x" });
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*300000000*");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull("the ledger write precedes the routing leg (ADR-040)");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -200,6 +217,9 @@ public sealed class DispositionRoutabilityNotificationSeamTests
                         return new CreateNotificationResult(false, null, false, "title is required");
                     if (string.IsNullOrWhiteSpace(req.Body))
                         return new CreateNotificationResult(false, null, false, "body is required");
+                    var invalid = Sprk.Bff.Api.Services.AppNotificationOptions.Validate(req.Priority, req.ToastType);
+                    if (invalid is not null)
+                        return new CreateNotificationResult(false, null, false, invalid);
                     return new CreateNotificationResult(true, CreatedNotificationId, false, null);
                 });
 

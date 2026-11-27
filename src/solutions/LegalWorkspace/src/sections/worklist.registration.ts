@@ -67,6 +67,7 @@ import {
   XrmDataverseClient,
   createWorklistService,
   createXrmNavigationService,
+  getClientUrl,
   getXrm,
   launchDecisionWizard,
   openInvoiceReview,
@@ -110,6 +111,10 @@ const WorklistSectionMount: React.FC = () => {
     [navigation, webApi]
   );
   const openRecord = React.useMemo(() => (navigation ? createWorklistOpenRecord(navigation) : undefined), [navigation]);
+  // Task 195 (ADR-050 launch rule): the org client URL, so a billing Work Item opens Invoice Review in-app on the shared modal shell with
+  // "N of M" browse. `getClientUrl()` walks the frames for Xrm and returns undefined when it cannot read one; then the widget falls back to
+  // `openInvoiceReview` (navigateTo), which is still passed below.
+  const invoiceReviewClientUrl = React.useMemo(() => getClientUrl() || undefined, []);
 
   const openEmailReview = React.useCallback(() => {
     dispatch("workspace", { type: "widget_load", widgetType: RECONCILIATION_WIDGET_TYPE });
@@ -146,6 +151,8 @@ const WorklistSectionMount: React.FC = () => {
       // Task 175 (D-207): a billing Work Item opens the eBilling Invoice Review page as a dialog instead of the wizard. The opener
       // is Xrm-coupled and rejects without Xrm.Navigation (the widget then shows "Invoice Review could not be opened").
       openInvoiceReview,
+      // Task 195: with the client URL the widget opens Invoice Review in-app (SprkModal, browse); `openInvoiceReview` above is the fallback.
+      invoiceReviewClientUrl,
     }),
   );
 };

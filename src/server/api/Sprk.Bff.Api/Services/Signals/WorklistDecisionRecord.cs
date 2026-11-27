@@ -32,6 +32,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="Steps">Every action the rule offered, in order; null when the stored envelope is missing or unreadable (the wizard then
 /// opens the item read-only with no replay rather than showing every action as Skipped).</param>
 /// <param name="FollowOns">The Next steps the decision created (<c>sprk_followons</c>); empty when none or unreadable.</param>
+/// <param name="Summary">Task 226 (D-231): the record's own name (<c>sprk_name</c>, which the writer builds from the record class and the
+/// actions taken), the line a Decision Records row shows for a record with no Work Item to open (an email-gate record, D-139). Null when
+/// empty.</param>
 public sealed record WorklistDecisionRecord(
     Guid RecordId,
     string? Number,
@@ -41,7 +44,8 @@ public sealed record WorklistDecisionRecord(
     string? DecidedByName,
     string? Reason,
     IReadOnlyList<WorklistDecisionStep>? Steps,
-    IReadOnlyList<WorklistDecisionFollowOn> FollowOns);
+    IReadOnlyList<WorklistDecisionFollowOn> FollowOns,
+    string? Summary = null);
 
 /// <summary>One offered action and what became of it. <paramref name="Values"/> is what was sent (null for a skipped step).</summary>
 public sealed record WorklistDecisionStep(string Code, bool Taken, JsonElement? Values, string? Status);
@@ -56,7 +60,7 @@ internal static class WorklistDecisionRecordReader
     internal static readonly string[] Columns =
     [
         "sprk_decisionrecordid", "sprk_decisionnumber", "sprk_recordclass", "sprk_decisionoutcome", "sprk_reason",
-        "sprk_decidedon", "sprk_confirmedby", "sprk_steps", "sprk_followons",
+        "sprk_decidedon", "sprk_confirmedby", "sprk_steps", "sprk_followons", "sprk_name",
     ];
 
     internal static bool TryParse(JsonElement raw, out WorklistDecisionRecord record)
@@ -95,7 +99,8 @@ internal static class WorklistDecisionRecordReader
             Text(raw, "by.fullname") ?? Text(raw, "by_x002e_fullname"),
             Text(raw, "sprk_reason"),
             ParseSteps(Text(raw, "sprk_steps")),
-            ParseFollowOns(Text(raw, "sprk_followons")));
+            ParseFollowOns(Text(raw, "sprk_followons")),
+            Text(raw, "sprk_name"));
         return true;
     }
 

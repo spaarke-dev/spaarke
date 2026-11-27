@@ -49,14 +49,8 @@ import {
 } from '@fluentui/react-components';
 import { ChevronLeft20Regular, ChevronRight20Regular } from '@fluentui/react-icons';
 import { useRecordNavigationModalShellStyles } from './RecordNavigationModalShell.styles';
-import {
-  DIRTY_CHECK_REQUEST_TYPE,
-  DIRTY_CHECK_RESULT_TYPE,
-  type IDirtyCheckRequest,
-  type IDirtyCheckResponse,
-  type IRecordNavigationModalShellProps,
-  type RecordNavigationDirection,
-} from './types';
+import { queryDirtyState } from './queryDirtyState';
+import type { IRecordNavigationModalShellProps, RecordNavigationDirection } from './types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,20 +93,6 @@ function isOriginAllowed(origin: string, allowList: ReadonlyArray<string>): bool
     }
   }
   return false;
-}
-
-/**
- * Generates a stable, unique correlation id for a dirty-check round trip.
- * Falls back to `Math.random()` + counter when `crypto.randomUUID` is
- * unavailable (e.g. older jsdom, IE-edge cases).
- */
-let _correlationCounter = 0;
-function generateCorrelationId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  _correlationCounter += 1;
-  return `rnms-${Date.now()}-${_correlationCounter}-${Math.floor(Math.random() * 1e9)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,59 +153,16 @@ export const RecordNavigationModalShell: React.FC<IRecordNavigationModalShellPro
    *   - the iframe does not respond within `dirtyCheckTimeout`
    *   - an untrusted-origin response arrives (treated as no response)
    */
-  const queryDirtyState = React.useCallback((): Promise<boolean> => {
-    const targetWindow = dirtyCheckTargetWindow;
-    if (!targetWindow) {
-      return Promise.resolve(false);
-    }
-
-    return new Promise<boolean>(resolve => {
-      const correlationId = generateCorrelationId();
-      let settled = false;
-
-      const handleMessage = (ev: MessageEvent): void => {
-        if (settled) return;
-        // Validate inbound origin against the allow-list.
-        if (!isOriginAllowed(ev.origin, resolvedAllowedOrigins)) return;
-        // Validate payload shape.
-        const data = ev.data as Partial<IDirtyCheckResponse> | null;
-        if (!data || typeof data !== 'object') return;
-        if (data.type !== DIRTY_CHECK_RESULT_TYPE) return;
-        if (data.correlationId !== correlationId) return;
-        settled = true;
-        window.removeEventListener('message', handleMessage);
-        clearTimeout(timeoutId);
-        resolve(Boolean(data.dirty));
-      };
-
-      const timeoutId = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        window.removeEventListener('message', handleMessage);
-        // Timeout — treat as clean per spec FR-14 fallback semantics.
-        resolve(false);
-      }, dirtyCheckTimeout);
-
-      window.addEventListener('message', handleMessage);
-
-      const request: IDirtyCheckRequest = {
-        type: DIRTY_CHECK_REQUEST_TYPE,
-        correlationId,
-      };
-      try {
-        targetWindow.postMessage(request, dirtyCheckTargetOrigin);
-      } catch {
-        // postMessage can throw if the target window is cross-origin and
-        // detached (e.g. iframe was just unmounted). Treat as clean.
-        if (!settled) {
-          settled = true;
-          window.removeEventListener('message', handleMessage);
-          clearTimeout(timeoutId);
-          resolve(false);
-        }
-      }
-    });
-  }, [dirtyCheckTargetWindow, dirtyCheckTargetOrigin, dirtyCheckTimeout, resolvedAllowedOrigins]);
+  const runDirtyCheck = React.useCallback(
+    (): Promise<boolean> =>
+      queryDirtyState({
+        targetWindow: dirtyCheckTargetWindow,
+        targetOrigin: dirtyCheckTargetOrigin,
+        timeoutMs: dirtyCheckTimeout,
+        isOriginTrusted: origin => isOriginAllowed(origin, resolvedAllowedOrigins),
+      }),
+    [dirtyCheckTargetWindow, dirtyCheckTargetOrigin, dirtyCheckTimeout, resolvedAllowedOrigins]
+  );
 
   /**
    * Common path for both prev and next:
@@ -235,14 +172,14 @@ export const RecordNavigationModalShell: React.FC<IRecordNavigationModalShellPro
    */
   const attemptNavigate = React.useCallback(
     async (direction: RecordNavigationDirection): Promise<void> => {
-      const dirty = await queryDirtyState();
+      const dirty = await runDirtyCheck();
       if (dirty) {
         setPendingDirection(direction);
         return;
       }
       await onNavigate(direction);
     },
-    [queryDirtyState, onNavigate]
+    [runDirtyCheck, onNavigate]
   );
 
   const handlePrev = React.useCallback(() => {

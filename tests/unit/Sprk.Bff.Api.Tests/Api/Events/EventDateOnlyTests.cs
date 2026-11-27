@@ -35,7 +35,6 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
-using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -122,13 +121,12 @@ public class EventDateOnlyTests
 
             DataverseWebApiService.BuildUpdateEventStatusPayload(EventStatusCode.Completed, new DateOnly(2026, 10, 5))
                 ["sprk_completeddate"].Should().Be("2026-10-05");
-            DataverseWebApiService.BuildCreateEventPayload(new DataverseCreateEventRequest
-            {
-                Name = "Filing",
-                DueDate = new DateOnly(2026, 10, 20),
-                BaseDate = new DateOnly(2026, 10, 1),
-                OwningTeamId = Guid.NewGuid(), // task 146 (master): never app-owned
-            }).Should().Contain("sprk_duedate", "2026-10-20").And.Contain("sprk_basedate", "2026-10-01");
+            EventEndpoints.BuildCreatePayload(
+                new ApiCreateEventRequest(
+                    "Filing", DueDate: new DateOnly(2026, 10, 20), ScheduledStart: new DateOnly(2026, 10, 1)),
+                regarding: null,
+                assignedToContactId: null)
+                .Should().Contain("sprk_duedate", "2026-10-20").And.Contain("sprk_basedate", "2026-10-01");
         }
         finally
         {

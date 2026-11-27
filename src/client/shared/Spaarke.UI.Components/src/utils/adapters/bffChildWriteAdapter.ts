@@ -25,7 +25,7 @@
  */
 
 import type { IDataService } from '../../types/serviceInterfaces';
-import type { AuthenticatedFetch } from './bffDataServiceAdapter';
+import type { ResponseFetchFn } from '../fetchTypes';
 import { resolveRecordType, type IPolymorphicWebApi } from '../../services/PolymorphicResolverService';
 import { isApiError, problemOf } from '../thrownFetchError';
 
@@ -234,7 +234,7 @@ async function failureOf(response: Response, fallback: string): Promise<ChildRec
  * record to copy mapped fields from ({@link IBffMappingSource}); it adds nothing to `payload`.
  */
 export async function createChildRecordViaBff(
-  authenticatedFetch: AuthenticatedFetch,
+  authenticatedFetch: ResponseFetchFn,
   bffBaseUrl: string,
   table: string,
   payload: Record<string, unknown>,
@@ -250,7 +250,7 @@ export async function createChildRecordViaBff(
  * read or determined, a mapped value that was not written) arrives in `warnings` too.
  */
 export async function createRecordViaBffWithWarnings(
-  authenticatedFetch: AuthenticatedFetch,
+  authenticatedFetch: ResponseFetchFn,
   bffBaseUrl: string,
   table: string,
   payload: Record<string, unknown>,
@@ -287,12 +287,13 @@ export async function createRecordViaBffWithWarnings(
 
 /**
  * Updates (re-files) a child record through the BFF: the caller's own update, with the owner re-derived when it changes
- * what the row is filed under. Rejects with a {@link ChildRecordWriteError} carrying the server's message — nothing was
- * written. For a {@link FILING_ONLY_REFILE_TABLES} table, `payload` must name only the filing (the server answers 400
- * otherwise); {@link withBffChildWrites} splits a mixed update for its callers.
+ * what the row is filed under. Rejects with a {@link ChildRecordWriteError} carrying the server's message and
+ * `reasonCode` — nothing was written — whether the injected fetch returns the non-2xx or throws it as an `ApiError`.
+ * For a {@link FILING_ONLY_REFILE_TABLES} table, `payload` must name only the filing (the server answers 400 otherwise);
+ * {@link withBffChildWrites} splits a mixed update for its callers.
  */
 export async function updateChildRecordViaBff(
-  authenticatedFetch: AuthenticatedFetch,
+  authenticatedFetch: ResponseFetchFn,
   bffBaseUrl: string,
   table: string,
   id: string,
@@ -303,11 +304,22 @@ export async function updateChildRecordViaBff(
     throw new ChildRecordWriteError(`'${table}' records are not re-filed through the BFF.`, 0);
   }
 
-  const response = await authenticatedFetch(joinUrl(bffBaseUrl, route(cleanId(id))), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload ?? {}),
-  });
+  let response: Response;
+  try {
+    response = await authenticatedFetch(joinUrl(bffBaseUrl, route(cleanId(id))), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload ?? {}),
+    });
+  } catch (err) {
+    // Ontology task 234 (F2-1): the fetch every Dataverse host injects (@spaarke/auth) THROWS an ApiError for a non-2xx
+    // instead of returning it. Answer it as the ChildRecordWriteError a returned non-2xx gives, so callers read one
+    // shape (reasonCode, status). Anything else (AuthError, a network failure) is rethrown unchanged.
+    if (isApiError(err)) {
+      throw new ChildRecordWriteError(err.message, err.status, reasonCodeOf(problemOf(err)));
+    }
+    throw err;
+  }
   if (!response.ok) {
     throw await failureOf(response, 'The record could not be updated');
   }
@@ -333,7 +345,7 @@ export async function updateChildRecordViaBff(
  * otherwise ({@link ChildRecordWriteError}, or the error the host's fetch throws) — the caller shows them as a warning.
  */
 export async function fileProjectUnderMatter(
-  authenticatedFetch: AuthenticatedFetch | undefined,
+  authenticatedFetch: ResponseFetchFn | undefined,
   bffBaseUrl: string | undefined,
   recordTypes: IPolymorphicWebApi,
   projectId: string,
@@ -399,7 +411,7 @@ function reasonCodeOf(problem: Record<string, unknown> | null): string | undefin
  * a refusal there writes nothing at all — then every other column as the caller's own update through `inner`.
  */
 async function updateFilingThenRest(
-  authenticatedFetch: AuthenticatedFetch,
+  authenticatedFetch: ResponseFetchFn,
   bffBaseUrl: string,
   inner: IDataService,
   entityName: string,
@@ -437,7 +449,7 @@ export function routesChildWritesThroughBff(service: IDataService | undefined): 
  */
 export function withBffChildWrites(
   inner: IDataService,
-  authenticatedFetch: AuthenticatedFetch | undefined,
+  authenticatedFetch: ResponseFetchFn | undefined,
   bffBaseUrl: string | undefined
 ): IDataService {
   if (routesChildWritesThroughBff(inner)) {

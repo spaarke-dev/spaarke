@@ -111,6 +111,73 @@ public sealed class PostUploadIndexingEnqueuerTests
         await sut.EnqueueIfApplicableAsync(ValidRequest() with { DocumentId = document.ToString() }, CreateHttpContext(), CancellationToken.None);
 
         captured!.ParentEntity.Should().Be(new ParentEntityContext("matter", matter.ToString(), "Acme v. Widget"));
+        captured.ReplaceParentEntity.Should().BeTrue("the row's answer was decided");
+    }
+
+    // GitHub #3223: the stored parent is replaced only where the parent answer was decided.
+
+    private async Task<FileIndexRequest> IndexAsync(PostUploadIndexingRequest request, IGenericEntityService dataverse)
+    {
+        FileIndexRequest? captured = null;
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FileIndexRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 1, Duration = TimeSpan.FromSeconds(1) });
+        var sut = new PostUploadIndexingEnqueuer(_fileIndexingMock.Object, _jobSubmissionMock.Object, _documentServiceMock.Object,
+            TestDocumentIndexParentResolver.Over(dataverse), _indexNames, Options.Create(_options), _loggerMock.Object);
+
+        var result = await sut.EnqueueIfApplicableAsync(request, CreateHttpContext(), CancellationToken.None);
+
+        result.JobSubmitted.Should().BeTrue();
+        return captured!;
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_NoParentAndNoDocument_LeavesTheStoredParentAlone()
+    {
+        var indexed = await IndexAsync(ValidRequest() with { DocumentId = null }, Mock.Of<IGenericEntityService>());
+
+        indexed.ParentEntity.Should().BeNull();
+        indexed.ReplaceParentEntity.Should().BeFalse("nothing decided the parent: silence must not clear one another path stamped");
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_ACallerParent_ReplacesTheStoredParent()
+    {
+        var parent = new ParentEntityContext("matter", Guid.NewGuid().ToString(), "Acme");
+
+        var indexed = await IndexAsync(ValidRequest(parentEntity: parent), Mock.Of<IGenericEntityService>());
+
+        indexed.ParentEntity.Should().Be(parent);
+        indexed.ReplaceParentEntity.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_ADocumentRowThatNamesNoRecord_ReplacesTheStoredParentWithNone()
+    {
+        var document = Guid.Parse("4d000000-0000-4000-8000-0000000032a1");
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", document, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", document));
+
+        var indexed = await IndexAsync(ValidRequest() with { DocumentId = document.ToString() }, dataverse.Object);
+
+        indexed.ParentEntity.Should().BeNull();
+        indexed.ReplaceParentEntity.Should().BeTrue("the row was read and names no record: a decided none clears the old parent");
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_AnUnreadableDocumentRow_LeavesTheStoredParentAlone()
+    {
+        var document = Guid.Parse("4d000000-0000-4000-8000-0000000032a2");
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(d => d.RetrieveAsync("sprk_document", document, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse throttled"));
+
+        var indexed = await IndexAsync(ValidRequest() with { DocumentId = document.ToString() }, dataverse.Object);
+
+        indexed.ParentEntity.Should().BeNull();
+        indexed.ReplaceParentEntity.Should().BeFalse("an unreadable row decided nothing, so the upload is indexed without touching the parent");
     }
 
 

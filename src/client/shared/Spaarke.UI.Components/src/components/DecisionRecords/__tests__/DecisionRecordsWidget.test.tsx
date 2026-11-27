@@ -1,6 +1,8 @@
 /**
  * DecisionRecordsWidget - unit tests (task 045, D-47). The stated contract:
  *  - the tab lists the decided items with their Decision Record, newest decision first
+ *  - task 226 (D-231): an item reviewed twice is two rows, and Open on either replays THAT record; a record that resolved no item
+ *    (an email-gate record) is listed with its summary and has no Open
  *  - a class filter (All / Judgements / Routine / Dismissals) shows only records of that class
  *  - Open launches the decision wizard on that item, and the wizard's item is READ-ONLY and replays the record's steps (#1959 item 2)
  *  - negative: no row offers edit or delete (FR-21, R-13); the only action is Open
@@ -83,7 +85,7 @@ const BODY = {
 const serviceFor = (read: WorklistService['read']): WorklistService => ({
   read,
   findInquiryForTodo: jest.fn(async () => null),
-  recordDisposition: jest.fn(async () => ({ todoCompleted: true })),
+  recordDisposition: jest.fn(async () => ({ todoCompleted: true, signalRefreshQueued: true })),
 });
 const okService = (body: unknown = BODY) => serviceFor(jest.fn(async set => parseWorklistResponse(body, set)));
 
@@ -113,6 +115,44 @@ describe('the Decision Record tab', () => {
     expect(first).toHaveTextContent('Acme v. Beta - Item DR-00004');
     expect(first).toHaveTextContent('Dana Decider');
     expect(first).toHaveTextContent('Judgement');
+  });
+
+  it("the finding is the rule's short name, then the stored title, then the subject, and never the sentence (D-227)", async () => {
+    const finding = {
+      ...BODY,
+      lanes: [
+        {
+          lane: 'Decide',
+          groups: [
+            {
+              core: MATTER,
+              notFiled: false,
+              items: [
+                item('s-rule', 'Judgement', 'DR-00021', '2026-10-09T09:00:00Z', {
+                  ruleShortName: 'Budget gap',
+                  title: 'Fee change without a budget revision',
+                  subjectName: 'RE: revised fees',
+                  sentence: 'Fees rose 12% with no budget revision on file.',
+                }),
+                item('s-subject', 'Judgement', 'DR-00020', '2026-10-08T09:00:00Z', {
+                  title: null,
+                  subjectName: 'RE: revised fees',
+                  sentence: 'Fees rose 12% with no budget revision on file.',
+                }),
+              ],
+            },
+          ],
+        },
+        BODY.lanes[1],
+      ],
+    };
+    renderTab(okService(finding));
+    await screen.findByTestId('decision-records-widget');
+    const [rule, subject] = screen.getAllByTestId('record-row');
+    expect(rule).toHaveTextContent('Acme v. Beta - Budget gap');
+    expect(rule).not.toHaveTextContent('Fee change without a budget revision');
+    expect(subject).toHaveTextContent('Acme v. Beta - RE: revised fees');
+    expect(subject).not.toHaveTextContent('Fees rose 12%');
   });
 
   it('filters by record class: only records of that class show, and the counts describe the full list', async () => {
@@ -300,6 +340,83 @@ describe('the Decision Record tab', () => {
     const bar = await screen.findByTestId('decision-records-error');
     expect(bar).toHaveTextContent("aren't available for your account");
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('an item reviewed twice is two rows, and Open on the earlier one replays the earlier record (task 226)', async () => {
+    const user = userEvent.setup();
+    const inquiry = item('s-twice', 'Routine', 'DR-00010', '2026-10-01T09:00:00Z');
+    const decision = item('s-twice', 'Judgement', 'DR-00011', '2026-10-12T09:00:00Z');
+    const twice = {
+      ...BODY,
+      lanes: [
+        { lane: 'Decide', groups: [{ core: MATTER, notFiled: false, items: [decision, inquiry] }] },
+        BODY.lanes[1],
+      ],
+    };
+    const launch = renderTab(okService(twice));
+    await screen.findByTestId('decision-records-widget');
+    expect(rowNumbers()).toEqual(['DR-00011', 'DR-00010']);
+
+    await user.click(within(screen.getAllByTestId('record-row')[1]).getByText(/Open/));
+    const request = launch.mock.calls[0][0];
+    expect(request.itemId).toBe('s-twice');
+    expect(request.visibleList).toEqual(['s-twice']);
+    const wizardItem = await request.loadItem!('s-twice');
+    expect(wizardItem.resolution?.recordNumber).toBe('DR-00010');
+
+    await user.click(within(screen.getAllByTestId('record-row')[0]).getByText(/Open/));
+    expect((await launch.mock.calls[1][0].loadItem!('s-twice')).resolution?.recordNumber).toBe('DR-00011');
+  });
+
+  it('a record that resolved no item (an email gate) is listed with its summary and no Open (task 226, D-231)', async () => {
+    const gate = {
+      recordId: 'rec-gate',
+      number: 'DR-00900',
+      recordClass: 'Judgement',
+      outcome: 'Authorized',
+      decidedOn: '2026-10-14T09:30:00Z',
+      decidedByName: 'Dana Decider',
+      reason: 'policy.allow',
+      summary: 'Judgement: Send the reply',
+      steps: null,
+      followOns: [],
+    };
+    const withGate = {
+      ...BODY,
+      lanes: [
+        {
+          lane: 'Decide',
+          groups: [
+            { ...BODY.lanes[0].groups[0], records: [gate] },
+            {
+              core: null,
+              notFiled: true,
+              items: [],
+              records: [{ ...gate, recordId: 'rec-gate-2', number: 'DR-00901', decidedOn: '2026-09-01T09:00:00Z' }],
+            },
+          ],
+        },
+        BODY.lanes[1],
+      ],
+    };
+    const launch = renderTab(okService(withGate));
+    await screen.findByTestId('decision-records-widget');
+
+    expect(rowNumbers()).toEqual(['DR-00900', 'DR-00004', 'DR-00003', 'DR-00002', 'DR-00001', 'DR-00901']);
+    expect(screen.getByTestId('decision-filter-all')).toHaveTextContent('All (6)');
+    const [gateRow] = screen.getAllByTestId('record-row');
+    expect(gateRow).toHaveTextContent('Acme v. Beta - Judgement: Send the reply');
+    expect(gateRow).toHaveTextContent('Dana Decider');
+    expect(within(gateRow).queryAllByRole('button')).toHaveLength(0);
+    expect(within(gateRow).queryByText(/Open/)).toBeNull();
+    const notFiled = screen.getAllByTestId('record-row')[5];
+    expect(notFiled).toHaveTextContent('Judgement: Send the reply');
+    expect(within(notFiled).queryAllByRole('button')).toHaveLength(0);
+
+    // The items' Open is unchanged, and the wizard's list holds only items (a record with no item has nothing to open).
+    const user = userEvent.setup();
+    await user.click(within(screen.getAllByTestId('record-row')[1]).getByText(/Open/));
+    expect(launch.mock.calls[0][0].visibleList).toEqual(['s-new', 's-dismiss', 's-routine', 's-old']);
   });
 
   it('renders under the dark theme', async () => {

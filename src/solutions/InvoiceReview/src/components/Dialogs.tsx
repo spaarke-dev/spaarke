@@ -32,6 +32,7 @@ import { FormModal } from '@spaarke/ui-components';
 import { noteMember, noteProblem } from '../services/noteModel';
 import { EMPTY_ADD_LINE_FORM, money, type AddLineForm } from '../services/reviewModel';
 import { NoteField } from './NoteField';
+import { useReportDirty } from './useDirtyCheck';
 
 const useStyles = makeStyles({
   muted: { color: tokens.colorNeutralForeground3 },
@@ -112,6 +113,8 @@ export function CorrectValueModal({ target, busy, error, noteError = null, onNot
   const [field, setField] = React.useState(draft?.field ?? target.field);
   const [value, setValue] = React.useState(draft?.value ?? target.initial);
   const [note, setNote] = React.useState(draft?.note ?? '');
+  // Task 195: unsaved work (a value changed from the one read, another field chosen, a note typed) holds the Console modal's browse.
+  useReportDirty(value !== target.initial || field !== target.field || note.trim() !== '');
   const headerField = HEADER_FIELDS.find(h => h.field === field);
   const kind = header ? (headerField?.kind ?? 'text') : (LINE_KIND[field] ?? 'text');
   const title = header ? 'Correct an invoice value' : `Correct ${target.label.toLowerCase()} · line ${target.lineSequence}`;
@@ -206,6 +209,7 @@ export interface ConfirmValueModalProps {
 export function ConfirmValueModal({ target, busy, error, noteError = null, onNoteEdit, draft, onClose, onSubmit }: ConfirmValueModalProps) {
   const s = useStyles();
   const [note, setNote] = React.useState(draft?.note ?? '');
+  useReportDirty(note.trim() !== ''); // task 195: a note typed is unsaved work
   return (
     <FormModal
       open
@@ -257,6 +261,8 @@ export interface AddLineModalProps {
 export function AddLineModal({ busy, error, onClose, onSubmit }: AddLineModalProps) {
   const s = useStyles();
   const [form, setForm] = React.useState<AddLineForm>(EMPTY_ADD_LINE_FORM);
+  // Task 195: any field changed from the empty form is unsaved work.
+  useReportDirty((Object.keys(form) as Array<keyof AddLineForm>).some(key => form[key] !== EMPTY_ADD_LINE_FORM[key]));
   const set = <K extends keyof AddLineForm>(key: K, value: AddLineForm[K]) => setForm(f => ({ ...f, [key]: value }));
   const fee = form.costType === 'fee';
   return (
@@ -364,6 +370,7 @@ export function BulkDecisionModal({ request, busy, error, noteError = null, onNo
   const s = useStyles();
   const [reason, setReason] = React.useState(draft?.reason ?? '');
   const [note, setNote] = React.useState(draft?.note ?? '');
+  useReportDirty(reason.trim() !== '' || note.trim() !== ''); // task 195: a reason or note typed is unsaved work
   const n = request.lines.length;
   return (
     <FormModal

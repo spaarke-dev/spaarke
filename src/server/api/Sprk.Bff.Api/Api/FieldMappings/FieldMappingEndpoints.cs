@@ -593,6 +593,88 @@ public static class FieldMappingEndpoints
                 });
             }
 
+            // Which children a push reaches decides whether the field-secured-source rule applies, so it is settled before the
+            // source is read. Family mode finds the children through a Filing edge (step 3). An ordinary request finds them
+            // through the target's ONE lookup to the source (step 3a), resolved here from the target's many-to-one
+            // relationships, read once as the caller: they also tell the lookup writes which navigation property binds each
+            // target lookup.
+            var familyMode = request.Preview || request.ChildIds is not null;
+            IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>? targetRelationships = null;
+            string? parentLookup = null;
+            if (!familyMode)
+            {
+                // Step 3a (task 166 r1, owner round 21 item 3): WHICH lookup on the target names the source is read from
+                // relationship metadata — the target's many-to-one relationships whose referenced entity is the source —
+                // instead of the `sprk_regarding{base}` naming convention, which sprk_invoice (it carries sprk_matter) does
+                // not follow. Exactly one lookup is required; none or several fail closed before any child is read.
+                targetRelationships = await ReadManyToOneRelationshipsAsync(
+                    impersonatedQuery, request.TargetEntity, callerSystemUserId.Value, ct);
+                (parentLookup, var parentLookupCount) = ResolveParentLookup(targetRelationships, request.SourceEntity, request.TargetEntity);
+                if (parentLookup is null)
+                {
+                    logger.LogWarning(
+                        "Push refused: {TargetEntity} has {Count} lookup(s) to {SourceEntity} in relationship metadata; exactly "
+                        + "one is required to find the children. Nothing was read or updated.",
+                        request.TargetEntity, parentLookupCount, request.SourceEntity);
+                    return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, parentLookupCount);
+                }
+            }
+
+            // Task 065 (owner 2026-11-26): the field-secured-source rule is lifted only for rows filed under the source by a
+            // listed Filing edge: family mode (its children are found through one), or an ordinary request whose parent lookup
+            // IS the column of such an edge from the source table to the target table. Every other related row keeps the rule
+            // (step 2a). A lifted value still copies only when the caller can read it (step 2 reads as the caller), and a copied
+            // value is readable by whoever can read the child column.
+            var filedUnderTheSource = familyMode || IsListedFilingEdgeColumn(request.SourceEntity, request.TargetEntity, parentLookup);
+
+            var skippedRuleCount = selection.SkippedCount;
+            string[] securedSourceWarnings = [];
+            IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>? sourceAttributeRows = null;
+            if (!filedUnderTheSource)
+            {
+                // Step 2a (DI-051, #3258): the source's attribute catalog, read AS THE CALLER with each column's IsSecured. A rule
+                // that reads a field-secured source column is not pushed, whatever the caller may read: a secured value written
+                // into an unsecured child column would be readable by everyone who can read the child. Anything but an explicit
+                // IsSecured == false counts as secured (fail closed). The rule is create's (FieldSecuredSourceRule, the one
+                // predicate); each skipped rule's target column is named in a warning and the rule is counted with the skipped
+                // rules.
+                sourceAttributeRows = await impersonatedQuery.QueryAsync(
+                    FieldMappingPushLookups.AttributeMetadataPath(request.SourceEntity),
+                    FieldMappingPushLookups.SourceAttributeMetadataQuery,
+                    callerSystemUserId.Value,
+                    ct);
+                var (pushable, securedSourced) = FieldSecuredSourceRule.Split(
+                    selection.Rules, FieldMappingPushLookups.SecuredColumns(sourceAttributeRows));
+                skippedRuleCount += securedSourced.Count;
+                securedSourceWarnings = SecuredSourceWarnings(securedSourced);
+                if (securedSourced.Count > 0)
+                {
+                    logger.LogInformation(
+                        "Push skipped {Count} rule(s) whose source column is field-secured. ProfileId={ProfileId}",
+                        securedSourced.Count, profile.Id);
+                    rules = pushable.Select(MapRuleEntityToDto).ToArray();
+                }
+
+                if (rules.Length == 0)
+                {
+                    return TypedResults.Ok(new PushFieldMappingsResponse
+                    {
+                        Success = true,
+                        TargetEntity = request.TargetEntity,
+                        TotalRecords = 0,
+                        UpdatedCount = 0,
+                        FailedCount = 0,
+                        SkippedCount = 0,
+                        Warnings = securedSourceWarnings,
+                        SkippedRuleCount = skippedRuleCount,
+                        Preview = request.Preview ? true : null,
+                        Changes = request.Preview ? [] : null,
+                        SkippedNoWriteCount = request.Preview ? 0 : null,
+                        Truncated = request.Preview ? false : null,
+                    });
+                }
+            }
+
             // Step 2: Get source record field values — AS THE CALLER (task 166 r2). The row-level Read gate above
             // does not cover field-level security: an app-only read would return a secured source column the caller
             // cannot read and copy it into children they CAN read. Impersonated, Dataverse returns such a column as
@@ -606,6 +688,7 @@ public static class FieldMappingEndpoints
                 request.SourceEntity,
                 request.SourceRecordId,
                 sourceFields,
+                sourceAttributeRows,
                 callerSystemUserId.Value,
                 ct);
 
@@ -618,9 +701,8 @@ public static class FieldMappingEndpoints
                 return SourceRecordNotFound();
             }
 
-            // The target's many-to-one relationships, read once: they tell the lookup writes which navigation property binds each
-            // target lookup, and (an ordinary request) which ONE lookup names the source.
-            var targetRelationships = await ReadManyToOneRelationshipsAsync(
+            // Family mode reads the target's many-to-one relationships here, once, for the lookup writes.
+            targetRelationships ??= await ReadManyToOneRelationshipsAsync(
                 impersonatedQuery, request.TargetEntity, callerSystemUserId.Value, ct);
 
             // Step 3: the children — AS THE CALLER (task 166), so a child they cannot read never enters the set, the counts, the
@@ -629,27 +711,13 @@ public static class FieldMappingEndpoints
             IReadOnlyList<RecordFamilyMember> familyChildren = [];
             var familyTruncated = false;
             var refusedChildIds = new List<Guid>();
-            var familyMode = request.Preview || request.ChildIds is not null;
             if (!familyMode)
             {
-                // Step 3a (task 166 r1, owner round 21 item 3): WHICH lookup on the target names the source is read from
-                // relationship metadata — the target's many-to-one relationships whose referenced entity is the source —
-                // instead of the `sprk_regarding{base}` naming convention, which sprk_invoice (it carries sprk_matter) does
-                // not follow. Exactly one lookup is required; none or several fail closed before any child is read.
-                var (parentLookup, parentLookupCount) = ResolveParentLookup(targetRelationships, request.SourceEntity, request.TargetEntity);
-                if (parentLookup is null)
-                {
-                    logger.LogWarning(
-                        "Push refused: {TargetEntity} has {Count} lookup(s) to {SourceEntity} in relationship metadata; exactly "
-                        + "one is required to find the children. Nothing was read or updated.",
-                        request.TargetEntity, parentLookupCount, request.SourceEntity);
-                    return ParentLookupNotResolvable(request.SourceEntity, request.TargetEntity, parentLookupCount);
-                }
-
+                // The parent lookup was resolved (step 3a) before the source was read.
                 var childRecords = await QueryChildRecordsAsync(
                     impersonatedQuery,
                     entityService,
-                    parentLookup,
+                    parentLookup!,
                     request.SourceRecordId,
                     request.TargetEntity,
                     callerSystemUserId.Value,
@@ -724,10 +792,10 @@ public static class FieldMappingEndpoints
 
             if (request.Preview)
             {
-                return TypedResults.Ok(await FieldMappingPushFamily.PreviewAsync(
+                var preview = await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
                         request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
-                        selection.SkippedCount, isAssignedToColumn, sourceGate, refusedChildIds),
+                        skippedRuleCount, isAssignedToColumn, sourceGate, refusedChildIds),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
                     probe,
@@ -735,7 +803,10 @@ public static class FieldMappingEndpoints
                     entityService,
                     participations.GetEffectiveRootRecordFlagsAsync,
                     ct,
-                    logger));
+                    logger);
+                return TypedResults.Ok(securedSourceWarnings.Length == 0
+                    ? preview
+                    : preview with { Warnings = [.. preview.Warnings, .. securedSourceWarnings] });
             }
 
             var refusals = refusedChildIds
@@ -755,7 +826,8 @@ public static class FieldMappingEndpoints
                     FailedCount = refusals.Length,
                     SkippedCount = 0,
                     Errors = refusals,
-                    SkippedRuleCount = selection.SkippedCount,
+                    Warnings = securedSourceWarnings,
+                    SkippedRuleCount = skippedRuleCount,
                 });
             }
 
@@ -784,7 +856,7 @@ public static class FieldMappingEndpoints
 
             logger.LogInformation(
                 "Push completed. Total={Total}, Updated={Updated}, Failed={Failed}, Skipped={Skipped}, SkippedRules={SkippedRules}",
-                childIds.Length + refusals.Length, updatedCount, failedCount, skippedCount, selection.SkippedCount);
+                childIds.Length + refusals.Length, updatedCount, failedCount, skippedCount, skippedRuleCount);
 
             return TypedResults.Ok(new PushFieldMappingsResponse
             {
@@ -796,7 +868,8 @@ public static class FieldMappingEndpoints
                 SkippedCount = skippedCount,
                 Errors = [.. errors, .. refusals],
                 FieldResults = fieldResults,
-                SkippedRuleCount = selection.SkippedCount,
+                Warnings = securedSourceWarnings,
+                SkippedRuleCount = skippedRuleCount,
             });
         }
         catch (Exception ex)
@@ -812,6 +885,42 @@ public static class FieldMappingEndpoints
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
         }
     }
+
+    /// <summary>
+    /// Task 065: true when <paramref name="parentLookup"/> (an ordinary push's resolved parent lookup) is the column of a
+    /// listed Filing edge from <paramref name="sourceEntity"/> down to <paramref name="targetEntity"/>, so the pushed rows are
+    /// filed under the source and the field-secured-source rule is lifted for them. Any other lookup to the source, a table pair
+    /// with no listed Filing edge, or no lookup at all keeps the rule. Answered from the edge catalogue alone (no read).
+    /// </summary>
+    internal static bool IsListedFilingEdgeColumn(string sourceEntity, string targetEntity, string? parentLookup)
+    {
+        if (string.IsNullOrWhiteSpace(parentLookup)
+            || !RecordFamilyReader.HasListedEdge(RecordFamilyEdges.FamilyKind.Filing, sourceEntity, targetEntity))
+        {
+            return false;
+        }
+
+        var source = sourceEntity.Trim();
+        var target = targetEntity.Trim();
+        var column = parentLookup.Trim();
+        return RecordFamilyEdges.Of(RecordFamilyEdges.FamilyKind.Filing).Any(e =>
+            string.Equals(e.ParentTable, source, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(e.ChildTable, target, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(e.LookupColumn, column, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// DI-051 (#3258): one warning per target column a rule skipped under <see cref="FieldSecuredSourceRule"/> would have filled,
+    /// in column order. It names the column and the reason, never a value.
+    /// </summary>
+    internal static string[] SecuredSourceWarnings(IEnumerable<FieldMappingRuleEntity> securedSourced) =>
+        securedSourced
+            .Select(r => r.TargetField?.Trim())
+            .Where(c => !string.IsNullOrEmpty(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => c, StringComparer.Ordinal)
+            .Select(c => $"'{c}' was not updated: {FieldSecuredSourceRule.NotCopiedReason}.")
+            .ToArray();
 
     /// <summary>The 400 for more children than one push handles.</summary>
     private static IResult TooManyChildren(int found) =>
@@ -952,10 +1061,13 @@ public static class FieldMappingEndpoints
         string sourceEntity,
         Guid sourceRecordId,
         string[] fields,
+        IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>? sourceAttributeRows,
         Guid callerSystemUserId,
         CancellationToken ct)
     {
-        var attributes = FieldMappingPushLookups.ReadableAttributes(await impersonatedQuery.QueryAsync(
+        // DI-051: when step 2a read the catalog as the caller (with IsSecured) to split the rules, it is not read twice. A push
+        // that lifts the field-secured-source rule (task 065) skips step 2a, so the catalog is read here, as the caller.
+        var attributes = FieldMappingPushLookups.ReadableAttributes(sourceAttributeRows ?? await impersonatedQuery.QueryAsync(
             FieldMappingPushLookups.AttributeMetadataPath(sourceEntity),
             FieldMappingPushLookups.AttributeMetadataQuery,
             callerSystemUserId,

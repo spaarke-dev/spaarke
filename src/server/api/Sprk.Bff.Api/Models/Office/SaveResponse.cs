@@ -82,6 +82,17 @@ public record SaveResponse
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? AttachmentsNotStored { get; init; }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 141 review: the attachments a save of an already saved email named that its stored
+    /// <c>.eml</c> holds but no email save ever creates a document for (the attachment noise filter drops them: a calendar
+    /// file, a blocked extension, an inline or signature image, a tiny image, an oversized file; or they have no content), by
+    /// file name. They are NOT added, and saving the email again would not add them either. Present on the add answer and on
+    /// the "already saved" (<see cref="Duplicate"/>) one; omitted (<c>null</c>) when empty. Additive: clients that do not
+    /// know the field ignore it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? AttachmentsNotSaveable { get; init; }
 }
 
 /// <summary>

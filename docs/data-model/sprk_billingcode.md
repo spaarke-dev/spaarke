@@ -54,7 +54,7 @@ Gotcha: the primary-name `MaxLength` in an entity-create body is ignored (Datave
 | `sprk_mattertype_ref` | `sprk_defaultbillingcodeset` | Lookup -> `sprk_billingcodeset` (relationship `sprk_billingcodeset_mattertype_ref_defaultcodeset`, delete RemoveLink) |
 | `sprk_practicearea_ref` | `sprk_defaultbillingcodeset` | Lookup -> `sprk_billingcodeset` (relationship `sprk_billingcodeset_practicearea_ref_defaultcodeset`, delete RemoveLink) |
 
-Resolution order (FR-22): firm-supplied codes, matter-type mapping, practice-area mapping, AI suggestion (flagged), settings default (Litigation). Matter, Project and Work Assignment reach these through their `sprk_mattertype` / `sprk_practicearea` lookups. No mapping rows are seeded here; the admin (and task 048's confirmed AI proposals) set them.
+Resolution order (FR-22): firm-supplied codes, matter-type mapping, practice-area mapping, AI suggestion (flagged), settings default (Litigation). Matter, Project and Work Assignment reach these through their `sprk_mattertype` / `sprk_practicearea` lookups. `Seed-EbillingBillingCodes.ps1` seeds no mappings. The `legal-standard` reference pack (see the last section) creates a new stamp's matter types and practice areas with a default code set where the code-set matching text names them (12 of 14 of each); the admin (and task 048's confirmed AI proposals) set the rest and can change any of them. A matter type or practice area a stamp already holds is never given or changed a default.
 
 ## Line code lookups (task 010)
 
@@ -96,3 +96,7 @@ Downloaded from utbms.com on 2026-10-15. Terms of use: "You may download materia
 ## Dev ids
 
 Litigation code set (the settings default for task 025): see `projects/ebilling-r1/notes/018-utbms-code-sets.md`. Row ids are environment-specific; resolve sets by name or by the alternate key.
+
+## New stamps: the `legal-standard` reference pack (data-setup plan D5)
+
+H12b seeds the same sets and codes into every new stamp as part of the `legal-standard` pack (`scripts/seed-data/reference/packs/legal-standard/sprk_billingcodeset.json` and `sprk_billingcode.json`; intake key `referenceDataPack`, `none` seeds nothing). The two files are generated from the CSVs and the tuning file by `scripts/seed-data/reference/Build-BillingCodePack.ps1` (`-Check` verifies them), and a unit test fails when they disagree. Rule: create-if-missing, never update. A set is matched by name and a code by (set, code), so a stamp that already ran `Seed-EbillingBillingCodes.ps1` gets nothing new and a new code joins the set the stamp already has. Pack row ids are derived (UUID v5) from the set name and code, not copied from any environment. The 2013 revised lists and the IP expense codes (DEF-005) are not in the pack either.

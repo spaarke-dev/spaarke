@@ -1,0 +1,14 @@
+{
+  "relationship": "sprk_playbooknode_knowledge",
+  "source": "sprk_playbooknode",
+  "navigationProperty": "sprk_playbooknode_knowledge",
+  "target": "sprk_analysisknowledge",
+  "pairs": [
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "43b4825f-ede9-f011-8406-7ced8d1dc988" },
+    { "source": "00602067-9a16-f111-8343-7c1e520aa4df", "target": "737c3e5e-ede9-f011-8406-7c1e520aa4df" },
+    { "source": "a2ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "22b035b6-cd18-f111-8343-7ced8d1dc988" },
+    { "source": "a2ea4d99-572f-f111-88b5-7c1e520aa4df", "target": "611194ee-cc18-f111-8343-7c1e520aa4df" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "43b4825f-ede9-f011-8406-7ced8d1dc988" },
+    { "source": "ca334fb7-a415-f111-8343-7c1e520aa4df", "target": "737c3e5e-ede9-f011-8406-7c1e520aa4df" }
+  ]
+}

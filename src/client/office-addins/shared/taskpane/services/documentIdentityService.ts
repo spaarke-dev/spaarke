@@ -76,6 +76,12 @@ export type DocumentIdentityOutcome =
        * absent) and the consumers need no change.
        */
       relatedRecordKnown?: boolean;
+      /**
+       * Task 141: on the email route only, the names of the saved email's child documents (its saved attachments) the caller
+       * may read. An attachment is saved when its file name is one of these, case-insensitive. Absent when nothing can be
+       * said (the Word routes, an older server, or a failed read): the pane then shows no saved/unsaved marks.
+       */
+      savedAttachmentNames?: string[];
     }
   | {
       /**
@@ -141,6 +147,8 @@ interface BffDocumentIdentityResponse {
    */
   relatedRecordWithheld?: boolean | null;
   reason?: string | null;
+  /** Task 141: email route only — the saved attachments' names the caller may read. Omitted when not determined. */
+  savedAttachmentNames?: string[] | null;
 }
 
 /** @internal The one ProblemDetails extension this service reads off a 403 (not in the shared `ApiError` type). */
@@ -183,6 +191,14 @@ function toResolvedOutcome(response: BffDocumentIdentityResponse): DocumentIdent
         }
       : null,
     ...(recordWithheld ? { relatedRecordKnown: false } : {}),
+    // Task 141: only a list is kept; anything else is "not determined" (no marks), never "none saved".
+    ...(Array.isArray(response.savedAttachmentNames)
+      ? {
+          savedAttachmentNames: response.savedAttachmentNames.filter(
+            (name): name is string => typeof name === 'string' && name.trim() !== ''
+          ),
+        }
+      : {}),
   };
 }
 

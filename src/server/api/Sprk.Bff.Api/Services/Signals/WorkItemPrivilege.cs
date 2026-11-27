@@ -1,4 +1,7 @@
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Access;
 
@@ -172,6 +175,44 @@ public sealed class WorkItemPrivilege
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(items);
 
+        return await FlaggedThroughAsync(items, (ids, token) => PrivilegedOrUnreadableAsync(caller, ids, token), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ontology task 233 (D-232, #3275): the same rule as <see cref="FlaggedAsync{TKey}"/>, read with the BFF's APPLICATION identity, for
+    /// a Decision Record the system writes with no caller (the nightly <see cref="SignalReevaluationJob"/>'s ConditionCleared record). One
+    /// batched read of <c>sprk_communication</c> (id and classification only) in In lists of at most <see cref="ChunkSize"/> distinct ids;
+    /// none when no item names a communication. Fails closed: a communication the read does not return (it no longer exists) flags its
+    /// item, and a FAULT (an exception, or a result that says more rows follow) flags every item that needed the read. Never throws but for
+    /// cancellation.
+    /// </summary>
+    /// <remarks>Owner decision D-232: the flag is a stamp only (ADR-015: nothing branches on it). It reflects the application's view of
+    /// every evidence communication, not any one reader's: false tells a reader of the record that its communications are not classified
+    /// privileged. The communication ids themselves are already in the Signal's stored evidence refs. The job already reads <c>sprk_communication</c> app-only (its witness
+    /// reads); this adds no privilege. Every caller-facing read stays <see cref="FlaggedAsync{TKey}"/> (as the caller, no app-only
+    /// fallback).</remarks>
+    /// <typeparam name="TKey">The item key (a Signal id for the job).</typeparam>
+    /// <param name="application">The application-identity Dataverse service the job already reads with.</param>
+    /// <param name="items">Each item and its sources (<see cref="SourcesOf"/>).</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<IReadOnlySet<TKey>> FlaggedAppOnlyAsync<TKey>(
+        IGenericEntityService application, IReadOnlyDictionary<TKey, WorkItemPrivilegeSources> items, CancellationToken ct)
+        where TKey : notnull
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        ArgumentNullException.ThrowIfNull(items);
+
+        return await FlaggedThroughAsync(items, (ids, token) => PrivilegedOrMissingAppOnlyAsync(application, ids, token), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The one partition of <paramref name="items"/> both reads share: undetermined flags without a read, no communication is
+    /// never read, and the rest flag when any of their communications is in the set <paramref name="read"/> returns (null: all of them).</summary>
+    private static async Task<IReadOnlySet<TKey>> FlaggedThroughAsync<TKey>(
+        IReadOnlyDictionary<TKey, WorkItemPrivilegeSources> items,
+        Func<IEnumerable<Guid>, CancellationToken, Task<IReadOnlySet<Guid>?>> read,
+        CancellationToken ct)
+        where TKey : notnull
+    {
         var flagged = new HashSet<TKey>();
         var toRead = new List<KeyValuePair<TKey, WorkItemPrivilegeSources>>();
         foreach (var item in items)
@@ -191,8 +232,7 @@ public sealed class WorkItemPrivilege
             return flagged;
         }
 
-        var privileged = await PrivilegedOrUnreadableAsync(caller, toRead.SelectMany(i => i.Value.CommunicationIds).Distinct(), ct)
-            .ConfigureAwait(false);
+        var privileged = await read(toRead.SelectMany(i => i.Value.CommunicationIds).Distinct(), ct).ConfigureAwait(false);
         foreach (var (key, sources) in toRead)
         {
             if (privileged is null || sources.CommunicationIds.Any(privileged.Contains))
@@ -268,6 +308,65 @@ public sealed class WorkItemPrivilege
 
         return flags;
     }
+
+    /// <summary>
+    /// Task 233: the <paramref name="ids"/> that flag, read app-only: classified Privileged, Potentially Privileged or an unrecognised
+    /// value, or not returned (the row no longer exists). Null on a fault (every id flags).
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>?> PrivilegedOrMissingAppOnlyAsync(IGenericEntityService application, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var flags = new HashSet<Guid>();
+        foreach (var chunk in ids.Chunk(ChunkSize))
+        {
+            EntityCollection rows;
+            try
+            {
+                var query = new QueryExpression(CommunicationTable) { ColumnSet = new ColumnSet(CommunicationKey, ClassificationColumn) };
+                query.Criteria.AddCondition(CommunicationKey, ConditionOperator.In, chunk.Cast<object>().ToArray());
+                rows = await application.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "Work Item privilege: the application read of {Table} faulted ({ExceptionType}); every item that names one is flagged (D-232, fail closed).",
+                    CommunicationTable, ex.GetType().Name);
+                return null;
+            }
+
+            if (rows is null || rows.MoreRecords)
+            {
+                _logger.LogWarning(
+                    "Work Item privilege: the application read of {Table} was incomplete; every item that names one is flagged (D-232, fail closed).",
+                    CommunicationTable);
+                return null;
+            }
+
+            var returned = new HashSet<Guid>();
+            foreach (var row in rows.Entities)
+            {
+                if (!chunk.Contains(row.Id))
+                {
+                    continue;
+                }
+
+                returned.Add(row.Id);
+                if (IsFlagging(row))
+                {
+                    flags.Add(row.Id);
+                }
+            }
+
+            flags.UnionWith(chunk.Where(id => !returned.Contains(id))); // not returned: no longer exists, cannot be judged, flagged
+        }
+
+        return flags;
+    }
+
+    /// <summary>Task 233: the SDK form of <see cref="IsFlagging(JsonElement)"/>. Absent or null: not flagged; None: not flagged; any other
+    /// value (Privileged, Potentially Privileged, unrecognised): flagged.</summary>
+    private static bool IsFlagging(Entity row) =>
+        row.Attributes.TryGetValue(ClassificationColumn, out var value) && value is not null
+        && !(value is OptionSetValue option && option.Value == (int)CommunicationPrivilegeClassification.None);
 
     /// <summary>Privileged, Potentially Privileged, or a value that is not None: flagged. Absent or null: not flagged.</summary>
     private static bool IsFlagging(JsonElement row)

@@ -311,7 +311,8 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
 
       fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
 
-      expect(screen.getByTestId('saved-bar-open-filed-record')).toHaveTextContent('Open in Spaarke');
+      // Task 141: an icon-only button; its accessible name says which record it opens.
+      expect(screen.getByTestId('saved-bar-open-filed-record')).toHaveAccessibleName(/^Open .+ in Spaarke$/);
       expect(openBrowserWindow()).toHaveBeenCalledTimes(1);
       expect(openBrowserWindow()).toHaveBeenCalledWith(matterUrl);
     });

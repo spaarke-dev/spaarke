@@ -21,7 +21,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
 using Xunit;
-using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
+using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -89,8 +89,8 @@ public class EventStatusWritePathTests
     [Fact]
     public void CreatePayload_WritesLiveOpen_Active()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest { Name = "Filing", OwningTeamId = Guid.NewGuid() });
+        var payload = EventEndpoints.BuildCreatePayload(
+            new ApiCreateEventRequest("Filing"), regarding: null, assignedToContactId: null);
 
         payload["statuscode"].Should().Be(659490001, "live Open — the former 3 does not exist in the option set");
         payload["statecode"].Should().Be(0);

@@ -477,7 +477,9 @@ public class AssignTaskNotifier
             return (EmailNotSentWarning, null);
 
         var content = BuildEmail(Template.Value, record, notice.Description, notice.Due, GrantAccessNotifier.ExternalGranterName(http.User), DateTime.UtcNow.Year);
-        var request = Request(content, address, notice.Core, record, notice.TaskId is { } task ? CorrelationIdFor(task) : null);
+        // ISS-010 part E (#3184): the in-request sends (as the assigner, or external from the system mailbox) leave their post-send work to
+        // the CommunicationPostSend job. The fallback job's own send (SendFromSystemMailboxAsync) already runs off the request and is not deferred.
+        var request = Request(content, address, notice.Core, record, notice.TaskId is { } task ? CorrelationIdFor(task) : null) with { DeferPostSend = true };
 
         // D-199 amendment: an EXTERNAL assignee is always emailed from the system mailbox (Communication:DefaultMailbox), never as the
         // assigner, so an outside party never sees a lawyer's address in From. Same send as the job (SendAsSystemAsync, app-only,
