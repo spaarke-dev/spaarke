@@ -94,6 +94,8 @@ public sealed partial class DecisionRecordWriterTests
         steps.RootElement.GetProperty("reviewId").GetString().Should().Be(GateDecisionKey.IdOf(CommunicationId, authorize: true).ToString("D"),
             "task 149: the record's key is the decision's (communication + outcome), never the per-run evaluation id");
         steps.RootElement.GetProperty("resolvedSignalIds").GetArrayLength().Should().Be(0);
+        // Task 226 (fix round 1): the Decision Records tab finds gate records by this exact text (a LIKE on sprk_steps), so it is pinned here.
+        row.GetAttributeValue<string>("sprk_steps").Should().Contain(SignalReadService.NoResolvedSignalsText);
         var step = steps.RootElement.GetProperty("steps").EnumerateArray().Single();
         step.GetProperty("code").GetString().Should().Be("communication-ri-action");
         step.GetProperty("taken").GetBoolean().Should().BeTrue();
@@ -138,6 +140,7 @@ public sealed partial class DecisionRecordWriterTests
         row.Contains("sprk_policyversion").Should().BeFalse();
 
         using var steps = JsonDocument.Parse(row.GetAttributeValue<string>("sprk_steps"));
+        row.GetAttributeValue<string>("sprk_steps").Should().Contain(SignalReadService.NoResolvedSignalsText, "task 226: the tab's gate read");
         var step = steps.RootElement.GetProperty("steps").EnumerateArray().Single();
         step.GetProperty("code").GetString().Should().Be("communication-ri-action");
         step.GetProperty("taken").GetBoolean().Should().BeFalse();
