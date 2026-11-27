@@ -169,3 +169,18 @@ Owner's words verbatim, then what each one means here.
   - The text is never logged.
   - It is delimited and labelled as user-supplied: it may narrow emphasis, but cannot override the action's instructions or output format.
   - Absent or blank: the prompt is byte-identical to today's.
+
+## D-037-results — a Copilot playbook run saves its results to the caller's analysis record (owner, 2026-11-27)
+
+- **Owner's words:** "for 037 yes option 1a" — answering: should Copilot runs save to an analysis record like the Console (option 1a), or should the widget show status only?
+- **Decision:** option 1 with sub-option (a) from `notes/037-decisions.md` §2.
+  - The Copilot start creates the caller's `sprk_analysis` (the Analysis Workspace's create core and its authorization: Create on `sprk_analysis` + `analysis.attach`). The detached runner then drains the existing wrapper `IAnalysisOrchestrationService.ExecutePlaybookAsync` with that id, not the engine entry, so the output lands in `sprk_workingdocument` as it does for the Workspace.
+  - The run record links to the analysis through its existing regarding columns (no new column).
+  - The results tool reads the analysis as the caller, so the caller gets the uniform not-found when they can't read it.
+- **Accepted costs (stated to the owner 2026-11-26):**
+  - it reopens 030's start path;
+  - one more refusal at start, when the caller can't create analysis records;
+  - Copilot runs also do the wrapper's canvas-to-node sync, as the Workspace does.
+- **ADR-039:** the engine is untouched. `PlaybookParameterPolicy` is the HTTP parameter policy (unified-access-control-r2 task 164), not the frozen engine, so editing it is Path C (comply). A uac-r2 review of the policy change is needed.
+- **Security condition set by the main session:** the analysis id that the wrapper writes to app-only must be bound by the server at start. A caller-supplied analysis id must never choose which analysis gets overwritten: it is refused, or it needs the caller's Write on that record.
+- **Related:** #3285 (pre-existing: a wrapper run with no analysis id writes to a random id).

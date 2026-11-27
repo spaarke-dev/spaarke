@@ -1,6 +1,6 @@
 # Task 037 — playbook run results widget: decisions
 
-Status: **STOPPED at step 1 (escalation trigger 1 and 2 fired).** No code written. The owner picks an option in §2.
+Status: **Owner chose option 1a on 2026-11-27** (notes/decisions.md D-037-results). Steps 2-6 resume on that basis.
 
 ## 1. Spike — where a finished run's outputs land, and how the caller reads them by run id (2026-11-26)
 
