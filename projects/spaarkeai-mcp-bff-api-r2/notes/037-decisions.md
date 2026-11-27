@@ -62,7 +62,51 @@ the record the Console already uses for analysis output (no new store, table or 
 gives `consoleLink` a real target. It reopens 030's start path, so it needs the owner's go and a re-review of the runner (ADR-052
 amendment conditions still hold: same detached helper, same caps, same pre-warm).
 
-## 3. Not done
+## 3. Implementation stop (2026-11-27): draining the wrapper loses the run
 
-Steps 2-6 (results read, app-only tool, widget, `_meta.ui`, CI wiring) wait for the owner's choice. No `.claude/` change and no
-CAPABILITY-INDEX row are proposed yet (nothing new was added).
+Base: `work/spaarkeai-mcp-bff-api-r2` b606cd8b41 merged with `origin/master` 6f4d7bc7e4. No code was written for steps 2-6.
+
+D-037-results says the detached runner should drain `IAnalysisOrchestrationService.ExecutePlaybookAsync` (the wrapper) with the
+caller's analysis id instead of the engine entry. It also says the run keeps 030's conditions, its `PlaybookRunRecordStore` record, and
+a link to the analysis through `sprk_playbookrun`'s regarding columns. As the code stands, the wrapper cannot do all of that unless
+the wrapper or the engine changes. Paths are under `src/server/api/Sprk.Bff.Api/Services/Ai/`.
+
+| # | Gap | Evidence |
+|---|---|---|
+| G1 | **Legacy (no-node) playbooks get no run.** The wrapper runs them itself and never calls the engine. So there is no engine run id and no `sprk_playbookrun` record: the start has no run id to return, and `spaarke_get_playbook_run` answers not-found once the run leaves the run table (after 1 hour, or on another instance). These are kind A's main seed playbooks: PB-009, PB-004, PB-007 and PB-003 (§1.2) | `AnalysisOrchestrationService.cs:225-259`: only the node branch calls the engine. `:402` onward: the legacy branch runs its tools in sequence. Only the engine writes the record: `PlaybookOrchestrationService.cs:728-745`, `:905` |
+| G2 | **Node playbooks: the runner cannot learn the engine's run id.** The wrapper yields `AnalysisStreamChunk`, and its bridge drops `RunId`. RunStarted becomes a text chunk, and the metadata and done chunks carry the analysis id | `AnalysisOrchestrationService.cs:195`, `:860-890` |
+| G3 | **Node playbooks: the run loses its parameters.** The wrapper builds its own `PlaybookRunRequest` with no `Parameters` and no `RunUserId`. So 007's authorized parameters never reach the run, and the record's regarding (`ResolveRegarding(context.Parameters)`) stays empty: sub-option (a)'s run-to-analysis link cannot be written | `AnalysisOrchestrationService.cs:261-267`; `PlaybookOrchestrationService.cs:835`, `:845` |
+| G4 | **No progress counts.** The runner counts `PlaybookStreamEvent` types, and the wrapper's chunks are text | `PlaybookRuns/DetachedPlaybookRunner.cs:576-606` |
+
+Draining the engine, as 030 does today, keeps the run id, the record, the parameters and the counts. But the engine never writes
+`sprk_workingdocument`:
+- The node branch's persistence lives only in the wrapper: Deliver Output, then `AnalysisResultPersistence.UpdateWorkingDocumentAsync`
+  and `FinalizeAnalysisAsync` (`AnalysisOrchestrationService.cs:319-370`).
+- The engine's legacy mode calls the wrapper with no analysis id (`PlaybookOrchestrationService.cs:908`, #3285).
+
+Three things are **not** the problem:
+- **The HttpContext stop condition does not fire.** The wrapper reads only `httpContext.RequestServices` (`AnalysisOrchestrationService.cs:259`)
+  and the OBO services the detached context already serves. It builds no `DefaultHttpContext`.
+- **The analysis create is already shared.** `Api/Ai/AnalysisEndpoints.StartAnalysisAsCallerAsync` (task 031) is the create core:
+  `AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync`, then `CreateAnalysisRecordAsync`.
+- **Every Copilot run has a document to anchor the analysis.** `RunPlaybookTool` requires `documentIds` with `minItems: 1`, and the
+  analysis needs a document as its anchor.
+
+### Options (the owner or the main session decides)
+
+| # | Option | Edits | Keeps | Costs |
+|---|---|---|---|---|
+| **B (recommended)** | **Engine-first, with the analysis id on the run request.** Add `AnalysisId` to `PlaybookRunRequest`. The engine's legacy mode forwards it to the wrapper, which fixes #3285 at its root. A node run with an `AnalysisId` saves its Deliver Output at the end of the run through `AnalysisResultPersistence`, as the wrapper's node branch does: the wrapper's code moves to one shared method rather than being copied. The runner keeps draining the engine, with `AnalysisId` set from the analysis the server created | `PlaybookOrchestrationService` (one field forwarded, one save call); `PlaybookRunRequest`; the wrapper's node save moved to a shared method | Every 030 condition, the run id, the record, 007's parameters, the counts and the regarding link | An engine edit, which needs an ADR-039 exception (precedent: #3268's Path C). The REST/Workspace `/execute` route gets the field too, unused unless it sets it |
+| A | **Wrapper-first, with pass-through.** Add `Parameters`, `RunUserId` and a run-id callback to `PlaybookExecuteRequest`. The wrapper forwards them and reports the engine's run id | `AnalysisOrchestrationService`; `PlaybookExecuteRequest` | For node playbooks: the run id, the record, the parameters and the regarding link | Legacy playbooks still get no run (G1). Either the runner mints its own id and `spaarke_get_playbook_run` needs a second durable source (the analysis row), or Copilot refuses legacy playbooks. The wrapper is the engine's legacy executor, so this is arguably an engine edit too |
+| C | **Engine-first, node playbooks only, no engine edit.** The runner keeps draining the engine and binds the analysis id on the server. On a `NodeCompleted` event with `IsDeliverOutput`, it hands the text to `AnalysisResultPersistence` | `DetachedPlaybookRunner` | No engine edit | The runner reads node output, though 030 condition 2 says it keeps counts only. It copies the wrapper's node save (F2 duplication). Kind A's legacy playbooks (PB-009, PB-004, PB-007) show "results are in Spaarke" with no content until they move to nodes |
+
+**Security condition, under every option:** the analysis id comes only from the server's own create during the start, never from
+tool arguments or HTTP parameters.
+- Under B it is a typed field on the run request, and no HTTP route binds that field from a request body. So `PlaybookParameterPolicy`
+  needs no change and no uac-r2 review.
+- Under A or C, if the id travels in parameters, it must be a server-owned key refused from HTTP callers (D-037-results).
+
+## 4. Not done
+
+Steps 2-6 (the results read, the app-only tool, the widget, `_meta.ui` and the CI wiring) wait on §3. No `.claude/` change and no
+CAPABILITY-INDEX row are proposed yet, because nothing new was added.
