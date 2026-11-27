@@ -29,6 +29,7 @@
     <step order="1">Number values: accept an integral value (TryGetInt64, else TryGetDouble with an integral check, e.g. 1.0, 1e0).</step>
     <step order="2">String values: trim and parse an integer (invariant culture).</step>
     <step order="3">Any other value kind, or an unparseable string or non-integral number, on a statecode/statuscode key: treat as closing (fail closed). Null stays not-closing.</step>
+    <step order="5">Guard (uac-r2 note on #3292, separate commit): a test that the stored-evidence redaction keeps each line's kind and ref (WorkItemPrivilege.SourcesOf reads them) while removing text and source.</step>
     <step order="4">Unit tests: must-fire for "1", " 1 ", 1.0, 1e0, "2" and "659490002" statuscode, true/garbage string on statecode; must-not-fire for 0, "0", null, statuscode 1, other column names.</step>
   </steps>
   <acceptance-criteria>
