@@ -362,6 +362,10 @@ globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' },
             self.assertEqual([s for s in secrets if s in text], [],
                              "expected hashes must be computed by the code, never stored in the plugin")
         self.assertEqual(wp.JS_EDITS.count(wp.EDITS_LINE), 1, "exactly one data line for Copilot to fill")
+        with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(wp.build(tmp)) as z:
+            version = json.loads(z.read("manifest.json"))["version"]
+        self.assertFalse(version.startswith("0"),
+                         "Microsoft's validation rules refuse an app version starting with 0 (v0.5/v0.6 upload)")
         for kb in wp.SIZES_KB:
             self.assertLess(abs(len(wp.js_size(kb)) - kb * 1024), kb * 1024 * 0.1, f"{kb}k probe size")
 

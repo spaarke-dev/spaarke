@@ -39,7 +39,10 @@ import gates  # noqa: E402
 from build_accelerator import make_icons, write, zip_dir  # noqa: E402
 
 PACKAGE = "spaarke-word-probe"
-VERSION = "0.6.0"   # 0.5 was refused at upload (two SKILL.md over 20,000 chars)
+VERSION = "0.7.0"   # the probe's label (zip name). v0.5 and v0.6 were refused by the admin-center upload
+# The manifest version must not start with "0": Microsoft's validation rules refuse it (atk validate, 2026-11-27), and
+# the admin-center upload refused v0.5/v0.6 (0.x) while admin-deployed spaarke-decisions (1.0.0) installed.
+MANIFEST_VERSION = "1." + VERSION.split(".")[1] + ".0"
 # Word's code runner refuses code that uses these (WP-5 run 1, 2026-11-26: "rejected ... because it uses
 # toString"). The others are guesses at the same denylist; the probe avoids them all.
 JS_FORBIDDEN = ("toString", "padStart", "eval", "Function", "constructor", "prototype", "__proto__",
@@ -413,7 +416,7 @@ def build(out):
     manifest = {
         "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
         "manifestVersion": "1.30",
-        "version": VERSION,
+        "version": MANIFEST_VERSION,
         "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"https://spaarke.com/accelerators/{PACKAGE}")),
         "developer": {"name": "Spaarke", "websiteUrl": "https://spaarke.com", "privacyUrl": "https://spaarke.com",
                       "termsOfUseUrl": "https://spaarke.com"},

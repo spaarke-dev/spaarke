@@ -14,9 +14,10 @@ SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "all
 NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 MAX_COMPANIONS, MAX_FILE, MAX_TOTAL = 20, 5 * 1024 * 1024, 10 * 1024 * 1024
 MAX_PLUGIN_SKILLS = 20
-# Microsoft: SKILL.md under 20,000 characters (required for declarative-agent skills, recommended for Copilot Chat).
-# The admin-center plugin upload refused probe v0.5, whose only out-of-range files were two SKILL.md files of 22,006
-# and 62,960 characters ("We couldn't validate this manifest file", 2026-11-27).
+# Microsoft: SKILL.md under 20,000 characters (required for declarative-agent skills, recommended for Copilot Chat;
+# not listed in the Cowork plugin validation rules). Kept as a precaution: whether the admin-center upload enforces it
+# is unconfirmed (it refused probe v0.6 too, whose SKILL.md files were all under 20,000; the 0.x version is the
+# likelier cause, 2026-11-27).
 MAX_SKILL_MD_CHARS = 20_000
 # Legal for Cowork / Word legal plugin skill names we must not collide with (design §5.7-1)
 RESERVED_NAMES = {"review-contract", "edit-contract", "draft-new-contract", "summarize-redlines", "create-playbook",
