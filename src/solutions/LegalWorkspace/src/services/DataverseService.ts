@@ -15,7 +15,7 @@
  *   - AI features go to BFF (never called directly from client)
  */
 
-import { createChildRecordViaBff } from '@spaarke/ui-components';
+import { createChildRecordViaBff, updateChildRecordViaBff } from '@spaarke/ui-components';
 import { authenticatedFetch } from './authInit';
 import { getBffBaseUrl } from '../config/runtimeConfig';
 import { TodoDataverseService } from '@spaarke/smart-todo-components';
@@ -149,9 +149,15 @@ export class DataverseService extends TodoDataverseService {
      * Injectable for tests.
      */
     createTodoRecord: (payload: WebApiEntity) => Promise<string> = payload =>
-      createChildRecordViaBff(authenticatedFetch, getBffBaseUrl(), 'sprk_todo', payload)
+      createChildRecordViaBff(authenticatedFetch, getBffBaseUrl(), 'sprk_todo', payload),
+    /**
+     * Ontology task 234 (#3279, D-233): how a to-do's STATUS is changed (complete, dismiss, restore) — through the BFF
+     * (`PATCH /api/v1/child-records/sprk_todo/{id}`), which refuses closing an open inquiry's outcome To Do. Injectable for tests.
+     */
+    updateTodoRecord: (todoId: string, payload: WebApiEntity) => Promise<void> = (todoId, payload) =>
+      updateChildRecordViaBff(authenticatedFetch, getBffBaseUrl(), 'sprk_todo', todoId, payload)
   ) {
-    super(_webApi, createTodoRecord);
+    super(_webApi, createTodoRecord, updateTodoRecord);
   }
 
   // -------------------------------------------------------------------------

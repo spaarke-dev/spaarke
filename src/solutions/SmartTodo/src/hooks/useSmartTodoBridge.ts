@@ -6,7 +6,9 @@
  * this hook supplies the page-specific pieces, the way LegalWorkspace's `useSmartToDoBridge` does for the workspace:
  *   - the list scope: to-dos assigned to the current user's contact (R4 task 031 / OD-2 "Assigned to Me"), narrowed
  *     to one parent record when the page was launched with `action=openTodos` (R4 FR-34 / DEF-11 Part 2);
- *   - to-do creates through the BFF (`createTodoThroughBff`, UAC-r2 task 147 r1);
+ *   - to-do creates through the BFF (`createTodoThroughBff`, UAC-r2 task 147 r1), and status changes (complete, dismiss,
+ *     restore) through the BFF (`updateTodoThroughBff`, ontology task 234 — the BFF refuses closing an open inquiry's
+ *     outcome To Do);
  *   - ONE preferences instance for the whole page (the Header's orientation and the board's thresholds and column
  *     order share it — two instances overwrote each other's fields).
  */
@@ -23,7 +25,7 @@ import {
   type ISmartToDoProps,
   type TodoListScope,
 } from '@spaarke/smart-todo-components';
-import { createTodoThroughBff } from '../services/childRecordWrites';
+import { createTodoThroughBff, updateTodoThroughBff } from '../services/childRecordWrites';
 import { useLaunchContext, LAUNCH_ACTION_OPEN_TODOS } from './useLaunchContext';
 import type { ITodo } from '../types/entities';
 
@@ -70,7 +72,7 @@ export function useSmartTodoBridge(options: IUseSmartTodoBridgeOptions): ISmartT
   const { webApi, userId } = options;
 
   const service = React.useMemo(
-    () => new TodoDataverseService(webApi as ITodoWebApi, createTodoThroughBff),
+    () => new TodoDataverseService(webApi as ITodoWebApi, createTodoThroughBff, updateTodoThroughBff),
     [webApi]
   );
 
