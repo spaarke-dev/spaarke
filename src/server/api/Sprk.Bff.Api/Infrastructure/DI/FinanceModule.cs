@@ -434,7 +434,8 @@ public static class FinanceModule
 
         // NOTE (verified 2026-08-20): no code anywhere submits a SpendSnapshotGeneration job. The
         // snapshots → signals → rollup analytics chain has no automatic trigger; FinanceRollupService
-        // runs ONLY via the manual POST /api/finance/{matters|projects}/{id}/recalculate endpoints.
+        // runs via the manual POST /api/finance/{matters|projects}/{id}/recalculate endpoints and (ontology
+        // task 232, D-230) from SignalReevaluationJob for the one record it raises a finance Threshold Signal on.
         // Whether the missing enqueue is a wiring gap or intended is an owner decision — do not wire
         // it without validating the side effects (same class as the TodoGenerationService trap in
         // docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md). (This note used to sit on the
@@ -472,6 +473,7 @@ public static class FinanceModule
         // Scoped: recalculates 9 financial fields on parent Matter/Project records
         // Called by: FinanceRollupEndpoints (subgrid parent rollup web resource)
         //            SpendSnapshotGenerationJobHandler (after background invoice processing)
+        //            SignalReevaluationJob (ontology task 232: the matter/project a finance Threshold Signal was raised on)
         // Fields: TotalSpendToDate, InvoiceCount, MonthlySpendCurrent, TotalBudget,
         //         RemainingBudget, BudgetUtilizationPercent, MonthOverMonthVelocity,
         //         AverageInvoiceAmount, MonthlySpendTimeline
