@@ -11,7 +11,7 @@
 2. **Scope: owner and the test user `demo@` only, never All users, never an org-wide group (R7).** If the route you use cannot be limited to those two accounts, **do not upload**; tell the session where it would have landed.
 3. **Dev tenant only.**
 4. The G8 artifacts are removed (due 2026-11-30; this precedes the G1 run, task 022).
-5. The dev BFF serves the spike tools. **Not true since 2026-11-27 ~20:19Z:** uac-r2 deployed master `d9595dd98e`, which has none of them. The re-deploy candidate is spike `af8a5547ef` (owner's exact-SHA go in uac-r2). Until it is live, the "List every tool" check will not show the spike tools; that is expected, not a load failure. (Before: `5cd40984b0` from about 13:14Z, `d307d67e36` from 2026-11-26.) Other dev users can see the spike tools; tell them before the runs.
+5. The dev BFF serves the spike tools: `af8a5547ef` since 2026-11-27 ~20:57Z (rollback `d9595dd98e`). They were off dev from ~20:19Z to ~20:57Z, when master `d9595dd98e` was deployed; a "List every tool" check run in that window would not show them, so repeat it. (Before: `5cd40984b0` from about 13:14Z, `d307d67e36` from 2026-11-26.) Every dev deploy from master removes them until a new spike tip goes out. Other dev users can see the spike tools; tell them before the runs.
 6. **Never change the OAuth registration** (A1), and never add anything to an action URL. Nothing in these packages needs either.
 
 ## Rules that apply to every package
