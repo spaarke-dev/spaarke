@@ -184,3 +184,17 @@ Owner's words verbatim, then what each one means here.
 - **ADR-039:** the engine is untouched. `PlaybookParameterPolicy` is the HTTP parameter policy (unified-access-control-r2 task 164), not the frozen engine, so editing it is Path C (comply). A uac-r2 review of the policy change is needed.
 - **Security condition set by the main session:** the analysis id that the wrapper writes to app-only must be bound by the server at start. A caller-supplied analysis id must never choose which analysis gets overwritten: it is refused, or it needs the caller's Write on that record.
 - **Related:** #3285 (pre-existing: a wrapper run with no analysis id writes to a random id).
+
+## D-037-engine — option B: the engine saves a Copilot run's results to its analysis (owner, 2026-11-27)
+
+- **Owner's words:** "Yes, option B". This answers: "May 037 make the small engine change (option B) so Copilot runs save their results?"
+- **Decision:** option B from `notes/037-decisions.md` §3. It refines D-037-results (the runner keeps draining the engine and does not drain the wrapper):
+  - `PlaybookRunRequest` gets a typed, server-set `AnalysisId`. Only the Copilot start sets it, from the `sprk_analysis` it created as the caller (`AnalysisEndpoints.StartAnalysisAsCallerAsync`).
+  - The engine's legacy mode forwards the id to the wrapper. This fixes #3285 at the root for callers that set it.
+  - A node run that has an `AnalysisId` saves its Deliver Output through `AnalysisResultPersistence` at the end of the run. The save code moves out of the wrapper's node branch into one shared method; it is not copied.
+  - The run links to the analysis through the run record's existing regarding columns (no new column).
+- **ADR-039:** the owner approves this engine edit, as with D-3268-user-focus. It is recorded as Path C (comply):
+  - It adds no node type, executor, graph, control flow or routing.
+  - It forwards one field and calls the existing persistence that the Workspace path already uses.
+  - Output stays the capability's own Deliver Output.
+- **Security:** no HTTP route binds `PlaybookRunRequest` from a body (it is built server-side in `PlaybookRunEndpoints.cs:186` and `AnalysisEndpoints.cs:714`). So the id cannot be chosen by a caller, and `PlaybookParameterPolicy` does not change. A test pins this.
