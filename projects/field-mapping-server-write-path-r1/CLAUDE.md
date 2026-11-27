@@ -49,10 +49,13 @@ Evidence (file:line): `notes/design-review-2026-10-19.md`. Line numbers drift; r
       external flag, contact identity) keeps the caller's checks: a failure drops it with a warning;
     - a value mapped from a source that is not the caller's filing parent, or an adapter default, keeps the
       caller's checks (dropped with a warning on failure);
-  - a value from a field-secured SOURCE column is copied when the source is the row's filing parent, on create and
-    push (owner 2026-11-26: "security does not matter"; task 065). The value is still read as the caller, so only what
-    the caller can read is copied, and once copied it is readable by whoever can read the target column. From any
-    other source it is not copied (dropped with a warning), and an unknown security state maps nothing.
+  - a value from a field-secured SOURCE column is copied when the source is the row's filing parent (owner
+    2026-11-26: "security does not matter"; task 065): on create when the source is the caller's filing record (table
+    and id); on push only for rows filed under the source by a listed Filing edge (family mode, or ordinary mode when
+    the parent lookup is that edge's column). The value is still read as the caller, so only what the caller can read
+    is copied, and once copied it is readable by whoever can read the target column. From any other source, and on
+    push through any other lookup, it is not copied (dropped with a warning), and an unknown security state maps
+    nothing. Repair never copies it.
 
   (FR-08)
 - MUST resolve the owner record-first via `ResolveOwnerAsync` for roots and children. Never user- or app-owned except
