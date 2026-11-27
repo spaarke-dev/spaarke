@@ -28,7 +28,10 @@ namespace Spaarke.ArchTests;
 /// judged as part of the member that contains it, so a variable it captures is traced; but a mask assignment inside a local function,
 /// lambda or anonymous method does not count for a call outside it):
 /// every occurrence of that name there must be (1) a declaration or a statement-level assignment of <c>null</c>, <c>default</c>
-/// or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else);
+/// or exactly <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c> (optionally <c>.ConfigureAwait(false)</c>, nothing else) — or,
+/// task 067, the same shape of <c>MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(decision, …)</c>, the mask's one named
+/// exception for the row's filing parent, admitted only when <c>decision</c> is a local initialised from a filing-parent decision
+/// (<see cref="FilingParentDecisions"/>) and never assigned again;
 /// (2) a null check; or (3) an engine call's source argument — and at least one assignment must be a mask call. Anything else (a
 /// helper argument, an alias, a cast, a parameter, a lambda, pattern or query binding, a deconstruction, a member access, a
 /// <c>ref</c>, a field, property or base-class member declared outside the body) fails, as does an expression source and the
@@ -75,15 +78,20 @@ public class MappingSourceCallerMaskGuardTests
             ["src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs|RecordCreationService.RepairMappingAsync"] = (1,
                 "Repair runs as the system principal with no caller to mask against (owner decision 2026-10-21, option 1; UAC-r2 " +
                 "concurs). Secure sources are never mapped into a row that isn't isolated (Repair source gate, fail closed). " +
-                "Field-secured source columns are neither read for mapping nor handed to the engine: Repair reads the source " +
-                "table's column metadata app-only (IGenericEntityService.GetColumnMetadataAsync, task 052a) and copies only the " +
-                "columns it states are not secured; metadata that cannot be read, or does not say, maps nothing " +
+                "The source is the row's own filing parent (FR-03, checked against the parents the owner was decided over), so a " +
+                "field-secured source column is copied too (owner 2026-11-27, task 067), except a field-secured access-model column " +
+                "(AccessModelSourceColumns), which is neither read for mapping nor handed to the engine: Repair reads the source " +
+                "table's column metadata app-only (IGenericEntityService.GetColumnMetadataAsync, task 052a); metadata that cannot be " +
+                "read, or does not say, maps nothing " +
                 "(record_repair.mapping_source_metadata_unavailable). The document access and D7 link columns are refused through " +
                 "RefuseAppOnlyWrite. Repair has no production caller until task 052's scheduled pass (RecordRepairReachabilityTests)."),
             ["src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs|FieldMappingEndpoints.ApplyMappingRule"] = (1,
                 "The field-mapping push (field-mapping-server-write-path-r1 task 040) reads its source AS THE CALLER through the " +
                 "impersonated query (RetrieveSourceRecordValuesAsCallerAsync), so Dataverse has already applied the caller's " +
-                "field-level security to every value that reaches the engine; there is no app-only read to mask. The entry is " +
+                "field-level security to every value that reaches the engine. Task 067 (owner 2026-11-27): for rows filed under " +
+                "the source by a listed Filing edge only, the same one row is then read app-only for exactly its mapped columns " +
+                "except the access-model columns (RetrieveFilingParentValuesAppOnlyAsync), after the caller's Read probe and the " +
+                "caller's own read returned it; every other push has no app-only read to mask. The entry is " +
                 "ApplyCopyOverwrite, which is internal to the BFF and is called here only. The call may be made from this one member."),
         };
 
@@ -834,6 +842,60 @@ public class MappingSourceCallerMaskGuardTests
             f(rules, target, appRead, p, w, l);
             """
         },
+        {
+            "(task 067) the filing-parent lift given a literal true",
+            """
+            var source = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(true, c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(task 067) the filing-parent lift given a local that is not a filing-parent decision",
+            """
+            var lifted = rules.Count > 0;
+            var source = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(lifted, c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(task 067) the filing-parent lift given a decision that is assigned again",
+            """
+            var lifted = await SourceIsCallersFilingRecordAsync(table, resolution, row, recordType, ct).ConfigureAwait(false);
+            lifted = true;
+            var source = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(lifted, c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(task 067) the filing-parent lift given a decision widened with ||",
+            """
+            var lifted = other || SourceIsTheCommunicationsFilingParent(request, id);
+            var source = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(lifted, c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+            """
+        },
+        {
+            "(task 067) the filing-parent lift given a parameter",
+            """
+            class Svc
+            {
+                async Task Map(bool lifted)
+                {
+                    var source = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(lifted, c, t, i, appRead, cols, _logger, ct);
+                    CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+                }
+            }
+            """
+        },
+        {
+            "(task 067) the filing-parent lift given a decision passed by ref before the lift",
+            """
+            var lifted = SourceIsTheCommunicationsFilingParent(request, id);
+            Widen(ref lifted);
+            var source = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(lifted, c, t, i, appRead, cols, _logger, ct);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, source, p, w, l);
+            """
+        },
     };
 
     [Theory(DisplayName = "#2188 guard control: each bypass shape fires")]
@@ -956,6 +1018,27 @@ public class MappingSourceCallerMaskGuardTests
             """
             var masked = await MappingSourceCallerMask.ApplyAsync(caller, table, id, appRead, columns, _logger, ct);
             CreateTimeFieldMapping.Apply(rules, target, protectedAttributes: p, source: masked, warnings: w, logger: l);
+            """
+        },
+        {
+            "(task 067) the create's shape: the lift given the filing-record decision (table and id)",
+            """
+            var sourceIsFilingRecord = fromFilingParent
+                && await SourceIsCallersFilingRecordAsync(table, resolution, row, (typeId, token) => Read(typeId, token), ct)
+                    .ConfigureAwait(false);
+            Entity? masked = null;
+            masked = await MappingSourceCallerMask
+                .ApplyOrLiftForFilingParentAsync(sourceIsFilingRecord, user, table, id, appRead, cols, _logger, ct)
+                .ConfigureAwait(false);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, target, masked, p, w, l);
+            """
+        },
+        {
+            "(task 067) the send's shape: the lift given the communication's filing-parent decision",
+            """
+            var sourceIsFilingParent = SourceIsTheCommunicationsFilingParent(request, analysisId);
+            var masked = await MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(sourceIsFilingParent, user, t, i, appRead, cols, logger, ct);
+            CreateTimeFieldMapping.ApplyFillOnly(rules, scratch, masked, p, w, l);
             """
         },
     };
@@ -1238,7 +1321,7 @@ public class MappingSourceCallerMaskGuardTests
                         continue;
                     }
 
-                    if (IsMaskCall(assignment.Right))
+                    if (IsMaskCall(assignment.Right, scope))
                     {
                         maskAssigned |= MaskReaches(token.Parent!, call);
                         continue;
@@ -1256,7 +1339,7 @@ public class MappingSourceCallerMaskGuardTests
                         continue;
                     }
 
-                    if (value is not null && IsMaskCall(value))
+                    if (value is not null && IsMaskCall(value, scope))
                     {
                         maskAssigned |= MaskReaches(token.Parent!, call);
                         continue;
@@ -1309,11 +1392,20 @@ public class MappingSourceCallerMaskGuardTests
     private static bool IsNullOrDefault(ExpressionSyntax e)
         => e.IsKind(SyntaxKind.NullLiteralExpression) || e.IsKind(SyntaxKind.DefaultLiteralExpression) || e is DefaultExpressionSyntax;
 
+    /// <summary>The filing-parent decisions the lift (<see cref="LiftMethod"/>) may be given (task 067): the create's (table and id)
+    /// and the email send's (the communication's primary association).</summary>
+    internal static readonly string[] FilingParentDecisions = ["SourceIsCallersFilingRecordAsync", "SourceIsTheCommunicationsFilingParent"];
+
+    /// <summary>Task 067: the mask's one named exception, which keeps the filing parent's mapped columns unmasked.</summary>
+    private const string LiftMethod = "ApplyOrLiftForFilingParentAsync";
+
     /// <summary>
     /// True only for <c>(await )?MappingSourceCallerMask.ApplyAsync(…)</c>, optionally followed by <c>.ConfigureAwait(false)</c>, and
-    /// nothing else (no <c>?? appRead</c>, no switch, no further member access). Its arguments are not checked (known limit).
+    /// nothing else (no <c>?? appRead</c>, no switch, no further member access); or (task 067) the same shape of
+    /// <c>MappingSourceCallerMask.ApplyOrLiftForFilingParentAsync(decision, …)</c> whose first argument is a filing-parent decision
+    /// (<see cref="IsFilingParentDecision"/>). Its other arguments are not checked (known limit).
     /// </summary>
-    private static bool IsMaskCall(ExpressionSyntax e)
+    private static bool IsMaskCall(ExpressionSyntax e, SyntaxNode scope)
     {
         if (e is AwaitExpressionSyntax awaited)
         {
@@ -1328,9 +1420,63 @@ public class MappingSourceCallerMaskGuardTests
             e = configure.Expression;
         }
 
-        return e is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax apply }
-               && apply.Name.Identifier.ValueText == "ApplyAsync"
-               && LastName(apply.Expression) == "MappingSourceCallerMask";
+        if (e is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax apply } invocation
+            || LastName(apply.Expression) != "MappingSourceCallerMask")
+        {
+            return false;
+        }
+
+        return apply.Name.Identifier.ValueText switch
+        {
+            "ApplyAsync" => true,
+            LiftMethod => IsFilingParentDecision(invocation, scope),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// Task 067: the lift's first argument is a plain local (positional, not named) declared ONCE in the member body and never
+    /// assigned again nor passed by <c>ref</c>/<c>out</c>, whose initializer is exactly one of the
+    /// <see cref="FilingParentDecisions"/> (<c>(await )?Decision(…)(.ConfigureAwait(false))?</c>), or <c>x &amp;&amp; </c> that
+    /// call (true only when the decision is). A literal, a parameter, a field, an <c>||</c> or any other value is not a decision.
+    /// Known limit: a local method spelled like a decision is not told apart (syntax only).
+    /// </summary>
+    private static bool IsFilingParentDecision(InvocationExpressionSyntax lift, SyntaxNode scope)
+    {
+        if (lift.ArgumentList.Arguments.FirstOrDefault() is not { NameColon: null, Expression: IdentifierNameSyntax argument })
+            return false;
+
+        var name = argument.Identifier.ValueText;
+        var declarators = scope.DescendantNodes().OfType<VariableDeclaratorSyntax>().Where(v => v.Identifier.ValueText == name).ToList();
+        if (declarators is not [{ Initializer.Value: { } initializer } declarator]
+            || declarator.Parent?.Parent is not (LocalDeclarationStatementSyntax or FieldDeclarationSyntax { Parent: CompilationUnitSyntax }))
+        {
+            return false;
+        }
+
+        var reassigned = scope.DescendantNodes().OfType<AssignmentExpressionSyntax>()
+                             .Any(a => a.Left is IdentifierNameSyntax left && left.Identifier.ValueText == name)
+                         || scope.DescendantNodes().OfType<ArgumentSyntax>()
+                             .Any(a => !a.RefKindKeyword.IsKind(SyntaxKind.None)
+                                       && a.Expression is IdentifierNameSyntax used && used.Identifier.ValueText == name)
+                         || scope.DescendantNodes().OfType<ParameterSyntax>().Any(p => p.Identifier.ValueText == name);
+        if (reassigned)
+            return false;
+
+        var decision = initializer is BinaryExpressionSyntax binary && binary.IsKind(SyntaxKind.LogicalAndExpression)
+            ? binary.Right
+            : initializer;
+        if (decision is AwaitExpressionSyntax awaited)
+            decision = awaited.Expression;
+        if (decision is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax configure } configured
+            && configure.Name.Identifier.ValueText == "ConfigureAwait"
+            && configured.ArgumentList.Arguments.Count == 1
+            && configured.ArgumentList.Arguments[0].Expression.IsKind(SyntaxKind.FalseLiteralExpression))
+        {
+            decision = configure.Expression;
+        }
+
+        return decision is InvocationExpressionSyntax call && FilingParentDecisions.Contains(LastName(call.Expression));
     }
 
     /// <summary>The last identifier of a (qualified, alias-qualified or member-access) name, normalised: <c>@Apply</c> is <c>Apply</c>.</summary>

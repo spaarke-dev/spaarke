@@ -26,14 +26,27 @@ public class FieldSecuredSourceRuleGuardTests
     private static readonly Regex PrivateIsSecuredReading = new(
         @"IsSecured[^;]{0,200}JsonValueKind\.(False|True)|JsonValueKind\.(False|True)[^;]{0,200}IsSecured", RegexOptions.Compiled);
 
-    /// <summary>Each writer file and the shared members it must call.</summary>
+    /// <summary>Each writer file and the shared members it must call. Task 067 (UAC-r2 C3): every surface that copies a filing
+    /// parent's value past the caller's column view (create and send through the mask's named exception, push, Repair) consults the
+    /// one access-model list.</summary>
     private static readonly IReadOnlyDictionary<string, string[]> RequiredCalls = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
         ["Services/RecordCreation/RecordCreationService.Mapping.cs"] =
-            ["FieldSecuredSourceRule.Split(", "FieldSecuredSourceRule.CountsAsSecured("],
-        ["Api/FieldMappings/FieldMappingEndpoints.cs"] = ["FieldSecuredSourceRule.Split(", "FieldMappingPushLookups.SecuredColumns("],
+            ["FieldSecuredSourceRule.Split(", "FieldSecuredSourceRule.CountsAsSecured(",
+             ".ApplyOrLiftForFilingParentAsync(", "AccessModelSourceColumns.TargetsOfRulesReadingOne("],
+        ["Api/FieldMappings/FieldMappingEndpoints.cs"] =
+            ["FieldSecuredSourceRule.Split(", "FieldMappingPushLookups.SecuredColumns(", "AccessModelSourceColumns.Contains(",
+             "AccessModelSourceColumns.TargetsOfRulesReadingOne("],
         ["Api/FieldMappings/FieldMappingPushLookups.cs"] = ["FieldSecuredSourceRule.CountsAsSecured("],
+        ["Services/Dataverse/FieldMapping/SendTimeFieldMapping.cs"] =
+            [".ApplyOrLiftForFilingParentAsync(sourceIsFilingParent,", "AccessModelSourceColumns.TargetsOfRulesReadingOne("],
+        ["Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs"] = ["mappedColumns.Where(AccessModelSourceColumns.Contains)"],
+        ["Services/RecordCreation/RecordCreationService.Repair.cs"] =
+            ["answer.Secured.Where(AccessModelSourceColumns.Contains)", "AccessModelSourceColumns.NotCopiedByRepairWarning("],
     };
+
+    /// <summary>Task 067 (C3): the access-model list's own definition; no other field-mapping source spells one of its columns.</summary>
+    private const string AccessModelDefinition = "Services/Dataverse/FieldMapping/AccessModelSourceColumns.cs";
 
     internal static IReadOnlyList<string> Violations(string code, IEnumerable<string> requiredCalls)
     {
@@ -59,10 +72,55 @@ public class FieldSecuredSourceRuleGuardTests
     [InlineData("Services/RecordCreation/RecordCreationService.Mapping.cs")]
     [InlineData("Api/FieldMappings/FieldMappingEndpoints.cs")]
     [InlineData("Api/FieldMappings/FieldMappingPushLookups.cs")]
+    [InlineData("Services/Dataverse/FieldMapping/SendTimeFieldMapping.cs")]
+    [InlineData("Services/Dataverse/FieldMapping/MappingSourceCallerMask.cs")]
+    [InlineData("Services/RecordCreation/RecordCreationService.Repair.cs")]
     public void EachWriter_UsesTheSharedRule_AndKeepsNoPrivateCopy(string relativePath)
     {
         var violations = Violations(CodeOf(relativePath), RequiredCalls[relativePath]);
         Assert.True(violations.Count == 0, relativePath + ": " + string.Join("; ", violations));
+    }
+
+    /// <summary>Task 067 (C3): a column of the access-model list spelled as a string literal outside its definition (a second
+    /// list).</summary>
+    internal static IReadOnlyList<string> PrivateAccessModelColumns(string code) =>
+        Sprk.Bff.Api.Services.Dataverse.FieldMapping.AccessModelSourceColumns.Exact
+            .Append(Sprk.Bff.Api.Services.Dataverse.FieldMapping.AccessModelSourceColumns.IdentityCollisionPrefix)
+            .Where(c => code.Contains($"\"{c}", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 067 (C3): no field-mapping source other than AccessModelSourceColumns spells an access-model column")]
+    public void NoOtherFieldMappingSource_KeepsItsOwnAccessModelList()
+    {
+        var folders = new[] { "Api/FieldMappings", "Services/Dataverse/FieldMapping", "Services/RecordCreation" };
+        var offenders = folders
+            .SelectMany(f => Directory.EnumerateFiles(Path.Combine(BffRoot, f.Replace('/', Path.DirectorySeparatorChar)), "*.cs", SearchOption.AllDirectories))
+            .Select(f => Path.GetRelativePath(BffRoot, f).Replace('\\', '/'))
+            .Where(p => p != AccessModelDefinition)
+            .Select(p => (Path: p, Columns: PrivateAccessModelColumns(CodeOf(p)).Where(IsOnlyAnAccessModelName).ToList()))
+            .Where(x => x.Columns.Count > 0)
+            .Select(x => $"{x.Path} ({string.Join(", ", x.Columns)})")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            "spells an access-model column itself; consult AccessModelSourceColumns instead: " + string.Join("; ", offenders));
+    }
+
+    /// <summary>The names that are field-mapping-only access-model columns. <c>sprk_issecure</c> and
+    /// <c>sprk_accessinheritance</c> are also the secure-root and copy-invariant columns other rules name in these folders, so
+    /// they are not counted as a second list.</summary>
+    private static bool IsOnlyAnAccessModelName(string column) =>
+        column is not ("sprk_issecure" or "sprk_accessinheritance" or "sprk_accesspermissiongrant" or "sprk_standinggrant");
+
+    [Fact(DisplayName = "Task 067 (C3) control: a second access-model list fires; the definition's own consumers do not")]
+    public void TheAccessModelDetector_FiresOnASecondList_AndStaysQuietOnTheSharedCall()
+    {
+        Assert.Equal(new[] { "adx_identity_passwordhash" },
+            PrivateAccessModelColumns("var denied = new[] { \"adx_identity_passwordhash\" };").Where(IsOnlyAnAccessModelName));
+        Assert.Equal(new[] { "sprk_identitycollision" },
+            PrivateAccessModelColumns("if (c.StartsWith(\"sprk_identitycollision\")) continue;").Where(IsOnlyAnAccessModelName));
+        Assert.Empty(PrivateAccessModelColumns("if (AccessModelSourceColumns.Contains(column)) continue;"));
     }
 
     [Fact(DisplayName = "DI-051: no field-mapping source file other than FieldSecuredSourceRule reads IsSecured itself")]
