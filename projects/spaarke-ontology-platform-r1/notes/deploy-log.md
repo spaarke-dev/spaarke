@@ -1,5 +1,15 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-27 20:41Z — mcp-r1 #3272 (ISS-010 Part C) live decision check on dev BFF `d9595dd98e`: PASS
+
+- **Owner go:** "Yes, run it" (2026-11-27, typed in the main session's chat). Dev BFF `d9595dd98e` was deployed by uac-r2 on the owner's go, live about 20:19Z. It carries #3270, #3277, #3278, #3292, #3293, #3295 and #3272.
+- **Run:** Console Decide lane, POL-MATTER-NOBUDGET Work Item on a non-secure test matter. Actions: Create budget + Assign Task (email notification off) + Add To Do + Assign Work, recorded as a judgement. The two secure matters' items are not in the owner's worklist (the owner is not a family member), so the secure inline share (#3270) was not exercised.
+- **Result:** `POST /api/v1/signals/{signalId}/decision` returned 200 in **15.4 s** server-side (the 4-action baseline before Part C was 26.9 s, #3184).
+  - Dependencies: HTTP 78 (RetrievePrincipalAccess 25, of which 5 were the known 400s, DI-131 #2405; RetrieveUserSetOfPrivilegesByNames 11; EntityDefinitions 28). WCF 66. AAD GetToken 68 (in-process). Redis 46.
+  - No exceptions. No Warning naming `Signals:DecisionAccessWindow:Enabled`. The only Warning was the per-request token line.
+  - All 4 children were owned by the matter's team. The Decision Record was written and the Signal was resolved and linked.
+- **Cleanup:** the budget, Task event, `zz-3272` To Do and `zz-3272` work assignment were deleted (204) and confirmed gone (404). The Decision Record stays (append-only). Results were sent to mcp-r1.
+
 ## 2026-11-26 ~13:02Z — `sprk_communicationreconciliation` redeployed to dev from master `6a2a569ac9`
 
 - **Owner go:** "Yes redeploy the reconciliation" (2026-11-26, typed in the main session's chat).
