@@ -5,6 +5,7 @@ using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Intake;
 using Sprk.Bff.Api.Services.Jobs;
 using Xunit;
@@ -389,7 +390,7 @@ public sealed class IntakeRunJobHandlerTests
     }
 
     [Fact]
-    public async Task ProcessAsync_ContentThatIsNotADocumentOfTheRequest_FailsBeforeAnyAiCall()
+    public async Task ProcessAsync_ContentThatIsNotADocumentOfTheRequest_GoesToTriageBeforeAnyAiCall()
     {
         var bed = new IntakeRunTestBed();
         var stranger = Guid.Parse("01300000-0000-4000-8000-0000000000e9");
@@ -402,11 +403,41 @@ public sealed class IntakeRunJobHandlerTests
 
         var outcome = await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None);
 
-        outcome.Status.Should().Be(JobStatus.Poisoned);
-        bed.RunStatus(runId).Should().Be((int)ProcessingJobStatus.Failed);
-        bed.Dataverse.Get(IntakeRunStore.RunEntity, runId).GetAttributeValue<string>(IntakeRunStore.RunErrorCode).Should().Be(IntakeRunCodes.ContentInvalid);
+        outcome.Status.Should().Be(JobStatus.Completed);
+        bed.RunStatus(runId).Should().Be((int)ProcessingJobStatus.Completed);
+        bed.RequestStage().Should().Be(IntakeRequestStages.NeedsTriage, "a person decides; the request is not left In review behind a dead run");
+        bed.Run(runId).State.Markers.Should().ContainKey("triage");
         bed.TextReads.Should().Be(0);
         bed.ClassifyCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_OlderRunReDrivenWhileANewerRunIsLive_NeverTakesTheRequestFromIt()
+    {
+        var bed = new IntakeRunTestBed();
+        var newer = await bed.CreateRunAsync("console-submit");
+        bed.Dataverse.Seed(Clone(bed.Dataverse.Get(IntakeRunStore.RunEntity, newer), IntakeRunStore.RunStatus, new OptionSetValue((int)ProcessingJobStatus.InProgress)));
+        bed.Dataverse.Seed(Clone(bed.Dataverse.Get(IntakeRunStore.RequestEntity, IntakeRunTestBed.RequestId),
+            IntakeRunStore.RequestCurrentRun, new EntityReference(IntakeRunStore.RunEntity, newer)));
+        var older = await bed.CreateRunAsync("front-door-submit");
+
+        await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(older), CancellationToken.None);
+
+        bed.Dataverse.Get(IntakeRunStore.RequestEntity, IntakeRunTestBed.RequestId)
+            .GetAttributeValue<EntityReference>(IntakeRunStore.RequestCurrentRun).Id.Should().Be(newer);
+        bed.RequestStage().Should().Be(IntakeRequestStages.Submitted, "only the current run writes the request's stage");
+    }
+
+    private static Entity Clone(Entity row, string column, object value)
+    {
+        var copy = new Entity(row.LogicalName, row.Id);
+        foreach (var attribute in row.Attributes)
+        {
+            copy[attribute.Key] = attribute.Value;
+        }
+
+        copy[column] = value;
+        return copy;
     }
 
     // ── Run create (doors) ───────────────────────────────────────────────────────────────────────
@@ -425,6 +456,26 @@ public sealed class IntakeRunJobHandlerTests
         row[IntakeRunStore.RunRequest].Should().BeOfType<EntityReference>().Which.Id.Should().Be(IntakeRunTestBed.RequestId);
         row.GetAttributeValue<OptionSetValue>(IntakeRunStore.RunJobType).Value.Should().Be((int)ProcessingJobType.IntakeRun);
         row.GetAttributeValue<OptionSetValue>(IntakeRunStore.RunStatus).Value.Should().Be((int)ProcessingJobStatus.Pending);
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(
+            new EntityReference("team", IntakeRunTestBed.RunOwnerTeamId), o => o.Including(r => r.LogicalName).Including(r => r.Id));
+        bed.Ownership.Verify(o => o.ResolveOwnerAsync(
+            It.Is<RecordOwnershipContext>(c => c.Parents.Any(p => p.EntityLogicalName == IntakeRunStore.RequestEntity && p.RecordId == IntakeRunTestBed.RequestId)),
+            It.IsAny<CancellationToken>()));
+    }
+
+    [Fact]
+    public async Task CreateRunAsync_NoOwnerTeamResolvesForTheRequest_RefusesAndCreatesNothing()
+    {
+        var bed = new IntakeRunTestBed();
+        bed.Ownership
+            .Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Refused(RecordOwnerRefusal.SecureParentNotIsolated, "the request's matter is flagged secure but not isolated"));
+
+        var create = () => bed.CreateRunAsync();
+
+        (await create.Should().ThrowAsync<IntakeRunOwnerRefusedException>())
+            .Which.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+        bed.Dataverse.Writes.Should().BeEmpty("a run the resolver gives no owner is never written (fail closed)");
     }
 
     private static Task SignalThenWait(TaskCompletionSource signal, Task wait)

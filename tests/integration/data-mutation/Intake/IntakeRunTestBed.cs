@@ -15,6 +15,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Intake;
 using Sprk.Bff.Api.Services.Intake.Harnesses;
 using Sprk.Bff.Api.Services.Jobs;
@@ -36,6 +37,7 @@ internal sealed class IntakeRunTestBed
     public static readonly Guid RequestId = Guid.Parse("01300000-0000-4000-8000-0000000000a1");
     public static readonly Guid DocumentId = Guid.Parse("01300000-0000-4000-8000-0000000000d1");
     public static readonly Guid OutputDocumentId = Guid.Parse("01300000-0000-4000-8000-0000000000d2");
+    public static readonly Guid RunOwnerTeamId = Guid.Parse("01300000-0000-4000-8000-0000000000f1");
     public const string CorrelationId = "0f3c2b1a-0000-4000-8000-000000000013";
 
     public InMemoryDataverse Dataverse { get; } = new();
@@ -43,6 +45,7 @@ internal sealed class IntakeRunTestBed
     public TestOptionsMonitor Options { get; } = new(new IntakePipelineOptions());
     public CapturingLoggerProvider Logs { get; } = new();
     public Mock<IAgreementAi> AgreementAi { get; } = new();
+    public Mock<IRecordOwnershipResolver> Ownership { get; } = new();
     public Mock<IntakeContentTextReader> TextReader { get; }
     public RecordingHarness Harness { get; set; } = new("nda");
     public RecordingDoor Door { get; } = new(IntakeChannels.FrontDoor);
@@ -70,6 +73,10 @@ internal sealed class IntakeRunTestBed
             [IntakeRunStore.DocumentRequest] = new EntityReference(IntakeRunStore.RequestEntity, RequestId),
         });
 
+        Ownership
+            .Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Owned(RunOwnerTeamId));
+
         AgreementAi
             .Setup(a => a.ClassifyAsync(It.IsAny<AgreementClassifyRequest>(), It.IsAny<CancellationToken>()))
             .Callback(() => Interlocked.Increment(ref ClassifyCalls))
@@ -96,7 +103,7 @@ internal sealed class IntakeRunTestBed
         Reasoning = SecretReasoning,
     };
 
-    public IntakeRunStore Store => new(Dataverse.Object, Time, Logs.CreateLogger<IntakeRunStore>());
+    public IntakeRunStore Store => new(Dataverse.Object, Ownership.Object, Time, Logs.CreateLogger<IntakeRunStore>());
 
     /// <summary>Creates the run as a door does, through the production create (deterministic id, lookups as references).</summary>
     public Task<Guid> CreateRunAsync(string passKey = "front-door-submit", params Guid[] content) =>

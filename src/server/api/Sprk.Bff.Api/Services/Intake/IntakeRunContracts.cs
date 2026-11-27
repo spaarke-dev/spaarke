@@ -179,6 +179,9 @@ public sealed record IntakeRequestSnapshot
     public int? RequestType { get; init; }
     public int? Channel { get; init; }
     public Guid? CurrentRunId { get; init; }
+
+    /// <summary>The <c>versionnumber</c> read, for the conditional stage write.</summary>
+    public string? RowVersion { get; init; }
 }
 
 /// <summary>

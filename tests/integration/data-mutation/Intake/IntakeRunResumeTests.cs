@@ -114,6 +114,42 @@ public sealed class IntakeRunResumeTests
         bed.ClassifyCalls.Should().Be(1);
     }
 
+    [Fact]
+    public async Task ProcessAsync_EngineResultRecordedBetweenTheClaimAndTheAwaitingMark_IsNeverDispatchedAgain()
+    {
+        var bed = new IntakeRunTestBed { Harness = new RecordingHarness("nda", externalEngineSteps: true) };
+        var runId = await bed.CreateRunAsync();
+        await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId), CancellationToken.None); // segment dispatched once
+
+        // The first delivery died after marking segment awaiting and before recording the dispatch.
+        var row = bed.Dataverse.Get(IntakeRunStore.RunEntity, runId);
+        var state = IntakeRunState.Parse(row.GetAttributeValue<string>(IntakeRunStore.RunState));
+        state.Awaiting = state.Awaiting! with { Dispatched = false };
+        row[IntakeRunStore.RunState] = state.Serialize();
+        bed.Dataverse.Seed(row);
+
+        // The engine's completion lands after the redelivery claimed the run, while it re-reads to mark the step awaiting.
+        var reads = 0;
+        var recorded = false;
+        bed.Dataverse.RunReadGate = async () =>
+        {
+            if (Interlocked.Increment(ref reads) == 2 && !recorded)
+            {
+                recorded = true;
+                (await bed.Store.RecordExternalStepResultAsync(runId, "segment", RecordingHarness.Reference("segment", runId), CancellationToken.None))
+                    .Should().BeTrue();
+            }
+        };
+
+        var outcome = await bed.CreateHandler().ProcessAsync(IntakeRunTestBed.Job(runId, deliveryCount: 2), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        recorded.Should().BeTrue();
+        bed.Harness.StepCalls["segment"].Should().Be(1, "a step whose result is stored is never dispatched again");
+        bed.Harness.StepCalls["edit-plan"].Should().Be(1);
+        bed.Run(runId).State.Awaiting!.Step.Should().Be("redline");
+    }
+
     private static Func<IntakeRunState, bool> Condition(string crashPoint)
     {
         var (kind, name) = (crashPoint.Split(':')[0], crashPoint.Split(':')[1]);

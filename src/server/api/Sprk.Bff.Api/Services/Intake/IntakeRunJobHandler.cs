@@ -244,8 +244,10 @@ public sealed class IntakeRunJobHandler : IJobHandler
             {
                 if (!await _store.IsRequestContentAsync(d.RequestId, documentId, ct).ConfigureAwait(false))
                 {
+                    // Deleted, deactivated or re-filed since the door named it: a person decides (FR-10), the request is not
+                    // left In review behind a Failed run.
                     _logger.LogWarning("Intake run {RunId}: content {DocumentId} is not a live document of the request", d.RunId, documentId);
-                    return await FailAsync(d, IntakeRunStage.Store, IntakeRunCodes.ContentInvalid, ct).ConfigureAwait(false);
+                    return await TriageAsync(d, IntakeRunCodes.ContentInvalid, ct).ConfigureAwait(false);
                 }
             }
 
@@ -342,11 +344,16 @@ public sealed class IntakeRunJobHandler : IJobHandler
             // The stage is shown before the step runs; an external step is marked awaiting BEFORE it is sent.
             state = await WriteAsync(d, stage, s =>
             {
-                if (step.External)
+                // The engine completion may have recorded this step's result since the claim read: never mark it again.
+                if (step.External && !s.Steps.ContainsKey(step.Name))
                 {
                     s.Awaiting = new IntakeAwaitingStep(step.Name, _time.GetUtcNow());
                 }
             }, ct).ConfigureAwait(false);
+            if (state.Steps.ContainsKey(step.Name))
+            {
+                continue; // recorded meanwhile (state is the stored state just written): never dispatched or run again
+            }
 
             var outcome = await harness.RunStepAsync(step, harnessRequest, state.Steps, ct).ConfigureAwait(false);
             switch (outcome.Kind)

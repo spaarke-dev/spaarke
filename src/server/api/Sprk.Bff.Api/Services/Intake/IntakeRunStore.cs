@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Intake.Harnesses;
 
 namespace Sprk.Bff.Api.Services.Intake;
@@ -89,15 +90,17 @@ public class IntakeRunStore
         RunRequest, RunJobType, RunStatus, RunCurrentStage, RunState, RunCorrelation, RunHarnessKey, RowVersionColumn,
     ];
 
-    private static readonly string[] RequestColumns = [RequestIntakeStage, RequestType, RequestChannel, RequestCurrentRun];
+    private static readonly string[] RequestColumns = [RequestIntakeStage, RequestType, RequestChannel, RequestCurrentRun, RowVersionColumn];
 
     private readonly IGenericEntityService _entities;
+    private readonly IRecordOwnershipResolver _ownership;
     private readonly TimeProvider _time;
     private readonly ILogger<IntakeRunStore> _logger;
 
-    public IntakeRunStore(IGenericEntityService entities, TimeProvider time, ILogger<IntakeRunStore> logger)
+    public IntakeRunStore(IGenericEntityService entities, IRecordOwnershipResolver ownership, TimeProvider time, ILogger<IntakeRunStore> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -117,8 +120,12 @@ public class IntakeRunStore
     /// Creates the run row for a door (Front Door 021, Console 022, email 040, Copilot 044): job type Intake run, status
     /// Pending, the request as an <see cref="EntityReference"/>, and the content document ids in the state. Idempotent:
     /// the id is <see cref="RunIdFor"/>, and a row that already exists for the same request is returned, not duplicated.
+    /// <para><b>Owner (unified-access-control-r2 task 146, write-path invariant I-2).</b> The run is a child of its request:
+    /// its owner team comes from <see cref="IRecordOwnershipResolver"/> over the row's lookups (secure-if-any, so a request
+    /// filed under a secure record gives its run the named Secure team), and a refusal creates nothing.</para>
     /// </summary>
     /// <exception cref="InvalidOperationException">A row with that id exists but belongs to another request or is not an intake run.</exception>
+    /// <exception cref="IntakeRunOwnerRefusedException">No owner team resolves for the request; no row was written.</exception>
     public virtual async Task<Guid> CreateRunAsync(
         Guid requestId,
         string passKey,
@@ -143,6 +150,17 @@ public class IntakeRunStore
         {
             entity[RunInitiatedBy] = new EntityReference("systemuser", user);
         }
+
+        var owner = await _ownership.ResolveOwnerAsync(RecordOwnershipContext.ForChild(entity), ct).ConfigureAwait(false);
+        if (!owner.IsOwned)
+        {
+            _logger.LogWarning("Intake run {RunId} not created: no owner resolved for request {RequestId} ({ReasonCode})",
+                runId, requestId, owner.RefusalCode);
+            throw new IntakeRunOwnerRefusedException(runId, owner.RefusalCode ?? "record_owner_unresolved");
+        }
+
+        entity["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+        owner.StampCreatorOn(entity);
 
         try
         {
@@ -190,6 +208,8 @@ public class IntakeRunStore
             RequestType = row.GetAttributeValue<OptionSetValue>(RequestType)?.Value,
             Channel = row.GetAttributeValue<OptionSetValue>(RequestChannel)?.Value,
             CurrentRunId = row.GetAttributeValue<EntityReference>(RequestCurrentRun)?.Id,
+            RowVersion = row.RowVersion
+                ?? (row.Contains(RowVersionColumn) ? Convert.ToString(row[RowVersionColumn], CultureInfo.InvariantCulture) : null),
         };
     }
 
@@ -358,37 +378,67 @@ public class IntakeRunStore
 
     /// <summary>
     /// Writes the request's intake stage (and, for Receive, its current run). Only the request's current run writes its
-    /// stage, so an older run never overwrites a newer one's; a request that is not an intake request is never written.
+    /// stage, so an older run never overwrites a newer one's; a run becomes current only when the request has none, or its
+    /// current run is gone or terminal (a re-driven older run never takes the request from a live newer one); a request
+    /// that is not an intake request is never written. The write is conditional on the request's row version, so a
+    /// concurrent change by another run is re-read, never overwritten.
     /// </summary>
     /// <returns>False when nothing was written (not the current run, or not an intake request).</returns>
     public virtual async Task<bool> WriteRequestStageAsync(
         Guid requestId, Guid runId, int stage, bool makeCurrentRun, CancellationToken ct)
     {
-        var request = await ReadRequestAsync(requestId, ct).ConfigureAwait(false);
-        if (request?.IntakeStage is null)
+        for (var attempt = 1; ; attempt++)
         {
-            return false;
-        }
+            var request = await ReadRequestAsync(requestId, ct).ConfigureAwait(false);
+            if (request?.IntakeStage is null)
+            {
+                return false;
+            }
 
-        if (!makeCurrentRun && request.CurrentRunId != runId)
-        {
-            _logger.LogInformation("Intake run {RunId}: not the current run of request {RequestId}; its stage is left as it is", runId, requestId);
-            return false;
-        }
+            var isCurrent = request.CurrentRunId == runId;
+            if (!isCurrent && !(makeCurrentRun && await CanBecomeCurrentAsync(request.CurrentRunId, ct).ConfigureAwait(false)))
+            {
+                _logger.LogInformation("Intake run {RunId}: not the current run of request {RequestId}; its stage is left as it is", runId, requestId);
+                return false;
+            }
 
-        if (request.IntakeStage == stage && request.CurrentRunId == runId)
+            if (request.IntakeStage == stage && isCurrent)
+            {
+                return true;
+            }
+
+            if (request.RowVersion is null)
+            {
+                throw new InvalidOperationException($"Request {requestId}: no row version was read; its stage is not written unconditionally.");
+            }
+
+            var fields = new Dictionary<string, object> { [RequestIntakeStage] = new OptionSetValue(stage) };
+            if (!isCurrent)
+            {
+                fields[RequestCurrentRun] = new EntityReference(RunEntity, runId);
+            }
+
+            try
+            {
+                await _entities.UpdateIfRowVersionMatchesAsync(RequestEntity, requestId, request.RowVersion, fields, ct).ConfigureAwait(false);
+                return true;
+            }
+            catch (System.Data.DBConcurrencyException) when (attempt < MaxConcurrencyRetries)
+            {
+                // Changed since the read (a user edit, another run): decide again on the new row.
+            }
+        }
+    }
+
+    private async Task<bool> CanBecomeCurrentAsync(Guid? currentRunId, CancellationToken ct)
+    {
+        if (currentRunId is not { } current)
         {
             return true;
         }
 
-        var fields = new Dictionary<string, object> { [RequestIntakeStage] = new OptionSetValue(stage) };
-        if (makeCurrentRun)
-        {
-            fields[RequestCurrentRun] = new EntityReference(RunEntity, runId);
-        }
-
-        await _entities.UpdateAsync(RequestEntity, requestId, fields, ct).ConfigureAwait(false);
-        return true;
+        var run = await ReadRunAsync(current, ct).ConfigureAwait(false);
+        return run is null || IsTerminalStatus(run.Status);
     }
 
     internal static bool IsTerminalStatus(int? status) =>
@@ -445,4 +495,14 @@ public sealed class IntakeClaimLostException(Guid runId)
     : Exception($"Intake run {runId}: this delivery no longer holds the run.")
 {
     public Guid RunId { get; } = runId;
+}
+
+/// <summary>The run's owner team could not be resolved (<see cref="IRecordOwnershipResolver"/> refused); no run was created.</summary>
+public sealed class IntakeRunOwnerRefusedException(Guid runId, string refusalCode)
+    : InvalidOperationException($"Intake run {runId}: no owner team resolved ({refusalCode}); the run was not created.")
+{
+    public Guid RunId { get; } = runId;
+
+    /// <summary>The resolver's stable refusal code (<see cref="RecordOwnerRefusal"/>).</summary>
+    public string RefusalCode { get; } = refusalCode;
 }
