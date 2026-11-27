@@ -96,6 +96,7 @@ Pairing `nda-review` with the Spaarke MCP tools: (1) how a Spaarke (SPE) documen
 - Skills and scripts embed no secrets and make no LLM or network calls.
 - Claude never types passwords and never sends email; choose "No email" on Cowork cards.
 - Leave the owner's tabs alone. Prefer moving over deleting; no permanent deletes by Claude. Ask before T-04 (share).
+- Run NDA, agreement and Legal Hold review tests with **Spaarke MCP off** unless the test is about the MCP: dev "Spaarke MCP" carries spike tools (`spike_review_nda`, `spike_get_profile`, `spike_review_agreement`, `spike_review_legal_hold`; inventory row T1) that can capture those prompts, until the next master deploy of the dev BFF (2026-11-26; `results.md` confounder note).
 - No Copilot Tuning in design.md yet. Declarative (Agent Builder) agents only in the advanced tiers of the four-tier package (owner, 2026-11-19); the base tiers stay files only.
 - Skills first in the Copilot app (owner, 2026-11-12): Cowork skills do reviews and redlines; Agent Builder agents are optional, review in chat only and never build redlines (enforced by the package build).
 - The Office add-in for redlining is out of scope; don't raise it.

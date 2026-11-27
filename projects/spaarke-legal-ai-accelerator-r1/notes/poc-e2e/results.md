@@ -751,6 +751,12 @@ the dev BFF. Runs since then that had Spaarke MCP on and may have been routed th
 Spaarke MCP on. Until the tools are gone, run NDA tests with **Spaarke MCP switched off** unless the test is about
 the MCP. A `NO_PROFILE` or spike result is this tool, not a probe failure.
 
+**Widened 2026-11-26 ~13:14Z (same row T1, `c0445b2cbe`).** The connector also carries `spike_review_agreement` and
+`spike_review_legal_hold` (fixed-acknowledgement stubs: no Action, no write), and `spike_review_nda` now also claims
+confidentiality agreements, mutual or one-way. So **agreement and Legal Hold Review prompts** can be pulled to the
+connector too. The rule now covers them: run any review test with Spaarke MCP off unless the test is about the MCP.
+A fixed acknowledgement in reply to an agreement or legal-hold prompt is this stub, not our skill.
+
 **WP-1 retry (owner, Word desktop, 2026-11-26, Spaarke MCP off, script skill chip):** again
 `Spaarke Word probe · instructions loaded · WPI-1112-A`. **Result: Word desktop did not load the script skill.**
 Two tries, no `WPS-1112-A` at all: not the script's line, and not the skill's own fallback line
