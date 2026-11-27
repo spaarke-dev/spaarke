@@ -471,8 +471,9 @@ export const App: React.FC<AppProps> = ({
       searchFilters: SearchFilters,
       domain: SearchDomain,
       // The index the caller has just chosen, before `selectedSearchIndexId` state catches up (a saved
-      // search on another domain, #3195). `{ row: null }` = the list has no index of this domain: search
-      // the standard index for it, and not the URL's index, which belongs to another domain.
+      // search on another domain, #3195). `{ row: null }` = the list has no index of this domain: no index
+      // row is sent, so the search goes to the URL's index when the domain is the URL's own, else to the
+      // standard index for that kind of record (see `envelopeSearchIndexName` below).
       selection?: { row: AiSearchIndexRow | null }
     ) => {
       setSelectedIds([]);
