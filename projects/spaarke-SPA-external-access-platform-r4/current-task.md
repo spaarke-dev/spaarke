@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-27 ~13:20Z (task 043 merged; BFF live, gate pending; SPA deploy awaiting SHA go)
+> **Last Updated**: 2026-11-27 ~13:20Z (task 043 merged; BFF live, gate passed; SPA deploy awaiting SHA go)
 > **Format**: CURRENT state only. Each checkpoint REWRITES this file. Target ≤ 10 KB.
 
 ## Quick Recovery (READ THIS FIRST)
@@ -8,11 +8,11 @@
 | Field | Value |
 |-------|-------|
 | **Active** | **Task 043 DONE** (FR-28 #2269), PR open — see In flight. Next task per TASK-INDEX after the owner's go. Full record: `notes/task-043-notes.md`. |
-| **In flight** | Task 043 PR #3267 MERGED (squash `c438119bca`, 2026-11-26 19:54Z). UAC APPROVED (uac-r2 2026-11-26); its note 1 fixed in 043 (sign-in Forbidden bind/create → 403 create_unavailable), note 2 = comment; #3264 narrowed to the resolver catch arms. BFF with 043 LIVE (see below); 30-min gate due ~13:45Z. SPA deploy waits on the owner's exact-SHA go. |
+| **In flight** | Task 043 PR #3267 MERGED (squash `c438119bca`, 2026-11-26 19:54Z). UAC APPROVED (uac-r2 2026-11-26); its note 1 fixed in 043 (sign-in Forbidden bind/create → 403 create_unavailable), note 2 = comment; #3264 narrowed to the resolver catch arms. BFF with 043 LIVE (see below); 30-min gate PASSED 13:45Z. SPA deploy waits on the owner's exact-SHA go. |
 | **Next action** | Owner: SPA SHA go (`c438119bca` = 043 only, or master `765a199922` = the BFF base). Deploy from tag `external-spa-dev-<sha>` after the BFF gate passes; rollback tag `external-spa-dev-24d53fb333`. |
 
 ## Live on dev
-- **BFF:** `5cd40984b0` (master `765a199922` + the unmerged specialist spike tools; contains 043) LIVE since 2026-11-27 ~13:14Z (uac-r2, owner's go); DLL hash verified, /healthz 200; 30-min gate due ~13:45Z. Rollback `d307d67e36`.
+- **BFF:** `5cd40984b0` (master `765a199922` + the unmerged specialist spike tools; contains 043) LIVE since 2026-11-27 ~13:14Z (uac-r2, owner's go); DLL hash verified, /healthz 200; 30-min gate PASSED 13:45Z (40 req, no 5xx). Rollback `d307d67e36`.
 - **SPA:** master `24d53fb333` LIVE since 2026-11-26 ~15:50Z. Rollback tag `external-spa-dev-rollback-0267ee64a2`. Dispatch SPA deploys from tag `external-spa-dev-<sha>` to build exactly the approved SHA; check the run's headSha.
 
 ## Owner questions open
