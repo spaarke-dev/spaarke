@@ -118,6 +118,48 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_eventtype_ref");
     }
 
+    // ── task 065: the field-secured-source lift decides by table AND id, as step 5's skip does ──
+
+    [Fact]
+    public async Task Task065_AFieldSecuredSourceColumnOfAnExplicitSourceWithThePairsIdButAnotherTable_IsNotCopied_WithTheFieldSecuredWarning()
+    {
+        // Filed under the matter by the pair; the explicit source is a project carrying the pair's id (a client-chosen GUID).
+        // It is not the record the row is filed under, so the drop stays: its field-secured column is not copied.
+        TheRecordTypes();
+        _sources[("sprk_project", OrdinaryMatter)] = new Entity("sprk_project", OrdinaryMatter)
+        {
+            ["sprk_projectnotes"] = "From the project",
+        };
+        Profile("sprk_project", "sprk_event", Rule("sprk_projectnotes", "sprk_description", Memo));
+        _scripted.SecuredColumns.Add("sprk_projectnotes");
+
+        var outcome = await Service().CreateAsync(
+            EventByPair(OrdinaryMatter, mappingSource: ("sprk_project", OrdinaryMatter)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Subject.Fields.Should().NotContainKey("sprk_description",
+            "a source is the filing record only when its table and id both match: a field-secured column of another table's record is not copied");
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappedValueDroppedCode);
+        warning.Column.Should().Be("sprk_description");
+        warning.Detail.Should().Contain(RecordCreationService.SourceColumnFieldSecured).And.NotContain("From the project");
+    }
+
+    [Fact]
+    public async Task Task065_AFieldSecuredSourceColumnOfTheSourceResolvedFromTheRegardingPair_TheCallerCanRead_IsWritten_WithNoWarning()
+    {
+        TheRecordTypes();
+        MatterEventTypeToEventProfile();
+        _scripted.SecuredColumns.Add("sprk_matterdescription"); // the caller can read it; the target sprk_description is not secured
+
+        var outcome = await Service().CreateAsync(EventByPair(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the matter",
+            "the record named by the regarding pair is the filing parent: its field-secured column copies when the caller can read it");
+        outcome.MappingWarnings.Should().BeEmpty("no SourceColumnFieldSecured warning from the filing parent");
+    }
+
     // ── (e) an ordinary adapter default the caller cannot AppendTo is dropped as a default ──
 
     [Fact]

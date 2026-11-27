@@ -514,7 +514,7 @@ describe('sprk_secure_child_ribbon.js — the platform "+ New" is redirected for
   });
 });
 
-describe('sprk_secure_child_ribbon.js — createChild creates through the BFF only (task 051: Add Memo, Add KPI)', () => {
+describe('sprk_secure_child_ribbon.js — createChild creates through the BFF only (task 051: Add Memo)', () => {
   it('creates a memo through POST /api/v1/child-records/sprk_memo, filed under the host, and resolves its id (no form, no Xrm create)', async () => {
     const h = harness({ flag: true });
     const host = h.ribbon.hostOf(formOf('sprk_matter'))!;

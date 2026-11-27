@@ -599,10 +599,12 @@ public static class FieldMappingEndpoints
             // null (the rule is then skipped), and a source the caller cannot read at all returns no row (404).
             // Lookup-aware (2026-10-06): which rule fields are lookups — and which exist at all — is read from the
             // source's metadata, so a lookup is selected as `_x_value` and an unknown field never poisons the read.
-            // Task 065 (owner 2026-11-26): the children are the rows filed under this source (step 3: its one parent lookup, or
-            // the family's Filing edge), so the source is their filing parent, and a rule that reads a field-secured source column pushes like any other. Its value still
-            // copies only when the caller can read it (this read is the caller's). A copied value is readable by whoever can
-            // read the child column.
+            // Task 065 (owner 2026-11-26): the pushed rows are the ones that name this source through their one parent lookup
+            // (ordinary mode: the single non-citation lookup to the source table; family mode: the Filing edge). For those
+            // rows the field-secured-source rule is lifted: a rule that reads a field-secured source column pushes like any
+            // other. That source is the rows' parent by that lookup, not necessarily their filing parent. The value still
+            // copies only when the caller can read it (this read is the caller's). A copied value is readable by whoever
+            // can read the child column.
             var sourceFields = rules.Select(r => r.SourceField).Distinct().ToArray();
             var sourceValues = await RetrieveSourceRecordValuesAsCallerAsync(
                 impersonatedQuery,

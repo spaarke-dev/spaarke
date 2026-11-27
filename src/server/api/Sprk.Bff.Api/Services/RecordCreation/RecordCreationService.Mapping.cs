@@ -939,7 +939,7 @@ internal sealed partial class RecordCreationService
         public static MappingReads Nothing(IReadOnlyList<RecordCreationWarning> warnings) => new(warnings, null, [], null, null, null);
 
         /// <summary>Task 064: the source columns the rules read that are field-secured (read as the caller, beside the target's
-        /// columns); <see langword="null"/> when that could not be read (step 3 then maps nothing).</summary>
+        /// columns); <see langword="null"/> when that could not be read (step 3 then maps nothing, unless the source is the filing record).</summary>
         public IReadOnlySet<string>? SecuredSourceColumns { get; init; }
     }
 
@@ -1051,7 +1051,8 @@ internal sealed partial class RecordCreationService
             return MappingReads.Nothing(warnings);
         }
 
-        // A source-columns read that faulted or was not answered is "not told": step 3 then maps nothing (fail closed).
+        // A source-columns read that faulted or was not answered is "not told": step 3 then maps nothing (fail closed), except from the
+        // filing record (table and id), which never asks the answer.
         IReadOnlySet<string>? secured;
         try
         {
@@ -1114,7 +1115,7 @@ internal sealed partial class RecordCreationService
                 var answeredName = name.GetString()!.Trim().ToLowerInvariant();
                 answered.Add(answeredName);
 
-                // Anything but an explicit false is secured (fail closed): the one predicate, shared with the push.
+                // Anything but an explicit false is secured (fail closed): the one predicate (FieldSecuredSourceRule).
                 if (FieldSecuredSourceRule.CountsAsSecured(
                         attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
                 {
