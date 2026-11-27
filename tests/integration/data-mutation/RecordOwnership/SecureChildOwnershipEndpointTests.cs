@@ -36,7 +36,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// <para><b>PUT /api/v1/events/{id}</b> was DELETED by task 159 (owner round 10 item 1: no caller, not published), so the
 /// re-file guards task 146 r1 pinned on it (verifier items 2, 9, 18) protect nothing that still exists; one test pins that the
 /// route answers nothing and re-owns nothing. <b>POST /api/v1/events</b> keeps 146's owner resolution behind 159's
-/// as-the-caller gate (Create privilege + AppendTo on the regarding record).</para>
+/// as-the-caller gate (Create privilege + Read and AppendTo on the regarding record).</para>
 /// <para><b>POST /api/ai/document-intelligence/associate-record</b> was DELETED by task 164 (owner round 10 item 1); its
 /// absence is pinned by <c>AiPlaybookPromptRecordMatchRouteRetirementTests</c>.</para>
 /// <para>No HTTP handler is mocked (ADR-038 B1); the Dataverse seams are module-boundary doubles.</para>
@@ -367,13 +367,13 @@ public class SecureChildOwnershipEndpointTests
         }
 
         /// <summary>
-        /// Task 159's create gate, as the caller: the <c>prvCreatesprk_Event</c> privilege and AppendTo on the regarding
-        /// record. The owner question (task 146) is asked only after it passes.
+        /// Task 159's create gate, as the caller: the <c>prvCreatesprk_Event</c> privilege and Read + AppendTo on the regarding
+        /// record (#3181: Read as well, the create copies its name and number). The owner question (task 146) is asked only after it passes.
         /// </summary>
         public void MayCreateEventsUnder(string entitySet, Guid regardingId)
         {
             Probe.HeldPrivileges.Add(EventEndpoints.CreateEventPrivilege);
-            Access.Grant(entitySet, regardingId, AccessRights.AppendTo);
+            Access.Grant(entitySet, regardingId, AccessRights.Read | AccessRights.AppendTo);
         }
 
         protected override void Register(IServiceCollection services)
