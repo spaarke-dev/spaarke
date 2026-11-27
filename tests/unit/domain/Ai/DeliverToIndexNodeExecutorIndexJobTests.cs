@@ -29,12 +29,12 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// <c>ResolveTemplate</c> short-circuits before calling it. <see cref="DeliverToIndexNodeExecutor"/>
 /// itself is the REAL production class.</para>
 /// </remarks>
-public sealed class DeliverToIndexNodeExecutorReplaceStaleChunksTests
+public sealed class DeliverToIndexNodeExecutorIndexJobTests
 {
     private readonly Mock<JobSubmissionService> _jobSubmissionMock;
     private readonly DeliverToIndexNodeExecutor _executor;
 
-    public DeliverToIndexNodeExecutorReplaceStaleChunksTests()
+    public DeliverToIndexNodeExecutorIndexJobTests()
     {
         var sbOptions = new Mock<IOptions<ServiceBusOptions>>();
         sbOptions.Setup(o => o.Value).Returns(new ServiceBusOptions

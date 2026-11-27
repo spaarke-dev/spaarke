@@ -283,6 +283,13 @@ public sealed record FileIndexingResult
     public string? SkipReason { get; init; }
 
     /// <summary>
+    /// True when every new chunk was written but chunks from an earlier index of the file beyond the new count could not be
+    /// removed (GitHub #3304). <see cref="Success"/> is false so a retrying caller retries; a caller that does not retry may
+    /// still treat the document as indexed, since search already answers from the new chunks.
+    /// </summary>
+    public bool LeftoverChunksRemain { get; init; }
+
+    /// <summary>
     /// Creates a skipped result: success, zero chunks, nothing to retry, and the document must not be stamped as indexed.
     /// </summary>
     public static FileIndexingResult Skip(string reason, string? documentId = null, string? speFileId = null) => new()

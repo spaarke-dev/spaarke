@@ -42,11 +42,11 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// task 033's fixture, so a concurrent PR touching that file cannot conflict with this one.</para>
 /// </remarks>
 [Trait("category", "contract")]
-public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixture<RagSendToIndexReplaceStaleChunksFixture>
+public sealed class RagSendToIndexJobPayloadContractTests : IClassFixture<RagSendToIndexJobPayloadFixture>
 {
-    private readonly RagSendToIndexReplaceStaleChunksFixture _fixture;
+    private readonly RagSendToIndexJobPayloadFixture _fixture;
 
-    public RagSendToIndexReplaceStaleChunksContractTests(RagSendToIndexReplaceStaleChunksFixture fixture)
+    public RagSendToIndexJobPayloadContractTests(RagSendToIndexJobPayloadFixture fixture)
     {
         _fixture = fixture;
         _fixture.ResetBoundaries();
@@ -85,7 +85,7 @@ public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixtur
         var response = await client.PostAsJsonAsync("/api/ai/rag/send-to-index", new SendToIndexRequest
         {
             DocumentIds = [DocumentId.ToString()],
-            TenantId = RagSendToIndexReplaceStaleChunksFixture.TestTenantId,
+            TenantId = RagSendToIndexJobPayloadFixture.TestTenantId,
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -117,7 +117,7 @@ public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixtur
         var response = await client.PostAsJsonAsync("/api/ai/rag/send-to-index", new SendToIndexRequest
         {
             DocumentIds = [DocumentId.ToString()],
-            TenantId = RagSendToIndexReplaceStaleChunksFixture.TestTenantId,
+            TenantId = RagSendToIndexJobPayloadFixture.TestTenantId,
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -135,7 +135,7 @@ public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixtur
 /// <c>RagSendToIndexFixture</c> host configuration verbatim (same required settings to boot
 /// <c>Program</c>), with its own auth scheme name and mock instances so the two files never share state.
 /// </summary>
-public sealed class RagSendToIndexReplaceStaleChunksFixture : WebApplicationFactory<Program>
+public sealed class RagSendToIndexJobPayloadFixture : WebApplicationFactory<Program>
 {
     public const string TestTenantId = "tenant-rag-send-to-index-048";
 
@@ -248,16 +248,16 @@ public sealed class RagSendToIndexReplaceStaleChunksFixture : WebApplicationFact
 
             services.AddAuthentication(options =>
             {
-                options.DefaultAuthenticateScheme = RagSendToIndexReplaceStaleChunksFakeAuthHandler.SchemeName;
-                options.DefaultChallengeScheme = RagSendToIndexReplaceStaleChunksFakeAuthHandler.SchemeName;
+                options.DefaultAuthenticateScheme = RagSendToIndexJobPayloadFakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = RagSendToIndexJobPayloadFakeAuthHandler.SchemeName;
             })
-            .AddScheme<AuthenticationSchemeOptions, RagSendToIndexReplaceStaleChunksFakeAuthHandler>(
-                RagSendToIndexReplaceStaleChunksFakeAuthHandler.SchemeName, _ => { });
+            .AddScheme<AuthenticationSchemeOptions, RagSendToIndexJobPayloadFakeAuthHandler>(
+                RagSendToIndexJobPayloadFakeAuthHandler.SchemeName, _ => { });
 
             services.PostConfigure<AuthenticationOptions>(options =>
             {
-                options.DefaultAuthenticateScheme = RagSendToIndexReplaceStaleChunksFakeAuthHandler.SchemeName;
-                options.DefaultChallengeScheme = RagSendToIndexReplaceStaleChunksFakeAuthHandler.SchemeName;
+                options.DefaultAuthenticateScheme = RagSendToIndexJobPayloadFakeAuthHandler.SchemeName;
+                options.DefaultChallengeScheme = RagSendToIndexJobPayloadFakeAuthHandler.SchemeName;
             });
 
             services.RemoveAll<IHostedService>();
@@ -295,11 +295,11 @@ public sealed class RagSendToIndexReplaceStaleChunksFixture : WebApplicationFact
 /// <summary>
 /// Fake auth handler local to this file — authenticates on the presence of any Authorization header.
 /// </summary>
-internal sealed class RagSendToIndexReplaceStaleChunksFakeAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+internal sealed class RagSendToIndexJobPayloadFakeAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
-    public const string SchemeName = "RagSendToIndexReplaceStaleChunksFakeAuth";
+    public const string SchemeName = "RagSendToIndexJobPayloadFakeAuth";
 
-    public RagSendToIndexReplaceStaleChunksFakeAuthHandler(
+    public RagSendToIndexJobPayloadFakeAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder)
@@ -317,9 +317,9 @@ internal sealed class RagSendToIndexReplaceStaleChunksFakeAuthHandler : Authenti
         var claims = new List<Claim>
         {
             new("oid", "rag-send-to-index-048-test-user"),
-            new("tid", RagSendToIndexReplaceStaleChunksFixture.TestTenantId),
+            new("tid", RagSendToIndexJobPayloadFixture.TestTenantId),
             new(ClaimTypes.NameIdentifier, "rag-send-to-index-048-test-user"),
-            new(ClaimTypes.Name, "RagSendToIndex ReplaceStaleChunks Test User"),
+            new(ClaimTypes.Name, "RagSendToIndex Job Payload Test User"),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

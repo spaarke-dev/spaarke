@@ -150,6 +150,22 @@ public sealed partial class Issue3304_ReindexLeavesNoOldChunksTests
         _index.DeletedIds.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task IndexFileAppOnly_WhenTheOldChunksCannotBeRemoved_ReportsTheNewChunksWrittenAndTheTailLeft()
+    {
+        _chunkCount = 5;
+        await CreateService().IndexFileAppOnlyAsync(Request(OldMatter));
+
+        _index.FailSearches = true;
+        _chunkCount = 2;
+        var result = await CreateService().IndexFileAppOnlyAsync(Request(NewMatter));
+
+        result.Success.Should().BeFalse("a retrying caller runs the index again to remove the tail");
+        result.LeftoverChunksRemain.Should().BeTrue("a caller that does not retry still records the document as indexed");
+        result.ChunksIndexed.Should().Be(2);
+        _index.Rows[$"{Item}_0"]["parentEntityId"]!.GetValue<string>().Should().Be(NewMatter.EntityId);
+    }
+
     /// <summary>
     /// The files index's wire, in memory: applies each write and delete of an index batch, and answers the trim's search
     /// (<c>speFileId eq '…' and chunkIndex ge N</c>) from what it holds.
@@ -160,6 +176,9 @@ public sealed partial class Issue3304_ReindexLeavesNoOldChunksTests
 
         public List<string> DeletedIds { get; } = [];
 
+        /// <summary>When set, the index refuses searches (so the trim cannot find the old tail); writes still land.</summary>
+        public bool FailSearches { get; set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? "{}" : await request.Content.ReadAsStringAsync(cancellationToken);
@@ -168,6 +187,14 @@ public sealed partial class Issue3304_ReindexLeavesNoOldChunksTests
 
             if (path.Contains("search.post.search", StringComparison.Ordinal))
             {
+                if (FailSearches)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    {
+                        Content = new StringContent("""{"error":{"code":"ServiceUnavailable","message":"busy"}}""", Encoding.UTF8, "application/json"),
+                    };
+                }
+
                 var filter = root["filter"]?.GetValue<string>() ?? string.Empty;
                 var file = SpeFileIdClause().Match(filter);
                 var from = ChunkIndexClause().Match(filter);

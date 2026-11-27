@@ -36,7 +36,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// <see cref="BatchJobStatusStore"/> and <see cref="RagTelemetry"/> are the REAL production classes —
 /// both are inert without a real Redis / OpenTelemetry exporter, so no double is needed.</para>
 /// </remarks>
-public sealed class BulkRagIndexingJobHandlerReplaceStaleChunksTests
+public sealed class BulkRagIndexingJobHandlerIndexRequestTests
 {
     private const string TenantId = "tenant-bulk-048";
     private const string DataverseUrl = "https://test.crm.dynamics.com";

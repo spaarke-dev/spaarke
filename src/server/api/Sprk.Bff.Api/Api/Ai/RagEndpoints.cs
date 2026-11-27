@@ -448,6 +448,7 @@ public static class RagEndpoints
     private static async Task<IResult> GetEmbedding(
         EmbeddingRequest request,
         IRagService ragService,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Text))
@@ -476,9 +477,10 @@ public static class RagEndpoints
         }
         catch (Exception ex)
         {
+            loggerFactory.CreateLogger("RagEndpoints").LogError(ex, "Embedding generation failed");
             return Results.Problem(
                 title: "Embedding Generation Failed",
-                detail: ex.Message,
+                detail: "The embedding could not be generated.",
                 statusCode: 500);
         }
     }
@@ -1406,7 +1408,7 @@ public static class RagEndpoints
                 {
                     DocumentId = documentId,
                     Success = false,
-                    ErrorMessage = ex.Message
+                    ErrorMessage = "The document could not be indexed."
                 });
             }
         }
@@ -1535,7 +1537,7 @@ public static class RagEndpoints
             logger.LogError(ex, "Failed to enqueue RAG indexing job for {FileName}", request.FileName);
             return Results.Problem(
                 title: "Enqueue Failed",
-                detail: ex.Message,
+                detail: "The indexing job could not be queued.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -1633,7 +1635,7 @@ public static class RagEndpoints
             logger.LogError(ex, "Failed to submit bulk RAG indexing job for tenant {TenantId}", request.TenantId);
             return Results.Problem(
                 title: "Submit Failed",
-                detail: ex.Message,
+                detail: "The bulk indexing job could not be submitted.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

@@ -385,7 +385,7 @@ public static class SemanticSearchEndpoints
             logger.LogError(ex, "Semantic search count failed for tenant {TenantId}", tenantId);
             return Results.Problem(
                 title: "Count Failed",
-                detail: ex.Message,
+                detail: "Search results could not be counted.",
                 statusCode: 500);
         }
     }

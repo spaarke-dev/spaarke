@@ -152,3 +152,40 @@ public sealed class Issue3307_RecordSearchOnANonRecordsIndexTests
             throw new RequestFailedException(500, IndexError);
     }
 }
+
+/// <summary>
+/// #3307, document search: POST /api/ai/search and /api/ai/search/count answered a failed search with the index's own error
+/// text as the 500 detail. Run through the real HTTP pipeline; the search service fails with an index error.
+/// </summary>
+public sealed class Issue3307_DocumentSearchRoutesAnswer500WithoutTheExceptionTextTests
+    : IClassFixture<Sprk.Bff.Api.Tests.EndToEnd.SearchIndexNameEndpointTestFixture>
+{
+    private const string IndexError = "Unknown field 'recordName' in highlight; the index has no such field.";
+
+    private readonly Sprk.Bff.Api.Tests.EndToEnd.SearchIndexNameEndpointTestFixture _fixture;
+
+    public Issue3307_DocumentSearchRoutesAnswer500WithoutTheExceptionTextTests(
+        Sprk.Bff.Api.Tests.EndToEnd.SearchIndexNameEndpointTestFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.ResetCapture();
+    }
+
+    [Theory]
+    [InlineData("/api/ai/search")]
+    [InlineData("/api/ai/search/count")]
+    public async Task PostSearchRoute_WhenTheSearchFails_Answers500WithoutTheExceptionText(string route)
+    {
+        _fixture.ConfigureServiceToThrow(new RequestFailedException(500, IndexError));
+        using var content = new StringContent(
+            """{"query":"any","scope":"entity","entityType":"matter","entityId":"00000000-0000-0000-0000-0000000000e1"}""",
+            System.Text.Encoding.UTF8,
+            "application/json");
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsync(route, content);
+
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.InternalServerError);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("recordName").And.NotContain("no such field", "the exception's text is logged, never returned");
+    }
+}

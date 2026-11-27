@@ -427,8 +427,9 @@ public sealed class FileIndexingService : IFileIndexingService
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // The new chunks are in place, so search already answers from the current version; only the
-                // leftover tail may remain. Report failure so the job retries (the idempotency key is not marked).
-                // The message names the exception TYPE only — never its text — so it can neither leak content
+                // leftover tail may remain. Report failure so a retrying caller (the RAG indexing job) runs again; the
+                // idempotency key is not marked. LeftoverChunksRemain tells a caller that does not retry (the Office
+                // indexing worker) that the document is indexed all the same. The message names the exception TYPE only — never its text — so it can neither leak content
                 // (ADR-015) nor trip the handler's permanent-failure words ("not found", "empty", ...).
                 _logger.LogWarning(ex,
                     "Indexed {FileName} speFileId={SpeFileId} but could not remove the previous version's leftover chunks in {IndexName}",
@@ -437,6 +438,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 return new FileIndexingResult
                 {
                     Success = false,
+                    LeftoverChunksRemain = true,
                     ChunksIndexed = successCount,
                     ErrorMessage = $"Indexed {successCount} chunks, but the previous version's leftover chunks could not be removed ({ex.GetType().Name}); retry required",
                     Duration = stopwatch.Elapsed,

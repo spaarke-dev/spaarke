@@ -43,7 +43,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Ai;
 /// ADR-038, new coverage goes here, at the <c>tests/unit/domain/**</c> KEEP path (the same placement task
 /// 029 used for <c>RagServiceChunkTrimTests.cs</c>), never modifying or weakening the existing file.</para>
 /// </remarks>
-public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
+public sealed class PostUploadIndexingEnqueuerIndexKeyTests
 {
     private readonly Mock<IFileIndexingService> _fileIndexingMock = new();
     private readonly Mock<JobSubmissionService> _jobSubmissionMock;
@@ -53,7 +53,7 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
     private readonly ISearchIndexNameResolver _indexNames =
         Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == "spaarke-files-index");
 
-    public PostUploadIndexingEnqueuerReplaceStaleChunksTests()
+    public PostUploadIndexingEnqueuerIndexKeyTests()
     {
         var sbOptions = new Mock<IOptions<ServiceBusOptions>>();
         sbOptions.Setup(o => o.Value).Returns(new ServiceBusOptions
