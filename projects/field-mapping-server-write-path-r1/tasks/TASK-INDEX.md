@@ -109,6 +109,7 @@
 | 064 | [Copy ordinary mapped values regardless of caller rights (owner 4b/4c)](064-copy-mapped-values-regardless-of-caller-rights.poml) | FR-08 amendment (owner 2026-10-27, reconfirmed 2026-11-26) | opus / high | FULL | W6 | none (UAC-r2 diff review) | ✅ |
 | 065 | [Copy a mapped value from the filing parent even when its source column is field-secured (owner 2026-11-26)](065-copy-field-secured-source-values.poml) | FR-08 amendment (owner 2026-11-26) | opus / high | FULL | W6 | UAC-r2 diff review | ✅ |
 | 066 | [Remove the "Add KPI Assessment" subgrid button (051 OQ-5)](066-remove-add-kpi-assessment-button.poml) | 051 OQ-5 (owner 2026-11-26) | sonnet / high | STANDARD | W6 | owner go for the dev import | ✅ |
+| 067 | [Copy the filing parent's mapped values whatever the caller can read on its columns; Repair copies field-secured values (owner 2026-11-27)](067-lift-caller-mask-for-filing-parent.poml) | FR-08 amendment (owner 2026-11-27) | opus / high | FULL | W6 | UAC-r2 diff review (C1–C7) | 🔲 |
 
 ## Phase 7 — W7 Record family service and Family tool (spec amendment 2026-10-27; design.md §12)
 
