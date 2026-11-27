@@ -200,6 +200,44 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_R4_TheRedactionKeepsEachEvidenceLinesKindAndRef_AndRemovesOnlyTextAndSource()
+    {
+        // Guard: redaction keeps kind and ref (privilege derivation reads them). WorkItemPrivilege.SourcesOf reads each stored line's `kind`
+        // and `ref` to find the communications whose classification flags a Decision Record as privileged (uac-r2 note on #3292), so a
+        // redaction that also dropped them would silently turn that flag false. Two lines: the witness the harness knows, and a second
+        // communication it does not (undetermined, so cleared too); a line of another kind has the same four properties.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001c5");
+        var signal = await SignalCreatedWithAnOrdinaryWitness(h, secureProject);
+        var otherCommunication = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001c6");
+        signal["sprk_evidencerefs"] =
+            "[{\"kind\":\"communication\",\"ref\":\"sprk_communication:" + Lower(CommunicationId) + "\",\"tier\":\"Fact\","
+            + "\"text\":\"Rate increase from Firm LLP\",\"source\":\"partner@firm.example\",\"asOf\":\"2026-10-05T09:15:00Z\",\"clause\":\"all[0]\"},"
+            + "{\"kind\":\"communication\",\"ref\":\"sprk_communication:" + Lower(otherCommunication) + "\",\"tier\":\"Fact\","
+            + "\"text\":\"Privileged advice\",\"source\":\"counsel@firm.example\",\"asOf\":\"2026-10-06T09:15:00Z\",\"clause\":\"all[1]\"}]";
+        signal["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+        signal["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionDismissed);
+        signal["sprk_resolvedon"] = RunAt.UtcDateTime.AddDays(-1);
+        h.Sysadmin.DeletePolicy(PolicyCode);
+        RefileTheWitnessUnder(h, secureProject);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ResultJson.Should().Contain("\"evidenceRedacted\":1");
+        var stored = h.Org.Rows[signal.Id].GetAttributeValue<string>("sprk_evidencerefs");
+        using var doc = System.Text.Json.JsonDocument.Parse(stored);
+        var lines = doc.RootElement.EnumerateArray().ToList();
+        lines.Should().HaveCount(2);
+        lines.Select(l => l.GetProperty("kind").GetString()).Should().Equal("communication", "communication");
+        lines.Select(l => l.GetProperty("ref").GetString()).Should().Equal(
+            $"sprk_communication:{Lower(CommunicationId)}", $"sprk_communication:{Lower(otherCommunication)}");
+        lines.Where(l => l.TryGetProperty("text", out var t) || l.TryGetProperty("source", out var src)).Should().BeEmpty(
+            "the detail is what is removed");
+        lines.Select(l => l.GetProperty("clause").GetString()).Should().Equal(new[] { "all[0]", "all[1]" }, "nothing else is touched");
+    }
+
+    [Fact]
     public async Task DeletedPolicyCodes_R4_ACodeThatStillExists_IsNotADeletedCode_WhateverTheSignalsStatus()
     {
         // Item 1, must-not-fire (the list itself): an Off policy's Signal with an empty lookup, created after the policy, is that policy's
