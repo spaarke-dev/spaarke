@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Documents;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Playbooks;
@@ -63,7 +64,7 @@ internal sealed class RunPlaybookTool : McpToolDefinition
     internal const int IdempotencyKeyMaxLength = 200;
 
     /// <summary>The most documents one run takes (constraint 3: bounds 007's sequential per-document checks).</summary>
-    internal const int MaxDocuments = 20;
+    internal const int MaxDocuments = PlaybookRunLimits.MaxDocuments;
 
     /// <summary>The most parameters one run takes (constraint 3).</summary>
     internal const int MaxParameters = 20;
@@ -349,6 +350,17 @@ internal sealed class RunPlaybookTool : McpToolDefinition
             { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code, Status: StatusCodes.Status403Forbidden }
                 when code == FinanceAuthorizationFilter.SystemFailureReasonCode => new McpToolError(
                 code, "Spaarke could not check access right now, so the JPS playbook run was not started. Try again shortly.", StatusCodes.Status403Forbidden),
+            // Task 037 review K-2: the owner rule's refusal (the analysis would be filed under a secure record) is not "may not create".
+            { Outcome: AnalysisStartOutcome.Refused, ReasonCode: SecureDesignationRemoval.NotPermittedReasonCode } => new McpToolError(
+                SecureDesignationRemoval.NotPermittedReasonCode,
+                "The JPS playbook run was not started: the analysis that holds its results would be filed under a secure record, and only "
+                + "someone with Full Access to that secure record can do that. Nothing is running.",
+                analysis.Status),
+            { Outcome: AnalysisStartOutcome.Refused, ReasonCode: SecureDesignationRemoval.PermissionUnverifiableReasonCode } => new McpToolError(
+                SecureDesignationRemoval.PermissionUnverifiableReasonCode,
+                "The JPS playbook run was not started: Spaarke could not confirm the signed-in user's access to the secure record that the "
+                + "analysis holding its results would be filed under. Nothing is running.",
+                analysis.Status),
             { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code, Status: StatusCodes.Status403Forbidden } => new McpToolError(
                 code,
                 "The JPS playbook run was not started: the signed-in user may not create the analysis that holds its results on the first "

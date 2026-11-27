@@ -218,6 +218,15 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
             return new PlaybookRunStartResult(PlaybookRunStartOutcome.Refused, authorization, null);
         }
 
+        // Task 037 review K-1: with AI off the engine is the null engine, so no run can start; answer Unavailable (what the launch would
+        // end in) BEFORE the create, so no empty analysis is left behind. The engine is resolved as ReadAsCallerAsync resolves it.
+        if (http.RequestServices?.GetService<IPlaybookOrchestrationService>() is NullPlaybookOrchestrationService)
+        {
+            _logger.LogInformation("Detached playbook run not started - Outcome: {Outcome}, CorrelationId: {CorrelationId}",
+                nameof(PlaybookRunStartOutcome.Unavailable), http.TraceIdentifier);
+            return new PlaybookRunStartResult(PlaybookRunStartOutcome.Unavailable, authorization, null);
+        }
+
         var analysis = await _analyses
             .StartAsCallerAsync(http, AnalysisNameOf(_time.GetUtcNow()), documentIds[0], playbookId, cancellationToken)
             .ConfigureAwait(false);

@@ -110,6 +110,19 @@ public sealed class PlaybookRunToolsContractTests
 
     // ---- task 037a (D-037-engine): the results analysis -----------------------------------------------------------------------------
 
+    [Theory(DisplayName = "037 review K-2: the owner rule's refusal (a secure record) keeps its code and status, with text that says so, not 'may not create'")]
+    [InlineData(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode, 403, "Full Access")]
+    [InlineData(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode, 403, "could not confirm")]
+    [InlineData(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode, 500, "could not confirm")]
+    public void Start_OwnerRuleRefusal_TextMatchesItsCode(string reasonCode, int status, string expected)
+    {
+        var error = RunPlaybookTool.ErrorOf(AnalysisStartResult.Failure(AnalysisStartOutcome.Refused, reasonCode, status, null));
+
+        error.ReasonCode.Should().Be(reasonCode);
+        error.Status.Should().Be(status);
+        error.Message.Should().Contain(expected).And.Contain("secure record").And.NotContain("may not create");
+    }
+
     [Theory(DisplayName = "037a refusal: a refused analysis create answers isError with the create's reasonCode and status; nothing runs, no retry key is kept")]
     [InlineData(AnalysisStartOutcome.Refused, "insufficient_rights", 403, "insufficient_rights")]
     [InlineData(AnalysisStartOutcome.Refused, "record_owner.unresolved", 409, "record_owner.unresolved")]
