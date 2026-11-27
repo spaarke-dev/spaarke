@@ -155,7 +155,7 @@ Also record (design G7, optional here): whether the skill appears in Cowork, and
 
 | # | Artifact | Kind | Owner project | Purpose | Scope | Removal | Sent (date, link) |
 |---|---|---|---|---|---|---|---|
-| G2-q1 | `spaarke-legal-g2-q1-test` (app id `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, v1.0.0, built 2026-11-26) | Package: one agent with the G5 action plus one marker `SKILL.md` | specialist-legal-agents-r1 | G2 Q1 | Owner + test user only, org catalog (R7) | Owner removes it when G2 is recorded | not yet (see "R4 row (to send)") |
+| G2-q1 | `spaarke-legal-g2-q1-test` (app id `7bcab05e-3d88-4006-96c9-545edfc5a6ee`, v1.0.0, built 2026-11-26) | Package: one agent with the G5 action plus one marker `SKILL.md` | specialist-legal-agents-r1 | G2 Q1 | Owner + test user only, org catalog (R7) | Owner removes it when G2 is recorded | 2026-11-26 (G1+G2 message to coordination) |
 | G2-q2 | `spaarke-legal-g2-q2-test` | **Not built.** The v1.30 schema allows one declarative agent per package (desk finding above) | specialist-legal-agents-r1 | G2 Q2 | n/a | n/a | **DROPPED (never uploaded)**, proposed; task 023 confirms |
 | G2-q3a / q3b | `spaarke-legal-g2-q3-core-test`, `spaarke-legal-g2-q3-practice-test` (app ids minted at build) | Two small packages; practice declares a dependency on core if a mechanism exists | specialist-legal-agents-r1 | G2 Q3 | As above | As above | |
 

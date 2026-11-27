@@ -36,18 +36,18 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 | Function | Expected tool name (from `tools/list`) |
 |---|---|
 | NDA review | `spike_review_nda` (task 011; confirm against `tools/list` or the smoke prompt) |
-| Agreement review | `spike_review_agreement` (routing stub, spike `5cd40984b0`; confirm against `tools/list`) |
-| Legal hold review | `spike_review_legal_hold` (routing stub, spike `5cd40984b0`; confirm against `tools/list`) |
+| Agreement review | `spike_review_agreement` (routing stub, spike `5cd40984b0`; in dev `tools/list` 2026-11-27) |
+| Legal hold review | `spike_review_legal_hold` (routing stub, spike `5cd40984b0`; in dev `tools/list` 2026-11-27) |
 
 #### Status of the function tools (updated 2026-11-27)
 
-- **Owner decision 2026-11-26 ("Yes proceed"): add the two stub tools.** They are built on the spike branch (commit `5cd40984b0`, never merged) and are **not on dev yet**. They need the owner's per-SHA go in the uac-r2 session and a uac-r2 dev deploy; until then dev (`d307d67e36`) has only `spike_review_nda` among the three functions.
+- **Owner decision 2026-11-26 ("Yes proceed"): add the two stub tools.** They are on the spike branch (commit `5cd40984b0`, never merged). **Live on dev since 2026-11-27 ~13:14Z** (owner go in uac-r2; uac-r2 hash-verified the dll, `/healthz` 200). `tools/list` on `/mcp/legal-operations` returned 9 tools, including `spike_get_profile`, `spike_review_nda`, `spike_review_agreement` and `spike_review_legal_hold`. Rollback target `d307d67e36`. uac-r2's 30-minute gate result is due about 13:45Z.
 - `spike_get_profile` is a profile fetch, not a function. It never counts as one and never answers a G5 prompt correctly.
 - **What the stubs do.** Each is read-only and model-visible, takes one required `documentText` argument, resolves the caller fail closed (as the other spike tools: `CALLER_UNRESOLVED`, `CALLER_LOOKUP_FAILED`, `AI_DISABLED`), and returns a fixed acknowledgement: "the {function} function was reached … This is a test stub: it did not review the document". `structuredContent.stub` is `g5-routing-stub`. No Action, model, profile or Dataverse write. The BFF logs one line per call under the tool's own name (BR-7 evidence).
 - **The three descriptions split the prompt set.** `spike_review_nda` now claims NDAs and confidentiality agreements, mutual or one-way (N-02, N-08, N-10), and excludes other agreement types and legal hold notices; the agreement stub excludes NDAs and confidentiality agreements; the legal hold stub excludes NDAs and other agreements. A branch test pins this.
 - **The package needs no change.** It uses dynamic discovery (BR-5), and its instructions describe the three functions by purpose, not by tool name. Record the tool names above from `tools/list`, then run the smoke prompt.
 - **FR-05 column.** The stubs return an instruction ("tell the user in one sentence … do not review the document yourself and do not call another tool"); record whether the agent followed it for A and H prompts. `spike_review_nda` returns no instruction block, so N prompts are "n.a.".
-- Until the stubs are live on dev, do not run G5; if the owner runs it anyway, score only N and C prompts and record "no tool on dev" for A and H.
+- If dev is ever rolled back below `5cd40984b0`, the stubs are gone: do not run G5 then; if the owner runs it anyway, score only N and C prompts and record "no tool on dev" for A and H.
 
 #### The package (task 020)
 
@@ -99,7 +99,7 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 | G5-a | `spaarke-legal-g5-area-test` (app id `f7af4143-02b0-4912-b3ee-e73b0e202422`, v1.0.0, built 2026-11-26 by task 020) | App package, one declarative agent, one MCP action on `/mcp/legal-operations`, A1 `reference_id`, dynamic discovery | specialist-legal-agents-r1 | Phase 0 G5: three-function routing | Owner + test user only (R7), org catalog | Owner removes it in admin center when the G5 result is recorded; removal date set when the row is sent |
 | G5-b | *Spaarke Legal Review* (existing) | **No change.** Read only: confirm instructions, send prompts | accelerator r1 (owner of the agent) | G5 baseline | Existing scope | None |
 
-R4 row sent: **not yet** (2026-11-27). The owner chose the stub tools; the row is sent once they are live on dev, and there is no upload before it is sent.
+R4 row sent: **2026-11-27** to COPILOT-PLATFORM-COORDINATION (session message, after the stubs went live on dev). The row below is the text sent. The upload is the owner's, after coordination records the row.
 
 #### R4 row (to send)
 

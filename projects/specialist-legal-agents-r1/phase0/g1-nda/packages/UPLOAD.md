@@ -71,7 +71,8 @@ These carry **no action**: they use the tenant connector "Spaarke MCP", which ea
 
 1. On the agent's **Data & tools** tab, look for the banner "This MCP server uses other tools, which may be changed by the publisher: ..." naming the package's action. Screenshot it. (Dynamic discovery shows this banner; V2 did.)
 2. Open the agent in Chat, in a new chat, as the owner. Send exactly: `List every tool and source you can use in this conversation`
-   - **G1 agents and G5:** the list must include `spike_get_profile` and `spike_review_nda`. It may also list `spaarke_show_decisions`.
+   - **G1 agents and G5:** the list must include `spike_get_profile` and `spike_review_nda`. It may also list `spaarke_show_decisions`, `spike_review_agreement` and `spike_review_legal_hold` (on dev since 2026-11-27).
+   - **G5 only:** the list must also include `spike_review_agreement` and `spike_review_legal_hold`.
    - **G2 agent:** same tools, and the skill `spaarke-test-g2-marker` may be named.
 3. If the tools are missing, **wait 10 minutes and ask once more in a new chat**. If they are still missing, stop and tell the session. Do not upload a corrected zip over it.
 4. Repeat step 2 as `demo@`. If `demo@` is asked to sign in, sign in with the demo account; that is expected on a first use.
@@ -82,7 +83,7 @@ These carry **no action**: they use the tenant connector "Spaarke MCP", which ea
 
 For each package: the time of the upload (to the minute, UTC), the screenshot of the Data & tools banner or the `/` list, and the answer to the "List every tool" prompt. The session records the install date in `phase0/README.md` and checks App Insights for the `tools/list` call. It will not mark anything installed until you confirm it.
 
-**Known gap for G5 (read before uploading row 4):** only one function tool exists on dev today (`spike_review_nda`, NDA review). The agreement review and legal hold review functions have no tool yet, so the G5 run cannot start until the session adds them (see `g5/README.md`, "Status of the function tools"). You can upload row 4 now: with dynamic discovery, tools added later on the server reach it without a package change. If you would rather wait until the tools exist, upload it then.
+**G5 tools (closed 2026-11-27):** all three function tools are on dev since about 13:14Z on 2026-11-27 (spike `5cd40984b0`): `spike_review_nda` plus the routing stubs `spike_review_agreement` and `spike_review_legal_hold`. The G5 R4 row was sent the same day, so row 4 can be uploaded like the others. See `g5/README.md`, "Status of the function tools".
 
 ## Removal (later, at task 031)
 
