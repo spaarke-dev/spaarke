@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-27 ~13:50Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-27 ~14:20Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -16,11 +16,8 @@
 | **Dev SPA** | 24d53fb333 (spa-r4, 15:50Z). |
 | **Agents running** | None. |
 
-## Active: #3245 Assign removal (owner: "Approve, keep D-160", 2026-11-26)
-- Audit note `notes/assign-privilege-audit-2026-11-26.md` (work branch 9a206976fc; also in the PR). Findings + peer answers commented on #3245.
-- **PR #3269** (`fix/3245-person-role-assign-removal`, worktree `C:\wtasg`, commit b85f923fba, bound to this session): removes 38 Assign grants (Core User 25 — keeps `sprk_Event`; Office Add In User 9; AI Analysis User 4); config `removals` gap `ASSIGN-3245` (124 total); 2 MustNotHold rules; ASSIGN-3245 pending for the release after 1.3.3.0; CoreUserWizardLinkingGuardTests pin updated. Local: role guards 100/100, full arch 2845/2845. **MERGED ~22:20Z as 50bdad697c** (Router + Client lint green; only the advisory api-insights-integration timed out).
-- **NEXT (owner's go needed in this session):** live dev `scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove -Gap ASSIGN-3245` (dry run first, then `-Apply`, then `-Remove -Verify`); rollback `-Restore -Gap ASSIGN-3245 -Apply`. Also remove the Workforce role's 8 inert Assign grants live (no role file). Re-run `scratchpad/asg2.ps1` and check. Then close #3245.
-- Kept by owner: AI Analysis Admin (rounds 124/127), Ontology Service (DecisionRecord/BudgetRevision/Signal), Ontology Administrator Signal (D-160).
+## DONE: #3245 Assign removal — CLOSED 2026-11-27
+- PR #3269 merged (50bdad697c). Applied on dev 2026-11-27 on the owner's go ("Yes, apply it"): 38 removals, `-Remove -Verify` PASS; Workforce role's 8 `prvAssignsprk_*` removed live (root + 6 BU copies read back 0; platform Assign privileges untouched). Audit re-run = kept set only. Result + rollbacks commented on #3245 (issuecomment-7220860295). Other environments: ASSIGN-3245 ships with the release after 1.3.3.0; the Workforce 8 need the same manual removal there.
 
 ## Open peer reviews (uac-r2 as access gate)
 - **mcp-r1 ISS-010 Part C: PR #3272** (head 18be14d973; the kill-switch fix was re-checked and approved; the PR quotes both approval lines). mcp-r1 merges it. Part E #3260 is MERGED to master as 4d69bf527e and NOT deployed. **NEXT: review the Part D1 diff when it is built.**
