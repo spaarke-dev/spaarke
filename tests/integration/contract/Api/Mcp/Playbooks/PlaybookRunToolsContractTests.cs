@@ -108,6 +108,64 @@ public sealed class PlaybookRunToolsContractTests
         world.Engine.Verify(e => e.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()), Times.Once());
     }
 
+    // ---- task 037a (D-037-engine): the results analysis -----------------------------------------------------------------------------
+
+    [Theory(DisplayName = "037a refusal: a refused analysis create answers isError with the create's reasonCode and status; nothing runs, no retry key is kept")]
+    [InlineData(AnalysisStartOutcome.Refused, "insufficient_rights", 403, "insufficient_rights")]
+    [InlineData(AnalysisStartOutcome.Refused, "record_owner.unresolved", 409, "record_owner.unresolved")]
+    [InlineData(AnalysisStartOutcome.Failed, AnalysisStartReasonCodes.CreateFailed, 500, AnalysisStartReasonCodes.CreateFailed)]
+    [InlineData(AnalysisStartOutcome.Failed, null, 500, AnalysisStartReasonCodes.CreateFailed)]
+    public async Task Start_AnalysisRefused_IsErrorWithTheCreatesCode(AnalysisStartOutcome outcome, string? reasonCode, int status, string expectedCode)
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        world.Analyses
+            .Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnalysisStartResult.Failure(outcome, reasonCode, status, null));
+        var arguments = new { playbookId, documentIds = new[] { documentId }, idempotencyKey = "refused-037a" };
+
+        var refused = await world.RunToolAsync(world.CallerContext(), arguments);
+
+        refused.IsError.Should().BeTrue();
+        Body(refused).GetProperty("reasonCode").GetString().Should().Be(expectedCode);
+        Body(refused).GetProperty("status").GetInt32().Should().Be(status);
+        Text(refused).Should().Contain("JPS playbook run was not started");
+        world.VerifyNothingStarted();
+
+        // No retry key was kept: once the analysis can be created, the same key starts the run.
+        world.Analyses
+            .Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnalysisStartResult.Created(PlaybookRunWorld.AnalysisId, 0));
+        var retried = await world.RunToolAsync(world.CallerContext(), arguments);
+        retried.IsError.Should().NotBe(true, retried.StructuredContent?.ToString());
+        world.Calls.Single().Request.AnalysisId.Should().Be(PlaybookRunWorld.AnalysisId);
+    }
+
+    [Fact(DisplayName = "037a security: no tool argument sets the run's AnalysisId; an `analysisId` argument is refused (mcp.invalid_argument) and is not in the schema")]
+    public async Task Start_AnalysisIdArgument_IsRefused()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+
+        var refused = await world.RunToolAsync(world.CallerContext(), new
+        {
+            playbookId,
+            documentIds = new[] { documentId },
+            idempotencyKey = "aid-037a",
+            analysisId = Guid.NewGuid(),
+        });
+
+        refused.IsError.Should().BeTrue();
+        Body(refused).GetProperty("reasonCode").GetString().Should().Be(DocumentToolSupport.InvalidArgumentReasonCode);
+        world.VerifyNothingStarted();
+        world.Analyses.Verify(
+            a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never());
+        var tool = new RunPlaybookTool().Create(new ServiceCollection().BuildServiceProvider()).ProtocolTool;
+        tool.InputSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("analysis", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ---- task 038: the optional `instructions` argument (owner decision Q18) ------------------------------------------------------
 
     /// <summary>A marker inside the instructions: it must never reach a log, a cache entry, a tool result or a stored record (NFR-05, ADR-015).</summary>

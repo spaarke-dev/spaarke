@@ -111,6 +111,84 @@ public sealed class DetachedPlaybookRunnerTests
         world.Graph.Verify(g => g.ForUserAsync(It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 
+    // ---- task 037a (D-037-engine): the caller's analysis, created before the run -------------------------------------------------
+
+    [Fact(DisplayName = "037a: the start creates the caller's analysis on the FIRST document, before the run; the run gets its id and its records are linked to it")]
+    public async Task Start_CreatesTheCallersAnalysisFirst_AndHandsTheRunItsId()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var documents = new[] { documentId, world.Host.ReadableDocument() };
+        var http = world.CallerContext();
+        var runsBeforeCreate = -1;
+        world.Analyses
+            .Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => runsBeforeCreate = world.Calls.Count)
+            .ReturnsAsync(AnalysisStartResult.Created(PlaybookRunWorld.AnalysisId, 0));
+
+        var started = await world.Runs.StartAsCallerAsync(http, playbookId, documents, null, null, CancellationToken.None);
+
+        started.Outcome.Should().Be(PlaybookRunStartOutcome.Started);
+        started.Analysis!.AnalysisId.Should().Be(PlaybookRunWorld.AnalysisId);
+        runsBeforeCreate.Should().Be(0, "the analysis is created before the run starts");
+        world.Analyses.Verify(a => a.StartAsCallerAsync(
+            http, DetachedPlaybookRunner.AnalysisNameOf(world.Time.GetUtcNow()), documentId, playbookId, It.IsAny<CancellationToken>()), Times.Once());
+        var call = world.Calls.Single();
+        call.Request.AnalysisId.Should().Be(PlaybookRunWorld.AnalysisId, "the id comes from the create, and only from it");
+        call.LinkedAnalysis.Should().Be(PlaybookRunWorld.AnalysisId, "the run's scope writes its records regarding the analysis");
+    }
+
+    [Theory(DisplayName = "037a refusal: a refused or failed analysis create starts nothing and answers AnalysisRefused with the create's outcome")]
+    [InlineData(AnalysisStartOutcome.Refused, "insufficient_rights", 403)]
+    [InlineData(AnalysisStartOutcome.Refused, "record_owner.unresolved", 409)]
+    [InlineData(AnalysisStartOutcome.Failed, AnalysisStartReasonCodes.CreateFailed, 500)]
+    public async Task Start_AnalysisCreateRefused_StartsNothing(AnalysisStartOutcome outcome, string reasonCode, int status)
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+        var refused = AnalysisStartResult.Failure(outcome, reasonCode, status, null);
+        world.Analyses
+            .Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(refused);
+
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+
+        started.Outcome.Should().Be(PlaybookRunStartOutcome.AnalysisRefused);
+        started.Run.Should().BeNull();
+        started.Analysis.Should().BeSameAs(refused);
+        world.VerifyNothingStarted();
+
+        // The caller's per-run reservation is released: a later start is not counted against a run that never began.
+        world.Analyses
+            .Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AnalysisStartResult.Created(PlaybookRunWorld.AnalysisId, 0));
+        for (var i = 0; i < PlaybookRunLimits.MaxConcurrentRunsPerCaller; i++)
+        {
+            (await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None))
+                .Outcome.Should().Be(PlaybookRunStartOutcome.Started);
+        }
+    }
+
+    [Fact(DisplayName = "037a order: a 007 refusal or a failed pre-warm creates no analysis")]
+    public async Task Start_RefusedBeforeTheCreate_CreatesNoAnalysis()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync();
+        var (playbookId, documentId) = world.AllowedRun();
+
+        (await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [], null, null, CancellationToken.None))
+            .Outcome.Should().Be(PlaybookRunStartOutcome.Refused);
+
+        world.DataverseUser.Setup(d => d.GetAsync("WhoAmI", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.OboExchangeFailed, "refused"));
+        (await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None))
+            .Outcome.Should().Be(PlaybookRunStartOutcome.AuthUnavailable);
+
+        world.Analyses.Verify(
+            a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never());
+        world.VerifyNothingStarted();
+    }
+
     // ---- condition 5: bounded --------------------------------------------------------------------------------------------------
 
     [Fact(DisplayName = "030 bounded: an engine that never accepts the run within the 5 s budget is NotAccepted, and its run is cancelled")]

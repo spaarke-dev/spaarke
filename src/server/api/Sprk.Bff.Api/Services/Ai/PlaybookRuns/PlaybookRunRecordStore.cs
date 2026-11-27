@@ -77,6 +77,9 @@ public sealed class PlaybookRunRecordStore
     internal const string SystemUserEntity = "systemuser";
     internal const string SystemUserOidColumn = "azureactivedirectoryobjectid";
 
+    /// <summary>The table a linked run is regarding (task 037a).</summary>
+    internal const string AnalysisEntity = "sprk_analysis";
+
     private const int NameMaxLength = 200;
     private const int ShortTextMaxLength = 100;
     private const int SummaryMaxLength = 4000;
@@ -90,6 +93,9 @@ public sealed class PlaybookRunRecordStore
     private static readonly JsonSerializerOptions InputContextJson = new(JsonSerializerDefaults.Web);
 
     private readonly IGenericEntityService _dataverse;
+
+    /// <summary>Task 037a: the analysis this scope's runs are regarding (<see cref="LinkRunsToAnalysis"/>).</summary>
+    private Guid? _linkedAnalysis;
 
     public PlaybookRunRecordStore(IGenericEntityService dataverse)
     {
@@ -148,7 +154,9 @@ public sealed class PlaybookRunRecordStore
             entity[CorrelationIdColumn] = Truncate(run.CorrelationId, ShortTextMaxLength);
         }
 
-        if (run.Regarding is { } regarding)
+        // Task 037a: a run linked to its analysis is regarding that analysis, whatever record parameter it was given
+        // (037-decisions §4, "both present": the analysis wins).
+        if ((_linkedAnalysis is { } analysisId ? new PlaybookRunRegarding(AnalysisEntity, analysisId) : run.Regarding) is { } regarding)
         {
             entity[RegardingEntityTypeColumn] = Truncate(regarding.EntityLogicalName, ShortTextMaxLength);
             entity[RegardingRecordIdColumn] = regarding.RecordId.ToString("D");
@@ -156,6 +164,35 @@ public sealed class PlaybookRunRecordStore
 
         return _dataverse.UpsertAsync(entity, cancellationToken);
     }
+
+    /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine): every run this store writes from now on, in this scope, is regarding the
+    /// analysis <paramref name="analysisId"/> (<c>sprk_regardingentitytype</c> = <c>sprk_analysis</c>,
+    /// <c>sprk_regardingrecordid</c> = its id), in place of the record the run's parameters name.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>DetachedPlaybookRunner</c> calls it, on the detached run's own scope, with the analysis it has just created for the caller
+    /// (<c>PlaybookRunAnalysisIdGuardTests</c>). The store is scoped, so the link never reaches another request's runs; a run the engine
+    /// starts inside the same run (the legacy wrapper's) is that analysis's run too. Set once: a second, different id is a programming
+    /// error and throws.
+    /// </remarks>
+    internal void LinkRunsToAnalysis(Guid analysisId)
+    {
+        if (analysisId == Guid.Empty)
+        {
+            throw new ArgumentException("The analysis id is empty.", nameof(analysisId));
+        }
+
+        if (_linkedAnalysis is { } linked && linked != analysisId)
+        {
+            throw new InvalidOperationException("This scope's runs are already linked to another analysis.");
+        }
+
+        _linkedAnalysis = analysisId;
+    }
+
+    /// <summary>The analysis this scope's runs are linked to (<see cref="LinkRunsToAnalysis"/>), if any.</summary>
+    internal Guid? LinkedAnalysis => _linkedAnalysis;
 
     /// <summary>Creates one <c>sprk_playbooknoderun</c> row for a node the run reached.</summary>
     public Task CreateNodeRunAsync(PlaybookNodeRunRecord node, CancellationToken cancellationToken)

@@ -131,6 +131,71 @@ public sealed class PlaybookRunPersistenceTests
         nodeRow.GetAttributeValue<string>("sprk_errormessage").Should().Be("model refused");
     }
 
+    // ── Task 037a (D-037-engine): a run linked to its analysis ───────────────────────────────────────────────────
+
+    [Fact(DisplayName = "037a regarding: a run whose scope is linked to an analysis is regarding sprk_analysis on every write, even with a matterId parameter (the analysis wins)")]
+    public async Task ExecuteAsync_LinkedToAnalysis_RegardingIsTheAnalysis_OverTheRecordParameter()
+    {
+        TwoSequentialNodes();
+        var analysisId = Guid.Parse("a7a1a5e5-0037-4037-8037-000000000037");
+        var service = NewService(_dataverse, configureStore: store => store.LinkRunsToAnalysis(analysisId));
+
+        var runId = await RunAsync(service); // the request carries matterId = MatterId
+
+        var runWrites = _dataverse.Writes.Where(e => e.LogicalName == "sprk_playbookrun").ToList();
+        runWrites.Should().HaveCount(2);
+        runWrites.Should().OnlyContain(w =>
+            w.GetAttributeValue<string>("sprk_regardingentitytype") == "sprk_analysis"
+            && w.GetAttributeValue<string>("sprk_regardingrecordid") == analysisId.ToString("D"));
+        var row = _dataverse.Row("sprk_playbookrun", runId);
+        row.GetAttributeValue<string>("sprk_regardingentitytype").Should().Be("sprk_analysis");
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(analysisId.ToString("D"));
+    }
+
+    [Fact(DisplayName = "037a regarding: a store with no link writes the run's own regarding, and none when the run has none (unchanged)")]
+    public async Task WriteRunAsync_NoLink_WritesTheRunsOwnRegarding()
+    {
+        var store = new PlaybookRunRecordStore(_dataverse);
+        store.LinkedAnalysis.Should().BeNull();
+        var withRecord = Guid.NewGuid();
+        var withoutRecord = Guid.NewGuid();
+
+        await store.WriteRunAsync(Record(withRecord) with { Regarding = new PlaybookRunRegarding("sprk_matter", MatterId) }, CancellationToken.None);
+        await store.WriteRunAsync(Record(withoutRecord), CancellationToken.None);
+
+        _dataverse.Row("sprk_playbookrun", withRecord).GetAttributeValue<string>("sprk_regardingentitytype").Should().Be("sprk_matter");
+        _dataverse.Row("sprk_playbookrun", withRecord).GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(MatterId.ToString("D"));
+        _dataverse.Row("sprk_playbookrun", withoutRecord).Contains("sprk_regardingentitytype").Should().BeFalse();
+        _dataverse.Row("sprk_playbookrun", withoutRecord).Contains("sprk_regardingrecordid").Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "037a regarding: a linked store writes sprk_analysis for a run with no regarding too; the link is set once (same id again is a no-op, another id or empty throws)")]
+    public async Task LinkRunsToAnalysis_SetOnce()
+    {
+        var store = new PlaybookRunRecordStore(_dataverse);
+        var analysisId = Guid.NewGuid();
+        store.LinkRunsToAnalysis(analysisId);
+        store.LinkRunsToAnalysis(analysisId);
+
+        var runId = Guid.NewGuid();
+        await store.WriteRunAsync(Record(runId), CancellationToken.None);
+
+        _dataverse.Row("sprk_playbookrun", runId).GetAttributeValue<string>("sprk_regardingentitytype").Should().Be("sprk_analysis");
+        _dataverse.Row("sprk_playbookrun", runId).GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(analysisId.ToString("D"));
+        store.Invoking(s => s.LinkRunsToAnalysis(Guid.NewGuid())).Should().Throw<InvalidOperationException>();
+        new PlaybookRunRecordStore(_dataverse).Invoking(s => s.LinkRunsToAnalysis(Guid.Empty)).Should().Throw<ArgumentException>();
+        store.LinkedAnalysis.Should().Be(analysisId);
+    }
+
+    private PlaybookRunRecord Record(Guid runId) => new()
+    {
+        RunId = runId,
+        PlaybookId = _playbookId,
+        State = PlaybookRunState.Running,
+        StartedAt = new DateTimeOffset(2026, 11, 27, 9, 0, 0, TimeSpan.Zero),
+        DocumentIds = [],
+    };
+
     [Fact]
     public async Task ExecuteAppOnlyAsync_SystemRun_WritesNoRows()
     {
@@ -393,7 +458,8 @@ public sealed class PlaybookRunPersistenceTests
         InMemoryDataverse? dataverse,
         string? reader = null,
         bool readerHasHttpContext = true,
-        ILogger<PlaybookOrchestrationService>? logger = null)
+        ILogger<PlaybookOrchestrationService>? logger = null,
+        Action<PlaybookRunRecordStore>? configureStore = null)
     {
         var accessor = new HttpContextAccessor { HttpContext = readerHasHttpContext ? CallerContext(reader ?? CallerOid) : null };
 
@@ -406,8 +472,15 @@ public sealed class PlaybookRunPersistenceTests
             new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             logger ?? NullLogger<PlaybookOrchestrationService>.Instance,
             contextEventEmitter: null,
-            runRecordStore: dataverse is null ? null : new PlaybookRunRecordStore(dataverse),
+            runRecordStore: dataverse is null ? null : NewStore(dataverse, configureStore),
             httpContextAccessor: accessor);
+    }
+
+    private static PlaybookRunRecordStore NewStore(InMemoryDataverse dataverse, Action<PlaybookRunRecordStore>? configure)
+    {
+        var store = new PlaybookRunRecordStore(dataverse);
+        configure?.Invoke(store);
+        return store;
     }
 
     private async Task<Guid> RunAsync(PlaybookOrchestrationService service) => (await RunCollectingAsync(service)).RunId;

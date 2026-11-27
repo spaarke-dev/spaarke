@@ -140,13 +140,24 @@ public enum PlaybookRunStartOutcome
 
     /// <summary>The caller already has <see cref="PlaybookRunLimits.MaxConcurrentRunsPerCaller"/> runs running in this process. Nothing ran.</summary>
     RunLimit,
+
+    /// <summary>
+    /// Task 037a (D-037-engine): the analysis that holds the run's results could not be created for the caller on the run's first document;
+    /// <see cref="PlaybookRunStartResult.Analysis"/> carries the create's outcome, status and <c>reasonCode</c>. Nothing ran.
+    /// </summary>
+    AnalysisRefused,
 }
 
 /// <summary>The answer to a start.</summary>
 /// <param name="Outcome">How the start ended.</param>
 /// <param name="Authorization">Task 007's decision (null when the start never reached it).</param>
 /// <param name="Run">The run, when <see cref="PlaybookRunStartOutcome.Started"/>.</param>
-public sealed record PlaybookRunStartResult(PlaybookRunStartOutcome Outcome, PlaybookRunAuthorization? Authorization, PlaybookRunView? Run);
+/// <param name="Analysis">
+/// Task 037a: the analysis created for the run's results (when <see cref="PlaybookRunStartOutcome.Started"/>), or the refused create (when
+/// <see cref="PlaybookRunStartOutcome.AnalysisRefused"/>); <c>null</c> when the start never reached the create.
+/// </param>
+public sealed record PlaybookRunStartResult(
+    PlaybookRunStartOutcome Outcome, PlaybookRunAuthorization? Authorization, PlaybookRunView? Run, AnalysisStartResult? Analysis = null);
 
 /// <summary>
 /// The one seam through which a host other than the REST run routes starts and reads a JPS playbook run (spaarkeai-mcp-bff-api-r2
@@ -156,7 +167,10 @@ public sealed record PlaybookRunStartResult(PlaybookRunStartOutcome Outcome, Pla
 /// <para><b>Start.</b> Authorizes with task 007's <see cref="PlaybookAuthorizationFilter.AuthorizePlaybookRunAsync"/> inside the caller's
 /// request, then runs the playbook through the engine's own person-run entry as a detached caller run (ADR-052 amendment 2026-11-26): the
 /// run continues after the request has answered, acting as the caller, capped at <see cref="PlaybookRunLimits.MaxRunDuration"/>. It returns
-/// once the engine has accepted the run, never waiting for it to finish.</para>
+/// once the engine has accepted the run, never waiting for it to finish. Task 037a (D-037-engine): after the authorization and the pre-warm,
+/// and before the run starts, it creates the caller's analysis on the run's first document (<see cref="IAnalysisStartAi"/>, the route's
+/// create); the run saves its output there and its record is regarding it. A refused create starts nothing
+/// (<see cref="PlaybookRunStartOutcome.AnalysisRefused"/>).</para>
 /// <para><b>Read.</b> A run this process is running, else the engine's own status read (in memory, then task 005's durable record), for
 /// the caller who started it only. Another caller's run and an unknown id both read as <c>null</c>.</para>
 /// </remarks>

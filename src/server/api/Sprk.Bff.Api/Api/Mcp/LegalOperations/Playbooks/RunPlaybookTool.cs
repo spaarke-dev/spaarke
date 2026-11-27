@@ -325,7 +325,36 @@ internal sealed class RunPlaybookTool : McpToolDefinition
                 "The signed-in user already has the most JPS playbook runs running at once. Nothing new was started. Wait for a run to "
                 + $"finish (check it with {GetPlaybookRunTool.ToolName}), then try again.",
                 StatusCodes.Status429TooManyRequests),
+            PlaybookRunStartOutcome.AnalysisRefused => ErrorOf(started.Analysis),
             _ => StartFailed,
+        };
+
+    /// <summary>
+    /// Task 037a: a start whose results analysis could not be created (nothing ran). The create's own code and status (the
+    /// <c>POST /api/ai/analysis/create</c> route's, as <c>spaarke_start_analysis</c> answers them), with fixed text (ADR-015).
+    /// </summary>
+    internal static McpToolError ErrorOf(AnalysisStartResult? analysis) =>
+        analysis switch
+        {
+            { Outcome: AnalysisStartOutcome.UserContextRequired } => DocumentToolSupport.UserContextRequired,
+            { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code, Status: StatusCodes.Status403Forbidden }
+                when code == FinanceAuthorizationFilter.SystemFailureReasonCode => new McpToolError(
+                code, "Spaarke could not check access right now, so the JPS playbook run was not started. Try again shortly.", StatusCodes.Status403Forbidden),
+            { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code, Status: StatusCodes.Status403Forbidden } => new McpToolError(
+                code,
+                "The JPS playbook run was not started: the signed-in user may not create the analysis that holds its results on the first "
+                + "document. Nothing is running.",
+                StatusCodes.Status403Forbidden),
+            { Outcome: AnalysisStartOutcome.Refused, ReasonCode: { } code } => new McpToolError(
+                code,
+                "The JPS playbook run was not started: Spaarke could not decide who owns the analysis that holds its results. Contact your "
+                + "administrator.",
+                analysis.Status),
+            _ => new McpToolError(
+                AnalysisStartReasonCodes.CreateFailed,
+                "The JPS playbook run was not started: the analysis that holds its results could not be created. Nothing is running; try "
+                + "again shortly.",
+                StatusCodes.Status500InternalServerError),
         };
 
     /// <summary>A refusal of task 007's method as a tool error: the REST reasonCode and status, fixed text (ADR-015).</summary>
