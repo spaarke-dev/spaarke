@@ -17,7 +17,8 @@ import * as path from 'path';
 import * as React from 'react';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import { TodoDetail, TODO_ASSIGNED_TO_ENTITY_SET, INQUIRY_TODO_CLOSE_MESSAGE } from '../TodoDetail';
+import { TodoDetail, TODO_ASSIGNED_TO_ENTITY_SET } from '../TodoDetail';
+import { INQUIRY_TODO_CLOSE_MESSAGE } from '../types';
 import type { ITodoRecord, ITodoFieldUpdates } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────

@@ -108,6 +108,13 @@ jobs:
           npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
 
+      # spaarkeai-mcp-bff-api-r2 task 037c (FR-16, NFR-03): the playbook run widget, embedded the same way (ui://spaarke/playbook-run.html).
+      - name: 'Build the Spaarke playbook run widget (size gate: fails above 3 MB)'
+        working-directory: src/client/widgets/spaarke-playbook-run
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
       - name: Build
         run: dotnet build ${{ env.API_PROJECT }} -c Release --no-restore
 
@@ -146,6 +153,16 @@ jobs:
             exit 1
           fi
           echo "Search results widget is embedded."
+
+      - name: Verify the playbook run widget is embedded in the published BFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -aq "Sprk.Bff.Api.Widgets.playbook-run.html" ./publish/Sprk.Bff.Api.dll; then
+            echo "::error::The published Sprk.Bff.Api.dll does not embed the playbook run widget (Sprk.Bff.Api.Widgets.playbook-run.html). The widget build step did not produce src/client/widgets/spaarke-playbook-run/dist/index.html."
+            exit 1
+          fi
+          echo "Playbook run widget is embedded."
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6

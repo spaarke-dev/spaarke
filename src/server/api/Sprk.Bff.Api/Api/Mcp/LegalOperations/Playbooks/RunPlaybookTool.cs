@@ -46,6 +46,9 @@ internal sealed class RunPlaybookTool : McpToolDefinition
 {
     internal const string ToolName = "spaarke_run_playbook";
 
+    /// <summary>The widget the tool's descriptor points at (<c>_meta.ui.resourceUri</c>, task 037c).</summary>
+    internal const string WidgetUri = PlaybookRunWidgetResource.Uri;
+
     internal const string PlaybookIdArgument = "playbookId";
 
     internal const string DocumentIdsArgument = "documentIds";
@@ -162,6 +165,12 @@ internal sealed class RunPlaybookTool : McpToolDefinition
                 Idempotent = true,
                 Destructive = false,
                 OpenWorld = false,
+                // MCP Apps (task 037c): the playbook run widget renders the run. Only the descriptor changes; the text and structuredContent
+                // are unchanged (frozen in PlaybookRunToolsContractTests).
+                Meta = new JsonObject
+                {
+                    ["ui"] = new JsonObject { ["resourceUri"] = WidgetUri },
+                },
             });
 
         // The input schema is stated, not inferred; the handler reads the raw arguments against the same closed set.

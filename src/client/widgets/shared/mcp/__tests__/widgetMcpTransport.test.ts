@@ -312,6 +312,11 @@ describe('shared widget source guard', () => {
         'spaarke-decisions/src/App.tsx',
         'spaarke-decisions/src/lane/DecideLane.tsx',
         'spaarke-decisions/src/wizard/WizardDialog.tsx',
+        // r2 task 037c: the playbook run widget (it polls and reads results through the transport only).
+        'spaarke-playbook-run/src/App.tsx',
+        'spaarke-playbook-run/src/run/useRunController.ts',
+        'spaarke-playbook-run/src/run/playbookRun.ts',
+        'spaarke-playbook-run/src/run/markdown.tsx',
       ])
     );
   });

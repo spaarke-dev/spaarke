@@ -183,9 +183,11 @@ public sealed class InquiryDispositionService(
         {
             if (property.Value.ValueKind != JsonValueKind.Number || !property.Value.TryGetInt64(out var value))
                 continue;
-            if (string.Equals(property.Name, "statecode", StringComparison.OrdinalIgnoreCase) && value == StateInactive)
+            // Trimmed as DataverseWriteItemMapper.MapCoreAsync trims column names (task 234 K4): " statecode" still closes it.
+            var name = property.Name.Trim();
+            if (string.Equals(name, "statecode", StringComparison.OrdinalIgnoreCase) && value == StateInactive)
                 return true;
-            if (string.Equals(property.Name, "statuscode", StringComparison.OrdinalIgnoreCase)
+            if (string.Equals(name, "statuscode", StringComparison.OrdinalIgnoreCase)
                 && value is TodoStatusCompleted or TodoStatusDismissed)
                 return true;
         }

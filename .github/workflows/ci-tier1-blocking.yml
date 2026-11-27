@@ -221,6 +221,7 @@ jobs:
               - 'src/client/widgets/spaarke-decisions/**'
               - 'src/client/widgets/spaarke-briefing/**'
               - 'src/client/widgets/spaarke-search-results/**'
+              - 'src/client/widgets/spaarke-playbook-run/**'
               - 'src/client/widgets/shared/**'
               - 'src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**'
               # The briefing widget's build shims re-export deep paths of the shared library, so a change there changes the built page.
@@ -1252,6 +1253,17 @@ jobs:
 
       - name: Test the search results widget
         working-directory: src/client/widgets/spaarke-search-results
+        run: npx jest --ci
+
+      # spaarkeai-mcp-bff-api-r2 task 037c: the playbook run widget is embedded the same way (ui://spaarke/playbook-run.html).
+      - name: Build the playbook run widget
+        working-directory: src/client/widgets/spaarke-playbook-run
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
+      - name: Test the playbook run widget
+        working-directory: src/client/widgets/spaarke-playbook-run
         run: npx jest --ci
 
       - name: Conformance suite against the real BFF MCP route
