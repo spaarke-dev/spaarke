@@ -98,12 +98,11 @@ export function queryDirtyState({
       targetWindow.postMessage(request, targetOrigin);
     } catch {
       // postMessage can throw if the target window is cross-origin and detached (e.g. iframe was just unmounted). Treat as clean.
-      if (!settled) {
-        settled = true;
-        window.removeEventListener('message', handleMessage);
-        clearTimeout(timeoutId);
-        resolve(false);
-      }
+      // Nothing can have settled yet: the answer and the timeout both arrive asynchronously, after this synchronous call.
+      settled = true;
+      window.removeEventListener('message', handleMessage);
+      clearTimeout(timeoutId);
+      resolve(false);
     }
   });
 }
