@@ -245,7 +245,7 @@ public class DecisionAccessWindowGuardTests
 
     // ── The scanners ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static IEnumerable<string> ScannedFiles()
+    internal static IEnumerable<string> ScannedFiles() // ISS-010 D1: also DecisionCommitTeamWriteGuardTests' scope
     {
         static bool NotBuildOutput(string f) =>
             !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
