@@ -43,6 +43,9 @@ internal sealed class GetPlaybookRunTool : McpToolDefinition
 {
     internal const string ToolName = "spaarke_get_playbook_run";
 
+    /// <summary>The widget the tool's descriptor points at (<c>_meta.ui.resourceUri</c>, task 037c).</summary>
+    internal const string WidgetUri = PlaybookRunWidgetResource.Uri;
+
     internal const string RunIdArgument = "runId";
 
     /// <summary>The longest result summary, in characters (POML constraint ADR-015).</summary>
@@ -93,6 +96,12 @@ internal sealed class GetPlaybookRunTool : McpToolDefinition
                 Idempotent = true,
                 Destructive = false,
                 OpenWorld = false,
+                // MCP Apps (task 037c): the playbook run widget renders the run. Only the descriptor changes; the text and structuredContent
+                // are unchanged (frozen in PlaybookRunToolsContractTests).
+                Meta = new JsonObject
+                {
+                    ["ui"] = new JsonObject { ["resourceUri"] = WidgetUri },
+                },
             });
 
         tool.ProtocolTool.InputSchema = InputSchema;

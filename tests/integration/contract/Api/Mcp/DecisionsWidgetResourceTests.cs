@@ -38,9 +38,9 @@ public sealed class DecisionsWidgetResourceTests
         var list = await host.RpcAsync(McpEndpoints.LegalOperationsRoute, "resources/list", new { }, McpTestHost.MintToken(Caller));
 
         var resources = list.GetProperty("resources").EnumerateArray().ToList();
-        // The Decisions widget plus the r2 widgets registered so far (task 034: ui://spaarke/briefing.html; task 035: ui://spaarke/search-results.html; their own cases are in
-        // BriefingWidgetResourceTests and SearchResultsWidgetResourceTests).
-        resources.Select(r => r.GetProperty("uri").GetString()).Should().BeEquivalentTo([WidgetUri, "ui://spaarke/briefing.html", "ui://spaarke/search-results.html"]);
+        // The Decisions widget plus the r2 widgets registered so far (task 034: ui://spaarke/briefing.html; task 035: ui://spaarke/search-results.html; task 037c: ui://spaarke/playbook-run.html; their own cases are in
+        // BriefingWidgetResourceTests, SearchResultsWidgetResourceTests and PlaybookRunWidgetResourceTests).
+        resources.Select(r => r.GetProperty("uri").GetString()).Should().BeEquivalentTo([WidgetUri, "ui://spaarke/briefing.html", "ui://spaarke/search-results.html", "ui://spaarke/playbook-run.html"]);
         var widget = resources.Single(r => r.GetProperty("uri").GetString() == WidgetUri);
         widget.GetProperty("uri").GetString().Should().Be(WidgetUri);
         widget.GetProperty("mimeType").GetString().Should().Be(ExpectedMimeType);

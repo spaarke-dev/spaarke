@@ -232,7 +232,8 @@ if (-not $SkipBuild) {
     # (fails above 3 MB, or when the page is not self-contained). Same steps as publish-bff-artifact.yml.
     # spaarkeai-mcp-bff-api-r2 task 034 added the Daily Briefing widget (ui://spaarke/briefing.html), built and embedded the same way.
     # Task 035 added the search results widget (ui://spaarke/search-results.html), built and embedded the same way.
-    foreach ($WidgetName in @("decisions", "briefing", "search-results")) {
+    # Task 037c added the playbook run widget (ui://spaarke/playbook-run.html), built and embedded the same way.
+    foreach ($WidgetName in @("decisions", "briefing", "search-results", "playbook-run")) {
         $WidgetDir = "$RepoRoot\src\client\widgets\spaarke-$WidgetName"
         Push-Location $WidgetDir
         try {

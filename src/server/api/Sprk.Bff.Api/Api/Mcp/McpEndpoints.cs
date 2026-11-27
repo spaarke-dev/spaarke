@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Briefing;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Playbooks;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -55,6 +56,7 @@ public static class McpEndpoints
         WarnIfWidgetMissing(startupLogger, mcpEnabled, DecisionsWidgetResource.IsEmbedded);
         WarnIfWidgetMissing(startupLogger, mcpEnabled, BriefingWidgetResource.IsEmbedded, "briefing", BriefingWidgetResource.Uri, "spaarke-briefing");
         WarnIfWidgetMissing(startupLogger, mcpEnabled, SearchResultsWidgetResource.IsEmbedded, "search-results", SearchResultsWidgetResource.Uri, "spaarke-search-results");
+        WarnIfWidgetMissing(startupLogger, mcpEnabled, PlaybookRunWidgetResource.IsEmbedded, "playbook-run", PlaybookRunWidgetResource.Uri, "spaarke-playbook-run");
 
         // The policy name is a literal on purpose: the health-probe policy guard (RouteAuthorizationGuardTests) reads only string literals.
         // Keep it equal to RateLimitingModule.McpPolicyName.

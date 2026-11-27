@@ -396,10 +396,14 @@ public sealed class PlaybookRunResultsToolTests
         tool.GetProperty("inputSchema").GetProperty("properties").EnumerateObject().Select(p => p.Name).Should().Equal(["runId"]);
         tool.GetProperty("inputSchema").GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
 
-        // The two model-visible playbook tools are untouched by this task: neither points at a widget yet (part c adds _meta.ui).
+        // The two model-visible playbook tools point at the playbook run widget (part c, 037c) and carry nothing else in _meta: no visibility,
+        // so they stay in the model's tool set. Their text and structuredContent are frozen in PlaybookRunToolsContractTests.
         foreach (var name in new[] { RunPlaybookTool.ToolName, GetPlaybookRunTool.ToolName })
         {
-            tools.Single(t => t.GetProperty("name").GetString() == name).TryGetProperty("_meta", out _).Should().BeFalse(name);
+            var meta = tools.Single(t => t.GetProperty("name").GetString() == name).GetProperty("_meta");
+            meta.EnumerateObject().Select(p => p.Name).Should().Equal(["ui"], name);
+            meta.GetProperty("ui").EnumerateObject().Select(p => p.Name).Should().Equal(["resourceUri"], name);
+            meta.GetProperty("ui").GetProperty("resourceUri").GetString().Should().Be(PlaybookRunWidgetResource.Uri, name);
         }
     }
 }
