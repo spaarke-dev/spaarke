@@ -181,6 +181,14 @@ function Results({ results, opener }: { results: RunResults; opener: LinkOpener 
         </Text>
       ) : null}
 
+      {results.results === 'unsaved' ? (
+        <MessageBar intent="warning">
+          <MessageBarBody>
+            The run finished but its results could not be saved. Open the analysis in Spaarke or run it again.
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
       {results.truncated ? (
         <MessageBar intent="info">
           <MessageBarBody>Some of the results were left out to keep this short.</MessageBarBody>
@@ -219,6 +227,11 @@ function Results({ results, opener }: { results: RunResults; opener: LinkOpener 
               </li>
             ))}
           </ul>
+          {results.moreDocuments > 0 ? (
+            <Text as="p" size={200}>
+              {`And ${results.moreDocuments} more ${results.moreDocuments === 1 ? 'document' : 'documents'}.`}
+            </Text>
+          ) : null}
         </section>
       ) : null}
     </>

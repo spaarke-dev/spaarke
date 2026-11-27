@@ -307,6 +307,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         ChannelWriter<PlaybookStreamEvent> writer,
         CancellationToken cancellationToken)
     {
+        // spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine (b), ADR-039 Path C, owner-approved): a run that carries an AnalysisId saves its
+        // Deliver Output to that analysis once, when it ends and before its terminal event is read, through the Analysis wrapper's own save
+        // (AnalysisResultPersistence.SaveNodeRunAsync). No AnalysisId: this writer. Task 037 review F-B: built once, so a node run that ends
+        // by an exception (the RunFailed below) saves its streamed text too; a cancelled run is not saved, as the wrapper does not.
+        var nodeRunWriter = NodeRunAnalysisSave.SavingWriter(writer, request.AnalysisId, context.HttpContext?.RequestServices, context.RunId, _logger);
         try
         {
             // Load nodes to detect mode
@@ -328,14 +333,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     "Playbook {PlaybookId} has {NodeCount} nodes - using NodeBased mode",
                     request.PlaybookId, nodes.Length);
 
-                // spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine (b), ADR-039 Path C, owner-approved): a run that carries an
-                // AnalysisId saves its Deliver Output to that analysis once, when it ends and before its terminal event is read,
-                // through the Analysis wrapper's own save (AnalysisResultPersistence.SaveNodeRunAsync). No AnalysisId: this writer.
-                await ExecuteNodeBasedModeAsync(
-                    context,
-                    nodes,
-                    NodeRunAnalysisSave.SavingWriter(writer, request.AnalysisId, context.HttpContext?.RequestServices, context.RunId, _logger),
-                    cancellationToken);
+                await ExecuteNodeBasedModeAsync(context, nodes, nodeRunWriter, cancellationToken);
             }
         }
         // Only a cancellation the CALLER asked for is a cancelled run: the SSE request token, or the run context's own token
@@ -354,7 +352,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             context.MarkFailed(ProblemDetailsHelper.Explain("The playbook run failed.", ex), "playbook_run_exception");
             // ADR-019: this event goes to the caller's SSE stream. The exception stays in the log above; the stream
             // gets the fixed text, the stable code and the trace id that finds the log entry.
-            await writer.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
+            await nodeRunWriter.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
                 context.RunId, context.PlaybookId, context.HttpContext?.TraceIdentifier ?? context.RunId.ToString()),
                 CancellationToken.None);
         }

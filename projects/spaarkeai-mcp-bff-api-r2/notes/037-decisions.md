@@ -129,6 +129,10 @@ A run that has an `AnalysisId` **and** a record parameter (`matterId`, `projectI
   and the engine uses it as before. The analysis is filed under the document.
 - A run the engine starts inside the same detached scope is linked too. The legacy wrapper starts none; a future nested run would
   belong to the same analysis, which is accurate.
+- **A behaviour change, stated (review K-4).** Before 037a, a Copilot run started with a `matterId` (or another record parameter)
+  had its `sprk_playbookrun` regarding **the matter**. Since 037a it is regarding **the analysis**. A view or report that finds a
+  matter's Copilot runs through the run record's regarding columns no longer finds them there; the matter id is still in the run's
+  parameters (`sprk_inputcontext`). Runs started outside the Copilot start (REST, Console) are unchanged.
 
 Tests:
 - `PlaybookRunPersistenceTests.ExecuteAsync_LinkedToAnalysis_RegardingIsTheAnalysis_OverTheRecordParameter`: the real engine, with
@@ -367,6 +371,16 @@ HTML and a Markdown `javascript:` link, and HTML inside code: no element, attrib
 `react-markdown`/`marked` (+40-120 KB and an HTML-or-sanitizer path for a feature the subset covers) and plain text (analysis output is headed and listed, so it
 would read as raw Markdown).
 
+**The second renderer is a stated decision (review K-3).** The shared library already has one:
+`src/client/shared/Spaarke.UI.Components/src/services/renderMarkdown.ts` (`marked` to HTML, then `DOMPurify`). The widget does not use it, for two reasons:
+- **Its output is an HTML string**, which reaches the DOM only through `dangerouslySetInnerHTML` / `innerHTML`. The widget's surface guard
+  (`widgetSurface.test.ts`, the same pattern list as the other MCP widgets) fails the build on either, so that model text can never become markup in the
+  Copilot host's sandbox. A sanitizer is a second line of defence the widget does not need when no HTML is produced at all.
+- **Bundle size.** `marked` and `DOMPurify` would add tens of KB (the estimate above; not measured) to a single-file widget that must stay under its 1 MB aim (0.89 MB now), for a
+  subset of Markdown the widget renders without them.
+Any other surface that renders model Markdown as HTML should keep using `renderMarkdown.ts`; this renderer is for the sandboxed widgets that may not
+create markup.
+
 ### 6.4 Sizes
 
 - **Bundle:** 928,100 bytes (0.89 MB), under the 1 MB aim and the 3 MB ceiling.
@@ -417,3 +431,102 @@ AI-internal type. Component justification is in `PlaybookRunWidgetResource.cs` (
 - **K5.** The cap is counted on the widget's clock against the server's `startedAt`; a clock running behind the server's polls a little past the cap, one
   running ahead stops a little early ("Check again" covers it).
 - **Q3.** Live rendering in Copilot Chat and Cowork, light and dark, is unverified until the dev deploy (039/043's E2E record), as for 035.
+
+## 7. Task 037 review fixes (2026-11-27)
+
+One fix per review finding. Each has a regression test that failed before the fix. That was shown by temporarily putting the pre-fix behaviour back in the
+working tree (always finalize, no clip, the raw writer in the engine's catch, no `unsaved` state, no document cap, no fault catch, the old heading regex, no
+AI-off check, no owner-rule texts), running the new tests (12 failed; the 3 that should pass under the old code passed: the heading-equivalence theory, the
+failed-run negative case and the pure clip test), then restoring the fixed sources. For the widget, the committed versions of `App.tsx`, `playbookRun.ts` and
+`markdown.tsx` were run against the new jest tests (6 failed: four hostile lines at 448-2,678 ms, the `unsaved` test and the `moreDocuments` test).
+
+### 7.1 F-A: a failed save was swallowed
+
+- `IWorkingDocumentService.TryUpdateWorkingDocumentAsync` writes `sprk_workingdocument` and returns false on failure. It logs only
+  `analysis_working_document_write_failed`, the analysis id, the content length and the exception type (ADR-015). `UpdateWorkingDocumentAsync` is unchanged
+  for its other callers (the legacy streaming path).
+- `AnalysisResultPersistence.SaveNodeRunAsync` (shared by the Analysis wrapper's node branch and the engine's saving writer) writes through it. When the
+  write fails it returns `ContentSaved: false` and does **not** finalize, so the analysis stays at statuscode 1. The content is clipped to 100,000 characters
+  with a visible `[truncated — ...]` marker; a high surrogate at the cut is dropped, so no pair is split.
+- `SavingRunWriter` logs `playbook_run_analysis_save_failed` (type only) when `ContentSaved` is false. The run is unchanged.
+- `PlaybookRunResultsReader` reads `statuscode`: a run that **completed** with no text and an analysis not at 2 (finalized) is `Unsaved`. A failed run with no
+  text stays `None`. The runner marks a run Completed only after the save, so a reader never sees a transient `unsaved`.
+- The results tool returns `results: "unsaved"`, `resultsReason: "analysis_save_failed"` and the text "... finished, but its results could not be saved." The
+  widget shows a warning: "The run finished but its results could not be saved. Open the analysis in Spaarke or run it again."
+- Tests: `NodeRun_WithAnalysisId_SaveFails_IsLogged_TheAnalysisIsNotFinalized_TheRunStillCompletes` (the real `WorkingDocumentService` over a failing
+  `IGenericEntityService`; asserts the outcome code and no finalize), `WriteFails_TheAnalysisIsNotFinalized_AndTheChunksAreUnchanged` (wrapper),
+  `OversizeOutput_IsSavedClippedWithTheMarker`, `ClipToWorkingDocumentLimit_KeepsSurrogatePairsWhole`, `CompletedRun_UnfinalizedEmptyAnalysis_IsUnsaved`,
+  `FailedRun_UnfinalizedEmptyAnalysis_IsNone`, and the widget's `unsaved` test.
+- **Behaviour change for the Analysis wrapper:** its node branch also skips finalize on a failed write and clips its saved content. Its SSE chunks and
+  the `Content` it returns are unchanged.
+
+### 7.2 F-B: a node run that ended by an exception skipped the save
+
+The saving writer is built once, before the `try`, and is used by the node branch and by the general `catch`'s RunFailed write. The whole engine diff
+(`PlaybookOrchestrationService.ExecuteInternalAsync`):
+
+```diff
++        // ... Task 037 review F-B: built once, so a node run that ends by an exception (the RunFailed below) saves its streamed text too;
++        // a cancelled run is not saved, as the wrapper does not.
++        var nodeRunWriter = NodeRunAnalysisSave.SavingWriter(writer, request.AnalysisId, context.HttpContext?.RequestServices, context.RunId, _logger);
+         try
+ ...
+-                await ExecuteNodeBasedModeAsync(context, nodes,
+-                    NodeRunAnalysisSave.SavingWriter(writer, request.AnalysisId, context.HttpContext?.RequestServices, context.RunId, _logger),
+-                    cancellationToken);
++                await ExecuteNodeBasedModeAsync(context, nodes, nodeRunWriter, cancellationToken);
+ ...
+-            await writer.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
++            await nodeRunWriter.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
+```
+
+The 037a comment moved with the writer. Nothing else in the engine changed. Legacy mode still writes to the raw writer. An exception in legacy mode now
+sends RunFailed through the saving writer, which has seen no text, so it writes and finalizes nothing, as before.
+
+- **Cancel (decided): no save,** matching the wrapper. The wrapper reads the engine's channel with `ReadAllAsync(cancellationToken)`, so a caller's cancel
+  throws before its save. The cancel `catch` still writes RunCancelled to the raw writer. Known edge: a Stop through the run context's own token in the wrapper
+  would save partial text; Copilot runs do not use it.
+- Test: `UpstreamTimeout_SavesTheStreamedText` (a node's `TaskCanceledException` that the caller did not ask for ends the run in the general catch; the
+  streamed text is saved). A cancel test was dropped because it depended on timing.
+
+### 7.3 F-C: a backtracking heading regex could throw out of the tool
+
+- `GetPlaybookRunResultsTool.HeadingText` is a linear scanner that reads headings as the old pattern did (the `HeadingText_MatchesTheOldPattern` theory).
+  Building and logging the result is wrapped: any fault logs the exception type only and returns `GetFailed`.
+- Widget: `parseHeading` replaces the HEADING regex. `parseInline` memoises its forward searches (backtick, `**`, `__`, emphasis closers, `](` and `)`) and runs
+  the intraword checks before any search, so a line is read in linear time.
+- Tests: `LongWhitespaceHeading_IsLinear_AndTheToolAnswers` ("# a" + 50,000 spaces + "x"; 996 ms before the fix, quick after),
+  `ResultBuildingFault_IsCouldNotRead`, and the widget's "hostile input" set (seven 36 KB lines, under 250 ms each; all 4 ms or less after the fix).
+
+### 7.4 F-D: the document list was uncapped
+
+`PlaybookRunLimits.MaxDocuments = 20` (shared with `RunPlaybookTool`'s input cap). The reader queries at most the first 20 ids and reports the rest as
+`MoreDocuments`. The tool returns `moreDocuments`, and the widget shows "And N more documents." when it is above 0. Test:
+`SixtyDocuments_AreCappedAtTwenty_UnderTheSizeBound` (under 64 KiB, at most 20 ids queried).
+
+### 7.5 K-1 to K-4
+
+- **K-1.** With AI off (`NullPlaybookOrchestrationService`), `DetachedPlaybookRunner` returns Unavailable before it creates the analysis. Test:
+  `Start_AiDisabled_IsUnavailable_AndCreatesNoAnalysis`.
+- **K-2.** An owner-rule 403 from the analysis create (`SecureDesignationRemoval.NotPermittedReasonCode`, `PermissionUnverifiableReasonCode`) gets text that
+  matches its code; the code and status are unchanged. This changes `spaarke_run_playbook`'s model-visible error text. That text was added by 037a, and the
+  review asked for this change. Test: `Start_OwnerRuleRefusal_TextMatchesItsCode` (3 rows).
+- **K-3.** §6.3 now names `renderMarkdown.ts` and says why the widget does not use it.
+- **K-4.** §4.2 now records that a Copilot run's record is regarding the analysis, not the matter.
+
+### 7.6 Sizes and runs
+
+- Widget bundle: 929,020 bytes (+920 bytes).
+- .NET `PlaybookRun|AnalysisNodeRunSave|AnalysisResultPersistence|WorkingDocument|AnalysisOrchestrationService|DetachedPlaybookRunner|McpHostContract|
+  McpCallerPath|PlaybookRunResults|WidgetResource|Api.Mcp|Playbook`: 2,068 passed, 0 failed, 4 skipped (the widgets' build-dependent twins).
+- ArchTests, the whole project (which includes the AnalysisId guard, ADR010, RouteAuthorization and DetachedHttpContext): 2,886 passed, 0 failed.
+  `check-changed-cs-format.sh origin/master`: clean.
+- Widget jest: 119 passed (one is skipped until `dist/` is built). `npm run build`: OK. BFF build: 0 warnings.
+
+### 7.7 Left open (not fixed here)
+
+- `WorkingDocumentService.UpdateWorkingDocumentAsync` (unchanged, legacy streaming path) still logs the exception object, which may carry Dataverse message
+  text (an ADR-015 question).
+- `FinalizeAnalysisAsync` still swallows its own failures: a failed finalize after a saved write leaves the analysis at statuscode 1, which the reader shows
+  as `available` because there is text.
+- K-4's reporting impact on matter-regarding views is not assessed.

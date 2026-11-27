@@ -169,6 +169,21 @@ public sealed class DetachedPlaybookRunnerTests
         }
     }
 
+    [Fact(DisplayName = "037 review K-1: with AI off (the null engine) the start answers Unavailable BEFORE the create, so no empty analysis is left")]
+    public async Task Start_AiDisabled_IsUnavailable_AndCreatesNoAnalysis()
+    {
+        await using var world = await PlaybookRunWorld.StartAsync(aiDisabled: true);
+        var (playbookId, documentId) = world.AllowedRun();
+
+        var started = await world.Runs.StartAsCallerAsync(world.CallerContext(), playbookId, [documentId], null, null, CancellationToken.None);
+
+        started.Outcome.Should().Be(PlaybookRunStartOutcome.Unavailable);
+        started.Run.Should().BeNull();
+        world.Analyses.Verify(
+            a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "no analysis is created for a run that cannot start");
+    }
+
     [Fact(DisplayName = "037a order: a 007 refusal or a failed pre-warm creates no analysis")]
     public async Task Start_RefusedBeforeTheCreate_CreatesNoAnalysis()
     {

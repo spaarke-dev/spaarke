@@ -62,6 +62,10 @@ public sealed class PlaybookRunAnalysisSaveTests
             .ReturnsAsync((string? _, string? __, AnalysisAction action, CancellationToken _) => InsightsLayer2RoutingResult.PassThrough(action));
         _executor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
         _executors.Setup(x => x.GetExecutor(ExecutorType.AiAnalysis)).Returns(_executor.Object);
+        // The node run's save writes through the reporting write (task 037 review F-A); the legacy wrapper streams through the
+        // swallowing one, as before.
+        _workingDocument.Setup(x => x.TryUpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         _workingDocument.Setup(x => x.UpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _workingDocument.Setup(x => x.FinalizeAnalysisAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -85,7 +89,7 @@ public sealed class PlaybookRunAnalysisSaveTests
         });
 
         events.Should().Contain(e => e.Type == PlaybookEventType.RunCompleted);
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(AnalysisId, "# Risk summary", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "# Risk summary", It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.Verify(x => x.FinalizeAnalysisAsync(AnalysisId, 7, 8, It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.VerifyNoOtherCalls();
         savedWhenTheReaderSawTheEnd.Should().BeTrue("the save runs before the run's end reaches its reader (the status a widget polls)");
@@ -119,23 +123,83 @@ public sealed class PlaybookRunAnalysisSaveTests
         var events = await RunAsync(NewEngine(), AnalysisId);
 
         events[^1].Type.Should().Be(PlaybookEventType.RunFailed);
-        _workingDocument.Verify(x => x.UpdateWorkingDocumentAsync(AnalysisId, "partial text", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "partial text", It.IsAny<CancellationToken>()), Times.Once);
         _workingDocument.VerifyNoOtherCalls();
     }
 
-    [Fact(DisplayName = "037a engine (b): a failed analysis save is logged with its outcome code and never changes the run")]
-    public async Task NodeRun_WithAnalysisId_SaveFails_TheRunStillCompletes()
+    [Fact(DisplayName = "037 review F-A: a failed working-document write (the REAL WorkingDocumentService) logs the outcome, skips the finalize and never changes the run")]
+    public async Task NodeRun_WithAnalysisId_SaveFails_IsLogged_TheAnalysisIsNotFinalized_TheRunStillCompletes()
     {
         OneDeliverNode("# Risk summary", tokensIn: 1, tokensOut: 1);
-        _workingDocument.Setup(x => x.UpdateWorkingDocumentAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable (test)."));
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse.Setup(x => x.UpdateAsync("sprk_analysis", AnalysisId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse refused the value '# Risk summary' (test)."));
         var logger = new CapturingLogger();
+        _saveWriter = new WorkingDocumentService(dataverse.Object, Options.Create(new AnalysisOptions()), logger);
 
         var events = await RunAsync(NewEngine(logger), AnalysisId);
 
-        events[^1].Type.Should().Be(PlaybookEventType.RunCompleted);
-        logger.Lines.Should().Contain(l => l.Contains("playbook_run_analysis_save_failed") && l.Contains(nameof(InvalidOperationException))
-                                           && !l.Contains("Dataverse unavailable"), "the outcome and the exception type only (ADR-015)");
+        events[^1].Type.Should().Be(PlaybookEventType.RunCompleted, "a failed save never changes the run");
+        logger.Lines.Should().Contain(l => l.Contains("playbook_run_analysis_save_failed"), "the save's outcome code fires on a real write failure");
+        logger.Lines.Should().Contain(l => l.Contains(WorkingDocumentService.WriteFailedOutcome) && l.Contains(nameof(InvalidOperationException)));
+        logger.Lines.Should().NotContain(l => l.Contains("Risk summary"), "ADR-015: the exception type only, never the output it may quote");
+        dataverse.Verify(x => x.UpdateAsync("sprk_analysis", AnalysisId,
+            It.Is<Dictionary<string, object>>(f => f.ContainsKey("sprk_workingdocument")), It.IsAny<CancellationToken>()), Times.Once);
+        dataverse.Verify(x => x.UpdateAsync("sprk_analysis", AnalysisId,
+            It.Is<Dictionary<string, object>>(f => f.ContainsKey("statuscode")), It.IsAny<CancellationToken>()), Times.Never,
+            "an analysis whose content was not written is not marked Completed");
+    }
+
+    [Fact(DisplayName = "037 review F-A: a Deliver Output past the column's 100,000 characters is saved clipped, with the visible marker, and finalized")]
+    public async Task NodeRun_WithAnalysisId_OversizeOutput_IsSavedClippedWithTheMarker()
+    {
+        OneDeliverNode(new string('a', 150_000), tokensIn: 2, tokensOut: 3);
+
+        await RunAsync(NewEngine(), AnalysisId);
+
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(
+            AnalysisId,
+            It.Is<string>(s => s.Length == AnalysisResultPersistence.WorkingDocumentMaxChars
+                               && s.EndsWith(AnalysisResultPersistence.WorkingDocumentTruncatedMarker, StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.FinalizeAnalysisAsync(AnalysisId, 2, 3, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "037 review F-A: the clip never splits a surrogate pair and leaves text that fits unchanged")]
+    public void ClipToWorkingDocumentLimit_KeepsSurrogatePairsWhole()
+    {
+        var keep = AnalysisResultPersistence.WorkingDocumentMaxChars - AnalysisResultPersistence.WorkingDocumentTruncatedMarker.Length;
+        var straddling = new string('a', keep - 1) + "😀" + new string('b', 10_000);
+
+        var clipped = AnalysisResultPersistence.ClipToWorkingDocumentLimit(straddling);
+
+        clipped.Length.Should().BeLessThanOrEqualTo(AnalysisResultPersistence.WorkingDocumentMaxChars);
+        clipped.Should().EndWith(AnalysisResultPersistence.WorkingDocumentTruncatedMarker);
+        var body = clipped[..^AnalysisResultPersistence.WorkingDocumentTruncatedMarker.Length];
+        char.IsHighSurrogate(body[^1]).Should().BeFalse("the cut never leaves half a surrogate pair");
+        AnalysisResultPersistence.ClipToWorkingDocumentLimit("short").Should().Be("short");
+        var exact = new string('x', AnalysisResultPersistence.WorkingDocumentMaxChars);
+        AnalysisResultPersistence.ClipToWorkingDocumentLimit(exact).Should().BeSameAs(exact);
+    }
+
+    [Fact(DisplayName = "037 review F-B: a node run whose AI node throws an upstream timeout (not the run's token) saves its streamed text")]
+    public async Task NodeRun_WithAnalysisId_UpstreamTimeout_SavesTheStreamedText()
+    {
+        var node = Node("Summarize");
+        _nodes.Setup(x => x.GetNodesAsync(PlaybookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        SetUpAction(node);
+        _executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken _) =>
+            {
+                await ctx.OnTokenReceived!("partial text");
+                throw new TaskCanceledException("HttpClient.Timeout elapsed (test).");
+            });
+
+        var events = await RunAsync(NewEngine(), AnalysisId);
+
+        events[^1].Type.Should().Be(PlaybookEventType.RunFailed);
+        _workingDocument.Verify(x => x.TryUpdateWorkingDocumentAsync(AnalysisId, "partial text", It.IsAny<CancellationToken>()), Times.Once);
+        _workingDocument.Verify(x => x.FinalizeAnalysisAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── (a) legacy mode ─────────────────────────────────────────────────────────────────────────────────────
@@ -209,10 +273,13 @@ public sealed class PlaybookRunAnalysisSaveTests
         RequestServices = new ServiceCollection().AddSingleton(NewPersistence()).BuildServiceProvider(),
     };
 
+    /// <summary>The run save's writer when a test replaces the double (the REAL WorkingDocumentService over a failing Dataverse seam).</summary>
+    private IWorkingDocumentService? _saveWriter;
+
     private AnalysisResultPersistence NewPersistence() => new(
         _dataverse.Object,
         _dataverse.Object,
-        _workingDocument.Object,
+        _saveWriter ?? _workingDocument.Object,
         new Mock<IStorageRetryPolicy>().Object,
         new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
         NullLogger<AnalysisResultPersistence>.Instance);
@@ -309,7 +376,7 @@ public sealed class PlaybookRunAnalysisSaveTests
         SprkExecutortype = ExecutorType.AiAnalysis,
     };
 
-    private sealed class CapturingLogger : ILogger<PlaybookOrchestrationService>
+    private sealed class CapturingLogger : ILogger<PlaybookOrchestrationService>, ILogger<WorkingDocumentService>
     {
         private readonly Lock _gate = new();
         private readonly List<string> _lines = new();

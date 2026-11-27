@@ -32,7 +32,35 @@ export type Block =
   | { type: 'code'; text: string }
   | { type: 'rule' };
 
-const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+const isBlank = (ch: string | undefined) => ch === ' ' || ch === '\t';
+
+/**
+ * An ATX heading line as `{ level, text }`, or null (pure, linear). The same match as the pattern
+ * `^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$`, which backtracked quadratically on a long run of spaces or tabs (task 037 review
+ * F-C): up to three spaces, one to six '#', at least one space or tab, the text, then an optional closing run of '#' after a space or
+ * tab, and trailing spaces or tabs.
+ */
+export function parseHeading(line: string): { level: number; text: string } | null {
+  let i = 0;
+  while (i < 3 && line[i] === ' ') i++;
+  let hashes = 0;
+  while (line[i + hashes] === '#') hashes++;
+  if (hashes === 0 || hashes > 6) return null;
+  i += hashes;
+  if (!isBlank(line[i])) return null;
+  while (isBlank(line[i])) i++;
+
+  let end = line.length;
+  while (end > i && isBlank(line[end - 1])) end--;
+  let closing = end;
+  while (closing > i && line[closing - 1] === '#') closing--;
+  if (closing < end && closing > i && isBlank(line[closing - 1])) {
+    end = closing - 1;
+    while (end > i && isBlank(line[end - 1])) end--;
+  }
+  return { level: hashes, text: line.slice(i, end) };
+}
+
 const BULLET = /^ {0,8}[-*+][ \t]+(.*)$/;
 const ORDERED = /^ {0,8}(\d{1,9})[.)][ \t]+(.*)$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
@@ -65,9 +93,9 @@ export function parseBlocks(markdown: string): Block[] {
       continue;
     }
 
-    const heading = HEADING.exec(line);
+    const heading = parseHeading(line);
     if (heading) {
-      blocks.push({ type: 'heading', level: heading[1].length, children: parseInline(heading[2]) });
+      blocks.push({ type: 'heading', level: heading.level, children: parseInline(heading.text) });
       i++;
       continue;
     }
@@ -139,7 +167,7 @@ export function parseBlocks(markdown: string): Block[] {
 function startsBlock(line: string): boolean {
   return (
     FENCE.test(line) ||
-    HEADING.test(line) ||
+    parseHeading(line) !== null ||
     RULE.test(line) ||
     TABLE.test(line) ||
     QUOTE.test(line) ||
@@ -150,7 +178,13 @@ function startsBlock(line: string): boolean {
 
 const ESCAPABLE = /[\\`*_{}[\]()#+\-.!|>~<"'&]/;
 
-/** Parses inline emphasis, code and links into nodes. Pure; never throws; unbalanced markers stay literal. */
+/**
+ * Parses inline emphasis, code and links into nodes. Pure; never throws; unbalanced markers stay literal.
+ *
+ * Linear (task 037 review F-C): every search for a closing marker goes through `search`, which reuses the last answer for that marker
+ * while it is still the first one past the new start. Without it, a line of unclosed openers (`[[[[…`, `*a *a *a …`) searched the rest of
+ * the line once per opener: quadratic. The emphasis openers that can never apply (inside a word) are ruled out before any search.
+ */
 export function parseInline(text: string): InlineNode[] {
   const nodes: InlineNode[] = [];
   let buffer = '';
@@ -159,6 +193,20 @@ export function parseInline(text: string): InlineNode[] {
       nodes.push({ type: 'text', text: buffer });
       buffer = '';
     }
+  };
+
+  const found = new Map<string, { from: number; at: number }>();
+  const search = (key: string, from: number, find: (start: number) => number): number => {
+    const seen = found.get(key);
+    if (seen && seen.from <= from && (seen.at === -1 || seen.at >= from)) return seen.at;
+    const at = find(from);
+    found.set(key, { from, at });
+    return at;
+  };
+  const strongClose = (start: number) => {
+    let end = text.indexOf('__', start);
+    while (end > 0 && end + 2 < text.length && /\w/.test(text[end + 2])) end = text.indexOf('__', end + 2);
+    return end;
   };
 
   let i = 0;
@@ -172,7 +220,7 @@ export function parseInline(text: string): InlineNode[] {
     }
 
     if (ch === '`') {
-      const end = text.indexOf('`', i + 1);
+      const end = search('`', i + 1, start => text.indexOf('`', start));
       if (end > i + 1) {
         flush();
         nodes.push({ type: 'code', text: text.slice(i + 1, end) });
@@ -182,13 +230,14 @@ export function parseInline(text: string): InlineNode[] {
     }
 
     if ((ch === '*' || ch === '_') && text[i + 1] === ch) {
-      const marker = ch + ch;
       // `__` inside a word (a__b, __init__-like names) is not emphasis.
       const intraword = ch === '_' && i > 0 && /\w/.test(text[i - 1]);
-      let end = text.indexOf(marker, i + 2);
-      while (ch === '_' && end > 0 && end + 2 < text.length && /\w/.test(text[end + 2]))
-        end = text.indexOf(marker, end + 2);
-      if (!intraword && end > i + 2) {
+      const end = intraword
+        ? -1
+        : ch === '_'
+          ? search('__', i + 2, strongClose)
+          : search('**', i + 2, start => text.indexOf('**', start));
+      if (end > i + 2) {
         flush();
         nodes.push({ type: 'strong', children: parseInline(text.slice(i + 2, end)) });
         i = end + 2;
@@ -199,8 +248,8 @@ export function parseInline(text: string): InlineNode[] {
     if ((ch === '*' || ch === '_') && text[i + 1] !== ch && text[i + 1] !== undefined && text[i + 1] !== ' ') {
       // An underscore inside a word (snake_case) is not emphasis.
       const wordBefore = ch === '_' && i > 0 && /\w/.test(text[i - 1]);
-      const end = findClosing(text, ch, i + 1);
-      if (!wordBefore && end > i + 1) {
+      const end = wordBefore ? -1 : search(ch, i + 1, start => findClosing(text, ch, start));
+      if (end > i + 1) {
         flush();
         nodes.push({ type: 'em', children: parseInline(text.slice(i + 1, end)) });
         i = end + 1;
@@ -209,8 +258,8 @@ export function parseInline(text: string): InlineNode[] {
     }
 
     if (ch === '[') {
-      const close = text.indexOf('](', i + 1);
-      const end = close > i ? text.indexOf(')', close + 2) : -1;
+      const close = search('](', i + 1, start => text.indexOf('](', start));
+      const end = close > i ? search(')', close + 2, start => text.indexOf(')', start)) : -1;
       if (close > i && end > close) {
         flush();
         const label = text.slice(i + 1, close);
