@@ -275,7 +275,7 @@ public static class OperationAccessPolicy
         // Recorded as an explicit obligation on task 005.
         ["entity.associate_document"] = AccessRights.AppendTo,
 
-        // "event.attach_regarding" — AppendTo on the REGARDING record an sprk_event is filed under: the body
+        // "event.attach_regarding" — Read AND AppendTo on the REGARDING record an sprk_event is filed under: the body
         // RegardingRecordType/RegardingRecordId of POST /api/v1/events. Added by unified-access-control-r2 task 159
         // (#1098). The event HOLDS the typed lookup; the record it points AT is the one being attached to, and
         // Dataverse asks AppendTo of that record ("other records can be attached to this record") — the
@@ -283,7 +283,12 @@ public static class OperationAccessPolicy
         // A separate key rather than "entity.associate_document" (which names an Office DOCUMENT being filed) or
         // "finance.attach_invoice" (which names an invoice): reusing either would misdescribe the act in every deny
         // log. Resource = the regarding record, in the entity set Dataverse's own metadata names for its type.
-        ["event.attach_regarding"] = AccessRights.AppendTo,
+        // Why Read as well (#3181, owner D-3181, 2026-11-27): the create copies the regarding record's name and number
+        // onto the new event (sprk_regardingrecordname / sprk_regardingrecordnumber, read app-only after this check), and
+        // the caller then reads that event back. AppendTo does not imply Read, so a caller who may attach but not read the
+        // record would learn its name and number. Requiring Read here proves the caller may see what is copied. The deny
+        // is unchanged: the same 403 "insufficient_rights" with the one fixed detail, which names no right.
+        ["event.attach_regarding"] = AccessRights.Read | AccessRights.AppendTo,
         // "memory.pin_matter" — AppendTo on the MATTER a pinned-memory item names: the body matterId of
         // POST /api/memory/pins and PUT /api/memory/pins/{pinId} (PinnedMemoryEndpoints.AuthorizePinMatterAsync).
         // Added by unified-access-control-r2 task 166 (findings S-43 / S-68). A pin carrying a matter id is not

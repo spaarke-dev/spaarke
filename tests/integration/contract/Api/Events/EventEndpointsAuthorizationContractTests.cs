@@ -405,7 +405,7 @@ public class EventEndpointsAuthorizationContractTests
         var analysis = Guid.NewGuid();
         var matter = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
@@ -442,7 +442,7 @@ public class EventEndpointsAuthorizationContractTests
         var analysis = Guid.NewGuid();
         var matter = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
@@ -478,7 +478,7 @@ public class EventEndpointsAuthorizationContractTests
         var analysis = Guid.NewGuid();
         var matter = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
@@ -526,7 +526,7 @@ public class EventEndpointsAuthorizationContractTests
         await using var host = await EventsAuthHost.StartAsync();
         var target = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant(entitySet, target, AccessRights.AppendTo);
+        host.Probe.Grant(entitySet, target, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync(logicalName, It.IsAny<CancellationToken>())).ReturnsAsync(entitySet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync(logicalName, It.IsAny<CancellationToken>()))
             .ReturnsAsync(host.InCallerCatalog(logicalName, new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = numberColumn }));
@@ -547,7 +547,7 @@ public class EventEndpointsAuthorizationContractTests
         await using var host = await EventsAuthHost.StartAsync();
         var matter = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
+        host.Probe.Grant("sprk_matters", matter, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
             .ReturnsAsync(host.InCallerCatalog("sprk_matter", new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_nosuchnumber" }));
@@ -575,7 +575,7 @@ public class EventEndpointsAuthorizationContractTests
     private static void MatterWithNumber(EventsAuthHost host, Guid matter)
     {
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
+        host.Probe.Grant("sprk_matters", matter, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
         host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_matter", matter) { ["sprk_mattername"] = "Acme Holdings", ["sprk_matternumber"] = "MAT-0097" });
@@ -663,7 +663,7 @@ public class EventEndpointsAuthorizationContractTests
         await using var host = await EventsAuthHost.StartAsync();
         var contact = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant("contacts", contact, AccessRights.AppendTo);
+        host.Probe.Grant("contacts", contact, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("contact", It.IsAny<CancellationToken>()))
             .ReturnsAsync(host.InCallerCatalog("contact", new Entity("sprk_recordtype_ref", Guid.NewGuid()))); // live: contact names no number column
@@ -726,7 +726,7 @@ public class EventEndpointsAuthorizationContractTests
         await using var host = await EventsAuthHost.StartAsync();
         var analysis = Guid.NewGuid();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
         host.ColumnProbe = (_, _) => throw new InvalidOperationException("metadata unavailable"); // the resolver fails closed (Error)
@@ -1028,6 +1028,9 @@ public class EventEndpointsAuthorizationContractTests
         /// <summary>The user client the host registers: the strict filing client until a test lets the service create as the caller.</summary>
         public CountingUserClient CallerClient { get; }
 
+        /// <summary>The REAL create service the host registers (set at start), so a test can build <c>EventsCapability</c> over the same seams as the route.</summary>
+        public RecordCreationService RecordCreation { get; private set; } = null!;
+
         /// <summary>
         /// Task 031: every app-only create the service makes (its upsert of a client-chosen id), as the table, the id and the
         /// Web API body it sent. Replaces the old <c>IEventDataverseService.CreateEventAsync</c> capture: that create no longer
@@ -1136,7 +1139,7 @@ public class EventEndpointsAuthorizationContractTests
             // owner double, the app-only writer, the host's Dataverse double, the real stamp derivation over the host's column probe
             // (so a stamp failure still fails the create closed), and the host's membership publisher.
             builder.Services.AddSingleton<IDataverseUserClient>(CallerClient);
-            builder.Services.AddSingleton(RouteRecordCreation.Over(
+            RecordCreation = RouteRecordCreation.Over(
                 Ownership,
                 AppOnly.Object,
                 new CoreAncestorRestamper(Entities.Object, coreAncestors, NullLogger<CoreAncestorRestamper>.Instance),
@@ -1145,7 +1148,8 @@ public class EventEndpointsAuthorizationContractTests
                 SecureRootFilingGateFixtures.NothingSecure(),
                 null,
                 Publisher,
-                Entities.Object));
+                Entities.Object);
+            builder.Services.AddSingleton(RecordCreation);
 
             // Task 147 r1c: the filing route's services (the re-file core's own tests drive them fully).
             builder.Services.AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper);

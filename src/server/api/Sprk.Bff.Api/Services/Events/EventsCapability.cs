@@ -48,7 +48,7 @@ internal sealed class EventsCapability : IEventsCapability
     /// </summary>
     internal const string CreateEventPrivilege = "prvCreatesprk_Event";
 
-    /// <summary>The create's regarding check: AppendTo on the record the event is filed under (OperationAccessPolicy).</summary>
+    /// <summary>The create's regarding check: Read and AppendTo on the record the event is filed under (OperationAccessPolicy; Read because the create copies its name and number, #3181).</summary>
     internal const string AttachRegardingOperation = "event.attach_regarding";
 
     /// <summary>The get's check on <c>sprk_events({id})</c> (OperationAccessPolicy "read"); the REST filter names the same constant.</summary>
@@ -176,7 +176,7 @@ internal sealed class EventsCapability : IEventsCapability
 
         var valid = request!; // CreateShapeProblem refuses a null body
 
-        // (2) The caller's Create privilege on sprk_event and AppendTo on the regarding record — the route filter's decision.
+        // (2) The caller's Create privilege on sprk_event and Read + AppendTo on the regarding record — the route filter's decision.
         var access = await RecordRouteAccessAuthorizationFilter.DecideDeclaredTargetAsync(
             httpContext!,
             _probe,
@@ -632,11 +632,10 @@ internal sealed class EventsCapability : IEventsCapability
         try
         {
             // The ADR-024 denormalised regarding fields, read here (the catalog and the target are not the service's reads).
-            // Runs only after the caller was authorized AppendTo on the regarding record. AppendTo does NOT imply Read, so the
-            // app-only name/number read below can copy a record's name onto an event a caller without Read then reads back:
-            // a pre-existing disclosure carried over unchanged from REST (task 006 tenant-isolation review F1, filed in
-            // notes/defer-issues.md; the fix changes who sees what and needs an owner decision). The I-1 core stamps and the
-            // owner are the service's, from the lookups below.
+            // Runs only after the caller was authorized Read and AppendTo on the regarding record (#3181, owner D-3181: AppendTo
+            // alone does not imply Read, so the app-only name/number read below used to copy a record's name onto an event a
+            // caller without Read then read back; the check now requires Read). The I-1 core stamps and the owner are the
+            // service's, from the lookups below.
             RegardingFields? regarding = null;
             if (CarriesRegarding(request.RegardingRecordType, request.RegardingRecordId))
             {
@@ -989,9 +988,9 @@ internal sealed class EventsCapability : IEventsCapability
     /// (task 031), and a stamp that cannot be derived refuses there (<see cref="ClassifyRefusal"/>).
     /// </summary>
     /// <remarks>
-    /// Runs only after the caller was authorized AppendTo on the regarding record. AppendTo does not imply Read, so the
-    /// app-only name/number read is a known pre-existing disclosure (task 006 tenant-isolation review F1, filed in
-    /// notes/defer-issues.md). The pieces and their posture, after TodoRegardingBuilder:
+    /// Runs only after the caller was authorized Read and AppendTo on the regarding record (#3181, owner D-3181), so the
+    /// app-only name/number read copies only what the caller may already read. The pieces and their posture, after
+    /// TodoRegardingBuilder:
     /// <list type="bullet">
     ///   <item>record-type row — <see cref="ICommunicationDataverseService.QueryRecordTypeRefAsync"/>; absent or faulted →
     ///   the record-type lookup is left unset with a warning (non-fatal, as TodoRegardingBuilder);</item>

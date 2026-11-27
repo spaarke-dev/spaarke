@@ -269,7 +269,7 @@ public sealed class EventRoutesContractBaselineTests
     {
         await using var host = await EventsAuthHost.StartAsync();
         host.Probe.Hold(CreateEventPrivilege);
-        host.Probe.Grant(AnalysesSet, Analysis, AccessRights.AppendTo);
+        host.Probe.Grant(AnalysesSet, Analysis, AccessRights.Read | AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);

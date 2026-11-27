@@ -82,7 +82,7 @@ internal enum EventCapabilityStatus
     /// <summary>No Read on the event, or no such event: the same answer for both.</summary>
     NotFound,
 
-    /// <summary>Read without the operation's rights, or (create) no AppendTo on the regarding record.</summary>
+    /// <summary>Read without the operation's rights, or (create) no Read + AppendTo on the regarding record.</summary>
     Forbidden,
 
     /// <summary>Create only: the caller does not hold the Create privilege on <c>sprk_event</c>.</summary>

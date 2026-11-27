@@ -75,8 +75,8 @@ public class FeatureRolePrivilegeGuardTests
     private const string Bff = "src/server/api/Sprk.Bff.Api/";
     private const string ChildCreate = Bff + "Api/ChildRecordEndpoints.cs:70-85,279-286; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:63-90";
 
-    /// <summary>The typed event route's regarding check: AppendTo (event.attach_regarding) on the record the body names, which is one
-    /// of the eight regarding types.</summary>
+    /// <summary>The typed event route's regarding check: Read and AppendTo (event.attach_regarding; Read since #3181, because the create
+    /// copies the record's name and number) on the record the body names, which is one of the eight regarding types.</summary>
     private const string EventRegarding = Bff + "Api/Events/EventEndpoints.cs:131,378-405; src/server/shared/Spaarke.Dataverse/Models.cs:1439-1449; "
         + "src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs:255";
 
@@ -84,6 +84,13 @@ public class FeatureRolePrivilegeGuardTests
     [
         "prvAppendTosprk_Project", "prvAppendTosprk_Matter", "prvAppendTosprk_Invoice", "prvAppendTosprk_analysis", "prvAppendToAccount",
         "prvAppendToContact", "prvAppendTosprk_WorkAssignment", "prvAppendTosprk_Budget",
+    ];
+
+    /// <summary>The Read half of the same check (#3181, owner D-3181), on the same eight tables.</summary>
+    private static readonly string[] EventRegardingRead =
+    [
+        "prvReadsprk_Project", "prvReadsprk_Matter", "prvReadsprk_Invoice", "prvReadsprk_analysis", "prvReadAccount",
+        "prvReadContact", "prvReadsprk_WorkAssignment", "prvReadsprk_Budget",
     ];
 
     /// <summary>The playbook Read (RetrievePrincipalAccess on the row, unless public) and the scope Reads (a Record-path Read on each
@@ -263,6 +270,9 @@ public class FeatureRolePrivilegeGuardTests
         // Office add-in path posts it, so both role sets the doc names are held to every type.
         .. For("Event (typed route)", [Core], "Deep", EventRegarding, EventRegardingAppendTo),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Deep", EventRegarding, EventRegardingAppendTo),
+        // Read on the regarding record (#3181, owner D-3181): the create copies its name and number, so the check asks Read as well.
+        .. For("Event (typed route, regarding Read)", [Core], "Deep", EventRegarding, EventRegardingRead),
+        .. For("Event (typed route, Office Add In User, regarding Read)", [Basic, Office], "Deep", EventRegarding, EventRegardingRead),
 
         // Office add-in: save (POST /api/office/save) asks AppendTo on the target record; the document is created by the service.
         .. For("Office save", [Core], "Deep", Bff + "Api/Office/OfficeEndpoints.cs:185-194; " + Bff + "Api/Filters/EntityAccessFilter.cs:94,115-155,273-282",

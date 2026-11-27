@@ -32,8 +32,8 @@ namespace Sprk.Bff.Api.Api.Events;
 ///   <item><c>GET /{id}</c> and <c>POST /{id}/complete</c> carry <c>RecordRouteAccessAuthorizationFilter</c> on
 ///   <c>sprk_events({id})</c>: no Read → the uniform 404 (also the answer for an id that does not exist); Read
 ///   without the route's right → 403.</item>
-///   <item><c>POST /</c> checks the caller's Create privilege on <c>sprk_event</c> and AppendTo on the regarding
-///   record, then writes app-only (the G5 pattern, owner round 3b / round 7 item 3).</item>
+///   <item><c>POST /</c> checks the caller's Create privilege on <c>sprk_event</c> and Read + AppendTo on the regarding
+///   record (#3181), then writes app-only (the G5 pattern, owner round 3b / round 7 item 3).</item>
 /// </list>
 /// <para>Request-shape validation (no I/O) runs FIRST, as its own endpoint filter on POST /, so a 400 is never
 /// turned into a 403 and discloses nothing about any record.</para>
@@ -106,7 +106,7 @@ public static class EventEndpoints
             .Produces(500); // Internal Server Error
 
         // POST /api/v1/events - Create a new event. Shape validation first; then the caller's Create privilege on
-        // sprk_event and AppendTo on the regarding record, AS THE CALLER; then the app-only write.
+        // sprk_event and Read + AppendTo on the regarding record (#3181), AS THE CALLER; then the app-only write.
         group.MapPost("/", CreateEventAsync)
             .AddEndpointFilter(ValidateCreateEventRequestAsync)
             .AddRecordRouteAccessAuthorizationFilter(EventsCapability.AttachRegardingOperation, ResolveCreateRegardingTargetAsync, CreateEventPrivilege)
@@ -399,7 +399,7 @@ public static class EventEndpoints
 
     /// <summary>
     /// Creates a new event (<see cref="EventsCapability.CreateCoreAsync"/>). The filters have validated the shape and
-    /// established, AS THE CALLER, the Create privilege on sprk_event and AppendTo on the regarding record (route-level
+    /// established, AS THE CALLER, the Create privilege on sprk_event and Read + AppendTo on the regarding record (route-level
     /// authorization, ADR-008, unchanged); the row create is the ONE server create, <see cref="RecordCreationService"/>.
     /// </summary>
     /// <remarks>
