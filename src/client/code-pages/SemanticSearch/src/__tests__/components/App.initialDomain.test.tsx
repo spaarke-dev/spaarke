@@ -10,10 +10,11 @@
  */
 
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import type { AiSearchIndexRow } from '../../services/aiSearchIndexService';
-import type { AppUrlParams, SearchDomain } from '../../types';
+import type { AppUrlParams, SavedSearch, SearchDomain } from '../../types';
+import { DEFAULT_FILTERS } from '../../utils/initialFilters';
 
 const mockListIndexes = jest.fn<Promise<AiSearchIndexRow[]>, []>();
 jest.mock('../../services/aiSearchIndexService', () => ({
@@ -39,17 +40,36 @@ jest.mock('../../hooks/useRecordSearch', () => ({ useRecordSearch: () => recordS
 jest.mock('../../hooks/useFilterOptions', () => ({
   useFilterOptions: () => ({ documentTypes: [], fileTypes: [], matterTypes: [] }),
 }));
+const savedSearchState: { savedSearches: SavedSearch[]; isLoading: boolean; saveSearch: jest.Mock } = {
+  savedSearches: [],
+  isLoading: false,
+  saveSearch: jest.fn(),
+};
 jest.mock('../../hooks/useSavedSearches', () => ({
-  useSavedSearches: () => ({ savedSearches: [], isLoading: false, saveSearch: jest.fn() }),
+  useSavedSearches: () => savedSearchState,
 }));
 jest.mock('../../hooks/useSearchViewDefinitions', () => ({
   useSearchViewDefinitions: () => ({ columns: [] }),
 }));
 
-const paneProps: Array<{ activeDomain: SearchDomain; selectedSearchIndexId: string }> = [];
+interface PaneSnapshot {
+  activeDomain: SearchDomain;
+  selectedSearchIndexId: string;
+  unindexedDomainLabel?: string;
+}
+interface PaneProps extends PaneSnapshot {
+  onSelectSavedSearch: (search: SavedSearch) => void;
+}
+const paneProps: PaneSnapshot[] = [];
+let selectSavedSearch: ((search: SavedSearch) => void) | null = null;
 jest.mock('../../components/SearchFilterPane', () => ({
-  SearchFilterPane: (props: { activeDomain: SearchDomain; selectedSearchIndexId: string }) => {
-    paneProps.push({ activeDomain: props.activeDomain, selectedSearchIndexId: props.selectedSearchIndexId });
+  SearchFilterPane: (props: PaneProps) => {
+    paneProps.push({
+      activeDomain: props.activeDomain,
+      selectedSearchIndexId: props.selectedSearchIndexId,
+      unindexedDomainLabel: props.unindexedDomainLabel,
+    });
+    selectSavedSearch = props.onSelectSavedSearch;
     return null;
   },
 }));
@@ -83,7 +103,7 @@ const ALL_DEFAULT = row('all-1', 'All', true, 1);
 const MATTERS = row('matter-1', 'Matter', false, 2);
 const MATTERS_2 = row('matter-2', 'Matter', false, 3);
 
-function renderApp(urlParams: AppUrlParams) {
+function renderApp(urlParams: AppUrlParams, initialSavedSearchId = '') {
   render(
     <FluentProvider theme={webLightTheme}>
       <App
@@ -91,7 +111,7 @@ function renderApp(urlParams: AppUrlParams) {
         initialDomain={urlParams.domain ?? 'documents'}
         initialScope="all"
         initialEntityId=""
-        initialSavedSearchId=""
+        initialSavedSearchId={initialSavedSearchId}
         isDark={false}
         urlParams={urlParams}
       />
@@ -105,8 +125,27 @@ async function settled() {
   return paneProps[paneProps.length - 1];
 }
 
+const latest = () => paneProps[paneProps.length - 1];
+
+function savedSearch(id: string, searchDomain: SearchDomain, query: string): SavedSearch {
+  return {
+    id,
+    name: `${searchDomain} search`,
+    searchDomain,
+    query,
+    filters: DEFAULT_FILTERS,
+    viewMode: 'grid',
+    columns: [],
+    sortColumn: 'similarity',
+    sortDirection: 'desc',
+  };
+}
+
 beforeEach(() => {
   paneProps.length = 0;
+  selectSavedSearch = null;
+  savedSearchState.savedSearches = [];
+  savedSearchState.isLoading = false;
   mockListIndexes.mockReset();
   documentSearch.search.mockReset();
   recordSearch.search.mockReset();
@@ -164,10 +203,74 @@ describe('App — initial search index and domain', () => {
     expect(await settled()).toEqual({ activeDomain: 'documents', selectedSearchIndexId: 'all-1' });
   });
 
-  it('with no index for the requested domain, falls back to the default index', async () => {
+  // #3195: before, the default index took over and the page moved to Documents, so the invoice
+  // results of the first search were no longer shown and nothing said why.
+  it('with no index for the requested domain, stays on it, selects nothing and says so', async () => {
     mockListIndexes.mockResolvedValue([ALL_DEFAULT, MATTERS]);
-    renderApp({ domain: 'invoices' });
+    renderApp({ query: 'retainer', domain: 'invoices' });
 
-    expect(await settled()).toEqual({ activeDomain: 'documents', selectedSearchIndexId: 'all-1' });
+    await waitFor(() => expect(latest().unindexedDomainLabel).toBe('Invoices'));
+    expect(latest()).toEqual({ activeDomain: 'invoices', selectedSearchIndexId: '', unindexedDomainLabel: 'Invoices' });
+    expect(recordSearch.search).toHaveBeenCalledTimes(1);
+    expect(recordSearch.search.mock.calls[0][1]).toEqual(['sprk_invoice']);
+    expect(documentSearch.search).not.toHaveBeenCalled();
+  });
+});
+
+describe('App — a saved search runs against an index of its own domain (#3195)', () => {
+  it('a saved Matters search chosen while a Documents index is selected selects and searches a Matters index', async () => {
+    mockListIndexes.mockResolvedValue([ALL_DEFAULT, MATTERS]);
+    renderApp({});
+    expect(await settled()).toMatchObject({ activeDomain: 'documents', selectedSearchIndexId: 'all-1' });
+
+    act(() => selectSavedSearch!(savedSearch('s1', 'matters', 'indemnity')));
+
+    await waitFor(() => expect(latest()).toMatchObject({ activeDomain: 'matters', selectedSearchIndexId: 'matter-1' }));
+    expect(recordSearch.search).toHaveBeenCalledTimes(1);
+    const [query, recordTypes, , envelopeIndex, fragment] = recordSearch.search.mock.calls[0];
+    expect(query).toBe('indemnity');
+    expect(recordTypes).toEqual(['sprk_matter']);
+    expect(envelopeIndex).toBeNull();
+    expect(fragment).toMatchObject({ searchIndexName: 'matter-1-index' });
+  });
+
+  it('keeps the selected index when it is already of the saved search domain', async () => {
+    mockListIndexes.mockResolvedValue([ALL_DEFAULT, MATTERS, MATTERS_2]);
+    renderApp({ searchIndexName: 'matter-2-index' });
+    expect(await settled()).toMatchObject({ activeDomain: 'matters', selectedSearchIndexId: 'matter-2' });
+
+    act(() => selectSavedSearch!(savedSearch('s1', 'matters', 'indemnity')));
+
+    await waitFor(() => expect(recordSearch.search).toHaveBeenCalledTimes(1));
+    expect(latest()).toMatchObject({ activeDomain: 'matters', selectedSearchIndexId: 'matter-2' });
+    expect(recordSearch.search.mock.calls[0][4]).toMatchObject({ searchIndexName: 'matter-2-index' });
+  });
+
+  it('a saved search of a domain with no index searches the standard index, not the selected one, and says so', async () => {
+    mockListIndexes.mockResolvedValue([ALL_DEFAULT, MATTERS]);
+    renderApp({ searchIndexName: 'all-1-index' });
+    expect(await settled()).toMatchObject({ activeDomain: 'documents', selectedSearchIndexId: 'all-1' });
+
+    act(() => selectSavedSearch!(savedSearch('s1', 'invoices', 'retainer')));
+
+    await waitFor(() => expect(recordSearch.search).toHaveBeenCalledTimes(1));
+    expect(latest()).toEqual({ activeDomain: 'invoices', selectedSearchIndexId: '', unindexedDomainLabel: 'Invoices' });
+    const [, recordTypes, , envelopeIndex, fragment] = recordSearch.search.mock.calls[0];
+    expect(recordTypes).toEqual(['sprk_invoice']);
+    expect(envelopeIndex).toBeNull();
+    expect(fragment).toBeNull();
+  });
+
+  it('a saved search opened from the URL before the index list loads ends on an index of its domain', async () => {
+    let resolveList: (rows: AiSearchIndexRow[]) => void = () => undefined;
+    mockListIndexes.mockReturnValue(new Promise(resolve => (resolveList = resolve)));
+    savedSearchState.savedSearches = [savedSearch('s1', 'matters', 'indemnity')];
+    renderApp({}, 's1');
+
+    await waitFor(() => expect(recordSearch.search).toHaveBeenCalledTimes(1));
+    await act(async () => resolveList([ALL_DEFAULT, MATTERS]));
+
+    expect(await settled()).toMatchObject({ activeDomain: 'matters', selectedSearchIndexId: 'matter-1' });
+    expect(documentSearch.search).not.toHaveBeenCalled();
   });
 });
