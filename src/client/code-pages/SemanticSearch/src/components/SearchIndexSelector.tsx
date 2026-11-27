@@ -37,6 +37,11 @@ export interface SearchIndexSelectorProps {
   isLoading: boolean;
   /** Called when the user picks a different row. */
   onSelectIndex: (row: AiSearchIndexRow) => void;
+  /**
+   * Set when the page searches a kind of record that has no index in the list (for example
+   * Invoices with no Invoice index): nothing is selected, and the selector says why (#3195).
+   */
+  unindexedDomainLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +84,7 @@ export const SearchIndexSelector: React.FC<SearchIndexSelectorProps> = ({
   selectedIndexId,
   isLoading,
   onSelectIndex,
+  unindexedDomainLabel,
 }) => {
   const styles = useStyles();
 
@@ -136,6 +142,7 @@ export const SearchIndexSelector: React.FC<SearchIndexSelectorProps> = ({
         value={selectedLabel}
         selectedOptions={selectedIndexId ? [selectedIndexId] : []}
         onOptionSelect={handleOptionSelect}
+        placeholder={unindexedDomainLabel && !selectedRow ? `No ${unindexedDomainLabel} index` : undefined}
         aria-label="Search index"
       >
         {indexes.map(row => (
@@ -144,6 +151,11 @@ export const SearchIndexSelector: React.FC<SearchIndexSelectorProps> = ({
           </Option>
         ))}
       </Dropdown>
+      {unindexedDomainLabel && !selectedRow ? (
+        <Text className={styles.emptyHint} data-testid="search-index-unindexed-hint">
+          No search index is set up for {unindexedDomainLabel}. Results come from the standard index.
+        </Text>
+      ) : null}
     </div>
   );
 };

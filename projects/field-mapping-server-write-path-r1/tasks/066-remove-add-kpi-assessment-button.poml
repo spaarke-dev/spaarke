@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Remove the "Add KPI Assessment" subgrid button; "+ New" is the one KPI create (owner 2026-11-26, 051 OQ-5)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>Owner go for the dev import (separate, after merge of the repo change)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Ribbon XML, config and their tests; no server code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped removal with exact files.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>051</deps>
+    <tags>dataverse, ribbon, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Owner 2026-11-26 (051 OQ-5): "only +New is required". The KPI assessment subgrid shows both "New KPI Assessment" (the SecureChild BFF create-then-open) and "Add KPI Assessment" (`sprk.matter.subgrid.kpi.AddKpiButton`). Remove "Add KPI Assessment" from the repo ribbon and from everything that requires it; keep "+ New".</prompt>
+  <role>Spaarke Dataverse ribbon developer.</role>
+  <goal>No repo ribbon defines `sprk.matter.subgrid.kpi.AddKpiButton`; the native-create config, `-Verify`, the ArchTests and the Pester tests no longer require it, and they now require that it is ABSENT from the KPI assessment ribbon; the subgrid "+ New" rule and every other 051 surface are unchanged.</goal>
+
+  <context>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_KPIAssessment/RibbonDiff.xml (CustomAction, CommandDefinition, its rules if used only by it, LocLabels)</file>
+      <file role="modify">infrastructure/dataverse/ribbon/NativeCreateRibbons/native-create-surfaces.json (`alsoPresent` on sprk_kpiassessment; the "+ Add KPI" wording in the budget and KPI reasons)</file>
+      <file role="modify">infrastructure/dataverse/ribbon/NativeCreateRibbons/Merge-NativeCreateRibbon.ps1, scripts/Test-NativeCreateSurfaces.ps1 and their Pester tests, if they hard-code Add KPI</file>
+      <file role="modify">tests/Spaarke.ArchTests (the `AddMemo_AndAddKpi_...` test and its control: keep the Add Memo half)</file>
+      <file role="read">src/solutions/SpaarkeCore/entities/sprk_matter/RibbonDiff/add-kpi-ribbon.xml, src/solutions/webresources/sprk_kpi_ribbon_actions.js, src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_kpi_ribbon_actions.js: report whether anything else uses them; delete a file only if nothing does, and say which</file>
+      <file role="do-not-touch">projects/**/notes, projects/**/CLAUDE.md, .claude/**</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Repo only: no Dataverse write, no import, no publish.</constraint>
+    <constraint>Add Memo on the event form is unchanged and still required by its checks.</constraint>
+    <constraint>Re-running `Merge-NativeCreateRibbon.ps1` on all tables leaves every file other than the KPI ribbon byte-identical.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>`grep -r AddKpiButton src/dataverse infrastructure tests scripts` finds nothing except a must-be-absent check.</criterion>
+    <criterion>A must-fire control: the check fails when a ribbon still contains the Add KPI button; must-not-fire: it passes on the edited ribbon.</criterion>
+    <criterion>Pester for the NativeCreateRibbons scripts green; Spaarke.ArchTests green (without --no-build).</criterion>
+  </acceptance-criteria>
+</task>

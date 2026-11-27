@@ -12,7 +12,7 @@
  */
 
 import { authenticatedFetch, initAuth, resolveRuntimeConfig } from '@spaarke/auth';
-import { createChildRecordViaBff } from '@spaarke/ui-components';
+import { createChildRecordViaBff, updateChildRecordViaBff } from '@spaarke/ui-components';
 
 let bffBaseUrlPromise: Promise<string> | null = null;
 
@@ -41,4 +41,15 @@ export function ensureBffBaseUrl(): Promise<string> {
 export async function createTodoThroughBff(payload: Record<string, unknown>): Promise<string> {
   const bffBaseUrl = await ensureBffBaseUrl();
   return createChildRecordViaBff(authenticatedFetch, bffBaseUrl, 'sprk_todo', payload);
+}
+
+/**
+ * Changes a `sprk_todo`'s status (complete, dismiss, restore) through the BFF (`PATCH /api/v1/child-records/sprk_todo/{id}`).
+ * Ontology task 234 (#3279, D-233): the BFF refuses closing the "Record the outcome" To Do of an open budget inquiry (409
+ * `inquiry.disposition_required`); a status change written through Xrm.WebApi never reached that check. Rejects with the
+ * server's error (`ChildRecordWriteError`, its `reasonCode` intact); nothing was written.
+ */
+export async function updateTodoThroughBff(todoId: string, payload: Record<string, unknown>): Promise<void> {
+  const bffBaseUrl = await ensureBffBaseUrl();
+  await updateChildRecordViaBff(authenticatedFetch, bffBaseUrl, 'sprk_todo', todoId, payload);
 }

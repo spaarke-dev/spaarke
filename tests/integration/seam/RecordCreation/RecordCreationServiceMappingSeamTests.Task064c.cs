@@ -17,8 +17,8 @@ namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
 /// field-mapping-server-write-path-r1 task 064c (the task 064 review): which mapped values step 5 writes without the caller's
 /// checks. A value is copied unchecked only when its source is the record the caller's row is filed under, by table AND id;
 /// the Assigned-To class is the prefix family united with the access-conferring registries; an adapter default and a filing
-/// lookup keep the caller's checks; a field-secured source column (or one whose security cannot be told) is never copied; a
-/// target column whose security is not stated counts as secured.
+/// lookup keep the caller's checks; a field-secured source column (or one whose security cannot be told) is not copied from
+/// a source that is not the filing parent (task 065); a target column whose security is not stated counts as secured.
 /// </summary>
 public sealed partial class RecordCreationServiceMappingSeamTests
 {
@@ -118,6 +118,48 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_eventtype_ref");
     }
 
+    // ── task 065: the field-secured-source lift decides by table AND id, as step 5's skip does ──
+
+    [Fact]
+    public async Task Task065_AFieldSecuredSourceColumnOfAnExplicitSourceWithThePairsIdButAnotherTable_IsNotCopied_WithTheFieldSecuredWarning()
+    {
+        // Filed under the matter by the pair; the explicit source is a project carrying the pair's id (a client-chosen GUID).
+        // It is not the record the row is filed under, so the drop stays: its field-secured column is not copied.
+        TheRecordTypes();
+        _sources[("sprk_project", OrdinaryMatter)] = new Entity("sprk_project", OrdinaryMatter)
+        {
+            ["sprk_projectnotes"] = "From the project",
+        };
+        Profile("sprk_project", "sprk_event", Rule("sprk_projectnotes", "sprk_description", Memo));
+        _scripted.SecuredColumns.Add("sprk_projectnotes");
+
+        var outcome = await Service().CreateAsync(
+            EventByPair(OrdinaryMatter, mappingSource: ("sprk_project", OrdinaryMatter)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Subject.Fields.Should().NotContainKey("sprk_description",
+            "a source is the filing record only when its table and id both match: a field-secured column of another table's record is not copied");
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappedValueDroppedCode);
+        warning.Column.Should().Be("sprk_description");
+        warning.Detail.Should().Contain(RecordCreationService.SourceColumnFieldSecured).And.NotContain("From the project");
+    }
+
+    [Fact]
+    public async Task Task065_AFieldSecuredSourceColumnOfTheSourceResolvedFromTheRegardingPair_TheCallerCanRead_IsWritten_WithNoWarning()
+    {
+        TheRecordTypes();
+        MatterEventTypeToEventProfile();
+        _scripted.SecuredColumns.Add("sprk_matterdescription"); // the caller can read it; the target sprk_description is not secured
+
+        var outcome = await Service().CreateAsync(EventByPair(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the matter",
+            "the record named by the regarding pair is the filing parent: its field-secured column copies when the caller can read it");
+        outcome.MappingWarnings.Should().BeEmpty("no SourceColumnFieldSecured warning from the filing parent");
+    }
+
     // ── (e) an ordinary adapter default the caller cannot AppendTo is dropped as a default ──
 
     [Fact]
@@ -143,7 +185,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.DefaultValueDroppedCode && w.Column == "sprk_eventtype_ref");
     }
 
-    // ── (f) a Template rule with a field-secured placeholder is not applied ──
+    // ── (f) a Template rule with a field-secured placeholder from a source that is not the filing parent is not applied ──
 
     [Fact]
     public async Task Task064c_ATemplateRuleWithAFieldSecuredPlaceholder_IsDropped()
@@ -153,7 +195,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         Profile("sprk_matter", "sprk_event", template);
         _scripted.SecuredColumns.Add("sprk_location");
 
-        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var outcome = await Service().CreateAsync(EventFromASourceThatIsNotTheFilingParent(), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         _creates.Should().ContainSingle().Subject.Fields.Should().NotContainKey("sprk_description");
@@ -163,7 +205,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         warning.Detail.Should().Contain(RecordCreationService.SourceColumnFieldSecured).And.NotContain("Courtroom 4");
     }
 
-    // ── (g) a source column whose security is not stated counts as secured ──
+    // ── (g) a source column whose security is not stated counts as secured (a source that is not the filing parent) ──
 
     [Theory]
     [InlineData(true)]  // the column is answered without IsSecured
@@ -180,7 +222,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             })
             : null;
 
-        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var outcome = await Service().CreateAsync(EventFromASourceThatIsNotTheFilingParent(), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
@@ -190,7 +232,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_description");
     }
 
-    // ── (h) the source-security read throws: nothing is mapped, with a warning ──
+    // ── (h) the source-security read throws: nothing is mapped, with a warning (a source that is not the filing parent) ──
 
     [Fact]
     public async Task Task064c_WhenTheSourceSecurityReadThrows_NothingIsMapped_WithAWarning()
@@ -200,7 +242,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             ? new HttpRequestException("metadata read failed")
             : null;
 
-        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var outcome = await Service().CreateAsync(EventFromASourceThatIsNotTheFilingParent(), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
@@ -294,7 +336,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         result.Should().Be(filing);
     }
 
-    // ── task 064d: a rule's source column is compared by its trimmed, lower-case logical name ──
+    // ── task 064d: a rule's source column is compared by its trimmed, lower-case logical name (a source that is not the filing parent) ──
 
     [Theory]
     [InlineData(false)] // the column is not field-secured: the value is mapped
@@ -305,13 +347,13 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         if (secured)
             _scripted.SecuredColumns.Add("sprk_matterdescription");
 
-        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var outcome = await Service().CreateAsync(EventFromASourceThatIsNotTheFilingParent(), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
         if (secured)
         {
-            fields.Should().NotContainKey("sprk_description", "a field-secured source column is never copied, whatever its spelling");
+            fields.Should().NotContainKey("sprk_description", "a field-secured source column is not copied from another source, whatever its spelling");
             outcome.MappingWarnings.Should().ContainSingle()
                 .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_description");
         }

@@ -79,6 +79,8 @@ export interface SearchFilterPaneProps {
   isLoadingSearchIndexes: boolean;
   /** Called when the user selects a different Search Index row. */
   onSelectSearchIndex: (row: AiSearchIndexRow) => void;
+  /** Label of the searched kind of record when no index of it is in the list (#3195). */
+  unindexedDomainLabel?: string;
   /** Current filter state */
   filters: SearchFilters;
   /** Callback when any filter value changes */
@@ -225,6 +227,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   selectedSearchIndexId,
   isLoadingSearchIndexes,
   onSelectSearchIndex,
+  unindexedDomainLabel,
   filters,
   onFiltersChange,
   onSearch,
@@ -356,6 +359,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
           selectedIndexId={selectedSearchIndexId}
           isLoading={isLoadingSearchIndexes}
           onSelectIndex={onSelectSearchIndex}
+          unindexedDomainLabel={unindexedDomainLabel}
         />
       </div>
 

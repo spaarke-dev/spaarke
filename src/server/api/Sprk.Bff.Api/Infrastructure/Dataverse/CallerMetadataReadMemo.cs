@@ -12,8 +12,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <para><b>What is remembered.</b> Only a SUCCESSFUL answer to a GET whose path starts with <c>EntityDefinitions(</c> — a
 /// table's privileges' names, its columns, its relationships, its entity set, its ownership type: data about the schema, read
 /// under the caller's token. A failure is never remembered, so the next identical read asks again, as before. Nothing else is
-/// remembered: <c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>, record reads and every other
-/// caller question still go to Dataverse every time (ADR-009: no authorization answer is cached). A write (POST, PATCH,
+/// remembered by THIS memo: <c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>, record reads and every other
+/// caller question go on to the client it wraps (ADR-009: this memo caches no authorization answer; inside a decision commit that client may be
+/// the <see cref="Sprk.Bff.Api.Services.Signals.DecisionAccessWindow"/> view, which answers some of them within its own rules: one request, record access per step). A write (POST, PATCH,
 /// DELETE) passes through; a memo of its own then forgets everything remembered (a request-scoped one keeps it, below).</para>
 /// <para><b>For how long, for whom.</b> One instance wraps one caller's client for one create's step 5, and (task 049c) a
 /// second instance for the same create's steps 2 and 3 (the caller's payload, then the merge of the mapped values, which
@@ -66,8 +67,12 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     /// row write forgets nothing; otherwise a memo of its own, exactly as before (a job, every create that does not go through
     /// <c>ChildRecordEndpoints.CreateAsync</c>, and any other <see cref="IDataverseUserClient"/> even inside a request).
     /// </summary>
+    /// <remarks>ISS-010 part C: an <see cref="ICallerClientView"/> (the decision commit's access-window view) counts as the
+    /// <see cref="DataverseUserClient"/> only when the client it wraps IS the <see cref="DataverseUserClient"/>: the gate checks
+    /// the wrapped type, not who built the view.</remarks>
     internal static CallerMetadataReadMemo For(IDataverseUserClient inner, RequestScope? requestReads) =>
-        requestReads is not null && inner is DataverseUserClient
+        requestReads is not null
+        && (inner is DataverseUserClient || (inner is ICallerClientView view && view.Inner is DataverseUserClient))
             ? new CallerMetadataReadMemo(inner, requestReads.Store, forgetOnWrite: false)
             : new CallerMetadataReadMemo(inner);
 
@@ -101,8 +106,9 @@ internal sealed class CallerMetadataReadMemo : IDataverseUserClient
     /// (POST, PATCH, DELETE) forgets nothing: a row write does not change a table's schema. What
     /// is kept is unchanged: only a SUCCESSFUL answer to a GET whose path starts with <c>EntityDefinitions(</c> (its
     /// <c>/Attributes</c> and other sub-paths included). Never a row, a record-type catalog row (<c>sprk_recordtype_refs</c>), an
-    /// access answer (<c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>) or a failure: those are asked
-    /// every time, as before (ADR-009: no authorization answer is cached). The store lives and dies with the request: nothing is
+    /// access answer (<c>RetrievePrincipalAccess</c>, <c>RetrieveUserSetOfPrivilegesByNames</c>) or a failure: this scope keeps none of them
+    /// (ADR-009: this memo caches no authorization answer; inside a decision commit the client it wraps may be the <see cref="Sprk.Bff.Api.Services.Signals.DecisionAccessWindow"/>
+    /// view, which may answer them within its own rules: one request, record access per step). The store lives and dies with the request: nothing is
     /// shared across requests, and there is no process-wide cache.</para>
     /// <para><b>Who gets it.</b> Only a create whose request names it (<c>RecordCreationRequest.MetadataReads</c>), which
     /// <c>ChildRecordEndpoints.CreateAsync</c> sets from its own request: the shared store applies to every create that goes

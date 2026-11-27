@@ -91,6 +91,7 @@ internal static class DecisionCapabilityFixtures
             new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance),
             new Mock<IDataverseUserClient>(MockBehavior.Strict).Object,
             TimeProvider.System,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<DecisionCommitService>.Instance);
 
     /// <summary>
