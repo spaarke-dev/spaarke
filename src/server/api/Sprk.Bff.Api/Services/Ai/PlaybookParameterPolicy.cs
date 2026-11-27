@@ -15,8 +15,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// position is escaped for that language (<see cref="PlaybookTemplateContextBuilder.EscapeForQueryText"/>) and the typed
 /// keys below are type-checked there too (<see cref="EnsureTypedParametersValid"/>) — so no parameter can inject,
 /// whatever its key. This class is the second half: the ONE shared policy every HTTP entry that takes caller parameters
-/// applies before a run starts (<c>POST /api/ai/playbooks/{id}/execute</c> and <c>POST /api/agent/run-playbook</c> via
-/// <c>PlaybookAuthorizationFilter</c>; <c>POST /api/insights/ask</c> is task 163's consumer).</para>
+/// applies before a run starts (<c>POST /api/ai/playbooks/{id}/execute</c> via <c>PlaybookAuthorizationFilter</c>;
+/// <c>POST /api/insights/ask</c> is task 163's consumer).</para>
 /// <para><b>The rules, in order</b> (<see cref="Evaluate"/>):</para>
 /// <list type="number">
 ///   <item>A <see cref="ServerOwnedKeys">server-owned key</see> (any letter case, or a <c>run.</c> / <c>start.</c> /

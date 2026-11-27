@@ -506,10 +506,9 @@ public sealed class OrderedCredentialClientProvider : IConfidentialClientProvide
     /// the same app registration. Centralising the lookup here is part of the point: it removes
     /// per-call-site credential knowledge, which is what let the estate drift in the first place.</para>
     ///
-    /// <para><b>Deliberately excluded: <c>AgentToken:ClientSecret</c>.</b> It is options-bound rather
-    /// than raw configuration and nominally describes the same app registration, but silently folding it
-    /// into this precedence could change which secret <c>AgentTokenService</c> presents. Reconciling it
-    /// is booked onto task 022, where that call site is migrated and the change is observable.</para>
+    /// <para><b>Deliberately excluded: <c>AgentToken:ClientSecret</c>.</b> It was options-bound and served
+    /// only the legacy M365 Copilot agent's token exchange. spaarkeai-mcp-bff-api-r2 task 001 removed that
+    /// exchange, and nothing reads the key now.</para>
     /// </summary>
     private string? ResolveClientSecret()
         => FirstNonBlank(

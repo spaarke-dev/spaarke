@@ -20,6 +20,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
@@ -80,7 +81,7 @@ public class EventEndpointsMembershipPublishingTests
     [Fact]
     public void CreateEventPayload_WithAnAssignee_WritesSprkAssignedToAsAContactLookup()
     {
-        var payload = EventEndpoints.BuildCreatePayload(
+        var payload = EventsCapability.BuildCreatePayload(
             new ApiCreateEventRequest("Hearing"), regarding: null, assignedToContactId: ActingUsersContactId);
 
         payload.Should().ContainKey("sprk_assignedto").WhoseValue.Should().BeEquivalentTo(
@@ -96,7 +97,7 @@ public class EventEndpointsMembershipPublishingTests
     [InlineData(true)]
     public void CreateEventPayload_WithNoAssignee_WritesNoAssignedTo(bool emptyGuid)
     {
-        var payload = EventEndpoints.BuildCreatePayload(
+        var payload = EventsCapability.BuildCreatePayload(
             new ApiCreateEventRequest("Hearing"), regarding: null, assignedToContactId: emptyGuid ? Guid.Empty : null);
 
         payload.Keys.Should().NotContain(k => k.StartsWith("sprk_assignedto", StringComparison.OrdinalIgnoreCase));
@@ -107,7 +108,7 @@ public class EventEndpointsMembershipPublishingTests
     {
         // The route's payload names neither column: RecordCreationService resolves the owner record-first (ResolveOwnerAsync)
         // and stamps the creator person from the owner decision, so no caller-built payload can leave an event app-owned.
-        var payload = EventEndpoints.BuildCreatePayload(
+        var payload = EventsCapability.BuildCreatePayload(
             new ApiCreateEventRequest("Hearing"), regarding: null, assignedToContactId: ActingUsersContactId);
 
         payload.Keys.Should().NotContain(k =>

@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Daily Briefing data seam in Spaarke.DailyBriefing.Components</title>
+    <phase>0 Removal, prerequisites and seams</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts code in a shared component consumed by the Console, the standalone page and the SpaarkeAi host; tags include react and frontend</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component refactor with explicit defaults and a reference pattern (spaarke-decisions App.tsx injected services); consumers must stay unchanged</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns src/client/shared/Spaarke.DailyBriefing.Components/** only; no BFF or other client files</parallel-reason>
+    <deps>none</deps>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give DailyBriefingApp an injected data service and an injected navigation handler, defaulting to today's authenticatedFetch and Xrm behaviour, so the same component can render inside a sandboxed MCP widget (no network, no MSAL, no Xrm) while the Console, the standalone DailyBriefing page and the SpaarkeAi host keep working unchanged.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 19, Fluent UI v9 and dependency-injected data seams.</role>
+  <goal>DailyBriefingAppProps accepts an optional data service (briefing render/narrate/summary and preferences) and an optional navigation handler (open record, open URL, browse playbooks); actions with no injected handler are hidden; with no props supplied the component behaves exactly as today and every existing test passes unchanged.</goal>
+
+  <context>
+    <background>Spec FR-16 ("DailyBriefingApp gains an injected data service; the Console and the standalone page keep working unchanged, and Xrm navigation becomes an injected handler") and FR-09 (owner: AI Daily Briefing). Reuse scan row "Daily Briefing component": DailyBriefingApp.tsx:75 imports authenticatedFetch (used at ~:895-949); Xrm via getXrm at ~:340, :534, :611; services/briefingService.ts:31 calls authenticatedFetch. Consumers: src/solutions/DailyBriefing/src/main.tsx, src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts, src/solutions/SpaarkeAi/src/main.tsx (not edited). Task 034 builds the widget on this seam and decides which briefing call the tool returns (spec Unresolved Question).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingRender.ts, useBriefingPreferences.ts (accept the injected service)</file>
+      <file role="new">src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingDataService.ts (interface BriefingDataService + createDefaultBriefingDataService wrapping today's calls)</file>
+      <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src/index.ts (export the interface and default factory)</file>
+      <file role="new">src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.injectedSeam.test.tsx</file>
+      <file role="canonical-reference">src/client/widgets/spaarke-decisions/src/App.tsx:38 (widget-side injected services)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/worklistService.ts:350 (createWorklistService({ fetch }) injected transport)</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">The seam lives in the existing package Spaarke.DailyBriefing.Components; no new package. The package stays free of Xrm globals in the injected path and free of any MCP SDK dependency.</constraint>
+    <constraint source="project">Defaults preserve behaviour: with no injected service/handler, the component makes exactly today's calls and navigations; every existing test under src/client/shared/Spaarke.DailyBriefing.Components/test/ passes without modification, and the three consumers compile without edits.</constraint>
+    <constraint source="project">When a data service is injected, the component never calls authenticatedFetch, getXrm or window.Xrm for data or navigation (a test asserts it with both spied); interactive actions that need a capability the host did not inject (inline to-do create, email share, dismiss, preferences save) are hidden, not broken.</constraint>
+    <constraint source="ADR-021">No visual change: the injected path renders the same Fluent v9 components with semantic tokens; mirror the existing DigestHeader/TldrSection rendering exactly.</constraint>
+    <constraint source="project">Run npm install --legacy-peer-deps --no-audit --no-fund (not npm ci) if dependencies are needed; npm test in the package must pass.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/notes/reuse-scan.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Injected service seam" location="src/client/widgets/spaarke-decisions/src/App.tsx">Services passed as props with a default factory; the component never reaches for globals when one is injected</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inventory every network and Xrm call reachable from DailyBriefingApp (component, hooks, services) and list them in the task notes with file:line.</step>
+    <step order="2">Define BriefingDataService and a navigation handler type; implement createDefaultBriefingDataService over today's calls; thread both through DailyBriefingApp and the hooks with defaults.</step>
+    <step order="3">Hide host-unsupported actions when their capability is not injected.</step>
+    <step order="4">Write DailyBriefingApp.injectedSeam.test.tsx; run npm test in the package; type-check the three consumers (tsc --noEmit in src/solutions/DailyBriefing and src/solutions/LegalWorkspace).</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If keeping the default path byte-for-byte requires editing a consumer under src/solutions/**, STOP and escalate (hot-path declaration says SpaarkeAi N).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row "Daily Briefing component": DailyBriefingApp.tsx:75 and services/briefingService.ts:31 call authenticatedFetch and Xrm directly; verdict "Extend: add a data seam". CAPABILITY-INDEX: no Daily Briefing seam row.</existing>
+    <extension>Yes, extended in place: an optional interface and a default factory inside the existing package; no new component.</extension>
+    <cost-of-doing-nothing>The briefing cannot render in a Copilot widget (the sandbox has no network, MSAL or Xrm), so FR-09/FR-16's Daily Briefing widget (task 034) fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Console briefing unchanged">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webResourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open the Spaarke Console and the Daily Briefing section</step>
+        <step>Verify TL;DR, channel sections and stat tiles render as before</step>
+        <step>Open a record link from a briefing row; verify the record modal opens</step>
+        <step>Check the console for JavaScript errors</step>
+      </steps>
+      <expected>Briefing renders and navigates exactly as before the change, with no console errors</expected>
+    </test>
+    <test name="Standalone Daily Briefing page unchanged">
+      <steps>
+        <step>Open the standalone DailyBriefing code page</step>
+        <step>Verify render, Browse Playbooks and email share still work</step>
+      </steps>
+      <expected>No behaviour change</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host to dark mode</step>
+        <step>Verify backgrounds and text adapt; no hard-coded white or black</step>
+      </steps>
+      <expected>All colours use Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">npm test in src/client/shared/Spaarke.DailyBriefing.Components; tsc --noEmit in consumers</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingDataService.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.injectedSeam.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every existing test in Spaarke.DailyBriefing.Components passes without modification.</criterion>
+    <criterion testable="true">tsc --noEmit passes in src/solutions/DailyBriefing and src/solutions/LegalWorkspace with no consumer edits.</criterion>
+    <criterion testable="true">With an injected data service and navigation handler, the component renders a fixture briefing and makes zero authenticatedFetch, getXrm or window.Xrm calls (spied).</criterion>
+    <criterion testable="true">With an injected service but no to-do/email/dismiss capability, those actions are not rendered.</criterion>
+    <criterion testable="true">Negative: when the injected service rejects, the component shows its existing failed-sections/empty state, not an unhandled error.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-16, FR-09. No BFF change. Completed 2026-11-25: BriefingDataService + BriefingNavigationHandler seam (briefingDataService.ts), optional dataService/navigation props on DailyBriefingApp, injected-service args on useBriefingRender/useBriefingPreferences, optional To Do/dismiss on NarrativeBullet and ActivityNotesSection. 11 new tests; package suite 180 -> 191 tests, existing tests unmodified. Inventory, decisions and the test-environment note are in notes/010-decisions.md. Consumer tsc (DailyBriefing, LegalWorkspace) not run here: no node_modules or built dist in the worktree. Out-of-scope findings: none new. rework: none task 010</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

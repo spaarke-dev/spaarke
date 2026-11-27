@@ -97,7 +97,13 @@ import { NarrativeCitedText, hasInlineRegardingMention } from './NarrativeCitedT
 
 /** Keys of the overflow-menu actions (see `menuActions` in the component). */
 type NarrativeMenuAction =
-  'previewDocument' | 'markAsRead' | 'remove' | 'keep' | 'addToTodo' | 'dismiss' | 'openRecord';
+  | 'previewDocument'
+  | 'markAsRead'
+  | 'remove'
+  | 'keep'
+  | 'addToTodo'
+  | 'dismiss'
+  | 'openRecord';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -229,10 +235,13 @@ export interface NarrativeBulletProps {
    * (source ModifiedOn), shown as an "Updated {date}" caption. Omitted/empty → not rendered.
    */
   date?: string;
-  /** Callback to add the covered notifications to To Do. */
-  onAddToTodo: (itemIds: string[]) => void;
-  /** Callback to dismiss the covered notifications. */
-  onDismiss: (itemIds: string[]) => void;
+  /**
+   * Callback to add the covered notifications to To Do. When undefined the "Add to To Do" menu item is
+   * hidden (a host that injected no To Do capability, task 010 data seam).
+   */
+  onAddToTodo?: (itemIds: string[]) => void;
+  /** Callback to dismiss the covered notifications. When undefined the "Dismiss" menu item is hidden. */
+  onDismiss?: (itemIds: string[]) => void;
   /** Whether a To Do has been created for this bullet. */
   isTodoCreated: boolean;
   /** Whether a To Do creation is in progress. */
@@ -392,9 +401,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // both the inline regarding-name link and the fallback "Open record"
   // overflow-menu handler.
   const resolveXrm = ():
-    { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined =>
+    | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
+    | undefined =>
     getXrm('navigation') as
-      { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined;
+      | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
+      | undefined;
 
   const openRecordViaXrm = (entityType: string, entityId: string): void => {
     if (!entityType || !entityId) return;
@@ -460,11 +471,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
 
   const handleMenuAddToTodo = (): void => {
     if (isTodoCreated || isTodoPending) return;
-    onAddToTodo(itemIds);
+    onAddToTodo?.(itemIds);
   };
 
   const handleMenuDismiss = (): void => {
-    onDismiss(itemIds);
+    onDismiss?.(itemIds);
   };
 
   const handleMenuOpenRecord = (): void => {
@@ -502,8 +513,14 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     { key: 'remove', label: 'Remove from briefing', icon: <DismissRegular />, hidden: !onRemove },
     { key: 'keep', label: 'Keep on briefing for 7 more days', icon: <CalendarAddRegular />, hidden: !onKeep },
     // Canonical position 4 (per FR-18 order): "Add to To Do" moved from a standalone button into the menu (R5 task 021).
-    { key: 'addToTodo', label: addToDoLabel, icon: <CheckmarkRegular />, disabled: isTodoCreated || isTodoPending },
-    { key: 'dismiss', label: 'Dismiss', icon: <DismissRegular /> },
+    {
+      key: 'addToTodo',
+      label: addToDoLabel,
+      icon: <CheckmarkRegular />,
+      disabled: isTodoCreated || isTodoPending,
+      hidden: !onAddToTodo,
+    },
+    { key: 'dismiss', label: 'Dismiss', icon: <DismissRegular />, hidden: !onDismiss },
     { key: 'openRecord', label: 'Open record', icon: <OpenRegular />, hidden: !canOpenRecord },
   ];
 
@@ -621,12 +638,15 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           Items 1/2/3 hide when their callback is undefined (defensive default,
           back-compat). Item 5 hides when primaryEntityType/Id are missing.
         */}
-        <RowActionMenu<NarrativeMenuAction>
-          ariaLabel="More actions"
-          triggerIcon={<MoreVerticalRegular />}
-          groups={[menuActions]}
-          onAction={handleMenuAction}
-        />
+        {/* No visible action (a host that injected no capability and has no record to open) → no empty menu. */}
+        {menuActions.some(a => !a.hidden) && (
+          <RowActionMenu<NarrativeMenuAction>
+            ariaLabel="More actions"
+            triggerIcon={<MoreVerticalRegular />}
+            groups={[menuActions]}
+            onAction={handleMenuAction}
+          />
+        )}
       </div>
     </div>
   );

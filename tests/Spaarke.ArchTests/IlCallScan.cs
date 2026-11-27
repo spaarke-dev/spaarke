@@ -416,6 +416,73 @@ internal static class IlCallScan
         return uses;
     }
 
+    /// <summary>One value load inside <c>Method</c> ("Type::Name") of <c>File</c>: an <c>ldstr</c> (<c>Value</c> is the string) or an
+    /// <c>ldsfld</c> (<c>Value</c> is "Type::Field").</summary>
+    internal sealed record FileLoad(string File, string Method, string OpCode, string Value);
+
+    /// <summary>
+    /// Every <c>ldstr</c> and <c>ldsfld</c> in every method body of the assembly at <paramref name="path"/> (task 030's header-name
+    /// rule: a header read by NAME is a string constant, or a <c>static readonly</c> field such as <c>HeaderNames.Authorization</c>,
+    /// which is a field load, not a constant, in IL). Read like <see cref="FileUses"/>: nothing is loaded and nothing runs.
+    /// </summary>
+    internal static List<FileLoad> FileLoads(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var pe = new PEReader(stream);
+        var reader = pe.GetMetadataReader();
+        var file = Path.GetFileName(path);
+        var self = reader.GetString(reader.GetAssemblyDefinition().Name);
+        var loads = new List<FileLoad>();
+
+        foreach (var handle in reader.MethodDefinitions)
+        {
+            var method = reader.GetMethodDefinition(handle);
+            if (method.RelativeVirtualAddress == 0)
+            {
+                continue;
+            }
+
+            var owner = $"{MetadataTypeName(reader, method.GetDeclaringType())}::{reader.GetString(method.Name)}";
+            var body = pe.GetMethodBody(method.RelativeVirtualAddress).GetILBytes();
+            foreach (var instruction in Instructions(body, () => $"{file} {owner}"))
+            {
+                if (instruction.OpCode == OpCodes.Ldstr)
+                {
+                    loads.Add(new FileLoad(file, owner, "ldstr",
+                        reader.GetUserString(MetadataTokens.UserStringHandle(instruction.Operand & 0x00FFFFFF))));
+                }
+                else if (instruction.OpCode == OpCodes.Ldsfld)
+                {
+                    loads.Add(new FileLoad(file, owner, "ldsfld", FieldInFile(reader, self, MetadataTokens.EntityHandle(instruction.Operand))));
+                }
+            }
+        }
+
+        return loads;
+    }
+
+    /// <summary>"Type::Field" for a field token (a definition in this file, or a reference to another assembly's field).</summary>
+    private static string FieldInFile(MetadataReader reader, string self, EntityHandle handle)
+    {
+        switch (handle.Kind)
+        {
+            case HandleKind.FieldDefinition:
+                {
+                    var f = reader.GetFieldDefinition((FieldDefinitionHandle)handle);
+                    return $"{MetadataTypeName(reader, f.GetDeclaringType())}::{reader.GetString(f.Name)}";
+                }
+
+            case HandleKind.MemberReference:
+                {
+                    var m = reader.GetMemberReference((MemberReferenceHandle)handle);
+                    return $"{MetadataEntityType(reader, self, m.Parent).Type}::{reader.GetString(m.Name)}";
+                }
+
+            default:
+                return "<unknown>";
+        }
+    }
+
     private static FileMemberRef? ResolveInFile(MetadataReader reader, string self, EntityHandle handle)
     {
         switch (handle.Kind)

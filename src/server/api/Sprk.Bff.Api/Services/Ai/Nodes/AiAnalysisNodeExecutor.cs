@@ -1149,10 +1149,10 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                 }
             };
 
-            // The records index does not have a tenantId field (tenant isolation is
-            // enforced at the Dataverse level). We use the dataverseRecordId for
-            // exact matching, which is inherently tenant-scoped since the record ID
-            // comes from the tenant's Dataverse instance via ConfigJson.
+            // Tenant isolation: RecordSearchService applies a tenantId filter on every search, so
+            // results never cross tenants at the search layer. The per-record guard here is the parent
+            // access check made before this retrieval plus the record-id match below (the record ID
+            // comes from the tenant's Dataverse instance via ConfigJson).
 
             // Build a targeted query using the record name for the search.
             // Since we need to find by dataverseRecordId, use a direct search

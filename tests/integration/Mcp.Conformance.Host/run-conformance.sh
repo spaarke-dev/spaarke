@@ -33,6 +33,12 @@ if [[ "$build" == 1 ]]; then
   if [[ "${MCP_SKIP_WIDGET:-}" != 1 ]]; then
     # The widget is embedded in the BFF only when dist/index.html exists at build time (Sprk.Bff.Api.csproj, Condition=Exists).
     (cd "$repo/src/client/widgets/spaarke-decisions" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
+    # r2 task 034: the briefing widget is embedded the same way.
+    (cd "$repo/src/client/widgets/spaarke-briefing" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
+    # r2 task 035: the search results widget is embedded the same way.
+    (cd "$repo/src/client/widgets/spaarke-search-results" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
+    # r2 task 037c: the playbook run widget is embedded the same way.
+    (cd "$repo/src/client/widgets/spaarke-playbook-run" && npm install --legacy-peer-deps --no-audit --no-fund && npm run build)
   fi
   dotnet build "$host_dir/Mcp.Conformance.Host.csproj" -c Debug
 fi

@@ -1,6 +1,6 @@
 # How to Add an MCP Tool or Area
 
-> **Last Updated**: 2026-11-24
+> **Last Updated**: 2026-11-25
 > **Purpose**: Add a tool to the `legal-operations` area of Spaarke's MCP server, or add a new area (`/mcp/{area}`), with the tests each needs.
 > **Audience**: A developer changing `Sprk.Bff.Api`.
 
@@ -25,7 +25,9 @@ The agent-facing summary of these rules is `.claude/skills/mcp-tool-handler/SKIL
 | Where tools live | `src/server/api/Sprk.Bff.Api/Api/Mcp/{Area}/{Group}/{Verb}{Object}Tool.cs` |
 | Tool name | `spaarke_{verb}_{object}`, lower snake case, unique across areas |
 | Startup validation | `Api/Mcp/McpToolAuthorization.cs` `ValidateTool` (a breaking tool stops the app from starting when `Mcp:Enabled` is true) |
-| Route and tool ledger | `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs` (`McpRoutes`, `McpTools`) |
+| Route and tool ledger | Rules, `McpRoutes` and the `McpTools` concatenation: `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs`. Tool rows: one partial per area, `RouteAuthorizationGuardTests.Mcp.{Area}.cs` (`Decisions`, `Search`, `Documents`, `Playbooks`, `Analysis`, `Tasks`, `Portfolio`, `Briefing`, `MatterSummary`, `Finance`, `Email`) |
+| Error result | `McpToolResults.FromError(McpToolError, correlationId)` in `Api/Mcp/McpToolResults.cs`; decision tools pass a `DecisionToolError` to the overload that maps it |
+| Work over 30 s | `McpLongRunning.Started` / `McpLongRunning.Status` in `Api/Mcp/McpLongRunning.cs` (budget `McpLongRunning.Budget`) |
 | Copy from | read-only, model-visible: `ShowDecisionsTool.cs`; app-only read: `ListDecisionPageTool.cs`, `GetDecisionPlanTool.cs`, `SearchDecisionLookupTool.cs`; app-only write: `CompleteDecisionTool.cs` (all under `Api/Mcp/LegalOperations/Decisions/`) |
 
 ## Procedure: add a tool to `legal-operations`
@@ -33,7 +35,7 @@ The agent-facing summary of these rules is `.claude/skills/mcp-tool-handler/SKIL
 ### Step 1: Decide the shape
 
 - **Read or write.** A read-only tool sets `ReadOnly = true`. Any tool that writes sets `ReadOnly = false` and **must** be app-only: the model never commits. Startup refuses a non-read-only tool that is not app-only.
-- **Visible to the model or only to the widget.** A tool only the widget calls is app-only: `Meta = new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray("app") } }`. A model-visible tool that renders a widget adds `["resourceUri"] = "ui://…"` and visibility `["model", "app"]`.
+- **Visible to the model or only to the widget.** A tool only the widget calls is app-only: `Meta = new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray("app") } }`. A model-visible tool that renders a widget adds `["resourceUri"] = "ui://…"` and visibility `["model", "app"]`. A read-only tool that returns what only a widget may show (for example `spaarke_get_playbook_run_results`) also adds its name to `McpToolAuthorization.AppOnlyTools`, so startup refuses it if its visibility is ever anything but `["app"]`.
 - **Model-visible output is minimal.** Counts and slim rows only; anything privileged goes to the widget through an app-only tool, as the caller (ADR-015).
 
 ### Step 2: Write the tool class
@@ -46,21 +48,22 @@ Create the file under `Api/Mcp/LegalOperations/{Group}/`. Copy the nearest tool 
 4. State the input schema (`tool.ProtocolTool.InputSchema = …`) with `additionalProperties: false` and closed enums, and read the arguments against the same set with `DecisionToolCall.TryReadSingleArgument` (or the SDK binding for typed parameters), so an invented argument is refused, not ignored.
 5. The handler is `static` and takes what it needs as parameters: `IHttpContextAccessor`, the capability or service, `TimeProvider`, `ILogger<T>`, `CancellationToken`. It holds no state between calls and registers nothing in DI.
 6. Pass exactly `IHttpContextAccessor.HttpContext` to the service. A null context or an unauthenticated caller is the service's `UserContextRequired` (use `PlanAndLookupToolSupport.HasCaller` or `DecisionCapability.HasSignedInCaller`). No fallback to an app-only client.
-7. Map every failure through the result mapper (`DecisionResultMapper.ToToolError` then `McpToolResults.FromError`), so a domain failure is an `isError` result with the REST route's `reasonCode`, never a thrown or transport error.
-8. Wrap the call in `DecisionToolCall.LogAroundAsync` (or write the same one line): tool, outcome, row count, elapsed time, correlation id. Log no argument, token, claim or record text.
-9. Keep the result under 64 KiB at worst case. Bound anything with unbounded text the way `PlanAndLookupToolSupport.BoundRow` does.
+7. Map every failure to an `McpToolError(reasonCode, message, status, partial?)` and return `McpToolResults.FromError(error, http?.TraceIdentifier)`, so a domain failure is an `isError` result with `structuredContent` `{ reasonCode, message, status, correlationId?, partial? }`, never a thrown or transport error (ADR-019). Use the REST route's `reasonCode` and HTTP status for the same failure, and a message that says how to fix the call with no record text (ADR-015). `partial` is for what a failed write left behind (codes, ids and flags only). Decision tools keep their mapper: `DecisionResultMapper.ToToolError` gives a `DecisionToolError`, and the `FromError` overload that takes it maps it field for field, so their bytes did not change.
+8. **Answer within 30 seconds** (`McpLongRunning.Budget`, FR-14). Work that can take longer starts the run through its service and returns `McpLongRunning.Started(runId, McpRunState.Queued or Running, consoleLink, oneLineSummary)`: `structuredContent` `{ runId, status, consoleLink }`. A separate status tool returns `McpLongRunning.Status(runId, state, progress?, result?, summary?)`: `{ runId, status (queued, running, completed or failed), progress?, result? }`. The helper only builds the two results; it starts, polls and stores nothing (ADR-052), so the run and its record belong to the service. Never build `consoleLink` by hand; `Started` refuses anything but an absolute https URL. Today no public-contract member returns a console link: `HandoffUrlBuilder` is in `Services/Ai/**`, so a tool cannot inject it (ADR-013), and `IDeepLinkBuilder` builds only `sprk_todo` links. The first long-running tool task (030, which also fixes #3198) adds a run-link member to the public-contract seam; later tools reuse it. A refusal to start is an error result (item 7); a run that failed is a successful status call with status `failed`.
+9. Wrap the call in `DecisionToolCall.LogAroundAsync` (or write the same one line): tool, outcome, row count, elapsed time, correlation id. Log no argument, token, claim or record text.
+10. Keep the result under 64 KiB at worst case. Bound anything with unbounded text the way `PlanAndLookupToolSupport.BoundRow` does.
 
 No DI registration and no shared registration file is edited: the catalog finds the class by attribute. If the work needs a new service, interface or package, that is §10 and §11 territory; do it and justify it.
 
 ### Step 3: Add the ledger entry
 
-In `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs`, add one `McpTool` to the `McpTools` list:
+In your area's ledger partial, `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.{Area}.cs` (for example `McpToolsSearch` in `RouteAuthorizationGuardTests.Mcp.Search.cs`), add one `McpTool`. Do not edit the list in `RouteAuthorizationGuardTests.Mcp.cs`: it concatenates every partial, so tool tasks running in parallel never edit the same list. An empty partial starts as `Array.Empty<McpTool>()`; replace it with `new[] { … }`.
 
 ```
 new McpTool("{ClassName}", "", "{ISeamItCalls}", "{reason of 60 or more characters}")
 ```
 
-The policy is `""` for bare `[Authorize]` or `"SystemAdmin"`. The seam is the service the tool calls as the caller. The test fails on any `[McpArea]` class missing from the ledger, any ledger entry with no class, a `partial` tool class, a missing `ReadOnly` or title, and any injected type declared under `Services/Ai/**` outside the public contracts (ADR-013). It reads text, so a seam that is named but never called passes; a reviewer reads what the tool does with it.
+The policy is `""` for bare `[Authorize]` or `"SystemAdmin"`. The seam is the service the tool calls as the caller. The test fails on any `[McpArea]` class missing from the ledger (including a row in a partial that is not concatenated), a class listed twice, any ledger entry with no class, a `partial` tool class, a missing `ReadOnly` or title, and any injected type declared under `Services/Ai/**` outside the public contracts (ADR-013). It reads text, so a seam that is named but never called passes; a reviewer reads what the tool does with it.
 
 ### Step 4: Tests a tool needs
 
@@ -68,7 +71,7 @@ The policy is `""` for bare `[Authorize]` or `"SystemAdmin"`. The seam is the se
 |---|---|---|
 | Route and tool guard | the ledger entry above, run by `dotnet test tests/Spaarke.ArchTests/` | the tool is declared, authorized and annotated |
 | Auth | `tests/integration/auth/Mcp/` (`McpAuthTests.cs`, `McpCallerPathTests.cs`) | no token gives `401`; a refused token type runs no tool; the tool reads as the caller and fails closed with no caller; a policy-restricted tool is hidden from, and refused to, an outsider |
-| Contract | `tests/integration/contract/Api/Mcp/` (`ShowDecisionsToolTests.cs`, `PlanAndLookupToolTests.cs`, `McpHostContractTests.cs`; host `DecisionToolsTestHost.cs`) | the `tools/list` entry (name, title, hints, visibility, schema), the happy path, an invalid argument as an `isError` result, and that the real BFF host lists the expected set (update `RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyTheFiveV1Tools`) |
+| Contract | `tests/integration/contract/Api/Mcp/` (`ShowDecisionsToolTests.cs`, `PlanAndLookupToolTests.cs`, `McpHostContractTests.cs`; host `DecisionToolsTestHost.cs`) | the `tools/list` entry (name, title, hints, visibility, schema), the happy path, an invalid argument as an `isError` result, and that the real BFF host lists the expected set (update `RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyThePinnedTools`) |
 | Result size | `tests/integration/regression/Mcp/McpResultSizeTests.cs` with the fixtures in `McpFiveToolFixtures.cs` | the result is a success under 64 KiB at the worst-case seed (200 Work Items) |
 | Writes only | `tests/integration/data-mutation/Mcp/` (`CompleteDecisionToolTests.cs`, `McpCommitCallerPathTests.cs`) | idempotency or replay, nothing written on a refusal, the failed-commit facts |
 | Privilege reduction (model-visible tools) | `tests/integration/auth/Mcp/DecisionsPrivilegeReductionTests.cs` | privileged items never reach the model text |
@@ -94,7 +97,7 @@ A new area is a new route on the same host, for example `/mcp/billing-review`. D
 2. **Add the route.** In `McpEndpoints.cs` add constants beside `LegalOperationsRoute` and `LegalOperationsArea`, and one more `app.MapMcp(...)` statement with the same chain: `.RequireAuthorization()` (no named policy), `.RequireMcpConnectorToken()`, `.RequireRateLimiting("mcp")` (keep the policy name a literal), the `RequestSizeLimitAttribute`, `new McpAreaMetadata(<area>)`, response buffering off, then `.RequireMcpEnabled()`. Leave the order as it is.
 3. **Tag its tools** `[McpArea(McpEndpoints.{Area}Area)]` and put them under `Api/Mcp/{Area}/{Group}/`. The catalog and `McpModule` pick the route's tools up by area with no other change. Tool names must be unique across areas.
 4. **If the area has a widget:** add a `{Widget}WidgetResource` class like `DecisionsWidgetResource.cs` (static, empty CSP, no request or caller data), a widget source folder under `src/client/widgets/`, an `EmbeddedResource` line in `Sprk.Bff.Api.csproj` and a step in `.github/workflows/publish-bff-artifact.yml`, and an `if (area == …)` branch in the `ConfigureSessionOptions` of `Infrastructure/DI/McpModule.cs` that sets `ResourceCollection`. That is the only sanctioned place a resource is registered.
-5. **Add the route to the ledger.** In `RouteAuthorizationGuardTests.Mcp.cs` add an `McpRoute("POST /mcp/{area}", "{area}", "<reason>")` to `McpRoutes`. `UnlistedMapMcpRoutes` fails on any `MapMcp` not listed. Never credit an MCP route with a waiver. Then add each tool's `McpTools` entry (Step 3 above).
+5. **Add the route to the ledger.** In `RouteAuthorizationGuardTests.Mcp.cs` add an `McpRoute("POST /mcp/{area}", "{area}", "<reason>")` to `McpRoutes`. `UnlistedMapMcpRoutes` fails on any `MapMcp` not listed. Never credit an MCP route with a waiver. Then add each tool's `McpTools` entry (Step 3 above). If the area's tools do not fit an existing ledger partial, add `RouteAuthorizationGuardTests.Mcp.{Area}.cs` and its line in `McpToolPartials` in `RouteAuthorizationGuardTests.Mcp.cs`.
 6. **Tests for the area.** The tool tests above for each tool, plus:
    - an anonymous request to the new route is `401` with `Bearer` whatever `Mcp:Enabled` is, a valid token on an unmapped path is `404` (pattern: `McpHostContractTests.cs`, `McpAuthTests.cs`);
    - the route lists only its own area's tools (`InitializeAndToolsList_WhenEnabledWithAValidToken_Succeed_AndListOnlyTheAreasTools`);
@@ -119,6 +122,7 @@ A new area is a new route on the same host, for example `/mcp/billing-review`. D
 | "the [Authorize] the SDK enforces … is not the tool class's own" | The handler is in a helper class, or `Metadata` was set | Make the handler a static method of the tool class and pass it as an unqualified method group |
 | "does not set ReadOnly explicitly" or "has no title" | Annotation left out | Set `ReadOnly` and `Title` |
 | "is not read-only, so it must be app-only" | A write tool visible to the model | Set `visibility` to exactly `["app"]` |
+| "is in McpToolAuthorization.AppOnlyTools" | A widget-only read tool declared model-visible, or with no visibility | Set `visibility` to exactly `["app"]` |
 | "names the '…' policy, which is not in AllowedToolPolicies" | A policy other than bare or `SystemAdmin` | Use an allowed policy; widening the set is a separate reviewed production change |
 | Arch test: "an MCP tool missing from McpTools" | No ledger entry | Add it (Step 3) |
 | Arch test: injects a type from `Services/Ai/**` | A tool reaches into the AI pipeline | Use the public contract facade (ADR-013) |

@@ -27,8 +27,11 @@
       "@fluentui/react-components": ["node_modules/@fluentui/react-components"],
       "@fluentui/react-icons": ["node_modules/@fluentui/react-icons"],
       "lexical": ["node_modules/lexical"],
-      "@lexical/*": ["node_modules/@lexical/*"]
+      "@lexical/*": ["node_modules/@lexical/*"],
+      "@modelcontextprotocol/ext-apps/react-with-deps": [
+        "node_modules/@modelcontextprotocol/ext-apps/dist/src/react/index.d.ts"
+      ]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared"]
 }

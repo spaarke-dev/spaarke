@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Sprk.Bff.Api.Services.Ai.Schemas;
+using Sprk.Bff.Api.Services.Ai.Tools;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -79,6 +80,13 @@ public sealed class PromptSchemaRenderer
     /// <c>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</c> (T111a) for the full
     /// authoring contract.
     /// </param>
+    /// <param name="userFocus">
+    /// #3268: the run's per-run user instructions (<c>ToolExecutionContext.UserContext</c>). When non-blank, a fenced
+    /// "User focus" block (built by <c>PromptContextHelper.BuildUserFocusBlock</c>, the single producer) is emitted after the
+    /// instructions, context, document, scopes and examples and BEFORE the output-format section; blank or null leaves the
+    /// rendered prompt byte-identical to what it was before this parameter existed. JPS prompts only: a flat-text action
+    /// returns its raw text and the calling handler appends the block itself. ADR-015: never logged here.
+    /// </param>
     /// <returns>A <see cref="RenderedPrompt"/> with the assembled text and format metadata.</returns>
     public RenderedPrompt Render(
         string? rawPrompt,
@@ -90,7 +98,8 @@ public sealed class PromptSchemaRenderer
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge = null,
         IReadOnlyList<ResolvedSkillRef>? additionalSkills = null,
         IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null,
-        JsonElement? runtimeInput = null)
+        JsonElement? runtimeInput = null,
+        string? userFocus = null)
     {
         // Step 1: Format detection
         if (string.IsNullOrWhiteSpace(rawPrompt))
@@ -104,7 +113,7 @@ public sealed class PromptSchemaRenderer
 
         if (IsJpsFormat(rawPrompt))
         {
-            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, templateParameters, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices, runtimeInput);
+            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, templateParameters, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices, runtimeInput, userFocus);
         }
 
         // Flat text legacy path — return rawPrompt as-is.
@@ -139,7 +148,8 @@ public sealed class PromptSchemaRenderer
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge,
         IReadOnlyList<ResolvedSkillRef>? additionalSkills,
         IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null,
-        JsonElement? runtimeInput = null)
+        JsonElement? runtimeInput = null,
+        string? userFocus = null)
     {
         PromptSchema schema;
 
@@ -153,9 +163,11 @@ public sealed class PromptSchemaRenderer
             // ADR-015: MUST NOT log prompt content — only log diagnostic identifier
             _logger.LogWarning("Failed to parse JPS schema; falling back to flat text rendering");
 
+            // #3268: the callers that send PromptText as it stands (Summary, Classifier, SemanticSearch) would otherwise drop the
+            // run's focus here; GenericAnalysisHandler ignores this text for flat prompts and appends the block itself.
             return new RenderedPrompt
             {
-                PromptText = rawPrompt,
+                PromptText = PromptContextHelper.AppendUserFocus(rawPrompt, userFocus),
                 Format = PromptFormat.FlatText
             };
         }
@@ -271,6 +283,16 @@ public sealed class PromptSchemaRenderer
                 sb.AppendLine(JsonSerializer.Serialize(example.Output, new JsonSerializerOptions { WriteIndented = true }));
                 sb.AppendLine();
             }
+        }
+
+        // 8.5. User focus (#3268): the run's per-run instructions, fenced and bounded. After the instructions and
+        //      context, before the output-format section, so the focus can never read as part of the schema.
+        var userFocusBlock = PromptContextHelper.BuildUserFocusBlock(userFocus);
+        if (userFocusBlock.Length > 0)
+        {
+            sb.Append(userFocusBlock.TrimStart('\n'));
+            sb.AppendLine();
+            sb.AppendLine();
         }
 
         // 9. Output instructions

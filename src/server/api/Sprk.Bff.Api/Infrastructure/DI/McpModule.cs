@@ -3,6 +3,9 @@ using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
 using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Api.Mcp.LegalOperations;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Briefing;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Playbooks;
+using Sprk.Bff.Api.Api.Mcp.LegalOperations.Search;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -72,10 +75,17 @@ public static class McpModule
 
                 serverOptions.ToolCollection = tools;
 
-                // The widget the legal-operations tools render in (FR-12). A further area that has a widget adds its own branch.
+                // The widgets the legal-operations tools render in (FR-12; r2 FR-16: the Daily Briefing, the search results and, task 037c, a playbook run). A further area that has a widget
+                // adds its own branch; a further legal-operations widget adds its resource here, the only sanctioned place.
                 if (string.Equals(area, McpEndpoints.LegalOperationsArea, StringComparison.OrdinalIgnoreCase))
                 {
-                    serverOptions.ResourceCollection = new McpServerResourceCollection { DecisionsWidgetResource.Instance };
+                    serverOptions.ResourceCollection = new McpServerResourceCollection
+                    {
+                        DecisionsWidgetResource.Instance,
+                        BriefingWidgetResource.Instance,
+                        SearchResultsWidgetResource.Instance,
+                        PlaybookRunWidgetResource.Instance,
+                    };
                 }
 
                 return Task.CompletedTask;

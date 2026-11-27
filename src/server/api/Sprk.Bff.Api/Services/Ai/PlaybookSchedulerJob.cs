@@ -508,7 +508,7 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                         // deny-lists. The per-user "userId" parameter is the user it targets, never the identity it writes as.
                         StartedBy = PlaybookRunStartedBy.System,
                         DocumentIds = Array.Empty<Guid>(),
-                        UserContext = $"Scheduled notification run for user {userName} (childCorrelationId={childCorrelationId})",
+                        // No UserContext (#3268): it is the run's user focus and now reaches the prompt; a scheduled run has no user text (the userId/userName parameters carry the target).
                         Parameters = new Dictionary<string, string>
                         {
                             ["userId"] = userId.ToString(),

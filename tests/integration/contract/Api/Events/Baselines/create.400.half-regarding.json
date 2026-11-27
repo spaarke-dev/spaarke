@@ -1,0 +1,14 @@
+{
+  "case": "create.400.half-regarding",
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"RegardingRecordId\":[\"RegardingRecordType and RegardingRecordId must be given together, or not at all.\"]}}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "RegardingRecordId": ["RegardingRecordType and RegardingRecordId must be given together, or not at all."]
+    }
+  }
+}

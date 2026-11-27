@@ -96,6 +96,16 @@ public class OperationAccessPolicyCompletenessTests
         @"(?:Has|Get)RequiredRights\s*\(\s*(?:[A-Za-z0-9_.]+\s*,\s*)?([A-Z]\w*)\s*\)",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// <c>AddXxxAuthorizationFilter(SomeType.SomeConst, …)</c> — a constant the filter call names through its declaring type, declared
+    /// in another file. Resolved against the const declarations of the whole tree (over-collecting is the safe direction, as for the
+    /// same-file mechanisms). Added when the events route moved onto <c>EventsCapability.AttachRegardingOperation</c> (task 006) and
+    /// the scan stopped reaching <c>event.attach_regarding</c>.
+    /// </summary>
+    private static readonly Regex FilterQualifiedConstPattern = new(
+        @"Add\w*(?:Authorization|Access)Filter\s*(?:<[^>()]*>)?\s*\(\s*[A-Za-z0-9_]+\.([A-Z]\w*)\s*,",
+        RegexOptions.Compiled);
+
     private static readonly Regex RequirementLiteralPattern = new(
         @"ResourceAccessRequirement\s*\(\s*""([^""]+)""",
         RegexOptions.Compiled);
@@ -258,7 +268,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("ebilling.invoice.assign_firm", AccessRights.Write | AccessRights.Append)] // ebilling-r1 task 095d-1b: setting the firm is a Write on the invoice, plus Append because the invoice holds the firm lookup (uac-r2 #2822 F4); the firm is asked separately
     [InlineData("ebilling.record.assign_firm", AccessRights.Read | AccessRights.Write | AccessRights.Append)] // ebilling-r1 task 095g (uac-r2 R1): the record HOLDS the firm lookup; Read because the answer describes the record's firms
     [InlineData("ebilling.record.remove_firm", AccessRights.Read | AccessRights.Write)] // ebilling-r1 task 095g: a clear sets nothing to attach; Read as for the add
-    [InlineData("event.attach_regarding", AccessRights.AppendTo)] // task 159: the regarding record is attached TO
+    [InlineData("event.attach_regarding", AccessRights.Read | AccessRights.AppendTo)] // task 159: the regarding record is attached TO; #3181 (D-3181): Read as well, the create copies its name and number
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
     [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
     public void RegressionA3A20_Operation_ResolvesWithLeastPrivilegeRights(
@@ -340,6 +350,9 @@ public class OperationAccessPolicyCompletenessTests
 
         var results = new List<CallSite>();
 
+        // Every source file's code (comment lines removed), read once: the qualified-const pattern below resolves a
+        // constant declared in ANOTHER file, so the tree-wide const lookup has to exist before the per-file pass.
+        var sources = new List<(string Name, string Code)>();
         foreach (var file in Directory.EnumerateFiles(apiRoot, "*.cs", SearchOption.AllDirectories))
         {
             // Skip build output — obj/ contains generated copies that would double-count.
@@ -351,9 +364,24 @@ public class OperationAccessPolicyCompletenessTests
                 continue;
             }
 
-            var codeLines = File.ReadAllLines(file).Where(IsCodeLine).ToArray();
-            var code = string.Join('\n', codeLines);
-            var name = Path.GetFileName(file);
+            sources.Add((Path.GetFileName(file), string.Join('\n', File.ReadAllLines(file).Where(IsCodeLine))));
+        }
+
+        var constsInTree = sources
+            .SelectMany(s => ConstDeclarationPattern.Matches(s.Code).Select(m => (Name: m.Groups[1].Value, Literal: m.Groups[2].Value)))
+            .ToLookup(c => c.Name, c => c.Literal, StringComparer.Ordinal);
+
+        foreach (var (name, code) in sources)
+        {
+            // #3181 / task 006: the events route names its operation through a constant another file declares
+            // (EventsCapability.AttachRegardingOperation), which none of the same-file mechanisms below can see.
+            foreach (Match m in FilterQualifiedConstPattern.Matches(code))
+            {
+                foreach (var literal in constsInTree[m.Groups[1].Value])
+                {
+                    results.Add(new CallSite(literal, name));
+                }
+            }
 
             foreach (var pattern in new[]
                      {

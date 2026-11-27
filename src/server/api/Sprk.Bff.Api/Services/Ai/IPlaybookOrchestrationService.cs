@@ -158,6 +158,17 @@ public record PlaybookRunRequest
     /// and only <see cref="IPlaybookOrchestrationService.ExecuteAppOnlyAsync"/> honours it: an HTTP run is always a person's.
     /// </summary>
     public PlaybookRunStartedBy StartedBy { get; init; } = PlaybookRunStartedBy.Person;
+
+    /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 037a (owner decision D-037-engine): the <c>sprk_analysis</c> the run's result is saved to. Set ONLY by
+    /// the Copilot start (<c>IPlaybookRunAi.StartAsCallerAsync</c>), from the analysis the server has just created AS THE CALLER for
+    /// this run; never from caller input (no HTTP route or MCP tool argument binds a <see cref="PlaybookRunRequest"/>, and only that
+    /// start sets this member: ArchTest <c>PlaybookRunAnalysisIdGuardTests</c>). The save writes app-only, so it must only ever name
+    /// that analysis. On a node run, the engine saves the Deliver Output to it when the run ends
+    /// (<see cref="AnalysisResultPersistence.SaveNodeRunAsync"/>); a legacy-mode run hands it to the Analysis wrapper, which writes to it
+    /// (#3285). <c>null</c> (every other entry): nothing is saved to an analysis, as before.
+    /// </summary>
+    public Guid? AnalysisId { get; init; }
 }
 
 /// <summary>
@@ -720,8 +731,10 @@ public record PlaybookRunStatus
 
     /// <summary>
     /// The Entra object id (<c>oid</c>) of the HTTP caller who started the run
-    /// (<see cref="PlaybookRunContext.StartedByOid"/>); <c>null</c> for an app-only run. Used ONLY for the owner
-    /// comparison on <c>GET /api/agent/playbooks/status/{jobId}</c> (unified-access-control-r2 task 164, sweep #78).
+    /// (<see cref="PlaybookRunContext.StartedByOid"/>); <c>null</c> for an app-only run. It exists for an owner
+    /// comparison (unified-access-control-r2 task 164, sweep #78). Its only reader was the legacy agent status route,
+    /// which spaarkeai-mcp-bff-api-r2 task 001 removed, so no route reads it today. It is kept for the durable run-status
+    /// read (spaarkeai-mcp-bff-api-r2 tasks 005 and 030).
     /// <see cref="JsonIgnoreAttribute"/>: it never reaches a response body — <c>GET /api/ai/playbooks/runs/{runId}</c>
     /// serializes this record and must not gain it.
     /// </summary>

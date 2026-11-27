@@ -102,16 +102,16 @@ interface ChannelNarrative {
 export interface ActivityNotesSectionProps {
   /** Channel groups with deterministic, item-sourced bullets (R5 task 010/011). */
   channelNarratives: ChannelNarrative[];
-  /** Callback to add notification IDs to To Do. */
-  onAddToTodo: (itemIds: string[]) => void;
-  /** Callback to dismiss notification IDs. */
-  onDismiss: (itemIds: string[]) => void;
-  /** Check whether a To Do has been created for a notification ID. */
-  isTodoCreated: (itemId: string) => boolean;
-  /** Check whether a To Do creation is pending for a notification ID. */
-  isTodoPending: (itemId: string) => boolean;
-  /** Get any error message for a notification ID's To Do creation. */
-  getTodoError: (itemId: string) => string | undefined;
+  /** Callback to add notification IDs to To Do. Undefined → the "Add to To Do" action is hidden. */
+  onAddToTodo?: (itemIds: string[]) => void;
+  /** Callback to dismiss notification IDs. Undefined → the "Dismiss" action is hidden. */
+  onDismiss?: (itemIds: string[]) => void;
+  /** Check whether a To Do has been created for a notification ID. Undefined → never created. */
+  isTodoCreated?: (itemId: string) => boolean;
+  /** Check whether a To Do creation is pending for a notification ID. Undefined → never pending. */
+  isTodoPending?: (itemId: string) => boolean;
+  /** Get any error message for a notification ID's To Do creation. Undefined → no error. */
+  getTodoError?: (itemId: string) => string | undefined;
   /** Whether channel narratives are still loading. */
   isLoading: boolean;
   /**
@@ -279,9 +279,9 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                 date={bullet.date}
                 onAddToTodo={onAddToTodo}
                 onDismiss={onDismiss}
-                isTodoCreated={isTodoCreated(firstItemId)}
-                isTodoPending={isTodoPending(firstItemId)}
-                todoError={getTodoError(firstItemId)}
+                isTodoCreated={isTodoCreated?.(firstItemId) ?? false}
+                isTodoPending={isTodoPending?.(firstItemId) ?? false}
+                todoError={getTodoError?.(firstItemId)}
                 // R7 Wave 12: sub-list expansion is dropped (no appnotification
                 // items to expand into per-row sub-list). `items` omitted →
                 // NarrativeBullet renders just the narrative + primary link.

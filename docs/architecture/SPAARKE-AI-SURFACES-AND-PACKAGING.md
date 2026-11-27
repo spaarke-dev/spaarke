@@ -57,8 +57,8 @@ The capability matrix was researched on 2026-11-23 and changes quickly; re-verif
 | Spaarke runtime: agent loop | `Services/Ai/Chat/SprkChatAgentFactory.cs`, `Services/Ai/Chat/SideEffectGateAIFunction.cs`, `Services/Ai/Chat/Gate/ConfirmationPolicyEngine.cs`, `Api/Ai/ChatEndpoints.cs` | Governed multi-step tool loop with a confirmation gate; the Practice engine when Spaarke orchestrates |
 | Spaarke runtime: playbooks | `Services/Ai/AnalysisOrchestrationService.cs`, `Services/Ai/Chat/SessionDispatchOrchestrator.cs` | JPS playbook execution and session dispatch |
 | Work IQ seam | `Services/Ai/PublicContracts/IOrganizationalContextProvider.cs` | Where M365 organisational context plugs in for a runtime agent (no provider wired yet) |
-| **Retired:** "Spaarke AI" agent | `src/solutions/CopilotAgent/` | Being removed (see Legacy below); code removal in `spaarkeai-mcp-bff-api-r2` |
-| **Retired:** agent gateway | `src/server/api/Sprk.Bff.Api/Api/Agent/`, `infrastructure/bot-service/` | Being removed with the agent |
+| **Retired:** "Spaarke AI" agent | `src/solutions/CopilotAgent/` (deleted) | Retired 2026-11-25 (spaarkeai-mcp-bff-api-r2); Copilot reaches Spaarke through the Spaarke MCP connector (see Legacy below) |
+| **Retired:** agent gateway | `src/server/api/Sprk.Bff.Api/Api/Agent/`, `infrastructure/bot-service/` | Removed 2026-11-25 with the agent |
 
 ## Data Flow
 

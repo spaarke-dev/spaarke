@@ -45,7 +45,7 @@
 | JS Web Resources (`src/solutions/webresources/`) | **6** | — | 6 |
 | Office Add-ins | **2** (Outlook, Word) | — | 2 |
 | External SPA | **1** (secure-project-workspace) | — | 1 |
-| Special solutions (not Code Pages) | **3** (CopilotAgent, SpaarkeCore, EventCommands) | — | 3 |
+| Special solutions (not Code Pages) | **2** (SpaarkeCore, EventCommands; the legacy agent retired 2026-11-25) | — | 2 |
 | **Icons / static assets** | _excluded from this inventory_ | — | — |
 
 ---
@@ -250,7 +250,6 @@ Static Web App-deployed Microsoft 365 add-ins.
 
 | Folder | Type | Purpose |
 |---|---|---|
-| **CopilotAgent** | Declarative agent | `declarativeAgent.json` + `spaarke-api-plugin.json` + `spaarke-bff-openapi.yaml` + `cards/` + `appPackage/` — M365 Copilot declarative agent definition (NOT a React SPA) |
 | **SpaarkeCore** | Dataverse solution | `solution.xml`, `customizations.xml`, `entities/`, `security-roles/`, `environment-variables/` — core Dataverse schema solution (NOT a Code Page) |
 | **EventCommands** | Ribbon commands + dialogs | `EventRibbonDiffXml.xml` + `sprk_event_ribbon_commands.js` + `dialogs/` — event ribbon command bundle (not a Vite Code Page) |
 

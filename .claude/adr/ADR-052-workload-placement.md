@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (2026-09-13) — owner-approved direction 2026-09-12 (D1–D7) and identity wording 2026-09-13; lands with `unified-access-control-r2` (PR #950)
 > **Domain**: Background, scheduled and event-driven work; hosting
-> **Last Updated**: 2026-09-15 (conditional Dataverse impersonation, owner-accepted; §5 MUST NOT narrowed to the caller's token)
+> **Last Updated**: 2026-11-26 (ACCEPTED: detached caller run for a user-started JPS playbook run, D-030-run-model; owner security sign-off 2026-11-26, uac-r2 reviewed; lands with spaarkeai-mcp-bff-api-r2 task 030) · 2026-09-15 (conditional Dataverse impersonation, owner-accepted; §5 MUST NOT narrowed to the caller's token)
 > **Supersedes**: ADR-001's Functions / Durable provisions · ADR-004's Durable prohibition · **Amends**: ADR-013, ADR-036
 
 > **This ADR is the only place the placement rule is stated in full.** Other documents link here.
@@ -27,7 +27,7 @@ choice in the Placement Justification.
 
 | Favour Functions | Favour the BFF |
 |---|---|
-| **F1** Event intake that should not depend on BFF availability | **B1** Needs the caller's identity (OBO, user-written SPE files) |
+| **F1** Event intake that should not depend on BFF availability | **B1** Needs the caller's identity (OBO, user-written SPE files); runs inside the user's request, except a user-started JPS playbook run under the 2026-11-26 amendment |
 | **F2** Independent scaling — bursty or heavy work | **B2** Uses a large share of BFF domain code |
 | **F3** One dispatch per schedule without building coordination | **B3** Low volume; same scale signal, identity, release cadence |
 | **F4** Isolation — failure, security, release cadence | **B4** Tied to a live request (streaming, chat, sub-500 ms) |
@@ -53,7 +53,17 @@ provisioning + CI/CD); Flex cost and limits.
 ### ❌ MUST NOT
 
 - **MUST NOT** host user-facing BFF API endpoints in Azure Functions
-- **MUST NOT** let the caller's **token** (OBO, user tokens) leave the BFF request that holds it. Acting for a user outside that request is only the conditional impersonation in the Identity row below (ADR-028 A5)
+- **MUST NOT** let the caller's **token** (OBO, user tokens) leave the BFF request that holds it. Acting for a user outside that request is only the conditional impersonation in the Identity row below (ADR-028 A5). **One exception, the detached caller run (2026-11-26 amendment, full ADR):**
+  - **Which work:** a JPS playbook run the user started (today `spaarke_run_playbook`) may finish in the **same BFF process** after its request answers, carrying that user's token.
+  - **One helper:** only through the shared detached-run helper. A detached `HttpContext` is built nowhere else (ArchTest; ratchet baseline `ComposeProfileDispatcher`, `DecisionRouteCores`, `AssignTaskNotifier`).
+  - **Memory only:** never stored, logged, queued or handed to another host.
+  - **No leak back:** `ExecutionContext` flow is suppressed, so the original request's accessor is untouched.
+  - **Bounded:** a **50-minute cap**, which bounds the run (the token may have only minutes left at start). Downstream tokens are taken at start. A token that can't be renewed, or any auth failure mid-run, fails the run closed (`auth_expired`), never app-only. At most **3 detached runs in progress per user** (per instance).
+  - **Guards:** ArchTests check that a detached `HttpContext` is built only in the helper and that the `Authorization` header is read only in the OBO files and the helper, each with a ratchet baseline.
+  - **Known limits:** access is checked once at start, so reads on the BFF's app-only SPE broker paths don't see access removed mid-run for up to the cap. Runs are keyed on oid alone because MCP accepts only Spaarke-tenant tokens; they must be keyed on (tid, oid) if that changes.
+  - **Authorized first:** authorization happens inside the request.
+  - **Visible:** the run state is recorded, and a lost run reads as interrupted.
+  - **Not permitted:** MSAL long-running OBO (90-day refresh tokens), or timer, webhook or system work
 - **MUST NOT** add new Azure WebJobs
 - **MUST NOT** add a new hand-rolled timer `BackgroundService` (existing ones migrate when next touched — any PR changing their behaviour or timer loop)
 

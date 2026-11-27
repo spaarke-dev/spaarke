@@ -1273,7 +1273,7 @@ public static class ExternalProjectDataEndpoints
     /// speaks of the caller's create privilege on the record's TABLE, not of attaching to this record: a user who can never
     /// create a project but can file a to-do against one would be refused, and the reverse let through. Attaching to a
     /// record is AppendTo everywhere else in the BFF (<c>OperationAccessPolicy</c>: <c>entity.associate_document</c>,
-    /// <c>event.attach_regarding</c>). Append, Share and Dataverse's CreateAccess carry nothing here.
+    /// <c>event.attach_regarding</c>, which also asks Read since #3181). Append, Share and Dataverse's CreateAccess carry nothing here.
     /// <para>The Create mapped here is then kept only when the caller also holds the child table's Create privilege
     /// (<see cref="WithDataverseRightsAsync"/>, task 036 fix round 1, F1): AppendTo says "may attach to this record", the
     /// privilege says "may create that kind of row", and Dataverse asks both of a user creating the child in MDA.</para>

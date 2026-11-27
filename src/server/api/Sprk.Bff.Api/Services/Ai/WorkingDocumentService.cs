@@ -59,6 +59,37 @@ public class WorkingDocumentService : IWorkingDocumentService
         }
     }
 
+    /// <summary>Outcome code logged when <see cref="TryUpdateWorkingDocumentAsync"/> fails.</summary>
+    internal const string WriteFailedOutcome = "analysis_working_document_write_failed";
+
+    /// <inheritdoc />
+    public async Task<bool> TryUpdateWorkingDocumentAsync(
+        Guid analysisId,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        try
+        {
+            var fields = new Dictionary<string, object>
+            {
+                ["sprk_workingdocument"] = content
+            };
+
+            await _genericEntityService.UpdateAsync("sprk_analysis", analysisId, fields, cancellationToken);
+            return true;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // ADR-015: the exception type only. A Dataverse validation message may quote the value it refused, and the value is the
+            // run's output.
+            _logger.LogWarning(
+                "Working document write failed - Outcome: {Outcome}, AnalysisId: {AnalysisId}, ContentLength: {ContentLength}, ErrorType: {ErrorType}",
+                WriteFailedOutcome, analysisId, content.Length, ex.GetType().Name);
+            return false;
+        }
+    }
+
     /// <inheritdoc />
     public async Task FinalizeAnalysisAsync(
         Guid analysisId,

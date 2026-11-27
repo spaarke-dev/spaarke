@@ -206,24 +206,24 @@ public partial class RouteAuthorizationGuardTests
             [Fact]
             public async Task Proves()
             {
-                var denied = await _client.GetAsync($"/api/agent/playbooks/status/{other}");
+                var denied = await _client.GetAsync($"/api/ai/playbooks/runs/{other}");
                 denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
-                var allowed = await _client.GetAsync($"/api/agent/playbooks/status/{mine}");
+                var allowed = await _client.GetAsync($"/api/ai/playbooks/runs/{mine}");
                 allowed.StatusCode.Should().Be(HttpStatusCode.OK);
             }
 
             [Fact]
             public async Task OtherRoute()
             {
-                var denied = await _client.GetAsync($"/api/agent/other/{other}");
+                var denied = await _client.GetAsync($"/api/ai/other/{other}");
                 denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
-                (await _client.GetAsync($"/api/agent/other/{mine}")).StatusCode.Should().Be(HttpStatusCode.OK);
+                (await _client.GetAsync($"/api/ai/other/{mine}")).StatusCode.Should().Be(HttpStatusCode.OK);
             }
 
             [Fact]
             public async Task RefusalOnly()
             {
-                (await _client.GetAsync($"/api/agent/playbooks/status/{other}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+                (await _client.GetAsync($"/api/ai/playbooks/runs/{other}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
             }
         }
 
@@ -233,8 +233,8 @@ public partial class RouteAuthorizationGuardTests
             public async Task Slim()
             {
                 await using var host = await SlimHost.StartAsync();
-                (await host.Client.GetAsync($"/api/agent/playbooks/status/{other}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
-                (await host.Client.GetAsync($"/api/agent/playbooks/status/{mine}")).StatusCode.Should().Be(HttpStatusCode.OK);
+                (await host.Client.GetAsync($"/api/ai/playbooks/runs/{other}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+                (await host.Client.GetAsync($"/api/ai/playbooks/runs/{mine}")).StatusCode.Should().Be(HttpStatusCode.OK);
             }
         }
         """.Replace("__REAL_APP_BASE__", "WebApplication" + "Factory", StringComparison.Ordinal);
@@ -242,7 +242,7 @@ public partial class RouteAuthorizationGuardTests
     [Fact(DisplayName = "Round 65 item 2 controls: ProvenByTest holds only for a real-app test of THIS route asserting refusal AND success")]
     public void ProvenByTest_NegativeControl_EachMissingPartFails()
     {
-        const string route = "GET /api/agent/playbooks/status/{jobId:guid}";
+        const string route = "GET /api/ai/playbooks/runs/{runId:guid}";
         var bases = TypeBasesOf(new[] { ProvenFixtureFile, "public sealed class SlimHost : IAsyncDisposable { }" });
 
         Assert.Null(ProvenByTestProblem(ProvenFixtureFile, "Proves", route, bases));
