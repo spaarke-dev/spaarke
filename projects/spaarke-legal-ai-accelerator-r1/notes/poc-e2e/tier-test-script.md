@@ -347,7 +347,68 @@ comment. Both carry a code plus a hash a model can't work out in its head.
 and whether `spaarke-word-probe-js` was in the **+** list. Then delete the test document.
 
 **Afterwards:** remove the probe plugin (Cowork › Customize › Plugins › Remove) so it doesn't show in your lists,
-and tell me, so copilot-platform-coordination can update its inventory.
+and tell me, so copilot-platform-coordination can update its inventory. **Result 2026-11-27: pass** (WP-5 run 3,
+`results.md`). Next: WP-6.
+
+### WP-6. Word desktop: can our code apply an edit list, report errors, and how big can it be? (added 2026-11-27)
+
+**Why.** WP-5 showed Word desktop runs our fixed JavaScript. A real Word edition needs three more things: Copilot
+fills in a list of edits while our code stays fixed; our code can report a problem back to Copilot; and the code
+can be as long as a real redline applier. Needs **probe plugin v0.5** (`Spaarke Word probe plugin v0.5.zip`),
+which adds five skills: `spaarke-word-probe-edits`, `spaarke-word-probe-error` and
+`spaarke-word-probe-size-5k` / `-20k` / `-60k`. Their code is already in the form Word's runner used in WP-5 run 3,
+so Copilot shouldn't need to change any line.
+
+**Setup (once):**
+1. Cowork › Customize › Plugins: remove **Spaarke Word Probe** (v0.4), then **Upload** v0.5 (Only you). Wait until
+   it shows.
+2. Word desktop: **new blank document**. Copilot pane: **Spaarke MCP off**; **Spaarke Word Probe** on. If the new
+   skills don't show in **+**, close and reopen Word.
+3. Use a **new Copilot chat for each run**, and pick the skill's chip from **+** first.
+
+**Runs, in this order** (each takes a minute; stop a run at the first refusal and record the message):
+
+| Run | Chip | Type exactly |
+|---|---|---|
+| 6a | `spaarke-word-probe-edits` | *Run the Spaarke edit probe with these edits: "two (2) years" to "three (3) years"; "Delaware" to "New York"; "30 days" to "60 days".* |
+| 6b | `spaarke-word-probe-error` | *Run the Spaarke error probe.* |
+| 6c | `spaarke-word-probe-size-5k` | *Run the Spaarke size probe 5k.* |
+| 6d | `spaarke-word-probe-size-20k` | *Run the Spaarke size probe 20k.* |
+| 6e | `spaarke-word-probe-size-60k` | *Run the Spaarke size probe 60k.* |
+
+**Expected:**
+- **6a (edit list).** The new last paragraph reads *Spaarke edit probe: The term is* ~~two (2) years~~
+  <u>three (3) years</u>*. Governing law is* ~~Delaware~~ <u>New York</u>*. Notice is* ~~30 days~~ <u>60 days</u>*.
+  [WPE-1127-A 3 64de6251]*. All three changes are tracked, and there are three comments:
+  - on *three (3) years*: `Spaarke edit 1/3 WPE-1127-A c8be54a4`
+  - on *New York*: `Spaarke edit 2/3 WPE-1127-A 450530b5`
+  - on *60 days*: `Spaarke edit 3/3 WPE-1127-A 1628a2b8`
+
+  Track Changes is back to how it was. Copilot quotes the `EDITS` line it used.
+- **6b (error channel).** Nothing changes in the document. We learn which of two lines reaches Copilot:
+  - error message `Spaarke probe error WPX-1127-A b4b1d9ac`;
+  - console output `Spaarke probe log WPX-1127-A d1a5d160`.
+
+  Either, both or neither is a valid result. Anything else quoted is made up.
+- **6c–6e (size).** One new paragraph each:
+  - 5k: `Spaarke size probe: WPZ-1127-A 5k 354 13758e44`
+  - 20k: `Spaarke size probe: WPZ-1127-A 20k 1651 378b86c7`
+  - 60k: `Spaarke size probe: WPZ-1127-A 60k 5098 589bd61e`
+
+  A different last part means the list was cut or changed on the way.
+
+| Result | Means |
+|---|---|
+| 6a exactly as expected | Copilot can fill in our data while our code applies it: the Word edition's core works |
+| 6a: edits right, but the bracketed hash or the comment hashes differ | Copilot rewrote the code or the data: record the `EDITS` line it quotes |
+| 6a: error `edit N matched 0 times` | Copilot changed the edit text (for example the quotes) when filling `EDITS`: record the line |
+| 6b: the error line is quoted exactly | Our code can report problems back to Copilot (a plan check can work in Word) |
+| 6b: only the console line, or neither | Our code reports only through the document |
+| 6c–6e: the first size that fails, and its message | The most code a Word skill can carry (Copilot re-types the code each time, so this is also what it will copy) |
+
+**Record:** for each run, the reply, whether Copilot said it changed any line, and a screenshot of the paragraph
+with its comments for 6a. Then delete the test document. **Afterwards:** keep v0.5 until the results are in, then
+remove it and tell me (copilot-platform-coordination tracks it).
 
 ---
 
