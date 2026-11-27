@@ -8,7 +8,8 @@ Owner decision 2026-11-26 (`decisions.md`): "if two records are related and ther
 |---|---|
 | Create, source = the caller's filing record (table and id) | Copied. Still read as the caller (`MappingSourceCallerMask`), so only a value the caller can read is copied. |
 | Create, any other source (explicit `mappingSource` not the filing record, id match with another table, unresolvable pair) | Not copied: dropped with the `SourceColumnFieldSecured` warning. "Security cannot be read" maps nothing (fail closed). |
-| Push (ordinary mode: the rows whose single non-citation lookup to the source table names it; family mode: the Filing edge) | Copied. The source is read as the caller (`RetrieveSourceRecordValuesAsCallerAsync`). The push no longer reads `IsSecured`. |
+| Push, rows filed under the source (family mode; ordinary mode when the parent lookup is a listed Filing edge's column) | Copied. The source is read as the caller (`RetrieveSourceRecordValuesAsCallerAsync`). |
+| Push, ordinary mode through any other lookup | Not copied: skipped with a warning naming the target, counted in `SkippedRuleCount`; unstated security counts as secured (section 6). |
 | Repair pass (system principal) | Not copied, unchanged: there is no caller to mask the read against. |
 
 Once copied, a value is readable by whoever can read the target column. To keep it restricted, field-secure the target column too.
@@ -59,3 +60,15 @@ On the merged tip acd0470942:
 - `Spaarke.ArchTests` (no `--no-build`): 2854/2854.
 - Publish delta, 065 + 066 (74efbf10ee) vs master 8975e13034, fresh builds, Compress-Archive: −35,679 bytes, 41.66 MB. `dotnet list package --vulnerable --include-transitive`: none.
 - UAC-r2 gate: requested (their four checks: only the field-secured-source rule changes and every other boundary keeps a must-fire test; must-fire on create AND push; the decision record quotes the owner and states the consequence; a copy reads only the one parent's data).
+
+## 6. Access gate (UAC-r2) and the push fix
+
+- Create path: APPROVED on 8b86b1a2b5 (no findings).
+- Push: the gate chose "Filing edge only" (the decision record's bounds: a copy reads only the caller's own filing parent; a lookup reference grants no access, so a lookup-only row has an unrelated audience). Fix d3b460290b (merged as 5477f5a8d1):
+  - ordinary mode resolves the parent lookup (and its 409) before any source read; `filedUnderTheSource = familyMode || IsListedFilingEdgeColumn(source, target, parentLookup)` (a listed Filing edge whose parent, child and lookup column match);
+  - otherwise step 2a is restored as in 08ba672339 (IsSecured as the caller, Split, one warning per target, counted as skipped, the empty-rules early return); the ArchTest again requires push to use the shared rule.
+  - Tests: `Push_ThroughALookupThatIsNotAFilingEdge_ARuleWhoseSourceColumnIsFieldSecured_IsSkippedWithAWarningNamingItsTarget` (must-fire), `Push_ARuleWhoseSourceColumnIsFieldSecured_PushesTheValueTheCallerCanRead_AndIsNotCountedAsSkipped` (Filing edge, must-not-fire), the fail-closed and every-rule-secured cases, `Apply_WithConfirmedChildIds_ARuleWhoseSourceColumnIsFieldSecured_Pushes_WithNoWarning` (family mode), and the 8-case `IsListedFilingEdgeColumn_*` theory. Mutation (column condition dropped): 6 of 215 fail.
+  - Behaviour change: in ordinary mode the none-or-several-lookups 409 now comes before the source reads.
+- Full approval on the fix and the merged head 05d5dce24d (master merged, no src/server resolution hunks).
+- On 05d5dce24d: build 0 warnings; filtered tests 1449/1449.
+- Deploy: next dev BFF candidate after merge, on the owner's exact-SHA go in UAC-r2's session; UAC-r2 re-runs the IsSecured check before it and runs the live push check (a user without read on a secured column pushes, the children stay unchanged) after it.
