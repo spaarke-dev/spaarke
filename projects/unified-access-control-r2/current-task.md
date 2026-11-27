@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-26 ~20:10Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-26 ~22:25Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -18,8 +18,8 @@
 
 ## Active: #3245 Assign removal (owner: "Approve, keep D-160", 2026-11-26)
 - Audit note `notes/assign-privilege-audit-2026-11-26.md` (work branch 9a206976fc; also in the PR). Findings + peer answers commented on #3245.
-- **PR #3269** (`fix/3245-person-role-assign-removal`, worktree `C:\wtasg`, commit b85f923fba, bound to this session): removes 38 Assign grants (Core User 25 — keeps `sprk_Event`; Office Add In User 9; AI Analysis User 4); config `removals` gap `ASSIGN-3245` (124 total); 2 MustNotHold rules; ASSIGN-3245 pending for the release after 1.3.3.0; CoreUserWizardLinkingGuardTests pin updated. Local: role guards 100/100, full arch 2845/2845. CI at ~20:05Z: 22 pass, 0 fail, 11 pending. **NEXT: merge when Router AND Client lint are green (don't push while CI runs).**
-- **After merge (owner's go needed):** live dev `scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove -Gap ASSIGN-3245` (dry run first, then `-Apply`, then `-Remove -Verify`); rollback `-Restore -Gap ASSIGN-3245 -Apply`. Also remove the Workforce role's 8 inert Assign grants live (no role file). Re-run `scratchpad/asg2.ps1` and check. Then close #3245.
+- **PR #3269** (`fix/3245-person-role-assign-removal`, worktree `C:\wtasg`, commit b85f923fba, bound to this session): removes 38 Assign grants (Core User 25 — keeps `sprk_Event`; Office Add In User 9; AI Analysis User 4); config `removals` gap `ASSIGN-3245` (124 total); 2 MustNotHold rules; ASSIGN-3245 pending for the release after 1.3.3.0; CoreUserWizardLinkingGuardTests pin updated. Local: role guards 100/100, full arch 2845/2845. **MERGED ~22:20Z as 50bdad697c** (Router + Client lint green; only the advisory api-insights-integration timed out).
+- **NEXT (owner's go needed in this session):** live dev `scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove -Gap ASSIGN-3245` (dry run first, then `-Apply`, then `-Remove -Verify`); rollback `-Restore -Gap ASSIGN-3245 -Apply`. Also remove the Workforce role's 8 inert Assign grants live (no role file). Re-run `scratchpad/asg2.ps1` and check. Then close #3245.
 - Kept by owner: AI Analysis Admin (rounds 124/127), Ontology Service (DecisionRecord/BudgetRevision/Signal), Ontology Administrator Signal (D-160).
 
 ## Open peer reviews (uac-r2 as access gate)
@@ -29,11 +29,11 @@
 - **field-mapping-r1:** 051 is live on dev (verified). **Combined 064 (064+b+c+d, `3e0268349a..fd8172ea32`): APPROVED 2026-11-26 ~20:30Z.** Pre-deploy condition MET: all 18 create tables on dev return a boolean IsSecured (task-064-notes §11; repeat per environment before a deploy carrying 064). Target-side field-security skip = owner-decided known limit. Nit filed as DI-052 #3280. Next: their one PR for 051/063/064 → merge → deploy only on the owner's SHA go here.
 - **mcp-r2 030 + ADR-052 amendment:** 030 closed; amendment PROPOSED until the owner's security sign-off.
 - **ontology-r1 PR #3278 (task 230, read-only system playbooks), test file only:** APPROVED. Nit: pin the guard-after-filters ordering with a must-not-fire case.
-- **word-add-in-r1 #3214 (task 140):** gate passed. **Task 141 (`fix/word-addin-141` 2a66132dc0, no PR yet): APPROVED 2026-11-26 ~20:45Z**. The named-.eml attachments add requires Write on the named .eml (version-save filter) plus EntityAccessFilter, IsFiledTo, the NotThisEmail check and the container guard. resolve-email-identity's savedAttachmentNames checks Read on each child via InternalPlaneDocumentNarrowing (ADR-008 A1). Nits accepted: replay confirmed per caller (IdempotencyFilter keys on userId); child id will be logged; batch or cap comes in their next fix round. Deploy through me on the owner's SHA go.
+- **word-add-in-r1 #3214 (task 140):** gate passed. **Task 141 (`fix/word-addin-141` 2a66132dc0, no PR yet): APPROVED 2026-11-26 ~20:45Z**. The named-.eml attachments add requires Write on the named .eml (version-save filter) plus EntityAccessFilter, IsFiledTo, the NotThisEmail check and the container guard. resolve-email-identity's savedAttachmentNames checks Read on each child via InternalPlaneDocumentNarrowing (ADR-008 A1). Nits accepted: replay confirmed per caller (IdempotencyFilter keys on userId); child id will be logged; batch or cap comes in their next fix round. **MERGED as PR #3289 → d2991fd743** (word-add-in-r1, ~22:15Z); they want the live SHA + gate result after the deploy.
 
 ## Waiting on the owner
 - ADR-052 amendment security sign-off (mcp-r2).
-- Next dev BFF deploy: exact-SHA go here. Candidates: #3260 Part E (merged), #3267 (spa-r4), #3272 Part C (mcp-r1), #3270 (ontology). A master deploy REMOVES the specialist spike tools now live: tell specialist-legal-agents-r1 first, #3269 needs no BFF deploy (roles only).
+- Next dev BFF deploy: exact-SHA go here. **Range-checked candidate: `d2991fd743`** (= master tip 50bdad697c on the server side; 50bdad697c adds only #3269 roles). 51ce01a116 is its ancestor; it drops only the 3 spike commits (spike tools go away: tell specialist-legal-agents-r1 first). Server work over live: #3260 Part E, #3267, #3270, #3278, 141 (#3289), and un-gated 226 (#3277), 227, 228 (#3273), 232, #1697 notification priority, provisioning seeds (control plane, not the BFF). 226 + 228 checked here ~22:25Z: access-safe (226 reads only through the caller's client; its app reads are config/policy/record-type metadata it already had; 228 adds a refusal only, after the caller's own read). NOT in it: 064 (field-mapping), #3272 Part C.
 - Dev hand checks: `notes/owner-test-checklist-2026-11-13.md`; ebilling W/X checklist; word-add-in 136-138.
 - Quality alerts #1906, #2067, #2866: mention only. Open: #3111, #2158, #3125, #3175, #3241, #1506, #3264/#3265 (R4's).
 
