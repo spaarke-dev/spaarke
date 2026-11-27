@@ -9,10 +9,11 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Api.FieldMappings;
 
 /// <summary>
-/// field-mapping-server-write-path-r1 DI-051 (#3258): a push applies create's field-secured SOURCE rule
-/// (<see cref="FieldSecuredSourceRule"/>). A rule that reads a field-secured source column is not pushed, whatever the caller
-/// may read, and the target column it would have filled is named in a warning; a column whose security the catalog does not
-/// state counts as secured; an unsecured source column pushes as before.
+/// field-mapping-server-write-path-r1 task 065 (owner 2026-11-26, superseding DI-051 on the push): the pushed children are the
+/// rows filed under the one source record, so a rule that reads a field-secured source column pushes like any other. The
+/// source is still read as the caller, filtered to that one record, so a column the caller cannot read copies nothing
+/// (<c>Push_ASourceColumnTheCallerCannotReadUnderFieldSecurity_IsNeverCopiedIntoAChild</c> in the main file). The push no
+/// longer asks the source catalog for <c>IsSecured</c> and no longer counts or names such a rule.
 /// </summary>
 public partial class FieldMappingPushAuthorizationContractTests
 {
@@ -22,10 +23,8 @@ public partial class FieldMappingPushAuthorizationContractTests
         PushHost.Rule("sprk_matterid", 0, "sprk_sourcematterid", 0),
     ];
 
-    private static string SecuredWarning(string column) => $"'{column}' was not updated: {FieldSecuredSourceRule.NotCopiedReason}.";
-
     [Fact]
-    public async Task Push_ARuleWhoseSourceColumnIsFieldSecured_IsSkippedWithAWarningNamingItsTarget_AndTheOtherRulesPush()
+    public async Task Push_ARuleWhoseSourceColumnIsFieldSecured_PushesTheValueTheCallerCanRead_AndIsNotCountedAsSkipped()
     {
         await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read;
@@ -36,54 +35,50 @@ public partial class FieldMappingPushAuthorizationContractTests
         var text = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, text);
-        host.Writes.Should().HaveCount(2);
-        host.Writes.Should().OnlyContain(w => !w.Payload.ContainsKey("sprk_clientreference"),
-            "a value read from a field-secured column is never copied into a column that is not (declassification)");
+        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_clientreference"] == "REF-166",
+            "the children are filed under the source, so a field-secured source value copies (task 065)");
         host.Writes.Should().OnlyContain(w => w.Payload.ContainsKey("sprk_sourcematterid"), "the other rules still push");
         var body = JsonNode.Parse(text)!;
-        body["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal(SecuredWarning("sprk_clientreference"));
-        body["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
-        host.SourceReads.Should().ContainSingle().Which.Query.Should().NotContain("sprk_clientreference",
-            "the secured column is not even read for the push");
+        body["warnings"]!.AsArray().Should().BeEmpty();
+        body["skippedRuleCount"]!.GetValue<int>().Should().Be(0);
+        body["updatedCount"]!.GetValue<int>().Should().Be(2);
     }
 
     [Fact]
-    public async Task Push_ARuleWhoseSourceColumnSecurityCannotBeTold_MapsNothingFromIt_AndWarns()
+    public async Task Push_ACopyReadsOnlyTheOneSourceRecord_AsTheCaller_AndAsksNoColumnSecurity()
     {
         await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read;
         host.ArrangeHappyPathData(rules: ClientReferenceAndMatterIdRules());
-        host.SourceColumnSecurity["sprk_clientreference"] = null; // the catalog does not say: fail closed
-
-        var response = await host.SendAsync(Authenticated(PushBody()));
-        var text = await response.Content.ReadAsStringAsync();
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK, text);
-        host.Writes.Should().OnlyContain(w => !w.Payload.ContainsKey("sprk_clientreference"),
-            "anything but an explicit IsSecured == false counts as secured");
-        JsonNode.Parse(text)!["warnings"]!.AsArray().Select(w => w!.GetValue<string>())
-            .Should().Equal(SecuredWarning("sprk_clientreference"));
-    }
-
-    [Fact]
-    public async Task Push_WhenEveryRuleReadsAFieldSecuredColumn_NothingIsReadOrWritten_AndEachTargetIsNamed()
-    {
-        await using var host = await PushHost.StartAsync();
-        host.Probe.Rights = AccessRights.Read;
-        host.ArrangeHappyPathData();
         host.SourceColumnSecurity["sprk_clientreference"] = true;
 
         var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.SourceReads.Should().ContainSingle("the values come from one read of the one source record").Which.Should().Be(
+            ("sprk_matters", (string?)$"$select=sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+             CallerSystemUserId));
+        host.MetadataQueries.Should().NotContain(q => q.Query != null && q.Query.Contains(FieldSecuredSourceRule.IsSecuredProperty),
+            "the push no longer reads the source columns' field security");
+        host.FieldMappings.Verify(f => f.RetrieveRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no app-only source read");
+    }
+
+    [Fact]
+    public async Task Push_ARuleWhoseSourceColumnSecurityCannotBeTold_PushesLikeAnyOther()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(rules: ClientReferenceAndMatterIdRules());
+        host.SourceColumnSecurity["sprk_clientreference"] = null; // the catalog does not say
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
         var text = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, text);
-        var body = JsonNode.Parse(text)!;
-        body["updatedCount"]!.GetValue<int>().Should().Be(0);
-        body["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal(SecuredWarning("sprk_clientreference"));
-        body["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
-        host.Writes.Should().BeEmpty();
-        host.SourceReads.Should().BeEmpty("no rule is left to read the source for");
-        host.ChildQueries.Should().BeEmpty();
+        host.Writes.Should().HaveCount(2).And.OnlyContain(w => (string?)w.Payload["sprk_clientreference"] == "REF-166");
+        JsonNode.Parse(text)!["skippedRuleCount"]!.GetValue<int>().Should().Be(0);
     }
 
     [Fact]

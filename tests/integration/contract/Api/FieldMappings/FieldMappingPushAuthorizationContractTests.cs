@@ -338,7 +338,7 @@ public partial class FieldMappingPushAuthorizationContractTests
         host.MetadataQueries.Should().Equal(new[]
         {
             ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
-             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute,IsSecured", CallerSystemUserId),
+             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute", CallerSystemUserId),
             ("EntityDefinitions(LogicalName='sprk_invoice')/ManyToOneRelationships",
              (string?)"$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName", CallerSystemUserId),
         }, "the metadata is read through the same impersonated seam, as the caller; with no lookup rule the source's "
