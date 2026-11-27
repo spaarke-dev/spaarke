@@ -24,6 +24,9 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
   - The runner does not pass the return value back.
   - It refuses `toString` and a top-level `await`.
   - Detail: accelerator PR #3266.
+- Plugin upload refused a package whose `SKILL.md` files were over 20,000 characters ("We couldn't validate this manifest file", accelerator v0.5, 2026-11-27).
+  - Learn's published validation rules (Cowork plugin development, checked 2026-11-27) list no `SKILL.md` size limit, so treat 20,000 characters as observed, not documented.
+  - Learn says `wiqd plugin validate --mode deep` runs the upload rules locally. Use it, or a size gate, before asking the owner to upload.
 
 ## Key sources
 
