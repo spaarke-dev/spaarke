@@ -237,3 +237,25 @@ Your review points: (2) UTBMS code without its description, (3) the highlight co
 - [ ] **A decision can't be left while it saves (ISS-016):** in Invoice Review, open an invoice decision (Approve, Reject or Return) and press Finish. While it saves, the ‹ › step buttons, ×, Escape, clicking outside and Cancel do nothing, and the extra buttons at the bottom left are greyed. When it finishes, the wizard closes or shows the result as before.
 - [ ] **Pages still open after the shared-code move (#2965), only if convenient:** AP Export, Invoice Files and the Rule Review page still open and load normally. Those three pages were not redeployed this time, so this check waits for our next page deploy.
 - Nothing else in batch 5 is visible: DEF-046 is a deploy-script fix, DEF-064 is a build check.
+
+## Z. Billing firm field in Invoice Review (#3211, merged 2026-11-26 04:37:54Z at 1459a14916): READY since 2026-11-26 12:15:10Z (page from 1459a14916, uac-r2's deploy; dev BFF unchanged 1e64e94168)
+
+Deployed by uac-r2 on your go in its session: `sprk_invoicereviewpage` live 12:15:10Z, sha256 e124c6d2…1306 (read-back equals the build). Rollback 49a8243a…9502.
+
+- [ ] **Set the firm from the header (095d-3):** open an invoice that has no firm. The header's firm value is a dropdown listing the firms linked to its matter; the note under the lines says to set the firm in the header. Pick a firm and save: the field shows the firm, and once the rules re-run finishes the lines, By-rule suggestions, corrections and Add line unlock without a reload. Needs a dev invoice with no firm; dev had none on 2026-11-26, so skip this if there still is none.
+- [ ] **Read-only otherwise:** on an invoice that already has a firm, or as a user who can't edit the invoice, the firm is plain text, not a dropdown.
+- [ ] **Pages still open after the shared-code move (#2965), only if convenient:** carried over from Y; AP Export, Invoice Files and Rule Review are not in this deploy either.
+
+## AA. Invoice Review in the Console's own modal, with browse (task 195): NOT READY, needs the master merge and two deploys
+
+Waits for: the master PR merge, then a Console deploy (`sprk_spaarkeai`, for the modal and browse) and an Invoice Review page deploy (for the compact cards and the unsaved-work answer). Both are your gos; the page deploy is uac-r2's, with you naming the SHA in its session. Hard-refresh (Ctrl+F5) before testing.
+
+- [ ] **Opens in the Console, not the platform dialog:** in the Console, open a billing item in the Worklist. Invoice Review opens in Spaarke's own modal: the title bar says "Invoice Review" in the Console's style (dark when the Console is dark), not the grey Dataverse dialog bar.
+- [ ] **Dark mode with no stored choice:** with the Console in dark mode and no theme picked in Spaarke's own theme menu, the page inside the modal is dark too.
+- [ ] **"N of M" browse:** the header shows "1 of 5" style counts over the billing items of the lane you clicked in (with its count filter, if one is on), one entry per invoice. Next and previous move to the neighbouring invoice. At the first invoice previous is greyed; at the last, next is. A lane with one invoice shows "1 of 1" with both greyed.
+- [ ] **Unsaved work is not lost:** type in a note box (don't save), then press next: you are asked "Discard what you haven't saved?". Cancel keeps you on the invoice with the text; Discard moves on. The same question comes with an open decision wizard, a firm chosen but not set, or a save still running. With nothing unsaved, next moves at once with no question. Opening "View decision" on a decided invoice is not unsaved work.
+- [ ] **Back button:** after a few next presses, the browser Back button does not change the invoice inside the modal while the count stays put.
+- [ ] **Keyboard at the ends:** using Tab and Enter on next until the last invoice, focus stays on a header button (previous, or close) instead of jumping out of the dialog.
+- [ ] **Closing refreshes the lanes:** close the modal with ×; the Worklist lanes reload (an invoice you decided moves or drops out).
+- [ ] **Count cards on one row:** at 1280 px wide or more, the five cards (All lines, Processing, To decide, Clean, Decided) sit on one row as shorter cards; count, label and the "done today" line stay readable.
+- [ ] **Navigator still there:** the Navigator side pane still registers on the page inside the modal, as it did in the old dialog.

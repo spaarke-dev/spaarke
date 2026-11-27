@@ -41,6 +41,7 @@ import {
 import type { ApiFailure, InvoiceReview } from '../../services/invoiceReviewApi';
 import { isNoteRefusal, noteArgs, noteProblem, noteRefusalMessage } from '../../services/noteModel';
 import { NoteField } from '../NoteField';
+import { useReportDirty } from '../useDirtyCheck';
 import { useApproval } from './ApprovalProvider';
 
 const REASON_MAX = 2000;
@@ -115,6 +116,9 @@ export function BlockedBanner({ review, reload }: BlockedBannerProps) {
   const [noteError, setNoteError] = React.useState<string | null>(null);
   const [locked, setLocked] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // Task 195: a send in flight, or the open Override / Return form with a reason or note typed, is unsaved work for the Console modal's
+  // browse guard.
+  useReportDirty(busy || (dialog?.open === true && (reason.trim() !== '' || note.trim() !== '')));
   const [error, setError] = React.useState<string | null>(null);
   const alive = React.useRef(true);
   React.useEffect(() => {

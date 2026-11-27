@@ -10,6 +10,9 @@
 #      hides the HOME-grid New only on a kept table that says so (owner OQ-1), and never leaves -Out half-written;
 #   5. r1: -Verify fails and names a table whose subgrid New rule passes no table (the script then never consults its redirect), a
 #      redirected table whose home-grid replacement button is missing, and a budget / KPI assessment whose home-grid New is shown;
+#   7. task 066: the KPI subgrid has ONE create ("+ New"): -Verify fails and names a KPI ribbon that still shows "Add KPI Assessment"
+#      (must-fire) and passes without it (must-not-fire); the merge removes the button, its command and its labels from a fresh
+#      export; no SpaarkeMaster ribbon carries a retired button.
 #   6. r1: the SpaarkeMaster ribbons agree with the config (every redirected table hides its three platform New buttons and carries
 #      its launcher buttons; the home-grid New is the launcher on the seven redirected tables).
 #
@@ -105,14 +108,31 @@ Describe 'Test-NativeCreateSurfaces -InputJson' {
         }
     }
 
-    It 'fails and names the table when Add Memo or + Add KPI is not on its ribbon (neither was live on dev)' {
+    It 'fails and names the table when Add Memo is not on its ribbon (it was not live on dev)' {
         $c = New-ClosedCapture
         $c.tables['sprk_event'].present = @($c.tables['sprk_event'].present | Where-Object { $_ -ne 'Spaarke.Event.AddMemo.Button' })
-        $c.tables['sprk_kpiassessment'].present = @()
         $r = Invoke-Verify $c
         $r.Exit | Should -Be 1
         $r.Out | Should -Match 'FAIL sprk_event: .*Spaarke.Event.AddMemo.Button'
-        $r.Out | Should -Match 'FAIL sprk_kpiassessment: .*sprk.matter.subgrid.kpi.AddKpiButton'
+        $r.Out | Should -Match 'NOT MET - 1 of 23 table\(s\): sprk_event'
+    }
+
+    It 'MUST FIRE: fails and names the KPI assessment table when "Add KPI Assessment" is still on its ribbon (task 066)' {
+        $c = New-ClosedCapture
+        $c.tables['sprk_kpiassessment'].present += 'sprk.matter.subgrid.kpi.AddKpiButton'
+        $r = Invoke-Verify $c
+        $r.Exit | Should -Be 1
+        $r.Out | Should -Match 'FAIL sprk_kpiassessment: a retired Spaarke button is still shown: sprk.matter.subgrid.kpi.AddKpiButton'
+        $r.Out | Should -Match 'NOT MET - 1 of 23 table\(s\): sprk_kpiassessment'
+    }
+
+    It 'MUST NOT FIRE: passes the KPI assessment table without the button, and ignores that id on a table that does not retire it (task 066)' {
+        $c = New-ClosedCapture
+        @($c.tables['sprk_kpiassessment'].present) | Should -Not -Contain 'sprk.matter.subgrid.kpi.AddKpiButton'
+        $c.tables['sprk_matter'].present += 'sprk.matter.subgrid.kpi.AddKpiButton'
+        $r = Invoke-Verify $c
+        $r.Exit | Should -Be 0
+        $r.Out | Should -Match 'PASS \(23 tables\)'
     }
 
     It 'fails a report card whose form New is not the wizard launcher' {
@@ -196,6 +216,11 @@ Describe 'native-create-surfaces.json' {
         # Owner OQ-1 (2026-11-26): budget and KPI assessment keep the form / subgrid New and lose only the home-grid New; memo and analysis keep all New.
         $homeHidden = @($cfg.tables | Where-Object { $_.homeGridNew -eq 'hidden' } | ForEach-Object { $_.table } | Sort-Object)
         ($homeHidden -join ',') | Should -Be 'sprk_budget,sprk_kpiassessment'
+        # Task 066: the KPI subgrid keeps ONE create (+ New); the second button is retired, and only the KPI assessment retires it.
+        $retired = @($cfg.tables | Where-Object { $_.mustBeAbsent } | ForEach-Object { $_.table })
+        ($retired -join ',') | Should -Be 'sprk_kpiassessment'
+        @(($cfg.tables | Where-Object { $_.table -eq 'sprk_kpiassessment' }).mustBeAbsent) | Should -Be @('sprk.matter.subgrid.kpi.AddKpiButton')
+        @($cfg.tables | Where-Object { $_.alsoPresent } | ForEach-Object { $_.table }) | Should -Be @('sprk_event')
         foreach ($kept in 'sprk_memo', 'sprk_analysis') { ($cfg.tables | Where-Object { $_.table -eq $kept }).nativeNew | Should -Be 'kept' }
         foreach ($excluded in 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_signal', 'sprk_decisionrecord', 'sprk_budgetrevision', 'sprk_servicerequest') {
             ($cfg.tables | Where-Object { $_.table -eq $excluded }).nativeNew | Should -Be 'kept'
@@ -226,6 +251,7 @@ Describe 'native-create-surfaces.json against the secure-child script and the Sp
                 $ids | Should -Contain "sprk.NativeCreate.$($e.table).Form.New"
                 if ($e.gridButtonId) { $ids | Should -Contain $e.gridButtonId }
             }
+            foreach ($retiredId in @($e.mustBeAbsent)) { if ($retiredId) { $ids | Should -Not -Contain $retiredId -Because "$retiredId is retired (task 066)" } }
             if ($e.nativeNew -eq 'kept' -and $e.homeGridNew -eq 'hidden') { $hides | Should -Contain "Mscrm.HomepageGrid.$($e.table).NewRecord" }
             if ($e.nativeNew -eq 'kept' -and -not $e.homeGridNew) { @($hides | Where-Object { $_ -match '^Mscrm.(Form|HomepageGrid)..*.(NewRecord|SaveAndNew)$' }).Count | Should -Be 0 }   # the analysis ribbon already hides its SUBGRID New (AnalysisRibbons)
         }
@@ -324,6 +350,59 @@ Describe 'Merge-NativeCreateRibbon' {
         $text | Should -Not -Match 'XmlWriter\]::Create\(\$Out'
         & $merge -RibbonDiff $seed -Entity sprk_todo -Out $seed | Out-Null
         @(Get-ChildItem (Split-Path $seed) -Filter '*.tmp').Count | Should -Be 0
+    }
+
+    It 'MUST FIRE (task 066): removes a retired button, its command and its labels from a fresh export and keeps every other command' {
+        @'
+<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml>
+  <CustomActions>
+    <CustomAction Id="sprk.matter.subgrid.kpi.AddKpiButton.CustomAction" Location="Mscrm.SubGrid.sprk_kpiassessment.MainTab.Management.Controls._children" Sequence="10">
+      <CommandUIDefinition><Button Id="sprk.matter.subgrid.kpi.AddKpiButton" Command="sprk.matter.subgrid.kpi.AddKpiButton.Command" LabelText="$LocLabels:sprk.matter.subgrid.kpi.AddKpiButton.LabelText" TemplateAlias="o1" /></CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates><RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates></Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.Existing.Command"><EnableRules /><DisplayRules /><Actions /></CommandDefinition>
+    <CommandDefinition Id="sprk.matter.subgrid.kpi.AddKpiButton.Command"><EnableRules /><DisplayRules /><Actions /></CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions><TabDisplayRules /><DisplayRules /><EnableRules /></RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.LabelText"><Titles><Title description="+ Add KPI" languagecode="1033" /></Titles></LocLabel>
+    <LocLabel Id="sprk.Existing.LabelText"><Titles><Title description="Keep" languagecode="1033" /></Titles></LocLabel>
+  </LocLabels>
+</RibbonDiffXml>
+'@ | Set-Content -LiteralPath $seed -Encoding utf8
+        & $merge -RibbonDiff $seed -Entity sprk_kpiassessment -Out $seed | Out-Null
+        [xml]$x = Get-Content -Raw $seed
+        $x.SelectSingleNode('//*[@Id="sprk.matter.subgrid.kpi.AddKpiButton"]') | Should -BeNullOrEmpty
+        $x.SelectSingleNode('//*[@Id="sprk.matter.subgrid.kpi.AddKpiButton.CustomAction"]') | Should -BeNullOrEmpty
+        $x.SelectSingleNode('//*[@Id="sprk.matter.subgrid.kpi.AddKpiButton.Command"]') | Should -BeNullOrEmpty
+        $x.SelectSingleNode('//*[starts-with(@Id,"sprk.matter.subgrid.kpi.AddKpiButton")]') | Should -BeNullOrEmpty
+        $x.SelectSingleNode('//*[@Id="sprk.Existing.Command"]') | Should -Not -BeNullOrEmpty
+        $x.SelectSingleNode('//*[@Id="sprk.Existing.LabelText"]') | Should -Not -BeNullOrEmpty
+        # Idempotent: a second run changes nothing.
+        $first = (Get-FileHash $seed).Hash
+        & $merge -RibbonDiff $seed -Entity sprk_kpiassessment -Out $seed | Out-Null
+        (Get-FileHash $seed).Hash | Should -Be $first
+    }
+
+    It 'MUST NOT FIRE (task 066): leaves the KPI-named nodes of a table that does not retire them untouched' {
+        @'
+<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml>
+  <CustomActions />
+  <Templates><RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates></Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.matter.subgrid.kpi.AddKpiButton.Command"><EnableRules /><DisplayRules /><Actions /></CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions><TabDisplayRules /><DisplayRules /><EnableRules /></RuleDefinitions>
+  <LocLabels />
+</RibbonDiffXml>
+'@ | Set-Content -LiteralPath $seed -Encoding utf8
+        & $merge -RibbonDiff $seed -Entity sprk_todo -Out $seed | Out-Null
+        [xml]$x = Get-Content -Raw $seed
+        $x.SelectSingleNode('//*[@Id="sprk.matter.subgrid.kpi.AddKpiButton.Command"]') | Should -Not -BeNullOrEmpty
     }
 
     It 'rejects a table that is not in the config' {

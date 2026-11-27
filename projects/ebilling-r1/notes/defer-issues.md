@@ -2815,3 +2815,61 @@ A line-decision call holds the invoice's processing lock for a fixed 2 minutes a
 **Related**: task iss029 (its pre-check relies on the lock between check and write). Not a security issue.
 
 ---
+
+### ISS-055 — SprkModal browse nav drops keyboard focus when the pressed button becomes disabled at either end
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-26 |
+| **Source** | Task 195 adversarial review (2026-11-26), finding 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3262 |
+
+**Description**
+
+In the shared `SprkModal` header nav group, the previous/next button the user just pressed becomes `disabled` when the move reaches the first or last record, while it still has focus. Chrome and Edge then move focus to the document body, so a keyboard or screen-reader user who reaches either end loses their place in the dialog. Every `nav` consumer is affected (BrowseModal, WizardShell browse, task 195's Invoice Review modal). Task 195 works around it locally in `InvoiceReviewModal` (after a move, focus the other enabled nav button) because it may not edit `SprkModal`.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx:401` (`disabled={nav.disabled || nav.index <= 0}`) and `:414` (`disabled={nav.disabled || nav.index >= nav.total - 1}`)
+- `src/client/shared/Spaarke.UI.Components/src/components/Worklist/InvoiceReviewModal.tsx` (the local workaround to remove once fixed)
+
+**Suggested fix**
+
+After `onNavigate`, if the focused nav button is now disabled, move focus to the other nav button (or the title or close); or use `aria-disabled` so the button keeps focus. Hypothesis only.
+
+**Estimated effort**: 1-2 hours with tests.
+**Blockers**: none. Stale open PR #1293 also edits `SprkModal.tsx`.
+**Related**: ADR-050; ebilling task 195. Owner of `SprkModal`: the modal-system / ontology area.
+
+---
+
+### ISS-056 — Billing Decision Records on secure matters are not shared inline (DI-178)
+
+| Field | Value |
+|---|---|
+| **Status** | Done (PR #3290 merged to master 2026-11-27, merge commit 6f4d7bc7e4; not yet on dev) |
+| **Urgency** | now |
+| **Filed** | 2026-11-26 (by ontology-r1 as DI-178; taken by ebilling-r1 the same day, owner go) |
+| **Source** | PR #3270 review (ontology task 225). Fix: PR #3290 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3276 |
+
+**Description**
+
+PR #3270 made the decision commit route share a new secure-child Decision Record inline. The billing entry points (`BillingDecisionRecorder.RecordAsync` and `RecordProcedureAsync`) do not, so on a secure matter the matter's sharees cannot read an Invoice Review or Procedure decision's record until the secure-child reconcile runs (up to about 2 minutes).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/BillingDecisionRecorder.cs:165` and `:185`
+- Reference: `src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs` `ShareSecureRecordAsync` (#3270)
+
+**Suggested fix**
+
+After each write, call `SecureChildShareSynchronizer.SyncChildAsync` for the one record when it was written Secure-team-owned or already existed. Use app-only access and `CancellationToken.None`. Log a fault and never fail the decision. The recorder is a singleton and the synchronizer is scoped, so resolve it in a fresh scope.
+
+**Estimated effort**: half a day with tests.
+**Blockers**: none (#3270 merged 2026-11-26 at 77433e5660).
+**Related**: ontology D-229, D-106; branch `fix/ebilling-3276-billing-dr-inline-share`; uac-r2 reviews.
+
+---

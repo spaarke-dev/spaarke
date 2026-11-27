@@ -125,6 +125,15 @@ public sealed partial class ReferenceRetrievalService
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrEmpty(options.TenantId);
 
+        // A "*" query names nothing to ground on (#3239 family). A tenant-wide match-all would put arbitrary reference
+        // chunks into a prompt, which is worse than none, so it returns no references (the caller runs ungrounded) and
+        // reaches neither the embedder, the result cache nor the index.
+        if (MatchAllQuery.IsMatchAll(query))
+        {
+            _logger.LogDebug("Reference search for tenant {TenantId} skipped: match-all query returns no references", options.TenantId);
+            return new ReferenceSearchResponse { Query = query };
+        }
+
         var totalStopwatch = Stopwatch.StartNew();
 
         // Step 0: Check Redis result cache (prevents duplicate embedding + search calls)

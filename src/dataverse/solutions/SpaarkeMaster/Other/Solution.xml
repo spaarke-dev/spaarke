@@ -422,7 +422,6 @@
       <RootComponent type="61" schemaName="sprk_graphview" behavior="0" />
       <RootComponent type="61" schemaName="sprk_invoicefiles" behavior="0" />
       <RootComponent type="61" schemaName="sprk_invoicespage.html" behavior="0" />
-      <RootComponent type="61" schemaName="sprk_kpi_ribbon_actions.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_kpi_subgrid_refresh.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_kpiassessment_quickcreate.js" behavior="0" />
       <RootComponent type="61" schemaName="sprk_kpiassessmentspage.html" behavior="0" />

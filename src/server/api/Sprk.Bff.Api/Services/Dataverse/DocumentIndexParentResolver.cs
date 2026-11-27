@@ -388,10 +388,11 @@ public sealed class DocumentIndexParentResolver
 
             if (string.Equals(table, ServiceRequestTable, StringComparison.OrdinalIgnoreCase))
             {
-                var requestRow = await ReadServiceRequestAsync(link.Id, ct).ConfigureAwait(false);
+                var (requestRow, requestReadFailed) = await ReadServiceRequestAsync(link.Id, ct).ConfigureAwait(false);
                 if (requestRow is null)
                 {
-                    return new IndexParentDecision(null, named, Decided: false);
+                    // A request that does not exist is an answer (nothing governs the document); one that could not be read is not.
+                    return new IndexParentDecision(null, named, Decided: false) { RowUnreadable = requestReadFailed };
                 }
 
                 foreach (var core in CoreRegardingsOf(requestRow, coreSearchType => CoreOrder.First(o => o.SearchType == coreSearchType).UnknownName))
@@ -407,10 +408,13 @@ public sealed class DocumentIndexParentResolver
             ct.ThrowIfCancellationRequested();
             if (!ancestors.Succeeded)
             {
+                // A read or metadata fault (RefusalKind Transient) is "could not read": the stored parent must survive it. A
+                // record that is not there, or that names two different roots, is a data condition a retry does not change.
+                var readFailed = !ancestors.IsPermanent;
                 _logger.LogWarning(
-                    "Index parent: document {DocumentId}'s {Table} {Id} has no readable core ancestor ({Error}); indexing without a parent.",
-                    documentId, table, link.Id, ancestors.Error);
-                return new IndexParentDecision(null, named, Decided: false);
+                    "Index parent: document {DocumentId}'s {Table} {Id} has no readable core ancestor ({Error}); indexing without a parent{Retry}.",
+                    documentId, table, link.Id, ancestors.Error, readFailed ? " (could not be read: the stored parent is kept)" : string.Empty);
+                return new IndexParentDecision(null, named, Decided: false) { RowUnreadable = readFailed };
             }
 
             foreach (var (coreTable, searchType, coreUnknownName) in CoreOrder)
@@ -447,9 +451,10 @@ public sealed class DocumentIndexParentResolver
 
     /// <summary>
     /// A related service request's row, carrying only its core regarding lookups (the records its documents are stored
-    /// under). Null when it cannot be read or is not found: the caller then fails closed and undecided.
+    /// under). A null row is fail closed and undecided; <c>ReadFailed</c> tells the two causes apart: <c>true</c> when the read
+    /// itself failed (an exception that is not a not-found: a throttle, a timeout), <c>false</c> when the request is not there.
     /// </summary>
-    private async Task<Entity?> ReadServiceRequestAsync(Guid serviceRequestId, CancellationToken ct)
+    private async Task<(Entity? Row, bool ReadFailed)> ReadServiceRequestAsync(Guid serviceRequestId, CancellationToken ct)
     {
         var columns = CoreOrder.Select(o => CoreAncestorResolver.StampColumnFor(o.Table)).ToArray();
         try
@@ -461,13 +466,19 @@ public sealed class DocumentIndexParentResolver
                     "Index parent: service request {Id} was not found; indexing without a parent (fail closed).", serviceRequestId);
             }
 
-            return row;
+            return (row, false);
+        }
+        catch (Exception ex) when (Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFoundInChain(ex))
+        {
+            _logger.LogWarning(
+                "Index parent: service request {Id} was not found; indexing without a parent (fail closed).", serviceRequestId);
+            return (null, false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex,
                 "Index parent: service request {Id} could not be read; indexing without a parent (fail closed).", serviceRequestId);
-            return null;
+            return (null, true);
         }
     }
 
@@ -523,13 +534,27 @@ internal sealed record IndexParentCandidate(string Table, Guid Id, ParentEntityC
 /// </summary>
 /// <param name="Parent">The governing record, or <c>null</c>.</param>
 /// <param name="Named">The records the row names directly (a related event as <c>event</c>) — empty when it names none.</param>
-/// <param name="Decided"><c>false</c> when the answer is <c>null</c> because something could not be read or the rule
-/// failed closed — a caller must then NOT substitute a parent of its own.</param>
+/// <param name="Decided"><c>false</c> when the answer is <c>null</c> and a caller must NOT substitute a parent of its own.
+/// Two kinds of "false", told apart by <see cref="IndexParentDecision.RowUnreadable"/>: COULD NOT READ (the document row, or the
+/// intermediate event, communication or service request, failed to read for a transient reason: <c>RowUnreadable</c> is true and
+/// nothing was decided), and THE RULE FAILED CLOSED (the record the document names is not there, names two different roots, or
+/// the rule found two different secure roots or could not read a secure state: <c>RowUnreadable</c> is false, and "no parent" IS the
+/// answer an index write may store).</param>
 public sealed record IndexParentDecision(ParentEntityContext? Parent, IReadOnlyList<ParentEntityContext> Named, bool Decided)
 {
     /// <summary>The row names no record: no parent, decided.</summary>
     public static readonly IndexParentDecision NothingNamed = new(null, Array.Empty<ParentEntityContext>(), Decided: true);
 
     /// <summary>The row could not be read: no parent, and no substitute.</summary>
-    public static readonly IndexParentDecision Undecided = new(null, Array.Empty<ParentEntityContext>(), Decided: false);
+    public static readonly IndexParentDecision Undecided = new(null, Array.Empty<ParentEntityContext>(), Decided: false) { RowUnreadable = true };
+
+    /// <summary>
+    /// <c>true</c> when the document's row, or the event, communication or service request it is related to, could not be read
+    /// for a transient reason (an exception, a throttle, a timeout), so NOTHING was decided about its parent. A record that is
+    /// not found, or that names two different roots, is an answer, not this. A <c>null</c>
+    /// <see cref="Parent"/> with this <c>false</c> is an answer ("no parent", including the fail-closed secure-state one) that an
+    /// index write may replace the stored parent with; with this <c>true</c> it is only the absence of an answer, and an index
+    /// write must leave the stored parent alone (or fail and retry).
+    /// </summary>
+    public bool RowUnreadable { get; init; }
 }

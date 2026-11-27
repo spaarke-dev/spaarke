@@ -63,9 +63,9 @@ if (-not $ToolTip) {
     $ToolTip = "Add a $($Labels[$Entity]) to this secure record (saved by Spaarke so it stays as private as the record)"
 }
 
-# Task 147 r1c once added the NativeNewAllowed rule to "+ Add KPI" (the KPI assessment quick create, prefilled). Task 051
-# (field-mapping-server-write-path-r1, FR-24) made "+ Add KPI" create through the BFF (Spaarke.SecureChild.Ribbon.newChild),
-# for a secure host and an ordinary one alike, so the rule would only hide the button for good: this script no longer adds it.
+# Task 147 r1c once added the NativeNewAllowed rule to Spaarke's own "+ Add KPI" button. That button was removed by
+# field-mapping-server-write-path-r1 task 066 (the KPI subgrid's "+ New" is its one create), so this script adds the rule to the
+# platform "+ New" only.
 
 $NativeCommandId = 'Mscrm.AddNewRecordFromSubGridStandard'
 $RuleId = "sprk.SecureChild.$Entity.NativeNewAllowed.EnableRule"

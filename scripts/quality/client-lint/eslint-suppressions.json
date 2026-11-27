@@ -913,7 +913,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/hooks/useDocumentStreamConsumer.ts": {
@@ -1115,19 +1115,6 @@
   "src/client/shared/Spaarke.UI.Components/src/services/FetchXmlService.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 2
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 5
-    },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 4
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/services/FieldSecurityService.ts": {

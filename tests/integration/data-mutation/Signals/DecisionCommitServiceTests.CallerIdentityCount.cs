@@ -18,8 +18,9 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// <summary>
 /// Ontology task 170 (D-196): one decision commit asks Dataverse who the caller is ONCE. The REAL commit service runs against
 /// the SHIPPED <see cref="CallerRecordAccessProbe"/> with only its wire steps answered in memory and counted (the OBO exchange,
-/// <c>WhoAmI()</c>, <c>RetrievePrincipalAccess</c>), inside a request set the way the host sets it. Every rights question is
-/// still asked: access results are not remembered.
+/// <c>WhoAmI()</c>, <c>RetrievePrincipalAccess</c>), inside a request set the way the host sets it. Every rights question the
+/// probe is asked still reaches Dataverse: the probe remembers no access result (ISS-010 part C's per-commit access window, above
+/// the probe, decides which questions reach it).
 /// </summary>
 public sealed partial class DecisionCommitServiceTests
 {
@@ -94,6 +95,16 @@ public sealed partial class DecisionCommitServiceTests
             Interlocked.Increment(ref _callerQuestions);
             Interlocked.Increment(ref _rightsQuestions);
             return base.GetCallerRightsAsync(callerBearerToken, entitySet, recordId, ct);
+        }
+
+        /// <summary>ISS-010 part C: inside the decision commit's access window, FR-51 and the executors ask this form (an unknown
+        /// answer is kept apart, so it is never remembered). Counted like <see cref="GetCallerRightsAsync"/>: one per record.</summary>
+        public override Task<IReadOnlyList<AccessRights?>> GetCallerRightsForRecordsOrUnknownAsync(
+            string? callerBearerToken, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _callerQuestions);
+            Interlocked.Add(ref _rightsQuestions, targets.Count);
+            return base.GetCallerRightsForRecordsOrUnknownAsync(callerBearerToken, targets, ct);
         }
 
         protected override Task<string?> ExchangeForDataverseTokenAsync(string callerBearerToken, string context, CancellationToken ct) =>

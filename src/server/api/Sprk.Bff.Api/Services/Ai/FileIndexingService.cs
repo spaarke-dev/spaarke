@@ -145,6 +145,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.Metadata,
                 request.ParentEntity,
                 request.ReplaceStaleChunks,
+                request.ReplaceParentEntity,
                 stopwatch,
                 cancellationToken);
         }
@@ -228,6 +229,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.Metadata,
                 request.ParentEntity,
                 request.ReplaceStaleChunks,
+                request.ReplaceParentEntity,
                 stopwatch,
                 cancellationToken);
         }
@@ -275,6 +277,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.Metadata,
                 request.ParentEntity,
                 replaceStaleChunks: false,
+                replaceParentEntity: request.ParentEntity is not null,
                 stopwatch,
                 cancellationToken);
         }
@@ -312,6 +315,7 @@ public sealed class FileIndexingService : IFileIndexingService
         Dictionary<string, string>? metadata,
         ParentEntityContext? parentEntity,
         bool replaceStaleChunks,
+        bool replaceParentEntity,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -377,6 +381,11 @@ public sealed class FileIndexingService : IFileIndexingService
             ParentEntityType = parentEntity?.EntityType,
             ParentEntityId = parentEntity?.EntityId,
             ParentEntityName = parentEntity?.EntityName,
+            // GitHub #3223: the write is merge-or-upload, which omits a null, so a re-index whose answer is now "no parent" (the
+            // document left its record, or the parent decision is withheld) would keep the old parent on every chunk and the
+            // document would stay findable under a record it no longer belongs to. The flag sends the three fields as explicit
+            // nulls in that case, so the re-index REPLACES them. Only a producer that DECIDED the parent opts in on the request.
+            ReplaceParentEntity = replaceParentEntity,
             // A resolved document with no type writes the empty marker, not null: the index write is merge-or-upload, which omits a null,
             // so a null would leave the previous type on the chunk when a re-index finds the matter's type cleared. The Matter Type filter
             // (search.in over record ids) never matches an empty string. Unresolved leaves both fields unset (null, omitted).

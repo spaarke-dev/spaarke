@@ -119,12 +119,32 @@ public class RagIndexingJobHandler : IJobHandler
                 // #1510 (unified-access-control-r2 task 177): a producer that knows the document but sent no parent — the
                 // relocation after a secure transition, an Office new-item save, the post-analysis re-index — would write
                 // chunks with no parent, and the document would drop out of record search and parent-scoped RAG. Recover
-                // the parent from the document row (the derivation Send-to-Index uses). Never fails the job: an unreadable
-                // row indexes without a parent, as before.
+                // the parent from the document row (the derivation Send-to-Index uses).
+                //
+                // GitHub #3223: the chunks' parent is REPLACED only when it was decided here — a parent in the payload, or the
+                // resolver's answer about the row (a decided "none", including its fail-closed secure-state answer, clears
+                // the old parent). A payload that names neither a parent nor a document decided nothing and leaves the stored
+                // parent alone. A row that cannot be read decides nothing either, and writing "no parent" from it would
+                // un-file the document with the job reported as a success: the job fails instead, so it is retried.
                 var parentEntity = payload.ParentEntity;
+                var replaceParent = parentEntity is not null;
                 if (parentEntity is null && !string.IsNullOrEmpty(payload.DocumentId))
                 {
-                    parentEntity = await _parentResolver.ResolveAsync(payload.DocumentId, ct);
+                    var decision = await _parentResolver.DecideAsync(payload.DocumentId, ct);
+                    if (decision.RowUnreadable)
+                    {
+                        _logger.LogWarning(
+                            "RAG indexing job {JobId}: document {DocumentId}'s row could not be read, so its parent is undecided; failing the job to retry.",
+                            job.JobId, payload.DocumentId);
+                        _telemetry.RecordRagIndexingJobFailure("parent_undecided");
+                        return JobOutcome.Failure(
+                            job.JobId, JobType,
+                            "The document's parent could not be decided (its row could not be read)",
+                            job.Attempt, stopwatch.Elapsed);
+                    }
+
+                    parentEntity = decision.Parent;
+                    replaceParent = true;
                     if (parentEntity is not null)
                     {
                         _logger.LogInformation(
@@ -146,6 +166,7 @@ public class RagIndexingJobHandler : IJobHandler
                     KnowledgeSourceName = payload.KnowledgeSourceName,
                     Metadata = payload.Metadata,
                     ParentEntity = parentEntity,
+                    ReplaceParentEntity = replaceParent,
                     // Task 029: only a version-save job sets this; the leftover chunks are removed from the index the
                     // new chunks landed in.
                     ReplaceStaleChunks = payload.ReplaceStaleChunks

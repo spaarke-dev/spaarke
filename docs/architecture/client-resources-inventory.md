@@ -234,7 +234,6 @@
 | `sprk_kpiassessment_quickcreate.js` | 2026-03-23 | KPI assessment quick-create form |
 | `sprk_matter_kpi_refresh.js` | 2026-03-23 | Matter KPI refresh |
 | `sprk_subgrid_parent_rollup.js` | 2026-03-20 | Subgrid parent rollup |
-| `sprk_kpi_ribbon_actions.js` | 2026-02-13 | KPI ribbon actions |
 | `sprk_chartdefinition_form.js` | 2026-01-03 | Chart definition form script (oldest — verify still used) |
 
 ## 7. Office Add-ins (`src/client/office-addins/`)
