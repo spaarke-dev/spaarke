@@ -1,5 +1,14 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-27 21:58Z — `sprk_smarttodo` (task 234 client message) to dev from master `c55b9812d8`
+
+- **Owner go:** "Yes deploy" (2026-11-27, main session chat), for the SmartTodo + LegalWorkspace code pages carrying #3293's client change.
+- **Source:** fresh detached worktree `C:\wtst234` at origin/master `c55b9812d8` (contains #3293 `e140b01761`). Clean Vite build; `Spaarke.UI.Components` needed its own `npm install` (Rollup could not resolve `dompurify` from the aliased shared source otherwise).
+- **D-126 clobber check:** live `sprk_smarttodo` was last modified 21:20:05Z by a bulk solution import (every web resource modified around 21:20Z; field-mapping-r1's import + Publish All window). Live had 5 user-facing strings the build lacks; each was removed from master on 2026-11-24/25 (#3071 sdap-client fold, task 028 field-mapping client, #3145 email-composer wording). So live was older master code, not newer work; check passed.
+- **Deploy:** `scripts/Deploy-SmartTodo.ps1` 21:58:02–21:58:24Z; PATCH by id + `PublishXml` of that web resource only. API content and served `/WebResources/sprk_smarttodo` both equal the build byte for byte (1,698,162 B).
+- **LegalWorkspace:** has no standalone web resource; it ships inside the Console (`sprk_spaarkeai`). The Console auto-deploy ran on `49eece4926` (19:56Z) and `c55b9812d8` (21:28Z run, `sprk_spaarkeai` modified 21:33:34Z, after the bulk import); both contain #3293. Nothing to deploy.
+- **Not checked by hand:** completing an outcome To Do in the SmartTodo page in a browser (needs an open inquiry with an outcome To Do; none exists on dev now).
+
 ## 2026-11-27 21:01Z — Task 234 dev check on dev BFF `af8a5547ef` (d9595dd98e + uac-r2 spike tools): PASS, plus one live bypass that task 237 fixes
 
 - **Owner go:** "Merge, check after" (2026-11-27). Run as the owner's signed-in Console session, after uac-r2's LIVE notice.
@@ -15,7 +24,7 @@
   - Completing the ordinary To Do: written, and read back Completed.
 - **Inquiry:** still open, disposition empty.
 - **Cleanup:** both test To Dos were deleted (204) and confirmed gone (404). The fetch hook used for the route call was removed and the tab was closed. The token was used only inside the page and never read out.
-- **Not done here:** the SmartTodo and LegalWorkspace code pages carrying #3293's client message are not yet deployed to dev. The Console auto-deployed from `e140b01761`.
+- **Not done here (done 21:58Z, entry above):** the SmartTodo and LegalWorkspace code pages carrying #3293's client message. The Console auto-deployed from `e140b01761`.
 
 ## 2026-11-27 20:41Z — mcp-r1 #3272 (ISS-010 Part C) live decision check on dev BFF `d9595dd98e`: PASS
 
