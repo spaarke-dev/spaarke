@@ -339,6 +339,115 @@ globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' },
         self.assertIn(["sync", "TrackAll"], calls)
         self.assertEqual(res["end"], "Off", "the user's tracking mode is put back")
 
+    # ---- WP-6 (v0.5) ------------------------------------------------------------------------------------
+    def wp6_codes(self):
+        import build_word_probe as wp
+        return {"spaarke-word-probe-edits": wp.JS_EDITS, "spaarke-word-probe-error": wp.JS_ERROR,
+                **{f"spaarke-word-probe-size-{kb}k": wp.js_size(kb) for kb in wp.SIZES_KB}}
+
+    def test_wp6_skills_carry_their_code_in_the_runner_form_and_store_no_expected_hash(self):
+        import build_word_probe as wp
+        per, mark = wp.edit_hashes()
+        secrets = per + [mark.split()[-1]] + [line.split()[-1] for line in wp.error_lines()] + \
+            [wp.size_mark(kb).split()[-1] for kb in wp.SIZES_KB]
+        with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(wp.build(tmp)) as z:
+            names = z.namelist()
+            for skill, code in self.wp6_codes().items():
+                self.assertFalse(any(n.startswith(f"skills/{skill}/scripts/") for n in names), skill)
+                self.assertIn(code, z.read(f"skills/{skill}/SKILL.md").decode("utf-8"), skill)
+                self.assertTrue(code.startswith("async function main(context) {"),
+                                f"{skill}: the runner's own form (WP-5 run 3), so no wrapper change is needed")
+                self.assertEqual([w for w in wp.JS_FORBIDDEN if re.search(rf"\b{re.escape(w)}\b", code)], [], skill)
+            text = "".join(z.read(n).decode("utf-8", "ignore") for n in names)
+            self.assertEqual([s for s in secrets if s in text], [],
+                             "expected hashes must be computed by the code, never stored in the plugin")
+        self.assertEqual(wp.JS_EDITS.count(wp.EDITS_LINE), 1, "exactly one data line for Copilot to fill")
+        for kb in wp.SIZES_KB:
+            self.assertLess(abs(len(wp.js_size(kb)) - kb * 1024), kb * 1024 * 0.1, f"{kb}k probe size")
+
+    def run_main(self, code, substitute=None):
+        """Run a WP-6 main(context) under Node against a Word stub that really searches and replaces text."""
+        if substitute:
+            code = code.replace(*substitute)
+        harness = """
+const calls = [];
+const para = { text: '' };
+const rng = (label) => ({
+  insertText: (t, loc) => { calls.push(['insertText', label, t, loc, doc.changeTrackingMode]);
+    para.text = para.text.replace(label, t); return rng(t); },
+  insertComment: (t) => { calls.push(['insertComment', label, t]); },
+});
+const doc = { changeTrackingMode: 'Off', load: () => {},
+  body: { insertParagraph: (t, loc) => { calls.push(['insertParagraph', t, loc, doc.changeTrackingMode]);
+    para.text = t;
+    return { insertText: (x, l) => { calls.push(['appendText', x, l, doc.changeTrackingMode]); para.text += x; },
+      search: (w, o) => { const n = para.text.split(w).length - 1;
+        return { load: () => {}, items: Array.from({ length: n }, () => rng(w)) }; } }; } } };
+const context = { document: doc, sync: async () => { calls.push(['sync', doc.changeTrackingMode]); } };
+globalThis.Word = { ChangeTrackingMode: { off: 'Off', trackAll: 'TrackAll' } };
+const logs = []; console.log = (m) => logs.push(m);
+%s
+main(context).then((r) => process.stdout.write(JSON.stringify({ r, calls, logs, text: para.text, end: doc.changeTrackingMode })),
+  (e) => process.stdout.write(JSON.stringify({ error: e.message, calls, logs, text: para.text, end: doc.changeTrackingMode })));
+""" % code
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "probe.js")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(harness)
+            out = subprocess.run(["node", path], capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def edits_line(self, edits):
+        return "  const EDITS = [" + ", ".join(f'{{ find: "{f}", replace: "{r}" }}' for f, r in edits) + "];"
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_wp6_edit_probe_applies_the_filled_edits_as_tracked_changes_with_the_python_hashes(self):
+        import build_word_probe as wp
+        res = self.run_main(wp.JS_EDITS, (wp.EDITS_LINE, self.edits_line(wp.EXPECTED_EDITS)))
+        per, mark = wp.edit_hashes()
+        self.assertEqual(res.get("r"), f"Spaarke edit probe ran: {mark}", res)
+        self.assertEqual(next(c for c in res["calls"] if c[0] == "insertParagraph")[3], "Off",
+                         "the test paragraph is added untracked, so only the edits are redlines")
+        for (f, r), h, i in zip(wp.EXPECTED_EDITS, per, range(1, 4)):
+            self.assertIn(["insertText", f, r, "Replace", "TrackAll"], res["calls"])
+            self.assertIn(["insertComment", r, f"Spaarke edit {i}/3 {wp.EDITS_CODE} {h}"], res["calls"])
+        self.assertTrue(res["text"].endswith(f"[{mark}]"), res["text"])
+        self.assertIn("three (3) years", res["text"])
+        self.assertEqual(res["end"], "Off", "the user's tracking mode is put back")
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_wp6_edit_probe_refuses_an_edit_that_does_not_match_exactly_once_and_changes_nothing_tracked(self):
+        import build_word_probe as wp
+        bad = (("two (2) years", "three (3) years"), ("Texas", "New York"))
+        res = self.run_main(wp.JS_EDITS, (wp.EDITS_LINE, self.edits_line(bad)))
+        self.assertEqual(res.get("error"), f"Spaarke edit probe {wp.EDITS_CODE}: edit 2 matched 0 times", res)
+        self.assertFalse([c for c in res["calls"] if c[0] in ("insertText", "insertComment")],
+                         "no edit is applied when any edit fails its check")
+        self.assertEqual(res["end"], "Off")
+        empty = self.run_main(wp.JS_EDITS)
+        self.assertEqual(empty.get("error"), f"Spaarke edit probe {wp.EDITS_CODE}: EDITS is empty", empty)
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_wp6_error_probe_logs_one_hash_and_throws_the_other_without_touching_the_document(self):
+        import build_word_probe as wp
+        res = self.run_main(wp.JS_ERROR)
+        err, log = wp.error_lines()
+        self.assertEqual(res.get("error"), err)
+        self.assertEqual(res["logs"], [log])
+        self.assertEqual(res["calls"], [], "the error probe writes nothing")
+
+    @unittest.skipUnless(shutil.which("node"), "needs Node.js")
+    def test_wp6_size_probes_return_the_python_mark_and_a_shortened_list_does_not(self):
+        import build_word_probe as wp
+        for kb in wp.SIZES_KB:
+            res = self.run_main(wp.js_size(kb))
+            self.assertEqual(res.get("r"), f"Spaarke size probe ran: {wp.size_mark(kb)}", kb)
+        nums = wp.pad_numbers(5)
+        cut = self.run_main(wp.js_size(5), (f", {nums[-1]}\n", "\n"))
+        self.assertNotEqual(cut.get("r"), f"Spaarke size probe ran: {wp.size_mark(5)}",
+                            "a list Copilot shortened must not reproduce the expected hash")
+
 
 if __name__ == "__main__":
     unittest.main()
