@@ -49,6 +49,20 @@ public sealed class SpikeRoutingStubToolsTests
         tools[SpikeReviewLegalHoldStubTool.Name].GetProperty("description").GetString().Should().Contain("Not for: NDAs or other agreements");
     }
 
+    [Fact]
+    public void TheThreeFunctionDescriptions_SplitTheG5Prompts_WithNoGapOrOverlap()
+    {
+        // The G5 kit has one-way NDA (N-08) and "confidentiality agreement" (N-02, N-10) prompts: the NDA tool must claim them, and
+        // each tool must exclude the other two functions (review finding 3).
+        SpikeReviewNdaTool.Description.Should().Contain("confidentiality agreement").And.Contain("one-way").And.Contain("legal hold");
+        SpikeReviewAgreementStubTool.Description.Should().Contain("Not for: NDAs or confidentiality agreements").And.Contain("legal hold");
+        SpikeReviewLegalHoldStubTool.Description.Should().Contain("Not for: NDAs or other agreements");
+        foreach (var d in new[] { SpikeReviewNdaTool.Description, SpikeReviewAgreementStubTool.Description, SpikeReviewLegalHoldStubTool.Description })
+        {
+            d.Length.Should().BeLessThanOrEqualTo(1024);
+        }
+    }
+
     [Theory]
     [InlineData(SpikeReviewAgreementStubTool.Name, "agreement-review")]
     [InlineData(SpikeReviewLegalHoldStubTool.Name, "legal-hold-review")]
@@ -152,7 +166,7 @@ public sealed class SpikeRoutingStubToolsTests
         headerLine.Message.Should().Contain("x-spike-probe");
         foreach (var entry in host.Logs.Entries)
         {
-            entry.Message.Should().NotContain("probe-value-must-not-be-logged").And.NotContain(OwnerToken);
+            entry.Message.Should().NotContain("probe-value-must-not-be-logged").And.NotContain(OwnerToken).And.NotContain(Document);
         }
     }
 

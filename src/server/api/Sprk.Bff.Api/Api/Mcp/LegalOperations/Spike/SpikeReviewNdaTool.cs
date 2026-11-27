@@ -35,11 +35,13 @@ internal sealed class SpikeReviewNdaTool : McpToolDefinition
 
     /// <summary>The description the model reads (at most 1,024 characters, "use for / not for").</summary>
     public const string Description =
-        "Use for: reviewing a mutual NDA (non-disclosure agreement) against the signed-in attorney's own NDA positions in Spaarke. Pass "
+        "Use for: reviewing an NDA (non-disclosure or confidentiality agreement, mutual or one-way) against the signed-in attorney's own "
+        + "NDA positions in Spaarke. Pass "
         + "the full text of the NDA as documentText. Spaarke applies the attorney's profile and returns the structured review (findings "
         + "with risk levels and recommendations) and the profileVersion it used; present that result to the user. If it returns "
         + "NO_PROFILE or CALLER_UNRESOLVED, stop and say so. "
-        + "Not for: other agreement types; drafting, redlining, signing or sending a document; changing the attorney's positions.";
+        + "Not for: other agreement types (services, licence, supply, vendor, consulting); legal hold or preservation notices; drafting, "
+        + "redlining, signing or sending a document; changing the attorney's positions.";
 
     private static readonly JsonElement InputSchema = JsonSerializer.SerializeToElement(new JsonObject
     {

@@ -163,7 +163,7 @@ internal static class SpikeRoutingStub
         SpikeToolCall.LogHeaderNames(logger, toolName, http);
         var outcome = SpikeToolCall.Exception;
         SpikeToolRun? run = null;
-        var documentChars = SpikeReviewNdaTool.DocumentCharsOf(arguments);
+        var documentChars = DocumentCharsOf(arguments);
         try
         {
             run = await RunAsync(toolName, function, arguments, http, spike, documentChars, cancellationToken);
@@ -177,6 +177,14 @@ internal static class SpikeRoutingStub
                 time.GetElapsedTime(started), http?.TraceIdentifier);
         }
     }
+
+    /// <summary>The length of this stub's <c>documentText</c> argument as received (before any check), or null when absent or not a string.</summary>
+    internal static int? DocumentCharsOf(IDictionary<string, JsonElement>? arguments) =>
+        arguments is not null
+        && arguments.TryGetValue(DocumentTextArgument, out var element)
+        && element.ValueKind == JsonValueKind.String
+            ? element.GetString()!.Length
+            : null;
 
     private static async Task<SpikeToolRun> RunAsync(
         string toolName,

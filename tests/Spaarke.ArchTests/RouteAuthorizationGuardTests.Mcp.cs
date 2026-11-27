@@ -102,12 +102,6 @@ public partial class RouteAuthorizationGuardTests
         new McpTool("SpikeReviewLegalHoldStubTool", "", "ISpecialistProfileSpikeAi",
             "spike_review_legal_hold (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
             + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
-        new McpTool("SpikeReviewAgreementStubTool", "", "ISpecialistProfileSpikeAi",
-            "spike_review_agreement (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
-            + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
-        new McpTool("SpikeReviewLegalHoldStubTool", "", "ISpecialistProfileSpikeAi",
-            "spike_review_legal_hold (G5 routing stub, model-visible, read-only): resolves IHttpContextAccessor.HttpContext's User through "
-            + "ISpecialistProfileSpikeAi (fail closed, as the other spike tools) and returns a fixed acknowledgement; no Action, model or write."),
         // ── end spike ──
     };
 
