@@ -7,7 +7,7 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Tier / effort |
 |----|-------|-------|--------|--------------|----------|---------------|
-| 001 | Engine container image + ADR-004 A2 consumer entrypoint + golden-fixture test (FR-01) | 0 | 🔄 built (613df25c60; 44 local tests, 1 skip); image build, in-image parity and Trivy run only in CI on a PR | 007, 002, ext #3163 | P0-B | opus / high |
+| 001 | Engine container image + ADR-004 A2 consumer entrypoint + golden-fixture test (FR-01) | 0 | ✅ (613df25c60; CI on #3253: image build, in-image golden parity, Trivy gate green) | 007, 002, ext #3163 | P0-B | opus / high |
 | 002 | Bicep: Container Apps env + engine Job (KEDA, UAMI, RBAC), staging container + 7-day lifecycle, engine queue (FR-01) | 0 | ✅ [done] | none | P0-A | sonnet / high |
 | 003 | CI: engine image build → Trivy → ACR push (FR-01) | 0 | ✅ [done] | none | P0-A | sonnet / high |
 | 004 | App-only agreement classify + edit-plan Action behind IAgreementAi facade (FR-02) | 0 | ✅ live on gpt-5-reasoning 48/48 edits; Action/Binding seeding in 008; filed #3238 | 005, ext #3163 | P0-A2 | sonnet / high |
