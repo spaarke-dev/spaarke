@@ -6,8 +6,7 @@
  *   - before the contact resolves (or when there is none) the scope matches no to-dos;
  *   - an `openTodos` launch narrows the list to the parent record; other launches do not;
  *   - creates go through the BFF helper (`createTodoThroughBff`), so the server sets the owner;
- *   - status changes (dismiss, restore) go through the BFF helper (`updateTodoThroughBff`, ontology task 234), and a
- *     refusal reaches the board in the service's plain words.
+ *   - status changes (dismiss, restore) go through the BFF helper (`updateTodoThroughBff`, ontology task 234).
  */
 
 import * as React from 'react';
@@ -17,7 +16,6 @@ import { createRoot, type Root } from 'react-dom/client';
 const mockUseTodoItems = jest.fn((_options: unknown) => ({ items: [], isLoading: false, error: null, refetch: jest.fn() }));
 const mockUseCurrentContactId = jest.fn((_options: unknown) => ({ contactId: 'contact-1' as string | null, contactName: null }));
 const mockServiceCtor = jest.fn();
-const mockDismissTodo = jest.fn(async (_id: string): Promise<unknown> => ({ success: true }));
 
 jest.mock('@spaarke/smart-todo-components', () => ({
   TodoDataverseService: class {
@@ -25,7 +23,7 @@ jest.mock('@spaarke/smart-todo-components', () => ({
       mockServiceCtor(...args);
     }
     createTodo = jest.fn(async () => ({ success: true, data: 'new-id' }));
-    dismissTodo = (id: string) => mockDismissTodo(id);
+    dismissTodo = jest.fn(async () => ({ success: true }));
     updateTodoStatus = jest.fn(async () => ({ success: true }));
   },
   useCurrentContactId: (options: unknown) => mockUseCurrentContactId(options),
@@ -138,18 +136,6 @@ describe('useSmartTodoBridge', () => {
     expect(typeof updateFn).toBe('function');
     updateFn!('t-1', { statecode: 1, statuscode: 659490002 });
     expect(mockUpdateTodoThroughBff).toHaveBeenCalledWith('t-1', { statecode: 1, statuscode: 659490002 });
-  });
-
-  it("a refused dismiss of an open inquiry's To Do reaches the board in the service's plain words (task 234)", async () => {
-    mockDismissTodo.mockResolvedValueOnce({
-      success: false,
-      error: { code: 'TODO_INQUIRY_DISPOSITION_REQUIRED', message: 'Record the outcome on the inquiry first.' },
-    });
-    renderBridge();
-    await expect(latest.current!.onDismissTodo('t-1')).resolves.toEqual({
-      success: false,
-      error: { message: 'Record the outcome on the inquiry first.' },
-    });
   });
 
   it('adapts the service results to the board’s mutation results', async () => {

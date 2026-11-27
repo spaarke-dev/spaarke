@@ -18,7 +18,7 @@
  * Methods never throw; they return `ITodoServiceResult<T>`.
  */
 
-import { INQUIRY_DISPOSITION_REQUIRED_REASON } from '@spaarke/ui-components';
+import { INQUIRY_DISPOSITION_REQUIRED_REASON, INQUIRY_TODO_CLOSE_MESSAGE } from '@spaarke/ui-components';
 import type { ITodo, IUserPreferenceRecord } from '../types/entities';
 import type { IKanbanDataverseService } from '../types/kanban';
 import { buildActiveTodosQuery, type TodoListScope } from './todoQueries';
@@ -45,17 +45,18 @@ export type CreateTodoRecord = (payload: Record<string, unknown>) => Promise<str
 export type UpdateTodoRecord = (todoId: string, payload: Record<string, unknown>) => Promise<void>;
 
 /**
- * Ontology task 234 (#3279, D-233): shown when the BFF refuses to complete or dismiss the "Record the outcome" To Do of
- * an open budget inquiry (409 `inquiry.disposition_required`). That To Do closes by recording the inquiry's outcome.
+ * The `reasonCode` of a failed BFF write: top level on a `ChildRecordWriteError` (what `updateChildRecordViaBff`
+ * rejects with), or in the `problemDetails` of an `ApiError` (what `@spaarke/auth`'s fetch throws), if any.
  */
-export const INQUIRY_TODO_CLOSE_REFUSED_MESSAGE =
-  'Record the outcome on the inquiry first. This To Do is completed by recording how the budget inquiry turned out, ' +
-  'from the Worklist. Nothing was saved.';
-
-/** The `reasonCode` a failed BFF write carries (`ChildRecordWriteError`), if any. */
 function reasonCodeOf(error: unknown): string | undefined {
-  const code = typeof error === 'object' && error !== null ? (error as { reasonCode?: unknown }).reasonCode : undefined;
-  return typeof code === 'string' ? code : undefined;
+  if (typeof error !== 'object' || error === null) return undefined;
+  const { reasonCode, problemDetails } = error as { reasonCode?: unknown; problemDetails?: unknown };
+  if (typeof reasonCode === 'string') return reasonCode;
+  const nested =
+    typeof problemDetails === 'object' && problemDetails !== null
+      ? (problemDetails as { reasonCode?: unknown }).reasonCode
+      : undefined;
+  return typeof nested === 'string' ? nested : undefined;
 }
 
 /** The to-do lifecycle states a list can set. "Restored" is not a status — restore sets Open. */
@@ -121,7 +122,7 @@ export class TodoDataverseService implements IKanbanDataverseService {
 
   /**
    * Sets a to-do's status (statecode follows: Open → Active, otherwise Inactive) through the BFF (task 234). An open
-   * inquiry's outcome To Do is refused with {@link INQUIRY_TODO_CLOSE_REFUSED_MESSAGE}; any other failure keeps its message.
+   * inquiry's outcome To Do is refused with `INQUIRY_TODO_CLOSE_MESSAGE`; any other failure keeps its message.
    */
   async updateTodoStatus(todoId: string, status: TodoStatus): Promise<ITodoServiceResult<void>> {
     const record = {
@@ -130,7 +131,7 @@ export class TodoDataverseService implements IKanbanDataverseService {
     };
     const result = await todoTryCatch(() => this.updateTodoRecord(todoId, record), 'TODO_STATUS_UPDATE_ERROR');
     if (!result.success && reasonCodeOf(result.error.raw) === INQUIRY_DISPOSITION_REQUIRED_REASON) {
-      return todoFail('TODO_INQUIRY_DISPOSITION_REQUIRED', INQUIRY_TODO_CLOSE_REFUSED_MESSAGE, result.error.raw);
+      return todoFail('TODO_INQUIRY_DISPOSITION_REQUIRED', INQUIRY_TODO_CLOSE_MESSAGE, result.error.raw);
     }
     return result;
   }

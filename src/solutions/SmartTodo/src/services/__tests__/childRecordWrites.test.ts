@@ -19,10 +19,16 @@ jest.mock('@spaarke/auth', () => ({
   })),
 }));
 
-jest.mock('@spaarke/ui-components', () => ({
-  createChildRecordViaBff: (...args: unknown[]) => mockCreateChildRecordViaBff(...args),
-  updateChildRecordViaBff: (...args: unknown[]) => mockUpdateChildRecordViaBff(...args),
-}));
+const mockRealAdapter = jest.fn((): boolean => false);
+jest.mock('@spaarke/ui-components', () => {
+  // Fix round 1 (F2-1): a test can run the REAL adapter (built dist), to prove what a host's thrown ApiError becomes.
+  const real = jest.requireActual('@spaarke/ui-components/utils/adapters/bffChildWriteAdapter');
+  return {
+    createChildRecordViaBff: (...args: unknown[]) => mockCreateChildRecordViaBff(...args),
+    updateChildRecordViaBff: (...args: unknown[]) =>
+      mockRealAdapter() ? real.updateChildRecordViaBff(...args) : mockUpdateChildRecordViaBff(...args),
+  };
+});
 
 import { updateTodoThroughBff } from '../childRecordWrites';
 
@@ -41,9 +47,21 @@ describe('updateTodoThroughBff (task 234)', () => {
     expect(payload).toEqual({ statecode: 1, statuscode: 2 });
   });
 
-  it("rejects with the BFF's error (its reasonCode intact) when the update is refused", async () => {
-    const refusal = Object.assign(new Error('refused'), { status: 409, reasonCode: 'inquiry.disposition_required' });
-    mockUpdateChildRecordViaBff.mockRejectedValueOnce(refusal);
-    await expect(updateTodoThroughBff('t-1', { statecode: 1, statuscode: 659490002 })).rejects.toBe(refusal);
+  it("a refusal the host's fetch throws (ApiError 409) rejects as a ChildRecordWriteError with its reasonCode", async () => {
+    mockRealAdapter.mockReturnValue(true);
+    mockAuthenticatedFetch.mockRejectedValueOnce(
+      Object.assign(new Error('server words'), {
+        name: 'ApiError',
+        status: 409,
+        problemDetails: { status: 409, detail: 'server words', reasonCode: 'inquiry.disposition_required' },
+      })
+    );
+    await expect(updateTodoThroughBff('t-1', { statecode: 1, statuscode: 659490002 })).rejects.toMatchObject({
+      name: 'ChildRecordWriteError',
+      status: 409,
+      reasonCode: 'inquiry.disposition_required',
+    });
+    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
+    mockRealAdapter.mockReturnValue(false);
   });
 });

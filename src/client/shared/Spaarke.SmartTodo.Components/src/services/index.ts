@@ -6,7 +6,7 @@
  * and result helpers stay internal (`./todoQueries`, `./todoServiceResult`).
  */
 
-export { TodoDataverseService, INQUIRY_TODO_CLOSE_REFUSED_MESSAGE } from './TodoDataverseService';
+export { TodoDataverseService } from './TodoDataverseService';
 export type { ITodoWebApi, CreateTodoRecord, UpdateTodoRecord, TodoStatus } from './TodoDataverseService';
 export type { ITodoRegardingFilter, TodoListScope } from './todoQueries';
 export type { ITodoServiceResult, ITodoServiceError } from './todoServiceResult';

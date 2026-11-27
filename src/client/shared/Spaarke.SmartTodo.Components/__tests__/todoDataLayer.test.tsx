@@ -15,7 +15,8 @@ jest.mock('@spaarke/ui-components', () => ({
 import * as React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { TodoDataverseService, INQUIRY_TODO_CLOSE_REFUSED_MESSAGE, type ITodoWebApi } from '../src/services';
+import { INQUIRY_TODO_CLOSE_MESSAGE } from '@spaarke/ui-components';
+import { TodoDataverseService, type ITodoWebApi } from '../src/services';
 import {
   buildActiveTodosQuery,
   buildTodoScopeClause,
@@ -261,29 +262,50 @@ describe('TodoDataverseService', () => {
       }
     );
 
+    // What a real host's BFF update rejects with (fix round 1, F2-1): `@spaarke/auth`'s authenticatedFetch THROWS an ApiError
+    // for a 409, its reasonCode inside problemDetails; `updateChildRecordViaBff` turns that into a ChildRecordWriteError
+    // (top-level reasonCode). The service reads both shapes.
+    const apiErrorRefusal = (): Error =>
+      Object.assign(new Error('This to-do is completed by recording how the budget inquiry turned out.'), {
+        name: 'ApiError',
+        status: 409,
+        problemDetails: { status: 409, detail: 'server words', reasonCode: 'inquiry.disposition_required' },
+      });
+    const childRecordWriteErrorRefusal = (): Error =>
+      Object.assign(new Error('server words'), {
+        name: 'ChildRecordWriteError',
+        status: 409,
+        reasonCode: 'inquiry.disposition_required',
+      });
+
     it.each([
-      ['dismiss', (s: TodoDataverseService) => s.dismissTodo('t1')],
-      ['complete', (s: TodoDataverseService) => s.updateTodoStatus('t1', 'Completed')],
-    ])("%s of an open inquiry's outcome To Do is refused in plain words", async (_name, act) => {
-      const refusal = Object.assign(
-        new Error('This to-do is completed by recording how the budget inquiry turned out.'),
-        {
-          status: 409,
-          reasonCode: 'inquiry.disposition_required',
-        }
-      );
+      ['dismiss', 'ApiError', (s: TodoDataverseService) => s.dismissTodo('t1'), apiErrorRefusal],
+      ['complete', 'ApiError', (s: TodoDataverseService) => s.updateTodoStatus('t1', 'Completed'), apiErrorRefusal],
+      [
+        'dismiss',
+        'ChildRecordWriteError',
+        (s: TodoDataverseService) => s.dismissTodo('t1'),
+        childRecordWriteErrorRefusal,
+      ],
+      [
+        'complete',
+        'ChildRecordWriteError',
+        (s: TodoDataverseService) => s.updateTodoStatus('t1', 'Completed'),
+        childRecordWriteErrorRefusal,
+      ],
+    ])("%s of an open inquiry's outcome To Do is refused in plain words (%s)", async (_name, _shape, act, refusal) => {
       const webApi = fakeWebApi();
       const result = await act(
         new TodoDataverseService(
           webApi,
           jest.fn(),
-          jest.fn(async () => Promise.reject(refusal))
+          jest.fn(async () => Promise.reject(refusal()))
         )
       );
       expect(result.success).toBe(false);
       expect(!result.success && result.error.code).toBe('TODO_INQUIRY_DISPOSITION_REQUIRED');
-      expect(!result.success && result.error.message).toBe(INQUIRY_TODO_CLOSE_REFUSED_MESSAGE);
-      expect(INQUIRY_TODO_CLOSE_REFUSED_MESSAGE).toMatch(/^Record the outcome on the inquiry first\./);
+      expect(!result.success && result.error.message).toBe(INQUIRY_TODO_CLOSE_MESSAGE);
+      expect(INQUIRY_TODO_CLOSE_MESSAGE).toMatch(/^Record the outcome on the inquiry first\./);
       expect(webApi.updateRecord).not.toHaveBeenCalled();
     });
 

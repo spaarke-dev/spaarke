@@ -69,6 +69,26 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().BeEmpty("a fault never reads as 'no inquiry'");
     }
 
+    /// <summary>Fix round 1 (K4): the write mapper trims column names (MapCoreAsync), so the check must too: a key with
+    /// padding still closes the To Do and is still refused, on the chat tool and on the browser route.</summary>
+    [Theory]
+    [InlineData(" statecode", " statuscode")]
+    [InlineData("statecode ", "\tstatuscode")]
+    public async Task APaddedStatusKey_StillClosesTheToDo_AndIsRefused_OnTheChatToolAndTheRoute(string stateKey, string statusKey)
+    {
+        InquiryTodoWorld($"serviceRequestId={OpenInquiry:D}", InquiryMatter);
+        ScriptInquiryReads();
+        var body = new Dictionary<string, object?> { [stateKey] = 1, [statusKey] = 2 };
+
+        var chat = await UpdateRecord("sprk_todo", InquiryTodo, ChatItem(body));
+        var route = await RefileChild("sprk_todo", InquiryTodo, body);
+
+        chat.Success.Should().BeFalse();
+        chat.ErrorCode.Should().Be(DecisionCommitReasons.InquiryDispositionRequired);
+        Status(route).Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status409Conflict);
+        _user.Patches.Should().BeEmpty("nothing is written on either path");
+    }
+
     // ── Must not fire ─────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]

@@ -60,7 +60,7 @@ import {
   AddCircleRegular,
 } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption, ITodoSaveResult } from './types';
-import { INQUIRY_DISPOSITION_REQUIRED_REASON } from './types';
+import { INQUIRY_DISPOSITION_REQUIRED_REASON, INQUIRY_TODO_CLOSE_MESSAGE } from './types';
 import { computeTodoScoreBreakdown } from '../../utils/dateLocal';
 import { safeRegardingRecordUrl } from '../../utils/safeRegardingRecordUrl';
 
@@ -75,13 +75,6 @@ const STATECODE_INACTIVE = 1;
 const STATUSCODE_COMPLETED = 2;
 /** statuscode = Dismissed (Inactive). */
 const STATUSCODE_DISMISSED = 659490002;
-
-/**
- * Ontology task 228 (#1984, D-111): shown when the server refuses to complete or dismiss the "Record the outcome" To Do
- * of an open budget inquiry (409 `inquiry.disposition_required`). That To Do is completed by recording the outcome.
- */
-export const INQUIRY_TODO_CLOSE_MESSAGE =
-  'This To Do is completed by recording how the budget inquiry turned out. Open it from the Worklist and record the outcome; that completes the To Do. Nothing was saved.';
 
 /** The `reasonCode` of a failed save: from the host's result, or from a thrown BFF write error (`ChildRecordWriteError`). */
 function reasonCodeOf(failure: unknown): string | undefined {
