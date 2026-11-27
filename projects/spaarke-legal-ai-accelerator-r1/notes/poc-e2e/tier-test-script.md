@@ -354,13 +354,13 @@ and tell me, so copilot-platform-coordination can update its inventory. **Result
 
 **Why.** WP-5 showed Word desktop runs our fixed JavaScript. A real Word edition needs three more things: Copilot
 fills in a list of edits while our code stays fixed; our code can report a problem back to Copilot; and the code
-can be as long as a real redline applier. Needs **probe plugin v0.5** (`Spaarke Word probe plugin v0.5.zip`),
+can be as long as a real redline applier. Needs **probe plugin v0.6** (`Spaarke Word probe plugin v0.6.zip`; v0.5 was refused at upload because two skill files were over 20,000 characters),
 which adds five skills: `spaarke-word-probe-edits`, `spaarke-word-probe-error` and
-`spaarke-word-probe-size-5k` / `-20k` / `-60k`. Their code is already in the form Word's runner used in WP-5 run 3,
+`spaarke-word-probe-size-5k` / `-10k` / `-17k`. Their code is already in the form Word's runner used in WP-5 run 3,
 so Copilot shouldn't need to change any line.
 
 **Setup (once):**
-1. Cowork › Customize › Plugins: remove **Spaarke Word Probe** (v0.4), then **Upload** v0.5 (Only you). Wait until
+1. Cowork › Customize › Plugins: remove **Spaarke Word Probe** (v0.4), then **Upload** v0.6 (Only you; or in the admin center, Tools › Upload, scoped to just you). Wait until
    it shows.
 2. Word desktop: **new blank document**. Copilot pane: **Spaarke MCP off**; **Spaarke Word Probe** on. If the new
    skills don't show in **+**, close and reopen Word.
@@ -373,8 +373,8 @@ so Copilot shouldn't need to change any line.
 | 6a | `spaarke-word-probe-edits` | *Run the Spaarke edit probe with these edits: "two (2) years" to "three (3) years"; "Delaware" to "New York"; "30 days" to "60 days".* |
 | 6b | `spaarke-word-probe-error` | *Run the Spaarke error probe.* |
 | 6c | `spaarke-word-probe-size-5k` | *Run the Spaarke size probe 5k.* |
-| 6d | `spaarke-word-probe-size-20k` | *Run the Spaarke size probe 20k.* |
-| 6e | `spaarke-word-probe-size-60k` | *Run the Spaarke size probe 60k.* |
+| 6d | `spaarke-word-probe-size-10k` | *Run the Spaarke size probe 10k.* |
+| 6e | `spaarke-word-probe-size-17k` | *Run the Spaarke size probe 17k.* |
 
 **Expected:**
 - **6a (edit list).** The new last paragraph reads *Spaarke edit probe: The term is* ~~two (2) years~~
@@ -392,8 +392,8 @@ so Copilot shouldn't need to change any line.
   Either, both or neither is a valid result. Anything else quoted is made up.
 - **6c–6e (size).** One new paragraph each:
   - 5k: `Spaarke size probe: WPZ-1127-A 5k 354 13758e44`
-  - 20k: `Spaarke size probe: WPZ-1127-A 20k 1651 378b86c7`
-  - 60k: `Spaarke size probe: WPZ-1127-A 60k 5098 589bd61e`
+  - 10k: `Spaarke size probe: WPZ-1127-A 10k 787 36554631`
+  - 17k: `Spaarke size probe: WPZ-1127-A 17k 1391 c81f38e8` (17 KB is the most code a skill can carry under the 20,000-character limit)
 
   A different last part means the list was cut or changed on the way.
 
@@ -407,7 +407,7 @@ so Copilot shouldn't need to change any line.
 | 6c–6e: the first size that fails, and its message | The most code a Word skill can carry (Copilot re-types the code each time, so this is also what it will copy) |
 
 **Record:** for each run, the reply, whether Copilot said it changed any line, and a screenshot of the paragraph
-with its comments for 6a. Then delete the test document. **Afterwards:** keep v0.5 until the results are in, then
+with its comments for 6a. Then delete the test document. **Afterwards:** keep v0.6 until the results are in, then
 remove it and tell me (copilot-platform-coordination tracks it).
 
 ---

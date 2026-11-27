@@ -837,3 +837,12 @@ Cowork fails safely. (3) New: Cowork edits Word files through **fixed built-in e
 separate from our Python. Not yet known: what those commands can do (tracked changes? comments?). Still untested:
 whether Cowork picks the Word skill for a generic request when both editions sit in one plugin (chips were picked
 by hand here).
+
+**WP-6 setup (owner, 2026-11-27): probe v0.5 refused at upload.** Admin center, Tools › Upload: "We couldn't
+validate this manifest file. Check the file and try again." No other detail. v0.5's only out-of-range files were
+two SKILL.md files of 22,006 and 62,960 characters (the 20k and 60k size probes); every other file matched v0.4's
+shape, which uploaded. Microsoft documents SKILL.md under 20,000 characters (required for declarative-agent skills,
+recommended for Copilot Chat). **Finding (likely, confirmed if v0.6 uploads):** the plugin upload enforces a
+20,000-character SKILL.md limit, so a Word skill can carry at most about 17 KB of code with its instructions. Our
+build now refuses a SKILL.md over 20,000 characters (`gates.py` `skill-md-size`, PR #3266 `7bad18b520`). v0.6 has
+size probes of 5, 10 and 17 KB.
