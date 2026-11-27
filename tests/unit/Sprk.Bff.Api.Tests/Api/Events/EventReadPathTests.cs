@@ -18,6 +18,7 @@ using System.Text.RegularExpressions;
 using FluentAssertions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -56,7 +57,7 @@ public class EventReadPathTests
     [Fact]
     public void CreatePayload_WritesTheLivePriorityValue()
     {
-        var payload = EventEndpoints.BuildCreatePayload(
+        var payload = EventsCapability.BuildCreatePayload(
             new ApiCreateEventRequest("Filing", Priority: EventPriority.High), regarding: null, assignedToContactId: null);
 
         payload["sprk_priority"].Should().Be(100000002);

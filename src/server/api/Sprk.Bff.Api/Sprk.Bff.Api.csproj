@@ -66,9 +66,11 @@
   <ItemGroup>
     <!-- 🔴 THREE DIFFERENT "AGENT" STACKS ARE EASY TO CONFLATE HERE. Verified 2026-09-29 (task 125):
            * Azure.AI.Projects          = Azure AI Foundry AGENT SERVICE. USED — Services/Ai/Foundry/.
-           * Microsoft.Agents.Hosting.* = M365 AGENTS SDK (Copilot/Teams channel). USED — brings
-                                          Microsoft.Agents.Builder/.Core transitively, consumed by
-                                          Api/Agent/SpaarkeAgentHandler.cs.
+           * Microsoft.Agents.Hosting.* = M365 AGENTS SDK (Copilot/Teams channel). REMOVED 2026-11-25
+                                          (spaarkeai-mcp-bff-api-r2 task 001): its only consumer was the
+                                          legacy M365 Copilot gateway's activity handler, deleted with that
+                                          gateway. Copilot reaches the BFF through the MCP server
+                                          (/mcp/legal-operations), which uses ModelContextProtocol.AspNetCore.
            * Microsoft.Agents.AI        = Microsoft AGENT FRAMEWORK. REMOVED 2026-09-29 (#1027) —
                                           it had zero call sites. Nothing depended on it
                                           (`dotnet nuget why` showed no parent), and Microsoft.Extensions.AI
@@ -79,7 +81,6 @@
     <!-- PINNED: Do NOT upgrade without testing (Phase 1 - AIPL-002, AIPL-050) -->
     <!-- Microsoft.Extensions.AI.OpenAI (10.11.0 since spaarkeai-mcp-bff-api-r1 task 020) requires OpenAI >= 2.14.0; OpenAI was added in AIPL-050 for the IChatClient bridge -->
     <PackageReference Include="Azure.AI.Projects" Version="1.0.0-beta.8" />
-    <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.0.1" />
     <!-- Microsoft.Extensions.AI + .OpenAI 10.3.0 -> 10.11.0 (spaarkeai-mcp-bff-api-r1 task 020, NFR-08): ModelContextProtocol.Core 2.3.1 requires
          Microsoft.Extensions.AI.Abstractions >= 10.11.0, so the whole M.E.AI family moves together. AI unit + integration suites re-run on it. -->
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
@@ -277,6 +278,36 @@
                       LogicalName="Sprk.Bff.Api.Widgets.decisions.html"
                       Link="Api/Mcp/LegalOperations/decisions-widget.html"
                       Condition="Exists('../../../client/widgets/spaarke-decisions/dist/index.html')" />
+  </ItemGroup>
+
+  <!-- spaarkeai-mcp-bff-api-r2 task 034 (FR-09, FR-16, NFR-03): the Spaarke daily briefing MCP App widget, ONE self-contained html file built
+       by src/client/widgets/spaarke-briefing (npm run build), served by BriefingWidgetResource as ui://spaarke/briefing.html. Same
+       Condition=Exists contract as the decisions widget above. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../../client/widgets/spaarke-briefing/dist/index.html"
+                      LogicalName="Sprk.Bff.Api.Widgets.briefing.html"
+                      Link="Api/Mcp/LegalOperations/Briefing/briefing-widget.html"
+                      Condition="Exists('../../../client/widgets/spaarke-briefing/dist/index.html')" />
+  </ItemGroup>
+
+  <!-- spaarkeai-mcp-bff-api-r2 task 035 (FR-16, NFR-03): the Spaarke search results MCP App widget, ONE self-contained html file built
+       by src/client/widgets/spaarke-search-results (npm run build), served by SearchResultsWidgetResource as
+       ui://spaarke/search-results.html. Same Condition=Exists contract as the widgets above. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../../client/widgets/spaarke-search-results/dist/index.html"
+                      LogicalName="Sprk.Bff.Api.Widgets.search-results.html"
+                      Link="Api/Mcp/LegalOperations/Search/search-results-widget.html"
+                      Condition="Exists('../../../client/widgets/spaarke-search-results/dist/index.html')" />
+  </ItemGroup>
+
+  <!-- spaarkeai-mcp-bff-api-r2 task 037c (FR-16, NFR-03): the Spaarke playbook run MCP App widget, ONE self-contained html file built
+       by src/client/widgets/spaarke-playbook-run (npm run build), served by PlaybookRunWidgetResource as
+       ui://spaarke/playbook-run.html. Same Condition=Exists contract as the widgets above. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../../client/widgets/spaarke-playbook-run/dist/index.html"
+                      LogicalName="Sprk.Bff.Api.Widgets.playbook-run.html"
+                      Link="Api/Mcp/LegalOperations/Playbooks/playbook-run-widget.html"
+                      Condition="Exists('../../../client/widgets/spaarke-playbook-run/dist/index.html')" />
   </ItemGroup>
 
   <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at

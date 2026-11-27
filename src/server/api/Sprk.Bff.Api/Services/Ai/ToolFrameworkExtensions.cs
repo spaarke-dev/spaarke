@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai.Handoff;
 using Sprk.Bff.Api.Services.Dataverse.Extensions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -74,6 +75,8 @@ public static class ToolFrameworkExtensions
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
 
+        AddHandoffUrlBuilder(services, configuration);
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -81,6 +84,48 @@ public static class ToolFrameworkExtensions
         services.AddScoped<IToolHandlerRegistry, ToolHandlerRegistry>();
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="HandoffUrlBuilder"/>, the deep-link composer the chat create-record tool
+    /// (<c>DataverseCreateRecordHandler</c>) injects. spaarkeai-mcp-bff-api-r2 task 001 moved this registration from the
+    /// removed legacy agent module. It is registered HERE because the assembly scan in this method registers its consumer
+    /// (CLAUDE.md §10 F.1). It is an idempotent singleton.
+    /// </summary>
+    /// <remarks>
+    /// <b>#3198 (spaarkeai-mcp-bff-api-r2 task 030).</b> The base URL is the validated <c>Dataverse:EnvironmentUrl</c>
+    /// (<see cref="DataverseOptions.EnvironmentUrl"/>: <c>[Required]</c>, validated at startup by <c>ConfigurationModule</c>), the
+    /// one key the rest of the BFF reads. The old chain fell back to <c>DataverseServiceClient:Url</c> and then to the literal dev
+    /// environment, so a customer BFF with the URL under another key silently pointed every deep link (chat refusal links, the MCP
+    /// run tools' console link) at Spaarke's dev environment. There is no fallback now: no URL is an
+    /// <see cref="OptionsValidationException"/> (see <see cref="HandoffBaseUrl"/>).
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The configuration root; when null, the host's <see cref="IConfiguration"/> is used.</param>
+    private static void AddHandoffUrlBuilder(IServiceCollection services, IConfiguration? configuration) =>
+        services.TryAddSingleton(sp => new HandoffUrlBuilder(HandoffBaseUrl(
+            sp.GetService<IOptions<DataverseOptions>>()?.Value,
+            configuration ?? sp.GetService<IConfiguration>())));
+
+    /// <summary>
+    /// The Dataverse environment URL deep links are built on: <see cref="DataverseOptions.EnvironmentUrl"/>, else the same key read
+    /// from <paramref name="configuration"/> (a host that binds no options). Never a default environment (#3198).
+    /// </summary>
+    /// <exception cref="OptionsValidationException">Neither holds a URL.</exception>
+    internal static string HandoffBaseUrl(DataverseOptions? options, IConfiguration? configuration)
+    {
+        foreach (var candidate in new[] { options?.EnvironmentUrl, configuration?["Dataverse:EnvironmentUrl"] })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return candidate.Trim();
+            }
+        }
+
+        throw new OptionsValidationException(
+            DataverseOptions.SectionName,
+            typeof(DataverseOptions),
+            ["Dataverse:EnvironmentUrl is required: every server-built deep link (HandoffUrlBuilder) is built on it, and there is no default environment (#3198)."]);
     }
 
     /// <summary>
@@ -134,6 +179,8 @@ public static class ToolFrameworkExtensions
         services.AddHttpContextAccessor();
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
+
+        AddHandoffUrlBuilder(services, configuration: null);
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

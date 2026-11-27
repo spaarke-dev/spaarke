@@ -128,7 +128,7 @@ describe('useBriefingPreferences', () => {
     );
   });
 
-  it('updatePreferences surfaces error when save fails', async () => {
+  it('updatePreferences rejects and rolls back when save returns success:false (so the dropdown shows its error)', async () => {
     const webApi = makeWebApi();
     (fetchDigestPreferences as jest.Mock).mockResolvedValue({
       success: true,
@@ -145,10 +145,34 @@ describe('useBriefingPreferences', () => {
       expect(result.current.isLoading).toBe(false);
     });
 
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    let rejection: unknown;
     await act(async () => {
-      await result.current.updatePreferences({ dueWithinDays: 5 });
+      await result.current.updatePreferences({ dueWithinDays: 5 }).catch(e => {
+        rejection = e;
+      });
+    });
+    errorSpy.mockRestore();
+
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).message).toBe('save failed');
+    expect(result.current.error).toBe('save failed');
+    // The optimistic update is rolled back.
+    expect(result.current.preferences).toEqual(DEFAULT_DAILY_DIGEST_PREFERENCES);
+  });
+
+  it('updatePreferences rejects when there is no webApi to save to', async () => {
+    const { result } = renderHook(() => useBriefingPreferences(null, USER_ID));
+
+    let rejection: unknown;
+    await act(async () => {
+      await result.current.updatePreferences({ dueWithinDays: 5 }).catch(e => {
+        rejection = e;
+      });
     });
 
-    expect(result.current.error).toBe('save failed');
+    expect(rejection).toBeInstanceOf(Error);
+    expect(saveDigestPreferences).not.toHaveBeenCalled();
+    expect(result.current.preferences).toEqual(DEFAULT_DAILY_DIGEST_PREFERENCES);
   });
 });

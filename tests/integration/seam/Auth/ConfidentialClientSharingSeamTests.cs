@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Tests.Seam.Auth;
 ///
 /// <para><b>MIGRATED, not rewritten from scratch (task 022).</b> These assertions used to be made
 /// against three per-class static caches — one on <c>DataverseAccessDataSource</c>, one on
-/// <c>DataverseUserClient</c>, one on <c>AgentTokenService</c> — each keyed
+/// <c>DataverseUserClient</c>, one on the legacy agent token service (since removed) — each keyed
 /// <c>(tenant|client|secret-fingerprint)</c>. That shape was itself the defect ADR-028 A4 forbids: one
 /// process could hold three confidential clients, and three OBO token caches, for the SAME identity.
 /// Task 011 booked it as a time-boxed A4 exception that <b>expired at task 022</b>. The caches are gone;
@@ -74,9 +74,9 @@ public class ConfidentialClientSharingSeamTests
     public async Task TwoDifferentConsumers_AskingForTheSameIdentity_GetTheSameClientInstance()
     {
         // THE property task 022 exists to establish, and the one the pre-migration test could not
-        // express: GraphClientFactory, DataverseAccessDataSource, DataverseUserClient and
-        // AgentTokenService all resolve the BFF's identity through this one provider, so they hold ONE
-        // confidential client between them rather than three. MSAL's OBO token cache lives on the
+        // express: GraphClientFactory, DataverseAccessDataSource and DataverseUserClient (and, until its
+        // removal in spaarkeai-mcp-bff-api-r2 task 001, the legacy agent token service) all resolve the
+        // BFF's identity through this one provider, so they hold ONE confidential client between them rather than three. MSAL's OBO token cache lives on the
         // client, so sharing the object is what shares the cache.
         var tenantId = Guid.NewGuid().ToString();
         var clientId = Guid.NewGuid().ToString();

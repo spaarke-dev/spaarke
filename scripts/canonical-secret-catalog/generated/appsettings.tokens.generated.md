@@ -112,9 +112,8 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Tags**: bff, identity, public
 - **Exception note**: H3 is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME and commits ClientId to the customer vault itself. value_source written-by-h3 since task 245a (2026-10-01): H4 skips it. Task 129 had made it from-run-parameter on the belief that the DAG runs H3 before H4; it runs H4 first (H3 needs H4's vault RBAC bootstrap), so H4 waited for a reference only H3 could supply -- a deadlock.
 - **Consumers**:
-  - BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId / AgentToken:ClientId
+  - BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId
 - **App-setting keys**:
-  - `AgentToken__ClientId`
   - `API_APP_ID`
   - `AzureAd__ClientId`
   - `Dataverse__ClientId`
@@ -292,7 +291,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - BFF: TENANT_ID / AzureAd:TenantId / Graph:TenantId / Dataverse:TenantId
   - L2 control-plane
 - **App-setting keys**:
-  - `AgentToken__TenantId`
   - `AzureAd__TenantId`
   - `Dataverse__TenantId`
   - `Graph__TenantId`

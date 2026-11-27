@@ -1,0 +1,14 @@
+{
+  "case": "create.403.privilege",
+  "status": 403,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.4\",\"title\":\"Forbidden\",\"status\":403,\"detail\":\"You do not have the Dataverse privilege this operation requires.\",\"reasonCode\":\"sdap.access.deny.insufficient_privilege\",\"traceId\":\"<volatile>\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.4",
+    "title": "Forbidden",
+    "status": 403,
+    "detail": "You do not have the Dataverse privilege this operation requires.",
+    "reasonCode": "sdap.access.deny.insufficient_privilege",
+    "traceId": "<volatile>"
+  }
+}

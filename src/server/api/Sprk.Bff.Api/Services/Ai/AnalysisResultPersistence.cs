@@ -67,6 +67,65 @@ public class AnalysisResultPersistence
     }
 
     /// <summary>
+    /// spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine): THE save of a node run's result to its analysis, moved unchanged out of the
+    /// Analysis wrapper's node branch so the wrapper and the engine (a run that carries an <c>AnalysisId</c>) save the same way.
+    /// <list type="bullet">
+    /// <item>A failed run (<see cref="NodeRunResultCollector.RunFailed"/>): its streamed text, if any, becomes the working document; the
+    /// analysis is not finalized.</item>
+    /// <item>A finished run: the Deliver Output node's text, else the streamed text, becomes the working document (none is written
+    /// when there is no text), then the analysis is finalized with the run's token counts.</item>
+    /// </list>
+    /// Writes go through <see cref="UpdateWorkingDocumentAsync"/> and <see cref="FinalizeAnalysisAsync"/> (the existing
+    /// <c>IWorkingDocumentService</c> writes). Faults propagate, as they did in the wrapper.
+    /// </summary>
+    /// <param name="analysisId">The <c>sprk_analysis</c> to save to: the analysis its caller created or was handed, never a caller-chosen one.</param>
+    /// <param name="run">The run's events, observed to the end (or to its failure).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<NodeRunSaveOutcome> SaveNodeRunAsync(Guid analysisId, NodeRunResultCollector run, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var (deliverOutput, streamed, hasFailedNodes, runFailed, tokensIn, tokensOut) = run.Snapshot();
+
+        if (runFailed)
+        {
+            // On run-level failure, persist what we have.
+            if (!string.IsNullOrEmpty(streamed))
+            {
+                await UpdateWorkingDocumentAsync(analysisId, streamed, cancellationToken);
+            }
+
+            return new NodeRunSaveOutcome(streamed, NodeRunSaveOutcome.FailedStatus, null, null, tokensIn, tokensOut);
+        }
+
+        // Prefer the Deliver Output node's rendered result; fall back to the content streamed by every node.
+        var finalContent = !string.IsNullOrEmpty(deliverOutput) ? deliverOutput : streamed;
+
+        var status = NodeRunSaveOutcome.CompletedStatus;
+        bool? partialStorage = null;
+        string? storageMessage = null;
+        if (hasFailedNodes && !string.IsNullOrEmpty(finalContent))
+        {
+            status = NodeRunSaveOutcome.CompletedWithWarningsStatus;
+            partialStorage = true;
+            storageMessage = NodeRunSaveOutcome.PartialResultsMessage;
+        }
+        else if (string.IsNullOrEmpty(finalContent))
+        {
+            status = NodeRunSaveOutcome.FailedStatus;
+        }
+
+        // Persist to working document (skip if no content to write)
+        if (!string.IsNullOrEmpty(finalContent))
+        {
+            await UpdateWorkingDocumentAsync(analysisId, finalContent, cancellationToken);
+        }
+
+        await FinalizeAnalysisAsync(analysisId, tokensIn, tokensOut, cancellationToken);
+
+        return new NodeRunSaveOutcome(finalContent, status, partialStorage, storageMessage, tokensIn, tokensOut);
+    }
+
+    /// <summary>
     /// Store Document Profile outputs in Dataverse with dual storage and soft failure handling.
     /// Stores outputs in both sprk_analysisoutput (always) and sprk_document fields (with retry).
     /// </summary>

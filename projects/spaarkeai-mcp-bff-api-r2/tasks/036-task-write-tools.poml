@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarkeai-mcp-bff-api-r2">
+  <metadata>
+    <title>Task write tools: spaarke_create_task, spaarke_complete_task (idempotent)</title>
+    <phase>2 Long-running work, AI, widgets, task writes</phase>
+    <gate>r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Model-callable writes to sprk_event through task 006's capability; idempotency; tags include tenant-isolation</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Thin write adapters over IEventsCapability (006, opus) whose create/complete authorization and must-not-leak proofs already exist; idempotency follows r1's CompleteDecisionTool</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns Api/Mcp/LegalOperations/Tasks/{Create,Complete}TaskTool.cs; the Tasks ledger partial was last edited by 025 (Phase 1, merged)</parallel-reason>
+    <deps>006, 020, 025</deps>
+    <tags>bff-api, api, tenant-isolation, integration-test</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two model-callable, reversible MCP write tools over task 006's IEventsCapability: spaarke_create_task (POST /api/v1/events semantics, with an idempotency key) and spaarke_complete_task (POST /api/v1/events/{id}/complete, idempotent). Run as the caller; server-side validation is the capability's; a retried create with the same key creates one record.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke Dataverse write path and MCP tool handlers.</role>
+  <goal>Create and complete behave as REST for the same caller, are refused with REST reasonCodes, never touch another user's private event, and a retried create with the same key yields one sprk_event.</goal>
+
+  <context>
+    <background>Spec FR-07 (writes), FR-15, NFR-06. Task 006 moved create/complete (with ValidateCreateEventRequestAsync and RecordRouteAccessAuthorizationFilter's checks) into IEventsCapability. Idempotent-write model: Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs. Write-path rules: docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/CreateTaskTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/CompleteTaskTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Tasks.cs</file>
+      <file role="new">tests/integration/data-mutation/Mcp/Tasks/TaskWriteToolsTests.cs (create equals REST create; retried key → one record; complete idempotent)</file>
+      <file role="new">tests/integration/auth/Mcp/Tasks/TaskWriteToolsAuthTests.cs (other user's private event; regarding record without access)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Events/IEventsCapability.cs (task 006)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">Events capability</dependency>
+      <dependency task="020" status="pending">General McpToolResults</dependency>
+      <dependency task="025" status="pending">Tasks ledger partial and read tools</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">r1 gate RELEASED 2026-11-25 (joint mcp-r1/mcp-r2 determination under the owner's delegation; see notes/decisions.md D-r1-gate). Before starting, merge origin/master into this branch (merge, never rebase). Do not edit r1's ISS-010 files (DecisionCommitService, Actions/DecisionActionExecutors, RecordCreationService, CallerWriteAuthorization, CallerRecordAccessProbe, CallerMetadataReadMemo, AssignTaskNotifier, the email-bell job handler) or the Decision wizard heading files (DecisionWizard/steps/FoundStep.tsx, Worklist/IssueLine.tsx, composeIssueLine.ts) without messaging mcp-r1 first.</constraint>
+    <constraint source="ADR-028">Run as the caller (IHttpContextAccessor; UserContextRequired; no app-only fallback). Validation and authorization are IEventsCapability's; the tools add none (spec MUST NOT copy authorization); refusals map to McpToolResults with the REST reasonCode.</constraint>
+    <constraint source="project">create: readOnlyHint false, destructiveHint false, idempotentHint true, required idempotencyKey; a retry with the same key and caller returns the first event id and writes nothing. complete: readOnlyHint false, destructiveHint false, idempotentHint true; completing a completed task returns success without a second write. No host consent prompt is relied on (NFR-06). Ledger rows in RouteAuthorizationGuardTests.Mcp.Tasks.cs.</constraint>
+    <constraint source="ADR-002">No plugin; writes go only through IEventsCapability (one server-side owner per invariant).</constraint>
+    <constraint source="ADR-015">Model-visible: event id, subject, due date, status, link. Logs: tool name, latency, outcome/reasonCode, correlation id; never the task description.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source: spec.md 'Placement &amp; New Components'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': +5 MB or more needs explicit justification, 55 MB total triggers architecture review, 60 MB is a hard stop. No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Before each push run bash scripts/quality/check-changed-cs-format.sh origin/master. CS0618 is a build error: migrate, never suppress.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the r1 gate and 006, 020, 025; read IEventsCapability create/complete and CompleteDecisionTool's idempotency.</step>
+    <step order="2">Write the two tools and ledger rows; write the data-mutation and auth tests.</step>
+    <step order="3">Run MCP and events suites, ArchTests and conformance; measure the publish-size delta.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="5">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r2/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If idempotency needs a new store beyond r1's mechanism, STOP and escalate with the §11 answers.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>IEventsCapability (006) create/complete; CompleteDecisionTool's idempotent-write pattern; notes/reuse-scan.md row "Tasks (events)".</existing>
+    <extension>Both are reused; the tools are thin adapters.</extension>
+    <cost-of-doing-nothing>Copilot users cannot create or complete a Spaarke to-do (FR-07 write half fails; "a retried create with the same key creates one record" cannot be met).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/CreateTaskTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Tasks/CompleteTaskTool.cs</output>
+    <output type="test">tests/integration/data-mutation/Mcp/Tasks/TaskWriteToolsTests.cs</output>
+    <output type="test">tests/integration/auth/Mcp/Tasks/TaskWriteToolsAuthTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A tool-created event's written fields equal a REST-created one for the same inputs (captured at the capability boundary).</criterion>
+    <criterion testable="true">A retried create with the same idempotencyKey and caller writes once and returns the same id; a different key writes a second record.</criterion>
+    <criterion testable="true">Completing an open task completes it; completing it again writes nothing and returns success.</criterion>
+    <criterion testable="true">Negative: completing user B's private event returns not-found for user A and writes nothing; a create regarding a record the caller cannot append to returns the REST reasonCode.</criterion>
+    <criterion testable="true">Negative: no caller context returns UserContextRequired.</criterion>
+    <criterion testable="true">ArchTests and conformance pass; publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07, FR-15, NFR-06. Two adversarial-verifier passes (tenant-isolation tag). uac-r2 reviews.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Schemas;
+using Sprk.Bff.Api.Services.Ai.Tools;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -259,7 +260,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.DownstreamNodes,
                 context.AdditionalKnowledge,
                 context.AdditionalSkills,
-                context.PreResolvedLookupChoices
+                context.PreResolvedLookupChoices,
+                userFocus: context.UserContext
             );
 
 #pragma warning disable SPRK001 // flat-text (non-JPS) actions still need BuildExecutionPrompt until the JPS migration completes
@@ -414,7 +416,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 context.DownstreamNodes,
                 context.AdditionalKnowledge,
                 context.AdditionalSkills,
-                context.PreResolvedLookupChoices
+                context.PreResolvedLookupChoices,
+                userFocus: context.UserContext
             );
 
 #pragma warning disable SPRK001 // flat-text (non-JPS) actions still need BuildExecutionPrompt until the JPS migration completes
@@ -580,7 +583,8 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
             prompt += $"\n\n## Document\n\n{context.Document.ExtractedText}";
         }
 
-        return prompt + schemaInstructions;
+        // User focus (#3268) goes before the output-format instructions, never after them.
+        return PromptContextHelper.AppendUserFocus(prompt, context.UserContext) + schemaInstructions;
     }
 
     /// <summary>

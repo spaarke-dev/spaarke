@@ -266,11 +266,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 Document = documentContext
             };
 
-            var totalTokensIn = 0;
-            var totalTokensOut = 0;
-            var allContent = new StringBuilder();
-            string? deliverOutputContent = null;
-            var hasFailedNodes = false;
+            // spaarkeai-mcp-bff-api-r2 task 037a (D-037-engine): the node run's result is read and saved by the shared
+            // NodeRunResultCollector + AnalysisResultPersistence.SaveNodeRunAsync (moved there unchanged; the engine saves a run that
+            // carries an AnalysisId through the same method). runRequest above carries no AnalysisId, so the engine never saves twice.
+            var nodeRun = new NodeRunResultCollector();
 
             await foreach (var evt in playbookOrchestrator.ExecuteAsync(
                 runRequest, httpContext, cancellationToken))
@@ -281,44 +280,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                     yield return chunk;
                 }
 
-                // Accumulate streamed content for working document fallback
-                if (evt.Type == PlaybookEventType.NodeProgress && evt.Content != null)
-                {
-                    allContent.Append(evt.Content);
-                }
+                nodeRun.Observe(evt);
 
-                // Capture Deliver Output node's rendered markdown from NodeCompleted events.
-                // Use IsDeliverOutput flag — avoids capturing side-effect node messages
-                // (e.g., "Updated sprk_document record" from UpdateRecord nodes) as content.
-                if (evt.Type == PlaybookEventType.NodeCompleted &&
-                    evt.NodeOutput is { IsDeliverOutput: true } deliverOutput &&
-                    !string.IsNullOrEmpty(deliverOutput.TextContent))
-                {
-                    deliverOutputContent = deliverOutput.TextContent;
-                }
-
-                // Track node failures for partial data handling
-                if (evt.Type == PlaybookEventType.NodeFailed)
-                {
-                    hasFailedNodes = true;
-                }
-
-                // Capture run-level metrics from completion event
-                if (evt.Type == PlaybookEventType.RunCompleted && evt.Metrics != null)
-                {
-                    totalTokensIn = evt.Metrics.TotalTokensIn;
-                    totalTokensOut = evt.Metrics.TotalTokensOut;
-                }
-
-                // On run-level failure, persist what we have and finalize with error status
+                // On run-level failure, persist what we have (the shared save writes the streamed content of a failed run)
                 if (evt.Type == PlaybookEventType.RunFailed)
                 {
-                    var partialContent = allContent.ToString();
-                    if (!string.IsNullOrEmpty(partialContent))
-                    {
-                        await _resultPersistence.UpdateWorkingDocumentAsync(
-                            analysisId, partialContent, cancellationToken);
-                    }
+                    await _resultPersistence.SaveNodeRunAsync(analysisId, nodeRun, cancellationToken);
 
                     analysis = analysis with { Status = "Failed", CompletedOn = DateTime.UtcNow };
                     await _documentLoader.CacheAnalysisAsync(analysisId, analysis);
@@ -329,43 +296,25 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 }
             }
 
-            // Determine final content: prefer Deliver Output node's rendered result,
-            // fall back to accumulated streamed content from all nodes.
-            var finalContent = !string.IsNullOrEmpty(deliverOutputContent)
-                ? deliverOutputContent
-                : allContent.ToString();
+            // Persist the final content (Deliver Output, else the streamed content; nothing when there is none) and finalize.
+            var saved = await _resultPersistence.SaveNodeRunAsync(analysisId, nodeRun, cancellationToken);
+            var finalContent = saved.Content;
+            var finalStatus = saved.Status;
+            var totalTokensIn = saved.TokensIn;
+            var totalTokensOut = saved.TokensOut;
 
-            // Determine status
-            var finalStatus = "Completed";
-            bool? partialStorage = null;
-            string? storageMessage = null;
-
-            if (hasFailedNodes && !string.IsNullOrEmpty(finalContent))
+            if (finalStatus == NodeRunSaveOutcome.CompletedWithWarningsStatus)
             {
-                finalStatus = "CompletedWithWarnings";
-                partialStorage = true;
-                storageMessage = "Some nodes failed during execution but partial results are available.";
                 _logger.LogWarning(
                     "[PLAYBOOK-EXEC] Node-based execution completed with warnings: some nodes failed. AnalysisId={AnalysisId}",
                     analysisId);
             }
-            else if (string.IsNullOrEmpty(finalContent))
+            else if (finalStatus == NodeRunSaveOutcome.FailedStatus)
             {
-                finalStatus = "Failed";
                 _logger.LogError(
                     "[PLAYBOOK-EXEC] Node-based execution produced no output. AnalysisId={AnalysisId}",
                     analysisId);
             }
-
-            // Persist to working document (skip if no content to write)
-            if (!string.IsNullOrEmpty(finalContent))
-            {
-                await _resultPersistence.UpdateWorkingDocumentAsync(
-                    analysisId, finalContent, cancellationToken);
-            }
-
-            await _resultPersistence.FinalizeAnalysisAsync(
-                analysisId, totalTokensIn, totalTokensOut, cancellationToken);
 
             // Update in-memory analysis store
             analysis = analysis with
@@ -383,7 +332,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 "[PLAYBOOK-EXEC] Node-based execution {Status}: Analysis {AnalysisId}, {NodeCount} nodes, output {OutputLength} chars",
                 finalStatus, analysisId, nodes.Length, finalContent?.Length ?? 0);
 
-            if (finalStatus == "Failed")
+            if (finalStatus == NodeRunSaveOutcome.FailedStatus)
             {
                 yield return AnalysisStreamChunk.FromError(
                     "Node-based execution produced no output");
@@ -393,8 +342,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 yield return AnalysisStreamChunk.Completed(
                     analysisId,
                     new TokenUsage(totalTokensIn, totalTokensOut),
-                    partialStorage: partialStorage,
-                    storageMessage: storageMessage);
+                    partialStorage: saved.PartialStorage,
+                    storageMessage: saved.StorageMessage);
             }
             yield break;
         }
