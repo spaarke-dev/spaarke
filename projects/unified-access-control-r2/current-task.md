@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-26 ~22:55Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-27 ~04:50Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -35,7 +35,7 @@
 
 ## Waiting on the owner
 - ADR-052 amendment security sign-off (mcp-r2).
-- Next dev BFF deploy: exact-SHA go here. **Range-checked candidate: `8975e13034`** (master, ~22:40Z) = d2991fd743 + 50bdad697c (roles only) + #3282 (051/063/064, approved). 51ce01a116 is its ancestor; it drops only the 3 spike commits (spike tools go away: tell specialist-legal-agents-r1 first). Server work over live: #3260 Part E, #3267, #3270, #3278, 141 (#3289), and un-gated 226 (#3277), 227, 228 (#3273), 232, #1697 notification priority, provisioning seeds (control plane, not the BFF). 226 + 228 checked here ~22:25Z: access-safe (226 reads only through the caller's client; its app reads are config/policy/record-type metadata it already had; 228 adds a refusal only, after the caller's own read). NOT in it: #3272 Part C.
+- Next dev BFF deploy: exact-SHA go here. **Recommended: spike `5cd40984b0`** (specialist-legal-agents-r1 request 2026-11-27 ~04:40Z; branch `spike/specialist-agents-phase0`, never merged) = master 765a199922 (8975e13034 + H12b control-plane seeds only, no BFF) + spike tools incl. new G5 stubs `spike_review_agreement`/`spike_review_legal_hold`: access-reviewed here, no findings ([Authorize], closed arg, fail-closed caller, fixed text, no data access). Rollback d307d67e36. Post-deploy: tools/list on `/mcp/legal-operations` shows 4 spike tools; reply live SHA + time to them. Alternative: **`8975e13034`** (master, ~22:40Z) = d2991fd743 + 50bdad697c (roles only) + #3282 (051/063/064, approved). 51ce01a116 is its ancestor; it drops only the 3 spike commits (spike tools go away: tell specialist-legal-agents-r1 first). Server work over live: #3260 Part E, #3267, #3270, #3278, 141 (#3289), and un-gated 226 (#3277), 227, 228 (#3273), 232, #1697 notification priority, provisioning seeds (control plane, not the BFF). 226 + 228 checked here ~22:25Z: access-safe (226 reads only through the caller's client; its app reads are config/policy/record-type metadata it already had; 228 adds a refusal only, after the caller's own read). NOT in it: #3272 Part C.
 - Dev hand checks: `notes/owner-test-checklist-2026-11-13.md`; ebilling W/X checklist; word-add-in 136-138.
 - Quality alerts #1906, #2067, #2866: mention only. Open: #3111, #2158, #3125, #3175, #3241, #1506, #3264/#3265 (R4's).
 
