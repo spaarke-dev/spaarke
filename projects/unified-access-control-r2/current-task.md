@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-26 ~22:40Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-26 ~22:55Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -27,6 +27,8 @@
 - **spa-r4 task 043 (PR #3267):** approved; both notes resolved (370390781e). Merge on owner's go in their session; dev deploy then on the owner's SHA go here.
 - **ontology-r1 PR #3270 (task 225, DR inline share):** APPROVED 2026-11-26 (~20:05Z). Notes they accepted: keep the share after `accessWindow.Close()` whichever of #3270/Part C lands second; resumed/replay paths rely on the reconcile (one line in the PR). They merge after their Opus reviews + CI.
 - **field-mapping-r1:** 051 is live on dev (verified). **Combined 064 (064+b+c+d, `3e0268349a..fd8172ea32`): APPROVED 2026-11-26 ~20:30Z.** Pre-deploy condition MET: all 18 create tables on dev return a boolean IsSecured (task-064-notes §11; repeat per environment before a deploy carrying 064). Target-side field-security skip = owner-decided known limit. Nit filed as DI-052 #3280. **MERGED as PR #3282 → 8975e13034** (~22:40Z); verified: after fd8172ea32 only 2 docs commits, master-merge 3c0ac94429 has no src/server resolution hunks. Re-run the IsSecured check just before the deploy.
+- **ebilling-r1 PR #3290 (#3276, inline share of billing/procedure Decision Records):** APPROVED ~22:55Z (head c47eca7c2d), no findings. Not in candidate 8975e13034.
+- **field-mapping-r1 next:** owner decided (their session) field-secured source values copy; separate PR to my gate. Check: other 064 boundaries kept + tested; decision record states the target-readability consequence.
 - **mcp-r2 030 + ADR-052 amendment:** 030 closed; amendment PROPOSED until the owner's security sign-off.
 - **ontology-r1 PR #3278 (task 230, read-only system playbooks), test file only:** APPROVED. Nit: pin the guard-after-filters ordering with a must-not-fire case.
 - **word-add-in-r1 #3214 (task 140):** gate passed. **Task 141 (`fix/word-addin-141` 2a66132dc0, no PR yet): APPROVED 2026-11-26 ~20:45Z**. The named-.eml attachments add requires Write on the named .eml (version-save filter) plus EntityAccessFilter, IsFiledTo, the NotThisEmail check and the container guard. resolve-email-identity's savedAttachmentNames checks Read on each child via InternalPlaneDocumentNarrowing (ADR-008 A1). Nits accepted: replay confirmed per caller (IdempotencyFilter keys on userId); child id will be logged; batch or cap comes in their next fix round. **MERGED as PR #3289 → d2991fd743** (word-add-in-r1, ~22:15Z); they want the live SHA + gate result after the deploy.
