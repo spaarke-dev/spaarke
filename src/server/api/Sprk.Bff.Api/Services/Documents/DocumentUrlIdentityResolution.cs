@@ -69,6 +69,7 @@ public static class DocumentUrlIdentityResolution
     private const string FileNameAttribute = "sprk_filename";
     private const string EmailMessageIdAttribute = "sprk_emailmessageid";
     private const string IsEmailArchiveAttribute = "sprk_isemailarchive";
+    private const string ParentDocumentAttribute = "sprk_parentdocument";
     private const string CreatedOnAttribute = "createdon";
 
     // Task 132: the archive's link to the communication that captured (or sent) the email. Mailbox capture and the
@@ -480,6 +481,51 @@ public static class DocumentUrlIdentityResolution
 
         var row = rows?.Entities.FirstOrDefault();
         return row is null ? null : ToResolution(row);
+    }
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 143: the email's STANDALONE attachment documents — saved on their own, without the email
+    /// (<c>SaveContentType.Attachment</c>): <c>sprk_document</c> rows that are not the email archive (<c>sprk_isemailarchive</c>
+    /// false or empty), have no <c>.eml</c> parent (<c>sprk_parentdocument</c> empty), and are linked
+    /// (<c>sprk_relatedcommunication</c>) to the <c>sprk_communication</c> whose <c>sprk_internetmessageid</c> is the email's RFC
+    /// Message-ID. Only the id and the two names (<c>sprk_documentname</c>, <c>sprk_filename</c>) are read.
+    /// </summary>
+    /// <remarks>
+    /// App-only, like every read in this type: the caller decides which of them may be named to the user
+    /// (<c>DocumentEmailIdentityFilter.ReadSavedAttachmentNamesAsync</c>, ADR-008 A1). A read that faults throws; that caller
+    /// omits the field. The single attachment save stores no message id of its own: the communication link is its only link to
+    /// the email, so an attachment saved before its email was identified (created Restricted, unlinked) is not found.
+    /// </remarks>
+    public static async Task<IReadOnlyList<DocumentEntity>> FindStandaloneEmailAttachmentsAsync(
+        string internetMessageId,
+        IGenericEntityService dataverse,
+        CancellationToken ct)
+    {
+        var query = new QueryExpression(DocumentLogicalName)
+        {
+            ColumnSet = new ColumnSet(DocumentNameAttribute, FileNameAttribute),
+        };
+        query.Criteria.AddCondition(ParentDocumentAttribute, ConditionOperator.Null);
+        var notArchive = new FilterExpression(LogicalOperator.Or);
+        notArchive.AddCondition(IsEmailArchiveAttribute, ConditionOperator.Equal, false);
+        notArchive.AddCondition(IsEmailArchiveAttribute, ConditionOperator.Null);
+        query.Criteria.AddFilter(notArchive);
+
+        var communication = query.AddLink(
+            CommunicationLogicalName, RelatedCommunicationAttribute, CommunicationIdAttribute, JoinOperator.Inner);
+        communication.LinkCriteria.AddCondition(
+            CommunicationInternetMessageIdAttribute, ConditionOperator.Equal, internetMessageId);
+
+        var rows = await dataverse.RetrieveMultipleAsync(query, ct);
+        return ((IEnumerable<Entity>?)rows?.Entities ?? Array.Empty<Entity>())
+            .Where(row => row.Id != Guid.Empty)
+            .Select(row => new DocumentEntity
+            {
+                Id = row.Id.ToString("D"),
+                Name = row.GetAttributeValue<string>(DocumentNameAttribute) ?? string.Empty,
+                FileName = row.GetAttributeValue<string>(FileNameAttribute),
+            })
+            .ToList();
     }
 
     /// <summary>The one place a <c>sprk_document</c> row becomes a <see cref="Resolution"/> — shared by the URL, the
