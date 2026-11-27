@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Copy a mapped value from the filing parent even when its source column is field-secured (owner 2026-11-26)</title>
+    <phase>6 W6 Standard, guards, docs, retirement</phase>
+    <gate>UAC-r2 diff review before merge (their four checks, below)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a field-security rule on the BFF create and push paths; security; bff-api.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes an access rule on the write path; every other boundary must hold exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>064</deps>
+    <tags>bff-api, field-mapping, security, auth</tags>
+    <estimated-effort>3-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the owner's decision (notes/decisions.md, 2026-11-26, "a mapped field copies whatever its field security"): "if two records are related and there is field mapping then the field should copy write - security does not matter." Today `FieldSecuredSourceRule.Split` drops every rule that reads a field-secured source column, on create (`RecordCreationService.Mapping.cs` step 3) and on push (`FieldMappingEndpoints.PushFieldMappingsAsync` step 2a). Lift that drop for the caller's filing parent; keep everything else.</prompt>
+  <role>SPAARKE BFF developer; Dataverse write path; authorization.</role>
+  <goal>A rule whose source column is field-secured is applied like any other rule when the mapping source is the record the new or pushed row is filed under; it is still dropped (as today, with its warning) for any other source. Every other 064 boundary still holds and has a must-fire test.</goal>
+
+  <context>
+    <background>
+      Task 064 made ordinary mapped values from the filing parent skip the caller's AppendTo and target field-security checks, but kept "a value from a field-secured SOURCE column is never copied" until a same-profile-set rule existed. The owner replaced that rule on 2026-11-26. The value is still read as the caller: on create the app read is masked to what the caller can read (`MappingSourceCallerMask`, #2188), and push reads the source as the caller (`RetrieveSourceRecordValuesAsCallerAsync`). Both STAY: a value copies only if the caller can read it. Whether that mask should also be lifted is an open owner question; do not change it.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs (step 3 around `FieldSecuredSourceRule.Split(rules, reads.SecuredSourceColumns)`, the `MappingSourceColumnsUnreadable` fallback, `SecuredColumnsAsync`, `SourceIsCallersFilingParent` vs `SourceIsCallersFilingRecordAsync`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs (step 2a: the IsSecured read, `Split`, `SecuredSourceWarnings`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingPushLookups.cs (`SourceAttributeMetadataQuery`, `SecuredColumns`: delete what becomes unused)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/FieldSecuredSourceRule.cs (doc comment: the rule now applies only to a source that is not the filing parent)</file>
+      <file role="modify">tests/Spaarke.ArchTests/FieldSecuredSourceRuleGuardTests.cs (the per-file required calls change if push no longer calls Split; keep the "no private copy of the predicate" guard and its must-fire controls)</file>
+      <file role="modify">tests/integration/seam/RecordCreation/RecordCreationServiceMappingSeamTests*.cs and tests/integration/contract/Api/FieldMappings/FieldMappingPushAuthorizationContractTests.FieldSecuredSource.cs (tests that pin the drop)</file>
+      <file role="modify">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md, docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md, docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (any sentence saying a field-secured source is never copied)</file>
+      <file role="do-not-touch">projects/field-mapping-server-write-path-r1/CLAUDE.md and notes/ (main session), anything under .claude/, CallerWriteAuthorization.cs (its target-side use of CountsAsSecured is a different rule and stays), and the UAC-r2 do-not-edit files listed in current-task.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Create: lift the drop only when the mapping source is the caller's filing record by table AND id (the step-5 predicate `SourceIsCallersFilingRecordAsync`, or an equivalent table-and-id check). An explicit `mappingSource` that is not the filing parent keeps today's drop and warning, and the fail-closed "secured columns unreadable → map nothing" fallback stays for that case.</constraint>
+    <constraint>Push: the pushed children are the rows whose parent lookup (`ResolveParentLookup`, citations excluded) names the one source record, so the drop is lifted for push. The source is still read as the caller. Remove the push's IsSecured metadata read and its warnings if nothing else uses them.</constraint>
+    <constraint>Unchanged, each with an existing or new must-fire test: the mapped filing lookup keeps the caller's AppendTo check (refuse); invariant and access-conferring columns (`IsCopyInvariantColumn`, the canonical and bound registries) keep the caller's checks; a source outside the filing chain keeps them; adapter defaults keep them; the FR-04 source Read probe as the caller; `MappingSourceCallerMask`; `EnforceMappingSourceOwnerAsync` (secure-source owner rule); the final whole-row check.</constraint>
+    <constraint>No new endpoint, service, DI registration, package or Dataverse column. Removing code is preferred to adding it.</constraint>
+    <constraint>Tests go under existing test files or `tests/unit/domain/**`; never under tests/unit/Sprk.Bff.Api.Tests/ for new files. Never run Sprk.Bff.Api.Tests unfiltered.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Create, source = filing parent, rule reads a field-secured column the caller can read: the value is written; no `SourceColumnFieldSecured` warning.</criterion>
+    <criterion>Create, source = filing parent, field-secured column the caller cannot read (masked out): nothing is written for it and nothing leaks; no refusal.</criterion>
+    <criterion>Create, explicit mapping source that is NOT the filing parent, rule reads a field-secured column: dropped with today's warning (must-fire).</criterion>
+    <criterion>Push, rule reads a field-secured source column: the child is updated with the value; the rule is no longer counted as skipped for field security.</criterion>
+    <criterion>Each unchanged boundary in the constraints above still has a passing must-fire test (list them in the task notes with test names).</criterion>
+    <criterion>`dotnet build src/server/api/Sprk.Bff.Api/` 0 warnings; filtered Sprk.Bff.Api.Tests (RecordCreationServiceMappingSeamTests, FieldSecuredSource, CallerWriteAuthorization, MappedCopyRights, FieldMappingPush) green; Spaarke.ArchTests green (without --no-build).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Code, tests and doc changes above; a short section in notes/task-065-notes.md (main session writes it from the agent's report).</output>
+  </outputs>
+</task>
