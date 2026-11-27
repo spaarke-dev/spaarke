@@ -178,6 +178,16 @@ public sealed class RecordSearchService : IRecordSearchService
         // semantic reranker so exact-name records are not buried under conceptually-similar ones.
         var preferKeywordRanking = request.Options?.PreferKeywordRanking ?? false;
 
+        // GitHub #3239: a query of just "*" is Azure AI Search's match-all ("every record that passes the filters"), not
+        // text to embed. Sent with a query vector it becomes a PURE VECTOR query, and Azure rejects highlighting on one
+        // (400 "Parameter 'highlight' is not supported for search requests with pure vector queries"), which surfaced as a
+        // 500. So it runs as a plain keyword "*" search: no embedding, no highlights, no semantic ranking.
+        var matchAll = IsMatchAll(request.Query);
+        if (matchAll)
+        {
+            hybridMode = RecordHybridSearchMode.KeywordOnly;
+        }
+
         _logger.LogDebug(
             "Starting record search: mode={Mode}, query length={QueryLength}, recordTypes=[{RecordTypes}]",
             hybridMode, request.Query.Length, string.Join(",", request.RecordTypes));
@@ -267,10 +277,11 @@ public sealed class RecordSearchService : IRecordSearchService
                 filter,
                 limit,
                 offset,
-                preferKeywordRanking);
+                preferKeywordRanking,
+                matchAll);
 
             // Step 6: Execute search
-            var searchText = hybridMode != RecordHybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(request.Query)
+            var searchText = !matchAll && hybridMode != RecordHybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(request.Query)
                 ? request.Query
                 : "*";
 
@@ -420,7 +431,8 @@ public sealed class RecordSearchService : IRecordSearchService
         string filter,
         int limit,
         int offset,
-        bool preferKeywordRanking)
+        bool preferKeywordRanking,
+        bool matchAll)
     {
         var searchOptions = new SearchOptions
         {
@@ -469,7 +481,8 @@ public sealed class RecordSearchService : IRecordSearchService
         // ranking. The semantic reranker orders by conceptual similarity and buries exact-name matches, so
         // the Association Engine's record-matching rungs opt out (preferKeywordRanking) to rank by name/keyword
         // relevance. When opted out, results carry the raw BM25 @search.score (no reranker score).
-        if (useKeyword && !preferKeywordRanking)
+        // Neither the semantic ranker nor highlights have query text to work on for a match-all ("*") search.
+        if (useKeyword && !preferKeywordRanking && !matchAll)
         {
             searchOptions.QueryType = SearchQueryType.Semantic;
             searchOptions.SemanticSearch = new SemanticSearchOptions
@@ -479,12 +492,19 @@ public sealed class RecordSearchService : IRecordSearchService
             };
         }
 
-        // Enable highlighting on relevant fields
-        searchOptions.HighlightFields.Add("recordName");
-        searchOptions.HighlightFields.Add("recordDescription");
+        // Enable highlighting on relevant fields — only when a keyword query runs. A vector-only request is sent with the
+        // match-all text "*", i.e. a pure vector query, and Azure AI Search rejects highlighting on those (400).
+        if (useKeyword && !matchAll)
+        {
+            searchOptions.HighlightFields.Add("recordName");
+            searchOptions.HighlightFields.Add("recordDescription");
+        }
 
         return searchOptions;
     }
+
+    /// <summary>True for a query that is only "*" (after trimming): the match-all request, not text to search for.</summary>
+    private static bool IsMatchAll(string? query) => query is not null && query.Trim() == "*";
 
     /// <summary>
     /// Processes search results into RecordSearchResult format.
