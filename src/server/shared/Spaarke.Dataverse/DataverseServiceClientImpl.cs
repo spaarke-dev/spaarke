@@ -2065,15 +2065,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                     // entry is gone. Assigning a raw Guid to a lookup attribute throws, and the caller
                     // catches and silently falls back to an in-memory-only job — so getting this wrong
                     // would disable job durability rather than fail loudly.
-                    if (fieldName == "sprk_initiatedby")
-                    {
-                        entity[fieldName] = new EntityReference("systemuser", guidValue);
-                        _logger.LogDebug("Set {FieldName} = EntityReference(systemuser, {Value})", fieldName, guidValue);
-                    }
-                    else
-                    {
-                        entity[fieldName] = guidValue;
-                    }
+                    entity[fieldName] = ProcessingJobGuidValue(fieldName, guidValue, onCreate: true);
                 }
                 else if (value is decimal decimalValue)
                 {
@@ -2138,6 +2130,25 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return jobId;
     }
 
+    /// <summary>
+    /// The value <see cref="CreateProcessingJobAsync"/> / <see cref="UpdateProcessingJobAsync"/> write for a <see cref="Guid"/>
+    /// property: a lookup column needs an <see cref="EntityReference"/> (Dataverse refuses a bare Guid there), any other column
+    /// takes the Guid as is.
+    /// </summary>
+    /// <remarks>
+    /// <c>sprk_initiatedby</c> → <c>systemuser</c> on create only, as before (spaarkeai-word-add-in-r1 task 067; the Office update
+    /// path never sends it, and its behaviour is unchanged). <c>sprk_servicerequest</c> → <c>sprk_servicerequest</c> and
+    /// <c>sprk_outputdocument</c> → <c>sprk_document</c> on create and update: the intake-run lookups added by
+    /// spaarke-intake-pipeline-r1 task 011, which these mappers sent as bare Guids (task 011 finding 1, fixed in task 013).
+    /// </remarks>
+    internal static object ProcessingJobGuidValue(string fieldName, Guid value, bool onCreate) => fieldName switch
+    {
+        "sprk_initiatedby" when onCreate => new EntityReference("systemuser", value),
+        "sprk_servicerequest" => new EntityReference("sprk_servicerequest", value),
+        "sprk_outputdocument" => new EntityReference("sprk_document", value),
+        _ => value,
+    };
+
     public async Task UpdateProcessingJobAsync(Guid id, object request, CancellationToken ct = default)
     {
         var entity = new Entity("sprk_processingjob", id);
@@ -2154,7 +2165,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 if (value is Guid guidValue)
                 {
-                    entity[fieldName] = guidValue;
+                    entity[fieldName] = ProcessingJobGuidValue(fieldName, guidValue, onCreate: false);
                 }
                 else if (value is decimal decimalValue)
                 {
