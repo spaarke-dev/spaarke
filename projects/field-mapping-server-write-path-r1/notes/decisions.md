@@ -1196,3 +1196,17 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - **Post-mapping defaults:** the owner asked what this meant, so it is not decided yet. In code, the only default is the Office add-in create's "Assigned To = the creator's own contact", used when mapping leaves it empty. It is an access-conferring column, so it keeps the caller's checks under any answer. No mapping rule on dev sets a fixed value: all 57 are Copy rules.
 - **051 OQ-4:** closed. The owner knows of no other places to close New.
 - **051 OQ-5:** "only +New is required". The KPI subgrid keeps "New KPI Assessment" (the BFF create-then-open). "Add KPI Assessment" (`sprk.matter.subgrid.kpi.AddKpiButton`) is to be removed. This is a ribbon change; the dev import needs the owner's go.
+
+## 2026-11-27 — Owner: a mapped copy from the filing parent runs whatever the caller can read; Repair copies field-secured values too (task 067)
+
+- **Repair:** "Yes also field secured values." The Repair pass copies a value from a field-secured source column of the row's filing parent, like create and push.
+- **The caller-read mask:** "a field to field copy executed regardless of the user as access to the destination record." A mapped value from the record the row is filed under is copied whatever the caller can read on that record's columns. What is needed is the caller's access to the row being created or pushed. This lifts `MappingSourceCallerMask` (#2188) for the filing parent on create and at email send, and the as-caller source read on push for rows filed under the source by a listed Filing edge. Supersedes "the value is still read as the caller" (2026-11-26).
+  - **Consequence (owner-accepted):** a user who cannot read a field-secured column on the parent can still see its value. They create or push a child the column maps into, then read the child's target column. To keep a value restricted, field-secure the target column too.
+  - **Bounds, unchanged:**
+    - only the row's own filing parent (create: the caller's filing record, table and id; push: a listed Filing edge; Repair: the row's filing parent);
+    - any other source keeps the caller mask and the field-secured drop;
+    - the FR-04 source Read probe as the caller stays: a caller who cannot read the parent record at all maps nothing;
+    - every other 064 and 065 boundary is unchanged: the filing lookup's AppendTo refusal, invariant and access-conferring columns, adapter defaults, the secure-source owner rule, and the final whole-row check.
+  - The FR-04 probe is kept by default; the owner's answer did not name it. Lifting it too is open to the owner.
+- **No live test:** "No test required just implement it." No temporary dev rule is set up for a positive copy check.
+- Access logic changes, so UAC-r2 reviews the diff before merge.
