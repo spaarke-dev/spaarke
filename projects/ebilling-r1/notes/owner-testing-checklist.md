@@ -246,9 +246,9 @@ Deployed by uac-r2 on your go in its session: `sprk_invoicereviewpage` live 12:1
 - [ ] **Read-only otherwise:** on an invoice that already has a firm, or as a user who can't edit the invoice, the firm is plain text, not a dropdown.
 - [ ] **Pages still open after the shared-code move (#2965), only if convenient:** carried over from Y; AP Export, Invoice Files and Rule Review are not in this deploy either.
 
-## AA. Invoice Review in the Console's own modal, with browse (task 195): NOT READY, waits for the Invoice Review page deploy
+## AA. Invoice Review in the Console's own modal, with browse (task 195): READY on dev
 
-Merged to master 2026-11-27 21:28Z (#3274, merge commit c55b9812d8). The Console (`sprk_spaarkeai`, the modal and browse) is already on dev from that commit, since 21:33Z. Still to come: the Invoice Review page deploy (the compact cards and the unsaved-work answer), which is uac-r2's, with you naming c55b9812d8 in its session. Hard-refresh (Ctrl+F5) before testing.
+Merged to master 2026-11-27 21:28Z (#3274, merge commit c55b9812d8). Both parts are on dev from that commit: the Console (`sprk_spaarkeai`, the modal and browse) since 21:33Z, deployed automatically by the Deploy SpaarkeAi workflow on the master push; the Invoice Review page (`sprk_invoicereviewpage`, the compact cards and the unsaved-work answer) since 21:44Z, deployed by uac-r2 on your go, read-back hash equal to the build. Hard-refresh (Ctrl+F5) before testing.
 
 - [ ] **Opens in the Console, not the platform dialog:** in the Console, open a billing item in the Worklist. Invoice Review opens in Spaarke's own modal: the title bar says "Invoice Review" in the Console's style (dark when the Console is dark), not the grey Dataverse dialog bar.
 - [ ] **Dark mode with no stored choice:** with the Console in dark mode and no theme picked in Spaarke's own theme menu, the page inside the modal is dark too.
