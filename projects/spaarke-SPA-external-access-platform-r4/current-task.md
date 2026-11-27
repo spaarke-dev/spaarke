@@ -12,7 +12,7 @@
 | **Next action** | Next task per TASK-INDEX, on the owner's go. Optional: owner E2E of the 503 retry on dev. |
 
 ## Live on dev
-- **BFF:** `5cd40984b0` (master `765a199922` + the unmerged specialist spike tools; contains 043) LIVE since 2026-11-27 ~13:14Z (uac-r2, owner's go); DLL hash verified, /healthz 200; 30-min gate PASSED 13:45Z (40 req, no 5xx). Rollback `d307d67e36`.
+- **BFF:** master `d9595dd98e` (contains 043) LIVE since 2026-11-27 ~20:19Z (uac-r2, owner's go); gate due ~20:50Z. Previous: `5cd40984b0` (gate PASSED 13:45Z).
 - **SPA:** `c438119bca` (043 merge) LIVE since 2026-11-27 ~14:29Z (run 46016029559, headSha checked, owner's go). Rollback tag `external-spa-dev-24d53fb333`. Dispatch SPA deploys from tag `external-spa-dev-<sha>` to build exactly the approved SHA; check the run's headSha.
 
 ## Owner questions open
