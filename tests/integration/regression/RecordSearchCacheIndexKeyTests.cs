@@ -120,6 +120,88 @@ public sealed class RecordSearchCacheIndexKeyTests
         _searchesPerIndex.GetValueOrDefault("records-index-a").Should().Be(1);
     }
 
+    // ---- every other request field that changes the results is part of the key too ----
+
+    private static RecordSearchRequest Base() => Request(searchIndexName: null);
+
+    private static RecordSearchRequest WithOptions(RecordSearchOptions options) => Base() with { Options = options };
+
+    private static RecordSearchRequest WithFilters(RecordSearchFilters filters) => Base() with { Filters = filters };
+
+    [Fact]
+    public async Task PreferKeywordRanking_ChangesTheResults_SoItIsNotServedTheSemanticallyRankedCacheEntry()
+    {
+        var service = CreateService();
+
+        await service.SearchAsync(WithOptions(new RecordSearchOptions { PreferKeywordRanking = false }));
+        await service.SearchAsync(WithOptions(new RecordSearchOptions { PreferKeywordRanking = true }));
+        await service.SearchAsync(WithOptions(new RecordSearchOptions { PreferKeywordRanking = true }));
+        await service.SearchAsync(Base());
+
+        _searchesPerIndex.GetValueOrDefault(StandardIndex).Should().Be(2,
+            "one semantic search (also answers the request with no options) and one keyword-ranked search; repeats are cache hits");
+    }
+
+    [Fact]
+    public async Task AFilterValueWithACommaIsNotTheSameKeyAsTwoFilterValues()
+    {
+        var service = CreateService();
+
+        // One organization named "Smith, Jones LLP" filters differently from the two organizations "Smith" and "Jones LLP".
+        await service.SearchAsync(WithFilters(new RecordSearchFilters { Organizations = ["Smith, Jones LLP"] }));
+        await service.SearchAsync(WithFilters(new RecordSearchFilters { Organizations = ["Smith", "Jones LLP"] }));
+        await service.SearchAsync(WithFilters(new RecordSearchFilters { People = ["a,b"] }));
+        await service.SearchAsync(WithFilters(new RecordSearchFilters { People = ["a", "b"] }));
+
+        _searchesPerIndex.GetValueOrDefault(StandardIndex).Should().Be(4);
+    }
+
+    public static IEnumerable<object[]> ResultChangingVariants()
+    {
+        yield return [(RecordSearchRequest r) => r with { Query = "other" }];
+        yield return [(RecordSearchRequest r) => r with { RecordTypes = [RecordEntityType.Project] }];
+        yield return [(RecordSearchRequest r) => r with { RecordTypes = [RecordEntityType.Matter, RecordEntityType.Project] }];
+        yield return [(RecordSearchRequest r) => r with { Filters = new RecordSearchFilters { Organizations = ["Acme"] } }];
+        yield return [(RecordSearchRequest r) => r with { Filters = new RecordSearchFilters { People = ["Ann"] } }];
+        yield return [(RecordSearchRequest r) => r with { Filters = new RecordSearchFilters { ReferenceNumbers = ["M-1"] } }];
+        yield return [(RecordSearchRequest r) => r with { Filters = new RecordSearchFilters { MatterTypes = ["6f1c1f0e-5a0b-4a3e-9d7a-2b1f6c4e8a10"] } }];
+        yield return [(RecordSearchRequest r) => r with { Options = new RecordSearchOptions { Limit = 5 } }];
+        yield return [(RecordSearchRequest r) => r with { Options = new RecordSearchOptions { Offset = 10 } }];
+        yield return [(RecordSearchRequest r) => r with { Options = new RecordSearchOptions { HybridMode = RecordHybridSearchMode.KeywordOnly } }];
+        yield return [(RecordSearchRequest r) => r with { Options = new RecordSearchOptions { PreferKeywordRanking = true } }];
+    }
+
+    [Theory]
+    [MemberData(nameof(ResultChangingVariants))]
+    public async Task EachFieldThatChangesTheResults_GetsItsOwnCacheEntry(Func<RecordSearchRequest, RecordSearchRequest> change)
+    {
+        var service = CreateService();
+
+        await service.SearchAsync(Base());
+        await service.SearchAsync(change(Base()));
+
+        _searchesPerIndex.GetValueOrDefault(StandardIndex).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task TheSameFilterValuesInAnotherOrder_AreStillACacheHit()
+    {
+        var service = CreateService();
+
+        await service.SearchAsync(Base() with
+        {
+            RecordTypes = [RecordEntityType.Matter, RecordEntityType.Project],
+            Filters = new RecordSearchFilters { Organizations = ["Acme", "Zed"], People = ["Ann", "Bob"] },
+        });
+        await service.SearchAsync(Base() with
+        {
+            RecordTypes = [RecordEntityType.Project, RecordEntityType.Matter],
+            Filters = new RecordSearchFilters { Organizations = ["Zed", "Acme"], People = ["Bob", "Ann"] },
+        });
+
+        _searchesPerIndex.GetValueOrDefault(StandardIndex).Should().Be(1);
+    }
+
     [Fact]
     public async Task TheSameQueryAgainstTheSameIndex_IsStillServedFromTheCache()
     {

@@ -625,22 +625,24 @@ public sealed class RecordSearchService : IRecordSearchService
     /// </summary>
     private string BuildCacheId(RecordSearchRequest request)
     {
+        // Every request field that can change the results is in the key: query, recordTypes, the four filters, hybridMode, limit,
+        // offset, preferKeywordRanking (it switches off semantic ranking and the score normalisation) and the target index. A new
+        // field that reaches the search must be added here.
         var queryHash = _embeddingCache.ComputeContentHash(request.Query);
-        var recordTypesHash = _embeddingCache.ComputeContentHash(
-            string.Join(",", request.RecordTypes.OrderBy(t => t)));
+        var recordTypesHash = _embeddingCache.ComputeContentHash(SortedListKey(request.RecordTypes));
 
         var filtersHash = "none";
         if (request.Filters is not null)
         {
             var filterParts = new List<string>();
             if (request.Filters.Organizations is { Count: > 0 })
-                filterParts.Add("org:" + string.Join(",", request.Filters.Organizations.OrderBy(o => o)));
+                filterParts.Add("org:" + SortedListKey(request.Filters.Organizations));
             if (request.Filters.People is { Count: > 0 })
-                filterParts.Add("ppl:" + string.Join(",", request.Filters.People.OrderBy(p => p)));
+                filterParts.Add("ppl:" + SortedListKey(request.Filters.People));
             if (request.Filters.ReferenceNumbers is { Count: > 0 })
-                filterParts.Add("ref:" + string.Join(",", request.Filters.ReferenceNumbers.OrderBy(r => r)));
+                filterParts.Add("ref:" + SortedListKey(request.Filters.ReferenceNumbers));
             if (request.Filters.MatterTypes is { Count: > 0 })
-                filterParts.Add("mt:" + string.Join(",", request.Filters.MatterTypes.OrderBy(m => m, StringComparer.Ordinal)));
+                filterParts.Add("mt:" + SortedListKey(request.Filters.MatterTypes));
 
             if (filterParts.Count > 0)
                 filtersHash = _embeddingCache.ComputeContentHash(string.Join("|", filterParts));
@@ -649,6 +651,7 @@ public sealed class RecordSearchService : IRecordSearchService
         var mode = request.Options?.HybridMode ?? RecordHybridSearchMode.Rrf;
         var limit = request.Options?.Limit ?? 20;
         var offset = request.Options?.Offset ?? 0;
+        var keywordRanking = request.Options?.PreferKeywordRanking == true ? "kw" : "sem";
 
         // The index the request targets is part of the answer: the cache is read BEFORE the index is resolved and validated, so
         // without it the same query against another index (or the standard one) is served the first index's cached results for
@@ -658,8 +661,15 @@ public sealed class RecordSearchService : IRecordSearchService
             ? "std"
             : "idx-" + _embeddingCache.ComputeContentHash(request.SearchIndexName.Trim().ToLowerInvariant());
 
-        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:{indexPart}";
+        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:{keywordRanking}:{indexPart}";
     }
+
+    /// <summary>
+    /// An order-insensitive, unambiguous key for a list of values. Values are JSON-encoded, so a value that itself contains a
+    /// comma ("Smith, Jones LLP") never collides with two values ("Smith", "Jones LLP") - the two filter differently.
+    /// </summary>
+    private static string SortedListKey(IEnumerable<string> values) =>
+        System.Text.Json.JsonSerializer.Serialize(values.OrderBy(v => v, StringComparer.Ordinal));
 
     /// <summary>
     /// Gets cached search response from Redis via ITenantCache.
