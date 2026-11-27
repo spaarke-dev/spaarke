@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-11-05 (added G-25: sub-agent worktrees pile up in the main checkout); 2026-10-09 (added G-19: sub-agent fan-out cost and out-of-memory crashes; earlier 2026-10-08 added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-11-25 (added G-26: reading the frozen playbook engine as "playbooks are not used"); 2026-11-05 (added G-25: sub-agent worktrees pile up in the main checkout); 2026-10-09 (added G-19: sub-agent fan-out cost and out-of-memory crashes; earlier 2026-10-08 added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -1289,6 +1289,19 @@ Never call a run green or red from a loaded full run alone.
 - Call PowerShell scripts that take `[string[]]` with `-Command "& script -Path @('a','b')"` or in-process, never `pwsh -File script -Path a,b`: `-File` binds the one string `"a,b"`, and every path is refused as missing.
 
 **Enforced by:** `scripts/worktree/Clean-AgentWorktrees.ps1`, with controls in `tests/scripts/Clean-AgentWorktrees.Tests.ps1` (CI `agent-guard-tests`), run by `/devops-project-archive` Step 5.5. Prose for the VS Code exclusion, because `.vscode/settings.json` is per machine and not in git.
+
+### G-26: Reading "the playbook engine is frozen" as "playbooks are not used"
+
+> **Added 2026-11-25** (specialist-legal-agents-r1; owner direction). **Class**: terminology drift between docs.
+
+**What happens.** ADR-039 freezes the node-graph engine, and the old entry doc carried "SUPERSEDED" and "⛔ FROZEN ENGINE" banners. Sessions concluded that Spaarke has no playbooks. They then either re-assessed the architecture from scratch or designed new work onto the frozen engine (the opposite error). Both happened in one week of November 2026.
+
+**Rule.**
+- "Playbook" has four meanings: the **concept** (D-209, live); the **node-graph engine** (frozen); a **composite capability** (a prompted Action or coded workflow invoked through a Binding: live, and the way new playbooks are built); and **legacy schema names** (`sprk_playbookconsumer` is the Binding; `sprk_playbookrun` is the AI-run record).
+- Before calling playbooks unused, or reaching for `PlaybookOrchestrationService`, read `docs/architecture/playbook-architecture.md`.
+- A new playbook is Actions + Bindings, plus an `ICodedWorkflow` for several steps (CAPABILITY-INDEX rows 16 and 34). Every AI run is recorded on `sprk_playbookrun` (row 35).
+
+**Enforced by:** prose plus routing. CAPABILITY-INDEX row 16 now points at the Action spine, not the engine, and every reuse scan reads it first. The ADR-039 2026-11-25 amendment and the frozen-engine banners point here. This stays prose because it is a misreading of the architecture, not a code pattern that a lint rule or ArchTest can see.
 
 ---
 
