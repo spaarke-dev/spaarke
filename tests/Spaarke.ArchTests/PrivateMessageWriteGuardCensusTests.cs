@@ -91,6 +91,10 @@ public class PrivateMessageWriteGuardCensusTests
             "Create-only: reached through ReadMappingInputsAsync from DecideAsync and MapFieldsAsync, both inside the create decision; "
             + "it drops mapping rules from the columns of a NEW row and sends nothing.",
             "ADR-002 (the create service is the one owner of a new row's mapped columns)"),
+        new Listed(new Member(RecordCreationMapping, "IsCopyInvariantColumn"),
+            "A create-only predicate that writes nothing: asked through MayCopyWithoutCallerChecks by CheckMergedPayloadAsync, step 5 "
+            + "of CreateAsync, to keep the caller's checks on a BFF-owned column of a NEW row (task 064).",
+            "ADR-002 (the create service is the one owner of a new row's mapped columns)"),
         new Listed(new Member("src/server/api/Sprk.Bff.Api/Services/Ai/DocumentProfileOutputMapper.cs", "BuildFields"),
             "Not a communication: it asks the rule for ExternalDocumentNarrowing.DocumentTable (sprk_document) only, and builds "
             + "document profile fields.",

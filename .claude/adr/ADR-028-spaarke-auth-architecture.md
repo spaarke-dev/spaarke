@@ -893,7 +893,7 @@ services.PostConfigure<JwtBearerOptions>(opts => {
 - **ADR-007** (SpeFileStore facade) — Graph client constructed by `IGraphClientFactory` uses `DefaultAzureCredential` (managed identity) for app-only when `Graph__ManagedIdentity__Enabled=true`; OBO retained for delegated.
 - **ADR-008** (Endpoint filters) — UNCHANGED. v2 adds new auth schemes via `AddAuthentication().AddScheme<>()`.
 - **ADR-009** (Redis-first caching) — UNCHANGED for server OBO cache. Client-side cache is now in-memory only per `InMemoryCache` wrapper.
-- **ADR-012** (Shared components) — Service factories (`createBffDataService`, `createBffUploadService`) accept `authenticatedFetch` from `@spaarke/auth` per the v2 function-based contract.
+- **ADR-012** (Shared components) — Service factories (`createBffUploadService`, the `bffChildWriteAdapter` functions) accept `authenticatedFetch` from `@spaarke/auth` per the v2 function-based contract.
 
 ## Deferred / Out of Scope (deliberate)
 

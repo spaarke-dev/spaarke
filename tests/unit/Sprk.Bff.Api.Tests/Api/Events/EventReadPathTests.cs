@@ -17,10 +17,12 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
-using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
+using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -55,8 +57,8 @@ public class EventReadPathTests
     [Fact]
     public void CreatePayload_WritesTheLivePriorityValue()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest { Name = "Filing", Priority = EventPriority.High, OwningTeamId = TeamId });
+        var payload = EventsCapability.BuildCreatePayload(
+            new ApiCreateEventRequest("Filing", Priority: EventPriority.High), regarding: null, assignedToContactId: null);
 
         payload["sprk_priority"].Should().Be(100000002);
         DocumentedPriorities().Values.Should().Contain((int)payload["sprk_priority"]!);

@@ -10,6 +10,8 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -779,15 +781,25 @@ public static class ChildRecordEndpoints
         if (entitySet is null)
             return Problem(StatusCodes.Status500InternalServerError, "child_record.metadata", $"Table '{entity}' has no entity set.");
 
+        // Ontology task 228 (#1984, D-111): an update that closes a To Do (completes or dismisses it) is checked below for an open
+        // inquiry; the To Do's notes and matter, which that check reads, ride along on the row read.
+        var closesTodo = string.Equals(entity, InquiryDispositionService.TodoTable, StringComparison.OrdinalIgnoreCase)
+                         && InquiryDispositionService.ClosesTodo(body);
+
         // The caller must be able to READ the row; a row they cannot read and a row that does not exist get the same 404.
         // Its owning team rides along: a row that was isolated and is moved out loses its mirrored shares below.
-        var row = await user.GetAsync($"{entitySet}({id:D})?$select={primaryId},_owningteam_value", ct).ConfigureAwait(false);
+        var row = await user.GetAsync(
+            $"{entitySet}({id:D})?$select={primaryId},_owningteam_value"
+            + (closesTodo ? $",{SignalReadService.TodoNotesColumn},{SignalReadService.TodoMatterColumn}" : string.Empty), ct).ConfigureAwait(false);
         if (!row.IsSuccess)
         {
             return row.StatusCode is StatusCodes.Status403Forbidden or StatusCodes.Status404NotFound
                 ? Problem(StatusCodes.Status404NotFound, NotFoundCode, $"The {Noun(entity)} was not found.")
                 : CallerFailure(row, entity);
         }
+
+        if (closesTodo && await InquiryTodoCloseRefusalAsync(user, id, row.Body, logger, ct).ConfigureAwait(false) is { } inquiryRefusal)
+            return inquiryRefusal;
 
         // Task 039 (FR-38): on a search-indexed table (an invoice, here) both index columns are the SERVER's — step 8 of the create
         // writes them from the owning business unit — so a body that names either has it dropped, never refused, and the
@@ -926,6 +938,46 @@ public static class ChildRecordEndpoints
 
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// Ontology task 228 (#1984, D-111): an update that closes the "Record the outcome" To Do of an OPEN budget inquiry is refused with
+    /// the commit route's 409 <see cref="DecisionCommitReasons.InquiryDispositionRequired"/>: that To Do is closed only by recording the
+    /// inquiry's disposition (<c>POST /api/v1/inquiries/{id}/disposition</c>), which completes it. The identification is the worklist's
+    /// own (<see cref="InquiryDispositionService.FindOpenInquiryOfTodoAsync"/>, as the caller: the To Do's notes hint, else its matter's
+    /// open outbound inquiries; open and outbound only). A To Do with no inquiry, or whose inquiry is closed, is not refused (null). A
+    /// lookup fault fails closed: 503 <see cref="InquiryCheckUnavailableCode"/>, logged; nothing is written either way.
+    /// </summary>
+    internal static async Task<IResult?> InquiryTodoCloseRefusalAsync(
+        IDataverseUserClient user, Guid todoId, JsonElement? todo, ILogger logger, CancellationToken ct)
+    {
+        Guid? matterId = Guid.TryParse(GetString(todo, SignalReadService.TodoMatterColumn), out var matter) ? matter : null;
+        var match = await InquiryDispositionService.FindOpenInquiryOfTodoAsync(
+            user, logger, todoId, GetString(todo, SignalReadService.TodoNotesColumn), matterId, ct).ConfigureAwait(false);
+
+        switch (match.Match)
+        {
+            case InquiryTodoMatch.OpenInquiry:
+                logger.LogInformation(
+                    "[CHILD-RECORD] closing To Do {Id} refused: it records the outcome of open inquiry {ServiceRequestId}", todoId, match.ServiceRequestId);
+                return Problem(StatusCodes.Status409Conflict, DecisionCommitReasons.InquiryDispositionRequired, InquiryDispositionRequiredDetail);
+            case InquiryTodoMatch.Unavailable:
+                logger.LogWarning(
+                    "[CHILD-RECORD] closing To Do {Id} refused: whether it records an open inquiry's outcome could not be read ({Reason})",
+                    todoId, match.Reason);
+                return Problem(StatusCodes.Status503ServiceUnavailable, InquiryCheckUnavailableCode,
+                    "Whether this to-do records the outcome of a budget inquiry could not be checked, so nothing was saved. Try again.");
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Ontology task 228: the words of the 409 for an open inquiry's To Do (shown to the person as is).</summary>
+    internal const string InquiryDispositionRequiredDetail =
+        "This to-do is completed by recording how the budget inquiry turned out, not here. Open it from the Worklist and record the " +
+        "outcome; that completes the to-do. Nothing was saved.";
+
+    /// <summary>Ontology task 228: whether a To Do records an open inquiry's outcome could not be read; nothing was written.</summary>
+    internal const string InquiryCheckUnavailableCode = "child_record.inquiry_check_unavailable";
 
     private static Guid? CallerObjectId(HttpContext httpContext) =>
         Guid.TryParse(CallerResolution.ResolveObjectId(httpContext.User), out var oid) && oid != Guid.Empty ? oid : null;

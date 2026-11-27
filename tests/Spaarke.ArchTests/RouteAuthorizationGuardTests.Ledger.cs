@@ -76,7 +76,11 @@ public partial class RouteAuthorizationGuardTests
             "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all eleven routes carry "
             + "AddDocumentAuthorizationFilter (share-link, gated by task 072, was RETIRED 2026-10-16, #1350; resolve-identity pairs DocumentUrlIdentityFilter "
             + "with it; GET /{documentId}/identity since word-add-in task 112; resolve-email-identity pairs "
-            + "DocumentEmailIdentityFilter with it since word-add-in task 120)."),
+            + "DocumentEmailIdentityFilter with it since word-add-in task 120). ADR-008 Amendment A1 (word-add-in task 141): "
+            + "resolve-email-identity's savedAttachmentNames lists the saved .eml's children, which only the handler's own "
+            + "lookup finds; ReadSavedAttachmentNamesAsync checks Read on each child through "
+            + "InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync before naming it (refused = left out; a fault omits the "
+            + "field)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows, a byte download, the pointer attach (POST /{id}/file, task 166 f1) and the "
             + "two container-keyed listings (gated by task 078; GET /api/v1/documents?containerId= since task 166 carries "
@@ -603,7 +607,9 @@ public partial class RouteAuthorizationGuardTests
             + "add job's row; 403 OFFICE_009) and ReconciledEmailFiling (Write on the matched communication through "
             + "CallerRecordAccessProbe with the caller's token, before the filing write when it is unfiled, and before the "
             + "confirm write (status Resolved, task 140) when it is filed to the save's own record and unconfirmed; refused = "
-            + "left as it was)."),
+            + "left as it was). Task 141: an attachments add that NAMES the saved .eml (email.savedDocumentId) is not an A1 "
+            + "case: OfficeVersionSaveAuthorizationFilter requires Write on that named document (DocumentAuthorizationFilter "
+            + "'write'), and EntityAccessFilter checks the named record, before the service runs."),
         new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
             "/api/office/communications/* — every read runs through IDataverseUserClient as the caller (task 127)."),
 

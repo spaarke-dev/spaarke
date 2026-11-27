@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
@@ -163,6 +164,44 @@ public sealed partial class DecisionCommitServiceTests
             }
         }
         public List<Entity> ExistingRecords { get; } = new();
+
+        /// <summary>Ontology task 225 (D-229): the Dataverse uac-r2's REAL share synchronizer reads (its secure team is this rig's
+        /// <c>SecureTeam</c>); every Decision Record the writer creates is stored in it as written (owner and filing lookups).</summary>
+        public SecureChildShareWorld ShareWorld { get; } = SecureChildShareWorld.Standard(SecureChildShareWorld.SecureBu, SecureTeam);
+
+        /// <summary>Task 225: the POA plane the synchronizer reads and writes (uac-r2 task 063's strict double).</summary>
+        public FakeRecordShareTable ShareTable { get; } = new();
+
+        /// <summary>Task 225: the commit's logger, when a test reads what it logged.</summary>
+        public Microsoft.Extensions.Logging.ILogger<DecisionCommitService>? CommitLogger { get; set; }
+
+        /// <summary>Task 225 (D-212): each communication's <c>sprk_privilegeclassification</c> as the CALLER reads it (null: no value). A
+        /// communication absent from the map is not returned to the caller (unreadable).</summary>
+        public Dictionary<Guid, int?> CommunicationClassifications { get; } = new();
+
+        /// <summary>Task 225: a fault answer for the caller's read of communications' classification, and every such read asked.</summary>
+        public DataverseUserResponse? CommunicationReadFails { get; set; }
+
+        public List<string> CommunicationReads { get; } = new();
+
+        /// <summary>Task 225 fix round 1: the synchronizer's logger, when a test makes it fault (the one fault that escapes SyncChildAsync).</summary>
+        public Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>? SynchronizerLogger { get; set; }
+
+        /// <summary>Task 225 fix round 1: the next Decision Record create COMMITS (the row is stored) and then throws this: a create
+        /// that timed out after committing.</summary>
+        public Exception? FailRecordAfterCreateWith { get; set; }
+
+        /// <summary>Task 225: the REAL synchronizer over <see cref="ShareWorld"/> and <see cref="ShareTable"/>.</summary>
+        public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Synchronizer() => ShareWorld.Synchronizer(ShareTable, logger: SynchronizerLogger);
+
+        /// <summary>Task 225: a created row as Dataverse stores it, for the synchronizer: its columns, the owner as owningteam/owninguser.</summary>
+        private void StoreInShareWorld(Entity created, Guid id)
+        {
+            var columns = created.Attributes.Where(a => a.Key != "ownerid").Select(a => (a.Key, a.Value)).ToList();
+            if (created.GetAttributeValue<EntityReference>("ownerid") is { } owner)
+                columns.Add((owner.LogicalName == "team" ? "owningteam" : "owninguser", (object)owner));
+            ShareWorld.Add(created.LogicalName, id, columns.ToArray());
+        }
 
         /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
         /// sees them; null: the read is not scripted and throws, which the routes must treat as "cannot be counted".
@@ -380,6 +419,13 @@ public sealed partial class DecisionCommitServiceTests
                     Log.Add($"record:{e.LogicalName}");
                     if (FailRecordWith is not null) throw FailRecordWith;
                     Records.Add(e);
+                    StoreInShareWorld(e, RecordId);
+                    if (FailRecordAfterCreateWith is { } afterCreate)
+                    {
+                        FailRecordAfterCreateWith = null;
+                        throw afterCreate;
+                    }
+
                     return Task.FromResult(RecordId);
                 });
             // Uac-r2 re-check F1: WhoAmI on the writer's own connection (the createdby of every row it creates).
@@ -520,6 +566,25 @@ public sealed partial class DecisionCommitServiceTests
                 return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.UserContextRequired, "no user");
             if (path is "WhoAmI" or "WhoAmI()")
                 return Ok(new Dictionary<string, object?> { ["UserId"] = Caller.ToString("D") });
+            if (path.StartsWith("sprk_communications?", StringComparison.Ordinal))
+            {
+                // Task 225 (D-212): the privilege classification of the decision's communications, AS THE CALLER (the In-list read).
+                CommunicationReads.Add(path);
+                if (CommunicationReadFails is { } communicationFault)
+                    return communicationFault;
+                var asked = System.Text.RegularExpressions.Regex.Matches(path, "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                    .Select(m => Guid.Parse(m.Value)).ToHashSet();
+                return Ok(new Dictionary<string, object?>
+                {
+                    ["value"] = CommunicationClassifications.Where(kv => asked.Contains(kv.Key))
+                        .Select(kv => new Dictionary<string, object?>
+                        {
+                            ["sprk_communicationid"] = kv.Key.ToString("D"),
+                            ["sprk_privilegeclassification"] = kv.Value,
+                        }).ToList(),
+                });
+            }
+
             if (path.Contains("&$filter=Microsoft.Dynamics.CRM.In(PropertyName='", StringComparison.Ordinal))
             {
                 // Task 150 (D-141): the worklist's Do-lane "mine" read of a subject, AS THE CALLER. The subject is the caller's own
@@ -659,7 +724,9 @@ public sealed partial class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), EntitiesSeam ?? Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(RealExecutors ?? Executors.Values.Cast<IDecisionActionExecutor>()), records, WriterClient(),
-                EntitiesSeam ?? Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                EntitiesSeam ?? Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads,
+                Synchronizer(), new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance), UserSeam ?? User.Object,
+                Clock, CommitLogger ?? NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);

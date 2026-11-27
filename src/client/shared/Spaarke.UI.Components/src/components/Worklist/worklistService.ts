@@ -57,6 +57,8 @@ export interface WorklistDecision {
   reason: string | null;
   steps: WorklistDecisionStep[] | null;
   followOns: WorklistDecisionFollowOn[];
+  /** The record's own name (task 226, D-231), for example `Judgement: Send the reply`; the headline of a record with no item. */
+  summary?: string | null;
 }
 
 /** One Signal as the route returns it: the row's display columns plus the columns the wizard and the disclosures read. */
@@ -86,6 +88,11 @@ export interface WorklistRouteItem extends WorklistItem {
 export interface WorklistGroupData {
   core: WorklistCore | null;
   items: WorklistRouteItem[];
+  /**
+   * Decided set only (task 226, D-231): the Decision Records in this group that resolved no item the caller sees (an email-gate
+   * record). They have no item, so nothing opens them. Absent in every other set.
+   */
+  records?: WorklistDecision[];
 }
 
 /** An answer: both lanes, each a list of groups in the route's order. */
@@ -120,6 +127,11 @@ export interface InquiryDispositionRequest {
 export interface RecordDispositionResult {
   /** The "Record the outcome" To Do was completed server-side (false when none was found or it could not be completed). */
   todoCompleted: boolean;
+  /**
+   * Task 228 (#1991): the To Do's re-evaluation was queued, so its row leaves the list within seconds. False (or missing, or an
+   * unreadable body) means it leaves at the nightly check, and the notice must say so.
+   */
+  signalRefreshQueued: boolean;
 }
 
 export interface WorklistService {
@@ -224,6 +236,7 @@ function parseDecision(raw: unknown): WorklistDecision | null {
     decidedByName: text(raw.decidedByName),
     reason: text(raw.reason),
     steps: parseDecisionSteps(raw.steps),
+    summary: text(raw.summary),
     followOns: Array.isArray(raw.followOns)
       ? raw.followOns.filter(isObject).flatMap(f => {
           const code = text(f.code);
@@ -292,9 +305,13 @@ function parseGroups(raw: unknown, lane: WorklistLane): WorklistGroupData[] {
   for (const g of raw) {
     if (!isObject(g) || !Array.isArray(g.items)) continue;
     const items = g.items.map(i => parseItem(i, lane)).filter((i): i is WorklistRouteItem => i !== null);
-    if (items.length === 0) continue;
+    const records = Array.isArray(g.records)
+      ? g.records.map(parseDecision).filter((r): r is WorklistDecision => r !== null)
+      : [];
+    if (items.length === 0 && records.length === 0) continue;
     // A group the route marks Not filed (or one with an unreadable core) is the null-core group: it is never dropped.
-    groups.push({ core: g.notFiled === true ? null : parseCore(g.core), items });
+    const core = g.notFiled === true ? null : parseCore(g.core);
+    groups.push(records.length > 0 ? { core, items, records } : { core, items });
   }
   return groups;
 }
@@ -458,10 +475,10 @@ export function createWorklistService({ fetch, baseUrl }: WorklistServiceOptions
       try {
         body = await response.json();
       } catch {
-        return { todoCompleted: false };
+        return { todoCompleted: false, signalRefreshQueued: false };
       }
-      const flag = (body as { todoCompleted?: unknown } | null)?.todoCompleted;
-      return { todoCompleted: flag === true };
+      const flags = body as { todoCompleted?: unknown; signalRefreshQueued?: unknown } | null;
+      return { todoCompleted: flags?.todoCompleted === true, signalRefreshQueued: flags?.signalRefreshQueued === true };
     },
 
     async narrate(request: WorklistNarrativeRequest): Promise<WorklistNarrativeText | null> {

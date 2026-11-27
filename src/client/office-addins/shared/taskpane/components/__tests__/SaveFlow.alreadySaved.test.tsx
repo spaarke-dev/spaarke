@@ -147,14 +147,16 @@ afterAll(() => {
 });
 
 describe('SaveFlow — a document already in Spaarke (task 111)', () => {
-  it('filed: the green box and the "Filed to" card name the record; no Open Document, no picker', () => {
+  it('filed: the green box names the record; no Open Document, no picker', () => {
     process.env.ORG_URL = ORG_URL;
     render(<Pane initial={FILED} canOpenRecord />);
 
     expect(screen.getByText('Saved to Spaarke')).toBeInTheDocument();
-    // The box's own line: "Filed to <record>." (the card's title is the bare words "Filed to").
-    expect(screen.getAllByText('Gamma Merger').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('Filed to', { selector: 'span' })).toBeInTheDocument();
+    // The box's own line: "Filed to <record>." Task 141: the separate "Filed to" card is gone from this state — the box
+    // names the record once and opens it with its own icon button.
+    expect(screen.getByText('Gamma Merger')).toBeInTheDocument();
+    expect(screen.queryByText('Filed to', { selector: 'span' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open Gamma Merger in Spaarke' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'View Document' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open Document' })).not.toBeInTheDocument();
@@ -176,7 +178,8 @@ describe('SaveFlow — a document already in Spaarke (task 111)', () => {
     expect((screen.getByRole('button', { name: 'File to record' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'File to record' }));
 
-    await waitFor(() => expect(screen.getAllByText('Acme v. Beta').length).toBeGreaterThanOrEqual(2));
+    // Task 141: the box names the record (the separate card is gone from this state).
+    await waitFor(() => expect(screen.getAllByText('Acme v. Beta').length).toBeGreaterThanOrEqual(1));
     const puts = putCalls();
     expect(puts).toHaveLength(1);
     const [url, init] = puts[0]!;
@@ -184,11 +187,11 @@ describe('SaveFlow — a document already in Spaarke (task 111)', () => {
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({
       matterLookup: 'aaaaaaaa-0000-0000-0000-00000000000a',
     });
-    // The box and card now show the record; the picker is gone; no reload.
+    // The box now shows the record; the picker is gone; no reload.
     expect(screen.queryByText('Not filed to a record yet.')).toBeNull();
     expect(screen.queryByTestId('related-to-picker')).toBeNull();
     expect(screen.queryByRole('button', { name: 'File to record' })).toBeNull();
-    expect(screen.getAllByText('Acme v. Beta').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Acme v. Beta')).toBeInTheDocument();
   });
 
   it('a Project pick sends projectLookup alone', async () => {

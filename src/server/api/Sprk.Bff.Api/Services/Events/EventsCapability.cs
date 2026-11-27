@@ -859,9 +859,9 @@ internal sealed class EventsCapability : IEventsCapability
     };
 
     /// <summary>
-    /// The Web API payload of the new event, in column logical names (what <c>DataverseWebApiService.BuildCreateEventPayload</c>
-    /// wrote, minus the columns the service owns: the owner, the creator person, the I-1 stamps and the Access Permission).
-    /// Open / Active and Source = User are the create's, as before: the platform default for a new row is Draft.
+    /// The Web API payload of the new event, in column logical names, without the columns the service owns: the owner, the
+    /// creator person, the I-1 stamps and the Access Permission. Open / Active and Source = User are the create's: the platform
+    /// default for a new row is Draft.
     /// </summary>
     internal static Dictionary<string, object?> BuildCreatePayload(
         ApiCreateEventRequest request, RegardingFields? regarding, Guid? assignedToContactId)

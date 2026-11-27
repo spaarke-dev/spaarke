@@ -648,6 +648,30 @@ public class FeatureRolePrivilegeGuardTests
         // on a Spaarke table: Basic User is read-only there (BasicUserIsReadOnlyOnSpaarkeTables), so there is no rule here for it.
         new("Invoice line (sprk_billingevent) create: none, by design (BFF-written, ebilling D-18)",
             ["prvCreatesprk_BillingEvent"], [], "projects/ebilling-r1/notes/decisions-log.md:24"),
+        // #3245 (owner 2026-11-26): the BFF sets a record's owner as the app (D-11), so a person role's own Assign has no product use;
+        // its only effect is a hand reassignment off the team owner, which the reconciler reports but does not move back. The kept
+        // Assign grants are AI Analysis Admin (admin-trusted, UAC rounds 124/127), Core User on sprk_Event (the rule below) and the
+        // Ontology Administrator's Signal Assign (ontology D-160, kept by the owner); the writer's are not person-role grants.
+        new("Assign on Spaarke tables: no person role reassigns these records by hand; the BFF sets owners as the app (#3245, owner 2026-11-26)",
+            [
+                "prvAssignsprk_Agreement", "prvAssignsprk_analysis", "prvAssignsprk_billingexport", "prvAssignsprk_Budget",
+                "prvAssignsprk_Communication", "prvAssignsprk_CommunicationAccount", "prvAssignsprk_CommunicationAttachment",
+                "prvAssignsprk_CommunicationChannelRef", "prvAssignsprk_CommunicationParticipant", "prvAssignsprk_CommunicationThread",
+                "prvAssignsprk_Document", "prvAssignsprk_externalidentifier", "prvAssignsprk_Invoice", "prvAssignsprk_invoiceapproval",
+                "prvAssignsprk_invoicesubmission", "prvAssignsprk_KPIAssessment", "prvAssignsprk_Matter", "prvAssignsprk_Memo",
+                "prvAssignsprk_NavItem", "prvAssignsprk_notificationoutbox", "prvAssignsprk_Project", "prvAssignsprk_Report",
+                "prvAssignsprk_ServiceRequest", "prvAssignsprk_Todo", "prvAssignsprk_WorkAssignment",
+                "prvAssignsprk_AttachmentArtifact", "prvAssignsprk_EmailArtifact", "prvAssignsprk_ProcessingJob",
+                "prvAssignsprk_analysischatmessage", "prvAssignsprk_analysisemailmetadata", "prvAssignsprk_analysisworkingversion",
+            ],
+            [AiAdmin],
+            "projects/unified-access-control-r2/notes/assign-privilege-audit-2026-11-26.md"),
+        // The one person-role Assign with a product use: naming someone else as a communication task's owner asks the caller's
+        // Assign on sprk_event (CommunicationRecordAuthorizationFilter.AuthorizeTaskCreateAsync). Core User carries it.
+        new("Assign on sprk_event: Core User only, for the communication create-task routes (#3245, owner 2026-11-26)",
+            ["prvAssignsprk_Event"], [Core],
+            "src/server/api/Sprk.Bff.Api/Api/Filters/CommunicationRecordAuthorizationFilter.cs:721; "
+            + "projects/unified-access-control-r2/notes/assign-privilege-audit-2026-11-26.md"),
     ];
 
     /// <summary>A rule that the named roles hold <paramref name="Privileges"/> at no more than <paramref name="MaxDepth"/> (a ceiling;
@@ -2061,10 +2085,12 @@ public class FeatureRolePrivilegeGuardTests
     {
         var removals = LoadRemovals(RuledChangesPath);
         var changes = LoadRuledChanges(RuledChangesPath);
-        // R1 (046b), the 80 of R3 (046c: Basic User is read-only on Spaarke tables) and the 5 of ISS028 (correction rows: native write hardening)
-        Assert.Equal(86, removals.Count);
+        // R1 (046b), the 80 of R3 (046c: Basic User is read-only on Spaarke tables), the 5 of ISS028 (correction rows: native write
+        // hardening) and the 38 of ASSIGN-3245 (#3245: person roles' Assign with no product use, owner 2026-11-26)
+        Assert.Equal(124, removals.Count);
         Assert.Equal(80, removals.Count(r => r.Gap == "R3" && r.Role == Basic));
         Assert.Equal(5, removals.Count(r => r.Gap == WriterOnlyRemovalGap));
+        Assert.Equal(38, removals.Count(r => r.Gap == "ASSIGN-3245"));
         var personRoles = PersonRoles(SolutionsDirectory);
         var roles = LoadRoles(RolesDirectory, removals.Select(r => r.Role));
 
@@ -2203,9 +2229,15 @@ public class FeatureRolePrivilegeGuardTests
 
     /// <summary>Removal gaps that no expectations file carries yet, each with the newest expectations version it was raised against. The
     /// next release's role-privilege expectations file must carry their entries (managed stage-and-upgrade); then the gap leaves this list.
-    /// None now: ISS028 (correction rows: native write hardening, raised against 1.3.1.0) is carried by 1.3.2.0 and left the list.</summary>
+    /// ISS028 (correction rows: native write hardening, raised against 1.3.1.0) is carried by 1.3.2.0 and left the list. Pending now:
+    /// ASSIGN-3245 (#3245, raised against 1.3.3.0).</summary>
     internal static readonly IReadOnlyDictionary<string, Version> PendingNextReleaseRemovalGaps =
-        new Dictionary<string, Version>(StringComparer.Ordinal);
+        new Dictionary<string, Version>(StringComparer.Ordinal)
+        {
+            // #3245 (owner 2026-11-26): the person roles' Assign with no product use, raised against 1.3.3.0. The next release's
+            // expectations file carries each entry in its role's absent list.
+            ["ASSIGN-3245"] = new Version(1, 3, 3, 0),
+        };
 
     /// <summary>Change gaps that no expectations file carries yet, each with the newest expectations version it was raised against; the same
     /// rule as <see cref="PendingNextReleaseRemovalGaps"/> for the config's <c>changes</c>: the published files are not edited, so the next
@@ -2376,7 +2408,8 @@ public class FeatureRolePrivilegeGuardTests
 
         // The pending gaps (the next release's expectations file takes them) are left out here, and held by their own ratchet, which
         // fails once a newer expectations file than the one a gap was raised against leaves the gap's entries out.
-        Assert.Empty(PendingNextReleaseRemovalGaps); // ISS028 left the list when 1.3.2.0 carried it
+        // ISS028 left the list when 1.3.2.0 carried it; ASSIGN-3245 (#3245) waits for the release after 1.3.3.0
+        Assert.Equal(new[] { "ASSIGN-3245" }, PendingNextReleaseRemovalGaps.Keys.Order(StringComparer.Ordinal).ToArray());
         var pendingProblems = PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, LoadAllExpectations(ExpectationsDirectory));
         Assert.True(pendingProblems.Count == 0, "Pending removal gaps:\n  " + string.Join("\n  ", pendingProblems));
         var removals = allRemovals.Where(r => !PendingNextReleaseRemovalGaps.ContainsKey(r.Gap)).ToList();
@@ -2431,7 +2464,7 @@ public class FeatureRolePrivilegeGuardTests
         var changes = LoadRuledChanges(RuledChangesPath);
         var allReleases = LoadAllExpectations(ExpectationsDirectory);
 
-        // must-not-fire: the real files and list (no gap is pending now)
+        // must-not-fire: the real files and list (ASSIGN-3245 is pending, raised against the newest file)
         Assert.Empty(PendingRemovalProblems(allRemovals, PendingNextReleaseRemovalGaps, allReleases));
 
         // The controls below replay ISS028's history, so they keep firing while no gap is pending: raised against 1.3.1.0, before

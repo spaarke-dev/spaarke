@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Activate" />
@@ -35,6 +35,9 @@
         <Button Alt="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.Alt" Command="Spaarke.Analysis.NewAnalysisSubgrid.Command" Id="Spaarke.Analysis.NewAnalysisSubgrid.Button" Image32by32="/_imgs/ribbon/entity32_add.png" Image16by16="/_imgs/ribbon/AddNew_16.png" LabelText="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Analysis.NewAnalysisSubgrid.Button.ToolTipDescription" ModernImage="Add" />
       </CommandUIDefinition>
     </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_analysis.Assign.Hide" Location="Mscrm.Form.sprk_analysis.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Assign.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_analysis.Assign.Hide" Location="Mscrm.SubGrid.sprk_analysis.Assign" />
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>

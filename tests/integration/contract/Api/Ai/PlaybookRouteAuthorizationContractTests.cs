@@ -934,6 +934,70 @@ public class PlaybookRouteAuthorizationContractTests
         }
     }
 
+    public enum WriteDenial { NoWritePrivilege, NotOwner }
+
+    // Ordering (uac-r2 review of #3278): the authorization filters decide BEFORE the read-only guard. A caller without
+    // Write, or a non-owner, gets the usual 403 even on a playbook whose guard would refuse, and the guard is never asked
+    // (it reads the playbook and its nodes app-only, so asking it first would read for a caller who may not write).
+    [Theory]
+    [InlineData(WriteRoute.Canvas, WriteDenial.NoWritePrivilege)]
+    [InlineData(WriteRoute.Canvas, WriteDenial.NotOwner)]
+    [InlineData(WriteRoute.NodeDelete, WriteDenial.NoWritePrivilege)]
+    [InlineData(WriteRoute.NodeDelete, WriteDenial.NotOwner)]
+    public async Task Write_DeniedCaller_OnProtectedPlaybook_Is403_AndTheReadOnlyGuardIsNeverAsked(WriteRoute route, WriteDenial denial)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, route, storedIsPublic: false, requestIsPublic: false);
+        host.Nodes.Setup(n => n.EnsureCanvasSyncAllowedAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProtectedPlaybookCanvasSyncException(Guid.NewGuid(), "matter-health-single", ProtectedPlaybookReason.SystemFlag));
+        if (denial == WriteDenial.NotOwner)
+        {
+            host.Probe.HeldPrivileges.Add(WritePlaybookPrivilege);
+            host.Probe.SystemUserId = Guid.NewGuid(); // the arranged playbook is owned by another user
+        }
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        host.Nodes.Verify(n => n.EnsureCanvasSyncAllowedAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Playbooks.Verify(p => p.SaveCanvasLayoutAsync(It.IsAny<Guid>(), It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.DeleteNodeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    // D-97 / PB-08 (#1698) and #1498: after the caller passes Write and ownership, the canvas save and every per-node
+    // write route refuse a repo-deployed system playbook (409) or one the guard cannot verify (503), before any write.
+    [Theory]
+    [InlineData(WriteRoute.Canvas, ProtectedPlaybookReason.SystemFlag, HttpStatusCode.Conflict, "playbook_read_only")]
+    [InlineData(WriteRoute.NodeCreate, ProtectedPlaybookReason.SystemFlag, HttpStatusCode.Conflict, "playbook_read_only")]
+    [InlineData(WriteRoute.NodeUpdate, ProtectedPlaybookReason.NotificationType, HttpStatusCode.Conflict, "playbook_read_only")]
+    [InlineData(WriteRoute.NodeDelete, ProtectedPlaybookReason.RepoDeployedNodes, HttpStatusCode.Conflict, "playbook_read_only")]
+    [InlineData(WriteRoute.NodeScopes, ProtectedPlaybookReason.SystemFlag, HttpStatusCode.Conflict, "playbook_read_only")]
+    [InlineData(WriteRoute.Canvas, ProtectedPlaybookReason.Unverifiable, HttpStatusCode.ServiceUnavailable, "playbook_canvas_unverifiable")]
+    [InlineData(WriteRoute.NodeCreate, ProtectedPlaybookReason.Unverifiable, HttpStatusCode.ServiceUnavailable, "playbook_canvas_unverifiable")]
+    [InlineData(WriteRoute.NodeUpdate, ProtectedPlaybookReason.Unverifiable, HttpStatusCode.ServiceUnavailable, "playbook_canvas_unverifiable")]
+    [InlineData(WriteRoute.NodeDelete, ProtectedPlaybookReason.Unverifiable, HttpStatusCode.ServiceUnavailable, "playbook_canvas_unverifiable")]
+    [InlineData(WriteRoute.NodeScopes, ProtectedPlaybookReason.Unverifiable, HttpStatusCode.ServiceUnavailable, "playbook_canvas_unverifiable")]
+    public async Task Write_OnRepoDeployedSystemPlaybook_IsRefused_AndNothingIsWritten(
+        WriteRoute route, ProtectedPlaybookReason reason, HttpStatusCode expected, string errorCode)
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var request = ArrangeWriteRoute(host, route, storedIsPublic: false, requestIsPublic: false);
+        host.Probe.HeldPrivileges.Add(WritePlaybookPrivilege);
+        host.Nodes.Setup(n => n.EnsureCanvasSyncAllowedAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProtectedPlaybookCanvasSyncException(Guid.NewGuid(), "matter-health-single", reason));
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be(errorCode);
+        host.Playbooks.Verify(p => p.SaveCanvasLayoutAsync(It.IsAny<Guid>(), It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.SyncCanvasToNodesAsync(It.IsAny<CanvasSyncPermit>(), It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.CreateNodeAsync(It.IsAny<Guid>(), It.IsAny<CreateNodeRequest>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.UpdateNodeAsync(It.IsAny<Guid>(), It.IsAny<UpdateNodeRequest>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.DeleteNodeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+        host.Nodes.Verify(n => n.UpdateNodeScopesAsync(It.IsAny<Guid>(), It.IsAny<NodeScopesRequest>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
     [Theory]
     [InlineData(WriteRoute.Update)]
     [InlineData(WriteRoute.Canvas)]
@@ -1018,6 +1082,9 @@ public class PlaybookRouteAuthorizationContractTests
             .ReturnsAsync(new PlaybookResponse { Id = playbookId, Name = "Owned", IsPublic = storedIsPublic, OwnerId = systemUserId });
         var node = new PlaybookNodeDto { Id = nodeId, PlaybookId = playbookId, Name = "Node" };
         host.Nodes.Setup(n => n.GetNodeAsync(nodeId, It.IsAny<CancellationToken>())).ReturnsAsync(node);
+        // A user-authored playbook: the read-only guard (D-97 / PB-08, #1498) lets the canvas and node writes through.
+        host.Nodes.Setup(n => n.EnsureCanvasSyncAllowedAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CanvasSyncPermit(playbookId, Array.Empty<object>()));
 
         HttpRequestMessage request;
         switch (route)
@@ -1033,7 +1100,7 @@ public class PlaybookRouteAuthorizationContractTests
             case WriteRoute.Canvas:
                 host.Playbooks.Setup(p => p.SaveCanvasLayoutAsync(playbookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(new CanvasLayoutResponse { PlaybookId = playbookId });
-                host.Nodes.Setup(n => n.SyncCanvasToNodesAsync(playbookId, It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
+                host.Nodes.Setup(n => n.SyncCanvasToNodesAsync(It.Is<CanvasSyncPermit>(p => p.PlaybookId == playbookId), It.IsAny<CanvasLayoutDto>(), It.IsAny<CancellationToken>()))
                     .Returns(Task.CompletedTask);
                 request = Authenticated(HttpMethod.Put, $"/api/ai/playbooks/{playbookId}/canvas", CallerOid);
                 request.Content = JsonContent.Create(new { layout = new { } });

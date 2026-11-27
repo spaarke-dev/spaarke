@@ -339,3 +339,13 @@ GitHub issues: D-024-1 #3208, D-024-2 #3209 (filed by the main session).
 
 - Found by the #3268 adversarial review (K3). The #3268 fix wires the "User focus" block into the main analysis builders. `AiCompletionNodeExecutor`, `ClauseAnalyzer`/`EntityExtractor`/`RiskDetector` (they cache by input), `InvoiceExtraction` and `ActionRunner` still ignore it, so a rerun "with additional instructions" over those nodes does not use them.
 - Options: (a) wire each, under the same ADR-039 Path C exception; (b) say so in the reply when no node reads the focus. Owner choice; not in r2 scope.
+
+## D-037-1 — master's demo-data and grid-seed scripts read the deprecated `sprk_eventstatus` column; `EventStatusDeprecationTests` fails on master (found 2026-11-27 merging master into 037)
+
+- **Status**: needs a GitHub issue (the main session files it). Pre-existing on `origin/master` 6f4d7bc7e4; this project did not touch these files.
+- **Failure:** `Sprk.Bff.Api.Tests.Api.Events.EventStatusDeprecationTests.NoSourceFile_ReadsOrWrites_TheDeprecatedColumn` fails with three offenders:
+  - `scripts/demo-data/DemoDataLib.ps1:100` (`status = @{ Column = 'sprk_eventstatus' }`) and `scripts/demo-data/reference-names.json`, from #3243;
+  - `scripts/seed-data/reference/sprk_gridconfiguration.json` (the Events grid's filter-chip allowlist names `sprk_eventstatus`), from #3244.
+- **Failure scenario:** D-28 makes `statuscode` authoritative. The demo loader writes, and the seeded Events grid filters on, a column that the owner will remove after the task-066 inventory. When that column goes, the demo load fails and the Events grid's status chip filters on nothing. Until then, the unit suite stays red for every branch that merges master.
+- **Fix:** move both scripts to `statuscode` and its option values (`EventStatusCode`), or, if the owner wants the old column kept for the demo, list them as approved exceptions in the test.
+- **Title**: `Demo-data and Events grid seed read deprecated sprk_eventstatus (EventStatusDeprecationTests red on master)`. Labels: bug; Type=Bug.

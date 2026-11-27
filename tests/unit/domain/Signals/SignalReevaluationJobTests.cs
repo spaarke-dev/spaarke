@@ -2674,6 +2674,15 @@ public partial class SignalReevaluationJobTests
         /// <summary>Task 153: the real Decision Record writer, over the same two seams (its creates land in <see cref="WriterOrg.DecisionRecordRows"/>).</summary>
         public DecisionRecordWriter Records { get; }
 
+        /// <summary>Task 232: the scopes the job and the writer resolve their scoped services from.</summary>
+        public IServiceScopeFactory Scopes { get; }
+
+        /// <summary>Task 232: ebilling-r1's <see cref="FinanceRollupService"/> at its virtual seam, recording each recalculation the job asks
+        /// for (built on first use).</summary>
+        public RollupRecorder Rollup => _rollup ??= new RollupRecorder();
+
+        private RollupRecorder? _rollup;
+
         public Harness(DateTimeOffset? runAt = null, string? writerClientId = null, IDistributedCache? cache = null)
         {
             Cache = cache ?? new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
@@ -2701,7 +2710,10 @@ public partial class SignalReevaluationJobTests
             services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SecureChildReconciler(
                 Sysadmin, Ownership, sp.GetRequiredService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>(), ReownApi,
                 configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing));
+            // Task 232: the job resolves ebilling-r1's scoped FinanceRollupService per pass; here its virtual seam (Rollup).
+            services.AddScoped<FinanceRollupService>(_ => Rollup);
             var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+            Scopes = scopes;
             Writer = new SignalWriter(writerClient, Sysadmin,
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
@@ -2716,7 +2728,7 @@ public partial class SignalReevaluationJobTests
                 Sysadmin,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
                 Clock, Logger<DecisionRecordWriter>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
-            Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
+            Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Records, Sysadmin, Cache, scopes, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
         }

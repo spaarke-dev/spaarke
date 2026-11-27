@@ -5,62 +5,81 @@
   "match": "naturalKey",
   "naturalKey": "sprk_practiceareacode",
   "nameColumn": "sprk_practiceareaname",
+  "lookups": [
+    {
+      "column": "sprk_defaultbillingcodeset",
+      "navigationProperty": "sprk_DefaultBillingCodeSet",
+      "targetTable": "sprk_billingcodeset",
+      "targetEntitySet": "sprk_billingcodesets"
+    }
+  ],
   "columns": ["sprk_practiceareacode", "sprk_practiceareaname"],
   "rows": [
     {
       "sprk_practicearea_refid": "b41377db-690e-f111-8342-7c1e520aa4df",
       "sprk_practiceareacode": "APPL",
-      "sprk_practiceareaname": "Appellate"
+      "sprk_practiceareaname": "Appellate",
+      "sprk_defaultbillingcodeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63"
     },
     {
       "sprk_practicearea_refid": "ad1b61ed-690e-f111-8342-7c1e520aa4df",
       "sprk_practiceareacode": "IPPAT",
-      "sprk_practiceareaname": "Intellectual Property Patents"
+      "sprk_practiceareaname": "Intellectual Property Patents",
+      "sprk_defaultbillingcodeset": "e7e15ea4-c626-56ec-ba47-fa2d069f72b4"
     },
     {
       "sprk_practicearea_refid": "1aa910f8-690e-f111-8342-7c1e520aa4df",
       "sprk_practiceareacode": "IPTM",
-      "sprk_practiceareaname": "Intellectual Property Trademarks"
+      "sprk_practiceareaname": "Intellectual Property Trademarks",
+      "sprk_defaultbillingcodeset": "b80f82de-21b2-5251-8985-931010ea2971"
     },
     {
       "sprk_practicearea_refid": "02169213-6a0e-f111-8342-7c1e520aa4df",
       "sprk_practiceareacode": "MA",
-      "sprk_practiceareaname": "Mergers & Acquisitions"
+      "sprk_practiceareaname": "Mergers & Acquisitions",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_practicearea_refid": "b371e9c1-690e-f111-8342-7ced8d1dc988",
       "sprk_practiceareacode": "BNKF",
-      "sprk_practiceareaname": "Banking & Finance"
+      "sprk_practiceareaname": "Banking & Finance",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_practicearea_refid": "f6523f00-6a0e-f111-8342-7ced8d1dc988",
       "sprk_practiceareacode": "CTRNS",
-      "sprk_practiceareaname": "Commercial Transactions"
+      "sprk_practiceareaname": "Commercial Transactions",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_practicearea_refid": "9d25d536-a844-4c41-8aa8-8b3c51d7a9df",
       "sprk_practiceareacode": "LITDISP",
-      "sprk_practiceareaname": "Litigation & Disputes"
+      "sprk_practiceareaname": "Litigation & Disputes",
+      "sprk_defaultbillingcodeset": "643a70a0-6572-5cf0-baa5-dc6fd4d9ed63"
     },
     {
       "sprk_practicearea_refid": "fe9e929b-a204-4031-89e9-daf162d50b89",
       "sprk_practiceareacode": "EMPLAB",
-      "sprk_practiceareaname": "Employment & Labor"
+      "sprk_practiceareaname": "Employment & Labor",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     },
     {
       "sprk_practicearea_refid": "324c268f-7d9b-4c98-a60d-a072fe013ba9",
       "sprk_practiceareacode": "REALEST",
-      "sprk_practiceareaname": "Real Estate"
+      "sprk_practiceareaname": "Real Estate",
+      "sprk_defaultbillingcodeset": "66cd4a35-5663-591e-979f-e02874bdbefe"
     },
     {
       "sprk_practicearea_refid": "b9be6dec-97bf-4f34-b160-1d1fc8bfcf95",
       "sprk_practiceareacode": "REGULAT",
-      "sprk_practiceareaname": "Regulatory"
+      "sprk_practiceareaname": "Regulatory",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     },
     {
       "sprk_practicearea_refid": "c63c1440-692f-4fe1-b305-d800ed8785a5",
       "sprk_practiceareacode": "PRIVCYB",
-      "sprk_practiceareaname": "Privacy & Cybersecurity"
+      "sprk_practiceareaname": "Privacy & Cybersecurity",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     },
     {
       "sprk_practicearea_refid": "5142ddad-fbbe-41f9-a3a5-f824f1f1c028",
@@ -75,7 +94,8 @@
     {
       "sprk_practicearea_refid": "4af78076-9b58-46d8-8252-e9b59fb07b71",
       "sprk_practiceareacode": "CORPGOV",
-      "sprk_practiceareaname": "Corporate Governance"
+      "sprk_practiceareaname": "Corporate Governance",
+      "sprk_defaultbillingcodeset": "9adb2c71-6339-5849-ba7f-347cf625a851"
     }
   ]
 }

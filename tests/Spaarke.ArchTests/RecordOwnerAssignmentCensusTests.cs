@@ -496,9 +496,6 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "RequireArtifactOwner", Refusal),
-        // b2 merge (task 152 extracted the payload builder): the refusal lives in the builder, so no payload without an
-        // owner is ever built (its CreateEventAsync POST was deleted by field-mapping task 031; no production caller is left).
-        new OwnerSeam("DataverseWebApiService.cs", "BuildCreateEventPayload", Refusal),
         // r2 (verifier items 3 and 15): a builder must REFUSE an empty team AND BIND the team it was handed — dropping the
         // bind used to pass every test, leaving the external create owned by the BFF application user.
         new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", RefusesAndBindsTheOwner),
@@ -619,8 +616,6 @@ public class RecordOwnerAssignmentCensusTests
             "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
         new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", 1, OwnerWriteKind.Seam,
             "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
-        new OwnerWriteEntry("DataverseWebApiService.cs", "BuildCreateEventPayload", 1, OwnerWriteKind.Seam,
-            "CreateEventRequest.OwningTeamId — throws without it (task 152 extracted it; its CreateEventAsync POST was deleted by field-mapping task 031)."),
         new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventLogAsync", 1, OwnerWriteKind.Seam,
             "The owner EventEndpoints resolved as content of the event; null only when the resolver answered Unchanged."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildDocumentCreatePayload", 1, OwnerWriteKind.Seam,
@@ -3153,7 +3148,6 @@ public class RecordOwnerAssignmentCensusTests
         // R3 task 034 (FR-11): the external thread post stamps its resolved author (StampCreator) on the sprk_communication it creates.
         new PersonBearingWriter("CommunicationService.cs", "PostToRecordThreadAsync", "the external-plane author (StampCreator)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
-        new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
         // ebilling-r1 task 081 (procedure model 13, O-23): the calling admin creates Procedures, their versions and the copied policy
         // versions, and RuleSetService's uploads and drafts. EB-D-168a: both services ask through RuleSetService's two questions — the

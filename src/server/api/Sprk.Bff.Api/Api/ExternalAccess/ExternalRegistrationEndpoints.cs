@@ -163,6 +163,13 @@ public static class ExternalRegistrationEndpoints
             return NotInvited();
         }
 
+        // A link or contact lookup that could not be answered right now (R4 task 043, FR-28): retryable, like this route's
+        // own binder faults below and like /me, never a 403 (ADR-028: an indeterminate result is not a denial).
+        if (CallerPrincipalResolution.IsBinderFault(resolution.DenyCode))
+        {
+            return Problem(StatusCodes.Status503ServiceUnavailable, ErrorUnavailable, "Nothing was registered; try again.");
+        }
+
         if (resolution.DenyCode != WorkforcePrincipalResolver.DenyRegistrationRequired)
         {
             return Problem(StatusCodes.Status403Forbidden, resolution.DenyCode, "Your account cannot be registered.");

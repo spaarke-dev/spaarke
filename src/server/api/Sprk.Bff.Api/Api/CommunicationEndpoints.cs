@@ -347,9 +347,10 @@ public static class CommunicationEndpoints
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Archive)
             .WithName("ArchiveCommunication")
-            .WithDescription("Archive an existing communication to SharePoint on demand (.eml Document + a Document per attachment). Idempotent — a communication already archived returns AlreadyArchived without duplicating. The caller must see the communication (404 otherwise), hold AppendTo on it and the Create privilege on sprk_document (403 otherwise).")
+            .WithDescription("Archive an existing communication to SharePoint on demand (.eml Document + a Document per attachment). Idempotent — a communication already archived returns AlreadyArchived without duplicating; while another archive of it is in progress (the post-send job), 409 archive_in_progress. The caller must see the communication (404 otherwise), hold AppendTo on it and the Create privilege on sprk_document (403 otherwise).")
             .Produces<ArchiveCommunicationResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/{id:guid}/suggest-associations", SuggestAssociationsAsync)
@@ -887,7 +888,9 @@ public static class CommunicationEndpoints
     {
         // Task 146 c1-r1 (owner round 13 item 9): the caller asked for the archive documents the application creates.
         var result = await communicationService.ArchiveExistingAsync(
-            id, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
+            id, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User),
+            // ISS-010 part E (Q3): the request holds the archive lock; another archive of the same email in flight is a 409 archive_in_progress.
+            archiveLockOwner: httpContext.TraceIdentifier);
         return TypedResults.Ok(result);
     }
 

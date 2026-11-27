@@ -20,6 +20,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Services.Events;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
@@ -28,7 +29,6 @@ using Sprk.Bff.Api.Tests.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
-using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -79,76 +79,42 @@ public class EventEndpointsMembershipPublishingTests
     }
 
     [Fact]
-    public void CreateEventPayload_WithAnAssignee_BindsSprkAssignedToTheContact()
+    public void CreateEventPayload_WithAnAssignee_WritesSprkAssignedToAsAContactLookup()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest
-            {
-                Name = "Hearing",
-                AssignedToContactId = ActingUsersContactId,
-                OwningTeamId = OwnerEventTestKit.TeamId,
-            });
+        var payload = EventsCapability.BuildCreatePayload(
+            new ApiCreateEventRequest("Hearing"), regarding: null, assignedToContactId: ActingUsersContactId);
 
-        payload.Should().ContainKey("sprk_AssignedTo@odata.bind")
-            .WhoseValue.Should().Be($"/contacts({ActingUsersContactId:D})");
+        payload.Should().ContainKey("sprk_assignedto").WhoseValue.Should().BeEquivalentTo(
+            new Dictionary<string, object?>
+            {
+                ["relatedTable"] = "contact",
+                ["recordId"] = ActingUsersContactId.ToString("D"),
+            });
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void CreateEventPayload_WithNoAssignee_WritesNoAssignedToBind(bool emptyGuid)
+    public void CreateEventPayload_WithNoAssignee_WritesNoAssignedTo(bool emptyGuid)
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest
-            {
-                Name = "Hearing",
-                AssignedToContactId = emptyGuid ? Guid.Empty : null,
-                OwningTeamId = OwnerEventTestKit.TeamId,
-            });
+        var payload = EventsCapability.BuildCreatePayload(
+            new ApiCreateEventRequest("Hearing"), regarding: null, assignedToContactId: emptyGuid ? Guid.Empty : null);
 
-        payload.Keys.Should().NotContain(k => k.StartsWith("sprk_AssignedTo", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void CreateEventPayload_WithNoOwner_Refuses_NoPayloadIsBuilt(bool emptyGuid)
-    {
-        // Task 146: the app-only create never leaves the row app-owned — no owner, no payload, nothing sent.
-        var build = () => DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest { Name = "Hearing", OwningTeamId = emptyGuid ? Guid.Empty : null });
-
-        build.Should().Throw<InvalidOperationException>().WithMessage("*OwningTeamId*");
+        payload.Keys.Should().NotContain(k => k.StartsWith("sprk_assignedto", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void CreateEventPayload_BindsTheResolvedTeamAsOwner()
+    public void CreateEventPayload_CarriesNoOwnerAndNoCreatorPerson_BecauseTheServiceOwnsBoth()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest { Name = "Hearing", OwningTeamId = OwnerEventTestKit.TeamId });
+        // The route's payload names neither column: RecordCreationService resolves the owner record-first (ResolveOwnerAsync)
+        // and stamps the creator person from the owner decision, so no caller-built payload can leave an event app-owned.
+        var payload = EventsCapability.BuildCreatePayload(
+            new ApiCreateEventRequest("Hearing"), regarding: null, assignedToContactId: ActingUsersContactId);
 
-        payload.Should().ContainKey("ownerid@odata.bind").WhoseValue.Should().Be($"/teams({OwnerEventTestKit.TeamId})");
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void CreateEventPayload_BindsThePersonWhoAsked_OnlyWhenThereIsOne(bool hasPerson)
-    {
-        // Task 146 c1-r1 (owner round 13 item 9): the app-only create records the person; a writer for nobody records nobody.
-        var person = Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000e1");
-        var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest
-            {
-                Name = "Hearing",
-                OwningTeamId = OwnerEventTestKit.TeamId,
-                CreatedByPersonId = hasPerson ? person : null,
-            });
-
-        if (hasPerson)
-            payload.Should().ContainKey("sprk_CreatedByPerson@odata.bind").WhoseValue.Should().Be($"/systemusers({person:D})");
-        else
-            payload.Keys.Should().NotContain(k => k.StartsWith("sprk_CreatedByPerson", StringComparison.OrdinalIgnoreCase));
+        payload.Keys.Should().NotContain(k =>
+            k.StartsWith("ownerid", StringComparison.OrdinalIgnoreCase)
+            || k.StartsWith("sprk_CreatedByPerson", StringComparison.OrdinalIgnoreCase)
+            || k.StartsWith("sprk_createdbyperson", StringComparison.OrdinalIgnoreCase));
     }
 
     // ── ADR-034 A3: the owner event names the row's REAL owner — the team the create wrote (task 146) ─────────

@@ -484,12 +484,41 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             message.JobId,
             cancellationToken);
 
+        // Task 141 review (F2): the create loop above logs and swallows a failed attachment (an SPE upload or row create that
+        // failed, an owner team that could not be resolved), so whether the add worked is read from what is STORED: every name
+        // it was queued with must now have a child under the .eml.
+        var notCreated = await AttachmentNamesWithoutAChildAsync(
+            emlDocumentId, payload.EmailMetadata?.SelectedAttachmentFileNames, cancellationToken);
+
         await MarkAsProcessedAsync(message.IdempotencyKey, emlDocumentId, cancellationToken);
+
+        if (notCreated.Count > 0)
+        {
+            // Recorded, not retried: the job ends Failed with the names not created, and the status read reports this
+            // stage (OfficeJobStatusService.ToEffectiveView), so the pane re-reads what is saved and shows those as unsaved.
+            // The message itself is done: saving them again is a new add, which creates only what is still missing.
+            _logger.LogWarning(
+                "Attachments-only finalization for job {JobId} under .eml document {DocumentId} did not create {Count} of "
+                + "the attachment(s) it was queued with",
+                message.JobId,
+                emlDocumentId,
+                notCreated.Count);
+            await UpdateJobStatusAsync(
+                message.JobId,
+                JobStatus.Failed,
+                EmailAttachmentAddPlanner.AttachmentsIncompletePhase,
+                100,
+                cancellationToken,
+                emlDocumentId,
+                errorCode: EmailAttachmentAddPlanner.AttachmentsNotCreatedErrorCode,
+                errorMessage: NotCreatedMessage(notCreated));
+            return JobOutcome.Success();
+        }
 
         await UpdateJobStatusAsync(
             message.JobId,
             JobStatus.Completed,
-            "AttachmentsAdded",
+            EmailAttachmentAddPlanner.AttachmentsAddedPhase,
             100,
             cancellationToken,
             emlDocumentId);
@@ -500,6 +529,48 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             emlDocumentId);
 
         return JobOutcome.Success();
+    }
+
+    /// <summary>
+    /// Task 141 review (F2): the names in <paramref name="queuedNames"/> that have no child document under
+    /// <paramref name="emlDocumentId"/> (<see cref="EmailAttachmentAddPlanner.IsAlreadySaved"/>, the rule the add was planned
+    /// by). A read that fails cannot confirm any of them, so it returns them all.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> AttachmentNamesWithoutAChildAsync(
+        Guid emlDocumentId,
+        IReadOnlyCollection<string>? queuedNames,
+        CancellationToken cancellationToken)
+    {
+        var names = (queuedNames ?? Array.Empty<string>())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count == 0)
+        {
+            return names;
+        }
+
+        try
+        {
+            var children = (await _documentService.GetDocumentsByParentAsync(emlDocumentId, cancellationToken)).ToList();
+            return names.Where(name => !children.Any(child => EmailAttachmentAddPlanner.IsAlreadySaved(child, name))).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not read the children of .eml document {DocumentId} after adding attachments; recording none as added",
+                emlDocumentId);
+            return names;
+        }
+    }
+
+    /// <summary>The <c>sprk_errormessage</c> of an add that did not create every attachment: the names, bounded in length.</summary>
+    private static string NotCreatedMessage(IReadOnlyList<string> notCreated)
+    {
+        const int MaxLength = 1_000;
+        var message = $"Not added: {string.Join(", ", notCreated)}";
+        return message.Length <= MaxLength ? message : message[..(MaxLength - 1)] + "…";
     }
 
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)

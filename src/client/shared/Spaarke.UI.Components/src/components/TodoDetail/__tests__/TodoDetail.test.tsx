@@ -17,7 +17,7 @@ import * as path from 'path';
 import * as React from 'react';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import { TodoDetail, TODO_ASSIGNED_TO_ENTITY_SET } from '../TodoDetail';
+import { TodoDetail, TODO_ASSIGNED_TO_ENTITY_SET, INQUIRY_TODO_CLOSE_MESSAGE } from '../TodoDetail';
 import type { ITodoRecord, ITodoFieldUpdates } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -386,5 +386,74 @@ describe('TodoDetail — open regarding record', () => {
     record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] = 'Unknown type';
     await openRegarding(record, onOpenRegardingUrl);
     expect(onOpenRegardingUrl).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Ontology task 228 (#1984, D-111): an open budget inquiry's To Do is completed only by recording the outcome.
+// The BFF refuses Complete and Dismiss with 409 `inquiry.disposition_required`; the pane says so in plain words.
+// ─────────────────────────────────────────────────────────────────────
+
+describe("TodoDetail — an open inquiry's To Do (409 inquiry.disposition_required)", () => {
+  const refused = { success: false, error: 'Conflict (HTTP 409).', reasonCode: 'inquiry.disposition_required' };
+
+  function renderPane(onSaveTodo: jest.Mock, onDismissTodo?: jest.Mock) {
+    renderWithProviders(
+      <TodoDetail
+        record={baseRecord}
+        isLoading={false}
+        error={null}
+        onSaveTodo={onSaveTodo}
+        onDismissTodo={onDismissTodo}
+        onSearchContacts={noopSearch}
+      />
+    );
+  }
+
+  it('Complete refused: shows plain words pointing to recording the outcome, not the raw error', async () => {
+    renderPane(jest.fn().mockResolvedValue(refused));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Complete/i }));
+    });
+
+    expect(await screen.findByText(INQUIRY_TODO_CLOSE_MESSAGE)).toBeInTheDocument();
+    expect(INQUIRY_TODO_CLOSE_MESSAGE).toMatch(/record the outcome/i);
+    expect(screen.queryByText('Conflict (HTTP 409).')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Complete$/i })).toBeEnabled();
+  });
+
+  it('Complete refused by a thrown BFF write error carrying the reason code: the same words', async () => {
+    const thrown = Object.assign(new Error('409'), { status: 409, reasonCode: 'inquiry.disposition_required' });
+    renderPane(jest.fn().mockRejectedValue(thrown));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Complete/i }));
+    });
+
+    expect(await screen.findByText(INQUIRY_TODO_CLOSE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('Dismiss refused: the same words', async () => {
+    renderPane(jest.fn().mockResolvedValue({ success: true }), jest.fn().mockResolvedValue(refused));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Dismiss/i }));
+    });
+
+    expect(await screen.findByText(INQUIRY_TODO_CLOSE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("any other refusal still shows the host's own error text", async () => {
+    renderPane(
+      jest.fn().mockResolvedValue({ success: false, error: 'Network down', reasonCode: 'child_record.denied' })
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Complete/i }));
+    });
+
+    expect(await screen.findByText('Network down')).toBeInTheDocument();
+    expect(screen.queryByText(INQUIRY_TODO_CLOSE_MESSAGE)).not.toBeInTheDocument();
   });
 });

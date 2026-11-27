@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Signals;
@@ -110,6 +111,16 @@ public interface IRecordProcedureDecisionEnqueuer
 public sealed record BillingDecisionRecordResult(Guid RecordId, bool AlreadyRecorded, RecordedDecisionClass RecordClass);
 
 /// <summary>
+/// Stable <see cref="EventId"/>s of <see cref="BillingDecisionRecorder"/> (#3276), in the ontology / billing range that
+/// <c>OntologyEventIdUniquenessGuardTests</c> keeps unique (50332 is free: 50330-50331 are the Signals core-pair read). Ids only in the message.
+/// </summary>
+public static class BillingDecisionRecorderEvents
+{
+    /// <summary>Warning: the decision is recorded, but the inline share of its secure Decision Record failed, was incomplete or threw; the reconcile completes it.</summary>
+    public static readonly EventId ShareIncomplete = new(50332, nameof(ShareIncomplete));
+}
+
+/// <summary>
 /// ebilling-r1 task 074 (spec FR-30; D-75, D-100, D-101): the ONE Finance-side owner of a billing decision's Decision Record. The line
 /// decisions (100), approve (103), reject and return (104), override (105) and the automatic rejection (049) call it, so each builds the same
 /// request and none can pair a code with the wrong subject table or a system decision with a confirmer.
@@ -128,19 +139,31 @@ public sealed record BillingDecisionRecordResult(Guid RecordId, bool AlreadyReco
 /// ontology-owned and must stay subject-agnostic about billing callers; the code-to-table mapping and the decider shape are the eBilling
 /// callers' contract, so they live here. Cost of doing nothing: five callers would each build the request, and one that passed a confirmer
 /// for a system decision, or a line code with the invoice id, would be refused at run time after the invoice had already changed.</para>
+/// <para><b>Inline share (#3276, DI-178).</b> A Decision Record the writer places under the Secure Record Owners team (a secure child), and a
+/// record found already written, is shared with the secure family's sharees before <see cref="RecordAsync"/> or <see cref="RecordProcedureAsync"/>
+/// returns, so they do not wait for the two-minute reconcile. It is the rule of <c>DecisionCommitService.ShareSecureRecordAsync</c> (PR #3270),
+/// applied here after the writer returns: app-only, never throws, never fails or undoes the decision. <b>Component justification (CLAUDE.md
+/// section 11):</b> no new service, endpoint, registration or package; the constructor takes an already-registered framework
+/// <see cref="IServiceScopeFactory"/> (the recorder is a singleton and the synchronizer is scoped, so it is resolved in a fresh scope per share).</para>
 /// </remarks>
 public sealed class BillingDecisionRecorder
 {
     private readonly DecisionRecordWriter _writer;
     private readonly IIdentityNormalizationService _identity;
     private readonly ILogger<BillingDecisionRecorder> _logger;
+    private readonly IServiceScopeFactory? _scopes;
 
     /// <param name="writer">The Decision Record writer's billing entry.</param>
     /// <param name="identity">The deciding user's linked internal contact (the user's <c>sprk_primarycontact</c>, else the contact bound to
     /// their Entra oid): the identity service the commit route reads it from (D-129).</param>
     /// <param name="logger">A decider with no linked contact, or a contact that could not be read.</param>
-    public BillingDecisionRecorder(DecisionRecordWriter writer, IIdentityNormalizationService identity, ILogger<BillingDecisionRecorder> logger)
+    /// <param name="scopes">The host's scope factory (a framework service, already registered), so each inline share resolves the scoped
+    /// <see cref="SecureChildShareSynchronizer"/> in a fresh scope. Null (a unit-test composition): no inline share is attempted, which
+    /// is the behaviour before #3276; the production host always supplies it (pinned by <c>BillingDecisionRecorderRegistrationTests</c>).</param>
+    public BillingDecisionRecorder(
+        DecisionRecordWriter writer, IIdentityNormalizationService identity, ILogger<BillingDecisionRecorder> logger, IServiceScopeFactory? scopes = null)
     {
+        _scopes = scopes;
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -163,6 +186,7 @@ public sealed class BillingDecisionRecorder
             ? token => DeciderContactAsync(user, DecisionRecordRefusalReason.BillingRecordLookupFailed, "Billing decision", token)
             : null;
         var result = await _writer.WriteBillingDecisionAsync(request, contact, ct).ConfigureAwait(false);
+        await ShareSecureRecordAsync(result, decision.DecisionId, "Billing decision").ConfigureAwait(false);
         return new BillingDecisionRecordResult(result.RecordId, result.AlreadyRecorded, result.RecordClass);
     }
 
@@ -183,8 +207,60 @@ public sealed class BillingDecisionRecorder
             ? token => DeciderContactAsync(decision.DeciderSystemUserId, DecisionRecordRefusalReason.RecordProcedureLookupFailed, "Procedure change", token)
             : null;
         var result = await _writer.WriteRecordProcedureDecisionAsync(request, contact, ct).ConfigureAwait(false);
+        await ShareSecureRecordAsync(result, decision.DecisionId, "Procedure change").ConfigureAwait(false);
         return new BillingDecisionRecordResult(result.RecordId, result.AlreadyRecorded, result.RecordClass);
     }
+
+    /// <summary>
+    /// #3276 (DI-178; the rule of <c>DecisionCommitService.ShareSecureRecordAsync</c>, ontology task 225, D-229): the inline share of ONE
+    /// Decision Record this recorder wrote or found, through uac-r2's per-child mirror
+    /// (<see cref="SecureChildShareSynchronizer.SyncChildAsync"/>, app-only, <see cref="CancellationToken.None"/>: the decision is already
+    /// committed, so a caller that went away must not leave the record unshared). Called only after the writer has returned, so the record
+    /// and its owner are committed and the synchronizer decides from the stored row. The id is always the writer's
+    /// <see cref="DecisionRecordWriteResult.RecordId"/>, never a caller's.
+    /// <para>It shares when the record was written now AND is owned by the Secure Record Owners team, or when the record already existed (a
+    /// retry may follow an attempt that stopped before its share; <c>SyncChildAsync</c> answers NotApplicable for a row the Secure team does
+    /// not own). An ordinary record makes no share call. Never throws and never fails or undoes the decision: a <c>Failed</c> or
+    /// <c>Incomplete</c> answer and any fault are logged (ids and status only) and left to the two-minute reconcile, the backstop.</para>
+    /// <para>The synchronizer is scoped and this recorder is a singleton, so it is resolved from a fresh scope per share, disposed after it.</para>
+    /// <para><b>Cost (known limit, review 2026-11-26).</b> A first-time ordinary record makes no call. A secure record costs one per-child
+    /// mirror, the work the reconcile would otherwise do for it. A retry of an already-recorded record costs the synchronizer's ownership
+    /// reads (about three) even when the row is ordinary, because only the stored row can say. The line-decision loop records at most
+    /// <see cref="InvoiceLineDecisionService.MaxLinesPerRequest"/> lines per request, so this is bounded and proportional to the writer's own
+    /// per-line reads.</para>
+    /// <para><b>Why this wrapper is not shared with the commit route's.</b> The rule itself is uac-r2's (<c>SyncChildAsync</c>); what is
+    /// repeated here is only the log-and-swallow around it, and its gate reads a different answer (the writer's
+    /// <see cref="DecisionRecordWriteResult.SecureOwnerTeamId"/>, not the commit route's owner resolution). Sharing it would mean editing
+    /// the ontology-owned <c>DecisionCommitService</c>, which another open change is editing.</para>
+    /// </summary>
+    private async Task ShareSecureRecordAsync(DecisionRecordWriteResult result, Guid decisionId, string what)
+    {
+        if (_scopes is null || (result.SecureOwnerTeamId is null && !result.AlreadyRecorded))
+        {
+            return;
+        }
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var shares = scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>();
+            var shared = await shares.SyncChildAsync(DecisionRecordTable, result.RecordId, CancellationToken.None).ConfigureAwait(false);
+            if (shared.Status is SecureChildShareSyncStatus.Failed or SecureChildShareSyncStatus.Incomplete)
+            {
+                _logger.LogWarning(BillingDecisionRecorderEvents.ShareIncomplete,
+                    "{What}: decision {DecisionId} recorded as {RecordId}; the secure record's sharees were not mirrored ({Status}: {Detail}); the reconcile completes it.",
+                    what, decisionId, result.RecordId, shared.Status, shared.Detail);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(BillingDecisionRecorderEvents.ShareIncomplete, ex,
+                "{What}: decision {DecisionId} recorded as {RecordId}; the secure record's share stopped; the reconcile completes it.",
+                what, decisionId, result.RecordId);
+        }
+    }
+
+    private const string DecisionRecordTable = "sprk_decisionrecord";
 
     /// <summary>Every refusal <see cref="RecordProcedureAsync"/> can give without I/O (task 084h-2: the Procedure service runs it before its
     /// transaction). Reads and writes nothing.</summary>
