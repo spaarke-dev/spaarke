@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="143" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Save attachments without the email, and add attachments to a saved email that is not filed to a record</title>
+    <phase>Phase 7: fixes before close (owner Outlook check of task 141, 2026-11-27)</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF authorization rule change on the Office save add path, an identity-route read extension, and pane UI over SaveFlow; tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes who may add under which saved email (an authorization rule) and the identity read; two subsystems.</model-tier-reason>
+    <effort>high</effort>
+    <deps>141</deps>
+    <tags>office-addins, react, fluent-ui, bff-api, authorization</tags>
+  </metadata>
+
+  <prompt>Owner's Outlook check of task 141, 2026-11-27. An email saved with no record showed "Saved to Spaarke", "Not filed to a record yet.", a yellow "Unsaved attachments" warning, and its .docx attachment with neither a saved mark nor a checkbox, and no Save. The heading was the email's subject, "Document: …", which read as if the attachment were the saved item.
+
+Cause: task 141's add of unsaved attachments under a saved .eml needs a filed record, on both sides:
+- pane: `SaveFlow.tsx` `renderSavedEmailAttachments`, `canAdd = view.record !== null && view.savedNames !== undefined`; `resolvedAttachmentsViewOf` sets `record` only when the resolved related record is associated;
+- server: `EmailAttachmentAddPlanner.IsFiledTo` returns false when the request has no target, so the planner answers `NotFiledToTheRecord` (403 OFFICE_009).
+
+Owner ruling, 2026-11-27 (verbatim): "we do want to be able to save an attachment even if the email is not saved (a user might receive a file and the email is not important); also a Document (file) does not need to be associated to a record (i.e., can be just a Document (file)". Owner then approved this task's four parts: "Yes, start 143".
+
+What already exists (checked 2026-11-27 on master d9595dd98e, line numbers approximate):
+- A save with no record is accepted (`OfficeEndpoints.ValidateSaveRequest`: "Association (TargetEntity) is optional").
+- The server has a single-attachment save, `SaveContentType.Attachment` (task 130): `OfficeService` ~:475 enriches the attachment, ~:705 captures the parent email's `sprk_communication` from the request's parent email (owner decision 2026-10-20: saving one attachment files the parent email to the record exactly as saving the email would), ~:1117 uploads `Attachment.ContentBase64`.
+- The Outlook pane never sends it: `useSaveFlow.ts` ~:1258 "Outlook always saves as Email".
+- The identity lookup (`DocumentUrlIdentityResolution.cs` ~:400-450) finds only the email archive (`sprk_isemailarchive = true` and the Message-ID); task 141's `savedAttachmentNames` lists only the .eml's children.</prompt>
+
+  <goal>In Outlook a user can (1) save only the ticked attachments of an email, without the email file, with or without a record; (2) add unsaved attachments to an already-saved email that is not filed to a record; (3) reopen the email and see every attachment saved either way marked as saved; and (4) see clearly that the saved card is the email.</goal>
+
+  <constraints>
+    <constraint source="owner 2026-11-27">Part 1, attachment-only save. On a first save in Outlook, a "Save the email" checkbox, ticked by default (today's behaviour unchanged when ticked). Unticked: each ticked attachment is saved as its own document through the EXISTING `SaveContentType.Attachment` path, with the picked record or none. At least one attachment must be ticked when the email is unticked; Save is disabled otherwise. The attachment bytes come from the pane (Office.js), never a server-only Graph fetch: guests' mailboxes are in their home directory (project CLAUDE.md, task 116). Check what the server's attachment path needs for the parent email's capture when the server cannot read the mailbox, and send that from the pane. If the attachment path cannot work without a server Graph read, STOP and report (escalation).</constraint>
+    <constraint source="owner 2026-11-27">Part 2, add under an unfiled saved email. The planner's filing rule becomes: the add's record must be the record the .eml is filed to, and "no record" matches only an .eml filed to no save-target record. Never add under an .eml filed to a record when the request names none, or names another. The children follow the .eml's filing (none). Everything else on the named add stays: Write on the named .eml (`OfficeVersionSaveAuthorizationFilter`), the Message-ID match, the submission refusal, the container guard (a no-record add resolves the caller's container; it must equal the .eml's drive, else refused). The pane offers the checkboxes and Save for an unfiled saved email when the server sends `savedAttachmentNames`. This is an authorization change: name it in the ADR-008 A1 row task 141 updated.</constraint>
+    <constraint source="owner 2026-11-27">Part 3, saved marks for attachment-only saves. Reopening an email whose attachments were saved on their own (no .eml) shows those attachments as saved. The identity route reports them: an additive extension that also lists the caller-readable attachment documents linked to this email's communication (by its Message-ID) that are not the archive. Use task 141's batched read check (`InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync`) and its name rule (`IsAlreadySaved`); one matcher, no second one. When there is no saved .eml, the pane stays in first-save mode, with those attachments marked saved and not offered again. The same failure rule as 141: a read fault or system deny omits the field, never claims "unsaved".</constraint>
+    <constraint source="owner 2026-11-27">Part 4, heading. The saved card says it is the email (for example an "Email" label before the subject, or "Email saved to Spaarke"), so a subject that starts with "Document:" is not read as the attachment. Keep task 141's compact layout.</constraint>
+    <constraint source="project">An attachment saved both on its own and later as a child of a saved .eml is not prevented by this task beyond the pane marking it saved. Say in the notes whether the planner should also skip names saved standalone; do not change the planner's child rule without saying why.</constraint>
+    <constraint source="project">Coordination (project CLAUDE.md, fm W3 direction): do not change `OfficeDocumentPersistence`, `UploadFinalizationWorker`, `RecordTableRules` or the attachment save's create path. If parts 1-3 need a change there, STOP and report. Do not edit TASK-INDEX.md, current-task.md, any CLAUDE.md, `.claude/` or ci-gated-suites.txt.</constraint>
+    <constraint source="ADR-021 / ADR-044">Fluent v9 only; every icon-only control has an accessible name; GUIDs through `cleanGuid` before they leave the client.</constraint>
+    <constraint source="BFF hygiene (§10)">Publish-size delta against a fresh master build; `dotnet list package --vulnerable`; no new package; no new route (additive fields only).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file>src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file>src/client/office-addins/shared/taskpane/services/documentIdentityService.ts</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/EmailAttachmentAddPlanner.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeEmailEnricher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/DocumentEmailIdentityFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Fail-before tests: a planner test where a no-record add under an unfiled .eml is refused today; an identity test where an attachment-only saved document is not reported; a jest test where an unfiled saved email offers no checkbox, and where the first save cannot untick the email.</step>
+    <step>Server: the planner's filing rule (part 2) and the identity extension (part 3); confirm what the attachment save needs from the pane for a guest (part 1).</step>
+    <step>Pane: the "Save the email" checkbox and attachment-only requests (part 1), the unfiled add (part 2), saved marks in first-save mode (part 3), the heading (part 4).</step>
+    <step>Gates: BFF build 0 warnings, affected classes, ArchTests; office-addins jest (shared/taskpane), typecheck baseline 68 with none in changed files, ESLint/Prettier, production webpack build with the CI env; publish delta; vulnerable packages. List new test files for the gate list.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">First save in Outlook, "Save the email" unticked, two attachments ticked, no record: two documents are created, no .eml; the pane reports them saved. With a record picked, both are filed to it. "Save the email" ticked: today's request, unchanged.</criterion>
+    <criterion testable="true">An unfiled saved email with an unsaved attachment shows that attachment with a checkbox and Save; Save adds it as a child of the .eml, unfiled, and the warning clears.</criterion>
+    <criterion testable="true">Negative (server): a no-record add under an .eml filed to a record is refused 403 with no child; an add naming record A under an .eml filed to B is refused; a caller without Write on the .eml is refused; a caller whose resolved container differs from the .eml's gets no child.</criterion>
+    <criterion testable="true">Reopening an email whose attachment was saved on its own shows it as saved and not tickable; an attachment the caller cannot read is not reported; a read fault omits the field and the pane makes no saved/unsaved claim.</criterion>
+    <criterion testable="true">The saved card names itself as the email; a subject starting with "Document:" is shown as the email's subject.</criterion>
+    <criterion testable="true">Task 141's flows (filed add, saved marks, "Save again as a new document") and Word saves keep working.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The attachment-only save needs a server Graph read of the mailbox, or a change in an fm-owned create path.</trigger>
+    <trigger>Allowing the unfiled add needs any rule beyond "no record matches only an unfiled .eml" (for example a new privilege or container decision).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The `SaveContentType.Attachment` save (task 130), task 141's named add and `savedAttachmentNames`, the identity route.</existing>
+    <extension>Extends them: the pane uses the existing attachment save; the planner's filing rule gains the no-record case; the identity response's existing field also lists standalone attachment documents. No new route, column, service or package.</extension>
+    <cost-of-doing-nothing>A user who wants only a file must save the email too, and an email saved without a record shows "Unsaved attachments" with no way to save them (the owner's 2026-11-27 dead end).</cost-of-doing-nothing>
+  </justification>
+
+  <notes></notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
