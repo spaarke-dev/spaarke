@@ -26,8 +26,10 @@
                      nativeNew = kept: the form and subgrid New are reported, never a failure (an owner decision, see the config's
                      ownerQuestion). With homeGridNew = hidden (budget, KPI assessment: created only in a matter's context, owner OQ-1)
                      Mscrm.HomepageGrid.<t>.NewRecord must be ABSENT.
-      ALSO PRESENT   A table whose config entry has alsoPresent (the Event form's Add Memo, the KPI subgrid's + Add KPI: both create through
-                     the BFF) must show those buttons; a missing one FAILS and is named.
+      ALSO PRESENT   A table whose config entry has alsoPresent (the Event form's Add Memo, which creates through the BFF) must show
+                     those buttons; a missing one FAILS and is named.
+      RETIRED        A table whose config entry has mustBeAbsent (the KPI subgrid's "Add KPI Assessment" button, removed in task 066: the subgrid's
+                     "+ New" is its one create) must NOT show those buttons; one still shown FAILS and is named.
       SUBGRID NEW RULE  A table the secure-child script serves (the config's subgridRule = true) carries the enable rule
                      sprk.SecureChild.<t>.NativeNewAllowed.EnableRule on the platform subgrid "+ New". The rule must PASS THE TABLE as a
                      StringParameter: without it the script gets table = undefined and never consults its redirect (NATIVE_NEW_REDIRECTED),
@@ -93,9 +95,11 @@ function Get-CheckedIds {
     $t = $Entry.table
     $mustBeAbsent = @("Mscrm.Form.$t.Assign", "Mscrm.HomepageGrid.$t.Assign", "Mscrm.SubGrid.$t.Assign")
     $mustBePresent = @()
+    $retired = @()
     $newIds = @("Mscrm.HomepageGrid.$t.NewRecord", "Mscrm.Form.$t.NewRecord", "Mscrm.Form.$t.SaveAndNew")
     $reported = $newIds
     if ($Entry.alsoPresent) { $mustBePresent += @($Entry.alsoPresent | ForEach-Object { [string]$_ }) }
+    if ($Entry.mustBeAbsent) { $retired += @($Entry.mustBeAbsent | ForEach-Object { [string]$_ }) }
     if ($Entry.nativeNew -eq 'redirected') {
         $mustBeAbsent += $newIds
         $mustBePresent += "sprk.NativeCreate.$t.Form.New"
@@ -108,7 +112,7 @@ function Get-CheckedIds {
     elseif ($Entry.nativeNew -eq 'hidden-outright') {
         $mustBeAbsent += $newIds + @("Mscrm.SubGrid.$t.AddNewStandard", "Mscrm.SubGrid.$t.NewRecord")
     }
-    [pscustomobject]@{ MustBeAbsent = $mustBeAbsent; MustBePresent = $mustBePresent; Reported = $reported; NewIds = $newIds }
+    [pscustomobject]@{ MustBeAbsent = $mustBeAbsent; MustBePresent = $mustBePresent; Retired = $retired; Reported = $reported; NewIds = $newIds }
 }
 
 function Get-TableVerdict {
@@ -131,6 +135,9 @@ function Get-TableVerdict {
 
     foreach ($id in @($ids.MustBeAbsent | Where-Object { $_ -notlike '*.Assign' })) {
         if ($present -contains $id) { $problems += "platform New still shown: $id" }
+    }
+    foreach ($id in $ids.Retired) {
+        if ($present -contains $id) { $problems += "a retired Spaarke button is still shown: $id" }
     }
     foreach ($id in $ids.MustBePresent) {
         if ($present -notcontains $id) { $problems += "the redirect button is missing: $id" }
@@ -210,7 +217,7 @@ else {
             $qc = if ($meta.IsQuickCreateEnabled -eq $false) { 'off' } elseif ($meta.IsQuickCreateEnabled -eq $true) { 'on' } else { '' }
             $ribbon = Get-RibbonIds $t
             $checked = Get-CheckedIds $entry
-            $present = @(($checked.MustBeAbsent + $checked.MustBePresent + $checked.Reported) | Select-Object -Unique | Where-Object { $ribbon.Ids.Contains($_) })
+            $present = @(($checked.MustBeAbsent + $checked.MustBePresent + $checked.Retired + $checked.Reported) | Select-Object -Unique | Where-Object { $ribbon.Ids.Contains($_) })
             $observations[$t] = [pscustomobject]@{ quickCreate = $qc; present = $present; newRule = $ribbon.NewRule }
         }
         catch {

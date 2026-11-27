@@ -337,10 +337,12 @@ public partial class FieldMappingPushAuthorizationContractTests
             "the live 'Matter to Invoice (Attorney Matrix)' profile works: sprk_invoice names its matter in sprk_matter");
         host.MetadataQueries.Should().Equal(new[]
         {
-            ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
-             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute,IsSecured", CallerSystemUserId),
+            // Task 065: the parent lookup is resolved first (it decides the field-secured-source rule); sprk_invoice.sprk_matter
+            // is a Filing edge, so the source catalog is read without IsSecured.
             ("EntityDefinitions(LogicalName='sprk_invoice')/ManyToOneRelationships",
              (string?)"$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName", CallerSystemUserId),
+            ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
+             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute", CallerSystemUserId),
         }, "the metadata is read through the same impersonated seam, as the caller; with no lookup rule the source's "
            + "relationships are not read");
         host.ChildQueries.Should().ContainSingle().Which.Should().Be(

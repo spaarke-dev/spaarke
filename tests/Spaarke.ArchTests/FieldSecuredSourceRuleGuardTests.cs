@@ -4,12 +4,13 @@ using Xunit;
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// field-mapping-server-write-path-r1 DI-051 (#3258; task 064 boundary 3): the field-secured SOURCE rule of field mapping has
-/// ONE definition, <c>FieldSecuredSourceRule</c> (<c>CountsAsSecured</c>, the predicate; <c>Split</c>, the rule split), asked by
-/// both writers that apply mapping rules: the unified create (<c>RecordCreationService.Mapping.cs</c>) and the field-mapping
-/// push (<c>FieldMappingEndpoints.cs</c>, reading its catalog through <c>FieldMappingPushLookups.cs</c>). If either grew its own
-/// reading of <c>IsSecured</c>, the two could disagree about which value may be copied, and one of them could declassify a
-/// secured value into an unsecured column.
+/// field-mapping-server-write-path-r1 DI-051 (#3258; task 064 boundary 3; task 065): the field-secured SOURCE rule of field
+/// mapping has ONE definition, <c>FieldSecuredSourceRule</c> (<c>CountsAsSecured</c>, the predicate; <c>Split</c>, the rule
+/// split), asked by both writers that apply mapping rules: the unified create (<c>RecordCreationService.Mapping.cs</c>) and the
+/// field-mapping push (<c>FieldMappingEndpoints.cs</c>, reading its catalog through <c>FieldMappingPushLookups.cs</c>). Task 065
+/// (owner 2026-11-26): each lifts it only for rows filed under the source (the create's filing parent by table and id; the
+/// push's rows filed under the source by a listed Filing edge); every other source keeps it. If a writer grew its own reading
+/// of <c>IsSecured</c>, the two could disagree about which value may be copied.
 /// </summary>
 /// <remarks>
 /// Enforced by: this source scan (CI and the Stop hook). Each writer must call the shared members, and no field-mapping source
@@ -54,7 +55,7 @@ public class FieldSecuredSourceRuleGuardTests
         string.Join('\n', File.ReadAllLines(Path.Combine(BffRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)))
             .Where(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && !l.TrimStart().StartsWith("*", StringComparison.Ordinal)));
 
-    [Theory(DisplayName = "DI-051: create and push ask ONE field-secured source rule (FieldSecuredSourceRule) and keep no private copy")]
+    [Theory(DisplayName = "DI-051 / task 065: create and push ask ONE field-secured source rule (FieldSecuredSourceRule) and keep no private copy")]
     [InlineData("Services/RecordCreation/RecordCreationService.Mapping.cs")]
     [InlineData("Api/FieldMappings/FieldMappingEndpoints.cs")]
     [InlineData("Api/FieldMappings/FieldMappingPushLookups.cs")]

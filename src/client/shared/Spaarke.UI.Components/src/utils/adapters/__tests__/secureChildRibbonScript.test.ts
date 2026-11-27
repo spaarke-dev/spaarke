@@ -514,7 +514,7 @@ describe('sprk_secure_child_ribbon.js — the platform "+ New" is redirected for
   });
 });
 
-describe('sprk_secure_child_ribbon.js — createChild creates through the BFF only (task 051: Add Memo, Add KPI)', () => {
+describe('sprk_secure_child_ribbon.js — createChild creates through the BFF only (task 051: Add Memo)', () => {
   it('creates a memo through POST /api/v1/child-records/sprk_memo, filed under the host, and resolves its id (no form, no Xrm create)', async () => {
     const h = harness({ flag: true });
     const host = h.ribbon.hostOf(formOf('sprk_matter'))!;
@@ -546,75 +546,5 @@ describe('sprk_secure_child_ribbon.js — createChild creates through the BFF on
     expect(created).toBeNull();
     expect(h.posts).toEqual([]);
     expect(h.alerts[0].text).toContain('Nothing was created.');
-  });
-});
-
-describe('sprk_kpi_ribbon_actions.js — Add KPI creates through the BFF, never a quick create (task 051)', () => {
-  const KPI_SCRIPT = fs.readFileSync(
-    path.join(
-      __dirname,
-      '..',
-      '..',
-      '..',
-      '..',
-      '..',
-      '..',
-      '..',
-      'solutions',
-      'webresources',
-      'sprk_kpi_ribbon_actions.js'
-    ),
-    'utf8'
-  );
-
-  interface IKpi {
-    openQuickCreate(p: unknown): void;
-    openProjectQuickCreate(p: unknown): void;
-  }
-
-  function withKpiScript(h: IHarness): IKpi {
-    vm.runInContext(KPI_SCRIPT, h.context as unknown as vm.Context);
-    return (h.context.Spaarke as { KpiRibbon: IKpi }).KpiRibbon;
-  }
-
-  const formWithSubgrid = (entity: string) => ({
-    ...formOf(entity),
-    getControl: () => ({ getRelationship: () => ({ attributeName: entity }), refresh: () => undefined }),
-  });
-
-  it.each([
-    ['openQuickCreate', 'sprk_matter'],
-    ['openProjectQuickCreate', 'sprk_project'],
-  ] as const)(
-    '%s on a %s form posts the KPI assessment to the BFF and opens the new row (not a quick create)',
-    async (fn, entity) => {
-      const h = harness({ flag: false }); // an unsecured record: the old script opened the quick create here
-      const kpi = withKpiScript(h);
-      kpi[fn](formWithSubgrid(entity));
-      for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
-
-      expect(h.posts).toHaveLength(1);
-      expect(h.posts[0].url).toBe('https://bff.example/api/v1/child-records/sprk_kpiassessment');
-      expect(h.forms).toEqual([{ entityName: 'sprk_kpiassessment', entityId: NEW_ID }]);
-      expect(h.forms.some(f => 'useQuickCreateForm' in f)).toBe(false);
-    }
-  );
-
-  it('with the shared create helper missing it creates nothing and says so (no quick create fallback)', async () => {
-    const h = harness({ flag: false });
-    const kpi = withKpiScript(h);
-    (h.context.Spaarke as { SecureChild?: unknown }).SecureChild = undefined;
-    kpi.openQuickCreate(formWithSubgrid('sprk_matter'));
-    await flush();
-
-    expect(h.posts).toEqual([]);
-    expect(h.forms).toEqual([]);
-    expect(h.alerts).toHaveLength(1);
-    expect(h.alerts[0].text).toContain('Nothing was created.');
-  });
-
-  it('the script holds no quick create launch or direct Xrm create (static guard)', () => {
-    expect(KPI_SCRIPT).not.toContain('useQuickCreateForm');
-    expect(KPI_SCRIPT).not.toMatch(/createRecord/);
   });
 });

@@ -42,8 +42,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// BFF-owned invariant column (<see cref="IsCopyInvariantColumn"/>) — is asked on its own: one that fails AppendTo, Append or
 /// field security, or whose check faults, is dropped with a warning and never written. The row as it will be written, less
 /// the values copied without the caller's checks, is asked whole once more; a failure then is no single value's, so it
-/// refuses. A value from a field-secured source column never reaches step 5 (step 3 drops it, boundary 3). With nothing
-/// mapped, step 5 is the one check it was (task 013), unchanged.</para>
+/// refuses. Task 065: a value from a field-secured source column reaches step 5 only from the filing parent (step 3 drops it
+/// from any other source, <see cref="FieldSecuredSourceRule.Split"/>). With nothing mapped, step 5 is the one check it was
+/// (task 013), unchanged.</para>
 /// <para><b>ADR-008 path A:</b> every check is <see cref="CallerWriteAuthorization"/>'s, unchanged, asked here. <b>ADR-010:</b>
 /// no registration — the collaborators are static or the service's own. <b>ADR-019:</b> every warning is a
 /// <see cref="RecordCreationWarning"/> with a stable code, the column when there is one, and no source id, name or value.</para>
@@ -70,10 +71,12 @@ internal sealed partial class RecordCreationService
     private const string NotPermitted = "you do not have permission to set it";
     private const string NotUsable = "it was not found, or you do not have permission to use it";
 
-    /// <summary>Task 064 (owner 2026-10-27 boundary 3): why a value copied from a field-secured source column is not written.</summary>
+    /// <summary>Task 064 (owner 2026-10-27 boundary 3; task 065: a source that is not the filing parent): why a value copied
+    /// from a field-secured source column is not written.</summary>
     internal const string SourceColumnFieldSecured = FieldSecuredSourceRule.NotCopiedReason;
 
-    /// <summary>Task 064: the words when whether the source's columns are field-secured could not be read: nothing is mapped.</summary>
+    /// <summary>Task 064: the words when whether the source's columns are field-secured could not be read: nothing is mapped
+    /// (task 065: from a source that is not the filing parent).</summary>
     internal const string MappingSourceColumnsUnreadable =
         "The related record's columns could not be checked, so no fields were copied from it.";
 
@@ -389,16 +392,32 @@ internal sealed partial class RecordCreationService
             return unmapped;
         }
 
-        // Task 064 (owner 2026-10-27 boundary 3): a value read from a field-secured source column is never copied by field mapping
-        // (a secured value into an unsecured column would declassify it). Its rule is not applied and the column it targets is
-        // named. Whether the source's columns are secured is read beside the target's; unread, nothing is mapped (fail closed).
-        if (masked is not null && reads.SecuredSourceColumns is null)
+        // Task 065 (owner 2026-11-26, superseding task 064's boundary 3 for the filing parent): a value from the record the
+        // caller's row is filed under, by table AND id (SourceIsCallersFilingRecordAsync, asked of the caller's row before any
+        // rule fills it), is copied whatever its source column's field security. It is still the masked read above, so a column
+        // the caller cannot read copies nothing. A copied value is readable by whoever can read the target column.
+        // From any other source a value read from a field-secured source column is not copied: its rule is not applied and the
+        // column it targets is named. Whether the source's columns are secured is read beside the target's; unread, nothing is
+        // mapped from that source (fail closed).
+        bool? fromFilingRecord = null;
+        async Task<bool> FromFilingRecordAsync() =>
+            fromFilingRecord ??= fromFilingParent
+                && await SourceIsCallersFilingRecordAsync(
+                        table, resolution, callersOwnRow, (typeId, token) => RecordTypeTableAsync(user, typeId, token), ct)
+                    .ConfigureAwait(false);
+
+        var securedSourceRuleApplies =
+            (reads.SecuredSourceColumns is { Count: > 0 } || (masked is not null && reads.SecuredSourceColumns is null))
+            && !await FromFilingRecordAsync().ConfigureAwait(false);
+        if (securedSourceRuleApplies && masked is not null && reads.SecuredSourceColumns is null)
         {
             warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingSourceColumnsUnreadable));
             return unmapped;
         }
 
-        var (copyable, securedSourced) = FieldSecuredSourceRule.Split(rules, reads.SecuredSourceColumns);
+        var (copyable, securedSourced) = securedSourceRuleApplies
+            ? FieldSecuredSourceRule.Split(rules, reads.SecuredSourceColumns)
+            : ([.. rules], []);
         var protectedColumns = ProtectedFromMapping(table, rule, request.ServerSetLookupColumns);
         var moneyAttributes = attributes.Where(a => a.Value.Type == "Money").Select(a => a.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -459,10 +478,7 @@ internal sealed partial class RecordCreationService
             return unmapped;
 
         // Task 064c: step 5's skip asks for the filing parent by table AND id (the gate above keeps its own question).
-        var copiesFromFilingParent = fromFilingParent
-            && await SourceIsCallersFilingRecordAsync(
-                    table, resolution, callersOwnRow, (typeId, token) => RecordTypeTableAsync(user, typeId, token), ct)
-                .ConfigureAwait(false);
+        var copiesFromFilingParent = await FromFilingRecordAsync().ConfigureAwait(false);
         return (await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false))
             with
         { Gate = gate, FromFilingParent = copiesFromFilingParent };
@@ -534,8 +550,8 @@ internal sealed partial class RecordCreationService
     /// keeps the caller's checks: a value mapped from a source that is not the record the caller's row is filed under
     /// (<paramref name="fromFilingParent"/>), an adapter's default (<paramref name="isDefault"/>), a filing lookup
     /// (<paramref name="isFilingLookup"/>: refused as the caller's own when it fails), and a BFF-owned invariant column
-    /// (<see cref="IsCopyInvariantColumn"/>). A value from a field-secured source column never reaches step 5
-    /// (<see cref="FieldSecuredSourceRule.Split"/>). Pure.
+    /// (<see cref="IsCopyInvariantColumn"/>). Task 065: a value from a field-secured source column reaches step 5 only from the
+    /// filing parent; from any other source step 3 drops it (<see cref="FieldSecuredSourceRule.Split"/>). Pure.
     /// </summary>
     internal static bool MayCopyWithoutCallerChecks(
         string table, string column, bool fromFilingParent, bool isDefault, bool isFilingLookup,
@@ -923,7 +939,7 @@ internal sealed partial class RecordCreationService
         public static MappingReads Nothing(IReadOnlyList<RecordCreationWarning> warnings) => new(warnings, null, [], null, null, null);
 
         /// <summary>Task 064: the source columns the rules read that are field-secured (read as the caller, beside the target's
-        /// columns); <see langword="null"/> when that could not be read (step 3 then maps nothing).</summary>
+        /// columns); <see langword="null"/> when that could not be read (step 3 then maps nothing, unless the source is the filing record).</summary>
         public IReadOnlySet<string>? SecuredSourceColumns { get; init; }
     }
 
@@ -1035,7 +1051,8 @@ internal sealed partial class RecordCreationService
             return MappingReads.Nothing(warnings);
         }
 
-        // A source-columns read that faulted or was not answered is "not told": step 3 then maps nothing (fail closed).
+        // A source-columns read that faulted or was not answered is "not told": step 3 then maps nothing (fail closed), except from the
+        // filing record (table and id), which never asks the answer.
         IReadOnlySet<string>? secured;
         try
         {
@@ -1098,7 +1115,7 @@ internal sealed partial class RecordCreationService
                 var answeredName = name.GetString()!.Trim().ToLowerInvariant();
                 answered.Add(answeredName);
 
-                // Anything but an explicit false is secured (fail closed): the one predicate, shared with the push.
+                // Anything but an explicit false is secured (fail closed): the one predicate (FieldSecuredSourceRule).
                 if (FieldSecuredSourceRule.CountsAsSecured(
                         attribute.TryGetProperty(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
                 {
