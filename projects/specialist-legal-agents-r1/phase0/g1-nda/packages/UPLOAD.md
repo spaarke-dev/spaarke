@@ -1,7 +1,7 @@
 # Owner upload checklist: Phase 0 test packages (task 020)
 
 > **Program:** specialist-legal-agents-r1, Phase 0. **Written by:** task 020, 2026-11-26.
-> **Status:** eight packages built and zipped, **none uploaded or installed**. A Claude session never clicks tenant or admin-center actions: every step below is the owner's.
+> **Status:** all eight packages **uploaded by the owner 2026-11-27** (admin centre shows each Available; the five agents show the dynamic-discovery banner on Data & tools; the three plugins list their skill). Load check (the "List every tool" prompt, the Cowork `/` list) and the Users-tab scope check are pending. A Claude session never clicks tenant or admin-center actions: every step below is the owner's.
 > **Covers:** G1-NDA (6 packages), G5 (1) and G2 question 1 (1). Test READMEs: `../README.md` (G1), `../../g5/README.md`, `../../g2/README.md`.
 > **Zips are gitignored** and live only on this machine. To rebuild one, see the "Test packages" section of the test README.
 
