@@ -158,6 +158,8 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
             IsInternalOnly = true,
             // Review round 2, item 7: the new matter thread is created Private, so a follow-up posted into it stays internal.
             CreateThreadPrivate = true,
+            // ISS-010 part E (#3184): the thread, archive, enrichment, participant index and arrived steps run in the CommunicationPostSend job.
+            DeferPostSend = true,
             Associations =
             [
                 new CommunicationAssociation

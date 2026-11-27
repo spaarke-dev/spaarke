@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -295,7 +296,8 @@ public static class DecisionCommitEvents
     /// <summary>Warning: the record was written but a Signal could not be closed or linked.</summary>
     public static readonly EventId SignalCloseFailed = new(50362, nameof(SignalCloseFailed));
 
-    /// <summary>Warning: a follow-on effect after the record (the budget-revision trigger, suppression) did not run.</summary>
+    /// <summary>Warning: a follow-on effect after the record (the budget-revision trigger, suppression, the inline secure-child share of
+    /// ontology task 225) did not run.</summary>
     public static readonly EventId AfterRecordFailed = new(50363, nameof(AfterRecordFailed));
 
     /// <summary>Information: a review was recorded. Counts and ids only.</summary>
@@ -345,7 +347,7 @@ public sealed class DecisionCommitService
     [
         "sprk_lane", "sprk_policy", "sprk_policyversion", "sprk_corerecordtype", "sprk_corerecordid", "sprk_signalstatus",
         "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordid",
-        "sprk_factsnapshot", "sprk_privilegeflagged", "sprk_dedupekey", "sprk_decisionrecord", "versionnumber",
+        "sprk_factsnapshot", "sprk_evidencerefs", "sprk_dedupekey", "sprk_decisionrecord", "versionnumber",
         .. SignalWriter.RegardingLookupByEntity.Values,
     ];
 
@@ -364,6 +366,9 @@ public sealed class DecisionCommitService
     private readonly DecisionCommitFollowUps _followUps;
     private readonly IScheduledJobLease _lease;
     private readonly DecisionPlanReadStamp _planReads;
+    private readonly SecureChildShareSynchronizer _shares;
+    private readonly WorkItemPrivilege _privilege;
+    private readonly IDataverseUserClient _caller;
     private readonly TimeProvider _clock;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DecisionCommitService> _logger;
@@ -382,6 +387,9 @@ public sealed class DecisionCommitService
         DecisionCommitFollowUps followUps,
         IScheduledJobLease lease,
         DecisionPlanReadStamp planReads,
+        SecureChildShareSynchronizer shares,
+        WorkItemPrivilege privilege,
+        IDataverseUserClient caller,
         TimeProvider clock,
         IConfiguration configuration,
         ILogger<DecisionCommitService> logger)
@@ -399,6 +407,9 @@ public sealed class DecisionCommitService
         _followUps = followUps ?? throw new ArgumentNullException(nameof(followUps));
         _lease = lease ?? throw new ArgumentNullException(nameof(lease));
         _planReads = planReads ?? throw new ArgumentNullException(nameof(planReads));
+        _shares = shares ?? throw new ArgumentNullException(nameof(shares));
+        _privilege = privilege ?? throw new ArgumentNullException(nameof(privilege));
+        _caller = caller ?? throw new ArgumentNullException(nameof(caller));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -432,6 +443,9 @@ public sealed class DecisionCommitService
         result is { Status: DecisionCommitStatus.Failed, Resumable: true, Landed.Count: > 0 };
 
     /// <summary>What the route read about one Signal, app-only (server-written columns; never from the request).</summary>
+    /// <remarks>Ontology task 225 (D-212, #2630): <c>EvidenceRefs</c> is the stored <c>sprk_evidencerefs</c>, read so the Decision Record's
+    /// privilege flag is derived from the Signal's communications (<see cref="WorkItemPrivilege.SourcesOf"/>).
+    /// <c>sprk_signal.sprk_privilegeflagged</c> is not read: nothing writes it (DI-64).</remarks>
     public sealed record SignalRow(
         Guid Id,
         DecisionLane? Lane,
@@ -446,7 +460,7 @@ public sealed class DecisionCommitService
         string? SubjectEntity,
         Guid? SubjectId,
         string? FactSnapshot,
-        bool PrivilegeFlagged,
+        string? EvidenceRefs,
         string? DedupeKey,
         Guid? DecisionRecordId,
         string? RowVersion)
@@ -1317,6 +1331,11 @@ public sealed class DecisionCommitService
             var closedNow = await CloseAllAsync(ids, resolution, dismissalText, existingRecord.Id, confirmedBy, reviewStart, clearedSince).ConfigureAwait(false);
             var finishWarnings = closedNow.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList();
             finishWarnings.AddRange(await SuppressAfterRepairAsync(resolution, p.Resolved, closedNow).ConfigureAwait(false));
+
+            // Task 225 fix round 1 (D-229): the record may have been written by an attempt that stopped before its inline share (a crash
+            // between the write and the share, retried at once), so it is shared here too, app-only and idempotent. Not gated on an owner
+            // answer: none is resolved on this path, and SyncChildAsync decides from the stored row (NotApplicable unless Secure-team-owned).
+            await ShareSecureRecordAsync(reviewId, existingRecord.Id).ConfigureAwait(false);
             return new DecisionCommitResult
             {
                 Status = DecisionCommitStatus.Recorded,
@@ -1393,10 +1412,16 @@ public sealed class DecisionCommitService
             }
         }
 
+        // ---- (1d') Ontology task 225 (D-212, #2630): the record's privilege flag, derived from the communications the covered Signals are
+        // about (each Signal's subject and its stored evidence), read AS THE CALLER and failing closed, through the one shared rule
+        // (WorkItemPrivilege, mcp-bff task 018). Never the Signal's own sprk_privilegeflagged (DI-64: nothing writes it). Record accuracy
+        // only (ADR-015): nothing below branches on it. Read before the first write; a review whose record already exists writes none.
+        var privilegeFlagged = existingRecord is null && await PrivilegeFlaggedAsync(p.Resolved, ct).ConfigureAwait(false);
+
         // ---- (1e) The record writer's own no-I/O preflight on the projected record ----------------------------------------
         try
         {
-            _records.Preflight(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact));
+            _records.Preflight(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, privilegeFlagged, deciderContact));
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -1422,7 +1447,7 @@ public sealed class DecisionCommitService
         DecisionRecordOwner recordOwner;
         try
         {
-            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact, assignee), ct).ConfigureAwait(false);
+            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, privilegeFlagged, deciderContact, assignee), ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex) when (ex.Reason is DecisionRecordRefusalReason.OwnerResolutionFailed or DecisionRecordRefusalReason.FilingFailed)
         {
@@ -1512,7 +1537,7 @@ public sealed class DecisionCommitService
         {
             try
             {
-                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed, hash, deciderContact, assignee), recordOwner, writeCt).ConfigureAwait(false);
+                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed, hash, privilegeFlagged, deciderContact, assignee), recordOwner, writeCt).ConfigureAwait(false);
                 recordId = written.RecordId;
                 recordClass = written.RecordClass.ToString();
             }
@@ -1529,6 +1554,16 @@ public sealed class DecisionCommitService
                 return failed;
             }
         }
+
+        // ---- (5b) Ontology task 225 (D-229, #1980): a record owned by the Secure Record Owners team (a secure child, D-33) is shared now,
+        // for that ONE record, with uac-r2's own per-child mirror (SecureChildShareSynchronizer.SyncChildAsync: exactly what the
+        // two-minute reconcile computes for it), so the deciding user reads it at once. Never fails or undoes the decision: a fault is
+        // logged and the reconcile, still the backstop, repairs it. Not a warning to the person (the wizard does not re-read the record).
+        // A record written by an earlier attempt (the found branch above) is shared whatever this request's owner answer says (task 225
+        // fix round 1: a parent unsecured between the attempts must not skip it); SyncChildAsync decides from the stored row. A record
+        // written now is shared only when the resolver placed it under the Secure Record Owners team.
+        if (existingRecord is not null || recordOwner.Resolution.IsSecureOwner)
+            await ShareSecureRecordAsync(reviewId, recordId).ConfigureAwait(false);
 
         // ---- (6) Close (or, for an inquiry only, link) every Signal the decision covers -------------------------------------
         var signals = await CloseAllAsync(p.Resolved.Select(r => r.Id).ToList(), p.Resolution, p.DismissalText, recordId, confirmedBy, reviewStart, clearedSince).ConfigureAwait(false);
@@ -1571,6 +1606,55 @@ public sealed class DecisionCommitService
             Warnings = warnings,
         };
     }
+
+    /// <summary>
+    /// Ontology task 225 (D-212, #2630): whether the Decision Record is privilege-flagged. True when any covered Signal's subject (when it
+    /// is a communication) or any of its stored evidence communications is Privileged or Potentially Privileged, through the one shared
+    /// rule (<see cref="WorkItemPrivilege.SourcesOf"/>, <see cref="WorkItemPrivilege.FlaggedAsync{TKey}"/>), read with the deciding
+    /// caller's client. Fails closed: undetermined sources, an unreadable communication or a read fault flag the record.
+    /// </summary>
+    private async Task<bool> PrivilegeFlaggedAsync(IReadOnlyList<SignalRow> resolved, CancellationToken ct)
+    {
+        var sources = resolved
+            .DistinctBy(r => r.Id)
+            .ToDictionary(r => r.Id, r => WorkItemPrivilege.SourcesOf(r.SubjectEntity, r.SubjectId, r.EvidenceRefs));
+        try
+        {
+            return (await _privilege.FlaggedAsync(_caller, sources, ct).ConfigureAwait(false)).Count > 0;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // FlaggedAsync answers its own faults; this is the defensive net (fail closed, D-212).
+            _logger.LogWarning("Decision commit: the privilege flag could not be derived ({ExceptionType}); the record is flagged.", ex.GetType().Name);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Ontology task 225 (D-229, #1980): the inline share of ONE new secure-child Decision Record, through uac-r2's per-child mirror
+    /// (<see cref="SecureChildShareSynchronizer.SyncChildAsync"/>, the call <c>RecordCreationService</c> makes after a secure create).
+    /// Never throws: an incomplete or faulted share is logged and left to the scheduled reconcile.
+    /// </summary>
+    private async Task ShareSecureRecordAsync(Guid reviewId, Guid recordId)
+    {
+        try
+        {
+            var shared = await _shares.SyncChildAsync(DecisionRecordTable, recordId, CancellationToken.None).ConfigureAwait(false);
+            if (shared.Status is SecureChildShareSyncStatus.Failed or SecureChildShareSyncStatus.Incomplete)
+            {
+                _logger.LogWarning(DecisionCommitEvents.AfterRecordFailed,
+                    "Decision commit: review {ReviewId} recorded as {RecordId}; the secure record's sharees were not mirrored ({Status}: {Detail}); the reconcile completes it.",
+                    reviewId, recordId, shared.Status, shared.Detail);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(DecisionCommitEvents.AfterRecordFailed, ex,
+                "Decision commit: review {ReviewId} recorded as {RecordId}; the secure record's share stopped; the reconcile completes it.", reviewId, recordId);
+        }
+    }
+
+    private const string DecisionRecordTable = "sprk_decisionrecord";
 
     // ── Validation ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -2006,7 +2090,7 @@ public sealed class DecisionCommitService
             subjectId is { } pairId ? SignalWriter.SubjectEntityOf(pairId, lookup => e.GetAttributeValue<EntityReference>(lookup)?.Id) : null,
             subjectId,
             e.GetAttributeValue<string>("sprk_factsnapshot"),
-            e.GetAttributeValue<bool>("sprk_privilegeflagged"),
+            e.GetAttributeValue<string>("sprk_evidencerefs"),
             e.GetAttributeValue<string>("sprk_dedupekey"),
             e.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id,
             version);
@@ -2397,7 +2481,7 @@ public sealed class DecisionCommitService
     private static DecisionRecordRequest RecordRequest(
         DecisionReview review, Prepared p, Guid confirmedBy, DateTimeOffset now,
         IReadOnlyList<DecisionRecordStep> steps, IReadOnlyList<DecisionRecordFollowOn> followOns, IReadOnlyList<DecisionCommitStep>? executed,
-        string reviewHash, Guid? deciderContact, Guid? assignee = null) =>
+        string reviewHash, bool privilegeFlagged, Guid? deciderContact, Guid? assignee = null) =>
         new(review.ReviewId,
             p.Primary.PolicyVersionId!.Value,
             p.RecordCore,
@@ -2413,7 +2497,8 @@ public sealed class DecisionCommitService
             DeciderRole: null,
             Because: string.IsNullOrWhiteSpace(review.Because) ? null : review.Because.Trim(),
             Reason: p.DismissalText,
-            PrivilegeFlagged: p.Resolved.Any(r => r.PrivilegeFlagged),
+            // Task 225 (D-212): derived from the covered Signals' communications (PrivilegeFlaggedAsync), never the Signal column.
+            PrivilegeFlagged: privilegeFlagged,
             // A Next step that ran but named no row (a notification whose communication row was not tracked) is still something
             // done: listed in sprk_steps, so the record never reads as a dismissal after an email went out.
             UnnamedNextSteps: (executed ?? [])

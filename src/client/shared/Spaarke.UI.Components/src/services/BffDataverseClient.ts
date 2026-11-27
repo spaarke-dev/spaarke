@@ -28,7 +28,7 @@
  * The shared library (`@spaarke/ui-components`) intentionally does NOT take a
  * runtime dependency on `@spaarke/auth` — `authenticatedFetch` is injected at
  * construction so this package stays decoupled from a specific bootstrap
- * strategy (same pattern as `bffDataServiceAdapter` and `EntityCreationService`).
+ * strategy (same pattern as the BFF adapters in `utils/adapters` and `EntityCreationService`).
  *
  * ## Error mapping (ProblemDetails → typed errors)
  * Non-2xx responses are unwrapped from RFC 7807 ProblemDetails (with the
@@ -43,8 +43,8 @@
  * ## R1 read-only scope
  * `IDataverseClient` defines only read operations — there are no `createRecord`
  * / `updateRecord` / `deleteRecord` methods to throw from. Write capability is
- * a future-R extension; for now the existing `bffDataServiceAdapter` /
- * `XrmContext` CRUD paths cover writes.
+ * a future-R extension; for now writes go through the BFF child-records route
+ * (`utils/adapters/bffChildWriteAdapter`) or the `XrmContext` CRUD paths.
  *
  * **Spec**: projects/spaarke-datagrid-framework-r1/design.md §6.2 (FR-BFF-06)
  * **ADRs**: ADR-012 (shared-lib home), ADR-019 (ProblemDetails), ADR-028 (auth)

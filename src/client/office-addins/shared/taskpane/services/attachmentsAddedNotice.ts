@@ -24,6 +24,19 @@ export function readAttachmentsAddedCount(value: unknown): number {
   return readNames(value).length;
 }
 
+/** Task 141 review: the names in `attachmentsAdded` (the server's answer, never what was sent), or none when absent or malformed. */
+export function readAttachmentsAdded(value: unknown): string[] {
+  return readNames(value);
+}
+
+/**
+ * Task 141 review: the attachments no email save ever creates a document for (`attachmentsNotSaveable`): their names, or
+ * none when absent or malformed.
+ */
+export function readAttachmentsNotSaveable(value: unknown): string[] {
+  return readNames(value);
+}
+
 /** The attachments the stored email does not hold (`attachmentsNotStored`): their names, or none when absent or malformed. */
 export function readAttachmentsNotStored(value: unknown): string[] {
   return readNames(value);
@@ -40,6 +53,53 @@ export function describeAttachmentsAdded(count: number | undefined): string | nu
     : `Adding ${count} attachments to the saved email. If they don't appear on the record in a few minutes, save the email again.`;
 }
 
+/**
+ * How the adds of this pane session ended, once their jobs have finished and the identity was re-read: `total` = the names
+ * the adds queued, `notAdded` = how many of them the server does not list as saved (`null` = not known: no re-read answered).
+ */
+export interface AttachmentsAddOutcome {
+  total: number;
+  notAdded: number | null;
+}
+
+/** The sum of two outcomes (adds that overlapped); one that is not known makes the sum not known. */
+export function combineAttachmentsAddOutcomes(
+  first: AttachmentsAddOutcome | undefined,
+  second: AttachmentsAddOutcome
+): AttachmentsAddOutcome {
+  if (!first) return second;
+  return {
+    total: first.total + second.total,
+    notAdded: first.notAdded === null || second.notAdded === null ? null : first.notAdded + second.notAdded,
+  };
+}
+
+/**
+ * The confirmation title once an add's job has FINISHED: what happened, from what the server then lists as saved. `null` when
+ * the outcome is not known (the caller keeps its plain title) — it never claims "added" for what it cannot confirm.
+ */
+export function describeAttachmentsAddFinished(outcome: AttachmentsAddOutcome | undefined): string | null {
+  if (!outcome || outcome.total < 1 || outcome.notAdded === null) return null;
+  const { total, notAdded } = outcome;
+  const added = total - notAdded;
+  if (notAdded <= 0) {
+    return total === 1 ? '1 attachment added to the saved email' : `${total} attachments added to the saved email`;
+  }
+  if (added <= 0) {
+    return notAdded === 1
+      ? '1 attachment could not be added to the saved email.'
+      : `${notAdded} attachments could not be added to the saved email.`;
+  }
+  return `${added} of ${total} attachments added to the saved email. ${notAdded} could not be added.`;
+}
+
+/**
+ * Task 141 review (round 2): the title while an add's job could not be followed to a final phase (the pane stopped waiting, or
+ * its status reads kept failing). It claims neither success nor failure: the names stay "Adding…" until a later read of the
+ * job or of the saved email settles them.
+ */
+export const ATTACHMENTS_ADD_UNCONFIRMED_TITLE = 'Still adding attachments. Check again in a moment.';
+
 /** The warning for attachments the stored email does not hold, or `null` when there are none. */
 export function describeAttachmentsNotStored(names: readonly string[] | undefined): string | null {
   if (!names || names.length < 1) return null;
@@ -47,4 +107,17 @@ export function describeAttachmentsNotStored(names: readonly string[] | undefine
   return names.length === 1
     ? `This attachment could not be added because it was not saved with the email: ${list}. To include it, choose "Save again as a new document", which saves a second copy of the email.`
     : `These attachments could not be added because they were not saved with the email: ${list}. To include them, choose "Save again as a new document", which saves a second copy of the email.`;
+}
+
+/**
+ * Task 141 review: the warning for attachments no email save ever creates a document for (a calendar file, a blocked type,
+ * an inline or signature image, an empty file), or `null` when there are none. Saving the email again would not save them,
+ * so it is not suggested.
+ */
+export function describeAttachmentsNotSaveable(names: readonly string[] | undefined): string | null {
+  if (!names || names.length < 1) return null;
+  const list = names.join(', ');
+  return names.length === 1
+    ? `This attachment can't be saved to Spaarke (its type or content is not saved with emails): ${list}.`
+    : `These attachments can't be saved to Spaarke (their type or content is not saved with emails): ${list}.`;
 }

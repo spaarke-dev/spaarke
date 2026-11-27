@@ -1,10 +1,12 @@
 /**
  * decisionRecordsView - pure shaping for the Decision Record tab (task 045, D-47): the route's `decided` answer flattened to one
- * row per decided item, newest first, and the class filter over it. No React, no fetch.
+ * row per Decision Record, newest first, and the class filter over it. No React, no fetch.
  *
- * The route is the only source (D-15): it returns, for each item, the Decision Record the CALLER can read (a record the caller
- * cannot read is not returned, so its item is not either). This module never widens or invents: an item without a record is
- * dropped here as well, so a defect upstream cannot show a row with nothing behind it.
+ * The route is the only source (D-15): it returns, for each item, the Decision Records the CALLER can read (a record the caller
+ * cannot read is not returned). Task 226 (D-231): the route reads records first, so an item reviewed twice comes back once per
+ * record, and a record that resolved no item (an email-gate record) comes back in its group's `records` with no item: it is listed
+ * with its own summary and nothing opens it. This module never widens or invents: an item without a record is dropped here as
+ * well, so a defect upstream cannot show a row with nothing behind it.
  */
 
 import type { RecordClass } from '../ConsoleKit';
@@ -21,21 +23,22 @@ export const DECISION_CLASS_FILTERS: readonly { key: DecisionClassFilter; label:
   { key: 'Dismissal', label: 'Dismissals' },
 ];
 
-/** One decided item with its record, and the core record (if any) it was filed under. */
+/** One Decision Record, the decided item it resolved (null for a record that resolved none), and its core record (if any). */
 export interface DecisionRecordRow {
-  item: WorklistRouteItem;
+  item: WorklistRouteItem | null;
   decision: WorklistDecision;
   core: WorklistCore | null;
 }
 
 const decidedAt = (row: DecisionRecordRow): number => {
-  const t = Date.parse(row.decision.decidedOn ?? row.item.resolvedOn ?? '');
+  const t = Date.parse(row.decision.decidedOn ?? row.item?.resolvedOn ?? '');
   return Number.isNaN(t) ? 0 : t;
 };
 
 /**
- * Every decided item in the answer, newest decision first (ties: the record number, then the Signal id, so the order is the same on
- * every read). The route returns items grouped by core record; this list is a history, not a worklist, so it is ordered by time.
+ * Every Decision Record in the answer, newest decision first (ties: the record number, the record id, then the Signal id, so the
+ * order is the same on every read). The route returns items grouped by core record; this list is a history, not a worklist, so it
+ * is ordered by time.
  */
 export function buildDecisionRows(data: WorklistData): DecisionRecordRow[] {
   const rows: DecisionRecordRow[] = [];
@@ -43,12 +46,14 @@ export function buildDecisionRows(data: WorklistData): DecisionRecordRow[] {
     for (const item of group.items) {
       if (item.decision) rows.push({ item, decision: item.decision, core: group.core });
     }
+    for (const decision of group.records ?? []) rows.push({ item: null, decision, core: group.core });
   }
   return rows.sort(
     (a, b) =>
       decidedAt(b) - decidedAt(a) ||
       (a.decision.number ?? '').localeCompare(b.decision.number ?? '') ||
-      a.item.signalId.localeCompare(b.item.signalId)
+      a.decision.recordId.localeCompare(b.decision.recordId) ||
+      (a.item?.signalId ?? '').localeCompare(b.item?.signalId ?? '')
   );
 }
 
@@ -70,8 +75,14 @@ export function countByFilter(rows: readonly DecisionRecordRow[]): Record<Decisi
   };
 }
 
-/** The row's headline: the core record's name (when it has one) and what the item was. Never blank. */
+/**
+ * The row's headline: the core record's name (when it has one) and the finding. D-227: the finding is the rule's short name, falling
+ * back to the Signal's stored title, then the subject's name, and never the stored sentence. For a record with no item, the record's own
+ * summary (task 226). Never blank.
+ */
 export function rowTitle(row: DecisionRecordRow): string {
-  const what = row.item.title ?? row.item.ruleShortName ?? row.item.subjectName ?? 'Decision';
+  const what =
+    (row.item ? (row.item.ruleShortName ?? row.item.title ?? row.item.subjectName) : row.decision.summary) ??
+    'Decision';
   return row.core?.name ? `${row.core.name} - ${what}` : what;
 }

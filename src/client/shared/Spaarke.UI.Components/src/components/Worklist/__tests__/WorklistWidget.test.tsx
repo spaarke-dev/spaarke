@@ -773,6 +773,40 @@ describe('loading and failure', () => {
     await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D1, D5]));
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
   });
+
+  it('negative: after a filter falls back to All because its items vanished, the same items returning do not re-activate it (#1688)', async () => {
+    const service = fakeService();
+    const real = service.read.getMockImplementation()!;
+    const launchWizard: Launch = jest.fn(async request => {
+      request.onRecorded?.({ signalId: D3, alsoResolved: [] });
+      return { opened: true };
+    });
+    renderWidget({ service, launchWizard });
+    await ready();
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
+    expect(countCard(lane('Do'), /^Coming due,/)).toHaveAttribute('aria-pressed', 'true');
+    // Read 1: the Coming due items are gone, so the filter falls back to All.
+    service.read.mockImplementation(async set =>
+      set === 'lanes'
+        ? real('lanes').then(d => ({
+            ...d,
+            Do: d.Do.map(g => ({ ...g, items: g.items.filter(i => i.workType !== 'comingDue') })).filter(
+              g => g.items.length
+            ),
+          }))
+        : real(set)
+    );
+    await userEvent.click(openedLine('Do', 0));
+    await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D1, D5]));
+    expect(countCard(lane('Do'), /^All,/)).toHaveAttribute('aria-pressed', 'true');
+    // Read 2: the Coming due items are back. The person chose All (by the fallback); the filter must stay off.
+    service.read.mockImplementation(async set => real(set));
+    await userEvent.click(openedLine('Do', 0));
+    await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]));
+    expect(countCard(lane('Do'), /^Coming due,/)).toHaveAttribute('aria-pressed', 'false');
+    expect(countCard(lane('Do'), /^All,/)).toHaveAttribute('aria-pressed', 'true');
+    expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
+  });
 });
 
 describe('the route is the only source (D-15)', () => {

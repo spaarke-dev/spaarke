@@ -28,7 +28,8 @@ public static class NodeEndpoints
             .ProducesProblem(404);
 
         // Node write routes: the caller's own Write privilege on sprk_analysisplaybook first (the node service writes
-        // app-only), then ownership of the playbook.
+        // app-only), then ownership of the playbook. Each handler then refuses a repo-deployed system playbook before
+        // any write (D-97 / PB-08, #1498): 409 playbook_read_only, or 503 when that cannot be verified.
         // POST /api/ai/playbooks/{id}/nodes - Create a new node
         group.MapPost("/", CreateNode)
             .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
@@ -41,6 +42,8 @@ public static class NodeEndpoints
             .ProducesProblem(401)
             .ProducesProblem(403)
             .ProducesProblem(404)
+            .ProducesProblem(409)
+            .ProducesProblem(503)
             .ProducesValidationProblem();
 
         // GET /api/ai/playbooks/{id}/nodes/{nodeId} - Get a single node
@@ -66,6 +69,8 @@ public static class NodeEndpoints
             .ProducesProblem(401)
             .ProducesProblem(403)
             .ProducesProblem(404)
+            .ProducesProblem(409)
+            .ProducesProblem(503)
             .ProducesValidationProblem();
 
         // DELETE /api/ai/playbooks/{id}/nodes/{nodeId} - Delete a node
@@ -78,7 +83,9 @@ public static class NodeEndpoints
             .Produces(204)
             .ProducesProblem(401)
             .ProducesProblem(403)
-            .ProducesProblem(404);
+            .ProducesProblem(404)
+            .ProducesProblem(409)
+            .ProducesProblem(503);
 
         // PUT /api/ai/playbooks/{id}/nodes/reorder was REMOVED by unified-access-control-r2 task 164 (owner round 10
         // item 1): no caller in the repo, not in any published API description, and sweep finding #54 (it PATCHed
@@ -95,7 +102,9 @@ public static class NodeEndpoints
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(403)
-            .ProducesProblem(404);
+            .ProducesProblem(404)
+            .ProducesProblem(409)
+            .ProducesProblem(503);
 
         return app;
     }
@@ -132,9 +141,10 @@ public static class NodeEndpoints
     /// Create a new node in the playbook.
     /// POST /api/ai/playbooks/{id}/nodes
     /// </summary>
-    private static async Task<IResult> CreateNode(
+    internal static async Task<IResult> CreateNode(
         Guid id,
         CreateNodeRequest request,
+        HttpContext httpContext,
         INodeService nodeService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -154,11 +164,19 @@ public static class NodeEndpoints
 
         try
         {
+            // D-97 / PB-08, #1498: refuse a repo-deployed system playbook before any write.
+            await nodeService.EnsureCanvasSyncAllowedAsync(id, cancellationToken);
+
             var node = await nodeService.CreateNodeAsync(id, request, cancellationToken);
             logger.LogInformation("Created node {NodeId}: {Name} in playbook {PlaybookId}",
                 node.Id, node.Name, id);
 
             return Results.Created($"/api/ai/playbooks/{id}/nodes/{node.Id}", node);
+        }
+        catch (ProtectedPlaybookCanvasSyncException ex)
+        {
+            logger.LogWarning("Node create refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            return PlaybookEndpoints.ReadOnlyPlaybookProblem(ex, httpContext);
         }
         catch (Exception ex)
         {
@@ -214,10 +232,11 @@ public static class NodeEndpoints
     /// Update an existing node.
     /// PUT /api/ai/playbooks/{id}/nodes/{nodeId}
     /// </summary>
-    private static async Task<IResult> UpdateNode(
+    internal static async Task<IResult> UpdateNode(
         Guid id,
         Guid nodeId,
         UpdateNodeRequest request,
+        HttpContext httpContext,
         INodeService nodeService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -236,11 +255,29 @@ public static class NodeEndpoints
             return Results.NotFound();
         }
 
+        // #1498: only an object config can keep the node's __canvasNodeId marker.
+        if (!NodeService.IsConfigJsonObjectOrEmpty(request.ConfigJson))
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["Node"] = [NodeService.ConfigJsonMustBeObjectMessage]
+                });
+        }
+
         try
         {
+            // D-97 / PB-08, #1498: refuse a repo-deployed system playbook before any write.
+            await nodeService.EnsureCanvasSyncAllowedAsync(id, cancellationToken);
+
             var node = await nodeService.UpdateNodeAsync(nodeId, request, cancellationToken);
             logger.LogInformation("Updated node {NodeId}: {Name}", node.Id, node.Name);
             return Results.Ok(node);
+        }
+        catch (ProtectedPlaybookCanvasSyncException ex)
+        {
+            logger.LogWarning("Node update refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            return PlaybookEndpoints.ReadOnlyPlaybookProblem(ex, httpContext);
         }
         catch (Exception ex)
         {
@@ -256,9 +293,10 @@ public static class NodeEndpoints
     /// Delete a node from the playbook.
     /// DELETE /api/ai/playbooks/{id}/nodes/{nodeId}
     /// </summary>
-    private static async Task<IResult> DeleteNode(
+    internal static async Task<IResult> DeleteNode(
         Guid id,
         Guid nodeId,
+        HttpContext httpContext,
         INodeService nodeService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -279,6 +317,9 @@ public static class NodeEndpoints
 
         try
         {
+            // D-97 / PB-08, #1498: refuse a repo-deployed system playbook before any write.
+            await nodeService.EnsureCanvasSyncAllowedAsync(id, cancellationToken);
+
             var deleted = await nodeService.DeleteNodeAsync(nodeId, cancellationToken);
             if (!deleted)
             {
@@ -287,6 +328,11 @@ public static class NodeEndpoints
 
             logger.LogInformation("Deleted node {NodeId} from playbook {PlaybookId}", nodeId, id);
             return Results.NoContent();
+        }
+        catch (ProtectedPlaybookCanvasSyncException ex)
+        {
+            logger.LogWarning("Node delete refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            return PlaybookEndpoints.ReadOnlyPlaybookProblem(ex, httpContext);
         }
         catch (Exception ex)
         {
@@ -302,10 +348,11 @@ public static class NodeEndpoints
     /// Update node scopes (skills and knowledge).
     /// PUT /api/ai/playbooks/{id}/nodes/{nodeId}/scopes
     /// </summary>
-    private static async Task<IResult> UpdateNodeScopes(
+    internal static async Task<IResult> UpdateNodeScopes(
         Guid id,
         Guid nodeId,
         NodeScopesRequest request,
+        HttpContext httpContext,
         INodeService nodeService,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -326,9 +373,17 @@ public static class NodeEndpoints
 
         try
         {
+            // D-97 / PB-08, #1498: refuse a repo-deployed system playbook before any write.
+            await nodeService.EnsureCanvasSyncAllowedAsync(id, cancellationToken);
+
             var node = await nodeService.UpdateNodeScopesAsync(nodeId, request, cancellationToken);
             logger.LogInformation("Updated scopes for node {NodeId}", nodeId);
             return Results.Ok(node);
+        }
+        catch (ProtectedPlaybookCanvasSyncException ex)
+        {
+            logger.LogWarning("Node scopes change refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            return PlaybookEndpoints.ReadOnlyPlaybookProblem(ex, httpContext);
         }
         catch (Exception ex)
         {

@@ -23,7 +23,7 @@ import {
   isBffChildCreateTable,
   type IBffMappingSource,
 } from '../../utils/adapters/bffChildWriteAdapter';
-import type { AuthenticatedFetch } from '../../utils/adapters/bffDataServiceAdapter';
+import type { ResponseFetchFn } from '../../utils/fetchTypes';
 
 /** The BFF delete route of a document (`DataverseDocumentsEndpoints`: `DELETE /api/v1/documents/{id}`). */
 function documentDeleteUrl(bffBaseUrl: string, id: string): string {
@@ -43,7 +43,7 @@ function documentDeleteUrl(bffBaseUrl: string, id: string): string {
  */
 export function withBffChildCreates(
   inner: IDataverseClient,
-  authenticatedFetch: AuthenticatedFetch,
+  authenticatedFetch: ResponseFetchFn,
   bffBaseUrl: string,
   mappingSource?: IBffMappingSource
 ): IDataverseClient {

@@ -1115,6 +1115,8 @@ public abstract class MessageExecutorBase : IDecisionActionExecutor
             Body = body,
             BodyFormat = BodyFormat.PlainText,
             Associations = associations,
+            // ISS-010 part E (#3184, ontology-r1 Q1): the post-send work runs in the CommunicationPostSend job.
+            DeferPostSend = true,
         });
     }
 

@@ -40,7 +40,7 @@ namespace Sprk.Bff.Api.Tests.Api.FieldMappings;
 /// (records the entity set, query string and impersonated user) and <see cref="IGenericEntityService"/> (the entity-set
 /// lookup). No HTTP handler is mocked (ADR-038).</para>
 /// </remarks>
-public class FieldMappingPushAuthorizationContractTests
+public partial class FieldMappingPushAuthorizationContractTests
 {
     private static readonly Guid MatterId = Guid.Parse("16616616-1111-4000-8000-000000000166");
     private static readonly Guid CallerSystemUserId = Guid.Parse("16616616-2222-4000-8000-000000000166");
@@ -177,8 +177,8 @@ public class FieldMappingPushAuthorizationContractTests
             if (path.EndsWith("EntityDefinitions(LogicalName='sprk_matter')/Attributes", StringComparison.Ordinal))
             {
                 return Rows(
-                    new { LogicalName = "sprk_matterid", AttributeType = "Uniqueidentifier", IsValidODataAttribute = true },
-                    new { LogicalName = "sprk_clientreference", AttributeType = "String", IsValidODataAttribute = true });
+                    new { LogicalName = "sprk_matterid", AttributeType = "Uniqueidentifier", IsValidODataAttribute = true, IsSecured = false },
+                    new { LogicalName = "sprk_clientreference", AttributeType = "String", IsValidODataAttribute = true, IsSecured = false });
             }
 
             if (path.EndsWith("EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships", StringComparison.Ordinal))
@@ -338,7 +338,7 @@ public class FieldMappingPushAuthorizationContractTests
         host.MetadataQueries.Should().Equal(new[]
         {
             ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
-             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute", CallerSystemUserId),
+             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute,IsSecured", CallerSystemUserId),
             ("EntityDefinitions(LogicalName='sprk_invoice')/ManyToOneRelationships",
              (string?)"$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName", CallerSystemUserId),
         }, "the metadata is read through the same impersonated seam, as the caller; with no lookup rule the source's "
@@ -870,14 +870,16 @@ public class FieldMappingPushAuthorizationContractTests
             };
 
             // The SOURCE's attribute catalog (live shape, 2026-10-06): a lookup's `...name` shadow is not a Web API property.
-            var sourceAttributes = new List<Dictionary<string, JsonElement>>
-            {
-                Attribute("sprk_matterid", "Uniqueidentifier"),
-                Attribute("sprk_clientreference", "String"),
-                Attribute("sprk_assignedattorney1", "Lookup"),
-                Attribute("sprk_assignedattorney1name", "String", validOData: false),
-                Attribute("sprk_client", "Customer"),
-            };
+            // DI-051: each column's IsSecured as SourceColumnSecurity states it (absent: explicitly not secured).
+            bool? SecurityOf(string column) => SourceColumnSecurity.TryGetValue(column, out var state) ? state : false;
+            List<Dictionary<string, JsonElement>> SourceAttributes() =>
+            [
+                Attribute("sprk_matterid", "Uniqueidentifier", secured: SecurityOf("sprk_matterid")),
+                Attribute("sprk_clientreference", "String", secured: SecurityOf("sprk_clientreference")),
+                Attribute("sprk_assignedattorney1", "Lookup", secured: SecurityOf("sprk_assignedattorney1")),
+                Attribute("sprk_assignedattorney1name", "String", validOData: false, secured: SecurityOf("sprk_assignedattorney1name")),
+                Attribute("sprk_client", "Customer", secured: SecurityOf("sprk_client")),
+            ];
 
             Impersonated
                 .Setup(q => q.QueryAsync(
@@ -888,7 +890,7 @@ public class FieldMappingPushAuthorizationContractTests
                     MetadataQueries.Add((path, query, caller));
                     return path switch
                     {
-                        "EntityDefinitions(LogicalName='sprk_matter')/Attributes" => sourceAttributes,
+                        "EntityDefinitions(LogicalName='sprk_matter')/Attributes" => SourceAttributes(),
                         "EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships" => sourceRelationships,
                         _ => targetRelationships,
                     };
@@ -913,6 +915,12 @@ public class FieldMappingPushAuthorizationContractTests
                     return row;
                 });
         }
+
+        /// <summary>
+        /// DI-051: the <c>IsSecured</c> the source catalog states for a column, by logical name: true or false, or null to leave the
+        /// property out. A column not listed is explicitly not secured.
+        /// </summary>
+        public Dictionary<string, bool?> SourceColumnSecurity { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>The user who owns the source in <see cref="ArrangeSourceGateRead"/> by default.</summary>
         public static readonly Guid SourceOwnerUserId = Guid.Parse("02200000-0000-4000-8000-0000000000a1");
@@ -946,12 +954,20 @@ public class FieldMappingPushAuthorizationContractTests
                 ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
             };
 
-        private static Dictionary<string, JsonElement> Attribute(string logicalName, string type, bool validOData = true) => new()
+        /// <summary>A source catalog row. DI-051: <paramref name="secured"/> is the column's <c>IsSecured</c>; null leaves the
+        /// property out (its security cannot be told).</summary>
+        internal static Dictionary<string, JsonElement> Attribute(string logicalName, string type, bool validOData = true, bool? secured = false)
         {
-            ["LogicalName"] = JsonSerializer.SerializeToElement(logicalName),
-            ["AttributeType"] = JsonSerializer.SerializeToElement(type),
-            ["IsValidODataAttribute"] = JsonSerializer.SerializeToElement(validOData),
-        };
+            var row = new Dictionary<string, JsonElement>
+            {
+                ["LogicalName"] = JsonSerializer.SerializeToElement(logicalName),
+                ["AttributeType"] = JsonSerializer.SerializeToElement(type),
+                ["IsValidODataAttribute"] = JsonSerializer.SerializeToElement(validOData),
+            };
+            if (secured is { } isSecured)
+                row["IsSecured"] = JsonSerializer.SerializeToElement(isSecured);
+            return row;
+        }
 
         public void VerifyNothingReadOrWritten()
         {

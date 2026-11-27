@@ -187,7 +187,8 @@ public static class OfficeEndpoints
         //   X-Idempotency-Key response cache is bound to that same key for Document saves
         //   (DocumentSaveIdempotencyBinding), so a reused header can never replay a response for a different document.
         //   A VERSION save is never replayed from that cache (task 047, SaveResponseMayBeReplayed): whether it repeats
-        //   a completed save depends on what the document holds now, which only the service can check.
+        //   a completed save depends on what the document holds now, which only the service can check. Nor is a task 141
+        //   attachments add that names its saved email (the .eml's children may have changed since).
         // Rate Limit: 10 requests/minute/user (per spec.md)
         group.MapPost("/save", SaveAsync)
             .WithName("OfficeSave")
@@ -198,7 +199,7 @@ public static class OfficeEndpoints
                 mayReplayResponse: SaveResponseMayBeReplayed)
             .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
             .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
-            .AddOfficeVersionSaveAuthorizationFilter() // word-add-in-r1 task 023 - FR-11 version save: "write" on the existing sprk_document
+            .AddOfficeVersionSaveAuthorizationFilter() // task 023 - FR-11 version save, and task 141 - a saved email's attachments add: "write" on the sprk_document the body names
             .Accepts<SaveRequest>("application/json")
             .Produces<SaveResponse>(StatusCodes.Status202Accepted)
             .Produces<SaveResponse>(StatusCodes.Status200OK) // For duplicate detection
@@ -263,7 +264,9 @@ public static class OfficeEndpoints
         // re-save that would add attachments checks the caller's current "write" on the saved .eml before anything runs
         // (OfficeService.AuthorizeEmailAttachmentAddAsync), because that path is decided inside the save, after the
         // idempotency lookup, where no route filter can see it — ADR-008 Amendment A1 (a resource only the service's own
-        // lookup identifies is checked where it is found). Every other check stays at the endpoint.
+        // lookup identifies is checked where it is found). Task 141's add that NAMES the saved .eml (email.savedDocumentId) is
+        // not such a path: the version-save filter checks "write" on that named document before the handler runs.
+        // Every other check stays at the endpoint.
         AuthorizationService authorizationService,
         CancellationToken cancellationToken)
     {
@@ -399,7 +402,8 @@ public static class OfficeEndpoints
 
     /// <summary>
     /// Task 047: may <c>IdempotencyFilter</c> answer this save from its response cache? Not a VERSION save
-    /// (<see cref="OfficeService.IsVersionSave"/>). Everything else may, exactly as before.
+    /// (<see cref="OfficeService.IsVersionSave"/>), and not (task 141 review) an attachments add that names its saved email
+    /// (<see cref="OfficeService.SavedEmailAttachmentAddDocumentId"/>). Everything else may, exactly as before.
     /// </summary>
     /// <remarks>
     /// A version save's key names a document and its content. Whether a request under that key repeats a completed save
@@ -408,10 +412,14 @@ public static class OfficeEndpoints
     /// still takes the in-flight lock (a concurrent double submit gets 409). A sequential retry reaches
     /// <c>OfficeService.SaveAsync</c>, which answers it with the first save's job when the document still holds these
     /// bytes (<c>200</c>, <c>duplicate: true</c>).
+    /// <para>A named attachments add is the same case: whether it repeats a completed add depends on which children the
+    /// <c>.eml</c> has NOW (one was deleted since, or the worker failed to create it), and the cache would replay the first
+    /// add's 202 while nothing is written. It keeps the in-flight lock; a sequential repeat reaches the service, whose
+    /// planner adds only what is missing.</para>
     /// </remarks>
     internal static bool SaveResponseMayBeReplayed(EndpointFilterInvocationContext context) =>
         context.Arguments.OfType<SaveRequest>().FirstOrDefault() is not { } request
-        || !OfficeService.IsVersionSave(request);
+        || (!OfficeService.IsVersionSave(request) && OfficeService.SavedEmailAttachmentAddDocumentId(request) is null);
 
     /// <summary>
     /// Validates a save request for required fields and constraints.
@@ -515,6 +523,23 @@ public static class OfficeEndpoints
                         "OFFICE_VALIDATION",
                         "Validation Error",
                         "Email metadata is required when ContentType is Email.",
+                        correlationId);
+                }
+
+                // Task 141: an attachments add names the saved email, the record it is filed to and at least one attachment.
+                // Without a record or a name there is nothing it could add, and it never falls back to an email save.
+                if (OfficeService.SavedEmailAttachmentAddDocumentId(request) is not null
+                    && (request.TargetEntity is null
+                        || request.Email.SelectedAttachmentFileNames is not { Count: > 0 } names
+                        || names.Any(string.IsNullOrWhiteSpace)))
+                {
+                    logger.LogWarning(
+                        "Attachments add without a record or attachment names, correlation {CorrelationId}",
+                        correlationId);
+                    return ProblemDetailsHelper.OfficeValidationError(
+                        "OFFICE_VALIDATION",
+                        "Validation Error",
+                        "Adding attachments to a saved email needs the record it is filed to and the names of the attachments.",
                         correlationId);
                 }
                 break;

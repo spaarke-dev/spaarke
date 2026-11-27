@@ -81,7 +81,9 @@ public static class InquiryEndpoints
     internal const string TodoEntitySet = "sprk_todos";
     internal const string LookupUnavailableReasonCode = "inquiry.unavailable";
 
-    public sealed record RecordDispositionResponse(Guid ServiceRequestId, bool TodoCompleted);
+    /// <summary>The 200 body of <c>POST /api/v1/inquiries/{id}/disposition</c>. <c>SignalRefreshQueued</c> (task 228): the To Do's
+    /// re-evaluation was queued, so its Worklist row leaves within seconds; false means it leaves at the nightly run.</summary>
+    public sealed record RecordDispositionResponse(Guid ServiceRequestId, bool TodoCompleted, bool SignalRefreshQueued = false);
 
     /// <summary>The body of <c>GET /api/v1/inquiries/for-todo/{todoId}</c>.</summary>
     public sealed record InquiryForTodoResponse(Guid ServiceRequestId, IReadOnlyList<InquiryReplyDto> Replies);
@@ -126,7 +128,7 @@ public static class InquiryEndpoints
 
         return result.Outcome switch
         {
-            InquiryResolutionOutcome.Resolved => Results.Ok(new RecordDispositionResponse(serviceRequestId, result.TodoCompleted)),
+            InquiryResolutionOutcome.Resolved => Results.Ok(new RecordDispositionResponse(serviceRequestId, result.TodoCompleted, result.SignalRefreshQueued)),
             InquiryResolutionOutcome.NotFound => ProblemDetailsHelper.UniformRecordNotFound(httpContext),
             InquiryResolutionOutcome.Invalid => Problem(StatusCodes.Status400BadRequest, "inquiry.invalid", result.Error),
             InquiryResolutionOutcome.Denied => Problem(StatusCodes.Status403Forbidden, "inquiry.denied", result.Error),

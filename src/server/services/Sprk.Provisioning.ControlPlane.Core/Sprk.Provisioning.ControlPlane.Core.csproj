@@ -405,11 +405,12 @@
       <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ReferenceData.sprk_gridconfiguration.json</LogicalName>
     </EmbeddedResource>
 
-    <!-- Data-setup plan D4: the `legal-standard` starter taxonomy pack (matter, matter
-         subtype, practice-area, project, document, contact and organization types).
+    <!-- Data-setup plan D4/D5: the `legal-standard` starter taxonomy pack (UTBMS billing code
+         sets and codes, matter, matter subtype, practice-area, project, document, contact
+         and organization types).
          Customer taxonomy, not product configuration: H12b seeds it create-if-missing
          by code/name when the run's referenceDataPack is legal-standard (the default).
-         ReferenceDataSet.PackTableNames lists the same seven files; the packs unit
+         ReferenceDataSet.PackTableNames lists the same files; the packs unit
          test fails if one is missing here. -->
     <EmbeddedResource Include="..\..\..\..\scripts\seed-data\reference\packs\legal-standard\*.json"
                        Link="Handlers\AppConfigSeed\ReferenceData\packs\legal-standard\%(Filename)%(Extension)">
