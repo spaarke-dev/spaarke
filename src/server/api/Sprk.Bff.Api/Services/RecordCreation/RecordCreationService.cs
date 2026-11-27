@@ -1481,7 +1481,7 @@ internal sealed partial class RecordCreationService
                 callerObjectId, callerSystemUserId) with
             {
                 RequestedBy = requestedBy,
-                // ISS-010 D1: a create of a child-records request asks over that request's configuration answers (R1, R4, R7);
+                // ISS-010 D1: a create of a child-records request asks over that request's configuration answers (R1, R2, R4);
                 // Repair and every other create name none (null), exactly as before.
                 LookupCache = ownerLookups,
             },
