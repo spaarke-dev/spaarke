@@ -12,6 +12,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
 /// <summary>
 /// A typed-name collision on an IMMUTABLE save (Email / Attachment) never overwrites another document's file
 /// (spaarkeai-word-add-in-r1 task 054 — the unimplemented half of the 2026-09-15 owner decision).
+/// Since task 143's review an attachment's name is system-derived and stored with a unique suffix, so the scenarios here
+/// are typed-name emails; <c>OfficeAttachmentSaveNamingTests</c> pins the attachment naming.
 /// </summary>
 /// <remarks>
 /// <para><b>The failure mode.</b> Task 046 (b) gave a SYSTEM-DERIVED <c>.eml</c> name a unique suffix, and the
@@ -43,7 +45,6 @@ public class OfficeTypedNameCollisionTests
     private static readonly DateTimeOffset Sent = new(2026, 9, 14, 9, 30, 0, TimeSpan.Zero);
 
     private static readonly byte[] ExhibitBytes = { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x37 };
-    private static readonly byte[] DifferentBytes = { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34 };
 
     private static SaveEntityReference NewRecord() => new() { EntityType = "matter", EntityId = Guid.NewGuid() };
 
@@ -63,18 +64,6 @@ public class OfficeTypedNameCollisionTests
             InternetMessageId = messageId,
             Body = body,
             IsNameSystemDerived = false,
-        },
-    };
-
-    private static SaveRequest AttachmentSave(string fileName, byte[] bytes, SaveEntityReference? record = null) => new()
-    {
-        ContentType = SaveContentType.Attachment,
-        TargetEntity = record ?? NewRecord(),
-        Attachment = new AttachmentMetadata
-        {
-            AttachmentId = $"att-{Guid.NewGuid():N}",
-            FileName = fileName,
-            ContentBase64 = Convert.ToBase64String(bytes),
         },
     };
 
@@ -152,19 +141,22 @@ public class OfficeTypedNameCollisionTests
         // owning document's id travels so the pane — Outlook's as well as Word's — can offer "Open"; the flag
         // stays false for every immutable capture, whatever it is filed to. The owning document is filed to
         // the SAME record the save targets, so the flag is false here for the content type alone.
+        //
+        // Task 143 review (F1): an attachment's stored name now carries a unique suffix (it is system-derived), so
+        // the immutable save whose name can collide is the typed-name email; it is the one exercised here.
         var world = new OfficeVersionSaveWorld();
         var record = NewRecord();
         var (existingId, existingItemId) = world.SeedDocument(
-            SaveContainer, "Exhibit A.pdf", ExhibitBytes, matterId: record.EntityId);
+            SaveContainer, TypedName, ExhibitBytes, matterId: record.EntityId);
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
 
         var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", DifferentBytes, record));
+            "/api/office/save", TypedNameEmailSave(record, "<collides@test.com>", "A different reply."));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var problem = await ReadProblemAsync(response);
         problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_020");
-        problem.Should().ContainKey("fileName").WhoseValue.Should().Be("Exhibit A.pdf");
+        problem.Should().ContainKey("fileName").WhoseValue.Should().Be(TypedName);
         problem.Should().ContainKey("canSaveAsVersion").WhoseValue.Should().Be("false",
             "an immutable capture has no version-save retry to offer");
         problem.Should().ContainKey("existingDocumentId").WhoseValue.Should().Be(existingId.ToString("D"),
@@ -178,26 +170,28 @@ public class OfficeTypedNameCollisionTests
     // ── The other arm: byte-identical content is still the duplicate suppress is for ───────────────────
 
     [Fact]
-    public async Task ByteIdenticalAttachmentSave_UnderAnExistingDocumentsName_IsResolvedToAReplace_NotARefusal()
+    public async Task ByteIdenticalTypedNameEmailSave_UnderAnExistingDocumentsName_IsResolvedToAReplace_NotARefusal()
     {
         // The collision IS detected (CollisionRefusals == 1 — SPE refused the first PUT), and then RESOLVED by
         // comparing content: the stored file already holds exactly these bytes, so the save continues under
         // Replace and the dedup branch suppresses it, byte-for-byte as before task 054. This is the arm that
-        // makes OfficeImmutableSaveFileSafetyTests still pass unmodified.
+        // keeps OfficeImmutableSaveFileSafetyTests' typed-name scenarios a suppressed duplicate.
+        // Task 143 review (F1): a typed-name email, because an attachment's stored name no longer collides.
         var world = new OfficeVersionSaveWorld();
-        var (canonicalId, canonicalItemId) = world.SeedDocument(SaveContainer, "Exhibit A.pdf", ExhibitBytes);
+        var request = TypedNameEmailSave(NewRecord(), "<same-capture@test.com>", "The same reply.");
+        var emlBytes = EmlBytesOf(request);
+        var (canonicalId, canonicalItemId) = world.SeedDocument(SaveContainer, TypedName, emlBytes);
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
         var client = factory.CreateClient();
 
-        var response = await client.PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", ExhibitBytes));
+        var response = await client.PostAsJsonAsync("/api/office/save", request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted, "a byte-identical capture is a duplicate, not a clash");
         world.CollisionRefusals.Should().Be(1, "SPE still refuses the first PUT — the resolution happens after it");
         world.UploadSmallCalls.Should().Be(1, "and exactly one upload then wrote, under Replace");
         world.DocumentCreates.Should().Be(0, "the duplicate is suppressed, as it always was");
         world.DeletedItemIds.Should().NotContain(canonicalItemId, "the item is the existing document's own file");
-        world.SpeItems[canonicalItemId].Versions[^1].Should().Equal(ExhibitBytes);
+        world.SpeItems[canonicalItemId].Versions[^1].Should().Equal(emlBytes);
 
         var job = await JobOf(client, (await response.Content.ReadFromJsonAsync<SaveResponse>())!);
         job.CurrentPhase.Should().Be("DeduplicatedToExisting");
@@ -213,11 +207,11 @@ public class OfficeTypedNameCollisionTests
         // save is refused: a refusal is recoverable (rename and retry), overwriting another document's file is
         // not. Same direction as task 046's cleanup guard.
         var world = new OfficeVersionSaveWorld { FailDownloads = true };
-        var (_, existingItemId) = world.SeedDocument(SaveContainer, "Exhibit A.pdf", ExhibitBytes);
+        var request = TypedNameEmailSave(NewRecord(), "<unreadable@test.com>", "The same reply.");
+        var (_, existingItemId) = world.SeedDocument(SaveContainer, TypedName, EmlBytesOf(request));
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
 
-        var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", ExhibitBytes));
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict,
             "unreadable content cannot prove the save is a duplicate, so it is not treated as one");
@@ -235,16 +229,27 @@ public class OfficeTypedNameCollisionTests
         // owns the name, so no document's bytes are at risk and Replace is still the right answer — otherwise
         // a transient failure would permanently lock out every retry under that name (task 025).
         var world = new OfficeVersionSaveWorld();
-        world.SeedDocument(SaveContainer, "Exhibit A.pdf", ExhibitBytes, withPointers: false);
-        var orphanItemId = world.SpeItems.Values.Single(i => i.Name == "Exhibit A.pdf").Id;
+        world.SeedDocument(SaveContainer, TypedName, ExhibitBytes, withPointers: false);
+        var orphanItemId = world.SpeItems.Values.Single(i => i.Name == TypedName).Id;
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
 
         var response = await factory.CreateClient().PostAsJsonAsync(
-            "/api/office/save", AttachmentSave("Exhibit A.pdf", DifferentBytes));
+            "/api/office/save", TypedNameEmailSave(NewRecord(), "<reclaims@test.com>", "The reclaiming reply."));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted, "an unowned name is reclaimed, never refused");
         world.CollisionRefusals.Should().Be(1, "SPE refused the first PUT; the reclaim followed it");
-        world.SpeItems[orphanItemId].Versions[^1].Should().Equal(DifferentBytes, "the reclaimed item now holds this save");
+        Encoding.UTF8.GetString(world.SpeItems[orphanItemId].Versions[^1]).Should().Contain("The reclaiming reply.",
+            "the reclaimed item now holds this save");
         world.DocumentCreates.Should().Be(1, "the save went on to create its own document");
+    }
+
+    /// <summary>The <c>.eml</c> bytes the server builds for <paramref name="request"/> (the same builder, so a seeded file can hold
+    /// exactly what the save uploads).</summary>
+    private static byte[] EmlBytesOf(SaveRequest request)
+    {
+        using var eml = Sprk.Bff.Api.Services.Office.OfficeEmailEnricher.BuildEmlFromMetadata(request.Email!);
+        using var copy = new MemoryStream();
+        eml.CopyTo(copy);
+        return copy.ToArray();
     }
 }

@@ -987,8 +987,8 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             Stream? contentStream = null;
             string fileName;
             // Task 046 (b) / 020: the name the document is SHOWN under (sprk_documentname). Null means "the
-            // stored file name", which is the case only for Attachment — Email (task 046 (b)) and Document
-            // (task 020, FR-06) both set it explicitly below.
+            // stored file name"; Email (task 046 (b)), Document (task 020, FR-06) and, since task 143's review,
+            // Attachment all set it explicitly below.
             string? documentName = null;
             long fileSize = 0;
             // FR-02 (task 014): on a Document CREATE the sprk_document id must be known BEFORE the bytes are
@@ -1133,7 +1133,22 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         // SANITIZED — see the note on the Document branch below. The client-supplied
                         // attachment name becomes the SPE upload path verbatim, and any '/' in it makes
                         // Graph create a folder.
-                        fileName = SpeUploadPath.SanitizeFileName(request.Attachment.FileName);
+                        //
+                        // Task 143 review (F1): an attachment's name comes from the email, never typed in the pane, so it is
+                        // SYSTEM-DERIVED (owner decision B2, 2026-09-14/15) and is STORED with task 046 (b)'s short unique
+                        // suffix, as the .eml's is. Containers are business-unit scoped and flat, so a common name ("Exhibit
+                        // A.pdf", "image001.png") was otherwise refused 409 OFFICE_020 for a different attachment saved before.
+                        // A byte-identical save is still answered by the content dedup after the upload, as a system-named
+                        // .eml's is.
+                        fileName = OfficeEmailEnricher.WithUniqueSuffix(SpeUploadPath.SanitizeFileName(request.Attachment.FileName));
+
+                        // The name the document is SHOWN under (sprk_documentname) is the attachment's own file name,
+                        // unsanitized and unsuffixed, as the worker names an .eml's attachment children (CreateDocumentRequest.Name
+                        // = attachment.FileName). Task 141's name rule (EmailAttachmentAddPlanner.SavedNamesOf: documentname or
+                        // filename, case-insensitive) therefore still finds it by that name, also when the sanitizer changed it.
+                        documentName = string.IsNullOrWhiteSpace(request.Attachment.FileName)
+                            ? fileName
+                            : request.Attachment.FileName;
                         break;
 
                     case SaveContentType.Document when request.Document != null:
