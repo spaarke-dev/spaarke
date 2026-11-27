@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -56,8 +57,9 @@ public enum WorklistSet
     /// <see cref="SignalReadService.DecidedWindowDays"/> days (<c>sprk_decidedon</c>), newest first on the client. A record that resolved
     /// Signals is listed once under each of them the caller's worklist read admits (the configuration's <c>closedEarlier</c> query, narrowed
     /// to those Signals, under every rule of the other sets), so each review of a Signal reviewed twice is its own row; a record none of
-    /// whose Signals is admitted is absent. An email-gate record (it resolves none) is in its group's <see cref="WorklistGroup.Records"/>;
-    /// any other record that resolved no Signal (billing, Record Procedure, assign-firm) is not listed.
+    /// whose Signals is admitted is absent. An email-gate record (it resolves none) is in its group's <see cref="WorklistGroup.Records"/>,
+    /// and so, since task 235 (D-234), is a Record Procedure, billing or assign-firm record that resolved none, under its core record only;
+    /// any other record that resolved no Signal is not listed.
     /// </summary>
     Decided,
 }
@@ -96,7 +98,9 @@ public sealed record WorklistLaneGroups(string Lane, IReadOnlyList<WorklistGroup
 /// <param name="Records">Task 226 (D-231): <see cref="WorklistSet.Decided"/> only. The email-gate Decision Records in this group (D-139:
 /// they resolve no Signal), each listed with its summary and no Open: there is no Work Item behind it to reopen. Read AS THE CALLER, only
 /// when the caller's own read returns the communication the record was made on, and kept by the record's own core-record stamp (the
-/// caller's read of the core returns it); with no core record, in a Not filed group. Carried without its steps or follow-ons.
+/// caller's read of the core returns it); with no core record, in a Not filed group. Task 235 (D-234): also the Record Procedure, billing
+/// and assign-firm Decision Records that resolved no Signal, read AS THE CALLER only when the caller's own read returns their core record,
+/// kept by the same core-record rule, and never in a Not filed group. Carried without its steps or follow-ons.
 /// Null, and not serialized, in every other set and when the group has none.</param>
 public sealed record WorklistGroup(
     WorklistCoreRecord? Core,
@@ -415,11 +419,13 @@ public sealed class SignalReadService
             // (3b) Task 226 (D-231, #2015): the Decided set is read RECORD FIRST. The caller's own read of the writer's Decision Records
             // that resolved Signals, decided in the window, names the Signals read at (4): exactly those the records resolved, through the
             // configuration's query narrowed to them, so every rule below still decides whether each Signal is shown. No record, no Signal
-            // query. The gate records are read beside them (their own bound, only those whose email the caller reads) and admitted at (10b).
+            // query. The gate records are read beside them (their own bound, only those whose email the caller reads), and so are the
+            // Record Procedure, billing and assign-firm records (task 235, D-234: a bound per kind and core table, only those whose core
+            // record the caller reads; not for a one-Work-Item read, which lists none of them); all are admitted at (10b).
             DecidedRecords? decided = null;
             if (set == WorklistSet.Decided)
             {
-                decided = await ReadDecidedRecordsAsync(gate, ct).ConfigureAwait(false);
+                decided = await ReadDecidedRecordsAsync(gate, withSignalLess: onlySignalId is null, ct).ConfigureAwait(false);
                 if (decided.Outcome is { } decidedFailure)
                 {
                     return decidedFailure;
@@ -620,8 +626,9 @@ public sealed class SignalReadService
             // Never fails the response: a fault leaves the lines without the member.
             visible = ApplyInvoiceReview(visible, catalog, lineInvoices);
 
-            // (10b) Task 226 (D-231): the Decided set's email-gate records, each kept only when the caller's own read returns its core
-            // record (or, with none, by the communication read that returned it). Listed with no Open.
+            // (10b) Task 226 (D-231): the Decided set's records with no Signal (email-gate records; task 235, D-234: Record Procedure,
+            // billing and assign-firm records), each kept only when the caller's own read returns its core record (or, for a gate record
+            // with none, by the communication read that returned it). Listed with no Open.
             var unbacked = await ListUnbackedRecordsAsync(decided, onlySignalId, gate, ct).ConfigureAwait(false);
             if (unbacked.Outcome is { } unbackedFailure)
             {
@@ -1672,7 +1679,7 @@ public sealed class SignalReadService
 
     /// <summary>One record of the Decided set as the caller's read returned it.</summary>
     /// <param name="SignalIds">The Signals it resolved (its <c>sprk_steps</c> <c>resolvedSignalIds</c>, as the writer stored them); empty for an
-    /// email-gate record. Never the Signal's own <c>sprk_decisionrecord</c> lookup, which a user can write and a later review overwrites.</param>
+    /// email-gate, Record Procedure, billing or assign-firm record that resolved none. Never the Signal's own <c>sprk_decisionrecord</c> lookup, which a user can write and a later review overwrites.</param>
     /// <param name="CoreTypeId">The record's core-record stamp type, with <paramref name="CoreId"/>; both null for a half pair or none.</param>
     /// <param name="HasNoCore">Neither half of the stamp is present.</param>
     private sealed record DecidedRecord(WorklistDecisionRecord Record, IReadOnlyList<Guid> SignalIds, Guid? CoreTypeId, Guid? CoreId, bool HasNoCore);
@@ -1738,28 +1745,101 @@ public sealed class SignalReadService
             .ToString(SaveOptions.DisableFormatting);
 
     /// <summary>
-    /// (3b) The Decided set's records, AS THE CALLER: the records that resolved Signals (<see cref="DecidedRecordsFetch"/>) and the gate
-    /// records (<see cref="GateRecordsFetch"/>), read at the same time, each paged within its own <see cref="MaxPages"/> bound (then 503 rather
-    /// than a shorter history). Dataverse trims both by the caller's own security: a secure child reaches only its family's members through
-    /// the mirrored shares (D-33/D-123). Only the writer's own records are asked for (a person's forged row is never listed, task 223). A
-    /// writer record that resolved no Signal and is not a gate record (a billing, Record Procedure or assign-firm record) is read by neither
-    /// and not listed (fix round 1, K2: the owner decides). The first read that failed answers.
+    /// Task 235 (D-234, #3283): a kind of writer record that resolves no Signal and is listed under its core record, told apart by the
+    /// catalog code the writer stores in <c>sprk_actioncode</c> (written only by the writer, from the catalog definition; trusted only on a
+    /// <see cref="WriterCreatedRecord"/> row). The writer's entries take disjoint code sets (its P1 check).
     /// </summary>
-    private async Task<DecidedRecords> ReadDecidedRecordsAsync(DataverseConcurrencyGate gate, CancellationToken ct)
+    /// <param name="Name">The kind, as logged.</param>
+    /// <param name="TooMany">The 503 reason when its read passes <see cref="MaxPages"/>.</param>
+    /// <param name="Codes">Its <c>sprk_actioncode</c> values, ordinal order.</param>
+    internal sealed record SignalLessKind(string Name, string TooMany, IReadOnlyList<string> Codes);
+
+    /// <summary>Task 235 (D-234): the Record Procedure decisions (<c>DecisionRecordWriter.WriteRecordProcedureDecisionAsync</c>, which always
+    /// writes <c>resolvedSignalIds: []</c>), the billing decisions other than Set firm (<c>WriteBillingDecisionAsync</c>, through
+    /// <c>BillingDecisionRecorder</c>), and Set firm (<see cref="InvoiceAssignFirmService.AssignFirmActionCode"/>, a billing code that never
+    /// resolves a Signal), each its own read so one kind's volume never fills another's bound.</summary>
+    internal static readonly IReadOnlyList<SignalLessKind> SignalLessKinds =
+    [
+        new("Record Procedure", "too_many_procedure_decision_records",
+            [.. DecisionActionCatalog.RecordProcedureActions.Select(d => d.Code).Order(StringComparer.Ordinal)]),
+        new("billing", "too_many_billing_decision_records",
+            [.. DecisionActionCatalog.BillingActions.Select(d => d.Code)
+                .Where(c => c != InvoiceAssignFirmService.AssignFirmActionCode).Order(StringComparer.Ordinal)]),
+        new("assign-firm", "too_many_assign_firm_decision_records", [InvoiceAssignFirmService.AssignFirmActionCode]),
+    ];
+
+    /// <summary>The columns of a <see cref="SignalLessKind"/> read: what the tab shows, the confirming user (named through
+    /// <see cref="ConfirmedByNameLink"/>) and the core-record stamp (D-34/D-36); no <c>sprk_steps</c> or <c>sprk_followons</c>, which nothing
+    /// replays for a record with no Open.</summary>
+    internal static readonly string[] SignalLessRecordColumns =
+        [.. WorklistDecisionRecordReader.Columns.Where(c => c is not ("sprk_steps" or "sprk_followons")), "sprk_corerecordtype", "sprk_corerecordid"];
+
+    /// <summary>
+    /// Task 235 (D-234): one <see cref="SignalLessKind"/>'s records on one filing core table: the writer's records
+    /// (<see cref="WriterCreatedRecord"/>) decided in the window, with one of the kind's codes, that resolved no Signal (so a record that
+    /// resolved one stays only in <see cref="DecidedRecordsFetch"/> and is listed once, under its Signal). The core table is an INNER link
+    /// on the record's typed lineage lookup (<see cref="DecisionRecordWriter.LineageColumnByCoreEntity"/>, written at create from the same
+    /// core as the core pair), so Dataverse returns only the records whose core record the CALLER can read: the bound counts only what the
+    /// caller could be shown, never the business unit's every record (the Deep read of D-144; the #3277 F1 lesson).
+    /// </summary>
+    internal static string SignalLessRecordsFetch(Guid writerUserId, SignalLessKind kind, string coreTable) =>
+        new XElement("fetch",
+            new XElement("entity", new XAttribute("name", "sprk_decisionrecord"),
+                SignalLessRecordColumns.Select(c => new XElement("attribute", new XAttribute("name", c))),
+                ConfirmedByNameLink(),
+                new XElement("link-entity", new XAttribute("name", coreTable), new XAttribute("from", $"{coreTable}id"),
+                    new XAttribute("to", DecisionRecordWriter.LineageColumnByCoreEntity[coreTable]), new XAttribute("link-type", "inner"),
+                    new XAttribute("alias", "core")),
+                new XElement("filter", new XAttribute("type", "and"),
+                    DecidedRecordConditions(writerUserId),
+                    new XElement("condition", new XAttribute("attribute", "sprk_actioncode"), new XAttribute("operator", "in"),
+                        kind.Codes.Select(code => new XElement("value", code))),
+                    new XElement("condition", new XAttribute("attribute", "sprk_steps"), new XAttribute("operator", "like"),
+                        new XAttribute("value", NoResolvedSignalsLike))),
+                DecidedRecordOrder()))
+            .ToString(SaveOptions.DisableFormatting);
+
+    /// <summary>Every (kind, filing core table) read of <see cref="SignalLessRecordsFetch"/>, in a fixed order.</summary>
+    private static readonly IReadOnlyList<(SignalLessKind Kind, string CoreTable)> SignalLessReads =
+        [.. SignalLessKinds.SelectMany(k => DecisionRecordWriter.LineageColumnByCoreEntity.Keys.Order(StringComparer.Ordinal).Select(t => (k, t)))];
+
+    /// <summary>
+    /// (3b) The Decided set's records, AS THE CALLER: the records that resolved Signals (<see cref="DecidedRecordsFetch"/>), the gate
+    /// records (<see cref="GateRecordsFetch"/>) and, unless <paramref name="withSignalLess"/> is false, each <see cref="SignalLessKind"/>'s
+    /// records per filing core table (<see cref="SignalLessRecordsFetch"/>, task 235, D-234), read at the same time, each paged within its own
+    /// <see cref="MaxPages"/> bound (then 503 rather than a shorter history). Dataverse trims every one by the caller's own security: a secure
+    /// child reaches only its family's members through the mirrored shares (D-33/D-123). Only the writer's own records are asked for (a
+    /// person's forged row is never listed, task 223). A writer record that resolved no Signal and is none of these (no kind's code, and not a
+    /// gate record) is read by none and not listed. The first read that failed answers, in the order above.
+    /// </summary>
+    private async Task<DecidedRecords> ReadDecidedRecordsAsync(DataverseConcurrencyGate gate, bool withSignalLess, CancellationToken ct)
     {
         // A WhoAmI fault throws to ReadAsync's catch (503), as in ReadDecisionRecordsAsync.
         var writerUserId = await _records.WriterUserIdAsync(ct).ConfigureAwait(false);
         var backed = gate.RunAsync(c => ReadRecordPagesAsync(DecidedRecordsFetch(writerUserId), "Decision Record", "too_many_decision_records", TryReadSignalBackedRecord, c), ct);
         var gated = gate.RunAsync(c => ReadRecordPagesAsync(GateRecordsFetch(writerUserId), "gate Decision Record", "too_many_gate_decision_records", TryReadGateRecord, c), ct);
-        await SettledAsync([backed, gated]).ConfigureAwait(false);
-        var signalBacked = await backed.ConfigureAwait(false);
-        if (signalBacked.Outcome is not null)
+        List<Task<DecidedRecords>> reads = [backed, gated];
+        if (withSignalLess)
         {
-            return signalBacked;
+            reads.AddRange(SignalLessReads.Select(r => gate.RunAsync(
+                c => ReadRecordPagesAsync(SignalLessRecordsFetch(writerUserId, r.Kind, r.CoreTable), $"{r.Kind.Name} Decision Record",
+                    r.Kind.TooMany, TryReadSignalLessRecord, c), ct)));
         }
 
-        var gateRecords = await gated.ConfigureAwait(false);
-        return gateRecords.Outcome is not null ? gateRecords : new DecidedRecords([.. signalBacked.Records, .. gateRecords.Records], null);
+        await SettledAsync(reads).ConfigureAwait(false);
+        var records = new List<DecidedRecord>();
+        foreach (var read in reads)
+        {
+            var result = await read.ConfigureAwait(false);
+            if (result.Outcome is not null)
+            {
+                return result;
+            }
+
+            records.AddRange(result.Records);
+        }
+
+        return new DecidedRecords(records, null);
     }
 
     /// <summary>
@@ -1878,6 +1958,19 @@ public sealed class SignalReadService
         return true;
     }
 
+    /// <summary>Task 235 (D-234): a <see cref="SignalLessKind"/> record, listed only under its core record (step 10b): never Not filed
+    /// (<c>HasNoCore</c> is false, whatever the stamp), and a half pair is no core to check, so neither is ever listed.</summary>
+    private static bool TryReadSignalLessRecord(JsonElement raw, out DecidedRecord record)
+    {
+        if (!TryReadGateRecord(raw, out record))
+        {
+            return false;
+        }
+
+        record = record with { HasNoCore = false };
+        return true;
+    }
+
     /// <summary>
     /// (10) Each record of <paramref name="decided"/> once under every one of its Signals in <paramref name="visible"/> (the rows steps 4 to
     /// 9b kept), carrying that record, in the records' order (newest decision first). A Signal two records resolved is two rows; a record
@@ -1906,24 +1999,30 @@ public sealed class SignalReadService
         return listed;
     }
 
-    /// <summary>A Decided-set gate record, as listed, and the core record it is grouped under (null: Not filed).</summary>
+    /// <summary>A Decided-set record with no Signal, as listed, and the core record it is grouped under (null: Not filed).</summary>
     private sealed record ListedRecord(WorklistCoreRecord? Core, WorklistDecisionRecord Record);
 
     private sealed record UnbackedRecords(List<ListedRecord> Listed, SignalReadResult? Outcome);
 
     /// <summary>
-    /// (10b) Task 226 (D-231): the gate records of <paramref name="decided"/> (an email-gate record resolved no Signal, D-139). Every one came
-    /// back through the caller's own read of its communication (<see cref="GateRecordsFetch"/>'s inner join). Each is then kept by the
-    /// record's OWN core stamp, as the worklist keeps a Signal: with a core record (D-34/D-36), only when the caller's own batched read of
-    /// that core returns it (a type outside uac-r2's core taxonomy is dropped); with a half pair, never; with no core record (D-35/D-39),
-    /// listed Not filed (the communication read above is its rule). Each is listed with no steps or follow-ons (there is no Open to replay
-    /// them). None when <paramref name="onlySignalId"/> is given (a one-Work-Item read). A fault is 503, never a shorter list.
+    /// (10b) Task 226 (D-231): the records of <paramref name="decided"/> that resolved no Signal: the gate records (D-139), each back through
+    /// the caller's own read of its communication (<see cref="GateRecordsFetch"/>'s inner join), and, task 235 (D-234), the Record Procedure,
+    /// billing and assign-firm records, each back through the caller's own read of its core record (<see cref="SignalLessRecordsFetch"/>'s
+    /// inner join). Each is then kept by the record's OWN core stamp, as the worklist keeps a Signal: with a core record (D-34/D-36), only
+    /// when the caller's own batched read of that core returns it (a type outside uac-r2's core taxonomy is dropped); with a half pair, never;
+    /// with no core record (D-35/D-39), a gate record is listed Not filed (the communication read above is its rule) and no other is. Each is
+    /// listed once (by id), newest decision first (stable: records decided at the same time keep the order they were read in), with no steps
+    /// or follow-ons (there is no Open to replay them). None when <paramref name="onlySignalId"/> is given (a one-Work-Item read). A fault
+    /// is 503, never a shorter list.
     /// </summary>
     private async Task<UnbackedRecords> ListUnbackedRecordsAsync(
         DecidedRecords? decided, Guid? onlySignalId, DataverseConcurrencyGate gate, CancellationToken ct)
     {
         var listed = new List<ListedRecord>();
-        var records = decided is null || onlySignalId is not null ? [] : decided.Records.Where(r => r.SignalIds.Count == 0).ToList();
+        var records = decided is null || onlySignalId is not null
+            ? []
+            : decided.Records.Where(r => r.SignalIds.Count == 0).DistinctBy(r => r.Record.RecordId)
+                .OrderByDescending(r => r.Record.DecidedOn).ToList();
         if (records.Count == 0)
         {
             return new UnbackedRecords(listed, null);
@@ -2654,7 +2753,8 @@ public sealed class SignalReadService
             if (lane == DecisionLane.Decide && records is { Count: > 0 })
             {
                 // Task 226 (D-231): the Decided set's records with no Signal join their core record's Decide group (a new group after the
-                // others when it has no item), in the records' order; those with no core record form a Not filed group, last.
+                // others when it has no item), in the records' order; those with no core record (gate records only) form a Not filed
+                // group, last. Task 235 (D-234): Record Procedure, billing and assign-firm records join their core's group the same way.
                 foreach (var listed in records)
                 {
                     var group = built.FirstOrDefault(b => SameCore(b.Core, listed.Core));

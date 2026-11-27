@@ -156,6 +156,7 @@
          so they compile into Sprk.Bff.Api.IntegrationTests instead (see that csproj), like the worklist golden baselines above. -->
     <Compile Remove="..\..\integration\regression\Signals\DecideLanePagingTests.cs" />
     <Compile Remove="..\..\integration\regression\Signals\Issue2015_DecisionRecordsTabRecordFirstTests.cs" />
+    <Compile Remove="..\..\integration\regression\Signals\Issue3283_DecisionRecordsTabSignalLessRecordsTests.cs" />
   </ItemGroup>
 
   <!--
