@@ -182,3 +182,139 @@ So the app-only save writes only to the analysis the server has just created for
   caller cancelling. The empty analysis stays. It is the caller's own record and does no harm. Part b should show it as "no results".
   Cleanup (delete it as the caller, or leave it) is an owner question.
 - **A retry with a new idempotency key creates a second analysis**, as `spaarke_start_analysis` does today.
+
+## 5. Task 037b: the app-only results tool (built 2026-11-27)
+
+Part c (the widget, the `_meta.ui` links on the two existing tools, the CI wiring and the publish-size delta) is not built here. Paths are
+under `src/server/api/Sprk.Bff.Api/` unless they start with `tests/`.
+
+### 5.1 What was built
+
+| # | Change | Where |
+|---|---|---|
+| 1 | `IPlaybookRunAi.ReadResultsAsCallerAsync(HttpContext, runId, ct)` → `PlaybookRunResults?` (`null` = the uniform not-found), with `PlaybookRunResultsState` (`Pending`, `Available`, `None`) and `PlaybookRunSourceDocument` | `Services/Ai/PublicContracts/IPlaybookRunAi.cs` |
+| 2 | The runner implements it: `ReadAsCallerAsync` (the one owner rule), then the run's link. A run still in the run table links through its in-memory analysis id and document ids (identifiers only, added to `DetachedRun`). Any other run links through the record's regarding columns, read by the new `PlaybookRunRecordStore.GetOwnedRunLinkAsync`, which re-checks the owner (`sprk_triggeredby` → oid) as `GetOwnedRunAsync` does | `Services/Ai/PlaybookRuns/DetachedPlaybookRunner.cs`, `PlaybookRunRecordStore.cs` |
+| 3 | The reads, as the caller: `PlaybookRunResultsReader` (static, no DI) | `Services/Ai/PlaybookRuns/PlaybookRunResultsReader.cs` |
+| 4 | `spaarke_get_playbook_run_results`: app-only, read-only, idempotent, title "Get a JPS playbook run's results", input `{ runId }` only (`additionalProperties: false`) | `Api/Mcp/LegalOperations/Playbooks/GetPlaybookRunResultsTool.cs` |
+| 5 | The startup check: `McpToolAuthorization.AppOnlyTools`, an allow-list like `ModelCallableWrites`. `ValidateTool` refuses a tool named there whose `_meta.ui.visibility` is not exactly `["app"]` (model-visible, missing or empty) | `Api/Mcp/McpToolAuthorization.cs` |
+
+The engine, the two existing playbook tools and the run record's columns are unchanged. Nothing is written.
+
+### 5.2 How the results are read (as the caller, except identifiers)
+
+1. `ReadAsCallerAsync`: another caller's run or an unknown id gives `null`.
+2. The link. The analysis id comes only from the server: the run table's copy of `PlaybookRunRequest.AnalysisId`, or the record's
+   `sprk_regardingentitytype = sprk_analysis` and `sprk_regardingrecordid`. 037a writes both. No argument names it, and the tool refuses
+   any argument but `runId`.
+3. With an analysis:
+   - The analysis-read rule runs unchanged (`AnalysisAuthorizationFilter.IsAnalysisReadableAsync`, as `spaarke_get_analysis` uses it):
+     Read on every anchor (the run's document), the creator branch and the external document narrowing. Its app-only read covers the
+     anchor ids only.
+   - Then the caller's own OBO read: `sprk_analysises({id})?$select=sprk_name,_sprk_documentid_value[,sprk_workingdocument]`. A 403 or
+     404 is the not-found. Any other failure throws, and the tool answers 503 `playbook.run-read-failed` (the status tool's code).
+   - The working document is selected only once the run has finished.
+4. Without an analysis, the run's first document is its subject (see 5.3).
+5. The source documents:
+   - ONE OBO query: `sprk_documents?$select=sprk_documentid,sprk_documentname&$filter=sprk_documentid eq … or …`.
+   - Then `InternalPlaneDocumentNarrowing.ForCallerAsync`.
+   - A document the caller cannot read is left out and never named. Nothing is read while the run is still running.
+6. The playbook name: the caller's OBO read of `sprk_analysisplaybooks({id})?$select=sprk_name`. A refused or failed read leaves it out,
+   because the name is a label, not the subject.
+
+### 5.3 Not-found and "no results" (the decision this task owed)
+
+| Case | Answer | Why |
+|---|---|---|
+| An unknown run id; another caller's run (live or stored) | Not-found, byte-identical to `spaarke_get_playbook_run`'s | One owner rule |
+| The analysis-read rule refuses (an unreadable anchor document or matter, the external narrowing, a row it cannot read) | Not-found | The run's subject |
+| The caller's own read of the analysis is refused (403 or 404) | Not-found | The analysis the caller cannot read |
+| A run with no analysis whose first document the caller can no longer read | Not-found | Its subject |
+| **An owned run with no linked analysis** (started before 037a, a REST run, or a record writer whose regarding is a matter) | **`results: "none"`**. `consoleLink` is the Console on its first document; the readable documents are listed | The run is the caller's own, and the status tool already reports it. A not-found here would contradict a `completed` status on the same run id and show the widget an error for a run that worked. It reveals nothing the status tool does not |
+| **An analysis whose working document is empty or whitespace** (a playbook that wrote to a record, a run that failed before its save, or the §4.6 known limit) | **`results: "none"`**. `consoleLink` is the analysis in the Console | The same reason; the caller can open the analysis |
+| A run still running | `results: "pending"`, with its state and progress but no sections and no documents. The working document is not read | POML step 3 |
+| A stored run still Running past the cap plus the margin | `status: "failed"`, `outcome: "interrupted"`, `results: "none"` | The status tool's own mapping (D-030 condition 7) |
+
+Tests:
+- `PlaybookRunResultsToolTests`: `EmptyWorkingDocument_IsNone`, `RunWithNoAnalysis_IsNone`, `RunRegardingAMatter_IsNone`,
+  `InterruptedRun_IsNone`, `RunningRun_ReturnsItsStateWithNoContent`.
+- `PlaybookRunResultsAuthTests`: every not-found row.
+
+### 5.4 The result (part c's widget consumes this)
+
+`structuredContent` uses `DecisionToolCall.Json` (camelCase; null members are omitted):
+
+```
+{
+  runId: string (GUID),
+  status: "running" | "completed" | "failed",                 // as the status tool
+  outcome: "running" | "completed" | "failed" | "cancelled" | "interrupted",
+  results: "pending" | "available" | "none",
+  playbookId: string (GUID),
+  playbookName?: string (at most 200 chars, one line),
+  progress?: int 0-100 (only while running),
+  reasonCode?: string (at most 64 chars),
+  analysisId?: string (GUID),
+  sections: [ { heading?: string (at most 200 chars, one line), text: string (Markdown), truncated: bool } ],
+  truncated: bool,
+  moreLink?: string (only when truncated; equals consoleLink),
+  consoleLink?: string,
+  documents: [ { documentId: string (GUID), name: string (at most 80 chars, one line), link?: string } ]
+}
+```
+
+- `content` is one line with no output text, for example "JPS playbook run {id} (completed): 3 result section(s).".
+- Sections: the working document is split at Markdown ATX headings (`#` to `######`, outside fenced code). Text before the first heading,
+  or a document with no heading, is one section without `heading`. Section text keeps its Markdown.
+- `consoleLink`:
+  - With an analysis: `HandoffUrlBuilder.BuildAnalysisWorkspaceUrl(analysisId, documentId)`. It opens `sprk_spaarkeai` with `analysisId`,
+    which is the Console's existing "open an existing analysis" entry (`launch-resolver.ts`, case 2d).
+  - With no analysis: `IPlaybookRunAi.RunConsoleLink` on the run's first document (030's target).
+  - A document's `link` is `RunConsoleLink` on that document.
+- Errors are `isError` results:
+  - `mcp.invalid_argument` (400) and `invalid_id` (400);
+  - `sdap.access.deny.record_unavailable` (404, the uniform not-found);
+  - `DATAVERSE_USER_CONTEXT_REQUIRED` (401);
+  - `playbook.run-read-failed` (503).
+
+### 5.5 Size (NFR-02)
+
+- The sections share 36 KiB of worst-case JSON, plus 64 bytes per section, with at most 50 sections. Every character the default encoder
+  may escape counts six bytes: non-ASCII, `"`, `\`, `<`, `>`, `&`, `'`, `+`, `` ` ``, controls and each surrogate half.
+- Past the budget:
+  - the section the cap falls in is cut, never mid surrogate pair, and dropped when less than 256 bytes would remain;
+  - later sections are dropped;
+  - `truncated` is true and `moreLink` opens the full analysis.
+- 20 documents at 80 characters (six bytes each), the links and the header keep the worst case under 64 KiB. The test,
+  `HugeResult_IsTruncatedUnder64KiB_WithAMoreLink`, uses 400 non-ASCII sections, 20 documents with 850-character CJK names and a
+  5,000-character playbook name.
+
+### 5.6 Logs
+
+- The per-call line (`DecisionToolCall.LogAroundAsync`): tool, outcome, rows (= sections), ms and correlation id.
+- One more line: the results state, the result's bytes, the section count, truncated, and the correlation id.
+- A fault logs the exception type only; the reader logs status codes only.
+- Test: `Logs_CarrySizesNotContent`. A marker in the text, a document name and the playbook name never reaches a log line.
+
+### 5.7 Placement and justification (CLAUDE.md §10, §11)
+
+- No package, endpoint, DI registration, store, schema or background work. The tool is found by `[McpArea]`; the reader is static.
+- The new surface, with its three answers:
+  - `ReadResultsAsCallerAsync`. Existing: `ReadAsCallerAsync` (state only) and `spaarke_get_analysis`'s read (an app-only loader).
+    Extension: extending `ReadAsCallerAsync` would change the status tool's frozen view, and the route's read is app-only for content.
+    Cost of doing nothing: the widget has no caller-scoped way to reach the results.
+  - `GetOwnedRunLinkAsync`. Existing: `GetOwnedRunAsync`, which reads node rows and returns a shape the engine maps. Extension: adding
+    the regarding columns there would change the query of every status read. Cost of doing nothing: a run no longer in the run table
+    cannot find its analysis.
+  - `McpToolAuthorization.AppOnlyTools`. Existing: the write check, which covers only tools that are not read-only. Cost of doing
+    nothing: the POML's "refused at startup if declared otherwise" has no enforcement for a read-only tool.
+- The ArchTest ledger row is in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.Playbooks.cs`.
+
+### 5.8 Known limits and open questions
+
+- **K1. Three OBO reads and the rule per finished results call** (the analysis, the documents, the playbook name). The widget should call
+  this tool once per finished run, not per poll (the status tool is the poll). Part c should keep it that way.
+- **K2. The no-analysis case lists the run's readable documents for a REST run too** (any run the caller started, read by run id). They
+  are the run's own inputs, which the caller can read, and the status tool already exposes the run.
+- **Q1 (part c).** Whether the widget renders section Markdown or plain text: the tool returns the Markdown as stored.
+- **Q2 (owner, carried from §4.6).** An analysis created at the start whose run never started shows "none" here; its cleanup is still
+  open.

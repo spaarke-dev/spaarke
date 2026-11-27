@@ -35,7 +35,7 @@ The agent-facing summary of these rules is `.claude/skills/mcp-tool-handler/SKIL
 ### Step 1: Decide the shape
 
 - **Read or write.** A read-only tool sets `ReadOnly = true`. Any tool that writes sets `ReadOnly = false` and **must** be app-only: the model never commits. Startup refuses a non-read-only tool that is not app-only.
-- **Visible to the model or only to the widget.** A tool only the widget calls is app-only: `Meta = new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray("app") } }`. A model-visible tool that renders a widget adds `["resourceUri"] = "ui://…"` and visibility `["model", "app"]`.
+- **Visible to the model or only to the widget.** A tool only the widget calls is app-only: `Meta = new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray("app") } }`. A model-visible tool that renders a widget adds `["resourceUri"] = "ui://…"` and visibility `["model", "app"]`. A read-only tool that returns what only a widget may show (for example `spaarke_get_playbook_run_results`) also adds its name to `McpToolAuthorization.AppOnlyTools`, so startup refuses it if its visibility is ever anything but `["app"]`.
 - **Model-visible output is minimal.** Counts and slim rows only; anything privileged goes to the widget through an app-only tool, as the caller (ADR-015).
 
 ### Step 2: Write the tool class
@@ -122,6 +122,7 @@ A new area is a new route on the same host, for example `/mcp/billing-review`. D
 | "the [Authorize] the SDK enforces … is not the tool class's own" | The handler is in a helper class, or `Metadata` was set | Make the handler a static method of the tool class and pass it as an unqualified method group |
 | "does not set ReadOnly explicitly" or "has no title" | Annotation left out | Set `ReadOnly` and `Title` |
 | "is not read-only, so it must be app-only" | A write tool visible to the model | Set `visibility` to exactly `["app"]` |
+| "is in McpToolAuthorization.AppOnlyTools" | A widget-only read tool declared model-visible, or with no visibility | Set `visibility` to exactly `["app"]` |
 | "names the '…' policy, which is not in AllowedToolPolicies" | A policy other than bare or `SystemAdmin` | Use an allowed policy; widening the set is a separate reviewed production change |
 | Arch test: "an MCP tool missing from McpTools" | No ledger entry | Add it (Step 3) |
 | Arch test: injects a type from `Services/Ai/**` | A tool reaches into the AI pipeline | Use the public contract facade (ADR-013) |

@@ -76,6 +76,17 @@ public static class McpToolAuthorization
         "spaarke_run_playbook", // r2 task 030: starts a detached caller run (ADR-052 amendment 2026-11-26); retry key per caller
     };
 
+    /// <summary>
+    /// The read-only tools that must still be app-only (<c>_meta.ui.visibility</c> exactly <c>["app"]</c>): they return what only a widget
+    /// may show, never the model (ADR-015). <see cref="ValidateTool"/> refuses startup when one is declared otherwise, as it does for a
+    /// write that is not app-only. r2 task 037b adds <c>spaarke_get_playbook_run_results</c> (a run's output content). An allow-list a
+    /// tool task adds to, pinned by the tool's own tests.
+    /// </summary>
+    public static readonly IReadOnlySet<string> AppOnlyTools = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "spaarke_get_playbook_run_results", // r2 task 037b: the run's results, for the playbook run widget only
+    };
+
     // The full name of the ASP.NET Core anonymity metadata interface. Matched by name because the anonymity guard
     // (RouteAuthorizationGuardTests.AnonymityIsDeclaredOnlyOnAScannedChain) bans any identifier containing it from BFF source.
     private const string AnonymityMetadataInterface = "Microsoft.AspNetCore.Authorization.IAllowAnonymous";
@@ -181,7 +192,7 @@ public static class McpToolAuthorization
     /// Throws <see cref="InvalidOperationException"/> when <paramref name="tool"/> (built by <paramref name="definition"/>) breaks
     /// the per-tool rule: no <c>[Authorize]</c> on the tool class; enforced <c>[Authorize]</c> metadata that differs from the
     /// class's own; anonymity metadata; a policy outside <see cref="AllowedToolPolicies"/>; an authentication scheme named on the
-    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only, not app-only and not a declared reversible write named in <see cref="ModelCallableWrites"/> (O-14 narrowed by r2 NFR-06). Called by <see cref="McpToolCatalog"/> for every tool at startup.
+    /// attribute; no explicit <c>ReadOnly</c>; no title; or a tool that is not read-only, not app-only and not a declared reversible write named in <see cref="ModelCallableWrites"/> (O-14 narrowed by r2 NFR-06); or a tool named in <see cref="AppOnlyTools"/> that is not app-only (ADR-015, r2 task 037b). Called by <see cref="McpToolCatalog"/> for every tool at startup.
     /// </summary>
     public static void ValidateTool(McpServerTool tool, Type definition)
     {
@@ -256,6 +267,14 @@ public static class McpToolAuthorization
             throw new InvalidOperationException(
                 $"{where} is a model-callable write that is not in McpToolAuthorization.ModelCallableWrites. Add it there (with its task) or make it "
                 + "app-only (set _meta.ui.visibility to exactly [\"app\"]) (NFR-06).");
+        }
+
+        // ADR-015 (r2 task 037b): a tool named in AppOnlyTools returns what only a widget may show; model-visible is refused.
+        if (AppOnlyTools.Contains(name) && !IsAppOnly(tool.ProtocolTool.Meta))
+        {
+            throw new InvalidOperationException(
+                $"{where} is in McpToolAuthorization.AppOnlyTools: it returns what only a widget may show, so it must be app-only "
+                + "(set _meta.ui.visibility to exactly [\"app\"]) (ADR-015).");
         }
     }
 

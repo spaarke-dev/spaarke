@@ -71,6 +71,9 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
             .ReturnsAsync((Guid runId, CancellationToken _) => StoredRuns.TryGetValue(runId, out var status) ? status : null);
         Analyses.Setup(a => a.StartAsCallerAsync(It.IsAny<HttpContext?>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AnalysisStartResult.Created(AnalysisId, 0));
+        // Task 037b: any other OBO read answers as Dataverse answers a row the caller cannot see (404), unless a test sets it up.
+        DataverseUser.Setup(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(404, "DATAVERSE_NOT_FOUND", "not found"));
         DataverseUser.Setup(d => d.GetAsync("WhoAmI", It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, null));
 
@@ -176,6 +179,147 @@ internal sealed class PlaybookRunWorld : IAsyncDisposable
     public Task<CallToolResult> GetToolAsync(HttpContext http, Guid runId) =>
         GetPlaybookRunTool.RunAsync(Args(new { runId }), http, Runs, Time,
             _root.GetRequiredService<ILogger<GetPlaybookRunTool>>(), CancellationToken.None);
+
+    public Task<CallToolResult> ResultsToolAsync(HttpContext http, Guid runId) =>
+        GetPlaybookRunResultsTool.RunAsync(Args(new { runId }), http, Runs, Time,
+            _root.GetRequiredService<ILogger<GetPlaybookRunResultsTool>>(), CancellationToken.None);
+
+    // ---- task 037b: the results read (the analysis-read rule's app-only anchor read, the caller's OBO reads, the durable link) ------
+
+    /// <summary>
+    /// The analysis-read rule's app-only read of <paramref name="analysisId"/>'s anchors (ids only): anchored on <paramref name="documentId"/>,
+    /// answering only the columns selected, as Dataverse does.
+    /// </summary>
+    public void SeedAnalysisAnchor(Guid analysisId, Guid documentId) =>
+        RunRecords
+            .Setup(e => e.RetrieveAsync("sprk_analysis", analysisId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+            {
+                var row = new Microsoft.Xrm.Sdk.Entity("sprk_analysis", analysisId);
+                if (columns.Contains("sprk_documentid"))
+                {
+                    row["sprk_documentid"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", documentId);
+                }
+
+                return row;
+            });
+
+    /// <summary>The caller's own OBO read of the analysis row: its name, its document and (when selected) its working document.</summary>
+    public void CallerReadsAnalysis(Guid analysisId, Guid documentId, string? workingDocument) =>
+        DataverseUser
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_analysises({analysisId:D})", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, CancellationToken _) =>
+            {
+                AnalysisReads.Enqueue(path);
+                var row = new Dictionary<string, object?>
+                {
+                    ["sprk_analysisid"] = analysisId.ToString("D"),
+                    ["sprk_name"] = "Copilot playbook run 2026-11-26 09:00 UTC",
+                    ["_sprk_documentid_value"] = documentId.ToString("D"),
+                };
+                if (path.Contains("sprk_workingdocument", StringComparison.Ordinal))
+                {
+                    row["sprk_workingdocument"] = workingDocument;
+                }
+
+                return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(row));
+            });
+
+    /// <summary>Dataverse security refuses the caller's own read of the analysis row (<paramref name="status"/>: 403 or 404).</summary>
+    public void CallerAnalysisReadRefused(Guid analysisId, int status = 403) =>
+        DataverseUser
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_analysises({analysisId:D})", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(status, "DATAVERSE_ACCESS_DENIED", "denied"));
+
+    /// <summary>The caller reads exactly these documents (Dataverse answers the OBO query with only the rows the caller may read).</summary>
+    public void CallerReadsDocuments(params (Guid Id, string Name)[] readable) =>
+        DataverseUser
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_documents?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, CancellationToken _) =>
+            {
+                var rows = readable
+                    .Where(r => path.Contains(r.Id.ToString("D"), StringComparison.OrdinalIgnoreCase))
+                    .Select(r => new Dictionary<string, object?> { ["sprk_documentid"] = r.Id.ToString("D"), ["sprk_documentname"] = r.Name })
+                    .ToArray();
+                return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = rows }));
+            });
+
+    /// <summary>The caller reads the playbook's name.</summary>
+    public void CallerReadsPlaybookName(Guid playbookId, string name) =>
+        DataverseUser
+            .Setup(d => d.GetAsync($"sprk_analysisplaybooks({playbookId:D})?$select=sprk_name", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { sprk_name = name })));
+
+    /// <summary>Every path the caller's OBO reads of the analysis row asked for, in order.</summary>
+    public ConcurrentQueue<string> AnalysisReads { get; } = new();
+
+    /// <summary>
+    /// A run this process does not hold: the engine's status (<see cref="StoredRuns"/>) and its <c>sprk_playbookrun</c> row (regarding and
+    /// document ids), started by <paramref name="oid"/>, read through the run record store's Dataverse seam.
+    /// </summary>
+    public Guid SeedStoredRun(
+        Guid playbookId, PlaybookRunState state, string oid, (string Type, Guid Id)? regarding, params Guid[] documentIds)
+    {
+        var runId = Guid.NewGuid();
+        StoredRuns[runId] = new PlaybookRunStatus
+        {
+            RunId = runId,
+            PlaybookId = playbookId,
+            State = state,
+            StartedAt = Time.GetUtcNow().AddMinutes(-20),
+            CompletedAt = state is PlaybookRunState.Running or PlaybookRunState.Pending ? null : Time.GetUtcNow().AddMinutes(-15),
+            StartedByOid = oid,
+            Metrics = new PlaybookRunMetrics { TotalNodes = 2, CompletedNodes = 2 },
+        };
+
+        var systemUser = Guid.NewGuid();
+        var row = new Microsoft.Xrm.Sdk.Entity(PlaybookRunRecordStore.RunEntity, runId)
+        {
+            [PlaybookRunRecordStore.PlaybookColumn] = new Microsoft.Xrm.Sdk.EntityReference(PlaybookRunRecordStore.PlaybookEntity, playbookId),
+            [PlaybookRunRecordStore.TriggeredByColumn] = new Microsoft.Xrm.Sdk.EntityReference(PlaybookRunRecordStore.SystemUserEntity, systemUser),
+            [PlaybookRunRecordStore.InputContextColumn] = JsonSerializer.Serialize(new { documentIds }),
+        };
+        if (regarding is { } link)
+        {
+            row[PlaybookRunRecordStore.RegardingEntityTypeColumn] = link.Type;
+            row[PlaybookRunRecordStore.RegardingRecordIdColumn] = link.Id.ToString("D");
+        }
+
+        _storedRows[runId] = row;
+        _systemUsers[systemUser] = Guid.Parse(oid);
+        RunRecords
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => AnswerRecordQuery(query));
+        return runId;
+    }
+
+    private readonly ConcurrentDictionary<Guid, Microsoft.Xrm.Sdk.Entity> _storedRows = new();
+    private readonly ConcurrentDictionary<Guid, Guid> _systemUsers = new();
+
+    private Microsoft.Xrm.Sdk.EntityCollection AnswerRecordQuery(Microsoft.Xrm.Sdk.Query.QueryExpression query)
+    {
+        var id = query.Criteria.Conditions.Single().Values.Single() is Guid value ? value : Guid.Empty;
+        var answer = new Microsoft.Xrm.Sdk.EntityCollection();
+        if (query.EntityName == PlaybookRunRecordStore.RunEntity && _storedRows.TryGetValue(id, out var row))
+        {
+            var selected = new Microsoft.Xrm.Sdk.Entity(row.LogicalName, row.Id);
+            foreach (var column in query.ColumnSet.Columns.Where(row.Attributes.ContainsKey))
+            {
+                selected[column] = row[column];
+            }
+
+            answer.Entities.Add(selected);
+        }
+        else if (query.EntityName == PlaybookRunRecordStore.SystemUserEntity && _systemUsers.TryGetValue(id, out var oid))
+        {
+            answer.Entities.Add(new Microsoft.Xrm.Sdk.Entity(PlaybookRunRecordStore.SystemUserEntity, id)
+            {
+                [PlaybookRunRecordStore.SystemUserOidColumn] = oid,
+            });
+        }
+
+        return answer;
+    }
 
     public static Dictionary<string, JsonElement> Args(object values) =>
         JsonSerializer.SerializeToElement(values).EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());

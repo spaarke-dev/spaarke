@@ -116,3 +116,22 @@ and add to "Extension point": "`userContext` is the engine's `PlaybookRunRequest
 | # | Capability | Synonyms | Canonical component | Symbol | Governing ADR | Extension point |
 |---|---|---|---|---|---|---|
 | (next) | Save a node-based playbook run's output (Deliver Output, else the streamed text) to a `sprk_analysis` working document and finalize it with the run's tokens | node run save, deliver output save, save run to analysis, working document from a playbook run, AnalysisId on a playbook run, #3285 | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs` (the save), `src/server/api/Sprk.Bff.Api/Services/Ai/NodeRunAnalysisSave.cs` (the collector and the engine's saving writer) | `AnalysisResultPersistence.SaveNodeRunAsync(analysisId, NodeRunResultCollector, ct)` → `NodeRunSaveOutcome`; `NodeRunResultCollector.Observe(PlaybookStreamEvent)`; `PlaybookRunRequest.AnalysisId` | `.claude/adr/ADR-039-grounded-execution-closed-catalogs.md` (engine edit, Path C, D-037-engine), `.claude/adr/ADR-013-ai-architecture.md`, `.claude/adr/ADR-015-ai-data-governance.md` | Never copy the save: feed every engine event to one `NodeRunResultCollector` and call `SaveNodeRunAsync` once at the run's end (the Analysis wrapper and the engine both do). To have the engine save a run, set `PlaybookRunRequest.AnalysisId` to an analysis the server has just created for the caller. Only `DetachedPlaybookRunner` may set it (ArchTest `tests/Spaarke.ArchTests/PlaybookRunAnalysisIdGuardTests.cs`). A new setter needs its own create-as-the-caller step and an entry in that guard. Tests to copy: `tests/integration/data-mutation/PlaybookRuns/PlaybookRunAnalysisSaveTests.cs` (the real engine and wrapper) and `AnalysisNodeRunSaveTests.cs` (the characterization). Notes: `projects/spaarkeai-mcp-bff-api-r2/notes/037-decisions.md` §4 |
+
+## Task 037b — read a playbook run's results as the caller, for an app-only widget tool (status: PENDING)
+
+**Edit to row 50** (`IPlaybookRunAi`):
+- In "Capability", append: "; read a run's results (its analysis's working document and readable source documents) as the caller".
+- In "Synonyms", add: `spaarke_get_playbook_run_results, run results, playbook output, playbook run widget`.
+- In "Symbol", add: `ReadResultsAsCallerAsync(HttpContext, runId, ct)` → `PlaybookRunResults?` (`PlaybookRunResultsState` `Pending` / `Available` / `None`).
+- In "Extension point", add: "Results: `ReadResultsAsCallerAsync` follows only the server-written link (the run table, else the record's
+  regarding columns via `PlaybookRunRecordStore.GetOwnedRunLinkAsync`), applies the analysis-read rule, and reads the working document,
+  the playbook name and the document names over `IDataverseUserClient` only; `null` is the uniform not-found. Never read the analysis
+  through `IAnalysisOrchestrationService.GetAnalysisAsync` for a tool (its loader is app-only). Tests to copy:
+  `tests/integration/contract/Api/Mcp/Playbooks/PlaybookRunResultsToolTests.cs`, `tests/integration/auth/Mcp/Playbooks/PlaybookRunResultsAuthTests.cs`.
+  Notes: `projects/spaarkeai-mcp-bff-api-r2/notes/037-decisions.md` §5".
+
+**New row:**
+
+| # | Capability | Synonyms | Canonical component | Symbol | Governing ADR | Extension point |
+|---|---|---|---|---|---|---|
+| (next) | Make a read-only MCP tool app-only and have startup refuse it declared otherwise (content only a widget may show) | app-only tool, visibility app, widget-only tool, hidden from the model, AppOnlyTools, _meta.ui.visibility | `src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolAuthorization.cs` | `McpToolAuthorization.AppOnlyTools`; `ValidateTool(McpServerTool, Type)` | `.claude/adr/ADR-015-ai-data-governance.md`, `.claude/adr/ADR-028-spaarke-auth-architecture.md` (A10) | Set `tool.ProtocolTool.Meta = { ui: { visibility: ["app"] } }` in `Create` and add the tool's name to `AppOnlyTools` in the same diff; `ValidateTool` then refuses startup if the visibility is anything else (a write tool is covered already by the not-read-only rule). Tests to copy: `PlaybookRunResultsAuthTests.Startup_RefusesTheToolUnlessAppOnly` (must-fire for model-visible, model-only, empty and missing visibility) and `Startup_LeavesOtherReadOnlyToolsAlone` (must-not-fire). First user: `spaarke_get_playbook_run_results` (`Api/Mcp/LegalOperations/Playbooks/GetPlaybookRunResultsTool.cs`). |

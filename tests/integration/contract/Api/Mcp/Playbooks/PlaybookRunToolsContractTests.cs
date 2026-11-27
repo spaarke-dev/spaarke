@@ -453,6 +453,9 @@ public sealed class PlaybookRunToolsContractTests
         public Task<PlaybookRunView?> ReadAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken) =>
             inner.ReadAsCallerAsync(http, runId, cancellationToken);
 
+        public Task<PlaybookRunResults?> ReadResultsAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken) =>
+            inner.ReadResultsAsCallerAsync(http, runId, cancellationToken);
+
         public string? RunConsoleLink(HttpContext http, Guid? documentId) => throw new InvalidOperationException("link builder fault");
     }
 

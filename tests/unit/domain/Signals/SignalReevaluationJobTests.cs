@@ -2712,6 +2712,8 @@ public partial class SignalReevaluationJobTests
                 configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildReconciler>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing));
             // Task 232: the job resolves ebilling-r1's scoped FinanceRollupService per pass; here its virtual seam (Rollup).
             services.AddScoped<FinanceRollupService>(_ => Rollup);
+            // Task 233 (D-232): the job resolves the shared privilege rule per pass for its condition-cleared records (app-only read).
+            services.AddScoped(_ => new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance));
             var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
             Scopes = scopes;
             Writer = new SignalWriter(writerClient, Sysadmin,
@@ -2960,6 +2962,9 @@ public partial class SignalReevaluationJobTests
 
         /// <summary>Task 153: the attribution reads the Decision Record writer made (the subject read with its <c>changedby</c> link).</summary>
         public int ChangedByReads { get; private set; }
+
+        /// <summary>Task 233: each app-only privilege read of <c>sprk_communication</c> (the condition-cleared record's flag).</summary>
+        public List<QueryExpression> PrivilegeReads { get; } = new();
 
         /// <summary>Task 153: an enabled, interactive person (access mode Read-Write, no application id).</summary>
         public Guid Person(Guid id)
@@ -3430,6 +3435,15 @@ public partial class SignalReevaluationJobTests
                 case "sprk_project" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
                                           && Value("sprk_projectid") is Guid projectId && _rows.TryGetValue(("sprk_project", projectId), out var project):
                     result.Entities.Add(project);
+                    break;
+                // Task 233 (D-232): the condition-cleared record's privilege read, app-only: the id and classification of the communications
+                // the closed Signals name, by an In list. A communication not stubbed is absent, as in Dataverse.
+                case "sprk_communication" when query.ColumnSet.Columns.Contains("sprk_privilegeclassification"):
+                    PrivilegeReads.Add(query);
+                    var asked = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_communicationid" && c.Operator == ConditionOperator.In)
+                        .Values.OfType<Guid>().ToHashSet();
+                    foreach (var communication in _rows.Where(r => r.Key.Entity == "sprk_communication" && asked.Contains(r.Key.Id)))
+                        result.Entities.Add(Project(query, communication.Value));
                     break;
                 case "sprk_communication" when query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_communicationid") is { } byId:
                     if (FailWitnessReads) throw new InvalidOperationException("Simulated failure reading a witness row.");

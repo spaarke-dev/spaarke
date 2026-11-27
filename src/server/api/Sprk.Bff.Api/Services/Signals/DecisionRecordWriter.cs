@@ -160,7 +160,8 @@ public static class ConditionClearedRecordKey
 /// <param name="ClosedOn">When the Signal was closed (its <c>sprk_resolvedon</c>, or the time the job closed it).</param>
 /// <param name="SignalRaisedOn">When the Signal was raised (its <c>createdon</c>); null when unknown.</param>
 /// <param name="AssigneeSystemUserId">D-134: for a no-core PERSONAL To Do, the one enabled user its Assigned To names; null otherwise.</param>
-/// <param name="PrivilegeFlagged">Copied forward from the Signal (ADR-015).</param>
+/// <param name="PrivilegeFlagged">Task 233 (D-232): derived by the job from the Signal's subject and evidence communications
+/// (<see cref="WorkItemPrivilege.FlaggedAppOnlyAsync{TKey}"/>), never the Signal's own column (DI-64). Record accuracy only (ADR-015).</param>
 public sealed record ConditionClearedRecordRequest(
     Guid SignalId,
     int Episode,

@@ -320,6 +320,43 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
     }
 
     /// <inheritdoc />
+    public async Task<PlaybookRunResults?> ReadResultsAsCallerAsync(HttpContext http, Guid runId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        var callerOid = CallerResolution.ResolveObjectId(http.User);
+        if (callerOid is null)
+        {
+            return null;
+        }
+
+        // The one owner rule (this process's run table, then the engine's status read of the durable record).
+        var run = await ReadAsCallerAsync(http, runId, cancellationToken).ConfigureAwait(false);
+        if (run is null)
+        {
+            return null;
+        }
+
+        // The run's link to its results: the run table when the run is still in it, else the record's regarding columns, which the server
+        // wrote at the start (task 037a). Owner-checked again on the record, so a link is never read for another caller's run.
+        PlaybookRunLink? link;
+        if (_runs.TryGetValue(runId, out var live) && PlaybookRunRecordStore.IsSameOid(live.StartedByOid, callerOid))
+        {
+            link = new PlaybookRunLink(
+                live.AnalysisId is { } analysisId ? new PlaybookRunRegarding(PlaybookRunRecordStore.AnalysisEntity, analysisId) : null,
+                live.DocumentIds);
+        }
+        else
+        {
+            var store = http.RequestServices?.GetService<PlaybookRunRecordStore>();
+            link = store is null ? null : await store.GetOwnedRunLinkAsync(runId, callerOid, cancellationToken).ConfigureAwait(false);
+        }
+
+        return link is null
+            ? null
+            : await PlaybookRunResultsReader.ReadAsync(http, run, link, this, _logger, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public string? RunConsoleLink(HttpContext http, Guid? documentId) =>
         http?.RequestServices?.GetService<HandoffUrlBuilder>()?.BuildConsoleUrl(documentId);
 
@@ -468,7 +505,8 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
 
     private DetachedRun Register(PlaybookStreamEvent first, Launch launch)
     {
-        var run = new DetachedRun(first.RunId, first.PlaybookId, launch.CallerOid, _time.GetUtcNow());
+        var run = new DetachedRun(
+            first.RunId, first.PlaybookId, launch.CallerOid, _time.GetUtcNow(), launch.Request.AnalysisId, launch.Request.DocumentIds);
         _runs[run.RunId] = run;
         return run;
     }
@@ -576,7 +614,10 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         }
     }
 
-    /// <summary>One run in this process's run table: counts and state only (ADR-015), guarded by one lock.</summary>
+    /// <summary>
+    /// One run in this process's run table: counts, state and identifiers only (ADR-015), guarded by one lock. Task 037b: the analysis the
+    /// start created and the run's document ids, so a run still in this table is linked to its results without a record read.
+    /// </summary>
     private sealed class DetachedRun
     {
         private readonly object _gate = new();
@@ -586,13 +627,21 @@ internal sealed class DetachedPlaybookRunner : IPlaybookRunAi
         private int _skipped;
         private DateTimeOffset? _completedAt;
 
-        public DetachedRun(Guid runId, Guid playbookId, string startedByOid, DateTimeOffset startedAt)
+        public DetachedRun(Guid runId, Guid playbookId, string startedByOid, DateTimeOffset startedAt, Guid? analysisId, Guid[] documentIds)
         {
             RunId = runId;
             PlaybookId = playbookId;
             StartedByOid = startedByOid;
             StartedAt = startedAt;
+            AnalysisId = analysisId;
+            DocumentIds = documentIds;
         }
+
+        /// <summary>Task 037b: the analysis the start created for this run (server-set, never a caller argument).</summary>
+        public Guid? AnalysisId { get; }
+
+        /// <summary>Task 037b: the document ids the run was authorized and started on.</summary>
+        public Guid[] DocumentIds { get; }
 
         public Guid RunId { get; }
 
