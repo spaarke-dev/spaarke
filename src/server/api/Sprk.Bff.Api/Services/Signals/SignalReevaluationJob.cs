@@ -989,6 +989,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
         }
 
+        // Task 233 (D-232, #3275): each record's privilege flag, derived from its Signal's subject and stored evidence communications through
+        // the one shared rule (WorkItemPrivilege, D-212), read app-only in ONE batched read per policy pass, failing closed.
+        var privilegeFlagged = await ClosurePrivilegeFlagsAsync(policy, candidates.Select(c => c.Signal).ToList(), ct).ConfigureAwait(false);
+
         var coreTables = new Dictionary<Guid, string?>();
         foreach (var (signal, closedOn, prior) in candidates)
         {
@@ -1028,7 +1032,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     new DecisionRecordRef(signal.SubjectEntity, signal.SubjectId), core, closedOn,
                     signal.LineageRow?.GetAttributeValue<DateTime?>("createdon"),
                     AssigneeSystemUserId: assignee,
-                    PrivilegeFlagged: signal.LineageRow?.GetAttributeValue<bool?>("sprk_privilegeflagged") ?? false), ct).ConfigureAwait(false);
+                    PrivilegeFlagged: privilegeFlagged is null || privilegeFlagged.Contains(signal.Id)), ct).ConfigureAwait(false);
                 if (!result.AlreadyRecorded) recorded++;
 
                 switch (await _writer.LinkConditionClearedRecordAsync(
@@ -1090,6 +1094,43 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _logger.LogInformation(
             "Policy {PolicyCode}: {Recorded} condition-cleared closure(s) recorded, {Skipped} skipped (cannot be recorded), {Failed} not recorded this pass (of {Candidates}).",
             policy.Code, recorded, skipped, failed, candidates.Count);
+    }
+
+    /// <summary>
+    /// Ontology task 233 (D-232, #3275, DI-177): which of these closures' Decision Records are privilege-flagged. The rule the commit route
+    /// uses (D-212, task 225): a closed Signal's subject, when it is a communication, and every communication its stored
+    /// <c>sprk_evidencerefs</c> names (<see cref="WorkItemPrivilege.SourcesOf"/>), judged by
+    /// <see cref="WorkItemPrivilege.FlaggedAppOnlyAsync{TKey}"/> with the job's application identity (the nightly has no caller). Never
+    /// <c>sprk_signal.sprk_privilegeflagged</c> (DI-64: nothing writes it). One batched read per policy pass (none when no closure names a
+    /// communication). Fails closed: a Signal whose evidence was not read is undetermined, and a fault returns null (every record flagged).
+    /// Record accuracy only (ADR-015): nothing branches on it, and the closure is never held back by it.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>?> ClosurePrivilegeFlagsAsync(PolicyRow policy, IReadOnlyList<ExistingSignal> signals, CancellationToken ct)
+    {
+        if (signals.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        var sources = signals
+            .DistinctBy(s => s.Id)
+            .ToDictionary(s => s.Id, s => s.LineageRow is { } row
+                ? WorkItemPrivilege.SourcesOf(s.SubjectEntity, s.SubjectId, row.GetAttributeValue<string>(SignalSuppressionService.EvidenceColumn))
+                : WorkItemPrivilegeSources.Unknown);
+        try
+        {
+            await using var scope = _scopes.CreateAsyncScope();
+            var privilege = scope.ServiceProvider.GetRequiredService<WorkItemPrivilege>();
+            return await privilege.FlaggedAppOnlyAsync(_entities, sources, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // FlaggedAppOnlyAsync answers its own read faults; this is the defensive net (fail closed, D-212).
+            _logger.LogWarning(
+                "Policy {PolicyCode}: the privilege flag of {Count} condition-cleared closure record(s) could not be derived ({ExceptionType}); each is flagged.",
+                policy.Code, signals.Count, ex.GetType().Name);
+            return null;
+        }
     }
 
     /// <summary>
@@ -1589,9 +1630,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 "sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
                 "sprk_policyversion", "sprk_lastevaluated", "sprk_decisionrecord",
-                // Task 153: when the Signal was raised (the attribution window) and its privilege flag (copied to its closure record).
-                "createdon", "sprk_privilegeflagged",
-                // Task 145 (review F1): the stored evidence, for the redaction pass (RedactStoredEvidenceAsync).
+                // Task 153: when the Signal was raised (the attribution window). Task 233 (D-232): sprk_privilegeflagged is not read (DI-64:
+                // nothing writes it); the closure record's flag is derived from the stored evidence below (ClosurePrivilegeFlagsAsync).
+                "createdon",
+                // Task 145 (review F1): the stored evidence, for the redaction pass (RedactStoredEvidenceAsync) and (task 233) the closure
+                // record's privilege flag.
                 SignalSuppressionService.EvidenceColumn,
             }.Concat(SignalSuppressionService.SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
