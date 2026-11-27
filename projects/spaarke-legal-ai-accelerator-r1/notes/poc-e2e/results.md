@@ -806,6 +806,18 @@ a tracked change and attached a comment, did not write the line itself, and chan
 tracked insertion (the quoted text was the accepted view), the comment on "charlie" reads
 `Spaarke JS probe comment WPJ-1126-A d81beac6`, and Track Changes is back to its earlier setting. **WP-5: pass.**
 (Owner also confirmed each earlier probe version was removed before the next was uploaded, v0.1 included.)
+
+**Where this sits against Microsoft's documented JavaScript routes (owner's search, 2026-11-27).** Microsoft
+documents three places a developer's JavaScript runs for Copilot: (1) on our server behind an API plugin or MCP
+server, with no access to the open document; (2) in an Office Add-in that Copilot calls, with Office.js access to
+the open document; (3) in a sandboxed UI frame in the Copilot pane (UX components / MCP Apps), for cards and
+charts. WP-5 is none of these. Our code ran through **Word Copilot's own built-in code tool**, the one it uses to
+edit documents itself (it described it as "JavaScript that edits the open document"), and our skill supplied the
+code. So it is real (hash-proven, checked by eye) but **not a documented extension point**: Microsoft can change
+that tool's rules or its willingness to run supplied code without notice. Route 1 matches the Spaarke MCP server
+we already have, and confirms why server tools alone can't redline in Word. Route 3 is a candidate for showing a
+review summary or dashboard in the Word pane (untested). Route 2 is the documented way to run our own Office.js;
+add-ins are out of scope for this project (owner directive).
 **What it means:** a Word edition can make real tracked changes and comments in the open document with our own
 code, carried in an instructions-only skill, with no Office add-in and no server round trip for the edit itself.
 Deciding *which* edits to make still needs either the model (reading the playbook) or our engines server-side; the
