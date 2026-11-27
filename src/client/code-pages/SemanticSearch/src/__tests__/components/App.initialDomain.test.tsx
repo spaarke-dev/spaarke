@@ -59,9 +59,11 @@ interface PaneSnapshot {
 }
 interface PaneProps extends PaneSnapshot {
   onSelectSavedSearch: (search: SavedSearch) => void;
+  onSearch: (query: string, filters: typeof DEFAULT_FILTERS) => void;
 }
 const paneProps: PaneSnapshot[] = [];
 let selectSavedSearch: ((search: SavedSearch) => void) | null = null;
+let runSearch: ((query: string, filters: typeof DEFAULT_FILTERS) => void) | null = null;
 jest.mock('../../components/SearchFilterPane', () => ({
   SearchFilterPane: (props: PaneProps) => {
     paneProps.push({
@@ -70,6 +72,7 @@ jest.mock('../../components/SearchFilterPane', () => ({
       unindexedDomainLabel: props.unindexedDomainLabel,
     });
     selectSavedSearch = props.onSelectSavedSearch;
+    runSearch = props.onSearch;
     return null;
   },
 }));
@@ -144,6 +147,7 @@ function savedSearch(id: string, searchDomain: SearchDomain, query: string): Sav
 beforeEach(() => {
   paneProps.length = 0;
   selectSavedSearch = null;
+  runSearch = null;
   savedSearchState.savedSearches = [];
   savedSearchState.isLoading = false;
   mockListIndexes.mockReset();
@@ -259,6 +263,45 @@ describe('App — a saved search runs against an index of its own domain (#3195)
     expect(recordTypes).toEqual(['sprk_invoice']);
     expect(envelopeIndex).toBeNull();
     expect(fragment).toBeNull();
+  });
+
+  // Review finding: only the first search dropped the URL's index; the next one (Search, Refresh) sent
+  // the URL's Documents index with an Invoices record search.
+  it('a later search of the unindexed domain still does not send the URL index of another domain', async () => {
+    mockListIndexes.mockResolvedValue([ALL_DEFAULT, MATTERS]);
+    renderApp({ searchIndexName: 'all-1-index' });
+    expect(await settled()).toMatchObject({ activeDomain: 'documents', selectedSearchIndexId: 'all-1' });
+
+    act(() => selectSavedSearch!(savedSearch('s1', 'invoices', 'retainer')));
+    await waitFor(() => expect(recordSearch.search).toHaveBeenCalledTimes(1));
+    act(() => runSearch!('retainer', DEFAULT_FILTERS));
+
+    await waitFor(() => expect(recordSearch.search).toHaveBeenCalledTimes(2));
+    const [, recordTypes, , envelopeIndex, fragment] = recordSearch.search.mock.calls[1];
+    expect(recordTypes).toEqual(['sprk_invoice']);
+    expect(envelopeIndex).toBeNull();
+    expect(fragment).toBeNull();
+  });
+
+  // Review finding: a saved search chosen after the list arrived but before React re-rendered read the
+  // "still loading" closure and ended on the default index of another domain.
+  it('a saved search chosen just as the list arrives, before a re-render, still selects an index of its domain', async () => {
+    let resolveList: (rows: AiSearchIndexRow[]) => void = () => undefined;
+    mockListIndexes.mockReturnValue(new Promise(resolve => (resolveList = resolve)));
+    renderApp({});
+    await waitFor(() => expect(selectSavedSearch).not.toBeNull());
+    const handlerFromBeforeTheListLoaded = selectSavedSearch!;
+
+    await act(async () => {
+      resolveList([ALL_DEFAULT, MATTERS]);
+      for (let i = 0; i < 5; i++) await Promise.resolve(); // the list continuation runs; no re-render yet
+      handlerFromBeforeTheListLoaded(savedSearch('s1', 'matters', 'indemnity'));
+    });
+
+    await waitFor(() => expect(latest()).toMatchObject({ activeDomain: 'matters', selectedSearchIndexId: 'matter-1' }));
+    expect(recordSearch.search.mock.calls[recordSearch.search.mock.calls.length - 1][4]).toMatchObject({
+      searchIndexName: 'matter-1-index',
+    });
   });
 
   it('a saved search opened from the URL before the index list loads ends on an index of its domain', async () => {
