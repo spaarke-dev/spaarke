@@ -12,7 +12,6 @@ using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Services.Workspace;
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
-using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 using DataverseRegardingRecordType = Spaarke.Dataverse.RegardingRecordType;
 
 namespace Sprk.Bff.Api.Api.Events;
@@ -912,9 +911,9 @@ public static class EventEndpoints
     };
 
     /// <summary>
-    /// The Web API payload of the new event, in column logical names (what <c>DataverseWebApiService.BuildCreateEventPayload</c>
-    /// wrote, minus the columns the service owns: the owner, the creator person, the I-1 stamps and the Access Permission).
-    /// Open / Active and Source = User are the route's, as before: the platform default for a new row is Draft.
+    /// The Web API payload of the new event, in column logical names, without the columns the service owns: the owner, the
+    /// creator person, the I-1 stamps and the Access Permission. Open / Active and Source = User are the route's: the platform
+    /// default for a new row is Draft.
     /// </summary>
     internal static Dictionary<string, object?> BuildCreatePayload(
         ApiCreateEventRequest request, RegardingFields? regarding, Guid? assignedToContactId)

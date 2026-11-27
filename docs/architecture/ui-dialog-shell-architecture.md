@@ -8,7 +8,7 @@
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Verified (accurate)
 >
-> Verified against `src/client/shared/Spaarke.UI.Components/src/components/` — `WizardShell`, `CreateRecordWizard`, `PlaybookLibraryShell`, `SidePaneShell`, `WorkspaceShell`, and all listed `Create*Wizard` components exist. Service adapters (`createXrmDataService`, `createBffDataService`, `createXrmUploadService`, `createBffUploadService`) verified in `src/client/shared/Spaarke.UI.Components/src/utils/adapters/`. `parseDataParams.ts` verified in `src/utils/`. Code Page wrappers verified in `src/solutions/Create*Wizard/`.
+> Verified against `src/client/shared/Spaarke.UI.Components/src/components/` — `WizardShell`, `CreateRecordWizard`, `PlaybookLibraryShell`, `SidePaneShell`, `WorkspaceShell`, and all listed `Create*Wizard` components exist. Service adapters (`createXrmDataService`, `createXrmUploadService`, `createBffUploadService`) verified in `src/client/shared/Spaarke.UI.Components/src/utils/adapters/`. `parseDataParams.ts` verified in `src/utils/`. Code Page wrappers verified in `src/solutions/Create*Wizard/`.
 
 ---
 
@@ -73,7 +73,7 @@ Direct use of `Xrm.WebApi` or `window.Xrm` in shared components would make them 
 | Context | Data Adapter | Upload Adapter | Navigation Adapter |
 |---------|-------------|----------------|--------------------|
 | **Dataverse Code Page** | `createXrmDataService()` | `createXrmUploadService(bffBaseUrl)` | `createXrmNavigationService()` |
-| **Power Pages SPA** | `createBffDataService(authFetch, bffBaseUrl)` | `createBffUploadService(authFetch, bffBaseUrl)` | `createBffNavigationService(navigate)` |
+| **Power Pages SPA** | none: creates go through `createChildRecordViaBff` (`bffChildWriteAdapter`) | `createBffUploadService(authFetch, bffBaseUrl)` | `createBffNavigationService(navigate)` |
 | **Unit Tests** | `createMockDataService()` | `createMockUploadService()` | `createMockNavigationService()` |
 
 ---

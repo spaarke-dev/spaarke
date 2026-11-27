@@ -1273,11 +1273,6 @@
       "count": 1
     }
   },
-  "src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
   "src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 6

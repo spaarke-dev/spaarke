@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingevent.NewRecord.Hide" Location="Mscrm.Form.sprk_billingevent.NewRecord" />
@@ -12,6 +12,9 @@
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.Copy.Selected.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.Copy.Selected" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingevent.CopySelected.Hide" Location="Mscrm.Form.sprk_billingevent.CopySelected" />
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_billingevent.CopySelected.Hide" Location="Mscrm.SubGrid.sprk_billingevent.CopySelected" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingevent.Assign.Hide" Location="Mscrm.Form.sprk_billingevent.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.Assign.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.Assign" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_billingevent.Assign.Hide" Location="Mscrm.SubGrid.sprk_billingevent.Assign" />
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
