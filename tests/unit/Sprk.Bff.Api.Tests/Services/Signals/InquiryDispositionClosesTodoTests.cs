@@ -40,6 +40,11 @@ public sealed class InquiryDispositionClosesTodoTests
     [InlineData("{\"statuscode\":false}")]
     [InlineData("{\"statuscode\":\"x\"}")]
     [InlineData("{\"sprk_name\":\"renamed\",\"statuscode\":\" 2 \"}")]
+    [InlineData("{\"statecode\":0,\"statecode\":1}")] // duplicate key: every occurrence is read, the closing one counts
+    [InlineData("{\"statecode\":9223372036854775808}")] // past long.MaxValue: unreadable, fail closed
+    [InlineData("{\"statecode\":\"+1\"}")]
+    [InlineData("{\"statuscode\":2e0}")]
+    [InlineData("{\"statecode\":null,\"statuscode\":2}")] // a null statecode does not hide a closing statuscode
     public void MustFire_ClosingOrUnreadableStateValue(string json) => Closes(json).Should().BeTrue(json);
 
     [Theory]
@@ -51,6 +56,9 @@ public sealed class InquiryDispositionClosesTodoTests
     [InlineData("{\"statuscode\":1}")]
     [InlineData("{\"statuscode\":\"1\"}")]
     [InlineData("{\"statuscode\":659490000}")]
+    [InlineData("{\"statecode\":-0}")]
+    [InlineData("{\"statecode\":-0.0}")]
+    [InlineData("{\"statuscode\":1e0}")] // 1 is Active, however it is written
     [InlineData("{\"sprk_priority\":1,\"sprk_status\":2}")]
     [InlineData("{\"sprk_statecode\":\"garbage\",\"sprk_name\":true}")]
     [InlineData("{\"sprk_name\":\"1\",\"sprk_count\":1}")]

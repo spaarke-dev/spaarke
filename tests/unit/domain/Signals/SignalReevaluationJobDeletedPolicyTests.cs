@@ -234,7 +234,11 @@ public partial class SignalReevaluationJobTests
             $"sprk_communication:{Lower(CommunicationId)}", $"sprk_communication:{Lower(otherCommunication)}");
         lines.Where(l => l.TryGetProperty("text", out var t) || l.TryGetProperty("source", out var src)).Should().BeEmpty(
             "the detail is what is removed");
+        lines.Select(l => l.GetProperty("tier").GetString()).Should().Equal(new[] { "Fact", "Fact" }, "nothing else is touched");
+        lines.Select(l => l.GetProperty("asOf").GetString()).Should().Equal(new[] { "2026-10-05T09:15:00Z", "2026-10-06T09:15:00Z" }, "nothing else is touched");
         lines.Select(l => l.GetProperty("clause").GetString()).Should().Equal(new[] { "all[0]", "all[1]" }, "nothing else is touched");
+        lines.Select(l => l.EnumerateObject().Select(p => p.Name).Order().ToArray()).Should().AllSatisfy(names =>
+            names.Should().Equal("asOf", "clause", "kind", "ref", "tier"), "exactly text and source are gone, every other property is left");
     }
 
     [Fact]
