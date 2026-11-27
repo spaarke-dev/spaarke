@@ -4,18 +4,19 @@ using Spaarke.Dataverse;
 namespace Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
 /// <summary>
-/// The field-secured SOURCE rule of field mapping (owner 2026-10-27 boundary 3; task 064 on create, DI-051 / #3258 on push): a
-/// value read from a field-secured source column is never copied by field mapping, because a secured value written into an
-/// unsecured column would be readable by everyone who can read that column. A rule that reads such a column is not applied and
-/// the column it would have filled is named in a warning. Anything other than an explicit <c>IsSecured == false</c> counts as
-/// secured (fail closed).
+/// The field-secured SOURCE rule of field mapping on create (owner 2026-10-27 boundary 3, task 064; narrowed by the owner
+/// 2026-11-26, task 065): a value read from a field-secured source column is not copied by field mapping when the mapping
+/// source is NOT the record the new row is filed under. A rule that reads such a column is not applied and the column it would
+/// have filled is named in a warning. Anything other than an explicit <c>IsSecured == false</c> counts as secured (fail closed).
 /// </summary>
 /// <remarks>
-/// <para>The ONE definition, asked by both writers that apply mapping rules: the unified create
-/// (<c>RecordCreationService</c>, step 3) and the field-mapping push (<c>FieldMappingEndpoints.PushFieldMappingsAsync</c>,
-/// step 2). <c>FieldSecuredSourceRuleGuardTests</c> keeps both on it and keeps a second copy of the predicate out of the
-/// tree.</para>
-/// <para>Pure: it reads nothing. Each writer reads its source table's attribute metadata (<c>IsSecured</c>) as the caller and
+/// <para>From the filing parent (table and id) a mapped value copies whatever its source column's field security; it is still
+/// read as the caller, so it copies only when the caller can read it. A copied value is then readable by whoever can read the
+/// target column. The field-mapping push copies only from the children's filing parent, so it does not ask this rule.</para>
+/// <para>The ONE definition: the unified create (<c>RecordCreationService</c>, step 3) asks <see cref="Split"/> and
+/// <see cref="CountsAsSecured"/>. <c>FieldSecuredSourceRuleGuardTests</c> keeps the create on it and keeps a second copy of
+/// the predicate out of the field-mapping sources.</para>
+/// <para>Pure: it reads nothing. The writer reads its source table's attribute metadata (<c>IsSecured</c>) as the caller and
 /// hands the answer here.</para>
 /// </remarks>
 internal static class FieldSecuredSourceRule
@@ -37,7 +38,8 @@ internal static class FieldSecuredSourceRule
     /// <paramref name="rules"/> split into the rules field mapping may apply and the rules that read a column of
     /// <paramref name="securedSourceColumns"/> (never applied). The source columns of a rule are the engine's own
     /// (<see cref="CreateTimeFieldMapping.CollectSourceColumns"/>), so a Concat or Template rule is caught by any placeholder.
-    /// An empty or absent set applies every rule; a caller that could not read the set maps nothing and does not ask. Pure.
+    /// An empty or absent set applies every rule; a caller that could not read the set maps nothing and does not ask. Asked
+    /// only for a source that is not the filing parent. Pure.
     /// </summary>
     internal static (List<FieldMappingRuleEntity> Copyable, List<FieldMappingRuleEntity> SecuredSourced) Split(
         IReadOnlyList<FieldMappingRuleEntity> rules, IReadOnlySet<string>? securedSourceColumns)

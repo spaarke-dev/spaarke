@@ -593,53 +593,16 @@ public static class FieldMappingEndpoints
                 });
             }
 
-            // Step 2a (DI-051, #3258): the source's attribute catalog, read AS THE CALLER with each column's IsSecured. A rule that
-            // reads a field-secured source column is not pushed, whatever the caller may read: a secured value written into an
-            // unsecured child column would be readable by everyone who can read the child. Anything but an explicit
-            // IsSecured == false counts as secured (fail closed). The rule is create's (FieldSecuredSourceRule, the one
-            // predicate); each skipped rule's target column is named in a warning and the rule is counted with the skipped rules.
-            var sourceAttributeRows = await impersonatedQuery.QueryAsync(
-                FieldMappingPushLookups.AttributeMetadataPath(request.SourceEntity),
-                FieldMappingPushLookups.SourceAttributeMetadataQuery,
-                callerSystemUserId.Value,
-                ct);
-            var (pushable, securedSourced) = FieldSecuredSourceRule.Split(
-                selection.Rules, FieldMappingPushLookups.SecuredColumns(sourceAttributeRows));
-            var skippedRuleCount = selection.SkippedCount + securedSourced.Count;
-            var securedSourceWarnings = SecuredSourceWarnings(securedSourced);
-            if (securedSourced.Count > 0)
-            {
-                logger.LogInformation(
-                    "Push skipped {Count} rule(s) whose source column is field-secured. ProfileId={ProfileId}",
-                    securedSourced.Count, profile.Id);
-                rules = pushable.Select(MapRuleEntityToDto).ToArray();
-            }
-
-            if (rules.Length == 0)
-            {
-                return TypedResults.Ok(new PushFieldMappingsResponse
-                {
-                    Success = true,
-                    TargetEntity = request.TargetEntity,
-                    TotalRecords = 0,
-                    UpdatedCount = 0,
-                    FailedCount = 0,
-                    SkippedCount = 0,
-                    Warnings = securedSourceWarnings,
-                    SkippedRuleCount = skippedRuleCount,
-                    Preview = request.Preview ? true : null,
-                    Changes = request.Preview ? [] : null,
-                    SkippedNoWriteCount = request.Preview ? 0 : null,
-                    Truncated = request.Preview ? false : null,
-                });
-            }
-
             // Step 2: Get source record field values — AS THE CALLER (task 166 r2). The row-level Read gate above
             // does not cover field-level security: an app-only read would return a secured source column the caller
             // cannot read and copy it into children they CAN read. Impersonated, Dataverse returns such a column as
             // null (the rule is then skipped), and a source the caller cannot read at all returns no row (404).
             // Lookup-aware (2026-10-06): which rule fields are lookups — and which exist at all — is read from the
             // source's metadata, so a lookup is selected as `_x_value` and an unknown field never poisons the read.
+            // Task 065 (owner 2026-11-26): the children are the rows filed under this source (step 3: its one parent lookup, or
+            // the family's Filing edge), so the source is their filing parent, and a rule that reads a field-secured source column pushes like any other. Its value still
+            // copies only when the caller can read it (this read is the caller's). A copied value is readable by whoever can
+            // read the child column.
             var sourceFields = rules.Select(r => r.SourceField).Distinct().ToArray();
             var sourceValues = await RetrieveSourceRecordValuesAsCallerAsync(
                 impersonatedQuery,
@@ -647,7 +610,6 @@ public static class FieldMappingEndpoints
                 request.SourceEntity,
                 request.SourceRecordId,
                 sourceFields,
-                sourceAttributeRows,
                 callerSystemUserId.Value,
                 ct);
 
@@ -766,10 +728,10 @@ public static class FieldMappingEndpoints
 
             if (request.Preview)
             {
-                var preview = await FieldMappingPushFamily.PreviewAsync(
+                return TypedResults.Ok(await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
                         request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
-                        skippedRuleCount, isAssignedToColumn, sourceGate, refusedChildIds),
+                        selection.SkippedCount, isAssignedToColumn, sourceGate, refusedChildIds),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
                     probe,
@@ -777,10 +739,7 @@ public static class FieldMappingEndpoints
                     entityService,
                     participations.GetEffectiveRootRecordFlagsAsync,
                     ct,
-                    logger);
-                return TypedResults.Ok(securedSourceWarnings.Length == 0
-                    ? preview
-                    : preview with { Warnings = [.. preview.Warnings, .. securedSourceWarnings] });
+                    logger));
             }
 
             var refusals = refusedChildIds
@@ -800,8 +759,7 @@ public static class FieldMappingEndpoints
                     FailedCount = refusals.Length,
                     SkippedCount = 0,
                     Errors = refusals,
-                    Warnings = securedSourceWarnings,
-                    SkippedRuleCount = skippedRuleCount,
+                    SkippedRuleCount = selection.SkippedCount,
                 });
             }
 
@@ -830,7 +788,7 @@ public static class FieldMappingEndpoints
 
             logger.LogInformation(
                 "Push completed. Total={Total}, Updated={Updated}, Failed={Failed}, Skipped={Skipped}, SkippedRules={SkippedRules}",
-                childIds.Length + refusals.Length, updatedCount, failedCount, skippedCount, skippedRuleCount);
+                childIds.Length + refusals.Length, updatedCount, failedCount, skippedCount, selection.SkippedCount);
 
             return TypedResults.Ok(new PushFieldMappingsResponse
             {
@@ -842,8 +800,7 @@ public static class FieldMappingEndpoints
                 SkippedCount = skippedCount,
                 Errors = [.. errors, .. refusals],
                 FieldResults = fieldResults,
-                Warnings = securedSourceWarnings,
-                SkippedRuleCount = skippedRuleCount,
+                SkippedRuleCount = selection.SkippedCount,
             });
         }
         catch (Exception ex)
@@ -859,19 +816,6 @@ public static class FieldMappingEndpoints
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
         }
     }
-
-    /// <summary>
-    /// DI-051 (#3258): one warning per target column a rule skipped under <see cref="FieldSecuredSourceRule"/> would have filled,
-    /// in column order. It names the column and the reason, never a value.
-    /// </summary>
-    internal static string[] SecuredSourceWarnings(IEnumerable<FieldMappingRuleEntity> securedSourced) =>
-        securedSourced
-            .Select(r => r.TargetField?.Trim())
-            .Where(c => !string.IsNullOrEmpty(c))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(c => c, StringComparer.Ordinal)
-            .Select(c => $"'{c}' was not updated: {FieldSecuredSourceRule.NotCopiedReason}.")
-            .ToArray();
 
     /// <summary>The 400 for more children than one push handles.</summary>
     private static IResult TooManyChildren(int found) =>
@@ -1012,12 +956,14 @@ public static class FieldMappingEndpoints
         string sourceEntity,
         Guid sourceRecordId,
         string[] fields,
-        IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> sourceAttributeRows,
         Guid callerSystemUserId,
         CancellationToken ct)
     {
-        // DI-051: the catalog is the one step 2a read as the caller (with IsSecured) to split the rules; it is not read twice.
-        var attributes = FieldMappingPushLookups.ReadableAttributes(sourceAttributeRows);
+        var attributes = FieldMappingPushLookups.ReadableAttributes(await impersonatedQuery.QueryAsync(
+            FieldMappingPushLookups.AttributeMetadataPath(sourceEntity),
+            FieldMappingPushLookups.AttributeMetadataQuery,
+            callerSystemUserId,
+            ct));
 
         var selectsALookup = fields.Any(f => attributes.TryGetValue(f, out var type) && FieldMappingPushLookups.IsLookupType(type));
         var referents = selectsALookup
