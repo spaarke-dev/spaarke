@@ -110,7 +110,7 @@ public class RecordCreationMappedValueTests
     // ── NormalizedRule: a copy, its target a logical name ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public void NormalizedRule_CopiesEveryProperty_TrimsAndLowerCasesTheTarget_AndLeavesTheProfilesRuleAlone()
+    public void NormalizedRule_CopiesEveryProperty_TrimsAndLowerCasesTheTargetAndSource_AndLeavesTheProfilesRuleAlone()
     {
         var rule = new FieldMappingRuleEntity { Name = "n", SourceField = "s", TargetField = "t" };
         var properties = typeof(FieldMappingRuleEntity).GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -118,13 +118,17 @@ public class RecordCreationMappedValueTests
         foreach (var property in properties)
             property.SetValue(rule, Distinct(property));
         rule.TargetField = "  SPRK_AssignedTo ";
+        rule.SourceField = " Sprk_MatterDescription  "; // task 064d: a Copy rule's source is a column's logical name too
 
         var copy = RecordCreationService.NormalizedRule(rule);
 
         copy.Should().NotBeSameAs(rule);
         copy.TargetField.Should().Be("sprk_assignedto");
+        copy.SourceField.Should().Be("sprk_matterdescription");
         rule.TargetField.Should().Be("  SPRK_AssignedTo ", "the profile reader may cache its rules");
-        foreach (var property in properties.Where(p => p.Name != nameof(FieldMappingRuleEntity.TargetField)))
+        rule.SourceField.Should().Be(" Sprk_MatterDescription  ", "the profile reader may cache its rules");
+        foreach (var property in properties.Where(p => p.Name != nameof(FieldMappingRuleEntity.TargetField)
+                                                        && p.Name != nameof(FieldMappingRuleEntity.SourceField)))
             property.GetValue(copy).Should().Be(property.GetValue(rule), $"{property.Name} is carried over (a new property must be too)");
     }
 
