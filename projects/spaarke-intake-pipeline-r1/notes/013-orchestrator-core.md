@@ -57,9 +57,18 @@ Built from an existing primitive: `IGenericEntityService.UpdateIfRowVersionMatch
 fire. The claim owner is one delivery (`IntakeRunStore.ClaimOwner`: `{jobId:N}.{nonce:N}`), so a redelivery of the
 same message after a lost lock cannot pass the overrun delivery's fence (found while writing the tests: the first cut
 used the job id as owner, and the overrun delivery kept writing; test
-`ProcessAsync_SameMessageRedeliveredWhileTheFirstDeliveryStillRuns_TheOverrunDeliveryWritesNothingMore`). Every
-fenced write refreshes the claim time, so a takeover only happens after the holder fell silent (same job: 1 min, the
-invoice lock's #1086 value; another job: 15 min).
+`ProcessAsync_HolderWhoseHeartbeatsCannotLand_…WithNoFurtherWrite`). Every fenced write refreshes the claim time, so a
+takeover only happens after the holder fell silent (same job: 1 min, the invoice lock's #1086 value; another job: 15 min).
+
+**Heartbeat (review F1, owner-approved 2026-11-27).** While a delivery waits on a long step (content read, AI classify,
+harness step, persist, door return) `IntakeRunJobHandler.WhileHeartbeatingAsync` refreshes the claim every
+`IntakePipeline:ClaimHeartbeatSeconds` (default 20) through `IntakeRunStore.RefreshClaimAsync` — the same fenced
+`WriteRunAsync` (re-read, owner check, If-Match). The interval is clamped by `IntakeRunStore.ClaimHeartbeat` to
+5 s … `OwnerTakeoverAge / 3` (20 s), so two missed beats in a row still leave a live claim younger than the 1-minute
+takeover age. A `PeriodicTimer` on the injected `TimeProvider`, scoped to one await (not a `BackgroundService`;
+ADR-052/036 not engaged); it is stopped and awaited before the next run write. A beat that finds the claim taken over
+cancels the step's token and the delivery ends as claim lost (writes nothing more); a beat that fails otherwise is logged
+(type name only) and retried at the next beat.
 
 The frozen invoice handlers (`InvoiceSubmissionProcessingJobHandler.cs`, `InvoiceSubmissionRerunJobHandler.cs`,
 `Services/Finance/Submission/**`) are not edited: trigger 3 does not fire.
@@ -108,6 +117,15 @@ refuses with `IntakeRunOwnerRefusedException` (nothing written) when none resolv
 `ExternalDocumentNarrowingGuardTests.GenericWritersThatUpdateNoDocument` (they write `sprk_processingjob` or
 `sprk_servicerequest` only). Doors (021, 022, 040, 044) must map `IntakeRunOwnerRefusedException` to their own error
 contract.
+
+**Dev changes for routed ownership (owner "Approve, do it now", 2026-11-27; spaarkedev1; ids and codes only).**
+
+| Change | Evidence |
+|---|---|
+| `sprk_createdbyperson` on `sprk_processingjob` | `scripts/Set-ChildRecordCreatorPersonSchema.ps1` (`$Tables` + `sprk_processingjob`): dry run WOULD create + secure; `-Apply` created lookup → systemuser, relationship `sprk_systemuser_sprk_processingjob_createdbyperson`, secured, Readers/Writers profiles granted, in SpaarkeCore; `-Verify` PASS. `RecordCreatorPerson.StampedChildTables` + `sprk_processingjob`; `CreatorPersonColumnSecuredGuardTests.SecuredOnlyByDeployScript` + `sprk_processingjob` (its SpaarkeMaster Entity.xml does not define the column, as `sprk_policy`'s) |
+| Refusal probe (howToExtend) | probe row owned by team Secure Record Owners `6eabc7f9-13be-f111-a05b-0022482913fc` (BU `d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`), 2026-11-27T20:09:33Z: HTTP 403 `0x80040299` "Read Privilege Check For Owner failed", missing `prvReadsprk_ProcessingJob` (`89832fe1-9118-468d-8c43-7f84a8d6fbb0`), OTC 10857 |
+| Role entry | `config/secure-record-owner-role.json` + `sprk_processingjob` (kind `child`, privilegeName from metadata); `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` dry run MISSING 1 → `-Apply` added at Basic on role `e4ebabd9-b4a0-f111-aaac-000d3a99d1d7` → `-Verify` PASS 41/41 |
+| Re-probe and cleanup | 20:13:01Z HTTP 204 (owner the team); probe row DELETE 204, GET 404 |
 
 ## Deviations from the POML
 
@@ -174,7 +192,7 @@ No violations; no ADR tension raised.
 
 | # | Finding | Class | Disposition |
 |---|---|---|---|
-| 1 | A duplicate of the SAME message (lost lock, or a refused duplicate's 1-minute retry copy) takes the claim over after 1 minute while the first delivery is still inside a long AI call (no write refreshes the claim during the call); the in-flight AI call is paid twice (outputs are not duplicated: the overrun delivery's fence refuses its writes) | F1 | **OPEN, reported to the operator**: the fix is a design choice (a heartbeat that refreshes the claim during long calls, or a same-job takeover age above the processor's 10-minute lock renewal, which slows crash recovery). Not implemented here |
+| 1 | A duplicate of the SAME message (lost lock, or a refused duplicate's 1-minute retry copy) takes the claim over after 1 minute while the first delivery is still inside a long AI call (no write refreshes the claim during the call); the in-flight AI call is paid twice (outputs are not duplicated: the overrun delivery's fence refuses its writes) | F1 | Fixed (owner chose the heartbeat, 2026-11-27): claim heartbeat, "Atomic claim" above. Tests `…InALongAiCall_TheHeartbeatKeepsTheClaimAndTheRedeliveryWritesNothing` (20 s and 5 s; fails with the heartbeat seeded off) and `…HolderWhoseHeartbeatsCannotLand_IsTakenOver…`; bounds `IntakeClaimHeartbeatTests` |
 | 2 | An external step whose result the engine completion recorded between the claim read and the awaiting mark could be dispatched again | F2 | Fixed: the awaiting mark skips a stored step and the loop re-checks the stored state. Test `ProcessAsync_EngineResultRecordedBetweenTheClaimAndTheAwaitingMark_IsNeverDispatchedAgain` (fails without the fix) |
 | 3 | `WriteRequestStageAsync` was check-then-set and unconditional; a re-driven older run could take the request back from a newer live run | F3 | Fixed: conditional on the request's row version (re-read and retried), and a run becomes current only when the request has none or its current run is gone or terminal. Test `ProcessAsync_OlderRunReDrivenWhileANewerRunIsLive_NeverTakesTheRequestFromIt` (fails without the fix) |
 | 4 | A state over 10,000 characters or a state that no longer parses leaves a run with no attention text | F4 | Partly a known limit: an oversized state throws at `CreateRunAsync` (the door), before any row exists; an unparseable state needs a future shape change (`IntakeRunState.Version`). Listed under Known limits |
@@ -194,17 +212,21 @@ pass. Wider filter (Intake, ProcessingJob, DiGraph, JobProcessing, OfficeJob, Re
 |---|---|
 | Claim write unconditional (check-then-set) | `ProcessAsync_SameMessageDeliveredTwiceConcurrently_RunsAiAndPersistOnce` |
 | Stored-result check dropped for Analyse steps | `IntakeRunResumeTests` crash points `step:segment`, `step:edit-plan`, `step:redline`, `stage:Persist`, `marker:approve` + the external-step test (6 of 11) |
-| Claim owner = job id (no per-delivery nonce) | `…SameMessageRedeliveredWhileTheFirstDeliveryStillRuns_TheOverrunDeliveryWritesNothingMore` |
+| Claim owner = job id (no per-delivery nonce) | `…HolderWhoseHeartbeatsCannotLand_IsTakenOver…WithNoFurtherWrite` (then named `…TheOverrunDeliveryWritesNothingMore`) |
 | Old Guid mapping (bare Guid lookups) | `ProcessingJobLookupMappingTests` 4 of 8 (the run with the old mapping also counted 1 unrelated filter match) |
 | No re-check after the awaiting mark (F2) | `…EngineResultRecordedBetweenTheClaimAndTheAwaitingMark_IsNeverDispatchedAgain` |
 | Any run may become current (F3) | `…OlderRunReDrivenWhileANewerRunIsLive_NeverTakesTheRequestFromIt` |
 | Owner refusal ignored | `CreateRunAsync_NoOwnerTeamResolvesForTheRequest_RefusesAndCreatesNothing` |
+| Heartbeat off (F1; `WhileHeartbeatingAsync` never starts the beat) | `…InALongAiCall_TheHeartbeatKeepsTheClaimAndTheRedeliveryWritesNothing` (20 s and 5 s): "Expected redelivered.Status to be JobStatus.Failed … but found JobStatus.Completed" — the redelivery took the run over; `…HolderWhoseHeartbeatsCannotLand…` also fails (no beat reaches Dataverse) |
 
-**ArchTests** (`dotnet test tests/Spaarke.ArchTests/`): 2842 passed, **3 failed — all three caused by routing the
-run's owner, pending the owner decision below**: `Task 146 b2` (sprk_processingjob missing from
-`config/secure-record-owner-role.json`), `UAC 099b r3 F4` (its negative control sees the same extra table), `Task 146
-c1-r1` (sprk_processingjob lacks the creator-person column in `RecordCreatorPerson.StampedChildTables` /
-`scripts/Set-ChildRecordCreatorPersonSchema.ps1`).
+**After the owner-approved dev changes and F1** (2026-11-27): `IntakeRunJobHandlerTests` 22 (the overrun test replaced by the two
+heartbeat tests), `IntakeClaimHeartbeatTests` 8; wider filter (Intake, ProcessingJob, DiGraph, JobProcessing, OfficeJob,
+RecordOwnership, CreatorPerson): 3318 passed, 0 failed, 4 skipped. BFF build: 0 warnings, 0 errors.
+
+**ArchTests** (`dotnet test tests/Spaarke.ArchTests/`): the three earlier failures (`Task 146 b2`, `UAC 099b r3 F4`, `Task 146
+c1-r1`) pass. Full run: 2843 passed, **2 failed — both `Task 182` (SecureFamilyConsistencyTests), open below**. Two
+creator-person guard failures the role/column change surfaced were closed by the `SecuredOnlyByDeployScript` entry (the
+guard's documented route for a column created by the deploy script).
 
 **Publish size** (fresh worktrees at short paths, `dotnet publish -c Release`, `Compress-Archive`): master
 `d7ab69b1ab` 194 files, 43,721,605 bytes; branch `acea991584` 194 files, 43,734,622 bytes; **delta +13,017 bytes
@@ -213,14 +235,15 @@ vulnerable packages.
 
 ## 🔔 Open for the owner
 
-1. **Run ownership (security, Dataverse schema).** Routing the run's owner from its request (implemented, fail-closed)
-   also needs: `sprk_processingjob` in `config/secure-record-owner-role.json` and the live Secure Record Owner role
-   on dev (task 145's procedure), and a `sprk_createdbyperson` column on `sprk_processingjob` (schema change on dev,
-   project CLAUDE.md §5 needs the owner's OK). Alternative: a Permanent census waiver like the Office job row (the
-   run holds ids, references and codes only and is read app-only by the BFF) — but census rule 3 forbids waiving a row
-   that names a core record, and Console/admin surfaces (020, 023) will read run rows. **Recommendation: route** (as
-   committed) and approve the role + column changes.
-2. **Review F1 (duplicate AI call on a same-message duplicate during a long step).** Options: (a) a heartbeat that
-   refreshes the claim every ~20 s while a long call runs (recommended: a takeover then means the holder is dead);
-   (b) raise the same-job takeover age above the processor's 10-minute lock renewal (simple, but a crashed delivery
-   then waits 10+ minutes and may exhaust retries into the admin re-drive).
+Items 1 (run ownership: role + column) and 2 (F1: heartbeat) of the earlier list are done (sections above).
+
+1. **Task 182: `sprk_processingjob` is a kind `child` role entry with no `SecureChildLineage` row.** The family contract
+   (C7) requires every role-set child to have a lineage row (or a reasoned `RoleSetNotInLineage` entry). Not resolved here
+   ("don't waive"): a lineage row needs a closed `ExternalMarker` choice (an external-visibility decision) and makes the
+   secure reconciler and share mirror re-own and mirror EVERY processing-job row (Office rows included) filed under a
+   secure document/root, which is uac-r2's model. The run is filed only under a service request, which the secure walk
+   never looks through (`IsReparentableChild`, D-36), so a run is never Secure-owned through lineage. Options: (a) a
+   lineage row from live metadata (lookups to a root or codified child, e.g. `sprk_outputdocument` → `sprk_document`)
+   with an `ExternalMarker` decided by uac-r2; (b) a `RoleSetNotInLineage` entry with that reason, signed off by uac-r2;
+   (c) a new role-config kind for a routed table never mirrored, added to `RoleSetKinds` by uac-r2. Recommendation:
+   (b), reviewed by uac-r2 (smallest change, no reconciler behaviour change); (a) if uac-r2 wants run rows mirrored.
