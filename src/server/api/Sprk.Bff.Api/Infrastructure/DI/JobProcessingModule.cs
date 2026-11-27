@@ -58,6 +58,16 @@ public static class JobProcessingModule
         // Unconditional: it has no AI dependency of its own.
         services.AddScoped<Sprk.Bff.Api.Services.Intake.Harnesses.IntakeHarnessRegistry>();
 
+        // Intake run orchestrator (task 013, FR-07). ADR-052 placement: queue → ADR-004 IJobHandler in the BFF, with the run
+        // row as the state machine (design §4 written reason: every stage uses BFF domain code; low volume; the one long wait,
+        // approval, is a persisted status). Unconditional: IAgreementAi resolves to its Null peer when the AI gate is off
+        // (the run is then held), and ITextExtractor has its Null peer too. Kill switches: IntakePipelineOptions, read per run.
+        // Door returns plug in as IIntakeDoorReturn (none yet: Front Door 021, Console 022, email 043, Copilot 044).
+        services.Configure<IntakePipelineOptions>(configuration.GetSection(IntakePipelineOptions.SectionName));
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeRunStore>();
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeContentTextReader>();
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Intake.IntakeRunJobHandler>();
+
         // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
         // Mixed handlers (RagIndexing references Dataverse) stay in Services/Jobs/Handlers/;
         // pure-AI handler (BulkRagIndexing) relocated per task 051 (FR-E3)

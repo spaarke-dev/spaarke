@@ -2,7 +2,8 @@ namespace Sprk.Bff.Api.Services.Intake.Harnesses;
 
 /// <summary>
 /// A harness owns the Analyse and Build stages, and the Persist hook, for ONE kind of request
-/// (spaarke-intake-pipeline-r1 spec FR-08; design §3). The orchestrator owns every other stage.
+/// (spaarke-intake-pipeline-r1 spec FR-08; design §3). The orchestrator (<see cref="IntakeRunJobHandler"/>) owns every
+/// other stage, and owns the run record: a harness never writes the run.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -13,8 +14,20 @@ namespace Sprk.Bff.Api.Services.Intake.Harnesses;
 /// <see cref="IntakeHarnessRegistry"/> does the rest.
 /// </para>
 /// <para>
-/// <b>Content is by reference</b> (NFR-03, ADR-004 claim-check): requests and results carry document
-/// ids and staged blob paths, never document bytes. A harness reads only what it needs.
+/// <b>Steps, not one call</b> (task 013 decision, FR-07a). Analyse and Build are a list of named
+/// <see cref="Steps"/> that the orchestrator runs in order, one at a time. It stores each completed step's
+/// <see cref="IntakeHarnessResultReference"/> on the run BEFORE it runs the next one, and never calls a stored step
+/// again (on resume, redelivery or replay). So an AI step (the NDA edit plan) runs once per run, and a step that needs
+/// the output of an engine job (the NDA segmentation) can wait for it: an external step answers
+/// <see cref="IntakeHarnessStepOutcome.Dispatched"/>, the run waits, and the engine completion (task 014) records the
+/// step's result through <see cref="IntakeRunStore.RecordExternalStepResultAsync"/> and re-enqueues the run.
+/// The NDA harness (task 015) declares <c>segment</c> (Analyse, external), <c>edit-plan</c> (Analyse, AI) and
+/// <c>redline</c> (Build, external).
+/// </para>
+/// <para>
+/// <b>Content is by reference</b> (NFR-03, ADR-004 claim-check, ADR-015): requests and step results carry document
+/// ids, staged blob paths and keys, never document bytes or text. A step result is stored on the run row, so it must
+/// never hold content: an edit plan is stored in staging or as a record and referenced by path or id.
 /// </para>
 /// <para>
 /// <b>ADR-010</b>: this is a genuine seam — one implementation per request type (NDA first, task 015;
@@ -38,18 +51,29 @@ public interface IIntakeHarness
     bool CanHandle(IntakeHarnessRoute route);
 
     /// <summary>
-    /// Analyse and Build: produce the outputs for one run. Returns references only; nothing is
-    /// written to the request yet (that is <see cref="PersistAsync"/>).
+    /// The Analyse and Build steps, in the order they run. Names are tokens, unique within the harness, and stable:
+    /// a resumed run finds its stored results by name.
     /// </summary>
-    Task<IntakeHarnessResult> RunAsync(IntakeHarnessRequest request, CancellationToken cancellationToken);
+    IReadOnlyList<IntakeHarnessStep> Steps { get; }
 
     /// <summary>
-    /// The persist hook (orchestrator stage 7): write the <paramref name="result"/> outputs to the
-    /// request and run in one step. Called with the stored result, so it must be idempotent: a
-    /// redelivered run calling it again creates nothing new (FR-07b).
+    /// Runs one step. <paramref name="completedSteps"/> holds the stored results of every step before it, by name.
+    /// Called again for the same step only when no result was stored (a crash before the orchestrator stored it, or a
+    /// redelivery of an external step whose completion has not arrived), so a dispatch must be idempotent on the run id.
+    /// </summary>
+    Task<IntakeHarnessStepOutcome> RunStepAsync(
+        IntakeHarnessStep step,
+        IntakeHarnessRequest request,
+        IReadOnlyDictionary<string, IntakeHarnessResultReference> completedSteps,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The persist hook (orchestrator stage 7): write the outputs of <paramref name="completedSteps"/> to the request
+    /// and run in one step. It may be called again after a crash before its result was stored, so it must be
+    /// idempotent: deterministic ids, and a redelivered run calling it again creates nothing new (FR-07b).
     /// </summary>
     Task<IntakeHarnessPersistResult> PersistAsync(
         IntakeHarnessRequest request,
-        IntakeHarnessResult result,
+        IReadOnlyDictionary<string, IntakeHarnessResultReference> completedSteps,
         CancellationToken cancellationToken);
 }

@@ -235,11 +235,19 @@ public sealed class IntakeHarnessRegistryTests
 
         public bool CanHandle(IntakeHarnessRoute route) => canHandle?.Invoke(route) ?? true;
 
-        public Task<IntakeHarnessResult> RunAsync(IntakeHarnessRequest request, CancellationToken cancellationToken) =>
-            Task.FromResult(new IntakeHarnessResult());
+        public IReadOnlyList<IntakeHarnessStep> Steps { get; } = Array.Empty<IntakeHarnessStep>();
+
+        public Task<IntakeHarnessStepOutcome> RunStepAsync(
+            IntakeHarnessStep step,
+            IntakeHarnessRequest request,
+            IReadOnlyDictionary<string, IntakeHarnessResultReference> completedSteps,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException("The registry never runs a step.");
 
         public Task<IntakeHarnessPersistResult> PersistAsync(
-            IntakeHarnessRequest request, IntakeHarnessResult result, CancellationToken cancellationToken) =>
+            IntakeHarnessRequest request,
+            IReadOnlyDictionary<string, IntakeHarnessResultReference> completedSteps,
+            CancellationToken cancellationToken) =>
             Task.FromResult(new IntakeHarnessPersistResult());
     }
 
