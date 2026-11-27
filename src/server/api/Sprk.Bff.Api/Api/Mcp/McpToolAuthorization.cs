@@ -74,6 +74,8 @@ public static class McpToolAuthorization
     {
         "spaarke_start_analysis",
         "spaarke_run_playbook", // r2 task 030: starts a detached caller run (ADR-052 amendment 2026-11-26); retry key per caller
+        "spaarke_create_task", // r2 task 036: one event through IEventsCapability.CreateAsync; retry key per caller
+        "spaarke_complete_task", // r2 task 036: one event through IEventsCapability.CompleteAsync; a completed task is success; retry key per caller
     };
 
     /// <summary>

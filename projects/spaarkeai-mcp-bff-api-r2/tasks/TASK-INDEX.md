@@ -35,7 +35,7 @@
 | 031 | Analysis tools: `spaarke_start_analysis`, `spaarke_get_analysis` | 2 | ✅ [done] | 020 | Group H | opus / high | FULL |
 | 033 | `spaarke_get_matter_finance` | 2 | ✅ [done] | 008, 020 | Group H | sonnet / high | FULL |
 | 034 | `spaarke_get_briefing` + Daily Briefing widget | 2 | ✅ [done] | 010, 020, 021 | Group H | sonnet / xhigh | FULL |
-| 036 | Task write tools: `spaarke_create_task`, `spaarke_complete_task` | 2 | 🔲 [open] | 006, 020, 025 | Group H | sonnet / high | FULL |
+| 036 | Task write tools: `spaarke_create_task`, `spaarke_complete_task` | 2 | ✅ [done] | 006, 020, 025 | Group H | sonnet / high | FULL |
 | 032 | `spaarke_get_matter_summary` (cached, else start a run) | 2 | 🔲 [open] | 012, 020, 030 | Group I | sonnet / high | FULL |
 | 035 | Search results widget | 2 | ✅ [done] | 021, 022, 034 | Group I | sonnet / high | FULL |
 | 038 | `spaarke_run_playbook`: optional `instructions` argument (owner Q18, added 2026-11-26) | 2 | ✅ [done] | 030 | Group I | sonnet / high | FULL |
