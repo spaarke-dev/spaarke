@@ -595,6 +595,9 @@ builder.Services.AddSingleton<ISeedManifestReader, EmbeddedSeedManifestReader>()
 builder.Services.AddTransient<TransientHttpRetryHandler>();
 builder.Services.AddHttpClient<ISeedManifestRunner, DataverseWebApiSeedWriter>()
     .AddHttpMessageHandler<TransientHttpRetryHandler>();
+// L56 / W2: the AI content set (fixed primary keys, create-if-missing), run by H12a before the manifest writer.
+builder.Services.AddHttpClient<IAiContentSeeder, DataverseWebApiAiContentSeeder>()
+    .AddHttpMessageHandler<TransientHttpRetryHandler>();
 builder.Services.AddScoped<H12aAiSeedChainHandler>();
 
 // Task 071: H12b app-config seed handler + four IAppConfigSeeder registrations.

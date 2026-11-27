@@ -5,7 +5,12 @@
  * `attachmentsRefusedUnverified`. Before the fix the button said "Saved to SharePoint." or "Already saved to
  * SharePoint." regardless, so a refused attachment was a silent success.
  */
-import { archiveStatus, refusedAttachmentsNotice } from '../archiveStatus';
+import {
+  ARCHIVE_IN_PROGRESS_TEXT,
+  archiveFailureNotice,
+  archiveStatus,
+  refusedAttachmentsNotice,
+} from '../archiveStatus';
 
 describe('archiveStatus', () => {
   it('a plain save is a success line', () => {
@@ -49,5 +54,36 @@ describe('archiveStatus', () => {
 
   it('a server without the field (older BFF) reads as none refused', () => {
     expect(refusedAttachmentsNotice({ alreadyArchived: true })).toBeNull();
+  });
+});
+
+describe('archiveFailureNotice (ISS-010 part E run 3)', () => {
+  it('a 409 archive_in_progress is an info line with the server detail', () => {
+    expect(
+      archiveFailureNotice(409, {
+        detail: 'This email is being saved to SharePoint already. Try again shortly.',
+        extensions: { code: 'archive_in_progress' },
+      })
+    ).toEqual({ message: 'This email is being saved to SharePoint already. Try again shortly.', intent: 'info' });
+  });
+
+  it('a 409 archive_in_progress without a detail still says it is being saved, not failed', () => {
+    expect(archiveFailureNotice(409, { type: 'https://spaarke.com/errors/archive_in_progress' })).toEqual({
+      message: ARCHIVE_IN_PROGRESS_TEXT,
+      intent: 'info',
+    });
+  });
+
+  it('another 409 is a failure', () => {
+    expect(
+      archiveFailureNotice(409, { detail: 'Owner refused.', extensions: { code: 'record_owner_unresolved' } })
+    ).toEqual({
+      message: 'Save to SharePoint failed (409): Owner refused.',
+      intent: 'error',
+    });
+  });
+
+  it('no answer and no detail is a plain failure line', () => {
+    expect(archiveFailureNotice(undefined, null)).toEqual({ message: 'Save to SharePoint failed.', intent: 'error' });
   });
 });

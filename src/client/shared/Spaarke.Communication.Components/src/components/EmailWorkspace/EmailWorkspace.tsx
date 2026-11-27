@@ -50,7 +50,13 @@ import { EmailRecipients } from '../EmailRecipients';
 import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions } from '../EmailComposeActions';
 import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding, bffRefile } from '../../logic/connections';
-import { launchCreate, refusedAttachmentsNotice, type CreateKind, type IArchiveResult } from '../../logic/actions';
+import {
+  archiveFailureNotice,
+  launchCreate,
+  refusedAttachmentsNotice,
+  type CreateKind,
+  type IArchiveResult,
+} from '../../logic/actions';
 import { createEmailInvoiceSubmission } from '../../logic/invoice';
 import { SubmitInvoiceDialog } from '../SubmitInvoice';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -264,7 +270,14 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
   // PR #2248: the attachments the last archive of an email refused ("N attachment(s) could not be verified and
   // were not saved."), shown on THAT email only — never a silent success.
-  const [archiveNotice, setArchiveNotice] = React.useState<{ communicationId: string; message: string } | null>(null);
+  // ISS-010 part E (run 3): a refused save (any non-success answer) shows the server's detail on that email too; a 409
+  // archive_in_progress is an info line ("already being saved"), not a failure.
+  const [archiveNotice, setArchiveNotice] = React.useState<{
+    communicationId: string;
+    message: string;
+    intent: 'warning' | 'info' | 'error';
+    testId: string;
+  } | null>(null);
 
   // "Save to SharePoint" (archive) — mirrors the `CommunicationActions` PCF's
   // handleArchive: POST the existing archive endpoint, then re-read the record so
@@ -273,14 +286,37 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     (communicationId: string): void => {
       void (async () => {
         setArchiveNotice(null);
+        const showFailure = (status: number | undefined, problem: unknown): void =>
+          setArchiveNotice({
+            communicationId,
+            ...archiveFailureNotice(status, problem),
+            testId: 'archive-failure-notice',
+          });
         try {
           const resp = await authenticatedFetch(`/communications/${communicationId}/archive`, { method: 'POST' });
           if (resp.ok) {
             const refused = refusedAttachmentsNotice((await resp.json()) as IArchiveResult);
-            if (refused) setArchiveNotice({ communicationId, message: refused });
+            if (refused)
+              setArchiveNotice({
+                communicationId,
+                message: refused,
+                intent: 'warning',
+                testId: 'archive-refused-notice',
+              });
             record.reload();
-          } else console.warn(`[EmailWorkspace] Save to SharePoint failed (${resp.status}).`);
+          } else {
+            showFailure(
+              resp.status,
+              await Promise.resolve()
+                .then(() => resp.json())
+                .catch(() => null)
+            );
+          }
         } catch (err) {
+          // `@spaarke/auth` throws a failed answer as an ApiError (status + problemDetails). Read structurally, never
+          // `instanceof`: a second bundled copy of the package fails `instanceof` silently.
+          const apiError = err as { status?: unknown; problemDetails?: unknown } | null;
+          showFailure(typeof apiError?.status === 'number' ? apiError.status : undefined, apiError?.problemDetails);
           console.warn('[EmailWorkspace] Save to SharePoint failed:', err);
         }
       })();
@@ -362,6 +398,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           recordName: record.recordState?.regardingRecordName,
           recordNumber: record.recordState?.regardingRecordNumber,
           recordTypeLabel: record.recordState?.regardingRecordType,
+          recordId: record.recordState?.regardingRecordId,
         }
       ),
     [record.recordState, filedAssociations]
@@ -429,7 +466,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
             <div className={s.bodyRegion}>
               {archiveNotice?.communicationId === id && (
                 <div className={s.archiveNotice}>
-                  <MessageBar intent="warning" data-testid="archive-refused-notice">
+                  <MessageBar intent={archiveNotice.intent} data-testid={archiveNotice.testId}>
                     <MessageBarBody>{archiveNotice.message}</MessageBarBody>
                   </MessageBar>
                 </div>
@@ -498,6 +535,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   regardingRecordName={record.recordState?.regardingRecordName ?? null}
                   regardingRecordNumber={record.recordState?.regardingRecordNumber ?? null}
                   regardingRecordType={record.recordState?.regardingRecordType ?? null}
+                  regardingRecordId={record.recordState?.regardingRecordId ?? null}
                   filedAssociations={filedAssociations}
                   writeContext={{
                     webApi,

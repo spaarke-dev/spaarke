@@ -86,10 +86,9 @@ describe('SdapApiClient', () => {
   // unified-access-control-r2 task 166 f1 (owner round 21 item 1 (i)): the client never writes a document's SPE
   // pointer — it asks the BFF to attach the file it uploaded, and the BFF stamps the pointer after verifying it.
   describe('attachDocumentFile', () => {
-    const okResponse = (body: unknown) =>
-      ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+    const okResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
 
-    it('POSTs the uploaded file\'s drive and item ids to the document\'s attach route', async () => {
+    it("POSTs the uploaded file's drive and item ids to the document's attach route", async () => {
       const calls: Array<{ url: string; init?: RequestInit }> = [];
       const client = new SdapApiClient({
         baseUrl: 'https://api.example.com/',
@@ -127,7 +126,7 @@ describe('SdapApiClient', () => {
             ok: false,
             status: 409,
             statusText: 'Conflict',
-            json: async () => ({ detail: 'The file is not stored where this document\'s files belong.' }),
+            json: async () => ({ detail: "The file is not stored where this document's files belong." }),
           }) as unknown as Response,
       });
 
@@ -135,6 +134,38 @@ describe('SdapApiClient', () => {
         name: 'SdapHttpError',
         status: 409,
       });
+    });
+  });
+
+  // field-mapping-server-write-path-r1 task 035 (FR-40): the server's index-file request has no index member; the index
+  // follows the document's content type. The client never names one, even when a caller hands it a stale extra member.
+  describe('indexFile', () => {
+    it('posts a body with no searchIndexName key, even when the request object carries one', async () => {
+      const bodies: Array<Record<string, unknown>> = [];
+      const client = new SdapApiClient({
+        baseUrl: 'https://api.example.com',
+        authenticatedFetch: async (_url: string, init?: RequestInit) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ success: true, chunksIndexed: 1 }),
+          } as unknown as Response;
+        },
+      });
+
+      const request = {
+        driveId: 'b!drive',
+        itemId: '01ITEM',
+        fileName: 'a.docx',
+        tenantId: 'tenant-1',
+        searchIndexName: 'a-stale-index',
+      } as Parameters<SdapApiClient['indexFile']>[0];
+      const result = await client.indexFile(request);
+
+      expect(result.success).toBe(true);
+      expect(Object.keys(bodies[0])).not.toContain('searchIndexName');
+      expect(JSON.stringify(bodies[0])).not.toContain('a-stale-index');
     });
   });
 });

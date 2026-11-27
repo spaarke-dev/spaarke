@@ -194,6 +194,9 @@ param preAuthorizedClientAppIds array = [
 @description('Client id of the shared Spaarke Copilot Agent app (T257): a secret-free public client in Spaarke tenant (PKCE, redirect https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect) that each customer Copilot agent auth config signs users in with. Threaded to modules/controlplane-worker-app-service.bicep, which adds it to the PreAuthorizedClientAppIds list, so H3 pre-authorizes it on every customer BFF app (user_impersonation) and no user sees a consent prompt. Empty (default) until the operator creates the app (SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12); H3 then pre-authorizes only preAuthorizedClientAppIds.')
 param copilotAgentClientAppId string = ''
 
+@description('Client apps H3 pre-authorizes ONLY on Demo stamps (registry row Environment Type = Demo and active) -- threaded to modules/controlplane-worker-app-service.bicep (demo environment plan decision 1, owner 2026-11-26). Today the Spaarke Operator Tools (Demo) public client (scripts/provisioning/Register-OperatorToolsClient.ps1), which operator scripts sign in with to call a demo stamp BFF as a user. Empty (default): no Demo-only client.')
+param demoPreAuthorizedClientAppIds array = []
+
 
 @description('Entra External ID (CIAM) tenant id(s) Spaarke operates for external contacts (config/spaarke-resources.yaml external_identity.ciam_tenant) -- threaded to BOTH control-plane modules as ReservedTenants__CiamTenantIds__N, next to ReservedTenants__SpaarkeTenantId (the deployment tenant). Task 255 (INCOMING-141): POST /api/runs, H4b and H13 refuse either as a customer workforce tenant -- a stamp BFF refuses to start with its CIAM tenant listed, and the Spaarke tenant would bind Spaarke staff into a customer environment. REQUIRED, no default: ReservedTenantsOptions.Validate() fails Api and Worker startup without it.')
 @minLength(1)
@@ -505,6 +508,8 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     preAuthorizedClientAppIds: preAuthorizedClientAppIds
     // T257: the shared Copilot agent client joins the pre-authorized list when set.
     copilotAgentClientAppId: copilotAgentClientAppId
+    // Demo environment plan decision 1: clients H3 adds only on Demo stamps.
+    demoPreAuthorizedClientAppIds: demoPreAuthorizedClientAppIds
     // Task 255: the CIAM tenant(s) H4b and H13 refuse as a customer workforce tenant (same list as the Api).
     ciamTenantIds: ciamTenantIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27

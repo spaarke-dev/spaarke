@@ -312,6 +312,77 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         task.GetProperty("sprk_eventtypecode").GetString().Should().Be("TASK");
     }
 
+    // ---- ISS-045: the 17 grid configurations product code hard-codes by dev row id -------------------------------------
+
+    /// <summary>The ids External Access widgets, the BFF external-grant allow-list, the workspace widgets and the pages hard-code.</summary>
+    private static readonly string[] HardCodedGridConfigurationIds =
+    [
+        "113ad380-9e63-f111-ab0c-70a8a53ec687", "1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6", "3019a06e-9b5e-f111-ab0c-7c1e521545d7",
+        "3af4102c-1092-f111-b8dc-7ced8ddc4a05", "3ff4102c-1092-f111-b8dc-7ced8ddc4a05", "403e5d37-cb94-f111-b8db-00224835447a",
+        "42f4102c-1092-f111-b8dc-7ced8ddc4a05", "5294c28a-f078-f111-ab0e-7ced8ddc4a05", "583a2a33-1092-f111-b8dc-7ced8ddc4a05",
+        "61711823-1092-f111-b8dc-7ced8ddc4a05", "97ee98e7-7a63-f111-ab0c-70a8a53ec687", "9c5b0ee7-7a63-f111-ab0c-000d3a4d8152",
+        "ac05e4f1-8d85-f111-8075-7c1e5268570d", "d021827b-9b5e-f111-ab0c-7c1e521545d7", "e15c2b93-a05f-f111-a825-70a8a59455f4",
+        "e1826c4c-9575-f111-ab0e-7ced8ddc4a05", "e7c8126a-968b-f111-8077-7ced8ddc4a05",
+    ];
+
+    [Fact]
+    public void ISS045_EmbeddedGridConfigurations_AreExactlyTheHardCodedIds_EachWithAUsableConfig()
+    {
+        var grid = ReferenceDataSet.Tables.Single(t => t.Table == "sprk_gridconfiguration");
+
+        grid.PrimaryKey.Should().Be("sprk_gridconfigurationid");
+        grid.EntitySet.Should().Be("sprk_gridconfigurations");
+        grid.Rows.Select(r => r.Id).Should().BeEquivalentTo(HardCodedGridConfigurationIds.Select(Guid.Parse));
+        grid.Columns.Should().Contain(["sprk_name", "sprk_entitylogicalname", "sprk_configjson"]);
+        grid.Columns.Should().NotContain(c => c.StartsWith("created", StringComparison.Ordinal) || c.StartsWith("modified", StringComparison.Ordinal)
+                                              || c.Contains("owner", StringComparison.Ordinal) || c == "versionnumber",
+            "no audit or ownership column travels to a stamp");
+
+        foreach (var row in grid.Rows)
+        {
+            // sprk_configjson is the shared <DataGrid configId=...> document: it must parse and name its source.
+            using var config = JsonDocument.Parse(row.Values["sprk_configjson"].GetString()!);
+            config.RootElement.TryGetProperty("source", out _).Should().BeTrue($"'{row.DisplayName}' carries a grid source");
+            row.Values["sprk_entitylogicalname"].GetString().Should().StartWith("sprk_");
+        }
+    }
+
+    [Fact]
+    public async Task ISS045_GridConfigurations_SeededIntoAnEmptyEnvironment_AreCreatedByTheirFixedIds()
+    {
+        var fake = new FakeDataverseHandler();
+        var seeder = BuildSeeder(fake, ReferenceDataSet.Tables);
+
+        var result = await seeder.SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        var posted = fake.Posts.Where(p => p.Uri.AbsolutePath == "/api/data/v9.2/sprk_gridconfigurations")
+            .Select(p => JsonDocument.Parse(p.Body).RootElement)
+            .ToList();
+        posted.Select(e => e.GetProperty("sprk_gridconfigurationid").GetString())
+            .Should().BeEquivalentTo(HardCodedGridConfigurationIds, "product code opens each row by this id, so the row is created with it");
+        posted.Select(e => e.GetProperty("sprk_configjson").GetString()).Should().OnlyContain(json => !string.IsNullOrEmpty(json));
+    }
+
+    [Fact]
+    public async Task ISS045_GridConfigurations_AlreadyPresentUnderTheirIds_AreNotWritten()
+    {
+        var grid = ReferenceDataSet.Tables.Single(t => t.Table == "sprk_gridconfiguration");
+        var fake = new FakeDataverseHandler();
+        fake.Existing["sprk_gridconfigurations"] = grid.Rows.Select(r =>
+        {
+            var row = r.Values.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
+            row[grid.PrimaryKey] = r.Id.ToString("D");
+            return JsonSerializer.Serialize(row);
+        }).ToArray();
+
+        var result = await BuildSeeder(fake, [grid]).SeedAsync(Input(), CancellationToken.None);
+
+        result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
+        result.Diagnostic.Should().Contain("0 created").And.Contain("17 unchanged");
+        fake.Posts.Should().BeEmpty();
+    }
+
     [Fact]
     public void ISS039_ReferenceDataSeeder_IsRegisteredInTheH12bSeederSet()
     {
@@ -538,12 +609,13 @@ public sealed class DataverseWebApiReferenceDataSeederTests
     // ---- the real legal-standard pack ------------------------------------------------------------------------------
 
     [Fact]
-    public void D4_TheEmbeddedLegalStandardPack_LoadsSevenTables_WithUniqueIdsCodesAndNames()
+    public void D4_TheEmbeddedLegalStandardPack_LoadsItsTables_WithUniqueIdsCodesAndNames()
     {
         var tables = ReferenceDataSet.Pack(PackName);
 
         tables.Select(t => t.Table).Should().Equal(ReferenceDataSet.PackTableNames[PackName]);
-        tables.Select(t => t.Rows.Count).Should().Equal(14, 16, 14, 8, 18, 9, 8);
+        // D5: the 8 UTBMS code sets and their 161 codes come first, then the seven taxonomy tables.
+        tables.Select(t => t.Rows.Count).Should().Equal(8, 161, 14, 16, 14, 8, 18, 9, 8);
         foreach (var table in tables)
         {
             table.Match.Should().Be(ReferenceMatch.NaturalKey, table.Table);
@@ -585,7 +657,7 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         var result = await BuildSeeder(fake, [], ReferenceDataSet.Pack).SeedAsync(PackInput(), CancellationToken.None);
 
         result.Status.Should().Be(AppConfigSeederStatus.Ok, result.Diagnostic);
-        fake.Posts.Should().HaveCount(87 - 4);
+        fake.Posts.Should().HaveCount(87 + 8 + 161 - 4, "the 87 taxonomy rows and the 169 D5 billing rows, less the four dev rows that are present");
         var created = fake.Posts.Select(p => p.Body).ToList();
         created.Should().NotContain(b => b.Contains("\"LITG\"") || b.Contains("\"PAT\""));
         created.Should().Contain(b => b.Contains("\"CORPMA\""));
@@ -609,7 +681,7 @@ public sealed class DataverseWebApiReferenceDataSeederTests
             () => tables,
             packTables);
 
-    private sealed class StaticTokenCredential : TokenCredential
+    internal sealed class StaticTokenCredential : TokenCredential
     {
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => new("fake-token", DateTimeOffset.UtcNow.AddHours(1));
@@ -619,7 +691,7 @@ public sealed class DataverseWebApiReferenceDataSeederTests
     }
 
     /// <summary>An in-memory Dataverse: GET lists the configured rows of an entity set (optionally paged), POST records the body.</summary>
-    private sealed class FakeDataverseHandler : HttpMessageHandler
+    internal sealed class FakeDataverseHandler : HttpMessageHandler
     {
         public Dictionary<string, string[]> Existing { get; } = new(StringComparer.Ordinal);
         public List<HttpMethod> Methods { get; } = new();
@@ -628,6 +700,9 @@ public sealed class DataverseWebApiReferenceDataSeederTests
         public HttpStatusCode PostStatus { get; init; } = HttpStatusCode.NoContent;
         public HttpStatusCode GetStatus { get; init; } = HttpStatusCode.OK;
         public int PageSize { get; init; } = int.MaxValue;
+
+        /// <summary>When true a successful POST adds the row to <see cref="Existing"/>, so a second run sees what the first created.</summary>
+        public bool PersistPosts { get; init; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -653,7 +728,14 @@ public sealed class DataverseWebApiReferenceDataSeederTests
 
             if (request.Method == HttpMethod.Post)
             {
-                Posts.Add((request.RequestUri, await request.Content!.ReadAsStringAsync(cancellationToken)));
+                var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+                Posts.Add((request.RequestUri, body));
+                if (PersistPosts && PostStatus == HttpStatusCode.NoContent)
+                {
+                    Existing[entitySet] = (Existing.TryGetValue(entitySet, out var current) ? current : Array.Empty<string>())
+                        .Append(StoredRow(body)).ToArray();
+                }
+
                 return PostStatus == HttpStatusCode.NoContent
                     ? new HttpResponseMessage(HttpStatusCode.NoContent)
                     : Json(PostStatus, "{\"error\":{\"message\":\"refused\"}}");
@@ -661,6 +743,32 @@ public sealed class DataverseWebApiReferenceDataSeederTests
 
             // PATCH / PUT / DELETE: recorded in Methods; answered 200 so a wrongly-writing seeder is caught by the assertion, not by a crash.
             return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+
+        /// <summary>
+        /// What Dataverse would return for a row created by <paramref name="postBody"/>: the body's columns, <c>statecode</c> 0, and each
+        /// <c>Nav@odata.bind</c> turned into the <c>_nav_value</c> lookup column (the Web API names it by the lowercase logical name).
+        /// </summary>
+        private static string StoredRow(string postBody)
+        {
+            var row = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var property in JsonDocument.Parse(postBody).RootElement.EnumerateObject())
+            {
+                const string bind = "@odata.bind";
+                if (property.Name.EndsWith(bind, StringComparison.Ordinal))
+                {
+                    var target = property.Value.GetString()!;
+                    var id = target[(target.IndexOf('(', StringComparison.Ordinal) + 1)..^1];
+                    row[$"_{property.Name[..^bind.Length].ToLowerInvariant()}_value"] = JsonSerializer.SerializeToElement(id);
+                }
+                else
+                {
+                    row[property.Name] = property.Value.Clone();
+                }
+            }
+
+            row["statecode"] = JsonSerializer.SerializeToElement(0);
+            return JsonSerializer.Serialize(row);
         }
 
         private static HttpResponseMessage Json(HttpStatusCode status, string body)

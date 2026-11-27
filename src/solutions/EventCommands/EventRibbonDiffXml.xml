@@ -298,8 +298,13 @@
       <DisplayRules>
         <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule" />
       </DisplayRules>
+      <!-- Task 051 (FR-24): the memo is created through the BFF (Spaarke.SecureChild.Ribbon.createChild), not a quick create, so the
+           three helper libraries load first, in order (the leading two as FunctionName="isNaN", the established ribbon idiom). -->
       <Actions>
-        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands.js"
                            FunctionName="Spaarke.Event.AddMemo">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>

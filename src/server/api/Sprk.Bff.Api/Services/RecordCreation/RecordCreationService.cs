@@ -383,7 +383,7 @@ internal sealed partial class RecordCreationService
         // table's relationships and the entity sets step 2 just read. Within these two steps each such read is asked once
         // (CallerMetadataReadMemo: schema only; access answers, record reads and failures are never kept). Step 3½, step 5
         // (its own memo), the pre-write rules and steps 6 to 10 keep the caller's own client, so their reads are asked as before.
-        var mappingClient = user is null ? null : new CallerMetadataReadMemo(user);
+        var mappingClient = user is null ? null : CallerMetadataReadMemo.For(user, request.MetadataReads);
 
         // Task 049c (NFR-02, option b): step 3's reads for a source the caller NAMED depend on nothing steps 2 and 3 decide, so
         // they start now, beside step 2, and are taken at step 3 (MappingReadsPrefetch). Refused before step 3: cancelled and
@@ -530,6 +530,9 @@ internal sealed partial class RecordCreationService
         // Task 022 fix round 3: the columns step 3 mapped, as step 3 left them. A copied default whose source is one of these
         // is a value from the mapping source, whatever step 5 later keeps of its source.
         IReadOnlySet<string> stepThreeMappedColumns = NoDefaultColumns;
+
+        // Task 064: the mapped values came from the record the caller's row is filed under (step 5 may copy an ordinary one).
+        var mappedFromFilingParent = false;
         if (rule.MappingExclusion is { } exclusion)
         {
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Skipped, $"not mapped ({exclusion.Name})");
@@ -567,6 +570,7 @@ internal sealed partial class RecordCreationService
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
             stepThreeMappedColumns = mapped.Values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            mappedFromFilingParent = mapped.Values.Count > 0 && mapped.FromFilingParent;
             // A mapped value with no gate read is checked as "not told" (fail closed), never skipped. Task 022b (review K2): its
             // source is unknown, never taken to be the target table.
             mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(null, null) : null;
@@ -710,7 +714,8 @@ internal sealed partial class RecordCreationService
             // below (step 5's AppendTo on the pair, 5½, 6, 6½, 7) sees the pair exactly as it is written. Both items: step 5
             // checks the caller's own values (callerItem) as well as the merged row, and may rebuild the row from them. ───────
             var typeOnly = await CompleteTypeOnlyRegardingPairAsync(
-                table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, noun, mappingWarnings, ct).ConfigureAwait(false);
+                table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, noun, mappingWarnings, request.MetadataReads, ct)
+                .ConfigureAwait(false);
             if (typeOnly.Refusal is { } typeOnlyRefusal)
                 return Decision.Refuse(typeOnlyRefusal);
             callerItem = typeOnly.CallerItem!;
@@ -720,7 +725,7 @@ internal sealed partial class RecordCreationService
             // failure each value, then the row as written): every pass re-read the same table metadata. Within this step each
             // such read is asked once; access answers are never kept (CallerMetadataReadMemo). Scoped to step 5 only: the
             // other steps' reads, and the pre-write rules, keep the caller's own client.
-            var checking = new CallerMetadataReadMemo(user);
+            var checking = CallerMetadataReadMemo.For(user, request.MetadataReads);
 
             // The K-2 guard (a server-set FILING lookup) ran before step 3. Task 031 fix round 1 (F1): a route-authorised
             // lookup is asked Read as the caller here, and only its AppendTo is skipped below (appendToSkip).
@@ -744,7 +749,7 @@ internal sealed partial class RecordCreationService
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
                     table, checking, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
-                    mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
+                    mappingWarnings, ct, defaultColumns, mappedFromFilingParent).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
 
@@ -753,7 +758,10 @@ internal sealed partial class RecordCreationService
                 mappedValues = checkedMerge.Values;
                 trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
                     "Create/Append, AppendTo on every record named, no field-secured column — on the merged payload" +
-                    (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped"));
+                    (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped") +
+                    (checkedMerge.CopiedWithoutCallerChecks == 0
+                        ? string.Empty
+                        : $"; {checkedMerge.CopiedWithoutCallerChecks} mapped value(s) copied without the caller's checks"));
             }
         }
 
@@ -1906,7 +1914,7 @@ internal sealed partial class RecordCreationService
     private async Task<TypeOnlyPairStep> CompleteTypeOnlyRegardingPairAsync(
         string table, IDataverseUserClient user, Guid callerSystemUserId, DataverseWriteItemMapper.MappedItem callerItem,
         DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, JsonElement> mappedValues, string noun,
-        List<RecordCreationWarning> warnings, CancellationToken ct)
+        List<RecordCreationWarning> warnings, CallerMetadataReadMemo.RequestScope? metadataReads, CancellationToken ct)
     {
         var pair = OwnedChildWrite.PairOf(item);
         if (!IsTypeOnlyRegardingPair(table, item) || pair.TypeId is not { } type
@@ -1952,7 +1960,7 @@ internal sealed partial class RecordCreationService
         }
 
         // One memo for both rewrites: the table's relationships and the related entity sets are read once (schema only).
-        var memo = new CallerMetadataReadMemo(user);
+        var memo = CallerMetadataReadMemo.For(user, metadataReads);
         var rewritten = await RewriteRegardingPairAsync(memo, table, item, fill, noun, ct).ConfigureAwait(false);
         if (rewritten.Refusal is not null)
             return new TypeOnlyPairStep(null, null, rewritten.Refusal);
@@ -2768,6 +2776,17 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
 
     /// <summary>The request's trace id (the ProblemDetails <c>correlationId</c>); a fresh one when absent.</summary>
     public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// ISS-010 (#3184): the HTTP request's table-metadata answers this create's caller checks share with every other create of
+    /// the same request (<see cref="CallerMetadataReadMemo.RequestScope"/>); <see langword="null"/> (every off-route caller)
+    /// keeps the per-create memo. Metadata only: never a row, a catalog row, an access answer or a failure.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md §11). Existing: the per-create memo the three caller-check steps build
+    /// (<see cref="CallerMetadataReadMemo"/>). Extension: this only hands those same memos a shared store; the service has no
+    /// <c>HttpContext</c> of its own and runs off-request too, so the route that owns the request names the scope. Cost of doing
+    /// nothing: the decision commit's four creates read 21 distinct metadata paths 37 times (25 with the scope).</remarks>
+    public CallerMetadataReadMemo.RequestScope? MetadataReads { get; init; }
 
     /// <summary>
     /// Task 014: the field mapping this create asks for (step 3), or <c>null</c> for none — step 3 then does nothing and

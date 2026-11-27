@@ -22,14 +22,12 @@
  * ```typescript
  * import { useAuth } from "@spaarke/auth";
  * import {
- *   createBffDataService,
  *   createBffUploadService,
  *   createBffNavigationService,
  * } from "@spaarke/ui-components";
  *
  * const { authenticatedFetch, getAccessToken } = useAuth();
  *
- * const dataService = createBffDataService(authenticatedFetch, "https://spe-api-dev-67e2xz.azurewebsites.net");
  * const uploadService = createBffUploadService(
  *   authenticatedFetch,
  *   "https://spe-api-dev-67e2xz.azurewebsites.net",
@@ -49,8 +47,6 @@ export { createWebApiFromDataService } from './dataServiceWebApiAdapter';
 export type { IDataServiceWebApi } from './dataServiceWebApiAdapter';
 
 // BFF API adapters (Power Pages SPA context)
-export { createBffDataService } from './bffDataServiceAdapter';
-export type { AuthenticatedFetch } from './bffDataServiceAdapter';
 export type { ProjectFilingResult, IBffMappingSource, IBffCreateOptions } from './bffChildWriteAdapter';
 export { createBffUploadService } from './bffUploadServiceAdapter';
 export type { GetBearerToken } from './bffUploadServiceAdapter';

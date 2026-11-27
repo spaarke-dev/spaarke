@@ -57,10 +57,15 @@ public sealed class ReferencePackContentTests
         var table = root.GetProperty("table").GetString()!;
         var primaryKey = root.GetProperty("primaryKey").GetString()!;
         var columnNames = root.GetProperty("columns").EnumerateArray().Select(c => c.GetString()!).ToList();
+        // Lookup columns (data-setup plan D5) are bound at create like any column: they must exist on the entity, and a required one
+        // (billing code -> code set) must be set on every row.
+        var lookupNames = root.TryGetProperty("lookups", out var lookupsElement)
+            ? lookupsElement.EnumerateArray().Select(l => l.GetProperty("column").GetString()!).ToList()
+            : [];
         var defined = Columns(entityXml);
         var problems = new List<string>();
 
-        foreach (var column in columnNames.Append(primaryKey).Where(c => !defined.ContainsKey(c)))
+        foreach (var column in columnNames.Concat(lookupNames).Append(primaryKey).Where(c => !defined.ContainsKey(c)))
         {
             problems.Add($"{table}: column '{column}' is not an attribute of the entity.");
         }
@@ -68,6 +73,7 @@ public sealed class ReferencePackContentTests
         // A system-required or required column that the pack does not carry at all (statecode is system-required but defaulted).
         foreach (var column in defined.Values.Where(c => c.Required && c.Name is not ("statecode" or "ownerid" or "owningbusinessunit")
                                                          && !columnNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase)
+                                                         && !lookupNames.Contains(c.Name, StringComparer.OrdinalIgnoreCase)
                                                          && !string.Equals(c.Name, primaryKey, StringComparison.OrdinalIgnoreCase)))
         {
             problems.Add($"{table}: required column '{column.Name}' is not in the pack's columns.");
@@ -75,6 +81,8 @@ public sealed class ReferencePackContentTests
 
         var natural = root.TryGetProperty("naturalKey", out var nk) ? nk.GetString() : null;
         var nameColumn = root.TryGetProperty("nameColumn", out var nc) ? nc.GetString() : null;
+        // "naturalKeyScope": a code or name is unique within the row's value of this lookup (a billing code within its code set), not table-wide.
+        var scope = root.TryGetProperty("naturalKeyScope", out var ns) ? ns.GetString() : null;
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -114,12 +122,27 @@ public sealed class ReferencePackContentTests
                 }
             }
 
-            if (natural is not null && row.TryGetProperty(natural, out var codeValue) && codeValue.GetString()?.Trim() is { Length: > 0 } code && !codes.Add(code))
+            foreach (var lookup in lookupNames)
+            {
+                var target = row.TryGetProperty(lookup, out var lookupValue) && lookupValue.ValueKind == JsonValueKind.String ? lookupValue.GetString() : null;
+                if (target is null && defined.TryGetValue(lookup, out var lookupMeta) && lookupMeta.Required)
+                {
+                    problems.Add($"{table} row {rowNumber}: required column '{lookup}' is empty.");
+                }
+                else if (target is not null && (!Guid.TryParse(target, out var targetId) || targetId == Guid.Empty))
+                {
+                    problems.Add($"{table} row {rowNumber}: lookup '{lookup}' value '{target}' is not a non-empty GUID.");
+                }
+            }
+
+            var scopeValue = scope is not null && row.TryGetProperty(scope, out var scopeElement) ? scopeElement.GetString() : null;
+            var scopePrefix = scope is null ? string.Empty : $"{scopeValue}|";
+            if (natural is not null && row.TryGetProperty(natural, out var codeValue) && codeValue.GetString()?.Trim() is { Length: > 0 } code && !codes.Add(scopePrefix + code))
             {
                 problems.Add($"{table} row {rowNumber}: code '{code}' repeats an earlier row (the second would be read as already present).");
             }
 
-            if (nameColumn is not null && row.TryGetProperty(nameColumn, out var nameValue) && nameValue.GetString()?.Trim() is { Length: > 0 } name && !names.Add(name))
+            if (nameColumn is not null && row.TryGetProperty(nameColumn, out var nameValue) && nameValue.GetString()?.Trim() is { Length: > 0 } name && !names.Add(scopePrefix + name))
             {
                 problems.Add($"{table} row {rowNumber}: name '{name}' repeats an earlier row (the second would be read as already present).");
             }
@@ -244,6 +267,130 @@ public sealed class ReferencePackContentTests
 
         var tooLong = Problems(WidgetPack(GoodRow.Replace("\"AA\"", "\"ABCDEFG\"", StringComparison.Ordinal)), WidgetXml);
         Assert.Contains(tooLong, p => p.Contains("7 characters; the column holds 5", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Problems with the lookups a pack file declares: each must match a many-to-one relationship in the SpaarkeMaster source (referencing
+    /// table, column, target table and the navigation property the Web API binds through). A wrong navigation property is a 400 on every
+    /// stamp that takes the pack, and cannot be seen from the pack file alone.
+    /// </summary>
+    internal static IReadOnlyList<string> LookupProblems(string packJson, IEnumerable<string> relationshipXmls)
+    {
+        using var doc = JsonDocument.Parse(packJson);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("lookups", out var lookups))
+        {
+            return [];
+        }
+
+        var table = root.GetProperty("table").GetString()!;
+        var relationships = relationshipXmls
+            .SelectMany(xml => XDocument.Parse(xml).Descendants("EntityRelationship"))
+            .Select(r => (
+                Referencing: r.Element("ReferencingEntityName")?.Value,
+                Referenced: r.Element("ReferencedEntityName")?.Value,
+                Column: r.Element("ReferencingAttributeName")?.Value,
+                Navigation: r.Descendants("EntityRelationshipRole")
+                    .Where(role => role.Element("RelationshipRoleType")?.Value == "1")
+                    .Select(role => role.Element("NavigationPropertyName")?.Value).FirstOrDefault()))
+            .ToList();
+
+        var problems = new List<string>();
+        foreach (var lookup in lookups.EnumerateArray())
+        {
+            var column = lookup.GetProperty("column").GetString()!;
+            var navigation = lookup.GetProperty("navigationProperty").GetString()!;
+            var target = lookup.GetProperty("targetTable").GetString()!;
+            bool Same(string? a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+            if (!relationships.Any(r => Same(r.Referencing, table) && Same(r.Column, column) && Same(r.Referenced, target) && string.Equals(r.Navigation, navigation, StringComparison.Ordinal)))
+            {
+                problems.Add($"{table}: lookup '{column}' -> '{target}' via navigation property '{navigation}' matches no relationship in the SpaarkeMaster source.");
+            }
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "D5: every lookup a pack file declares matches a relationship and navigation property of the SpaarkeMaster solution")]
+    public void EveryPackLookup_MatchesARelationshipOfTheSolution()
+    {
+        var relationships = Directory.EnumerateFiles(Abs("src/dataverse/solutions/SpaarkeMaster/Other/Relationships"), "*.xml").Select(File.ReadAllText).ToList();
+        var files = Directory.EnumerateFiles(Abs(PacksDirectory), "*.json", SearchOption.AllDirectories).ToList();
+        var declared = files.Count(f => File.ReadAllText(f).Contains("\"lookups\"", StringComparison.Ordinal));
+        Assert.True(declared >= 3, $"Only {declared} pack files declare lookups (billing code, matter type, practice area); the check would be vacuous.");
+
+        var problems = files.SelectMany(f => LookupProblems(File.ReadAllText(f), relationships).Select(p => $"{Path.GetFileName(f)}: {p}")).ToList();
+
+        Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
+    }
+
+    private const string RelationshipsXml = """
+        <EntityRelationships>
+          <EntityRelationship Name="sprk_set_widget_setid">
+            <ReferencingEntityName>sprk_Widget</ReferencingEntityName><ReferencedEntityName>sprk_set</ReferencedEntityName>
+            <ReferencingAttributeName>sprk_SetId</ReferencingAttributeName>
+            <EntityRelationshipRoles>
+              <EntityRelationshipRole><NavigationPropertyName>sprk_SetId</NavigationPropertyName><RelationshipRoleType>1</RelationshipRoleType></EntityRelationshipRole>
+              <EntityRelationshipRole><NavigationPropertyName>sprk_set_widget_setid</NavigationPropertyName><RelationshipRoleType>0</RelationshipRoleType></EntityRelationshipRole>
+            </EntityRelationshipRoles>
+          </EntityRelationship>
+        </EntityRelationships>
+        """;
+
+    [Fact(DisplayName = "D5 control (must not fire): a lookup that matches a relationship and its navigation property is not reported")]
+    public void Control_AMatchingLookup_DoesNotFire()
+        => Assert.Empty(LookupProblems(ScopedPack(ScopedRow("11111111-0000-4000-8000-000000000001", "L110", SetA)), [RelationshipsXml]));
+
+    [Fact(DisplayName = "D5 control (must fire): a wrong navigation property, a wrong target table and a missing relationship are each reported")]
+    public void Control_AWrongNavigationTargetOrMissingRelationship_Fire()
+    {
+        var pack = ScopedPack(ScopedRow("11111111-0000-4000-8000-000000000001", "L110", SetA));
+
+        Assert.NotEmpty(LookupProblems(pack.Replace("\"navigationProperty\": \"sprk_SetId\"", "\"navigationProperty\": \"sprk_setid\"", StringComparison.Ordinal), [RelationshipsXml]));
+        Assert.NotEmpty(LookupProblems(pack.Replace("\"targetTable\": \"sprk_set\"", "\"targetTable\": \"sprk_other\"", StringComparison.Ordinal), [RelationshipsXml]));
+        Assert.NotEmpty(LookupProblems(pack, ["<EntityRelationships />"]));
+    }
+
+    private const string ScopedXml = """
+        <Entity><EntityInfo><entity><attributes>
+          <attribute PhysicalName="sprk_WidgetId"><Name>sprk_widgetid</Name><LogicalName>sprk_widgetid</LogicalName><RequiredLevel>systemrequired</RequiredLevel></attribute>
+          <attribute PhysicalName="sprk_Code"><Name>sprk_code</Name><LogicalName>sprk_code</LogicalName><RequiredLevel>systemrequired</RequiredLevel><MaxLength>5</MaxLength></attribute>
+          <attribute PhysicalName="sprk_SetId"><Name>sprk_setid</Name><LogicalName>sprk_setid</LogicalName><RequiredLevel>systemrequired</RequiredLevel></attribute>
+        </attributes></entity></EntityInfo></Entity>
+        """;
+
+    private static string ScopedPack(string rows, string lookupColumn = "sprk_setid")
+        => "{ \"table\": \"sprk_widget\", \"entitySet\": \"sprk_widgets\", \"primaryKey\": \"sprk_widgetid\", \"match\": \"naturalKey\"," +
+           " \"naturalKey\": \"sprk_code\", \"nameColumn\": \"sprk_code\", \"naturalKeyScope\": \"" + lookupColumn + "\"," +
+           " \"lookups\": [ { \"column\": \"" + lookupColumn + "\", \"navigationProperty\": \"sprk_SetId\", \"targetTable\": \"sprk_set\", \"targetEntitySet\": \"sprk_sets\" } ]," +
+           " \"columns\": [\"sprk_code\"], \"rows\": [" + rows + "] }";
+
+    private static string ScopedRow(string id, string code, string? set)
+        => "{ \"sprk_widgetid\": \"" + id + "\", \"sprk_code\": \"" + code + "\", \"sprk_setid\": " + (set is null ? "null" : "\"" + set + "\"") + " }";
+
+    private const string SetA = "aaaaaaaa-0000-4000-8000-00000000000a";
+    private const string SetB = "bbbbbbbb-0000-4000-8000-00000000000b";
+
+    [Fact(DisplayName = "D5 control (must not fire): the same code in two different code sets is not a duplicate")]
+    public void Control_ASameCodeInTwoScopes_DoesNotFire()
+        => Assert.Empty(Problems(ScopedPack(
+            ScopedRow("11111111-0000-4000-8000-000000000001", "L110", SetA) + "," + ScopedRow("11111111-0000-4000-8000-000000000002", "L110", SetB)), ScopedXml));
+
+    [Fact(DisplayName = "D5 control (must fire): a code repeated inside one code set, an empty required lookup and an unknown lookup column are reported")]
+    public void Control_ASameCodeInOneScope_AnEmptyRequiredLookup_AndAnUnknownLookup_Fire()
+    {
+        var repeated = Problems(ScopedPack(
+            ScopedRow("11111111-0000-4000-8000-000000000001", "L110", SetA) + "," + ScopedRow("11111111-0000-4000-8000-000000000002", "l110", SetA)), ScopedXml);
+        Assert.Contains(repeated, p => p.Contains("code 'l110' repeats", StringComparison.Ordinal));
+
+        var unset = Problems(ScopedPack(ScopedRow("11111111-0000-4000-8000-000000000001", "L110", null)), ScopedXml);
+        Assert.Contains(unset, p => p.Contains("required column 'sprk_setid' is empty", StringComparison.Ordinal));
+
+        var unknown = Problems(ScopedPack(ScopedRow("11111111-0000-4000-8000-000000000001", "L110", SetA).Replace("sprk_setid", "sprk_nope", StringComparison.Ordinal), "sprk_nope"), ScopedXml);
+        Assert.Contains(unknown, p => p.Contains("'sprk_nope' is not an attribute", StringComparison.Ordinal));
+
+        var notAGuid = Problems(ScopedPack(ScopedRow("11111111-0000-4000-8000-000000000001", "L110", "not-a-guid")), ScopedXml);
+        Assert.Contains(notAGuid, p => p.Contains("is not a non-empty GUID", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "D4 control (must fire): a repeated code or name, a repeated id and a column the pack omits are reported")]

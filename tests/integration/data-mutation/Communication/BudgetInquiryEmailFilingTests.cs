@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -23,6 +24,7 @@ using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Identity;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.DataMutation.ChildAccessPermission;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -139,17 +141,72 @@ public class BudgetInquiryEmailFilingTests
     }
 
     [Fact]
-    public async Task Sender_CarriesTheCoresArchivalWarning_WhenTheArchiveFails_Task176Review2()
+    public async Task Sender_Queued_SaysSentNotArchived_AndTheJobBellsTheSenderOnce_WhenTheArchiveFails_Task176Review2()
     {
-        // The harness has no archive store, so the core's archive step fails AFTER the send (as when the matter's container cannot be
-        // resolved). The sender must hand the core's warning on with the communication id, not return the id alone.
-        var harness = new SendHarness();
+        // ISS-010 part E (ontology-r1 on run 2): the inquiry email defers its post-send work, so the archive runs in the
+        // CommunicationPostSend job. The harness has no archive store, so the job's archive fails (as when the matter's container
+        // cannot be resolved); on the job's final delivery the sender gets ONE bell, and a re-drive adds none.
+        var queued = new List<JobContract>();
+        var harness = new SendHarness(jobs: CommunicationPostSendTests.BuildJobQueue(queued, postSendSubmit: null));
         var sender = new InquiryEmailSender(harness.Service, new HttpContextAccessor { HttpContext = harness.SignedInUser() });
 
         var sent = await sender.SendAsync(Inquiry(), ServiceRequestId, CancellationToken.None);
 
+        // (a) No archival warning yet, and exactly one post-send job for the communication. (f) Nothing says "archived".
+        sent.CommunicationId.Should().Be(harness.CommunicationId);
+        sent.ArchivalWarning.Should().BeNull("nothing was archived, or failed to be, before the job runs");
+        JsonSerializer.Serialize(sent).Should().NotContainEquivalentOf("archived");
+        var job = queued.Should().ContainSingle(j => j.JobType == CommunicationPostSendJobHandler.JobTypeName).Subject;
+        job.SubjectId.Should().Be(harness.CommunicationId.ToString());
+
+        // (b) The job, on its final delivery, with the archive failing.
+        job.DeliveryCount = JobContract.MaxDeliveryCount;
+        var log = new Sprk.Bff.Api.Tests.Auth.Finance.CapturingLogger<CommunicationPostSendJobHandler>();
+        var handler = new CommunicationPostSendJobHandler(
+            harness.Service, harness.Entities.Object, Mock.Of<ICommunicationEnrichmentService>(),
+            new CommunicationPostSendTests.InMemoryIdempotency(),
+            new Sprk.Bff.Api.Services.NotificationService(harness.Entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
+            new UnansweredProbe(), log);
+        (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().NotBe(JobStatus.Completed, "the archive failed");
+        // K5: the failure is the ARCHIVE's (its final Error), not a fault in another step that would also leave the job not completed.
+        log.Entries.Where(e => e.Level == LogLevel.Error).Should().ContainSingle()
+            .Which.Message.Should().Contain("could not be archived and will not be retried").And.Contain(harness.CommunicationId.ToString());
+
+        // (c) One bell, owned by the sender's systemuser, with the fixed title.
+        var sentBy = harness.Communication().GetAttributeValue<EntityReference>("sprk_sentby")!.Id;
+        var bell = harness.Bells.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<EntityReference>("ownerid").Should().Be(new EntityReference("systemuser", sentBy));
+        bell.GetAttributeValue<string>("title").Should().Be("An email you sent was not saved to SharePoint");
+
+        // (d) A re-drive of the dead job: still exactly one.
+        await handler.ProcessAsync(job, CancellationToken.None);
+        harness.Bells.Should().ContainSingle("the bell is keyed on the communication");
+    }
+
+    [Fact]
+    public async Task Sender_CarriesTheCoresArchivalWarning_WhenThePostSendJobCannotBeQueued_AndTheInlineArchiveFails_Task176Review2()
+    {
+        // (e) The queue refuses the post-send job, so the tail runs inline (the 2 s fallback). The harness has no archive store, so the
+        // core's inline archive step fails AFTER the send; the sender hands the core's warning on with the communication id.
+        var queued = new List<JobContract>();
+        var harness = new SendHarness(jobs: CommunicationPostSendTests.BuildJobQueue(
+            queued, postSendSubmit: _ => throw new Azure.Messaging.ServiceBus.ServiceBusException(
+                "queue down", Azure.Messaging.ServiceBus.ServiceBusFailureReason.ServiceCommunicationProblem)));
+        var sender = new InquiryEmailSender(harness.Service, new HttpContextAccessor { HttpContext = harness.SignedInUser() });
+
+        var sent = await sender.SendAsync(Inquiry(), ServiceRequestId, CancellationToken.None);
+
+        queued.Should().NotContain(j => j.JobType == CommunicationPostSendJobHandler.JobTypeName, "the precondition: nothing was queued");
         sent.CommunicationId.Should().Be(harness.CommunicationId);
         sent.ArchivalWarning.Should().NotBeNullOrWhiteSpace().And.Contain("archival failed");
+    }
+
+    /// <summary>The access probe with no answer from Dataverse (the bell then carries no link; D-123 fail closed).</summary>
+    private sealed class UnansweredProbe() : Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe(
+        new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance)
+    {
+        public override Task<AccessRights?> GetPrincipalRightsAppOnlyOrUnknownAsync(
+            Guid principalSystemUserId, string entitySet, Guid recordId, CancellationToken ct = default) => Task.FromResult<AccessRights?>(null);
     }
 
     [Fact]
@@ -223,7 +280,8 @@ public class BudgetInquiryEmailFilingTests
         private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
 
         public SendHarness(
-            Guid? matterId = null, int? matterAccessPermission = null, Guid? secureMatterId = null, bool realThreads = false)
+            Guid? matterId = null, int? matterAccessPermission = null, Guid? secureMatterId = null, bool realThreads = false,
+            Sprk.Bff.Api.Services.Jobs.JobSubmissionService? jobs = null)
         {
             var matter = matterId ?? MatterId;
             _world.OrdinaryRoot("sprk_matter", matter);
@@ -309,7 +367,8 @@ public class BudgetInquiryEmailFilingTests
 
             Service = new CommunicationService(
                 dispatcher, validator, communications.Object, entities.Object, Mock.Of<IDocumentDataverseService>(),
-                accountService: null!, jobSubmissionService: null!, Mock.Of<ICommunicationEnrichmentService>(),
+                // ISS-010 part E: no queue unless the test passes one (the deferred send then runs its post-send tail inline).
+                accountService: null!, jobSubmissionService: jobs!, Mock.Of<ICommunicationEnrichmentService>(),
                 Options.Create(options), Ancestors(), Ownership, NullLogger<CommunicationService>.Instance,
                 threadResolver: threadResolver);
         }
@@ -329,6 +388,9 @@ public class BudgetInquiryEmailFilingTests
 
         /// <summary>The id of the thread the thread step created (null until one is).</summary>
         public Guid? CreatedThreadId { get; private set; }
+
+        /// <summary>Every bell (<c>appnotification</c>) created.</summary>
+        public IEnumerable<DataverseEntity> Bells => _created.Where(e => e.LogicalName == "appnotification");
 
         /// <summary>Every <c>sprk_communicationthread</c> row created.</summary>
         public IEnumerable<DataverseEntity> Threads => _created.Where(e => e.LogicalName == "sprk_communicationthread");

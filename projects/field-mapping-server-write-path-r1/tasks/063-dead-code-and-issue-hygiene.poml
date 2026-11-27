@@ -4,7 +4,7 @@
     <title>Delete bffDataServiceAdapter and LegalWorkspace matterService; close or update #1614 #1617 #1318 #1437; file #2098 and prvAssign follow-ups (FR-28)</title>
     <phase>6 W6 Standard, guards, docs, retirement</phase>
     <gate>035 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deletes dead client files (tags include refactor, cleanup, deletion override: code-review + adr-check run) and updates GitHub issues.</rigor-reason>
     <model-tier>sonnet</model-tier>

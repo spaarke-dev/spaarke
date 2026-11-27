@@ -22,6 +22,8 @@ namespace Spaarke.ArchTests;
 /// id, and that id is minted by the server.</item>
 /// <item><b>G6</b> every Office create carries its SPE pointer, and an attachment child carries its parent link, in the create;
 /// <c>CreateDocumentAsync</c> stages both.</item>
+/// <item><b>G7</b> (task 138 condition 1) the email re-save planner <c>EmailAttachmentAddPlanner</c> only reads; a missing
+/// attachment is created only by the finalization worker, which G1, G3 and G6 scan.</item>
 /// </list>
 /// <para><b>Why source scans.</b> Every Office test mocks <c>IDocumentDataverseService</c>, and the real create runs only
 /// against a live org, so moving the association back into the update, or upserting a given id, would pass every behaviour
@@ -765,5 +767,167 @@ public class OfficeDocumentSaveGuardTests
                 return (await _serviceClient.CreateAsync(document, ct)).ToString();
             }
             """));
+    }
+
+    // ── G7: the email re-save planner writes nothing ──────────────────────────────────────────────────────────────
+
+    private const string PlannerFile = "src/server/api/Sprk.Bff.Api/Services/Office/EmailAttachmentAddPlanner.cs";
+
+    /// <summary>The planner's Dataverse fields. Every use of them must be a read call.</summary>
+    private static readonly string[] PlannerDataverseFields = ["_documents", "_entities"];
+
+    /// <summary>A member access on a Dataverse field: a call, a generic call or a method group.</summary>
+    private static readonly Regex DataverseFieldCall = new(
+        @"\b(?<field>_documents|_entities)\s*\.\s*(?<method>\w+)\s*[(<;,)]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex ReadMethod = new(@"^(Get|Retrieve|List|Query|Exists)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>A Dataverse field handed on: a positional or named argument, or an alias (<c>x = _documents;</c>).</summary>
+    private static readonly Regex DataverseFieldHandedOn = new(
+        @"(?:[(,:]|(?<![=!<>])=)\s*(?<field>_documents|_entities)\s*[,);]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>A write verb anywhere in a member name (<c>CreateDocumentAsync</c>, <c>BulkUpdateAsync</c>,
+    /// <c>ExecuteTransactionAsync</c>), called or taken as a method group; <c>CreatedAt</c> is not a verb.</summary>
+    private static readonly Regex WriteCall = new(
+        @"\.\s*(?<method>\w*(?:Create|Update|Upsert|Delete|Associate|Disassociate|Execute)(?![a-z])\w*)\s*[(<;,)]",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex WriteShape = new(
+        @"\bUpsert\w*|\bnew\s+(?:[\w.]+\.)?(?:Create|Update)\w*Request\b|\bnew\s+(?:[\w.]+\.)?Entity\s*\(\s*""sprk_document""",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>A field typed as a Dataverse client or service that is not one of <see cref="PlannerDataverseFields"/>.</summary>
+    private static readonly Regex DataverseTypedField = new(
+        @"\bprivate\s+(?:readonly\s+)?(?<type>I?\w*(?:Dataverse|EntityService|OrganizationService|ServiceClient)\w*)\??\s+(?<field>_\w+)\s*;",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// G7 scan: a use of a Dataverse field that is not a read call; a Dataverse field handed to another method or aliased (a
+    /// helper or a local could write through it); a member whose name carries a write verb, on any receiver; an upsert, a
+    /// create or update request, or a new <c>sprk_document</c> entity; a Dataverse-typed field the scan does not know.
+    /// <c>reads</c> counts the read calls on each Dataverse field.
+    /// </summary>
+    internal static (List<string> Violations, Dictionary<string, int> Reads) PlannerWriteScan(string source, string file)
+    {
+        var code = Code(source);
+        var violations = new List<string>();
+        var reads = PlannerDataverseFields.ToDictionary(f => f, _ => 0);
+
+        foreach (Match call in DataverseFieldCall.Matches(code))
+        {
+            if (ReadMethod.IsMatch(call.Groups["method"].Value))
+                reads[call.Groups["field"].Value]++;
+            else
+                violations.Add($"{file}: {call.Groups["field"].Value}.{call.Groups["method"].Value} is not a read");
+        }
+
+        foreach (Match handed in DataverseFieldHandedOn.Matches(code))
+            violations.Add($"{file}: {handed.Groups["field"].Value} is handed on, and could be written through");
+
+        foreach (Match write in WriteCall.Matches(code))
+            violations.Add($"{file}: .{write.Groups["method"].Value} writes");
+
+        foreach (Match shape in WriteShape.Matches(code))
+            violations.Add($"{file}: '{shape.Value}' builds a write");
+
+        foreach (Match typed in DataverseTypedField.Matches(code))
+        {
+            if (!PlannerDataverseFields.Contains(typed.Groups["field"].Value))
+                violations.Add($"{file}: {typed.Groups["type"].Value} {typed.Groups["field"].Value} is a Dataverse field the scan does not know");
+        }
+
+        return (violations, reads);
+    }
+
+    /// <summary>
+    /// G7 (task 138 condition 1, agreed with spaarkeai-word-add-in-r1 2026-11-25): <c>EmailAttachmentAddPlanner</c> only
+    /// reads. It never creates, updates or upserts a <c>sprk_document</c>, directly or through a helper, so a missing
+    /// attachment is created only by <c>UploadFinalizationWorker.ProcessSingleAttachmentAsync</c>, where G1, G3 and G6 pin the
+    /// association, the owner and the parent link.
+    /// </summary>
+    /// <remarks>Maintenance: a new read on <c>_documents</c> or <c>_entities</c> passes if its name starts with Get, Retrieve,
+    /// List, Query or Exists. If the planner needs another Dataverse field, the scan fails until the field is added to
+    /// <see cref="PlannerDataverseFields"/> and <see cref="DataverseFieldCall"/>. A write belongs in the worker, not here.
+    /// Stated limits: code text only (line comments stripped); a write reached through reflection, a lambda captured
+    /// elsewhere or a type the planner constructs itself is not seen.</remarks>
+    [Fact(DisplayName = "Task 138 G7: the email re-save planner reads only; attachment children are created only by the worker")]
+    public void G7_EmailAttachmentAddPlanner_WritesNothing()
+    {
+        var (violations, reads) = PlannerWriteScan(Read(PlannerFile), PlannerFile);
+
+        Assert.True(violations.Count == 0,
+            "EmailAttachmentAddPlanner must only read (task 138 condition 1): a missing attachment is created only by "
+            + "UploadFinalizationWorker.ProcessSingleAttachmentAsync, where the association, owner and parent link are pinned. "
+            + "Move the write to the worker:\n  " + string.Join("\n  ", violations));
+        foreach (var field in PlannerDataverseFields)
+        {
+            Assert.True(reads[field] > 0,
+                $"{PlannerFile}: no read on {field} was found, so the field was renamed or removed and the scan no longer sees "
+                + "the planner's Dataverse calls. Update PlannerDataverseFields.");
+        }
+    }
+
+    [Fact(DisplayName = "Task 138 G7 control: each write shape fires, and each from its own detector")]
+    public void G7_Control_MustFire()
+    {
+        const string source = """
+            private readonly IDataverseService _writer;
+            await _documents.CreateDocumentAsync(request, ct);
+            await _entities.BulkUpdateAsync(rows, ct);
+            await DocumentWriter.SaveAsync(_documents, request);
+            await helper.RunAsync(documents: _entities);
+            var alias = _documents;
+            Func<string, Task> remove = _documents.DeleteDocumentAsync;
+            await _other.UpsertAsync(entity);
+            await _writer.ExecuteTransactionAsync(batch);
+            var create = new CreateDocumentRequest { Name = "x" };
+            var row = new Entity("sprk_document");
+            """;
+
+        var (violations, _) = PlannerWriteScan(source, "A.cs");
+
+        Assert.Equal(
+        [
+            "A.cs: _documents.CreateDocumentAsync is not a read",
+            "A.cs: _entities.BulkUpdateAsync is not a read",
+            "A.cs: _documents.DeleteDocumentAsync is not a read",
+            "A.cs: _documents is handed on, and could be written through",
+            "A.cs: _entities is handed on, and could be written through",
+            "A.cs: _documents is handed on, and could be written through",
+            "A.cs: .CreateDocumentAsync writes",
+            "A.cs: .BulkUpdateAsync writes",
+            "A.cs: .DeleteDocumentAsync writes",
+            "A.cs: .UpsertAsync writes",
+            "A.cs: .ExecuteTransactionAsync writes",
+            "A.cs: 'UpsertAsync' builds a write",
+            "A.cs: 'new CreateDocumentRequest' builds a write",
+            "A.cs: 'new Entity(\"sprk_document\"' builds a write",
+            "A.cs: IDataverseService _writer is a Dataverse field the scan does not know",
+        ], violations);
+    }
+
+    [Fact(DisplayName = "Task 138 G7 control: reads, a comment, a collection Add, a CreatedAt-style name and the constructor do not fire")]
+    public void G7_Control_MustNotFire()
+    {
+        const string source = """
+            private readonly IDocumentDataverseService _documents;
+            private readonly IGenericEntityService _entities;
+            _documents = documents ?? throw new ArgumentNullException(nameof(documents));
+            _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+            var age = time.GetUtcNow() - job.CreatedAt(ct);
+            var eml = await _documents.GetDocumentAsync(id, ct);
+            var children = await _documents.GetDocumentsByParentAsync(id, ct);
+            var row = await _entities.RetrieveAsync("sprk_document", id, columns, ct);
+            if (_documents == null) { }
+            // await _documents.CreateDocumentAsync(request, ct);   (a comment)
+            stored.Add(name);
+            var plan = new Plan(id, drive, item, name, size, missing);
+            """;
+
+        var (violations, reads) = PlannerWriteScan(source, "B.cs");
+
+        Assert.Empty(violations);
+        Assert.Equal(2, reads["_documents"]);
+        Assert.Equal(1, reads["_entities"]);
     }
 }

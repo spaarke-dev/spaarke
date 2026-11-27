@@ -102,6 +102,11 @@ function buildDocumentFilters(filters: SearchFilters) {
   if (filters.fileTypes.length > 0) {
     docFilters.fileTypes = filters.fileTypes;
   }
+  // Matter type record ids; the index carries the matter type of each document's matter or
+  // project (#3165). Before, the selection was never sent.
+  if (filters.matterTypes.length > 0) {
+    docFilters.matterTypes = filters.matterTypes;
+  }
   if (filters.entityTypes && filters.entityTypes.length > 0) {
     docFilters.entityTypes = filters.entityTypes;
   }

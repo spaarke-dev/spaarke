@@ -422,3 +422,93 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Pre-existing. The shared `FileUploadZone` resolves a type only for PDF/DOCX/XLSX, and `AddFilesStep` ignores the validation errors, so the user sees nothing. |
 | **Need** | Every advertised extension resolves to a type; validation errors are shown; tests for each extension and for a shown rejection. |
 | **Status** | Filed. Outside FR-16 (the create payload). |
+
+## DI-044 — The Create Matter wizard reads the business unit on every submit and discards it (found in the 035 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-25, task 035 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3190 |
+| **Class** | Pre-existing. `CreateMatterWizard.tsx` awaits `resolveUserBuDefaults()` (systemuser, then businessunit) and passes the result as `_cascadeDefaults`, which `matterService.createMatter` never reads. |
+| **Need** | Remove the prop, its hosts' wiring and the unused parameter; keep `EntityCreationService.resolveUserBuDefaults` for its container callers; test that a matter create makes no systemuser or businessunit read. |
+| **Status** | Filed. Out of 035 scope (no wizard-logic changes). |
+
+## DI-045 — Field-mapping push cost scales with the child count; a 500-child push can exceed the request limit (#2098)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-18, PR #2094 measurement; recorded in this project 2026-11-26 (task 063). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2098 |
+| **Class** | Pre-existing, out of scope (spec: `/push` performance is separate work). About 17 Dataverse calls per child, run serially, so a 500-child push can pass App Service's 230 s request limit and the caller gets a timeout instead of counts. |
+| **Need** | Run the push as a queued job (ADR-004 `IJobHandler`) with a progress and result record, or batch the reads with bounded parallelism and take the isolation read from the re-file's own row read. Measure before and after with the call-counting world in `RefileWriterBindShapeTests`. |
+| **Status** | Filed (existing issue; status comment posted 2026-11-26). Not fixed in this project. |
+
+## DI-046 — Audit the uses of the Assign privilege in Spaarke roles before removing it (owner: unified-access-control-r2)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-19, design review; owner decision Q12. Filed 2026-11-26 (task 063). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3245 |
+| **Class** | Follow-up, out of scope for this project. Owner decision Q12 hides the native Assign command now (task 051) and sequences any role change after an audit. |
+| **Need** | An audit of every role holding the Assign privilege on a standard-owned table and its legitimate use; then a reviewed role change or a written exception per grant. UAC-r2 owns the change. |
+| **Status** | Filed to UAC-r2. Not done in this project. |
+
+## DI-047 — Demo data v2 writes the deprecated event status column; EventStatusDeprecationTests fails on master (found in the 063 gates)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 063 gates (re-run on the work branch with master 24d53fb333 merged). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3246 |
+| **Class** | Pre-existing, another project's code (#3110, demo dataset v2). `scripts/demo-data/DemoDataLib.ps1:100` and `reference-names.json:6` name `sprk_eventstatus`; `statuscode` is authoritative (D-28). The guard test fails 1 of 13. |
+| **Need** | Seed event status through `statuscode`/`statecode`; the guard then passes. |
+| **Status** | Filed and reported. Not fixed here (not this project's files). |
+
+## DI-048 — CommunicationConnections New uses platform quick create and fails silently when it is off (found in the 051 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 051 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3248 |
+| **Class** | Pre-existing; affects matter today and project after 051 turns its quick create off. `handleCreateType` logs the failure only. |
+| **Need** | Route the control's New to the table's wizard launcher; show a message when there is none; test both. |
+| **Status** | Filed. Outside 051's ribbon scope. |
+
+## DI-049 — Shared DataGrid default New opens the native form (found in the 051 review)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 051 adversarial review. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3249 |
+| **Class** | Pre-existing. `DataGrid/commandBar/defaults.ts:139` opens the native form for any table; the repair pass is the backstop. |
+| **Need** | Call the table's wizard launcher where one exists, or hide New by config; tests per path. |
+| **Status** | Filed. Outside 051's ribbon scope. |
+
+## DI-050 — Event ribbon commands are missing on dev; their sources name the library without .js (found in the 051 fix round)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 051 fix round (read-only dev checks, notes/task-051-notes.md §9 items 2 and 3). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3256 |
+| **Class** | Pre-existing. A later `sprk_event` ribbon import replaced the EventRibbons commands (Complete, Cancel, Reschedule, Reassign, Complete Selected, home-grid set); `EventRibbonDiffXml.xml` and the EventCommands README name `sprk_event_ribbon_commands` without `.js`. |
+| **Need** | Decide which commands are wanted; author them into the SpaarkeMaster `sprk_Event` RibbonDiff with the `.js` name; fix the README; add the ids to a verify check. |
+| **Status** | Filed. Outside 051's New/Assign scope. |
+
+## DI-051 — Push applies the field-secured source rule of task 064 (boundary 3)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, task 064. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3258 |
+| **Class** | A follow-on to 064 in this project's code, assigned to us by UAC-r2 on 2026-11-26. A dev check on 2026-11-26 found that none of the 57 rules reads a field-secured source column. |
+| **Need** | Push skips a rule whose source column is field-secured, with a warning, and maps nothing when the column's security state is unknown. Use one predicate shared with create, plus must-fire and must-not-fire tests. |
+| **Status** | Fixing in scope (task 064 follow-on). |
+
+## DI-052 — A missing source column is reported with the field-secured warning text
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-26, review of the combined task 064 change (nit). |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3280 |
+| **Class** | Wording only. A rule whose source column does not exist maps nothing (fail closed), but the warning names it as field-secured. |
+| **Need** | A separate "source column not found" reason from `SecuredColumnsAsync` to the step-3 warning; one test per reason. |
+| **Status** | Filed. Not needed for 064. |

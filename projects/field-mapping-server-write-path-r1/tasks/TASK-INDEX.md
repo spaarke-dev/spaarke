@@ -69,7 +69,7 @@
 | 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔄 design final (`task/fm-032b-design` 9083f5df93; owner, UAC-r2 and ebilling-r1 approved; O1 inline, U7 accepted). Split 032b-1 (fm branch: shared gates, invoice out of the access registry, display copies never pushed) → done on `task/fm-032b-1`, adversarial review running; then 032b-2/032b-3 on the current `work/ebilling-r1` tip |
 | 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🚫 [cancelled] dropped (owner 2026-11-07): named exceptions under the W3 direction; the Repair metadata-reader wiring moves to 052 |
 | 034 | [System creators: inbound ingestion](034-system-creators-inbound-ingestion.poml) | FR-21 | opus / high | FULL | W3-server | 019 | ✅ on master via #2629 (57748ebf6d). Owner: no field mapping on inbound system rows in R1 (DI-022 #2633) |
-| 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | 🔲 |
+| 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | ✅ |
 | 036 | [W3 server paths deploy + live check](036-w3-server-paths-deploy-and-live-check.poml) | FR-18–FR-21 | sonnet / high | FULL | none | 030–034 | 🔲 |
 | 037 | [Work Assignment Assigned To default (#2354)](037-work-assignment-assignedto-default.poml) | FR-36 | opus / high | FULL | W7-A | none (UAC-r2 diff review) | ✅ [done] #2370 |
 | 038 | [WA wizard: optional Assigned To picker](038-wa-wizard-assignedto-field.poml) | FR-37 | sonnet / high | FULL | none | 037 | ✅ [done] #2376 |
@@ -85,7 +85,7 @@
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | ✅ |
-| 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
+| 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | ✅ |
 | 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 (033 dropped; its Repair metadata-reader wiring is in scope here) | 🔄 split into 052a–e. 052a is on master via #2629, 052b via #2790, 052c and 052d via #2898; 052e (cascade design) approved 2026-11-18; 052f merged to the work branch 2026-11-18; 052g merged to the work branch 2026-11-19 (UAC-r2 PASS). The pass stays off (go-live unset). Owner: exclude task and account; contacts go to the `ExternalAccess:CustomerBusinessUnitId` default team (fail closed), also for the chat contact create. 052b job waits on 032b-1 (shared gates); then 052c trigger, 052d report, 052e cascade design |
 | 052b | [Scheduled repair pass job, contact owner rule, chat contact create](052b-repair-job.poml) | FR-25, FR-09 | opus / high | FULL | W5-B | 052a | ✅ on master via #2790 (merge 4f9e77e9c0, 2026-11-13; work-branch merge b18d4fc394; UAC-r2 PASS); in the dev BFF builds since, off (go-live unset) |
 | 052c | [Repair pass on-demand admin trigger: one table, one bounded window](052c-repair-on-demand-trigger.poml) | FR-25, NFR-01 | opus / high | FULL | W5-B | 052b | ✅ on master via #2898 (merge a3ff45b853, 2026-11-18; work-branch merge cb86030700; Opus + Sonnet passes, fix round 1, re-check: no F1/F2); dev BFF deploy is UAC-r2's on the owner's word; go-live unset |
@@ -105,7 +105,8 @@
 | 060 | [Ownership matrix + exception assessment](060-ownership-matrix-and-exception-assessment.poml) | FR-26 | opus / high | STANDARD | W6 | 033, 034 | ✅ 2026-11-08 on the work branch (merge 99e3e4a260; `task/fm-060` bc4e904f28): §5.2 matrix with 25 rows; outbox and gate record kept; DI-023 #2636 filed. A role-depth observation went to UAC-r2 privately |
 | 061 | [Census and client guards](061-census-and-client-guards.poml) | FR-27 | sonnet / high | FULL | W6 | 035, 036 | 🔲 |
 | 062 | [Docs rewrite + root CLAUDE.md + CHANGELOG (main session)](062-docs-rewrite-and-root-claude-md.poml) | FR-28 | sonnet / high | MINIMAL | none | 040, 053, 060 | 🔲 |
-| 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | 🔲 |
+| 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | ✅ 2026-11-26: adapter + dead event builder deleted; issues updated (#1318 closed, #3245 filed); DI-045..047 |
+| 064 | [Copy ordinary mapped values regardless of caller rights (owner 4b/4c)](064-copy-mapped-values-regardless-of-caller-rights.poml) | FR-08 amendment (owner 2026-10-27, reconfirmed 2026-11-26) | opus / high | FULL | W6 | none (UAC-r2 diff review) | ✅ |
 
 ## Phase 7 — W7 Record family service and Family tool (spec amendment 2026-10-27; design.md §12)
 

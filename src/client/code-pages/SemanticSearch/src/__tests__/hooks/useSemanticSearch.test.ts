@@ -238,6 +238,19 @@ describe('useSemanticSearch', () => {
       });
     });
 
+    // #3165: the Matter Type selection was kept in the page's filters but never sent.
+    it('sends the chosen matter types', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useSemanticSearch());
+
+      await act(async () => {
+        result.current.search('lease', { ...defaultFilters, matterTypes: ['mt-1'] });
+      });
+
+      const body = mockSearch.mock.calls[0][0] as { filters?: Record<string, unknown> };
+      expect(body.filters).toEqual({ matterTypes: ['mt-1'] });
+    });
+
     // FR-CP-04 — searchIndexName forwarding (Task 042)
 
     it('should include searchIndexName in request body when non-empty', async () => {

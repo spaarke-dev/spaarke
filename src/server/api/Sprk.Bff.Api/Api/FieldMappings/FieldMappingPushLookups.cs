@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.FieldMapping;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
 namespace Sprk.Bff.Api.Api.FieldMappings;
 
@@ -40,9 +41,9 @@ internal sealed record LookupBindPlan(string? BindKey, string? BindValue, string
 /// whether it can be selected at all, is read from the SOURCE's attribute metadata and the TARGET's many-to-one
 /// relationships. A rule field that is not a readable Web API attribute of the source never enters <c>$select</c> —
 /// its rule is skipped, and the other rules still run.</para>
-/// <para><b>Mirrors the client engine</b> (<c>Spaarke.UI.Components/src/services/FieldMappingService.ts</c>,
+/// <para><b>Mirrors the former client engine</b> (deleted in field-mapping-server-write-path-r1 task 035; its
 /// <c>applyCopyLookup</c>): select <c>_x_value</c>, bind through the target's navigation property, skip a null lookup
-/// silently, and skip (never throw) a lookup whose referent cannot be resolved. The client reads the referent from the
+/// silently, and skip (never throw) a lookup whose referent cannot be resolved. The former client engine read the referent from the
 /// <c>lookuplogicalname</c> annotation; the impersonated seam here does not request that annotation, so the referent
 /// comes from the source lookup's relationship metadata instead — exactly one relationship names it. A lookup that can
 /// reference several tables (Customer, Owner, multi-table) is therefore skipped with a stated reason.</para>
@@ -58,6 +59,33 @@ internal static class FieldMappingPushLookups
 
     /// <summary>Filtered in memory, so no metadata <c>$filter</c> support is assumed.</summary>
     internal const string AttributeMetadataQuery = "$select=LogicalName,AttributeType,IsValidODataAttribute";
+
+    /// <summary>
+    /// DI-051 (#3258): the push SOURCE's catalog also carries each column's <c>IsSecured</c>, so the one read decides both which
+    /// rule fields can be selected and which rules read a field-secured column (<see cref="SecuredColumns"/>).
+    /// </summary>
+    internal const string SourceAttributeMetadataQuery = AttributeMetadataQuery + "," + FieldSecuredSourceRule.IsSecuredProperty;
+
+    /// <summary>
+    /// DI-051 (#3258): the source columns that count as field-secured under <see cref="FieldSecuredSourceRule.CountsAsSecured"/>
+    /// (anything but an explicit <c>IsSecured == false</c>), from the catalog read with <see cref="SourceAttributeMetadataQuery"/>.
+    /// A column the catalog does not list is never selected (its rule is skipped as not found), so it is not listed here.
+    /// </summary>
+    internal static IReadOnlySet<string> SecuredColumns(IEnumerable<Dictionary<string, JsonElement>> rows)
+    {
+        var secured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            if (TryGetString(row, "LogicalName", out var name)
+                && FieldSecuredSourceRule.CountsAsSecured(
+                    row.TryGetValue(FieldSecuredSourceRule.IsSecuredProperty, out var isSecured) ? isSecured : null))
+            {
+                secured.Add(name);
+            }
+        }
+
+        return secured;
+    }
 
     /// <summary>
     /// The many-to-one relationship columns read for the parent lookup AND for lookup writes — one read of the target's

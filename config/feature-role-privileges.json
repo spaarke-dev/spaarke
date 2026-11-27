@@ -138,6 +138,310 @@
   ],
   "removals": [
     {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_agreement",
+      "privilege": "prvAssignsprk_Agreement",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_analysis",
+      "privilege": "prvAssignsprk_analysis",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_billingexport",
+      "privilege": "prvAssignsprk_billingexport",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_budget",
+      "privilege": "prvAssignsprk_Budget",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_communication",
+      "privilege": "prvAssignsprk_Communication",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_communicationaccount",
+      "privilege": "prvAssignsprk_CommunicationAccount",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_communicationattachment",
+      "privilege": "prvAssignsprk_CommunicationAttachment",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_communicationchannelref",
+      "privilege": "prvAssignsprk_CommunicationChannelRef",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_communicationparticipant",
+      "privilege": "prvAssignsprk_CommunicationParticipant",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_communicationthread",
+      "privilege": "prvAssignsprk_CommunicationThread",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_document",
+      "privilege": "prvAssignsprk_Document",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_externalidentifier",
+      "privilege": "prvAssignsprk_externalidentifier",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoice",
+      "privilege": "prvAssignsprk_Invoice",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoiceapproval",
+      "privilege": "prvAssignsprk_invoiceapproval",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_invoicesubmission",
+      "privilege": "prvAssignsprk_invoicesubmission",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_kpiassessment",
+      "privilege": "prvAssignsprk_KPIAssessment",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_matter",
+      "privilege": "prvAssignsprk_Matter",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_memo",
+      "privilege": "prvAssignsprk_Memo",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_navitem",
+      "privilege": "prvAssignsprk_NavItem",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_notificationoutbox",
+      "privilege": "prvAssignsprk_notificationoutbox",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_project",
+      "privilege": "prvAssignsprk_Project",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_report",
+      "privilege": "prvAssignsprk_Report",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_servicerequest",
+      "privilege": "prvAssignsprk_ServiceRequest",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_todo",
+      "privilege": "prvAssignsprk_Todo",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Core User",
+      "table": "sprk_workassignment",
+      "privilege": "prvAssignsprk_WorkAssignment",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_attachmentartifact",
+      "privilege": "prvAssignsprk_AttachmentArtifact",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_emailartifact",
+      "privilege": "prvAssignsprk_EmailArtifact",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_event",
+      "privilege": "prvAssignsprk_Event",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_invoice",
+      "privilege": "prvAssignsprk_Invoice",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_matter",
+      "privilege": "prvAssignsprk_Matter",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_memo",
+      "privilege": "prvAssignsprk_Memo",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_processingjob",
+      "privilege": "prvAssignsprk_ProcessingJob",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_project",
+      "privilege": "prvAssignsprk_Project",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_workassignment",
+      "privilege": "prvAssignsprk_WorkAssignment",
+      "expectedDepth": "Deep",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke AI Analysis User",
+      "table": "sprk_analysis",
+      "privilege": "prvAssignsprk_analysis",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke AI Analysis User",
+      "table": "sprk_analysischatmessage",
+      "privilege": "prvAssignsprk_analysischatmessage",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke AI Analysis User",
+      "table": "sprk_analysisemailmetadata",
+      "privilege": "prvAssignsprk_analysisemailmetadata",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
+      "gap": "ASSIGN-3245",
+      "role": "Spaarke AI Analysis User",
+      "table": "sprk_analysisworkingversion",
+      "privilege": "prvAssignsprk_analysisworkingversion",
+      "expectedDepth": "Basic",
+      "feature": "No product use of the caller's Assign: the BFF sets owners as the app (D-11; #3245 audit, owner 2026-11-26)"
+    },
+    {
       "gap": "R1",
       "role": "Spaarke Ontology Administrator",
       "table": "sprk_budgetrevision",

@@ -560,16 +560,16 @@ Describe 'Loader source guards (scripts/Load-DemoSampleData.ps1)' {
     It 'parses without errors' {
         @($parseErrors).Count | Should Be 0
     }
-    It 'supports -WhatIf (SupportsShouldProcess) and every Invoke-DvWrite sits behind ShouldProcess (create) or the reset section''s -Approve callback (delete)' {
+    It 'supports -WhatIf (SupportsShouldProcess) and every Invoke-DvWrite sits behind ShouldProcess (create) or a section''s -Approve callback (reset delete, redate patch)' {
         $text | Should Match 'SupportsShouldProcess'
         $writes = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-DvWrite' }, $true)
-        @($writes).Count | Should Be 2
+        @($writes).Count | Should Be 3
         foreach ($w in $writes) {
             $gated = $false
             for ($p = $w.Parent; $p; $p = $p.Parent) {
                 if ($p -is [System.Management.Automation.Language.IfStatementAst] -and ($p.Clauses | Where-Object { $_.Item1.Extent.Text -match 'ShouldProcess\(' })) { $gated = $true }
                 # The delete runs inside the -Delete callback; Invoke-DemoResetSection calls it only after -Approve (tested behaviourally below).
-                if ($p -is [System.Management.Automation.Language.AssignmentStatementAst] -and $p.Left.Extent.Text -eq '$deleter') { $gated = $true }
+                if ($p -is [System.Management.Automation.Language.AssignmentStatementAst] -and $p.Left.Extent.Text -in '$deleter', '$patcher') { $gated = $true }
             }
             $gated | Should Be $true
         }
@@ -584,14 +584,16 @@ Describe 'Loader source guards (scripts/Load-DemoSampleData.ps1)' {
         @($calls).Count | Should Be 2
         foreach ($c in $calls) { (Get-EnclosingFunctionName $c) | Should Be 'Invoke-Dv' }
     }
-    It 'uses no method but GET, POST and DELETE, and writes only through Invoke-DvWrite' {
+    It 'uses no method but GET, POST, PATCH and DELETE, and writes only through Invoke-DvWrite' {
         $dvCalls = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-Dv' }, $true)
         foreach ($c in $dvCalls) {
             $s = $c.Extent.Text
-            if ($s -match '-Method\s+(POST|DELETE)') { (Get-EnclosingFunctionName $c) | Should Be 'Invoke-DvWrite' }
+            if ($s -match '-Method\s+(POST|PATCH|DELETE)') { (Get-EnclosingFunctionName $c) | Should Be 'Invoke-DvWrite' }
         }
-        $text | Should Not Match '-Method\s+(PATCH|PUT|MERGE)'
-        $text | Should Not Match "ValidateSet\('GET', 'POST', 'DELETE', '"
+        $text | Should Not Match '-Method\s+(PUT|MERGE)'
+        $text | Should Not Match "ValidateSet\('GET', 'POST', 'DELETE', 'PATCH', '"
+        $text | Should Match "ValidateSet\('GET', 'POST', 'DELETE', 'PATCH'\)"
+        $text | Should Match "ValidateSet\('POST', 'PATCH', 'DELETE'\)"
     }
     It 'refuses a write under -WhatIf even if a caller forgot to ask' {
         $text | Should Match "if \(\`$WhatIfPreference\) \{ throw 'Internal error: a write was attempted under -WhatIf.' \}"
@@ -688,6 +690,122 @@ function New-FakeDataverse {
         throw "fake Dataverse: unexpected path $p"
     }.GetNewClosure()
     return @{ Get = $get; Paths = $state.Paths }
+}
+
+function New-LoadedWorld {
+    <#
+      A fake Dataverse holding what a load on $LoadDay would have written: every dated dataset row, TAGGED, with its date
+      columns as the loader writes them (ConvertTo-DemoDateValue). Per dated table it also holds one UNTAGGED row (same key as
+      the first dataset row, dates a year old) that a redate must never touch. -LoadDayOf (row -> day) lets the rows of one
+      table have been loaded on different days.
+    #>
+    param([Parameter(Mandatory)]$Dataset, [Parameter(Mandatory)][datetime]$LoadDay, [scriptblock]$LoadDayOf)
+    $tag = Get-DemoImportSequenceNumber
+    $rows = @{}
+    $untaggedIds = New-Object System.Collections.Generic.List[string]
+    foreach ($spec in (Get-DemoTableSpecs)) {
+        if (@($spec.Dates).Count -eq 0) { continue }
+        $list = New-Object System.Collections.Generic.List[object]
+        $first = $true
+        foreach ($row in @($Dataset.($spec.Section))) {
+            $day = if ($LoadDayOf) { & $LoadDayOf $row } else { $LoadDay }
+            $r = @{}
+            $r[$spec.IdColumn] = [guid]::NewGuid().ToString()
+            $r[$spec.NaturalKey] = Get-DemoNaturalKeyValue -Spec $spec -Row $row
+            $r['importsequencenumber'] = $tag
+            foreach ($c in $spec.Dates) { $r[$c] = $null }
+            foreach ($kv in (Get-DemoRowProperty $row 'dates').GetEnumerator()) { $r[$kv.Key] = ConvertTo-DemoDateValue -Offset "$($kv.Value)" -Today $day }
+            $list.Add($r)
+            if ($first) {
+                $u = @{}
+                $u[$spec.IdColumn] = [guid]::NewGuid().ToString()
+                $u[$spec.NaturalKey] = $r[$spec.NaturalKey]
+                $u['importsequencenumber'] = $null
+                foreach ($c in $spec.Dates) { $u[$c] = $null }
+                foreach ($kv in (Get-DemoRowProperty $row 'dates').GetEnumerator()) { $u[$kv.Key] = '2025-01-01' }
+                $list.Add($u)
+                $untaggedIds.Add($u[$spec.IdColumn])
+                $first = $false
+            }
+        }
+        $rows[$spec.EntitySet] = $list.ToArray()
+    }
+    return @{ Fail = @(); NotSupported = @(); Rows = $rows; UntaggedIds = $untaggedIds.ToArray() }
+}
+
+function Get-WorldRowById {
+    param([Parameter(Mandatory)][hashtable]$World, [Parameter(Mandatory)][string]$Set, [Parameter(Mandatory)][string]$IdColumn, [Parameter(Mandatory)][string]$Id)
+    return @($World.Rows[$Set] | Where-Object { $_[$IdColumn] -eq $Id })[0]
+}
+
+function Get-WorldTaggedRow {
+    param([Parameter(Mandatory)][hashtable]$World, [Parameter(Mandatory)][string]$Section, [Parameter(Mandatory)][string]$Key)
+    $spec = Get-DemoTableSpecs | Where-Object { $_.Section -eq $Section }
+    return @($World.Rows[$spec.EntitySet] | Where-Object { $_['importsequencenumber'] -and $_[$spec.NaturalKey] -eq $Key })[0]
+}
+
+function Invoke-FakeRedate {
+    <# Runs the redate the way the loader does (every table with a date column, one shared reader) against a fake Dataverse. A PATCH updates the fake world. #>
+    param(
+        [Parameter(Mandatory)][hashtable]$World, [Parameter(Mandatory)]$Dataset, [Parameter(Mandatory)][datetime]$Today,
+        [bool]$Approve = $true, [string]$FailPatchFor
+    )
+    $fake = New-FakeDataverse -World $World
+    $patched = New-Object System.Collections.Generic.List[object]
+    $patch = {
+        param($Spec, $Row, $Body)
+        if ($FailPatchFor -and $Row.Name -eq $FailPatchFor) { throw 'HTTP 500 (fake patch failure)' }
+        # No helper calls in here: a closure does not see the test file's functions.
+        $target = @($World.Rows[$Spec.EntitySet] | Where-Object { $_[$Spec.IdColumn] -eq $Row.Id })[0]
+        foreach ($k in $Body.Keys) { $target[$k] = $Body[$k] }
+        $patched.Add(@{ Section = $Spec.Section; Id = $Row.Id; Name = $Row.Name; Body = $Body })
+    }.GetNewClosure()
+    $approveSb = { param($Target, $Action) $Approve }.GetNewClosure()
+    $counts = @{}
+    $plans = New-Object System.Collections.Generic.List[object]
+    foreach ($spec in (Get-DemoTableSpecs)) {
+        $r = Invoke-DemoRedateSection -Spec $spec -DatasetRows @($Dataset.($spec.Section)) -Get $fake.Get -Patch $patch -Approve $approveSb -Today $Today
+        $counts[$spec.Section] = $r.Counts
+        foreach ($p in $r.Plans) { $plans.Add($p) }
+    }
+    return @{ Counts = $counts; Patched = $patched.ToArray(); Plans = $plans.ToArray(); Paths = $fake.Paths }
+}
+
+function Get-RedateTotal {
+    param($Result, [string]$Key)
+    return [int](($Result.Counts.Values | ForEach-Object { $_[$Key] } | Measure-Object -Sum).Sum)
+}
+
+function Test-WorldMatchesLoadOn {
+    <#
+      Empty when every TAGGED dated row of the world holds exactly what a fresh load on $Day writes; otherwise the first
+      mismatch as text. (Never return $true / text and assert `Should Be $true`: Pester 3 compares with -eq, and any non-empty
+      string equals $true, so the assertion could not fail.)
+    #>
+    param([Parameter(Mandatory)][hashtable]$World, [Parameter(Mandatory)]$Dataset, [Parameter(Mandatory)][datetime]$Day)
+    foreach ($spec in (Get-DemoTableSpecs)) {
+        if (@($spec.Dates).Count -eq 0) { continue }
+        foreach ($row in @($Dataset.($spec.Section))) {
+            $key = Get-DemoNaturalKeyValue -Spec $spec -Row $row
+            $w = Get-WorldTaggedRow -World $World -Section $spec.Section -Key $key
+            foreach ($kv in (Get-DemoRowProperty $row 'dates').GetEnumerator()) {
+                $want = ConvertTo-DemoDateValue -Offset "$($kv.Value)" -Today $Day
+                if ("$($w[$kv.Key])" -ne $want) { return "$($spec.Section) '$key' $($kv.Key): have '$($w[$kv.Key])', want '$want'" }
+            }
+        }
+    }
+    return ''
+}
+
+function Get-UntaggedSnapshot {
+    <# Every row of the world that carries no tag, as one comparable string. A redate must leave it exactly as it was. #>
+    param([Parameter(Mandatory)][hashtable]$World)
+    $lines = foreach ($set in ($World.Rows.Keys | Sort-Object)) {
+        foreach ($row in @($World.Rows[$set] | Where-Object { $_ -and -not $_['importsequencenumber'] })) {
+            "$set " + (($row.Keys | Sort-Object | ForEach-Object { "$_=$($row[$_])" }) -join ';')
+        }
+    }
+    return ($lines -join "`n")
 }
 
 function Invoke-FakeReset {
@@ -1196,8 +1314,12 @@ Describe 'The loader entry (scripts/Load-DemoSampleData.ps1 run against a fake a
     function Invoke-RestMethod {
         param([string]$Uri, [string]$Method = 'GET', $Headers, $Body, $ContentType, [string]$ResponseHeadersVariable)
         $lf = $global:LoaderFake
-        $lf.Calls.Add([pscustomobject]@{ Method = $Method; Uri = $Uri })
-        if ($Method -ne 'GET') { if ($ResponseHeadersVariable) { Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1 }; return $null }
+        $lf.Calls.Add([pscustomobject]@{ Method = $Method; Uri = $Uri; Body = $Body; Headers = $Headers })
+        if ($Method -ne 'GET') {
+            if ($lf.OnWrite) { & $lf.OnWrite $Method $Uri $Body }
+            if ($ResponseHeadersVariable) { Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1 }
+            return $null
+        }
         $path = [uri]::UnescapeDataString($Uri.Substring($Uri.IndexOf('/api/data/v9.2/') + '/api/data/v9.2/'.Length))
         if ($Uri.StartsWith($lf.RegistryUrl)) {
             if ($lf.RegistryFail) { throw 'HTTP 401 (fake registry failure)' }
@@ -1212,8 +1334,9 @@ Describe 'The loader entry (scripts/Load-DemoSampleData.ps1 run against a fake a
         return @{ value = @(& $lf.Fake.Get $path) }
     }
     function Invoke-Loader {
-        param([hashtable]$Params, [object[]]$Registry, [string[]]$Roles = @('System Administrator', 'Basic User'), [switch]$RegistryFail)
-        $global:LoaderFake = @{ Calls = (New-Object System.Collections.Generic.List[object]); Registry = $Registry; RegistryUrl = $admin; Roles = $Roles; RegistryFail = [bool]$RegistryFail; Fake = (New-FakeDataverse -World (New-ResetWorld)) }
+        param([hashtable]$Params, [object[]]$Registry, [string[]]$Roles = @('System Administrator', 'Basic User'), [switch]$RegistryFail, [hashtable]$World, [scriptblock]$OnWrite)
+        if (-not $World) { $World = New-ResetWorld }
+        $global:LoaderFake = @{ Calls = (New-Object System.Collections.Generic.List[object]); Registry = $Registry; RegistryUrl = $admin; Roles = $Roles; RegistryFail = [bool]$RegistryFail; Fake = (New-FakeDataverse -World $World); OnWrite = $OnWrite }
         $err = $null
         try { & $script:Loader @Params -RegistryUrl $admin -Confirm:$false *> $null } catch { $err = "$_" }
         return @{ Error = $err; Calls = $global:LoaderFake.Calls.ToArray() }
@@ -1275,5 +1398,337 @@ Describe 'The loader entry (scripts/Load-DemoSampleData.ps1 run against a fake a
                     'contacts(00000000-0000-4000-8000-000000000012)', 'contacts(00000000-0000-4000-8000-000000000013)',
                     'sprk_events(00000000-0000-4000-8000-000000000106)',
                     'sprk_matters(00000000-0000-4000-8000-000000000005)', 'sprk_matters(00000000-0000-4000-8000-000000000006)') | Sort-Object) -join ',')
+    }
+
+    # ---- -Redate (W7): the same guard, a dry run by default, PATCH only with -Apply -------------------------------------------
+    function New-RedateWriter {
+        <# What the fake Dataverse does with a PATCH the loader sends: the row in the world takes the new values (so a second run sees them). #>
+        param([hashtable]$World)
+        $specs = @(Get-DemoTableSpecs)
+        return {
+            param($Method, $Uri, $Body)
+            if ($Method -eq 'PATCH' -and $Uri -match '/api/data/v9\.2/(\w+)\(([0-9a-f-]{36})\)$') {
+                $set = $Matches[1]; $id = $Matches[2]
+                $spec = @($specs | Where-Object { $_.EntitySet -eq $set })[0]
+                $row = @($World.Rows[$set] | Where-Object { $_[$spec.IdColumn] -eq $id })[0]
+                foreach ($m in [regex]::Matches("$Body", '"(\w+)":"([^"]*)"')) { $row[$m.Groups[1].Value] = $m.Groups[2].Value }
+            }
+        }.GetNewClosure()
+    }
+    function Get-PatchCalls { param($Result) return @($Result.Calls | Where-Object { $_.Method -eq 'PATCH' }) }
+
+    It 'REDATE MUST FIRE: a target that is not an active Demo stamp (Production, Development, inactive Demo, no row) is refused before the target is read or written, even with -Apply and -AllowNonDemo for Production' {
+        $dataset = Get-FreshDataset
+        $load = (Get-Date).ToUniversalTime().Date.AddDays(-9)
+        foreach ($case in @(
+                @{ Params = @{ CustomerId = 'acme'; Redate = $true; Apply = $true }; Row = (Reg3 'acme' $acme 6); Match = 'Production' },
+                @{ Params = @{ CustomerId = 'acme'; Redate = $true; Apply = $true; AllowNonDemo = $true }; Row = (Reg3 'acme' $acme 6); Match = 'Production' },
+                @{ Params = @{ CustomerId = 'acme'; Redate = $true; Apply = $true }; Row = (Reg3 'acme' $acme 0); Match = 'not Demo' },
+                @{ Params = @{ CustomerId = 'acme'; Redate = $true; Apply = $true }; Row = (Reg3 'acme' $acme 1 $false); Match = 'not active' },
+                @{ Params = @{ DataverseUrl = $acme; Redate = $true; Apply = $true }; Row = (Reg3 'someone' 'https://someone-else.crm.dynamics.com' 1 $true 'Someone'); Match = 'has no row' })) {
+            $world = New-LoadedWorld -Dataset $dataset -LoadDay $load
+            $r = Invoke-Loader -Params $case.Params -Registry @($case.Row) -World $world -OnWrite (New-RedateWriter -World $world)
+            $r.Error | Should Match 'REFUSED'
+            $r.Error | Should Match $case.Match
+            (Get-TargetCalls $r).Count | Should Be 0
+            (Get-WriteCalls $r).Count | Should Be 0
+        }
+    }
+    It 'REDATE MUST FIRE: a failed registry read stops a redate before the target is touched, even with -AllowNonDemo' {
+        $world = New-LoadedWorld -Dataset (Get-FreshDataset) -LoadDay ((Get-Date).ToUniversalTime().Date.AddDays(-9))
+        $r = Invoke-Loader -Params @{ DataverseUrl = $acme; Redate = $true; Apply = $true; AllowNonDemo = $true } -Registry @((Reg3 'acme' $acme 1)) -RegistryFail -World $world
+        $r.Error | Should Match 'could not be read'
+        (Get-TargetCalls $r).Count | Should Be 0
+    }
+    It 'REDATE: with no -Apply it is a dry run: it reads the tagged dates and writes nothing' {
+        $dataset = Get-FreshDataset
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay ((Get-Date).ToUniversalTime().Date.AddDays(-9))
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Redate = $true } -Registry @((Reg3 'acme' $acme 1)) -World $world -OnWrite (New-RedateWriter -World $world)
+        $r.Error | Should BeNullOrEmpty
+        ((Get-TargetCalls $r).Count -gt 0) | Should Be $true
+        (Get-WriteCalls $r).Count | Should Be 0
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day ((Get-Date).ToUniversalTime().Date.AddDays(-9))) | Should BeNullOrEmpty
+    }
+    It 'REDATE: -Apply with -WhatIf is still a dry run' {
+        $world = New-LoadedWorld -Dataset (Get-FreshDataset) -LoadDay ((Get-Date).ToUniversalTime().Date.AddDays(-9))
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Redate = $true; Apply = $true; WhatIf = $true } -Registry @((Reg3 'acme' $acme 1)) -World $world -OnWrite (New-RedateWriter -World $world)
+        $r.Error | Should BeNullOrEmpty
+        (Get-WriteCalls $r).Count | Should Be 0
+    }
+    It 'REDATE: -Apply PATCHes only tagged rows (update-only, If-Match *), moves them to today''s dates, and a second run writes nothing' {
+        $dataset = Get-FreshDataset
+        $today = (Get-Date).ToUniversalTime().Date
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-9)
+        $writer = New-RedateWriter -World $world
+        $untaggedBefore = Get-UntaggedSnapshot $world
+        $untaggedBefore.Length | Should BeGreaterThan 0
+        $first = Invoke-Loader -Params @{ CustomerId = 'acme'; Redate = $true; Apply = $true } -Registry @((Reg3 'acme' $acme 1)) -World $world -OnWrite $writer
+        $first.Error | Should BeNullOrEmpty
+        $patches = @(Get-PatchCalls $first)
+        $datedRows = 0
+        foreach ($spec in (Get-DemoTableSpecs)) { if (@($spec.Dates).Count -gt 0) { $datedRows += @($dataset.($spec.Section)).Count } }
+        $patches.Count | Should Be $datedRows
+        (Get-WriteCalls $first).Count | Should Be $datedRows
+        foreach ($p in $patches) {
+            $p.Uri | Should Match '^https://spaarke-acme\.crm\.dynamics\.com/api/data/v9\.2/sprk_\w+\([0-9a-f-]{36}\)$'
+            $p.Headers['If-Match'] | Should Be '*'
+            foreach ($id in $world.UntaggedIds) { $p.Uri | Should Not Match $id }
+        }
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today) | Should BeNullOrEmpty
+        (Get-UntaggedSnapshot $world) | Should Be $untaggedBefore
+        $second = Invoke-Loader -Params @{ CustomerId = 'acme'; Redate = $true; Apply = $true } -Registry @((Reg3 'acme' $acme 1)) -World $world -OnWrite $writer
+        $second.Error | Should BeNullOrEmpty
+        (Get-WriteCalls $second).Count | Should Be 0
+    }
+    It 'REDATE: -Redate with -Reset, and -Apply without -Redate, are refused before anything is read' {
+        $r = Invoke-Loader -Params @{ CustomerId = 'acme'; Redate = $true; Reset = $true } -Registry @((Reg3 'acme' $acme 1))
+        $r.Error | Should Match 'different modes'
+        $r2 = Invoke-Loader -Params @{ CustomerId = 'acme'; Apply = $true } -Registry @((Reg3 'acme' $acme 1))
+        $r2.Error | Should Match '-Apply belongs to -Redate'
+        (Get-TargetCalls $r).Count | Should Be 0
+        (Get-TargetCalls $r2).Count | Should Be 0
+    }
+}
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# W7: -Redate. Pure functions and the section runner, against a fake Dataverse (no network, no az).
+# ---------------------------------------------------------------------------------------------------------------------------
+
+Describe 'Date helpers for the redate' {
+    It 'ConvertFrom-DemoDateOffset reads the one offset grammar the loader writes by (and refuses the rest)' {
+        $a = ConvertFrom-DemoDateOffset '-3d'
+        $a.Days | Should Be -3
+        $a.HasTime | Should Be $false
+        $b = ConvertFrom-DemoDateOffset '+14d 09:30'
+        $b.Days | Should Be 14
+        $b.HasTime | Should Be $true
+        $b.Hour | Should Be 9
+        $b.Minute | Should Be 30
+        (ConvertFrom-DemoDateOffset '0d 00:00').HasTime | Should Be $true
+        { ConvertFrom-DemoDateOffset 'tomorrow' } | Should Throw "Date offset 'tomorrow' is not"
+    }
+    It 'ConvertFrom-DemoDateColumnValue reads a date-only string, a date-time string and the [datetime] Invoke-RestMethod makes of it' {
+        $d = ConvertFrom-DemoDateColumnValue '2026-11-20'
+        $d.Date.ToString('yyyy-MM-dd') | Should Be '2026-11-20'
+        $d.DateOnly | Should Be $true
+        $t = ConvertFrom-DemoDateColumnValue '2026-11-20T09:30:00Z'
+        $t.Date.ToString('yyyy-MM-dd') | Should Be '2026-11-20'
+        $t.TimeOfDay.ToString() | Should Be '09:30:00'
+        $t.DateOnly | Should Be $false
+        $utc = ConvertFrom-DemoDateColumnValue ([datetime]::SpecifyKind([datetime]'2026-11-20 09:30:00', [System.DateTimeKind]::Utc))
+        $utc.TimeOfDay.ToString() | Should Be '09:30:00'
+        $utc.DateOnly | Should Be $false
+        # A Local-kind value (a Z string converted to the machine's zone by some PowerShell versions) is brought back to UTC.
+        $local = ConvertFrom-DemoDateColumnValue ([datetime]::SpecifyKind([datetime]'2026-11-20 09:30:00', [System.DateTimeKind]::Utc).ToLocalTime())
+        $local.Date.ToString('yyyy-MM-dd') | Should Be '2026-11-20'
+        $local.TimeOfDay.ToString() | Should Be '09:30:00'
+        (ConvertFrom-DemoDateColumnValue ([datetimeoffset]'2026-11-20T09:30:00+02:00')).TimeOfDay.ToString() | Should Be '07:30:00'
+        { ConvertFrom-DemoDateColumnValue 'soon' } | Should Throw "'soon' is not a date Dataverse would return."
+    }
+}
+
+Describe 'Get-DemoRedateRowPlan (what a redate does to one row)' {
+    $today = [datetime]'2026-11-26'
+    $spec = Get-DemoTableSpecs | Where-Object { $_.Section -eq 'events' }
+    function New-EventRow([hashtable]$Dates) { return [pscustomobject]@{ key = 'ev'; fields = [pscustomobject]@{ sprk_eventname = 'E' }; dates = [pscustomobject]$Dates } }
+    $row = New-EventRow @{ sprk_duedate = '+3d'; sprk_plannedstart = '+3d 16:00'; sprk_plannedend = '+3d 17:00' }
+
+    It 'shifts every column by today minus the day the dates are counted from, keeps the time of day, keeps a date-only column date-only' {
+        # Loaded on 2026-11-14: due 11-17, planned 11-17 16:00-17:00. Today is 11-26: +12 days.
+        $current = [pscustomobject]@{ sprk_duedate = '2026-11-17'; sprk_plannedstart = '2026-11-17T16:00:00Z'; sprk_plannedend = '2026-11-17T17:00:00Z' }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $p.Status | Should Be 'Shift'
+        $p.Days | Should Be 12
+        $p.Anchor.ToString('yyyy-MM-dd') | Should Be '2026-11-14'
+        @($p.Changes).Count | Should Be 3
+        (@($p.Changes | Where-Object { $_.Column -eq 'sprk_duedate' })[0]).To | Should Be '2026-11-29'
+        (@($p.Changes | Where-Object { $_.Column -eq 'sprk_plannedstart' })[0]).To | Should Be '2026-11-29T16:00:00Z'
+        (@($p.Changes | Where-Object { $_.Column -eq 'sprk_plannedend' })[0]).To | Should Be '2026-11-29T17:00:00Z'
+    }
+    It 'reads a [datetime] column value the same as the string (what Invoke-RestMethod hands back)' {
+        $current = [pscustomobject]@{ sprk_duedate = '2026-11-17'; sprk_plannedstart = [datetime]::SpecifyKind([datetime]'2026-11-17 16:00:00', [System.DateTimeKind]::Utc); sprk_plannedend = [datetime]::SpecifyKind([datetime]'2026-11-17 17:00:00', [System.DateTimeKind]::Utc) }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $p.Days | Should Be 12
+        (@($p.Changes | Where-Object { $_.Column -eq 'sprk_plannedstart' })[0]).To | Should Be '2026-11-29T16:00:00Z'
+    }
+    It 'is Current (no change, no write) when the dates already read as a load today would write them' {
+        $current = [pscustomobject]@{ sprk_duedate = '2026-11-29'; sprk_plannedstart = '2026-11-29T16:00:00Z'; sprk_plannedend = '2026-11-29T17:00:00Z' }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $p.Status | Should Be 'Current'
+        $p.Days | Should Be 0
+        @($p.Changes).Count | Should Be 0
+    }
+    It 'is idempotent: planning again on the result of a shift gives Current' {
+        $current = [pscustomobject]@{ sprk_duedate = '2026-11-17'; sprk_plannedstart = '2026-11-17T16:00:00Z'; sprk_plannedend = '2026-11-17T17:00:00Z' }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $after = [pscustomobject]@{}
+        foreach ($c in $p.Changes) { $after | Add-Member -NotePropertyName $c.Column -NotePropertyValue $c.To }
+        (Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $after -Today $today).Status | Should Be 'Current'
+    }
+    It 'MUST FIRE: a row whose date columns no longer move together is skipped (edited by hand), not shifted' {
+        $current = [pscustomobject]@{ sprk_duedate = '2026-11-17'; sprk_plannedstart = '2026-12-05T16:00:00Z'; sprk_plannedend = '2026-11-17T17:00:00Z' }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $p.Status | Should Be 'Skip'
+        $p.Reason | Should Match 'do not move together'
+        @($p.Changes).Count | Should Be 0
+    }
+    It 'MUST FIRE: dates later than a load today would write are skipped, never moved backwards' {
+        $current = [pscustomobject]@{ sprk_duedate = '2026-12-06'; sprk_plannedstart = '2026-12-06T16:00:00Z'; sprk_plannedend = '2026-12-06T17:00:00Z' }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $p.Status | Should Be 'Skip'
+        $p.Reason | Should Match 'later than a load today would write'
+    }
+    It 'never writes a column a person cleared, and shifts the rest' {
+        $current = [pscustomobject]@{ sprk_duedate = '2026-11-17'; sprk_plannedstart = $null; sprk_plannedend = '2026-11-17T17:00:00Z' }
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current $current -Today $today
+        $p.Status | Should Be 'Shift'
+        ((@($p.Changes | ForEach-Object { $_.Column }) | Sort-Object) -join ',') | Should Be 'sprk_duedate,sprk_plannedend'
+        (@($p.Cleared) -join ',') | Should Be 'sprk_plannedstart'
+    }
+    It 'skips a row when every date column is empty or one cannot be read' {
+        (Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current ([pscustomobject]@{}) -Today $today).Status | Should Be 'Skip'
+        $p = Get-DemoRedateRowPlan -Spec $spec -DatasetRow $row -Current ([pscustomobject]@{ sprk_duedate = 'soon'; sprk_plannedstart = $null; sprk_plannedend = $null }) -Today $today
+        $p.Status | Should Be 'Skip'
+        $p.Reason | Should Match 'unreadable'
+    }
+    It 'only ever looks at columns the table spec says the loader writes' {
+        $bad = New-EventRow @{ sprk_modifiedon = '+1d' }
+        { Get-DemoRedateRowPlan -Spec $spec -DatasetRow $bad -Current ([pscustomobject]@{ sprk_modifiedon = '2026-11-20' }) -Today $today } | Should Throw "'sprk_modifiedon' is not a date column the loader writes on sprk_event"
+    }
+}
+
+Describe 'Invoke-DemoRedateSection against a fake Dataverse (W7)' {
+    $dataset = Get-FreshDataset
+    $today = [datetime]'2026-11-26'
+
+    It 'moves every tagged dated row to the dates a load today would write (shift = today - load day), whole table by table' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today) | Should Not BeNullOrEmpty
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today) | Should BeNullOrEmpty
+        (Get-RedateTotal $r 'Errors') | Should Be 0
+        (Get-RedateTotal $r 'Skipped') | Should Be 0
+        $dated = 0
+        foreach ($spec in (Get-DemoTableSpecs)) { if (@($spec.Dates).Count -gt 0) { $dated += @($dataset.($spec.Section)).Count } }
+        (Get-RedateTotal $r 'Shifted') | Should Be $dated
+        $r.Patched.Count | Should Be $dated
+        @($r.Plans | ForEach-Object { $_.Days } | Select-Object -Unique) -join ',' | Should Be '12'
+    }
+    It 'sends only the date columns the dataset row sets (a subset of the loader''s own Dates), never a tag, owner or name column' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-5)
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        foreach ($p in $r.Patched) {
+            $spec = Get-DemoTableSpecs | Where-Object { $_.Section -eq $p.Section }
+            $row = @($dataset.($spec.Section) | Where-Object { (Get-DemoNaturalKeyValue -Spec $spec -Row $_) -eq $p.Name })[0]
+            $allowed = @((Get-DemoRowProperty $row 'dates').Keys)
+            foreach ($k in $p.Body.Keys) { ($allowed -contains $k) | Should Be $true; ($spec.Dates -contains $k) | Should Be $true }
+        }
+        # a date-only column stays date-only, a date-time column keeps its time of day
+        $matterSpec = @(Get-DemoTableSpecs | Where-Object { $_.Section -eq 'matters' })[0]
+        $m = Get-WorldTaggedRow -World $world -Section 'matters' -Key (Get-DemoNaturalKeyValue -Spec $matterSpec -Row $dataset.matters[0])
+        "$($m.sprk_openeddate)" | Should Match '^\d{4}-\d{2}-\d{2}$'
+        $timed = @($dataset.events | Where-Object { (Get-DemoRowProperty $_ 'dates').sprk_plannedstart -match ' \d\d:\d\d$' })[0]
+        $e = Get-WorldTaggedRow -World $world -Section 'events' -Key $timed.fields.sprk_eventname
+        "$($e.sprk_plannedstart)" | Should Match 'T\d\d:\d\d:\d\dZ$'
+        ("$($e.sprk_plannedstart)" -replace '^[^T]+T', '') | Should Be (("$((Get-DemoRowProperty $timed 'dates').sprk_plannedstart)" -replace '^.* ', '') + ':00Z')
+    }
+    It 'is idempotent: a second run on the same day patches nothing and reports every row Current' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $null = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        $again = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        $again.Patched.Count | Should Be 0
+        (Get-RedateTotal $again 'Shifted') | Should Be 0
+        (Get-RedateTotal $again 'Current') | Should BeGreaterThan 0
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today) | Should BeNullOrEmpty
+    }
+    It 'shifts again on a later day by the days since the last shift (not by the days since the load)' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $null = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        $later = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today.AddDays(3)
+        @($later.Plans | ForEach-Object { $_.Days } | Select-Object -Unique) -join ',' | Should Be '3'
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today.AddDays(3)) | Should BeNullOrEmpty
+    }
+    It 'does nothing to data loaded today' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        $r.Patched.Count | Should Be 0
+        (Get-RedateTotal $r 'Shifted') | Should Be 0
+    }
+    It 'gives each row its own shift when rows were loaded on different days (a partial load completed later)' {
+        $n = @{ Count = 0 }
+        $now = $today
+        $alternate = { param($Row) $n.Count++; if ($n.Count % 2 -eq 0) { $now.AddDays(-20) } else { $now.AddDays(-4) } }.GetNewClosure()
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today -LoadDayOf $alternate
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        (@($r.Plans | ForEach-Object { $_.Days } | Select-Object -Unique | Sort-Object) -join ',') | Should Be '4,20'
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today) | Should BeNullOrEmpty
+    }
+    It 'MUST NOT FIRE on untagged rows: an untagged row with the same key and stale dates is never read for a shift or patched, and the read filters by the tag' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $before = Get-UntaggedSnapshot $world
+        $before.Length | Should BeGreaterThan 0
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        (Get-UntaggedSnapshot $world) | Should Be $before
+        foreach ($id in $world.UntaggedIds) { @($r.Patched | Where-Object { $_.Id -eq $id }).Count | Should Be 0 }
+        foreach ($p in @($r.Paths | Where-Object { $_ -match '\$select' })) { $p | Should Match "importsequencenumber eq $(Get-DemoImportSequenceNumber)" }
+    }
+    It 'reads nothing for a table the loader writes no date column on (organizations, contacts, documents)' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        foreach ($set in 'sprk_organizations', 'contacts', 'sprk_documents') { @($r.Paths | Where-Object { $_ -match "^$set\?" }).Count | Should Be 0 }
+        foreach ($set in 'sprk_matters', 'sprk_projects', 'sprk_events', 'sprk_todos', 'sprk_communications') { @($r.Paths | Where-Object { $_ -match "^$set\?" }).Count | Should Be 1 }
+    }
+    It 'a dry run (-Approve false) counts WouldShift, calls -Patch never, and leaves the world as it was' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today -Approve $false
+        $r.Patched.Count | Should Be 0
+        (Get-RedateTotal $r 'Shifted') | Should Be 0
+        (Get-RedateTotal $r 'WouldShift') | Should BeGreaterThan 0
+        $r.Plans.Count | Should Be (Get-RedateTotal $r 'WouldShift')
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today.AddDays(-12)) | Should BeNullOrEmpty
+    }
+    It 'skips (and does not write) an edited row, a future-dated row and a tagged row no dataset row names, and still shifts the others' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $eventSpec = Get-DemoTableSpecs | Where-Object { $_.Section -eq 'events' }
+        $multi = @($dataset.events | Where-Object { (Get-DemoRowProperty $_ 'dates').Count -ge 2 })[0]
+        $editedKey = $multi.fields.sprk_eventname
+        $edited = Get-WorldTaggedRow -World $world -Section 'events' -Key $editedKey
+        $col = @((Get-DemoRowProperty $multi 'dates').Keys)[0]
+        $edited[$col] = '2030-01-01'
+        $orphan = @{}
+        $orphan[$eventSpec.IdColumn] = [guid]::NewGuid().ToString(); $orphan[$eventSpec.NaturalKey] = 'Renamed by a user'; $orphan['importsequencenumber'] = Get-DemoImportSequenceNumber; $orphan['sprk_duedate'] = '2026-11-01'
+        $world.Rows['sprk_events'] = @($world.Rows['sprk_events']) + @($orphan)
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        (Get-RedateTotal $r 'Skipped') | Should Be 2
+        @($r.Patched | Where-Object { $_.Name -in $editedKey, 'Renamed by a user' }).Count | Should Be 0
+        $edited[$col] | Should Be '2030-01-01'
+        $orphan['sprk_duedate'] | Should Be '2026-11-01'
+        (Get-RedateTotal $r 'Shifted') | Should BeGreaterThan 40
+    }
+    It 'MUST FIRE: data whose dates are in the future of today (a clock behind the load) is skipped whole, nothing is moved back' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(5)
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        $r.Patched.Count | Should Be 0
+        (Get-RedateTotal $r 'Skipped') | Should BeGreaterThan 0
+        (Get-RedateTotal $r 'Shifted') | Should Be 0
+    }
+    It 'counts a failed PATCH as an error, keeps going, and leaves that row for the next run' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $failKey = $dataset.matters[0].fields.sprk_matternumber
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today -FailPatchFor $failKey
+        (Get-RedateTotal $r 'Errors') | Should Be 1
+        (Get-RedateTotal $r 'Shifted') | Should BeGreaterThan 40
+        $left = Get-WorldTaggedRow -World $world -Section 'matters' -Key $failKey
+        "$($left.sprk_openeddate)" | Should Be (ConvertTo-DemoDateValue -Offset (Get-DemoRowProperty $dataset.matters[0] 'dates').sprk_openeddate -Today $today.AddDays(-12))
+        $retry = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        (Get-RedateTotal $retry 'Shifted') | Should Be 1
+        (Test-WorldMatchesLoadOn -World $world -Dataset $dataset -Day $today) | Should BeNullOrEmpty
+    }
+    It 'a table that cannot be read is an error, not a silent pass' {
+        $world = New-LoadedWorld -Dataset $dataset -LoadDay $today.AddDays(-12)
+        $world.Fail = @('^sprk_todos\?')
+        $r = Invoke-FakeRedate -World $world -Dataset $dataset -Today $today
+        $r.Counts['todos']['Errors'] | Should Be 1
+        $r.Counts['matters']['Shifted'] | Should Be @($dataset.matters).Count
     }
 }

@@ -270,8 +270,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// without creating duplicates. Attachment Documents are only created for attachments that lack one.
     /// </summary>
     /// <param name="requestedBy">Task 146 c1-r1: the caller asking for the archive, recorded on the documents it creates.</param>
+    /// <param name="archiveLockOwner">ISS-010 part E (Q3): who holds the archive lock (the job id, or the request's trace id); a new id when null.</param>
     public async Task<ArchiveCommunicationResult> ArchiveExistingAsync(
-        Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
+        Guid communicationId, CancellationToken ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
+        string? archiveLockOwner = null)
     {
         // 1. Load the persisted communication.
         DataverseEntity record;
@@ -282,7 +284,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 communicationId,
                 // Ontology task 177 A3: plus the regarding (its typed lookups and the primary's id), from which an outbound
                 // archive chooses its record link (StageArchiveRecordLink).
-                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode", "sprk_regardingrecordid" }
+                // ISS-010 part E (Q2): plus the body format and Bcc, so an outgoing row's .eml matches the one the send would have archived.
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode", "sprk_regardingrecordid", "sprk_bodyformat", "sprk_bcc" }
                     .Concat(Engine.RegardingFieldMap.AllRegardingFields).ToArray(),
                 ct);
         }
@@ -319,6 +322,22 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             };
         }
 
+        // ISS-010 part E (Q3): one .eml archive of a communication at a time (the CommunicationPostSend job and this on-demand route).
+        // A held lock is a 409 archive_in_progress (the job retries it); the lock fails open (#984), and the re-check before the
+        // create below is the backstop. Once held, ask again: another archive may have finished between the check above and the lock.
+        await using var archiveLock = await AcquireArchiveLockAsync(communicationId, archiveLockOwner, ct);
+        if (archiveLock.Held && await FindExistingArchiveDocumentAsync(communicationId, ct) is { } archivedMeanwhile)
+        {
+            return new ArchiveCommunicationResult
+            {
+                CommunicationId = communicationId,
+                ArchiveDocumentId = archivedMeanwhile,
+                AlreadyArchived = true,
+                AttachmentDocumentsCreated = attachmentsCreated,
+                AttachmentsRefusedUnverified = attachmentsRefused,
+            };
+        }
+
         // 4. Reconstruct the request/response the archiver expects from the stored record.
         var to = SplitRecipients(record.GetAttributeValue<string>("sprk_to"));
         var cc = SplitRecipients(record.GetAttributeValue<string>("sprk_cc"));
@@ -337,13 +356,21 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var directionValue = record.GetAttributeValue<OptionSetValue>("sprk_direction")?.Value;
         var emailDirection = directionValue == 100000000 ? 100000000 : 100000001;
 
+        // ISS-010 part E (Q2, field-mapping-r1): an OUTGOING row's Bcc and body format as sent (both written on every send); HTML when
+        // the format is unset. Bcc goes into the .eml only, never a log or a response. An incoming row is unchanged.
+        var outgoing = directionValue == (int)CommunicationDirection.Outgoing;
+        var bcc = outgoing ? SplitRecipients(record.GetAttributeValue<string>("sprk_bcc")) : [];
+        var storedFormat = record.GetAttributeValue<OptionSetValue>("sprk_bodyformat")?.Value;
+        var bodyFormat = outgoing && storedFormat is { } fmt && Enum.IsDefined(typeof(BodyFormat), fmt) ? (BodyFormat)fmt : BodyFormat.HTML;
+
         var request = new SendCommunicationRequest
         {
             To = to.Length > 0 ? to : new[] { string.Empty },
             Cc = cc.Length > 0 ? cc : null,
+            Bcc = bcc.Length > 0 ? bcc : null,
             Subject = record.GetAttributeValue<string>("sprk_subject") ?? "(No Subject)",
             Body = record.GetAttributeValue<string>("sprk_body") ?? string.Empty,
-            BodyFormat = BodyFormat.HTML,
+            BodyFormat = bodyFormat,
             FromMailbox = string.IsNullOrEmpty(from) ? null : from,
             CommunicationType = commType,
         };
@@ -362,7 +389,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         try
         {
             archiveDocumentId = await ArchiveToSpeAsync(
-                request, response, communicationId, ct, emailDirection, requestedBy, filedCommunication: record);
+                request, response, communicationId, ct, emailDirection, requestedBy, filedCommunication: record, recheckBeforeCreate: true);
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
         {
@@ -400,7 +427,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>Split a Dataverse recipient string (";"- or ","-separated) into trimmed, non-empty addresses.</summary>
-    private static string[] SplitRecipients(string? raw) =>
+    internal static string[] SplitRecipients(string? raw) =>
         string.IsNullOrWhiteSpace(raw)
             ? Array.Empty<string>()
             : raw.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -487,9 +514,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// Returns the id of an existing email-archive <c>sprk_document</c> for the communication, or null.
-    /// Used for idempotent on-demand archival (task 044).
+    /// Used for idempotent on-demand archival (task 044), and by the CommunicationPostSend job after a 409 archive_in_progress
+    /// (ISS-010 part E run 3: the archive that held the lock may have finished).
     /// </summary>
-    private async Task<Guid?> FindExistingArchiveDocumentAsync(Guid communicationId, CancellationToken ct)
+    internal async Task<Guid?> FindExistingArchiveDocumentAsync(Guid communicationId, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_document")
         {
@@ -841,7 +869,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// (<c>InReplyToMessageId</c> set) joins its parent's thread and a fresh email creates one; the thread anchors
     /// to the record's regarding (mapped at create time, ADR-024 reuse). Both paths MUST NOT fail the send.
     /// </summary>
-    private async Task ResolveOutboundThreadAsync(
+    internal async Task ResolveOutboundThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string correlationId, CancellationToken ct)
     {
         // (1) FR-19 explicit target: mirror the Message path — stamp the supplied thread directly and skip
@@ -2449,6 +2477,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "A server-only send must be a send-as-user email that is not archived to SharePoint Embedded and is not system mail.");
         }
 
+        // ISS-010 part E (#3184): the deferred post-send tail is defined for a plain email only. Refused before anything is sent.
+        if (request.DeferPostSend
+            && (request.CommunicationType != CommunicationType.Email
+                || request.AttachmentDocumentIds is { Length: > 0 }
+                || request.ServerSend is not null
+                || request.SystemMail is not null
+                || request.ThreadId.HasValue))
+        {
+            throw new InvalidOperationException(
+                "A deferred post-send must be an email with no attachments, thread, server-send options or system mail.");
+        }
+
         // Ebilling-r1 task 151c-2 (uac-r2 K5): the batch the email is linked to and the record its owner follows are one decision made twice. If
         // both are set and they differ, the email would be owned like one batch and listed under another: refused before anything is sent or
         // written, like the owner mismatch.
@@ -2635,7 +2675,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !request.DeferPostSend)
             {
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
             }
@@ -2665,6 +2705,34 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
+            // ISS-010 part E (#3184): a deferred send hands the thread, archive, enrichment, participant index and arrived steps to the
+            // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
+            var deferred = false;
+            string? inlinePostSendOwner = null;
+            // Run 3b (review F1): the inline fallback's tail runs to completion whatever the caller's token (the email is sent; the
+            // non-deferred tail below was never bounded by a caller that gave up either). Otherwise the caller's token.
+            var tailCt = cancellationToken;
+            var enrichedInline = false;
+            if (request.DeferPostSend && communicationId.HasValue)
+            {
+                deferred = await TryEnqueuePostSendAsync(
+                    communicationId.Value, archive && archiveOutgoingOptIn, request,
+                    CallerResolution.ResolveObjectId(httpContext?.User), preparedRecord.GetAttributeValue<EntityReference>("sprk_sentby")?.Id,
+                    correlationId);
+                if (!deferred)
+                {
+                    // The fallback takes the job's lock and leaves the markers of the steps it completed, so a job whose submit
+                    // landed late does only what is left.
+                    inlinePostSendOwner = await ClaimInlinePostSendAsync(communicationId.Value, correlationId);
+                    deferred = inlinePostSendOwner is null;
+                    if (!deferred)
+                    {
+                        tailCt = CancellationToken.None;
+                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, tailCt);
+                    }
+                }
+            }
+
             if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
@@ -2672,7 +2740,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for sender {SenderEmail} | CorrelationId: {CorrelationId}",
                     senderResult.Email, correlationId);
             }
-            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn && !deferred)
             {
                 // Build a partial response for .eml generation (before archival fields are known)
                 var partialResponse = new SendCommunicationResponse
@@ -2689,14 +2757,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 {
                     // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
-                        request, partialResponse, communicationId.Value, cancellationToken,
+                        request, partialResponse, communicationId.Value, tailCt,
                         requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User),
                         sentAttachments: fileAttachments ?? [],
                         sentSources: attachmentSources ?? [],
                         filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
-                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, cancellationToken);
+                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, tailCt);
                 }
                 catch (Exception archEx)
                 {
@@ -2777,7 +2845,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
             // Task 185: a system-mail send is never enriched — its body carries a secret (an invite link) that must not
             // reach AI indexing, triage summaries or proposals.
-            if (communicationId.HasValue && request.SystemMail is null)
+            if (communicationId.HasValue && !deferred && request.SystemMail is null)
             {
                 try
                 {
@@ -2786,7 +2854,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         CommunicationDirection.Outgoing,
                         BuildOutboundEnvelope(request, senderResult.Email!),
                         archivedDocumentId,
-                        cancellationToken);
+                        tailCt);
+                    enrichedInline = true;
                 }
                 catch (Exception enrichEx)
                 {
@@ -2799,18 +2868,23 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
             // resolve via the shared email→contact resolver (no pre-resolved sender identity on this path).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !deferred)
             {
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderResult.Email, null,
-                    request.To, request.Cc, request.Bcc, cancellationToken);
+                    request.To, request.Cc, request.Bcc, tailCt);
 
                 // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
                 // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
                 // spine-owned producer + emit point as the other four persist paths (channel-identical).
                 if (_arrivedProducer is not null)
-                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, tailCt);
             }
+
+            if (inlinePostSendOwner is not null)
+                await CompleteInlinePostSendAsync(
+                    communicationId!.Value, inlinePostSendOwner, correlationId,
+                    archived: !(archive && archiveOutgoingOptIn) || archivedDocumentId.HasValue, enriched: enrichedInline);
 
             return new SendCommunicationResponse
             {
@@ -2987,7 +3061,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
 
             // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !request.DeferPostSend)
             {
                 await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
             }
@@ -3020,6 +3094,32 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
             }
 
+            // ISS-010 part E (#3184): a deferred send hands the thread, archive, enrichment, participant index and arrived steps to the
+            // CommunicationPostSend job. When the job cannot be queued within its bound they run inline below, as before.
+            var deferred = false;
+            string? inlinePostSendOwner = null;
+            // Run 3b (review F1): the inline fallback's tail runs to completion whatever the caller's token (the email is sent; the
+            // non-deferred tail below was never bounded by a caller that gave up either). Otherwise the caller's token.
+            var tailCt = ct;
+            var enrichedInline = false;
+            if (request.DeferPostSend && communicationId.HasValue)
+            {
+                deferred = await TryEnqueuePostSendAsync(
+                    communicationId.Value, archive && archiveOutgoingOptIn, request, userObjectId, senderSystemUserId, correlationId);
+                if (!deferred)
+                {
+                    // The fallback takes the job's lock and leaves the markers of the steps it completed, so a job whose submit
+                    // landed late does only what is left.
+                    inlinePostSendOwner = await ClaimInlinePostSendAsync(communicationId.Value, correlationId);
+                    deferred = inlinePostSendOwner is null;
+                    if (!deferred)
+                    {
+                        tailCt = CancellationToken.None;
+                        await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, tailCt);
+                    }
+                }
+            }
+
             if (archive && !archiveOutgoingOptIn)
             {
                 archivalWarning = "Archival skipped: ArchiveOutgoingOptIn is disabled for this sender account.";
@@ -3027,7 +3127,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     "SPE archival skipped — ArchiveOutgoingOptIn is false for user sender {UserEmail} | CorrelationId: {CorrelationId}",
                     userEmail, correlationId);
             }
-            else if (archive && communicationId.HasValue && archiveOutgoingOptIn)
+            else if (archive && communicationId.HasValue && archiveOutgoingOptIn && !deferred)
             {
                 var partialResponse = new SendCommunicationResponse
                 {
@@ -3043,14 +3143,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 {
                     // Review F1b: embed the bytes just sent (the attachment rows are created in Step 7, after this).
                     archivedDocumentId = await ArchiveToSpeAsync(
-                        request, partialResponse, communicationId.Value, ct,
+                        request, partialResponse, communicationId.Value, tailCt,
                         requestedBy: Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId),
                         sentAttachments: fileAttachments ?? [],
                         sentSources: attachmentSources ?? [],
                         filedCommunication: preparedRecord);
 
                     // Enqueue AI analysis for the archived .eml document (best-effort)
-                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, ct);
+                    await EnqueueDocumentAnalysisAsync(archivedDocumentId.Value, correlationId, tailCt);
                 }
                 catch (Exception archEx)
                 {
@@ -3132,7 +3232,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
             // Task 151c-1a: a server-only send may skip enrichment, and one whose owner follows a record always does (enrichment's
             // category routing would re-own it).
-            if (communicationId.HasValue && request.ServerSend is not ({ SkipEnrichment: true } or { OwnerFollows: not null }))
+            if (communicationId.HasValue && !deferred && request.ServerSend is not ({ SkipEnrichment: true } or { OwnerFollows: not null }))
             {
                 try
                 {
@@ -3141,7 +3241,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                         CommunicationDirection.Outgoing,
                         BuildOutboundEnvelope(request, userEmail),
                         archivedDocumentId,
-                        ct);
+                        tailCt);
+                    enrichedInline = true;
                 }
                 catch (Exception enrichEx)
                 {
@@ -3155,18 +3256,23 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
             // resolve via the shared email→contact resolver (the sender's typed identity is already on the
             // record's sprk_sentby lookup; the junction is additive and back-fillable).
-            if (communicationId.HasValue)
+            if (communicationId.HasValue && !deferred)
             {
                 await WriteParticipantIndexAsync(
                     communicationId.Value, userEmail, null,
-                    request.To, request.Cc, request.Bcc, ct);
+                    request.To, request.Cc, request.Bcc, tailCt);
 
                 // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
                 // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
                 // spine-owned producer + emit point as the other four persist paths (channel-identical).
                 if (_arrivedProducer is not null)
-                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, tailCt);
             }
+
+            if (inlinePostSendOwner is not null)
+                await CompleteInlinePostSendAsync(
+                    communicationId!.Value, inlinePostSendOwner, correlationId,
+                    archived: !(archive && archiveOutgoingOptIn) || archivedDocumentId.HasValue, enriched: enrichedInline);
 
             return new SendCommunicationResponse
             {
@@ -3810,7 +3916,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null,
         IReadOnlyList<ChannelAttachment>? sentAttachments = null,
         IReadOnlyList<OutboundAttachmentSource>? sentSources = null,
-        DataverseEntity? filedCommunication = null)
+        DataverseEntity? filedCommunication = null,
+        bool recheckBeforeCreate = false)
     {
         // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
         // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
@@ -3938,6 +4045,21 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Ontology task 177 A3 (D-218, uac-r2 Option A): an outbound archive is linked to the record its communication is
         // filed to, in this same create, so it shows in that record's Documents. Inbound (on-demand re-archive) is not.
         var linked = emailDirection == SentEmailDirection && StageArchiveRecordLink(document, filedCommunication);
+
+        // ISS-010 part E (Q3, field-mapping-r1): the on-demand archive asks again, after the PUT and before the create, whether another
+        // archive of this communication created its Document meanwhile (the lock fails open, #984). No second row is created, and the
+        // detected race is an Error. Between two on-demand archives (route and job) the PUT went to the same path, so the existing
+        // Document still names the file. Known limit (field-mapping-r1 review of #3260): the send's own inline archive names its file
+        // from the send time, not sprk_sentat, and takes no comm-archive lock, so if it races an on-demand archive the on-demand .eml is
+        // left in SPE with no Document; and if the on-demand create lands first, the send's archive (no re-check) makes a second
+        // Document (pre-existing with DeferPostSend off).
+        if (recheckBeforeCreate && await FindExistingArchiveDocumentAsync(communicationId, ct) is { } racedDocumentId)
+        {
+            _logger.LogError(
+                "Duplicate .eml archive detected: Document {DocumentId} was created for communication {CommunicationId} while this archive ran; no second document was created",
+                racedDocumentId, communicationId);
+            return racedDocumentId;
+        }
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -4544,6 +4666,227 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    /// <summary>ISS-010 part E (#3184): how long a deferred send waits for its <c>CommunicationPostSend</c> job to be queued before it
+    /// runs the post-send tail inline instead (field-mapping-r1 Q4).</summary>
+    internal static readonly TimeSpan PostSendEnqueueTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// ISS-010 part E (#3184): queues the <c>CommunicationPostSend</c> job for a sent, persisted email
+    /// (<see cref="SendCommunicationRequest.DeferPostSend"/>). True when it was queued. False when the queue faulted or did not answer
+    /// within <see cref="PostSendEnqueueTimeout"/>: one Warning with the communication id, and the caller runs today's inline tail, so
+    /// nothing is lost and the response does not change. The payload holds ids and flags only.
+    /// <para>It runs AFTER the email was sent, so it never throws and takes no caller token (run 3, review F1): a caller whose token
+    /// fires during the enqueue (<c>AssignTaskNotifier</c>'s send timeout) would otherwise turn a delivered email into a 500 and send it
+    /// again. The submit is bound only by <see cref="PostSendEnqueueTimeout"/>.</para>
+    /// </summary>
+    /// <param name="senderSystemUserId">The sending systemuser resolved at send time (the row's <c>sprk_sentby</c>); the job bells it
+    /// when the row names no sender (ontology-r1 condition b).</param>
+    private async Task<bool> TryEnqueuePostSendAsync(
+        Guid communicationId, bool archive, SendCommunicationRequest request, string? requestedByObjectId, Guid? senderSystemUserId,
+        string correlationId)
+    {
+        var job = CommunicationPostSendJobHandler.CreateJob(
+            new CommunicationPostSendPayload(
+                communicationId,
+                Guid.TryParse(requestedByObjectId, out var oid) && oid != Guid.Empty ? oid : null,
+                Archive: archive,
+                Enrich: request.SystemMail is null && request.ServerSend is null,
+                CreateThreadPrivate: request.CreateThreadPrivate,
+                SenderSystemUserId: senderSystemUserId is { } sender && sender != Guid.Empty ? sender : null),
+            correlationId);
+
+        using var timeout = new CancellationTokenSource(PostSendEnqueueTimeout);
+        try
+        {
+            await _jobSubmissionService.SubmitJobAsync(job, timeout.Token).WaitAsync(PostSendEnqueueTimeout, CancellationToken.None);
+            _logger.LogInformation(
+                "Post-send work queued (job {JobId}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                job.JobId, communicationId, correlationId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "Post-send work could not be queued ({ExceptionType}); running it inline | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                ex.GetType().Name, communicationId, correlationId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// ISS-010 part E (#3184): claims the <c>CommunicationPostSend</c> processing lock for an inline fallback (the job could not be queued
+    /// in time, but a late submit may still land). Returns the owner when this request may run the tail, or null when the job already
+    /// holds it (the job does the work). Without the cache, or on a cache fault, it answers the owner: the lock fails open (#984), and the
+    /// job's durable guards remain.
+    /// </summary>
+    private async Task<string?> ClaimInlinePostSendAsync(Guid communicationId, string correlationId)
+    {
+        var owner = $"inline-{Guid.NewGuid():N}";
+        if (_scopeFactory is null)
+            return owner;
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<IIdempotencyService>() is not { } idempotency)
+                return owner;
+
+            if (await idempotency.TryAcquireProcessingLockAsync(
+                    CommunicationPostSendJobHandler.KeyFor(communicationId), owner, CommunicationPostSendJobHandler.LockDuration, CancellationToken.None))
+                return owner;
+
+            _logger.LogInformation(
+                "Post-send work is already running in its job; the inline fallback leaves it there | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(
+                "Post-send lock not checked ({ExceptionType}); running inline | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                ex.GetType().Name, communicationId, correlationId);
+            return owner;
+        }
+    }
+
+    /// <summary>
+    /// ISS-010 part E (#3184): after an inline fallback ran the tail, sets the markers the job reads for the steps that completed,
+    /// with the job's own semantics (run 3b): <c>:enriched</c> only when enrichment returned, <c>:arrived</c> once the emit ran, and
+    /// done only when the .eml was archived (or no archive was asked for), so a job whose submit landed late retries a failed inline
+    /// archive instead of finding it hidden. Then releases the lock. Best-effort: a cache fault leaves the job's durable guards.
+    /// </summary>
+    private async Task CompleteInlinePostSendAsync(Guid communicationId, string owner, string correlationId, bool archived, bool enriched)
+    {
+        if (_scopeFactory is null)
+            return;
+
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            if (scope.ServiceProvider.GetService<IIdempotencyService>() is not { } idempotency)
+                return;
+
+            var key = CommunicationPostSendJobHandler.KeyFor(communicationId);
+            var markers = new List<string> { CommunicationPostSendJobHandler.ArrivedKeyFor(communicationId) };
+            if (enriched)
+                markers.Add(CommunicationPostSendJobHandler.EnrichedKeyFor(communicationId));
+            if (archived)
+                markers.Add(key);
+            else
+                _logger.LogInformation(
+                    "Post-send work ran inline but the .eml was not archived; the job, if it lands, retries it | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                    communicationId, correlationId);
+            foreach (var marker in markers)
+                await idempotency.MarkEventAsProcessedAsync(marker, CommunicationPostSendJobHandler.MarkerRetention, CancellationToken.None);
+            await idempotency.ReleaseProcessingLockAsync(key, owner, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(
+                "Post-send markers not written ({ExceptionType}) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                ex.GetType().Name, communicationId, correlationId);
+        }
+    }
+
+    /// <summary>ISS-010 part E (Q3): the reason code of an archive refused while another archive of the same communication runs (409).</summary>
+    public const string ArchiveInProgressCode = "archive_in_progress";
+
+    /// <summary>How long one archive of a communication holds its lock.</summary>
+    internal static readonly TimeSpan ArchiveLockDuration = TimeSpan.FromMinutes(2);
+
+    /// <summary>ISS-010 part E (Q3): the lock one .eml archive of a communication holds.</summary>
+    internal static string ArchiveLockKeyFor(Guid communicationId) => $"comm-archive:{communicationId:N}";
+
+    /// <summary>
+    /// ISS-010 part E (Q3): takes the communication's archive lock (<see cref="IIdempotencyService"/>, reached through a scope as
+    /// <see cref="MarkOutboundEchoProcessedAsync"/> does). A held lock throws a 409 <see cref="ArchiveInProgressCode"/>. Without the cache,
+    /// or on a cache fault, there is no lock (fails open, #984): the re-check before the create is the backstop.
+    /// </summary>
+    private async Task<ArchiveLock> AcquireArchiveLockAsync(Guid communicationId, string? owner, CancellationToken ct)
+    {
+        if (_scopeFactory is null)
+            return ArchiveLock.None;
+
+        var scope = _scopeFactory.CreateAsyncScope();
+        var key = ArchiveLockKeyFor(communicationId);
+        owner ??= Guid.NewGuid().ToString("N");
+        bool acquired;
+        IIdempotencyService? idempotency = null;
+        try
+        {
+            idempotency = scope.ServiceProvider.GetService<IIdempotencyService>();
+            acquired = idempotency is null || await idempotency.TryAcquireProcessingLockAsync(key, owner, ArchiveLockDuration, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogInformation(
+                "Archive lock not checked ({ExceptionType}); archiving without it | CommunicationId: {CommunicationId}",
+                ex.GetType().Name, communicationId);
+            await scope.DisposeAsync();
+            return ArchiveLock.None;
+        }
+
+        if (idempotency is null)
+        {
+            await scope.DisposeAsync();
+            return ArchiveLock.None;
+        }
+
+        if (!acquired)
+        {
+            await scope.DisposeAsync();
+            _logger.LogInformation("Archive refused: another archive of communication {CommunicationId} is in progress", communicationId);
+            throw new SdapProblemException(
+                code: ArchiveInProgressCode,
+                title: "Archive in progress",
+                detail: "This email is being saved to SharePoint already. Try again shortly.",
+                statusCode: 409,
+                extensions: new Dictionary<string, object> { ["reasonCode"] = ArchiveInProgressCode });
+        }
+
+        return new ArchiveLock(scope, idempotency, key, owner);
+    }
+
+    /// <summary>A held archive lock (released on dispose), or <see cref="None"/>.</summary>
+    private sealed class ArchiveLock : IAsyncDisposable
+    {
+        public static readonly ArchiveLock None = new(null, null, string.Empty, string.Empty);
+
+        private readonly AsyncServiceScope? _scope;
+        private readonly IIdempotencyService? _idempotency;
+        private readonly string _key;
+        private readonly string _owner;
+
+        public ArchiveLock(AsyncServiceScope? scope, IIdempotencyService? idempotency, string key, string owner)
+        {
+            _scope = scope;
+            _idempotency = idempotency;
+            _key = key;
+            _owner = owner;
+        }
+
+        public bool Held => _idempotency is not null;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_idempotency is null)
+                return;
+
+            try
+            {
+                // Not with the caller's token: a cancelled token never reaches the cache (task 068, #1086).
+                await _idempotency.ReleaseProcessingLockAsync(_key, _owner, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // The lock expires on its own (ArchiveLockDuration).
+            }
+
+            if (_scope is { } scope)
+                await scope.DisposeAsync();
+        }
+    }
+
     /// <summary>
     /// Enqueues an AppOnlyDocumentAnalysis job for a document record (best-effort).
     /// Failures are logged but do not propagate.
@@ -5003,7 +5346,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// junction-write failure never fails an already-sent + persisted message (NFR-02). No-op when the indexer
     /// is not composed (test constructions that predate it).
     /// </summary>
-    private Task WriteParticipantIndexAsync(
+    internal Task WriteParticipantIndexAsync(
         Guid communicationId,
         string? fromAddress,
         ParticipantReference? fromResolved,

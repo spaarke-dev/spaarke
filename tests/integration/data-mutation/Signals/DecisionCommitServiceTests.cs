@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
@@ -52,16 +53,16 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 public sealed partial class DecisionCommitServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
-    private static readonly Guid Caller = Guid.Parse("c0430000-0000-4000-8000-000000000001");
-    private static readonly Guid CallerOid = Guid.Parse("c0430000-0000-4000-8000-000000000002");
-    private const string Tenant = "c0430000-0000-4000-8000-0000000000aa";
-    private static readonly Guid TypeMatter = Guid.Parse("c0430000-0000-4000-8000-000000000010");
+    internal static readonly Guid Caller = Guid.Parse("c0430000-0000-4000-8000-000000000001");
+    internal static readonly Guid CallerOid = Guid.Parse("c0430000-0000-4000-8000-000000000002");
+    internal const string Tenant = "c0430000-0000-4000-8000-0000000000aa";
+    internal static readonly Guid TypeMatter = Guid.Parse("c0430000-0000-4000-8000-000000000010");
     private static readonly Guid Matter = Guid.Parse("c0430000-0000-4000-8000-000000000011");
     private static readonly Guid OtherMatter = Guid.Parse("c0430000-0000-4000-8000-000000000012");
     private static readonly Guid Policy = Guid.Parse("c0430000-0000-4000-8000-000000000020");
     private static readonly Guid PathB = Guid.Parse("c0430000-0000-4000-8000-000000000021");
     private static readonly Guid DoVersion = Guid.Parse("c0430000-0000-4000-8000-000000000022");
-    private static readonly Guid Primary = Guid.Parse("c0430000-0000-4000-8000-000000000031");
+    internal static readonly Guid Primary = Guid.Parse("c0430000-0000-4000-8000-000000000031");
     private static readonly Guid Second = Guid.Parse("c0430000-0000-4000-8000-000000000032");
     private static readonly Guid DoSignal = Guid.Parse("c0430000-0000-4000-8000-000000000033");
     private static readonly Guid Budget = Guid.Parse("c0430000-0000-4000-8000-000000000040");
@@ -96,7 +97,7 @@ public sealed partial class DecisionCommitServiceTests
     /// <summary>Uac-r2 re-check F1: a Console user, who has Deep Create on <c>sprk_decisionrecord</c>.</summary>
     private static readonly Guid ConsoleCreator = Guid.Parse("c0430000-0000-4000-8000-0000000000cc");
 
-    private sealed class Rig
+    internal sealed class Rig
     {
         public Dictionary<Guid, Entity> Signals { get; } = new();
         public Dictionary<Guid, int> Versions { get; } = new();
@@ -164,6 +165,44 @@ public sealed partial class DecisionCommitServiceTests
         }
         public List<Entity> ExistingRecords { get; } = new();
 
+        /// <summary>Ontology task 225 (D-229): the Dataverse uac-r2's REAL share synchronizer reads (its secure team is this rig's
+        /// <c>SecureTeam</c>); every Decision Record the writer creates is stored in it as written (owner and filing lookups).</summary>
+        public SecureChildShareWorld ShareWorld { get; } = SecureChildShareWorld.Standard(SecureChildShareWorld.SecureBu, SecureTeam);
+
+        /// <summary>Task 225: the POA plane the synchronizer reads and writes (uac-r2 task 063's strict double).</summary>
+        public FakeRecordShareTable ShareTable { get; } = new();
+
+        /// <summary>Task 225: the commit's logger, when a test reads what it logged.</summary>
+        public Microsoft.Extensions.Logging.ILogger<DecisionCommitService>? CommitLogger { get; set; }
+
+        /// <summary>Task 225 (D-212): each communication's <c>sprk_privilegeclassification</c> as the CALLER reads it (null: no value). A
+        /// communication absent from the map is not returned to the caller (unreadable).</summary>
+        public Dictionary<Guid, int?> CommunicationClassifications { get; } = new();
+
+        /// <summary>Task 225: a fault answer for the caller's read of communications' classification, and every such read asked.</summary>
+        public DataverseUserResponse? CommunicationReadFails { get; set; }
+
+        public List<string> CommunicationReads { get; } = new();
+
+        /// <summary>Task 225 fix round 1: the synchronizer's logger, when a test makes it fault (the one fault that escapes SyncChildAsync).</summary>
+        public Microsoft.Extensions.Logging.ILogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>? SynchronizerLogger { get; set; }
+
+        /// <summary>Task 225 fix round 1: the next Decision Record create COMMITS (the row is stored) and then throws this: a create
+        /// that timed out after committing.</summary>
+        public Exception? FailRecordAfterCreateWith { get; set; }
+
+        /// <summary>Task 225: the REAL synchronizer over <see cref="ShareWorld"/> and <see cref="ShareTable"/>.</summary>
+        public Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer Synchronizer() => ShareWorld.Synchronizer(ShareTable, logger: SynchronizerLogger);
+
+        /// <summary>Task 225: a created row as Dataverse stores it, for the synchronizer: its columns, the owner as owningteam/owninguser.</summary>
+        private void StoreInShareWorld(Entity created, Guid id)
+        {
+            var columns = created.Attributes.Where(a => a.Key != "ownerid").Select(a => (a.Key, a.Value)).ToList();
+            if (created.GetAttributeValue<EntityReference>("ownerid") is { } owner)
+                columns.Add((owner.LogicalName == "team" ? "owningteam" : "owninguser", (object)owner));
+            ShareWorld.Add(created.LogicalName, id, columns.ToArray());
+        }
+
         /// <summary>Task 161 (D-180, fix round 1 F1-a): how many ACTIVE budgets the matter really has, as the BFF's own (app-only) read
         /// sees them; null: the read is not scripted and throws, which the routes must treat as "cannot be counted".
         /// <see cref="AppBudgetsFault"/> throws instead when set.</summary>
@@ -195,6 +234,20 @@ public sealed partial class DecisionCommitServiceTests
 
         /// <summary>Task 170: when set, the commit asks THIS probe (the shipped one, wire seams counted) instead of <see cref="Probe"/>.</summary>
         public CallerRecordAccessProbe? ProbeOverride { get; set; }
+
+        /// <summary>ISS-010 (#3184): when set, the commit runs THESE executors (the real ones over a create world) instead of the
+        /// scripted <see cref="Executors"/>.</summary>
+        public IEnumerable<IDecisionActionExecutor>? RealExecutors { get; set; }
+
+        /// <summary>ISS-010: when set, the commit's app-only reads go through this seam (a counting wrapper of <see cref="Entities"/>).</summary>
+        public IGenericEntityService? EntitiesSeam { get; set; }
+
+        /// <summary>ISS-010: when set, the commit's own caller reads go through this seam (a counting wrapper of <see cref="User"/>).</summary>
+        public IDataverseUserClient? UserSeam { get; set; }
+
+        /// <summary>ISS-010: when set, the ontology writer's connection is this seam (a counting wrapper of <see cref="Org"/>).</summary>
+        public IOrganizationServiceAsync2? OrgSeam { get; set; }
+
         public InMemoryTenantCache Ledger { get; } = new();
         public Mock<DecisionCommitFollowUps> FollowUps { get; }
         public FakeTimeProvider Clock { get; } = new(Now);
@@ -366,6 +419,13 @@ public sealed partial class DecisionCommitServiceTests
                     Log.Add($"record:{e.LogicalName}");
                     if (FailRecordWith is not null) throw FailRecordWith;
                     Records.Add(e);
+                    StoreInShareWorld(e, RecordId);
+                    if (FailRecordAfterCreateWith is { } afterCreate)
+                    {
+                        FailRecordAfterCreateWith = null;
+                        throw afterCreate;
+                    }
+
                     return Task.FromResult(RecordId);
                 });
             // Uac-r2 re-check F1: WhoAmI on the writer's own connection (the createdby of every row it creates).
@@ -445,7 +505,7 @@ public sealed partial class DecisionCommitServiceTests
         /// <summary>Task 142: uac-r2's REAL core-ancestor resolver over <see cref="Entities"/>; the probe says every stamp column exists
         /// (they do on sprk_decisionrecord after task 140).</summary>
         public CoreAncestorResolver CoreAncestors() => new(
-            Entities.Object,
+            EntitiesSeam ?? Entities.Object,
             (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
                 CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
             NullLogger<CoreAncestorResolver>.Instance);
@@ -458,7 +518,7 @@ public sealed partial class DecisionCommitServiceTests
         public List<IReadOnlyList<Guid>> FamiliesAsked { get; } = new();
 
         public OntologyWriterDataverseClient WriterClient() =>
-            new(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
+            new(() => OrgSeam ?? Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
 
         public void AddSignal(Guid id, DecisionLane lane, Guid? core, Guid version, int status = Open, int? resolution = null,
             DateTime? resolvedOn = null, string? subjectEntity = null, Guid? subjectId = null)
@@ -506,6 +566,25 @@ public sealed partial class DecisionCommitServiceTests
                 return DataverseUserResponse.Fail(401, DataverseUserClientErrorCodes.UserContextRequired, "no user");
             if (path is "WhoAmI" or "WhoAmI()")
                 return Ok(new Dictionary<string, object?> { ["UserId"] = Caller.ToString("D") });
+            if (path.StartsWith("sprk_communications?", StringComparison.Ordinal))
+            {
+                // Task 225 (D-212): the privilege classification of the decision's communications, AS THE CALLER (the In-list read).
+                CommunicationReads.Add(path);
+                if (CommunicationReadFails is { } communicationFault)
+                    return communicationFault;
+                var asked = System.Text.RegularExpressions.Regex.Matches(path, "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+                    .Select(m => Guid.Parse(m.Value)).ToHashSet();
+                return Ok(new Dictionary<string, object?>
+                {
+                    ["value"] = CommunicationClassifications.Where(kv => asked.Contains(kv.Key))
+                        .Select(kv => new Dictionary<string, object?>
+                        {
+                            ["sprk_communicationid"] = kv.Key.ToString("D"),
+                            ["sprk_privilegeclassification"] = kv.Value,
+                        }).ToList(),
+                });
+            }
+
             if (path.Contains("&$filter=Microsoft.Dynamics.CRM.In(PropertyName='", StringComparison.Ordinal))
             {
                 // Task 150 (D-141): the worklist's Do-lane "mine" read of a subject, AS THE CALLER. The subject is the caller's own
@@ -619,8 +698,8 @@ public sealed partial class DecisionCommitServiceTests
 
         public DecisionCommitService Service()
         {
-            var access = new SignalCoreRecordAccess(User.Object, Entities.Object, Identity.Object, NullLogger<SignalCoreRecordAccess>.Instance);
-            var plans = new DecisionPlanService(Entities.Object, NullLogger<DecisionPlanService>.Instance);
+            var access = new SignalCoreRecordAccess(UserSeam ?? User.Object, EntitiesSeam ?? Entities.Object, Identity.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+            var plans = new DecisionPlanService(EntitiesSeam ?? Entities.Object, NullLogger<DecisionPlanService>.Instance);
             var ownership = new Mock<IRecordOwnershipResolver>();
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
                 .Returns((RecordOwnershipContext context, CancellationToken _) =>
@@ -643,9 +722,11 @@ public sealed partial class DecisionCommitServiceTests
                 resolver = recording.Object;
             }
 
-            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
-            return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), EntitiesSeam ?? Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
+            return new DecisionCommitService(access, plans, new DecisionActionExecutors(RealExecutors ?? Executors.Values.Cast<IDecisionActionExecutor>()), records, WriterClient(),
+                EntitiesSeam ?? Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads,
+                Synchronizer(), new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance), UserSeam ?? User.Object,
+                Clock, CommitLogger ?? NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -665,7 +746,7 @@ public sealed partial class DecisionCommitServiceTests
     }
 
     /// <summary>An executor scripted at the interface; it logs the order it is called in.</summary>
-    private sealed class FakeExecutor(string code, Rig rig) : IDecisionActionExecutor
+    internal sealed class FakeExecutor(string code, Rig rig) : IDecisionActionExecutor
     {
         public string Code => code;
 
@@ -712,7 +793,7 @@ public sealed partial class DecisionCommitServiceTests
         };
     }
 
-    private static HttpContext Http(bool withClaims = true)
+    internal static HttpContext Http(bool withClaims = true)
     {
         var http = new DefaultHttpContext();
         if (withClaims)

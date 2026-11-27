@@ -273,7 +273,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 2
+      "count": 1
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/useEmailWorkspaceRecord.ts": {
@@ -340,7 +340,7 @@
   },
   "src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 12
+      "count": 11
     }
   },
   "src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/useCommunicationArrivals.ts": {
@@ -1269,11 +1269,6 @@
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 14
     },
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffDataServiceAdapter.ts": {
     "no-restricted-syntax": {
       "count": 1
     }

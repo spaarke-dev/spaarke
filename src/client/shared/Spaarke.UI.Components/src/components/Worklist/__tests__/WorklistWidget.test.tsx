@@ -245,7 +245,7 @@ describe('count filters', () => {
     expect(screen.getByTestId('worklist-narrative')).toBeInTheDocument();
     expect(screen.getByTestId('agg')).toBeInTheDocument();
 
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
 
     expect(within(lane('Do')).getByTestId('lane-showing-Do')).toHaveTextContent('Showing 2 of 5 - Coming due.');
     expect(lineIds(lane('Do'))).toEqual([D3, D2]);
@@ -261,7 +261,7 @@ describe('count filters', () => {
   it('a card with an item outside the filter says so', async () => {
     renderWidget();
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     const cards = within(lane('Do')).getAllByTestId('matter-card');
     const matter = cards.find(c => c.getAttribute('data-core-type') === 'sprk_matter')!;
     expect(matter).toHaveTextContent('+1 other open item on this matter, not in this filter');
@@ -289,7 +289,7 @@ describe('count filters', () => {
     });
     renderWidget({ service });
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     const cards = within(lane('Do')).getAllByTestId('matter-card');
     expect(cards[0]).toHaveTextContent('+1 other open item in Not filed, not in this filter');
     expect(cards[1]).toHaveTextContent('+1 other open item on this project, not in this filter');
@@ -298,7 +298,7 @@ describe('count filters', () => {
   it('Show all returns to the full list and the narrative and aggregate row come back', async () => {
     renderWidget({ narrative: <span>Seven things to do.</span>, aggregateRow: <div data-testid="agg">8 emails</div> });
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     // The count card opened the lane (D-195), so Show all, inside the collapsible region, is reachable.
     const showAll = within(lane('Do')).getByRole('button', { name: 'Show all' });
     expect(showAll).toBeVisible();
@@ -312,8 +312,8 @@ describe('count filters', () => {
   it('choosing the selected card again also clears the filter', async () => {
     renderWidget();
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
   });
 
@@ -338,7 +338,7 @@ describe('count filters', () => {
     const setItem = jest.spyOn(Storage.prototype, 'setItem');
     const first = renderWidget();
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     expect(within(lane('Do')).getByTestId('lane-showing-Do')).toBeInTheDocument();
     first.unmount();
 
@@ -402,7 +402,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
   it('with a filter on, the browse set is the filtered list and nothing else', async () => {
     const { launchWizard } = renderWidget();
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     await userEvent.click(openedLine('Do', 0));
     expect(launchWizard.mock.calls[0][0].visibleList).toEqual([D3, D2]);
     expect(launchWizard.mock.calls[0][0].itemId).toBe(D3);
@@ -418,7 +418,7 @@ describe('opening the wizard (D-26: in-app, on the list the user is looking at)'
       visibleList: [A1, A2, A3],
     });
 
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     await userEvent.click(within(lane('Do')).getByRole('button', { name: 'Work through these' }));
     expect(launchWizard.mock.calls[1][0]).toMatchObject({
       itemId: D3,
@@ -757,7 +757,7 @@ describe('loading and failure', () => {
     });
     renderWidget({ service, launchWizard });
     await ready();
-    await userEvent.click(countCard(lane('Do'), /^Coming due/));
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
     // After the wizard, the route no longer has the two Coming due items.
     service.read.mockImplementation(async set =>
       set === 'lanes'
@@ -771,6 +771,40 @@ describe('loading and failure', () => {
     );
     await userEvent.click(openedLine('Do', 0));
     await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D1, D5]));
+    expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
+  });
+
+  it('negative: after a filter falls back to All because its items vanished, the same items returning do not re-activate it (#1688)', async () => {
+    const service = fakeService();
+    const real = service.read.getMockImplementation()!;
+    const launchWizard: Launch = jest.fn(async request => {
+      request.onRecorded?.({ signalId: D3, alsoResolved: [] });
+      return { opened: true };
+    });
+    renderWidget({ service, launchWizard });
+    await ready();
+    await userEvent.click(countCard(lane('Do'), /^Coming due,/));
+    expect(countCard(lane('Do'), /^Coming due,/)).toHaveAttribute('aria-pressed', 'true');
+    // Read 1: the Coming due items are gone, so the filter falls back to All.
+    service.read.mockImplementation(async set =>
+      set === 'lanes'
+        ? real('lanes').then(d => ({
+            ...d,
+            Do: d.Do.map(g => ({ ...g, items: g.items.filter(i => i.workType !== 'comingDue') })).filter(
+              g => g.items.length
+            ),
+          }))
+        : real(set)
+    );
+    await userEvent.click(openedLine('Do', 0));
+    await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D1, D5]));
+    expect(countCard(lane('Do'), /^All,/)).toHaveAttribute('aria-pressed', 'true');
+    // Read 2: the Coming due items are back. The person chose All (by the fallback); the filter must stay off.
+    service.read.mockImplementation(async set => real(set));
+    await userEvent.click(openedLine('Do', 0));
+    await waitFor(() => expect(lineIds(lane('Do'))).toEqual([D4, D3, D1, D2, D5]));
+    expect(countCard(lane('Do'), /^Coming due,/)).toHaveAttribute('aria-pressed', 'false');
+    expect(countCard(lane('Do'), /^All,/)).toHaveAttribute('aria-pressed', 'true');
     expect(within(lane('Do')).queryByTestId('lane-showing-Do')).not.toBeInTheDocument();
   });
 });

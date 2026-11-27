@@ -787,7 +787,7 @@ public static class SemanticSearchEndpoints
     /// <summary>
     /// Validate request filters (entityTypes values).
     /// </summary>
-    private static IResult? ValidateFilters(SemanticSearchRequest request)
+    internal static IResult? ValidateFilters(SemanticSearchRequest request)
     {
         if (request.Filters?.EntityTypes is { Count: > 0 } entityTypes)
         {
@@ -812,6 +812,20 @@ public static class SemanticSearchEndpoints
             }
         }
 
+        if (request.Filters?.MatterTypes is { Count: > SearchFilters.MaxMatterTypes })
+        {
+            return TooManyMatterTypesProblem();
+        }
+
         return null; // Validation passed
     }
+
+    internal static IResult TooManyMatterTypesProblem() =>
+        Results.Problem(new ProblemDetails
+        {
+            Title = "Too Many Matter Types",
+            Detail = $"matterTypes may name at most {SearchFilters.MaxMatterTypes} values.",
+            Status = 400,
+            Extensions = { ["code"] = SearchErrorCodes.TooManyMatterTypes }
+        });
 }

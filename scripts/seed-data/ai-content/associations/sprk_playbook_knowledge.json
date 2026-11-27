@@ -1,0 +1,13 @@
+{
+  "relationship": "sprk_playbook_knowledge",
+  "source": "sprk_analysisplaybook",
+  "navigationProperty": "sprk_playbook_knowledge",
+  "target": "sprk_analysisknowledge",
+  "pairs": [
+    { "source": "18cf3cc8-02ec-f011-8406-7c1e520aa4df", "target": "737c3e5e-ede9-f011-8406-7c1e520aa4df" },
+    { "source": "bc71facf-6af1-f011-8406-7ced8d1dc988", "target": "737c3e5e-ede9-f011-8406-7c1e520aa4df" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "400c7059-ede9-f011-8406-7ced8d1dc988" },
+    { "source": "ea4d2ecc-4aea-f011-8406-7ced8d1dc988", "target": "43b4825f-ede9-f011-8406-7ced8d1dc988" },
+    { "source": "fe3e5acc-4aea-f011-8406-7c1e520aa4df", "target": "43b4825f-ede9-f011-8406-7ced8d1dc988" }
+  ]
+}

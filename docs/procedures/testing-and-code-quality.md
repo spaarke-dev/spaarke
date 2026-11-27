@@ -401,8 +401,8 @@ The adr-check skill validates code against Architecture Decision Records:
 ### 🔴 Violations Found
 
 **ADR-002: No Dataverse Plugins / Server-Side Write Path**
-- File: `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` *(illustrative — a known master-today gap, registry I-3)*
-- Violation: record invariant (creation-time field mapping via `applyFieldMappings`) enforced only in client wizard code
+- File: `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` *(illustrative)*
+- Violation: record invariant (creation-time field mapping, formerly done by the client engine deleted in task 035) enforced only in client wizard code
 - Constraint: "Client code MAY preview an invariant but MUST NOT be its only enforcement" (WP-2)
 - Fix: Apply the invariant in the BFF write path (single server owner, WP-1) and create via a BFF endpoint (WP-3)
 

@@ -281,7 +281,7 @@ public sealed class WorkAssignmentCreateLiveTests
     /// <summary>
     /// The payload the wizard builds (workAssignmentService.ts createWorkAssignment): name, priority, description, due
     /// date; the acting user's business-unit search defaults; the regarding matter with the ADR-024 resolver fields
-    /// (applyResolverFields); the field-mapping profile's rules for {sprk_matter → sprk_workassignment} (applyFieldMappings:
+    /// (applyResolverFields); the field-mapping profile's rules for {sprk_matter → sprk_workassignment} (as the former client mapping engine, deleted in task 035, did:
     /// a lookup Copy writes `{navProp}@odata.bind`); the matter's type and practice area. Navigation properties are read
     /// from metadata, as the wizard's discoverNavProps does.
     /// </summary>

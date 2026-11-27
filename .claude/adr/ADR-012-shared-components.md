@@ -183,7 +183,6 @@ Supporting types: `UploadOptions`, `UploadResult`, `DialogOptions`, `DialogResul
 | `createXrmDataService()` | Xrm.WebApi (Code Pages in Dataverse) |
 | `createXrmUploadService(bffBaseUrl)` | BFF API upload endpoints |
 | `createXrmNavigationService()` | Xrm.Navigation |
-| `createBffDataService(authenticatedFetch, bffBaseUrl)` | BFF API (Power Pages SPA) |
 | `createBffUploadService(authenticatedFetch, bffBaseUrl)` | BFF API (SPA) |
 | `createBffNavigationService(navigate?)` | SPA router |
 | `createMockDataService()` | jest.fn() stubs for unit tests |

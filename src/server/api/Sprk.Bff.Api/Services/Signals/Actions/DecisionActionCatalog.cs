@@ -196,7 +196,7 @@ public static class DecisionActionCatalog
         new("revise-budget", "Revise budget", DecisionLane.Decide, IsNextStep: false, WorkType: "fund",
             [
                 new("budget", "Budget to revise", DecisionParameterKind.Lookup, Required: true,
-                    Hint: "Pre-selected when the matter has one budget; the user picks one when it has several (D-18)",
+                    Hint: "Chosen automatically when the matter has one budget; pick the budget to revise when it has several.",
                     LookupEntity: "sprk_budget"),
                 new("amount", "New budget", DecisionParameterKind.Money, Required: true),
                 new("reason", "Reason for revision", DecisionParameterKind.TextArea, Required: true),
