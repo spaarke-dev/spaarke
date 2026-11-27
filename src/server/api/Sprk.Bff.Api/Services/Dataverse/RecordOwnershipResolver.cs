@@ -293,7 +293,8 @@ internal sealed record UnfiledCommunicationFacts(Guid CommunicationId, Guid? Cre
 /// <c>RecordCreationService</c> hands to every owner question and share sync of a CREATE of that request (never a repair, a job
 /// or any other create). It keeps the business-unit and team CONFIGURATION reads only: the Secure Record business unit by its
 /// configured name (R1), the Secure Record owner team by the configured unit and team names (R2),
-/// each business unit's default owner team (R4), and the acting user's business unit by Entra object id (R7).
+/// and each business unit's default owner team (R4). The acting user's own row is not kept (ISS-010 D1 review round 2: the route
+/// asks by system user id, so an object-id key never fired).
 /// The restricted-content and communication-filing answers a pass keeps are NOT kept per request
 /// (<see cref="RequestScoped"/>): a request may write communications, and neither was reviewed for request scope.</para>
 /// <para><b>What is kept.</b> In a request's instance, only a successful, non-empty answer: a fault, a cancellation, "not found", "ambiguous" and a
@@ -302,7 +303,7 @@ internal sealed record UnfiledCommunicationFacts(Guid CommunicationId, Guid? Cre
 /// that did not fault, "not found" included, exactly as before ISS-010 D1 (a fault or cancellation is removed). No caller-access answer is ever kept
 /// here (ADR-009): the caller's Deep-depth business-unit test, <c>RetrievePrincipalAccess</c> and
 /// <c>RetrieveUserSetOfPrivilegesByNames</c> never pass through this type.</para>
-/// <para><b>Thread safety.</b> Each R1, R2, R4 and R7 answer is a <see cref="Lazy{T}"/> of the read's task in a
+/// <para><b>Thread safety.</b> Each R1, R2 and R4 answer is a <see cref="Lazy{T}"/> of the read's task in a
 /// <see cref="ConcurrentDictionary{TKey, TValue}"/>, so concurrent first reads of one key issue one call and share its outcome.
 /// The restricted-content and communication-filing dictionaries stay single-threaded: only a pass (one row at a time) uses them.</para>
 /// <para><b>Why no stale read inside a request.</b> Nothing on the decision-commit path writes a <c>team</c> or
@@ -358,19 +359,18 @@ public sealed class RecordOwnerLookupCache
         }
     }
 
-    /// <summary>True for a request's instance (<see cref="ForRequest"/>): only the R1, R2, R4 and R7 configuration reads are kept, and
-    /// the acting user's business unit (R7) is kept only here.</summary>
+    /// <summary>True for a request's instance (<see cref="ForRequest"/>): only the R1, R2 and R4 configuration reads are kept, by the
+    /// request rule; the acting user's own path (<c>ResolveFromUserAsync</c>) takes R1 and R4 from a request's instance only.</summary>
     internal bool RequestScoped { get; }
 
     private readonly ConcurrentDictionary<string, Lazy<Task<(Guid? Id, bool Ambiguous)>>> _secureBusinessUnits = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<Guid, Lazy<Task<RecordOwnerResolution>>> _defaultOwnerTeams = new();
     private readonly ConcurrentDictionary<(string BusinessUnitName, string TeamName), Lazy<Task<(Guid? TeamId, string? Refusal)>>> _secureOwnerTeams = new();
-    private readonly ConcurrentDictionary<Guid, Lazy<Task<ActingUserRow>>> _actingUsers = new();
 
     /// <summary>R1: the Secure Record business unit named <paramref name="businessUnitName"/> (the configured value, read at use).
     /// A request's instance keeps it only when exactly one unit was found; a pass keeps every answer that did not fault, "not
-    /// found" and "ambiguous" included, as it did before ISS-010 D1 (a pass in an environment with no Secure Record unit reads
-    /// it once, not once per row).</summary>
+    /// found" and "ambiguous" included, as it did before ISS-010 D1 (on the questions that took a pass's cache then: a parent's
+    /// and a record's, never the acting user's).</summary>
     internal Task<(Guid? Id, bool Ambiguous)> SecureBusinessUnitAsync(string businessUnitName, Func<Task<(Guid? Id, bool Ambiguous)>> read) =>
         OnceAsync(_secureBusinessUnits, businessUnitName, read, a => !RequestScoped || IsOneSecureBusinessUnit(a));
 
@@ -398,14 +398,6 @@ public sealed class RecordOwnerLookupCache
         string businessUnitName, string teamName, Func<Task<(Guid? TeamId, string? Refusal)>> read) =>
         OnceAsync(_secureOwnerTeams, (businessUnitName, teamName), read, a => a.TeamId is { } id && id != Guid.Empty && a.Refusal is null);
 
-    /// <summary>R7: the acting user's row by Entra object id (a request's instance only). Kept only when exactly one enabled user
-    /// with a business unit came back.</summary>
-    internal Task<ActingUserRow> ActingUserAsync(Guid objectId, Func<Task<ActingUserRow>> read) =>
-        OnceAsync(_actingUsers, objectId, read, a => a.Count == 1 && a.BusinessUnitId is { } id && id != Guid.Empty);
-
-    /// <summary>The acting user's row as the owner question reads it: how many enabled users matched, and the first one's
-    /// business unit and external flag.</summary>
-    internal readonly record struct ActingUserRow(int Count, Guid? BusinessUnitId, bool? IsExternal);
 
     /// <summary>
     /// The one read of <paramref name="key"/>: a concurrent first read shares the same call. An answer <paramref name="keep"/>
@@ -2163,7 +2155,6 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 {
     private const string SystemUserEntity = "systemuser";
     private const string IsExternalUserColumn = "sprk_isexternal"; // uac-r2 191c: a stored true only
-    private const string ObjectIdColumn = "azureactivedirectoryobjectid"; // ISS-010 D1: the key R7 is kept under
     private const string TeamEntity = "team";
     private const string BusinessUnitEntity = "businessunit";
     private const string BusinessUnitColumn = "businessunitid";
@@ -2645,7 +2636,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         if (context.CallerObjectId is { } objectId && objectId != Guid.Empty)
         {
-            return await ResolveFromUserAsync(ObjectIdColumn, objectId, context, ct).ConfigureAwait(false);
+            return await ResolveFromUserAsync("azureactivedirectoryobjectid", objectId, context, ct).ConfigureAwait(false);
         }
 
         // ── 3. Neither. Refuse upstream. ───────────────────────────────────────────────────────────────
@@ -5453,13 +5444,23 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<RecordOwnerResolution> ResolveFromUserAsync(
         string userKeyColumn, Guid userKey, RecordOwnershipContext context, CancellationToken ct)
     {
-        // ISS-010 D1 (uac-r2 Q4): one child-records request reads the acting user's row once, keyed by the Entra object id; only a
-        // request's cache, never a pass's, and only a single enabled user with a business unit is kept.
-        var user = context.LookupCache is { RequestScoped: true } requestCache
-                   && string.Equals(userKeyColumn, ObjectIdColumn, StringComparison.Ordinal)
-            ? await requestCache.ActingUserAsync(userKey, () => ReadActingUserAsync(userKeyColumn, userKey, ct)).ConfigureAwait(false)
-            : await ReadActingUserAsync(userKeyColumn, userKey, ct).ConfigureAwait(false);
-        if (user.Count > 1)
+        // TOP 2, not TOP 1 — the same contract RecordContainerResolver.ResolveForActingUserAsync keeps for the
+        // same fact. One row is the answer; two mean the key maps to more than one Dataverse user and the
+        // business unit is AMBIGUOUS. TOP 1 would silently pick a winner, so this component and the
+        // container resolver could put one save's bytes and its row in different business units.
+        var userQuery = new QueryExpression(SystemUserEntity)
+        {
+            ColumnSet = new ColumnSet(BusinessUnitColumn, IsExternalUserColumn),
+            TopCount = 2,
+            NoLock = true
+        };
+        userQuery.Criteria.AddCondition(userKeyColumn, ConditionOperator.Equal, userKey);
+        // Issue #1576: a disabled systemuser keeps its oid and id; its business unit must not own a new record, so it
+        // resolves as "no user" and the save refuses (ActingUserUnresolved) rather than filing under that BU.
+        userQuery.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
+
+        var users = await _dataverse.RetrieveMultipleAsync(userQuery, ct).ConfigureAwait(false);
+        if (users.Entities.Count > 1)
         {
             _logger.LogError(
                 "Cannot resolve an owning team: {UserKeyColumn}={UserKey} matches more than one Dataverse "
@@ -5470,7 +5471,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "the acting user matches more than one Dataverse user, so their business unit is ambiguous");
         }
 
-        var businessUnitId = user.BusinessUnitId;
+        var businessUnitId = users.Entities.FirstOrDefault()
+            ?.GetAttributeValue<EntityReference>(BusinessUnitColumn)?.Id;
 
         if (businessUnitId is null || businessUnitId == Guid.Empty)
         {
@@ -5489,7 +5491,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // user (across firms). It is owned in the CUSTOMER's business unit (ExternalAccess:CustomerBusinessUnitId) instead;
         // unset: refused, never the external unit's team. A flagged user NOT yet in that unit (191e's placement is off until
         // 191i) keeps today's rule — their own unit owns it — so this ships safely before the customer unit is configured.
-        if (user.IsExternal == true
+        if (users.Entities[0].GetAttributeValue<bool?>(IsExternalUserColumn) == true
             && await IsInExternalCollaboratorsUnitAsync(businessUnitId.Value, ct).ConfigureAwait(false))
         {
             var configured = _configuration[ExternalAccessOptionsValidator.CustomerBusinessUnitKey];
@@ -5514,7 +5516,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // The user path should never meet the Secure Record BU (it holds no users; provisioning and the census job
         // refuse and report otherwise), but if it does, the answer is still the named team or a refusal — never the
         // default team task 144 retired.
-        var secureBu = await SecureBusinessUnitAsync(context.LookupCache, ct).ConfigureAwait(false);
+        // ISS-010 D1 (review round 2): a request's cache only; a pass reads per question here, as before D1.
+        var requestCache = context.LookupCache is { RequestScoped: true } scoped ? scoped : null;
+        var secureBu = await SecureBusinessUnitAsync(requestCache, ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
             return RecordOwnerResolution.Refused(
@@ -5525,35 +5529,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return secureBu.Id == businessUnitId
             ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false)
             : await OrdinaryExitAsync(
-                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct, context.LookupCache).ConfigureAwait(false), businessUnitId.Value, context, ct)
+                await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct, requestCache).ConfigureAwait(false), businessUnitId.Value, context, ct)
                 .ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// The acting user's row behind <see cref="ResolveFromUserAsync"/>: TOP 2, not TOP 1 — the same contract
-    /// RecordContainerResolver.ResolveForActingUserAsync keeps for the same fact. One row is the answer; two mean the key maps to
-    /// more than one Dataverse user and the business unit is AMBIGUOUS. TOP 1 would silently pick a winner, so this component and
-    /// the container resolver could put one save's bytes and its row in different business units. A fault propagates.
-    /// </summary>
-    private async Task<RecordOwnerLookupCache.ActingUserRow> ReadActingUserAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
-    {
-        var userQuery = new QueryExpression(SystemUserEntity)
-        {
-            ColumnSet = new ColumnSet(BusinessUnitColumn, IsExternalUserColumn),
-            TopCount = 2,
-            NoLock = true
-        };
-        userQuery.Criteria.AddCondition(userKeyColumn, ConditionOperator.Equal, userKey);
-        // Issue #1576: a disabled systemuser keeps its oid and id; its business unit must not own a new record, so it
-        // resolves as "no user" and the save refuses (ActingUserUnresolved) rather than filing under that BU.
-        userQuery.Criteria.AddCondition("isdisabled", ConditionOperator.Equal, false);
-
-        var users = await _dataverse.RetrieveMultipleAsync(userQuery, ct).ConfigureAwait(false);
-        var first = users.Entities.FirstOrDefault();
-        return new RecordOwnerLookupCache.ActingUserRow(
-            users.Entities.Count,
-            first?.GetAttributeValue<EntityReference>(BusinessUnitColumn)?.Id,
-            first?.GetAttributeValue<bool?>(IsExternalUserColumn));
     }
 
     /// <summary>
@@ -5599,7 +5576,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeamForAsync(
         Guid answerBusinessUnitId, RecordOwnerLookupCache? cache, CancellationToken ct)
     {
-        // ISS-010 D1: a request's cache keeps only the R1, R2, R4 and R7 configuration reads; the restricted-content walk is a pass's only.
+        // ISS-010 D1: a request's cache keeps only the R1, R2 and R4 configuration reads; the restricted-content walk is a pass's only.
         var passCache = cache is { RequestScoped: false } ? cache : null;
         if (passCache is not null && passCache.RestrictedContentByAnswerBusinessUnit.TryGetValue(answerBusinessUnitId, out var known))
             return known;

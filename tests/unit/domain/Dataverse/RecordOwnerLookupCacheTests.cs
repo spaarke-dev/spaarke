@@ -1,10 +1,11 @@
 // ISS-010 part D1 (#3184): the per-request RecordOwnerLookupCache — one read per request of the business-unit and team
 // configuration rows a decision commit's creates ask again and again (R1 the Secure Record business unit by name, R2 the Secure
-// Record owner team, R4 a unit's default owner team, R7 the acting user's unit by Entra object id). The binding conditions
-// (uac-r2 and field-mapping-r1, 2026-11-26) are pinned here: a request keeps only a successful, non-empty answer; a fault, a
-// cancellation, "not found" and a refusal are removed so the next read goes to the wire; concurrent first reads issue one call;
-// two requests share nothing; R1/R2 are keyed on the configured VALUE; R7 is kept per request only; a request's instance keeps
-// nothing a pass keeps besides R1, R2, R4 and R7. A pass keeps R1 and R4 exactly as before D1 (every answer that did not fault).
+// Record owner team, R4 a unit's default owner team). The binding conditions (uac-r2 and field-mapping-r1, 2026-11-26) are
+// pinned here: a request keeps only a successful, non-empty answer; a fault, a cancellation, "not found" and a refusal are
+// removed so the next read goes to the wire; concurrent first reads issue one call; two requests share nothing; R1/R2 are keyed
+// on the configured VALUE; a request's instance keeps nothing a pass keeps besides R1, R2 and R4. A pass keeps R1 and R4 exactly
+// as before D1: every answer that did not fault, and only on the questions that took a pass's cache before D1 (a parent's and a
+// record's, never the acting user's). R3 (can a team be the Secure owner) and R7 (the acting user's row) are not cached.
 
 using System.Reflection;
 using FluentAssertions;
@@ -137,31 +138,6 @@ public class RecordOwnerLookupCacheTests
         refused.Calls.Should().Be(2);
     }
 
-    [Fact]
-    public async Task R7_OneEnabledUserWithAUnit_IsReadOnce_ButNoneOrTwoAreReadAgain()
-    {
-        var cache = RequestCache();
-        var oid = Guid.NewGuid();
-        var one = new Wire<RecordOwnerLookupCache.ActingUserRow>(_ => Task.FromResult(new RecordOwnerLookupCache.ActingUserRow(1, Unit, false)));
-        await cache.ActingUserAsync(oid, one.Read);
-        await cache.ActingUserAsync(oid, one.Read);
-        one.Calls.Should().Be(1);
-
-        foreach (var row in new[]
-                 {
-                     new RecordOwnerLookupCache.ActingUserRow(0, null, null),
-                     new RecordOwnerLookupCache.ActingUserRow(2, Unit, false),
-                     new RecordOwnerLookupCache.ActingUserRow(1, null, false),
-                 })
-        {
-            var key = Guid.NewGuid();
-            var wire = new Wire<RecordOwnerLookupCache.ActingUserRow>(_ => Task.FromResult(row));
-            await cache.ActingUserAsync(key, wire.Read);
-            await cache.ActingUserAsync(key, wire.Read);
-            wire.Calls.Should().Be(2, $"{row} is not a single user with a unit");
-        }
-    }
-
     // ── A pass keeps what it kept before D1 (review F2) ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -215,20 +191,25 @@ public class RecordOwnerLookupCacheTests
         wire.Calls.Should().Be(2, "a fault is asked again; the answer after it is kept for the pass");
     }
 
-    /// <summary>Review F2, through the resolver: in an environment with no Secure Record business unit (supported), a pass asks
-    /// the unit once for all its rows, as before D1; a request asks it per question (not-found is never kept per request).</summary>
+    /// <summary>Review F2, through the resolver, in an environment with no Secure Record business unit (supported): a pass
+    /// asks the unit once for all its filed rows, as before D1 (the parent's question took the pass's cache); the acting user's
+    /// question takes no pass cache, so a pass asks it per row there, as before D1. A request asks it per question either way
+    /// (not-found is never kept per request).</summary>
     [Fact]
-    public async Task APass_WithNoSecureUnit_ReadsTheUnitOnce_NotOncePerRow()
+    public async Task APass_WithNoSecureUnit_ReadsTheUnitOnceForFiledRows_AndPerRowOnTheActingUsersPath()
     {
         const int Rows = 3;
-        var question = new RecordOwnershipContext { CallerObjectId = FakeDirectory.CallerOid };
+        var matter = Guid.Parse("d1d1d1d1-0000-4000-8000-0000000000b1");
 
-        async Task<(int UnitReads, Guid? Owner)> Ask(RecordOwnerLookupCache? cache)
+        async Task<(int UnitReads, Guid? Owner)> Ask(RecordOwnerLookupCache? cache, RecordOwnershipContext question)
         {
             var directory = new FakeDirectory()
                 .WithUser(FakeDirectory.CallerUserId, FakeDirectory.CallerOid, FakeDirectory.GeneralBu)
                 .WithBusinessUnit(FakeDirectory.GeneralBu, "Spaarke")
-                .WithTeam(FakeDirectory.GeneralTeam, FakeDirectory.GeneralBu, isDefault: true, teamType: 0, "Spaarke");
+                .WithBusinessUnit(FakeDirectory.ChildBu, "Spaarke Business Unit 1", parent: FakeDirectory.GeneralBu)
+                .WithTeam(FakeDirectory.GeneralTeam, FakeDirectory.GeneralBu, isDefault: true, teamType: 0, "Spaarke")
+                .WithTeam(FakeDirectory.ChildTeam, FakeDirectory.ChildBu, isDefault: true, teamType: 0, "Spaarke Business Unit 1")
+                .WithRecord("sprk_matter", matter, FakeDirectory.ChildBu, owningTeam: FakeDirectory.ChildTeam);
             var resolver = directory.Resolver();
             RecordOwnerResolution? answer = null;
             for (var i = 0; i < Rows; i++)
@@ -236,13 +217,17 @@ public class RecordOwnerLookupCacheTests
             return (directory.QueriedEntities.Count(e => e == "businessunit"), answer!.OwningTeamId);
         }
 
-        var pass = await Ask(new RecordOwnerLookupCache());
-        var request = await Ask(RequestCache());
-        var none = await Ask(null);
+        var filed = new RecordOwnershipContext { TargetEntityLogicalName = "sprk_matter", TargetRecordId = matter };
+        var unfiled = new RecordOwnershipContext { CallerObjectId = FakeDirectory.CallerOid };
 
-        pass.Should().Be((1, FakeDirectory.GeneralTeam), "a pass: the missing Secure Record unit is read once");
-        request.Should().Be((Rows, FakeDirectory.GeneralTeam), "a request reads not-found again on every question");
-        none.Should().Be((Rows, FakeDirectory.GeneralTeam));
+        (await Ask(new RecordOwnerLookupCache(), filed)).Should().Be((1, FakeDirectory.ChildTeam), "a pass: the missing unit once for its filed rows");
+        (await Ask(RequestCache(), filed)).Should().Be((Rows, FakeDirectory.ChildTeam), "a request reads not-found again");
+        (await Ask(null, filed)).Should().Be((Rows, FakeDirectory.ChildTeam));
+
+        (await Ask(new RecordOwnerLookupCache(), unfiled)).Should().Be((Rows, FakeDirectory.GeneralTeam),
+            "the acting user's question took no pass cache before D1, so a pass reads per row there");
+        (await Ask(RequestCache(), unfiled)).Should().Be((Rows, FakeDirectory.GeneralTeam), "a request reads not-found again");
+        (await Ask(null, unfiled)).Should().Be((Rows, FakeDirectory.GeneralTeam));
     }
 
     // ── Faults, cancellation and concurrency ─────────────────────────────────────────────────────────────────────────
@@ -313,10 +298,12 @@ public class RecordOwnerLookupCacheTests
 
     // ── Through the real readers ─────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>R7 is the request's only: one unfiled question per create, the acting user read once per request, and per
-    /// question (as before) with a pass's cache or none. The answers are the same.</summary>
+    /// <summary>Review round 2 (F2, F3): the acting user's question. With a request's cache it reads R1 and R4 once per request;
+    /// with a pass's cache or none it reads them per question, exactly as before D1 (the cascade's root-owner step and the
+    /// unfiled-communication creator hand it a pass's cache). The user's own row is read per question in every case (R7 is not
+    /// cached). The answers are the same.</summary>
     [Fact]
-    public async Task R7_TheActingUsersRow_IsReadOncePerRequest_ButEveryTimeWithAPassCacheOrNone()
+    public async Task TheActingUsersQuestion_ReadsR1AndR4OncePerRequest_ButPerQuestionWithAPassCacheOrNone()
     {
         var question = new RecordOwnershipContext { CallerObjectId = FakeDirectory.CallerOid };
 
@@ -335,13 +322,12 @@ public class RecordOwnerLookupCacheTests
         var pass = await Twice(new RecordOwnerLookupCache());
         var none = await Twice(null);
 
-        request.Should().Be((1, 1, 1, FakeDirectory.GeneralTeam), "R7, R1 and R4 once per request");
-        pass.UserReads.Should().Be(2, "uac-r2 Q4: the acting user's row is kept per request only, never per pass");
+        request.Should().Be((2, 1, 1, FakeDirectory.GeneralTeam), "R1 and R4 once per request; the user's row per question");
+        pass.Should().Be((2, 2, 2, FakeDirectory.GeneralTeam), "a pass: the acting user's question reads as before D1");
         none.Should().Be((2, 2, 2, FakeDirectory.GeneralTeam), "no cache: every question reads, exactly as before");
-        pass.Owner.Should().Be(none.Owner);
     }
 
-    /// <summary>A request's instance keeps nothing a pass keeps besides R1, R2, R4 and R7: the restricted-content walk is read per question.</summary>
+    /// <summary>A request's instance keeps nothing a pass keeps besides R1, R2 and R4: the restricted-content walk is read per question.</summary>
     [Fact]
     public async Task ARequestCache_DoesNotKeepTheRestrictedContentWalk_APassCacheDoes()
     {
@@ -364,6 +350,20 @@ public class RecordOwnerLookupCacheTests
 
         (await WalkReads(new RecordOwnerLookupCache())).Should().Be(2, "a pass walks once");
         (await WalkReads(RequestCache())).Should().Be(4, "a request walks per question, as with no cache");
+    }
+
+    /// <summary>Review round 2 (F3, CLAUDE.md §11): the route asks the owner question by system user id, so an object-id key for
+    /// the acting user's row (R7) never fired; it is not cached. Re-keying it on the system user id needs the owners' sign-off.</summary>
+    [Fact]
+    public void R7_IsNotCached_TheCacheHasNoActingUserEntry()
+    {
+        const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
+        typeof(RecordOwnerLookupCache).GetMembers(All).Select(m => m.Name)
+            .Should().NotContain(n => n.Contains("ActingUser", StringComparison.Ordinal), "the cache keeps no acting user's row");
+        typeof(RecordOwnerLookupCache).GetNestedTypes(All).Select(t => t.Name)
+            .Should().NotContain(n => n.Contains("ActingUser", StringComparison.Ordinal));
+        typeof(RecordOwnershipResolver).GetMethods(All).Select(m => m.Name)
+            .Should().NotContain("ReadActingUserAsync", "the user's row is read inline, as on master");
     }
 
     /// <summary>Review F4 (CLAUDE.md §11): "can this team be the Secure owner" (R3) has no production caller with a request, so

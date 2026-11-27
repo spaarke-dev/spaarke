@@ -1374,6 +1374,9 @@ public sealed class SecureChildShareSynchronizer
         IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct, RecordOwnerLookupCache? cache = null)
     {
         var teamName = SecureRecordOwnerTeam.OwnerTeamName(configuration);
+        // ISS-010 D1 (review round 2, accepted for request scope): the key reads the configured unit name here, and the read
+        // behind it reads that name again through R1. A configuration reload between the two could file one request's R2
+        // answer under the old unit name; the next request has its own cache, so the window is one request.
         return cache is null
             ? ReadSecureOwnerTeamAsync(dataverse, configuration, teamName, ct, cache: null)
             : cache.SecureOwnerTeamAsync(SecureRecordOwnerTeam.BusinessUnitName(configuration), teamName,

@@ -2795,8 +2795,8 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
 
     /// <summary>
     /// ISS-010 part D1 (#3184): the HTTP request's business-unit and team configuration answers (<see cref="RecordOwnerLookupCache"/>:
-    /// the Secure Record business unit and owner team, each unit's default owner team and the acting user's
-    /// unit) that this create's owner question, copy gate and share sync share with every other create of the same request;
+    /// the Secure Record business unit and owner team and each
+    /// unit's default owner team) that this create's owner question, copy gate and share sync share with every other create of the same request;
     /// <see langword="null"/> (every off-route caller, Repair, a job) reads them as before. Set by <c>ChildRecordEndpoints.CreateAsync</c>
     /// only (<c>RecordOwnerLookupCache.ForRequest</c>). Configuration only: never a caller-access answer, a row or a failure.
     /// </summary>
