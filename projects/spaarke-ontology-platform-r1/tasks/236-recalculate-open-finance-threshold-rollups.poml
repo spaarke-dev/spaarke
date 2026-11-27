@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="236" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>One-off: recalculate the stored finance roll-up of each matter or project with a finance Threshold Signal open from before task 232 (D-235, #1767)</title>
+    <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operational dev data step through an existing route; no code change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Main session; writes dev data on the owner's standing go (D-235).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-d-2026-11-27</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dev data only; no repo files besides notes.</parallel-reason>
+    <deps>232</deps>
+    <tags>finance, signals, dev-data</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-27 decision D-235: once task 232 is on dev (dev BFF 5cd40984b0 carries it), list the matters and projects that have an open base-derived finance Threshold Signal (spend, budget or utilization; SignalReevaluationJob.RollupSubjectOf), and call the existing POST /api/finance/{matters|projects}/{id}/recalculate once for each. Read-only listing first; record counts (no ids in public) in notes/task-236-notes.md.</prompt>
+  <role>Main session ontology-r1.</role>
+  <goal>Every matter or project form with an open finance Threshold Signal shows the same roll-up figures the Signal was raised on.</goal>
+  <context><background>Never write the roll-up columns directly; only the route (FinanceRollupService, unchanged-write skip). One call per record (D-61). Stop on any non-404 failure and report.</background></context>
+  <constraints>
+    <constraint source="public repo">No environment GUIDs, record ids or mailbox addresses in notes, commits or issues.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Confirm task 232 (fae8f453d6) is in the deployed dev BFF.</step>
+    <step order="2">Read-only: list matters and projects with an open base-derived finance Threshold Signal.</step>
+    <step order="3">Call the recalculate route once per subject; record outcome counts in notes/task-236-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Count of subjects listed, count recalculated (200), count unchanged, count failed recorded in notes/task-236-notes.md.</criterion>
+  </acceptance-criteria>
+  <completion></completion>
+</task>

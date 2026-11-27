@@ -873,3 +873,22 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 - **Decision (owner, answered in this session):** "Listed, no Open". The tab reads Decision Records first (every writer-authored record the caller can read in the window, both reviews of a Signal reviewed twice included). A gate Decision Record (no Signal, D-139) appears with its summary and no Open action. Task 226.
 - **Rejected:** a read-only summary panel for gate records.
+
+## D-232 — A system-closed Decision Record derives its privilege flag app-only (owner, 2026-11-27; #3275, DI-177)
+
+- **Decision (owner, answered in this session):** option A. When the nightly re-evaluation writes the ConditionCleared Decision Record, it derives `sprk_privilegeflagged` with the same `WorkItemPrivilege` rule the commit route uses (D-212, task 225), read app-only as the job's identity; it no longer copies the Signal column nothing writes (DI-64). The flag is a stamp; nothing branches on it, and a reader learns no more than the Decide lane shows (D-142). Task 233.
+- **Rejected:** a "not assessed" (null) flag on system closures (B); documenting that system closures are never flagged (C).
+
+## D-233 — An open inquiry's outcome To Do closes only through the BFF, from SmartTodo, LegalWorkspace and the chat tool (owner, 2026-11-27; #3279, DI-179, #1984)
+
+- **Decision (owner, answered in this session):** option A. SmartTodo's and LegalWorkspace's complete and dismiss go through the existing BFF PATCH (`/api/v1/child-records/sprk_todo/{id}`), which refuses with `inquiry.disposition_required` and the user sees "Record the outcome on the inquiry first"; the chat update tool runs the same `InquiryTodoCloseRefusalAsync` check before its confirm dialog. The model-driven form's Deactivate stays a known limit (no plugins, ADR-002). The SmartTodo/LegalWorkspace owners review; a real Dataverse create and read is required. Task 234.
+- **Rejected:** closing the chat-tool path only (B).
+
+## D-234 — Signal-less billing, Procedure and assign-firm Decision Records are listed on the Decision Records tab under their core record, without Open (owner, 2026-11-27; #3283, DI-180)
+
+- **Decision (owner, answered in this session):** list them under their core record with no Open action, as D-231 does for gate records. Each kind gets its own bounded, caller-trimmed read (no unbounded read: the capped-read 503 found on #3277 must not return). Task 235.
+- **Rejected:** keeping the #3277 scope as accepted.
+
+## D-235 — One-off recalculation of finance roll-ups for Threshold Signals open before task 232 (owner, 2026-11-27; #1767)
+
+- **Decision (owner, answered in this session):** "yes after next ontology deploy; you can run it automatically". Once task 232 is on dev, the main session recalculates, through the existing recalculate route (`FinanceRollupService`, unchanged-write skip), the stored roll-up of each matter or project that has an open spend, budget or utilization Threshold Signal raised before 232 shipped. Targeted, one call per record (D-61); never a direct column write. Task 236.

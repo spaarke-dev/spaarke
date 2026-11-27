@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="233" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A system-closed (ConditionCleared) Decision Record derives its privilege flag with WorkItemPrivilege, app-only (#3275, DI-177)</title>
+    <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Privilege flag on an append-only record; the job runs app-only, so the read identity must not widen what the flag reveals.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-d-2026-11-27</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalReevaluationJob ConditionCleared write and its tests; 234 and 235 touch other files.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, signals, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-27 decision D-232 (notes/decisions.md): option A on #3275. Read gh issue view 3275 and DI-177. The nightly SignalReevaluationJob writes a ConditionCleared Decision Record whose sprk_privilegeflagged is copied from sprk_signal.sprk_privilegeflagged, which nothing writes (DI-64), so it always reads false. Derive it instead with the same WorkItemPrivilege rule task 225 uses at commit (DecisionCommitService.PrivilegeFlaggedAsync: WorkItemPrivilege.SourcesOf over the subject and stored sprk_evidencerefs, then FlaggedAsync), read with the job's application identity, failing closed (a read fault = flagged). Stop selecting and reading the Signal column for this. Entry points on origin/master: Services/Signals/SignalReevaluationJob.cs (the PrivilegeFlagged: line near the ConditionCleared record, ~:965, and the column select ~:1523), Services/Signals/WorkItemPrivilege.cs, DecisionCommitService.cs PrivilegeFlaggedAsync. Search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, the ontology Signal re-evaluation job.</role>
+  <goal>Every ConditionCleared Decision Record carries the D-212 privilege flag derived from its Signal's subject and evidence communications, not the unwritten Signal column.</goal>
+  <context>
+    <background>Reuse WorkItemPrivilege and, if a shared helper is cleaner than copying DecisionCommitService.PrivilegeFlaggedAsync, extract one with no behaviour change on the commit path. The flag is record accuracy only (ADR-015: never branched on). Batch the reads per pass where the job already batches; do not add per-Signal round trips that turn the nightly into N reads without bounding them (state the cost in the PR). D-145b idempotency of the ConditionCleared record must be unchanged. Run /conflict-check; read git log -5 on the files you edit.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-233-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #3275"; notes in notes/task-233-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">A test fails on origin/master: a Signal closed by condition-cleared whose evidence communication is classified Privileged (and one Potentially Privileged) yields a Decision Record with sprk_privilegeflagged = true.</criterion>
+    <criterion testable="true">Must-not-fire: evidence classified None or null gives false; the job no longer reads sprk_signal.sprk_privilegeflagged (test or guard); a read fault gives true and the closure still completes.</criterion>
+    <criterion testable="true">The commit path's behaviour and tests are unchanged; D-145b idempotency test still passes.</criterion>
+    <criterion testable="true">Build, Signals filter (contract baselines included), full ArchTests pass; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>Deriving the flag app-only would need a new privilege or role, or would require reading communications the job does not already have access to: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt233); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="235" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Signal-less billing, Record Procedure and assign-firm Decision Records appear on the Decision Records tab under their core record, without Open (#3283, DI-180)</title>
+    <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code (.cs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Caller-trimmed reads of append-only records on secure matters; an unbounded read brought a 503 on #3277.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-d-2026-11-27</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SignalReadService Decided set and its tests; 233 edits SignalReevaluationJob, 234 client + AI handler.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, signals, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-27 decision D-234 (notes/decisions.md) on #3283. Read gh issue view 3283, DI-180, D-231 and the #3277 reviews (task 226 notes). The Decision Records tab (SignalReadService Decided set, set=decided) reads two bounded sets: Signal-backed records and email-gate records joined to their email. Add Record Procedure decisions (resolvedSignalIds always empty), billing decisions written with no Signal, and assign-firm decisions: each listed under its core record (matter or project) with its summary and no Open action, exactly as gate records are shown. Each kind gets its own bounded, caller-trimmed read (the caller's identity; never app-only), with the same cap and truncation signal the existing reads use. Writers: DecisionRecordWriter (Procedure ~:2213, billing ~:1764), BillingDecisionRecorder (Services/Finance), the assign-firm path. Search by name.</prompt>
+  <role>SPAARKE backend developer: .NET 10 BFF, the ontology Signal read routes.</role>
+  <goal>The Decision Records tab lists every writer-authored Decision Record the caller can read in the window, including Procedure, billing and assign-firm records with no Signal, without bringing back the capped-read 503.</goal>
+  <context>
+    <background>Identify each kind by a stored, writer-trusted property (WriterCreatedRecord, D-145a/task 223), not by text. Keep the window and cap semantics of the existing reads; merge and order the sets as the tab already does; do not duplicate a record that is also Signal-backed. If the client needs a new group label, keep it inside the existing Decision Records tab component (no new component). Run /conflict-check; read git log -5 on the files you edit.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-235-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #3283"; notes in notes/task-235-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Tests fail on origin/master: a Procedure, a Signal-less billing and an assign-firm Decision Record the caller can read appear under their core record with no Open action.</criterion>
+    <criterion testable="true">Must-not-fire: a non-member of a secure family sees none of them; a record that is Signal-backed is listed once; a test proves each new read is bounded (cap + truncation flag) and runs as the caller.</criterion>
+    <criterion testable="true">Contract baseline updated in the same PR; existing Signal-backed and gate listings unchanged.</criterion>
+    <criterion testable="true">Build, Signals filter, full ArchTests, client checks if the client changes; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>A kind cannot be identified from stored writer-trusted data, or a bounded caller-trimmed read is not possible for it: STOP and report (do not add an unbounded or app-only read).</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt235); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>

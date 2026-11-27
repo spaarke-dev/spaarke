@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="234" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>An open inquiry's outcome To Do closes only through the BFF from SmartTodo, LegalWorkspace and the chat update tool (#3279 DI-179, #1984)</title>
+    <phase>13 Deferred-issue triage group D (R1 close-out)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies client (.ts) and BFF (.cs) code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes how a shared library (Spaarke.SmartTodo.Components) writes every To Do status, plus a chat-tool refusal; cross-project blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>group-d-2026-11-27</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SmartTodo service, LegalWorkspace To Do block and DataverseUpdateRecordHandler; 233 and 235 touch Signals files only.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react, bff-api, ai, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Owner 2026-11-27 decision D-233 (notes/decisions.md): option A on #3279. Read gh issue view 3279, gh issue view 1984 and DI-179. PR #3273 (task 228) added a 409 inquiry.disposition_required to PATCH /api/v1/child-records/sprk_todo/{id} (ChildRecordEndpoints InquiryTodoCloseRefusalAsync). (1) Route SmartTodo's updateTodoStatus and dismissTodo (src/client/shared/Spaarke.SmartTodo.Components/src/services/TodoDataverseService.ts ~:98-111) and the LegalWorkspace To Do block's complete/dismiss through that BFF PATCH (existing authenticatedFetch from @spaarke/auth; no new endpoint), and show the refusal in plain words ("Record the outcome on the inquiry first"). (2) Add the same InquiryTodoCloseRefusalAsync check to the chat update tool (src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseUpdateRecordHandler.cs ~:195-215) before its confirm dialog, reusing the guard, not copying it. (3) The model-driven form Deactivate stays a known limit (ADR-002, no plugins): note it in the PR. Run /conflict-check first (shared library used by several projects).</prompt>
+  <role>SPAARKE full-stack developer: React 19 shared components, @spaarke/auth, .NET 10 BFF AI tool handlers.</role>
+  <goal>Completing or dismissing an open inquiry's outcome To Do from SmartTodo Kanban, the LegalWorkspace To Do block or the chat tool is refused in plain words; every other To Do closes as before.</goal>
+  <context>
+    <background>Moving SmartTodo writes to the BFF changes the path for every To Do status change: keep the result identical for To Dos with no open inquiry (same statecode/statuscode, same UI refresh), handle offline/failed calls as the current Xrm path does, and do not break hosts that load SmartTodo without the BFF configured (check every host; if any lacks the BFF, STOP and report). Notify the SmartTodo and LegalWorkspace owners via the PR. A real Dataverse create and read is required before merge (push-to-github Step 1.7): do it on dev and record it in the notes (no ids in public). Run /conflict-check; read git log -5 on the files you edit.</background>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §6 gotcha 2026-11-24">Run the relevant --filter (Signals code: "FullyQualifiedName~Signals", which includes the contract baselines; Communication: "FullyQualifiedName~Communication"; Ai: "FullyQualifiedName~Ai"); update any baseline the change moves in the same PR.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF hygiene when the BFF changes: publish-size delta vs a fresh master build (short paths, same zip tool, file counts) in the PR; no new HIGH CVE; no new package.</constraint>
+    <constraint source="root CLAUDE.md §11">No new service, interface, endpoint or DI registration unless the three questions are answered in the PR.</constraint>
+    <constraint source="project CLAUDE.md §6">Filtered BFF tests only (never the unfiltered Sprk.Bff.Api.Tests); full ArchTests (build tests/Spaarke.ArchTests explicitly first). Client code: run node scripts/quality/client-lint/client-lint.mjs check and the package jest suite.</constraint>
+    <constraint source="public repo">No environment GUIDs, user or contact ids, mailbox addresses, tenant names or private access-control mechanics in code, tests, notes, commits or the PR.</constraint>
+    <constraint source="project CLAUDE.md §2 / D-106">Fix only what the named issues describe. Any other defect found: report it in the task notes and to the main session; do not fix it here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the issue(s) and entry points; record findings in notes/task-234-notes.md.</step>
+    <step order="2">Failing tests first, with must-not-fire controls.</step>
+    <step order="3">Implement the fix.</step>
+    <step order="4">Build, filtered tests, full ArchTests (BFF tasks), client checks (client tasks), publish-size delta (BFF tasks).</step>
+    <step order="5">Code review and ADR check (Step 9.5); PR to master, body "Closes #3279, closes #1984"; notes in notes/task-234-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Tests fail on origin/master: dismissing and completing an open inquiry's outcome To Do from SmartTodo and from the LegalWorkspace block is refused with the plain-words message; the chat update tool refuses before its confirm dialog.</criterion>
+    <criterion testable="true">Must-not-fire on each path: a To Do with no open inquiry completes and dismisses exactly as before (same columns written).</criterion>
+    <criterion testable="true">The model-driven Deactivate known limit is stated in the PR; #1984 is closed by the PR only if all three paths are covered.</criterion>
+    <criterion testable="true">Client jest suites, client-lint, tsc, build, Ai and Signals filters, full ArchTests pass; real Dataverse create+read on dev recorded; publish-size delta reported.</criterion>
+  </acceptance-criteria>
+  <escalation>
+    <trigger>A SmartTodo host cannot reach the BFF, the PATCH route cannot express a status the Xrm path writes today, or the shared-library change conflicts with another active project: STOP and report.</trigger>
+  </escalation>
+  <execution>
+    <protocol>Run through task-execute. Fresh branch from origin/master in a short-path worktree (C:\wt234); PR to master; do not merge (the main session reviews and merges, D-115).</protocol>
+  </execution>
+  <completion></completion>
+</task>
