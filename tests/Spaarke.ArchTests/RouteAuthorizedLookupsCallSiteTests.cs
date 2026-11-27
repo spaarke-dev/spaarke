@@ -1,6 +1,7 @@
 using System.Reflection;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
 
@@ -35,11 +36,12 @@ public class RouteAuthorizedLookupsCallSiteTests
     /// <summary>The closed list of call sites that may set the option, each with its route decision.</summary>
     private static readonly IReadOnlyList<(Type Type, string Method, string Reason)> SetterAllowList = new[]
     {
-        // spaarkeai-mcp-bff-api-r2 task 031: the route's one create moved, unchanged, into CreateAnalysisRecordAsync, which the route's
-        // handler and the MCP start tool share; its callers are the closed list below (OnlyTheCreateDecisionFeedsTheSharedCreate).
-        (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysisRecordAsync),
-            "POST /api/ai/analysis/create and spaarke_start_analysis: the playbook the create decision (AnalysisAuthorizationFilter, "
-            + "AnalysisCreate) authorised for this caller and id."),
+        // spaarkeai-mcp-bff-api-r2 task 031: the route's one create moved, unchanged, into CreateAnalysisRecordAsync (task 037a: now in
+        // Services/Ai/AnalysisStartService, unchanged), which the route's handler and the caller-facing start share; its callers are
+        // the closed list below (OnlyTheCreateDecisionFeedsTheSharedCreate).
+        (typeof(AnalysisStartService), nameof(AnalysisStartService.CreateAnalysisRecordAsync),
+            "POST /api/ai/analysis/create, spaarke_start_analysis and the Copilot playbook start: the playbook the create decision "
+            + "(AnalysisAuthorizationFilter, AnalysisCreate) authorised for this caller and id."),
     };
 
     /// <summary>
@@ -49,13 +51,13 @@ public class RouteAuthorizedLookupsCallSiteTests
     private static readonly IReadOnlyList<(Type Type, string Method)> SharedCreateCallers = new[]
     {
         (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysis)),
-        (typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.StartAnalysisAsCallerAsync)),
+        (typeof(AnalysisStartService), nameof(AnalysisStartService.StartAsCallerAsync)),
     };
 
     [Fact(DisplayName = "mcp-r2 031: only the route handler and the caller-facing start call the shared analysis create (both pass the create decision's ids)")]
     public void OnlyTheCreateDecisionFeedsTheSharedCreate()
     {
-        var callers = Callers(BffTypes.Value, typeof(AnalysisEndpoints), nameof(AnalysisEndpoints.CreateAnalysisRecordAsync))
+        var callers = Callers(BffTypes.Value, typeof(AnalysisStartService), nameof(AnalysisStartService.CreateAnalysisRecordAsync))
             .Distinct()
             .ToArray();
 
@@ -64,7 +66,7 @@ public class RouteAuthorizedLookupsCallSiteTests
             .Select(c => $"{c.Type.FullName}.{c.Method}")
             .ToArray();
         Assert.True(outside.Length == 0,
-            "AnalysisEndpoints.CreateAnalysisRecordAsync exempts the playbook its caller names from the create's AppendTo question; only a "
+            "AnalysisStartService.CreateAnalysisRecordAsync exempts the playbook its caller names from the create's AppendTo question; only a "
             + "caller holding the create decision's answer may call it. Not on the list:\n" + string.Join("\n", outside));
         Assert.Equal(SharedCreateCallers.Count, callers.Length);
     }

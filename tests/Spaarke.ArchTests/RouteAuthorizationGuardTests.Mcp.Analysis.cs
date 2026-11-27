@@ -8,11 +8,12 @@ namespace Spaarke.ArchTests;
 public partial class RouteAuthorizationGuardTests
 {
     // Task 031 (FR-06, NFR-06): spaarke_start_analysis (a model-callable reversible write) and spaarke_get_analysis (read-only), both
-    // through AnalysisEndpoints' caller-facing methods (ADR-013 Path C: the tools name no Services/Ai type).
+    // through caller-facing seams (ADR-013: the tools name no Services/Ai type outside PublicContracts). Task 037a: the start's create moved
+    // from AnalysisEndpoints into the PublicContracts facade IAnalysisStartAi (AnalysisStartService), unchanged.
     private static readonly IReadOnlyList<McpTool> McpToolsAnalysis = new[]
     {
-        new McpTool("StartAnalysisTool", "", "AnalysisEndpoints",
-            "FR-06, reversible write: AnalysisEndpoints.StartAnalysisAsCallerAsync with exactly IHttpContextAccessor.HttpContext runs the "
+        new McpTool("StartAnalysisTool", "", "IAnalysisStartAi",
+            "FR-06, reversible write: IAnalysisStartAi.StartAsCallerAsync with exactly IHttpContextAccessor.HttpContext runs the "
             + "route's create decision (AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync: Create on sprk_analysis, Read and AppendTo "
             + "on the document, playbook use) as the caller, then the route's one RecordCreationService create. The tool adds no check and "
             + "runs nothing; its idempotencyKey is per caller. Bare [Authorize]."),

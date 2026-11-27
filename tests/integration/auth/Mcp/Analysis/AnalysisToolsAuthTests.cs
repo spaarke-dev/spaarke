@@ -141,7 +141,7 @@ public sealed class AnalysisToolsAuthTests
         {
             ctx.User = new ClaimsPrincipal(new ClaimsIdentity());
             return StartAnalysisTool.RunAsync(
-                AnalysisToolsContractTests.Args(Start(documentId)), ctx, ctx.RequestServices.GetRequiredService<ITenantCache>(),
+                AnalysisToolsContractTests.Args(Start(documentId)), ctx, ctx.RequestServices.GetRequiredService<ITenantCache>(), AnalysisToolsContractTests.Starts,
                 AnalysisToolsContractTests.EnvironmentUrl, NullLogger.Instance, CancellationToken.None);
         });
 

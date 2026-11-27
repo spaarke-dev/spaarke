@@ -193,7 +193,7 @@ public static class AnalysisEndpoints
         {
             // Step 1: Create the sprk_analysis record (the ONE server create; the analysis is a child of its document), with what
             // the route filter decided for this caller (the playbook it authorised, the document it allowed).
-            var outcome = await CreateAnalysisRecordAsync(
+            var outcome = await AnalysisStartService.CreateAnalysisRecordAsync(
                 request,
                 Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedPlaybookId(httpContext),
                 Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId(httpContext),
@@ -258,64 +258,13 @@ public static class AnalysisEndpoints
     /// is shown, and any other document is not. <c>null</c> when the filter recorded none, so a document source maps nothing.
     /// </summary>
     internal static Func<Guid, CancellationToken, Task<bool>>? MappingDocumentDecisionOf(HttpContext httpContext) =>
-        MappingDocumentDecisionFor(Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId(httpContext));
+        AnalysisStartService.MappingDocumentDecisionFor(Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId(httpContext));
 
     /// <summary>
-    /// spaarkeai-mcp-bff-api-r2 task 031: the narrowing answer for one allowed document: it is shown, any other is not; <c>null</c>
-    /// (a document source maps nothing) when no document was allowed.
+    /// The route's answer for a refused create (task 146): the owner 409 (or its F3 403/503), else the generic 500 (NFR-07). Task 037a: also
+    /// read by <see cref="AnalysisStartService.StartAsCallerAsync"/>, so a non-route host gets the route's status and code for the same case.
     /// </summary>
-    private static Func<Guid, CancellationToken, Task<bool>>? MappingDocumentDecisionFor(Guid? allowedDocumentId) =>
-        allowedDocumentId is { } allowed
-            ? (documentId, _) => Task.FromResult(documentId == allowed)
-            : null;
-
-    /// <summary>
-    /// spaarkeai-mcp-bff-api-r2 task 031 (spec FR-06): THE analysis create — the one <see cref="RecordCreationService.CreateAsync"/>
-    /// call of <c>POST /api/ai/analysis/create</c>, shared by that route's handler and <see cref="StartAnalysisAsCallerAsync"/>, so a
-    /// tool-created analysis is the same row a REST-created one is for the same inputs. <paramref name="authorizedPlaybookId"/> and
-    /// <paramref name="authorizedDocumentId"/> are what the create decision allowed for this caller (the route filter's record, or
-    /// <see cref="Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync"/>'s answer) and nothing else
-    /// (<c>RouteAuthorizedLookupsCallSiteTests</c> pins the two callers).
-    /// </summary>
-    internal static Task<RecordCreationOutcome> CreateAnalysisRecordAsync(
-        CreateAnalysisRequest request,
-        Guid? authorizedPlaybookId,
-        Guid? authorizedDocumentId,
-        RecordCreationService recordCreation,
-        IDataverseUserClient user,
-        ILogger logger,
-        HttpContext httpContext,
-        CancellationToken cancellationToken) =>
-        recordCreation.CreateAsync(
-            new RecordCreationRequest(
-                AnalysisTable,
-                new RecordCreationPayload.WebApi(
-                    JsonSerializer.SerializeToElement(BuildCreatePayload(request))))
-            {
-                CorrelationId = httpContext.TraceIdentifier,
-                // FR-19 / FR-03: the mapping profile of the document the analysis is filed under, if one exists; read as
-                // the caller first (FR-04). No profile: a silent no-op. Fill-only: every value of the request wins.
-                // Task 043 (owner 2026-11-04): a Document to Analysis profile maps when the caller can read the document. The
-                // service asks the caller's Read on it; the external document narrowing is the create decision on the
-                // body document, reused here (MappingDocumentDecisionFor), so it is not asked twice.
-                Mapping = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerMappingOf(
-                    httpContext, logger, MappingDocumentDecisionFor(authorizedDocumentId)),
-                // Task 031 fix round 1 (F1, owner 2026-11-04; UAC-r2 2026-11-04): the create decision's playbook-use answer
-                // (public, or the caller's Read on the row) authorised ONE playbook id, so the service asks no AppendTo on
-                // that record (only Spaarke AI Analysis Admin holds it). The id is the decision's, not the body's: the service
-                // exempts the payload's playbook only when it is that record. Set only when the decision authorised one.
-                RouteAuthorizedLookups =
-                    authorizedPlaybookId is { } authorisedPlaybook
-                        ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase) { [PlaybookColumn] = authorisedPlaybook }
-                        : null,
-            },
-            RecordCreationPrincipal.ForCaller(
-                user,
-                Guid.TryParse(CallerResolution.ResolveObjectId(httpContext.User), out var oid) && oid != Guid.Empty ? oid : null),
-            cancellationToken);
-
-    /// <summary>The route's answer for a refused create (task 146): the owner 409 (or its F3 403/503), else the generic 500 (NFR-07).</summary>
-    private static IResult CreateRefusalResult(RecordCreationRefusal refusal) =>
+    internal static IResult CreateRefusalResult(RecordCreationRefusal refusal) =>
         refusal switch
         {
             { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision: { } decision } => AnalysisOwnerRefusal(decision),
@@ -324,79 +273,8 @@ public static class AnalysisEndpoints
             _ => CreateAnalysisFailure(),
         };
 
-    /// <summary>
-    /// spaarkeai-mcp-bff-api-r2 task 031 (spec FR-06, NFR-06): starts an analysis for the caller of <paramref name="httpContext"/>
-    /// WITHOUT running it — for the MCP tool <c>spaarke_start_analysis</c>, which may not name a <c>Services/Ai</c> type (ADR-013).
-    /// It is the route's rule and the route's create, in the route's order: the shared create decision
-    /// (<see cref="Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync"/>), then
-    /// <see cref="CreateAnalysisRecordAsync"/> with what it allowed. No scope rows are associated (the tool names none) and nothing
-    /// is executed: no orchestration or playbook service is resolved.
-    /// <para>A refusal carries the route's status and <c>reasonCode</c> for the same case; the generic failure (the route's bare 500)
-    /// carries <see cref="CreateFailedReasonCode"/>. Never throws except on cancellation; no exception text reaches the result.</para>
-    /// </summary>
-    public static async Task<AnalysisStartResult> StartAnalysisAsCallerAsync(
-        HttpContext? httpContext, string? name, Guid documentId, Guid? playbookId, CancellationToken cancellationToken)
-    {
-        var request = new CreateAnalysisRequest(name!, documentId, [], [], [], playbookId);
-        var decision = await Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizeAnalysisCreateAsync(httpContext, request, cancellationToken);
-        switch (decision.Outcome)
-        {
-            case Sprk.Bff.Api.Api.Filters.AnalysisCreateAuthorizationOutcome.UserContextRequired:
-                return AnalysisStartResult.Failure(AnalysisStartOutcome.UserContextRequired, decision.ReasonCode, StatusCodes.Status401Unauthorized, null);
-            case Sprk.Bff.Api.Api.Filters.AnalysisCreateAuthorizationOutcome.Invalid:
-                return AnalysisStartResult.Failure(AnalysisStartOutcome.Invalid, null, StatusCodes.Status400BadRequest, decision.Message);
-            case Sprk.Bff.Api.Api.Filters.AnalysisCreateAuthorizationOutcome.Allowed:
-                break;
-            default:
-                return AnalysisStartResult.Failure(
-                    AnalysisStartOutcome.Refused, decision.ReasonCode, StatusCodes.Status403Forbidden, null);
-        }
-
-        // The caller was identified by the decision, so the context and its services are there.
-        var services = httpContext!.RequestServices;
-        var logger = services.GetRequiredService<ILogger<AnalysisOrchestrationService>>();
-        try
-        {
-            var outcome = await CreateAnalysisRecordAsync(
-                request, decision.AuthorizedPlaybookId, decision.AuthorizedDocumentId,
-                services.GetRequiredService<RecordCreationService>(), services.GetRequiredService<IDataverseUserClient>(),
-                logger, httpContext, cancellationToken);
-
-            if (outcome.Refusal is { } refusal)
-            {
-                logger.LogWarning(
-                    "Refused analysis start: {Kind} {Code} (correlationId={CorrelationId})", refusal.Kind, refusal.Code, outcome.CorrelationId);
-                var (status, reasonCode) = StatusAndReasonOf(CreateRefusalResult(refusal));
-                return reasonCode is null
-                    ? AnalysisStartResult.Failure(AnalysisStartOutcome.Failed, CreateFailedReasonCode, StatusCodes.Status500InternalServerError, null)
-                    : AnalysisStartResult.Failure(AnalysisStartOutcome.Refused, reasonCode, status, null);
-            }
-
-            if (outcome.CreatedId is not { } analysisId)
-            {
-                logger.LogError("Analysis start ended without a decision (correlationId={CorrelationId})", outcome.CorrelationId);
-                return AnalysisStartResult.Failure(AnalysisStartOutcome.Failed, CreateFailedReasonCode, StatusCodes.Status500InternalServerError, null);
-            }
-
-            return AnalysisStartResult.Created(analysisId, outcome.Warnings.Count);
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            // ADR-015: the exception type only.
-            logger.LogError("Analysis start failed ({ExceptionType}) (correlationId={CorrelationId})", ex.GetType().Name, httpContext.TraceIdentifier);
-            return AnalysisStartResult.Failure(AnalysisStartOutcome.Failed, CreateFailedReasonCode, StatusCodes.Status500InternalServerError, null);
-        }
-    }
-
     /// <summary>The <c>reasonCode</c> of a start the route would answer with its bare 500 (the route's body carries no code).</summary>
-    public const string CreateFailedReasonCode = "analysis.create_failed";
-
-    /// <summary>The status and <c>reasonCode</c> of a route ProblemDetails result (<c>null</c> code when it carries none).</summary>
-    private static (int Status, string? ReasonCode) StatusAndReasonOf(IResult result) =>
-        result is Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult problem
-            ? (problem.StatusCode,
-               problem.ProblemDetails.Extensions.TryGetValue("reasonCode", out var code) ? code as string ?? code?.ToString() : null)
-            : (StatusCodes.Status500InternalServerError, null);
+    public const string CreateFailedReasonCode = AnalysisStartReasonCodes.CreateFailed;
 
     /// <summary>
     /// spaarkeai-mcp-bff-api-r2 task 031 (spec FR-06): <c>GET /api/ai/analysis/{analysisId}</c> for a host that is not that route (the MCP
