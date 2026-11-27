@@ -823,3 +823,14 @@ code, carried in an instructions-only skill, with no Office add-in and no server
 Deciding *which* edits to make still needs either the model (reading the playbook) or our engines server-side; the
 skill's fixed code would apply an edit list. Not yet known: a size limit on supplied code, and whether the runner
 accepts a data block (the edit list) the model fills in while the code stays fixed.
+
+**WP-5 Cowork control (owner, Cowork, 2026-11-27, probe v0.4, all three skill chips picked):** reply
+`Spaarke JS probe · code not run · WPJ-1126-A`. Cowork said it has no way to run JavaScript inside Word: it "can only
+make changes to a Word document through fixed editing commands, and none of them runs supplied code", and that no
+document was open. It changed nothing and didn't fake the paragraph, change or comment.
+**Findings:** (1) As expected, Cowork has no Office.js runner: the JavaScript route is Word-desktop-only. (2) Cowork
+followed the skill's "code not run" fallback exactly instead of imitating the result, so a Word skill that lands in
+Cowork fails safely. (3) New: Cowork edits Word files through **fixed built-in editing commands** (its own tools),
+separate from our Python. Not yet known: what those commands can do (tracked changes? comments?). Still untested:
+whether Cowork picks the Word skill for a generic request when both editions sit in one plugin (chips were picked
+by hand here).
