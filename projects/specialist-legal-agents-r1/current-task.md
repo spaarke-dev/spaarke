@@ -16,7 +16,7 @@
 ## Next action (exact)
 
 1. Coordination checks on 020: DONE (d1cf402ec2; test markers, run isolation, R1′ wording; reply sent).
-2. **Owner:** give the per-SHA go for spike `5cd40984b0` in the uac-r2 session (a relayed go does not count). Deploy request sent to uac-r2 with rollback target `d307d67e36`. When live: confirm all 4 spike tools in `tools/list`, send the G5 R4 row (`phase0/g5/README.md` "R4 row (to send)") to coordination, then the owner uploads G5. G1 (c) runs after this deploy see the broadened `spike_review_nda` description (notes/decisions.md 2026-11-27).
+2. **Owner:** give the per-SHA go for spike `5cd40984b0` in the uac-r2 session (a relayed go does not count). Deploy request sent to uac-r2 with rollback target `d307d67e36`; uac-r2 passed its range and access checks on 2026-11-27 (master `765a199922` is an ancestor; no findings) and is asking the owner to deploy `5cd40984b0` in place of master `8975e13034`. When live: confirm all 4 spike tools in `tools/list`, send the G5 R4 row (`phase0/g5/README.md` "R4 row (to send)") to coordination, then the owner uploads G5. G1 (c) runs after this deploy see the broadened `spike_review_nda` description (notes/decisions.md 2026-11-27).
 3. **Owner:** upload per `phase0/g1-nda/packages/UPLOAD.md` (owner + demo@ only). Remove the G8 artifacts by 2026-11-30.
 4. Then 021/022 runs. The latency p95 check moved into 021.
 
