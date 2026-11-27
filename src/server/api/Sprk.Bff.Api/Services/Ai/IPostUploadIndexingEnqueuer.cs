@@ -120,12 +120,8 @@ public interface IPostUploadIndexingEnqueuer
 /// VERSION of an already-indexed item (an Office version save) — to a value that identifies that individual
 /// save (the save's ProcessingJob id). On the app-only path it appends <c>-version-{value}</c> to the
 /// idempotency key, so the new version is indexed instead of being skipped as the item's earlier index. Null
-/// (the default, and every other caller) keeps the key byte-for-byte. The OBO path does not read it.
-/// <b>Task 048</b>: <see cref="RagIndexingJobPayload.ReplaceStaleChunks"/> is no longer gated on this value —
-/// it is now set on EVERY app-only enqueue through <see cref="IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/>
-/// (and every OBO enqueue through <see cref="IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync"/>), so the
-/// stale-tail trim runs after every successful re-index of an existing item, not only a version save.
-/// <see cref="VersionDiscriminator"/>'s remaining, sole role is the idempotency-key suffix described above.</param>
+/// (the default, and every other caller) keeps the key byte-for-byte. The OBO path does not read it. Its sole role
+/// is that idempotency-key suffix: the stale-tail trim runs on every index (GitHub #3304).</param>
 public sealed record PostUploadIndexingRequest(
     string TenantId,
     string DriveId,

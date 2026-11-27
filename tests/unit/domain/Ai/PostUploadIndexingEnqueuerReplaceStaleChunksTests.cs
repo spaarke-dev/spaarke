@@ -16,10 +16,10 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Domain.Ai;
 
 /// <summary>
-/// Task 048 (spaarkeai-word-add-in-r1) — turns on task 029's chunk-trim
-/// (<see cref="FileIndexRequest.ReplaceStaleChunks"/> / <see cref="RagIndexingJobPayload.ReplaceStaleChunks"/>)
-/// for every re-index path that shares <see cref="PostUploadIndexingEnqueuer"/>, not only the Office
-/// version-save job. This is the highest-leverage single seam: both its methods are the ONLY place seven
+/// Task 048 (spaarkeai-word-add-in-r1) started this file for task 029's chunk-trim switch on every re-index path that shares
+/// <see cref="PostUploadIndexingEnqueuer"/>; GitHub #3304 removed the switch (every index now trims inside
+/// <see cref="FileIndexingService"/>), and what stays here is the seam's job shape: the idempotency key and the skip gates.
+/// This is the highest-leverage single seam: both its methods are the ONLY place seven
 /// producers build their indexing request — <c>EnqueueIfApplicableAsync</c> (OBO) is called by Compose
 /// save-back (<c>ComposeService</c>) and the "LinearDocumentProfile" direct-Action re-index
 /// (<c>AnalysisEndpoints</c>); <c>EnqueueAppOnlyIfApplicableAsync</c> (app-only via Service Bus) is called
@@ -102,38 +102,16 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
             json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
     }
 
-    // ===== OBO path — Compose save-back + AnalysisEndpoints "LinearDocumentProfile" ==================
-
-    [Fact]
-    public async Task EnqueueIfApplicableAsync_AnyCaller_SetsReplaceStaleChunksTrueOnTheFileIndexRequest()
-    {
-        FileIndexRequest? captured = null;
-        _fileIndexingMock
-            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
-            .Callback<FileIndexRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
-            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 5 });
-
-        var result = await CreateSut().EnqueueIfApplicableAsync(ValidRequest(), CreateHttpContext(), CancellationToken.None);
-
-        result.JobSubmitted.Should().BeTrue();
-        captured.Should().NotBeNull();
-        captured!.ReplaceStaleChunks.Should().BeTrue(
-            "every OBO caller of this seam — Compose save-back on every edit, and the direct-Action " +
-            "LinearDocumentProfile re-index — can be re-indexing an item that already has chunks; a " +
-            "first index simply finds nothing to trim (IRagService.DeleteChunksBeyondCountAsync deletes " +
-            "zero when there is no tail)");
-    }
+    // GitHub #3304: the OBO fact that pinned FileIndexRequest.ReplaceStaleChunks went with the switch. Every index now removes
+    // the file's leftover chunks inside FileIndexingService (tests/integration/regression/Issue3304_ReindexLeavesNoOldChunksTests.cs).
 
     // ===== App-only path — Office, Email-to-Document, outbound enrichment, post-analysis re-index ====
 
     [Fact]
-    public async Task EnqueueAppOnlyIfApplicableAsync_NoVersionDiscriminator_StillSetsReplaceStaleChunksTrue()
+    public async Task EnqueueAppOnlyIfApplicableAsync_NoVersionDiscriminator_KeepsThePlainPerItemKey()
     {
-        // Before task 048: no VersionDiscriminator meant ReplaceStaleChunks was FALSE (task 029's design —
-        // only a version save asked for the trim). This is the behavior change task 048 makes: every
-        // app-only producer through this seam now gets it, including the ones that never set
-        // VersionDiscriminator at all (Office CREATE save, Email-to-Document, CommunicationEnrichmentService,
-        // AnalysisResultPersistence).
+        // Every app-only producer through this seam that is not a version save (Office CREATE save, Email-to-Document,
+        // CommunicationEnrichmentService, AnalysisResultPersistence) keeps the plain per-item key.
         JobContract? capturedJob = null;
         _jobSubmissionMock
             .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
@@ -145,21 +123,16 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
 
         result.JobSubmitted.Should().BeTrue();
         capturedJob.Should().NotBeNull();
-        var payload = DeserializePayload(capturedJob!);
-        payload.ReplaceStaleChunks.Should().BeTrue();
-
-        // Key/skip behaviour is UNCHANGED — this task touches ONLY whether the trim runs, never the key.
+        DeserializePayload(capturedJob!).ItemId.Should().Be("item-xyz");
         capturedJob!.IdempotencyKey.Should().Be("rag-index-drive-abc-item-xyz",
-            "the plain per-item key (no version suffix) must be preserved for every non-version caller — " +
-            "this task must not change idempotency behaviour");
+            "the plain per-item key (no version suffix) must be preserved for every non-version caller");
     }
 
     [Fact]
     public async Task EnqueueAppOnlyIfApplicableAsync_WithVersionDiscriminator_StillAppendsVersionSuffixToIdempotencyKey()
     {
-        // Regression guard for task 029's mechanism: decoupling ReplaceStaleChunks from
-        // VersionDiscriminator (task 048) must not touch the key-suffix logic, which is a SEPARATE
-        // ternary in production code keyed on the same variable.
+        // Regression guard for task 029's mechanism: VersionDiscriminator's one remaining role is this key suffix, so a
+        // version is not skipped as a duplicate of the item's earlier index.
         JobContract? capturedJob = null;
         _jobSubmissionMock
             .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
@@ -172,10 +145,7 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
 
         result.JobSubmitted.Should().BeTrue();
         capturedJob!.IdempotencyKey.Should().Be($"rag-index-drive-abc-item-xyz-version-{jobId}",
-            "task 029's version-key suffix must survive task 048's change to ReplaceStaleChunks untouched");
-
-        var payload = DeserializePayload(capturedJob);
-        payload.ReplaceStaleChunks.Should().BeTrue("the original task 029 version-save case must still trim");
+            "task 029's version-key suffix keeps a version from being skipped as the item's earlier index");
     }
 
     [Fact]

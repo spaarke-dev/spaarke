@@ -64,7 +64,7 @@ public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixtur
     };
 
     [Fact]
-    public async Task SendToIndex_ReindexingAnExistingDocument_SetsReplaceStaleChunksTrueOnTheFileIndexRequest()
+    public async Task SendToIndex_ReindexingAnExistingDocument_IndexesThatDocumentsFileAndReportsSuccess()
     {
         _fixture.DataverseMock
             .Setup(d => d.GetDocumentAsync(DocumentId.ToString(), It.IsAny<CancellationToken>()))
@@ -92,11 +92,12 @@ public sealed class RagSendToIndexReplaceStaleChunksContractTests : IClassFixtur
         var body = await response.Content.ReadFromJsonAsync<SendToIndexResponse>();
         body!.Results[0].Success.Should().BeTrue();
 
+        // GitHub #3304: the request no longer carries a stale-chunk switch. Every index removes the file's leftover chunks
+        // inside FileIndexingService (tests/integration/regression/Issue3304_ReindexLeavesNoOldChunksTests.cs).
         capturedIndexRequest.Should().NotBeNull();
-        capturedIndexRequest!.ReplaceStaleChunks.Should().BeTrue(
-            "Send to Index re-indexes a document that already exists in Dataverse and may already carry " +
-            "chunks from an earlier index — a shorter re-index must not leave a stale tail behind " +
-            "(task 029's DeleteChunksBeyondCountAsync trim, applied here for the first time by task 048)");
+        capturedIndexRequest!.DriveId.Should().Be("b!drive-id-048");
+        capturedIndexRequest.ItemId.Should().Be("item-id-048");
+        capturedIndexRequest.DocumentId.Should().Be(DocumentId.ToString());
     }
 
     [Fact]

@@ -144,7 +144,6 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
-                request.ReplaceStaleChunks,
                 request.ReplaceParentEntity,
                 stopwatch,
                 cancellationToken);
@@ -228,7 +227,6 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
-                request.ReplaceStaleChunks,
                 request.ReplaceParentEntity,
                 stopwatch,
                 cancellationToken);
@@ -276,7 +274,6 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
-                replaceStaleChunks: false,
                 replaceParentEntity: request.ParentEntity is not null,
                 stopwatch,
                 cancellationToken);
@@ -314,7 +311,6 @@ public sealed class FileIndexingService : IFileIndexingService
         string? knowledgeSourceName,
         Dictionary<string, string>? metadata,
         ParentEntityContext? parentEntity,
-        bool replaceStaleChunks,
         bool replaceParentEntity,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
@@ -409,13 +405,15 @@ public sealed class FileIndexingService : IFileIndexingService
             "Indexed {FileName} for tenant {TenantId} speFileId={SpeFileId}: {SuccessCount}/{TotalCount} chunks in {Duration}ms",
             fileName, tenantId, speFileId, successCount, results.Count, stopwatch.ElapsedMilliseconds);
 
-        // Task 029 (spaarkeai-word-add-in-r1, owner decision 2026-09-15, option B): a VERSION re-index REPLACES the
-        // file's chunks. Chunk ids are {speFileId}_{index} and a version keeps its item id, so the batch above
-        // overwrote chunks 0..N-1 in place — but a shorter version would leave the previous version's chunks
-        // N..M-1 behind, with the old content and the old document vector (which Find reads). They are removed
-        // only AFTER every new chunk is confirmed, and from the SAME index the batch went to, so the file is never
-        // without chunks. Only the version-save index job asks for this; every other path skips the block.
-        if (allSucceeded && replaceStaleChunks)
+        // Task 029 (spaarkeai-word-add-in-r1, owner decision 2026-09-15, option B): a re-index REPLACES the file's
+        // chunks. Chunk ids are {speFileId}_{index} and a re-index keeps the item id, so the batch above overwrote
+        // chunks 0..N-1 in place — but shorter text would leave the previous index's chunks N..M-1 behind, with the
+        // old content, the old parent record and the old document vector (which Find reads). They are removed only
+        // AFTER every new chunk is confirmed, and from the SAME index the batch went to, so the file is never
+        // without chunks. GitHub #3304: this runs on EVERY index, not only where a caller asked for it — a caller
+        // that did not (a bulk sweep without force, /index-file, /enqueue) left the old tail, still findable under
+        // the old parent. A first index finds no tail and deletes nothing.
+        if (allSucceeded)
         {
             try
             {
