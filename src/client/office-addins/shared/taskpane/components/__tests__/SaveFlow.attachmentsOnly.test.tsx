@@ -251,6 +251,8 @@ describe('SaveFlow — "Save the email" (task 143)', () => {
       expect(b.email.selectedAttachmentFileNames).toBeUndefined();
     });
     expect(keyOf(calls[0]!)).not.toBe(keyOf(calls[1]!));
+    // The key travels in the body too (the server's persistent dedupe reads it there).
+    calls.forEach(call => expect(bodyOf(call).idempotencyKey).toBe(keyOf(call)));
 
     expect(screen.getByText('2 attachments saved to Spaarke. The email was not saved.')).toBeInTheDocument();
     // Never adopted as a saved email: no completion, no "Saved to Spaarke" box; the identity is re-read for the marks.
@@ -307,6 +309,26 @@ describe('SaveFlow — "Save the email" (task 143)', () => {
     expect(outcome).not.toHaveTextContent(`${A}:`);
     expect(screen.queryByText(/2 attachments saved to Spaarke/)).toBeNull();
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retry after a failed attempt is a new key, never the failed attempt key', async () => {
+    let n = 0;
+    mockFetch.mockImplementation(async (url: string) =>
+      String(url).includes('/api/office/save') ? (++n === 1 ? forbidden() : accepted()) : response(200, { data: {} })
+    );
+    render(<OutlookPane attachments={[pdf(A)]} />);
+    fireEvent.click(saveEmailBox());
+    tick(A);
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(screen.getByText('The attachment was not saved.')).toBeInTheDocument());
+
+    fireEvent.click(saveButton());
+    await waitFor(() =>
+      expect(screen.getByText('1 attachment saved to Spaarke. The email was not saved.')).toBeInTheDocument()
+    );
+    const calls = saveCalls();
+    expect(calls).toHaveLength(2);
+    expect(keyOf(calls[1]!)).not.toBe(keyOf(calls[0]!));
   });
 
   it('negative: nothing saved → no identity re-read', async () => {

@@ -1845,6 +1845,10 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
               },
             })
           );
+          // Also in the body, as the version save sends it: the server's PERSISTENT job dedupe keys on
+          // `request.idempotencyKey` when present, and its own key for an attachment (type|record|message|attachment id)
+          // has no attempt count, so a retry after a failed attempt would be answered with that failed job.
+          serverRequest.idempotencyKey = idempotencyKey;
           const response = await authenticatedJsonFetch(
             `${apiBaseUrl}/api/office/save`,
             {
