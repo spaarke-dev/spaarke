@@ -346,16 +346,29 @@ internal sealed partial class RecordCreationService
         if (reads.Rules is not { } rules)
             return unmapped;
 
+        // Task 065 / 067: whether the source is the record the caller's row is filed under, by table AND id
+        // (SourceIsCallersFilingRecordAsync), asked of the caller's row before any rule fills it (never a mapped lookup).
+        var fromFilingParent = SourceIsCallersFilingParent(table, resolution, target);
+        var callersOwnRow = CopyOf(target); // the caller's row before any rule fills it (never a mapped lookup)
+        var sourceIsFilingRecord = fromFilingParent
+            && await SourceIsCallersFilingRecordAsync(
+                    table, resolution, callersOwnRow, (typeId, token) => RecordTypeTableAsync(user, typeId, token), ct)
+                .ConfigureAwait(false);
+
         // #2188 (DI-004): the app-only read ignores field-level security, so it is masked down to the columns the CALLER can
         // read (one caller read of the same row) before any rule sees it; a caller read that cannot be made or answered makes
         // the source unavailable — the same single warning as FR-04's, never the app-read values. A Default-only profile maps
         // no source column (the read holds only the gate's columns), so there is nothing to mask. Masked here, beside the
         // engine call, so the #2188 guard sees both.
+        // Task 067 (owner 2026-11-27): from the filing record (table and id) the mapped columns are copied whatever the caller
+        // can read on them, except the access-model columns, which keep the mask. The FR-04 Read probe as the caller has already
+        // answered Read before the app read (ReadMappingInputsAsync), so a caller who cannot read the record maps nothing.
         Entity? masked = null;
         if (reads.AppRead is { } appRead && reads.SourceColumns.Count > 0)
         {
             masked = await MappingSourceCallerMask
-                .ApplyAsync(user, source.EntityLogicalName, source.RecordId, appRead, reads.SourceColumns, _logger, ct)
+                .ApplyOrLiftForFilingParentAsync(
+                    sourceIsFilingRecord, user, source.EntityLogicalName, source.RecordId, appRead, reads.SourceColumns, _logger, ct)
                 .ConfigureAwait(false);
             if (masked is null)
             {
@@ -371,8 +384,6 @@ internal sealed partial class RecordCreationService
         // available to the caller (an unavailable source keeps its one warning). A source whose answer cannot be told maps
         // nothing (fail closed). The owner is checked again before the create, on every path (EnforceMappingSourceOwnerAsync).
         var gate = new MappedSourceGate(source.EntityLogicalName, reads.AppRead);
-        var fromFilingParent = SourceIsCallersFilingParent(table, resolution, target);
-        var callersOwnRow = CopyOf(target); // the caller's row before any rule fills it (never a mapped lookup)
         var early = await DecideMappingSourceAsync(gate, rowOwner: null, secureOwnerTeam, ct).ConfigureAwait(false);
         if (!SourceMapsBeforeOwner(early.Verdict, request.SecureFromCreation, fromFilingParent))
         {
@@ -393,22 +404,15 @@ internal sealed partial class RecordCreationService
         }
 
         // Task 065 (owner 2026-11-26, superseding task 064's boundary 3 for the filing parent): a value from the record the
-        // caller's row is filed under, by table AND id (SourceIsCallersFilingRecordAsync, asked of the caller's row before any
-        // rule fills it), is copied whatever its source column's field security. It is still the masked read above, so a column
-        // the caller cannot read copies nothing. A copied value is readable by whoever can read the target column.
+        // caller's row is filed under, by table AND id (sourceIsFilingRecord above), is copied whatever its source column's field
+        // security. Task 067 (owner 2026-11-27): it is read past the caller's column view (above), so a column the caller cannot
+        // read is copied too, except an access-model column. A copied value is readable by whoever can read the target column.
         // From any other source a value read from a field-secured source column is not copied: its rule is not applied and the
         // column it targets is named. Whether the source's columns are secured is read beside the target's; unread, nothing is
         // mapped from that source (fail closed).
-        bool? fromFilingRecord = null;
-        async Task<bool> FromFilingRecordAsync() =>
-            fromFilingRecord ??= fromFilingParent
-                && await SourceIsCallersFilingRecordAsync(
-                        table, resolution, callersOwnRow, (typeId, token) => RecordTypeTableAsync(user, typeId, token), ct)
-                    .ConfigureAwait(false);
-
         var securedSourceRuleApplies =
             (reads.SecuredSourceColumns is { Count: > 0 } || (masked is not null && reads.SecuredSourceColumns is null))
-            && !await FromFilingRecordAsync().ConfigureAwait(false);
+            && !sourceIsFilingRecord;
         if (securedSourceRuleApplies && masked is not null && reads.SecuredSourceColumns is null)
         {
             warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingSourceColumnsUnreadable));
@@ -428,6 +432,20 @@ internal sealed partial class RecordCreationService
             moneyAttributes: moneyAttributes,
             mappedColumns: written);
         warnings.AddRange(engineWarnings.Select(w => new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, null, w)));
+
+        // Task 067 (C3, C7): from the filing record, a rule that reads an access-model column is named (it copies only what the
+        // caller can read: the same words whatever the source holds), and each value copied past the caller's column view is
+        // logged by rule, source and target column (never the value).
+        if (sourceIsFilingRecord && masked is not null)
+        {
+            foreach (var accessModelTarget in AccessModelSourceColumns.TargetsOfRulesReadingOne(copyable))
+            {
+                warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, accessModelTarget,
+                    AccessModelSourceColumns.ReadAsTheCallerWarning(accessModelTarget)));
+            }
+
+            MappingSourceCallerMask.LogCopiesPastTheMask(_logger, "create", source.EntityLogicalName, copyable, written);
+        }
 
         // Each column a secured-source rule would still have filled (the engine decides, on a copy of the row, after the copyable
         // rules) is named once: not copied, because its source column is field-secured. An empty secured column fills nothing.
@@ -478,10 +496,9 @@ internal sealed partial class RecordCreationService
             return unmapped;
 
         // Task 064c: step 5's skip asks for the filing parent by table AND id (the gate above keeps its own question).
-        var copiesFromFilingParent = await FromFilingRecordAsync().ConfigureAwait(false);
         return (await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false))
             with
-        { Gate = gate, FromFilingParent = copiesFromFilingParent };
+        { Gate = gate, FromFilingParent = sourceIsFilingRecord };
     }
 
     /// <summary>A copy of <paramref name="row"/> (its name, id and values), so a probe of the engine leaves the row as it is.</summary>

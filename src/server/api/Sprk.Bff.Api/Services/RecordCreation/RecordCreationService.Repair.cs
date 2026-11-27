@@ -1116,8 +1116,9 @@ internal sealed partial class RecordCreationService
     /// (<see cref="MappingSourceReader.System"/>, no probe), then <see cref="CreateTimeFieldMapping.ApplyFillOnly"/> — the
     /// create's own fill decision — over a copy of the row. A mapped value that would file the row under a record (a filing
     /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row. Task 052a: both
-    /// tables' column metadata is read app-only first — the source's field-secured columns are never read for mapping nor
-    /// copied, a mapped value its column cannot take is not written, Money columns get a Money (#2124), and metadata that
+    /// tables' column metadata is read app-only first — task 067: a field-secured column of the source (the row's filing parent)
+    /// is copied too, except an access-model column (<see cref="AccessModelSourceColumns"/>), which is neither read for mapping nor
+    /// copied; a mapped value its column cannot take is not written, Money columns get a Money (#2124), and metadata that
     /// cannot be read maps nothing.
     /// </summary>
     private async Task RepairMappingAsync(
@@ -1196,8 +1197,8 @@ internal sealed partial class RecordCreationService
 
             // Task 052a: both tables' column metadata, read app-only before anything is read from the source (owner decision
             // 2026-10-21, option 1; UAC-r2 condition 1: metadata that cannot be read, or does not say, maps nothing).
-            if (await SourceColumnsRepairMayCopyAsync(table, row.Id, source.EntityLogicalName,
-                    CreateTimeFieldMapping.CollectSourceColumns(rules), pass, ct).ConfigureAwait(false) is not { } copyable)
+            if (await SourceColumnsRepairMayCopyAsync(table, row.Id, source.EntityLogicalName, rules, warnings, pass, ct)
+                    .ConfigureAwait(false) is not { } sourceAnswer)
             {
                 report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceMetadataUnavailable));
                 return;
@@ -1211,6 +1212,7 @@ internal sealed partial class RecordCreationService
 
             // The source's own secure status (review F1-e (ii)) and, task 022c, its Access Permission (where its table carries
             // the column) are read in the same one read as its mapped columns.
+            var copyable = sourceAnswer.Copyable;
             var sourceColumns = copyable
                 .Concat(SourceGateColumns(source.EntityLogicalName))
                 .Concat(MappingSourceAccessColumns(source.EntityLogicalName))
@@ -1264,7 +1266,8 @@ internal sealed partial class RecordCreationService
                 protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
             // Task 052a: only the columns Repair may copy reach the engine — a gate column (the owner, the secure flag) is read to
-            // decide the gate, never copied unless a rule names it and it is not field-secured. #2124: the row's Money columns,
+            // decide the gate, never copied unless a rule names it and Repair may copy it (task 067: any column of the row's
+            // filing parent, field-secured or not, except a field-secured access-model column). #2124: the row's Money columns,
             // so a Default or an expression into one is written as a Money.
             var copySource = CopyableSource(source.EntityLogicalName, read.Record, copyable);
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1337,6 +1340,25 @@ internal sealed partial class RecordCreationService
                 }
             }
 
+            // Task 067 (C7): each value Repair copied from a field-secured column of the filing parent, by rule, source and target
+            // column (never the value).
+            if (sourceAnswer.CopiedSecured.Count > 0)
+            {
+                var copiedSecured = new HashSet<string>(sourceAnswer.CopiedSecured, StringComparer.OrdinalIgnoreCase);
+                var repairedTargets = new HashSet<string>(mappedHere, StringComparer.OrdinalIgnoreCase);
+                foreach (var copied in rules.Where(r => r.TargetField?.Trim() is { Length: > 0 } t && repairedTargets.Contains(t)))
+                {
+                    var secured = CreateTimeFieldMapping.CollectSourceColumns([copied]).Where(copiedSecured.Contains).ToArray();
+                    if (secured.Length > 0)
+                    {
+                        _logger.LogInformation(
+                            "[RECORD-REPAIR] {Table} {Id}: rule {RuleId} copied the field-secured column(s) {SourceTable}.{SourceColumns} " +
+                            "of the filing parent into {TargetColumn}", table, row.Id, copied.Id, source.EntityLogicalName,
+                            string.Join(",", secured), copied.TargetField?.Trim());
+                    }
+                }
+            }
+
             // #2247: what the write asks the app-only refusal over (a fault above maps nothing, so adds nothing).
             mappedColumns.UnionWith(mappedHere);
         }
@@ -1367,22 +1389,26 @@ internal sealed partial class RecordCreationService
             : null;
 
     /// <summary>
-    /// The mapped source columns Repair may read and copy (owner decision 2026-10-21, field security option 1; task 052a): Repair
-    /// runs as the system principal, with no caller to mask the source against (#2188), so it leaves out every column of
-    /// <paramref name="sourceTable"/> its metadata states is field-secured. A column the table does not have is left out too
-    /// (nothing to read or copy). <c>null</c> — map nothing for the row (UAC-r2 condition 1, fail closed) — when the metadata
-    /// cannot be read, comes back empty, or does not say whether a mapped column is secured.
+    /// The mapped source columns Repair may read and copy (task 052a; task 067, owner 2026-11-27: "Yes also field secured
+    /// values"). The source is the row's own filing parent (FR-03, checked against the parents the owner was decided over), so a
+    /// column its metadata states is field-secured is copied too, EXCEPT an access-model column
+    /// (<see cref="AccessModelSourceColumns"/>, UAC-r2 C3): a field-secured one of those is left out as before, logged, and each
+    /// rule that reads one is named in a warning by its target. A column the table does not have is left out (nothing to read or
+    /// copy). <c>null</c> — map nothing for the row (UAC-r2 condition 1, fail closed) — when the metadata cannot be read, comes
+    /// back empty, or does not say whether a mapped column is secured (kept: an access-model column cannot be told apart
+    /// otherwise, and the answer is per profile).
     /// </summary>
     /// <remarks>Task 032b-1: a wrapper over <see cref="MappingColumnMetadata.CopyableSourceColumns"/> (the shared gate) that keeps
-    /// Repair's log lines.</remarks>
-    private async Task<IReadOnlyList<string>?> SourceColumnsRepairMayCopyAsync(
-        string table, Guid rowId, string sourceTable, IEnumerable<string> mappedSourceColumns, RecordRepairPassContext? pass,
-        CancellationToken ct)
+    /// Repair's log lines. <see cref="RepairSourceColumns.CopiedSecured"/> are the field-secured columns now copied (C7 logs each
+    /// value copied from one).</remarks>
+    private async Task<RepairSourceColumns?> SourceColumnsRepairMayCopyAsync(
+        string table, Guid rowId, string sourceTable, IReadOnlyList<FieldMappingRuleEntity> rules, List<string> warnings,
+        RecordRepairPassContext? pass, CancellationToken ct)
     {
         if (await ColumnMetadataForRepairAsync(sourceTable, rowId, pass, ct).ConfigureAwait(false) is not { } columns)
             return null;
 
-        var answer = MappingColumnMetadata.CopyableSourceColumns(columns, mappedSourceColumns);
+        var answer = MappingColumnMetadata.CopyableSourceColumns(columns, CreateTimeFieldMapping.CollectSourceColumns(rules));
         if (answer.Copyable is not { } copyable)
         {
             _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the metadata of the mapping source column {Source}.{Column} does not " +
@@ -1390,14 +1416,25 @@ internal sealed partial class RecordCreationService
             return null;
         }
 
-        if (answer.Secured.Count > 0)
+        var notCopied = answer.Secured.Where(AccessModelSourceColumns.Contains).ToArray();
+        var copiedSecured = answer.Secured.Where(c => !AccessModelSourceColumns.Contains(c)).ToArray();
+        if (notCopied.Length > 0)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the field-secured source column(s) {Columns} of {Source} are not " +
-                                   "copied", table, rowId, string.Join(", ", answer.Secured), sourceTable);
+                                   "copied", table, rowId, string.Join(", ", notCopied), sourceTable);
+            var notCopiedSet = new HashSet<string>(notCopied, StringComparer.OrdinalIgnoreCase);
+            foreach (var target in AccessModelSourceColumns.TargetsOfRulesReadingOne(
+                         rules.Where(r => CreateTimeFieldMapping.CollectSourceColumns([r]).Any(notCopiedSet.Contains))))
+            {
+                warnings.Add(AccessModelSourceColumns.NotCopiedByRepairWarning(target));
+            }
         }
 
-        return copyable;
+        return new RepairSourceColumns([.. copyable, .. copiedSecured], copiedSecured);
     }
+
+    /// <summary>The mapped source columns Repair reads and copies, and those of them that are field-secured (task 067).</summary>
+    private sealed record RepairSourceColumns(IReadOnlyList<string> Copyable, IReadOnlyList<string> CopiedSecured);
 
     /// <summary>
     /// <paramref name="table"/>'s column metadata, read app-only (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>,
