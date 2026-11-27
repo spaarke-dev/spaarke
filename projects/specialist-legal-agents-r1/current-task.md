@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-27 (spike `5cd40984b0` live on dev ~13:14Z with all 4 spike tools; G5 R4 row sent; owner uploads next)
+> **Last Updated**: 2026-11-27 (spike `5cd40984b0` live on dev ~13:14Z with all 4 spike tools; G5 R4 row sent; gate passed 13:45Z; owner uploading)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 
@@ -9,14 +9,14 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 0 in execution. `spec.md` (2026-11-25), `plan.md`, project `CLAUDE.md`, 20 POMLs + `tasks/TASK-INDEX.md` (2026-11-26, lint PASS, no drift) |
-| **Active task** | 001–015 ✅; spike live on dev (now `5cd40984b0`). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8). G5 stubs `spike_review_agreement` / `spike_review_legal_hold` at spike `5cd40984b0`, **live on dev 2026-11-27 ~13:14Z** (uac-r2; `tools/list` 9 tools incl. all 4 spike tools; rollback `d307d67e36`; 30-min gate due ~13:45Z). G5 R4 row sent 2026-11-27 and recorded PLANNED by coordination (c0445b2cbe), so all 8 rows are recorded |
+| **Active task** | 001–015 ✅; spike live on dev (now `5cd40984b0`). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8). G5 stubs `spike_review_agreement` / `spike_review_legal_hold` at spike `5cd40984b0`, **live on dev 2026-11-27 ~13:14Z** (uac-r2; `tools/list` 9 tools incl. all 4 spike tools; rollback `d307d67e36`; 30-min gate PASSED 13:45Z). G5 R4 row sent 2026-11-27 and recorded PLANNED by coordination (c0445b2cbe), so all 8 rows are recorded |
 | **Stop points** | 010 DEV write (`agreement-review-spike`) needs the owner's go; 015 dev deploy needs the owner's per-SHA go via uac-r2 |
 | **Uncommitted** | see `git status` |
 
 ## Next action (exact)
 
 1. Coordination checks on 020: DONE (d1cf402ec2; test markers, run isolation, R1′ wording; reply sent).
-2. DONE 2026-11-27: spike `5cd40984b0` live on dev (owner go in uac-r2), all 4 spike tools in `tools/list`, G5 R4 row sent to coordination. Still to come: uac-r2's 30-minute gate result (~13:45Z); if it fails, uac-r2 rolls back to `d307d67e36` and G5 must not run (`phase0/g5/README.md`). G1 (c) runs from now on see the broadened `spike_review_nda` description (notes/decisions.md 2026-11-27).
+2. DONE 2026-11-27: spike `5cd40984b0` live on dev (owner go in uac-r2), all 4 spike tools in `tools/list`, G5 R4 row sent to coordination. uac-r2's 30-minute gate PASSED at 13:45Z; rollback stays `d307d67e36`. G1 (c) runs from now on see the broadened `spike_review_nda` description (notes/decisions.md 2026-11-27).
 3. **Owner:** upload per `phase0/g1-nda/packages/UPLOAD.md` (owner + demo@ only); all 8 R4 rows are sent, G5 included. Remove the G8 artifacts by 2026-11-30.
 4. Then 021/022 runs. The latency p95 check moved into 021.
 
