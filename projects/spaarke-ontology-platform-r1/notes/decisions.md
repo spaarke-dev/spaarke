@@ -892,3 +892,8 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 ## D-235 — One-off recalculation of finance roll-ups for Threshold Signals open before task 232 (owner, 2026-11-27; #1767)
 
 - **Decision (owner, answered in this session):** "yes after next ontology deploy; you can run it automatically". Once task 232 is on dev, the main session recalculates, through the existing recalculate route (`FinanceRollupService`, unchanged-write skip), the stored roll-up of each matter or project that has an open spend, budget or utilization Threshold Signal raised before 232 shipped. Targeted, one call per record (D-61); never a direct column write. Task 236.
+
+## D-236 — The Decision Records tab lists only invoice-level Signal-less billing records, not line decisions (owner, 2026-11-27; #3283, task 235 review F1)
+
+- **Decision (owner, answered in this session):** option (a). Task 235's billing kind drops the line codes (`accept-line`, `reduce-line`, `disallow-line`, `add-line`); invoice-level billing codes stay. Line decisions remain visible on the invoice. Volume then grows with invoices, not lines, so one kind's `MaxPages` bound is far from the 503 that would take down the whole tab. Narrows D-234 for billing.
+- **Rejected:** (b) newest-up-to-cap with a truncation flag (contract, baseline and client change; breaks the tab's "never a partial list" rule); (c) accepting a whole-tab 503 past 25,000 line records in 90 days.
