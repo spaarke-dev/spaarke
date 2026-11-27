@@ -495,6 +495,73 @@ public sealed class PlaybookRunToolsContractTests
         body.GetProperty("reasonCode").GetString().Should().NotContain("\n");
     }
 
+    // ---- frozen model-visible output (task 037c: the widget link must not change a byte of it) ------------------------------------
+
+    private static readonly Guid FrozenRun = Guid.Parse("0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b");
+
+    private static readonly Guid FrozenPlaybook = Guid.Parse("11111111-2222-4333-8444-555555555555");
+
+    private static readonly DateTimeOffset FrozenStart = new(2026, 11, 27, 9, 0, 0, TimeSpan.Zero);
+
+    private static string Frozen(CallToolResult result) =>
+        JsonSerializer.Serialize(new { text = Text(result), structuredContent = result.StructuredContent, isError = result.IsError });
+
+    [Fact(DisplayName = "037c frozen: spaarke_run_playbook's start result (text and structuredContent) is byte-identical to before the widget link")]
+    public void Frozen_StartResult()
+    {
+        var run = new PlaybookRunView(FrozenRun, FrozenPlaybook, PlaybookRunPhase.Running, 0, 0, 0, 0, null, FrozenStart, null, FromDurableRecord: false);
+
+        var started = RunPlaybookTool.StartedResult(run, "https://spaarke-test.crm.dynamics.com/main.aspx?x=1", replayed: false, FrozenStart);
+        var replayed = RunPlaybookTool.StartedResult(run, "https://spaarke-test.crm.dynamics.com/main.aspx?x=1", replayed: true, FrozenStart);
+
+        Frozen(started).Should().Be(
+            "{\"text\":\"Started JPS playbook run 0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b. It continues in Spaarke after this reply; call spaarke_get_playbook_run with this runId to see its progress and result.\","
+            + "\"structuredContent\":{\"runId\":\"0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b\",\"status\":\"running\",\"consoleLink\":\"https://spaarke-test.crm.dynamics.com/main.aspx?x=1\"},\"isError\":null}");
+        Frozen(replayed).Should().Be(
+            "{\"text\":\"A JPS playbook run was already started with this idempotencyKey: 0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b. Nothing new was started. Call spaarke_get_playbook_run with this runId for its status.\","
+            + "\"structuredContent\":{\"runId\":\"0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b\",\"status\":\"running\",\"consoleLink\":\"https://spaarke-test.crm.dynamics.com/main.aspx?x=1\"},\"isError\":null}");
+    }
+
+    [Fact(DisplayName = "037c frozen: spaarke_get_playbook_run's status results (running, completed, interrupted) are byte-identical to before the widget link")]
+    public void Frozen_StatusResults()
+    {
+        var running = new PlaybookRunView(FrozenRun, FrozenPlaybook, PlaybookRunPhase.Running, 40, 2, 0, 1, null, FrozenStart, null, FromDurableRecord: false);
+        var completed = running with { Phase = PlaybookRunPhase.Completed, Progress = 100, CompletedAt = FrozenStart.AddMinutes(3) };
+        var stale = running with { FromDurableRecord = true, Progress = null };
+
+        Frozen(GetPlaybookRunTool.StatusResult(running, FrozenStart.AddMinutes(1))).Should().Be(
+            "{\"text\":\"JPS playbook run 0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b: The run is running (40% done). Nodes: 2 completed, 0 failed, 1 skipped. Call spaarke_get_playbook_run again shortly.\","
+            + "\"structuredContent\":{\"runId\":\"0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b\",\"status\":\"running\",\"progress\":40,\"result\":{\"playbookId\":\"11111111-2222-4333-8444-555555555555\",\"outcome\":\"running\",\"startedAt\":\"2026-11-27T09:00:00Z\",\"completedNodes\":2,\"failedNodes\":0,\"skippedNodes\":1,\"summary\":\"The run is running (40% done). Nodes: 2 completed, 0 failed, 1 skipped.\"}},\"isError\":null}");
+        Frozen(GetPlaybookRunTool.StatusResult(completed, FrozenStart.AddMinutes(4))).Should().Be(
+            "{\"text\":\"JPS playbook run 0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b: The run completed. Nodes: 2 completed, 0 failed, 1 skipped.\","
+            + "\"structuredContent\":{\"runId\":\"0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b\",\"status\":\"completed\",\"result\":{\"playbookId\":\"11111111-2222-4333-8444-555555555555\",\"outcome\":\"completed\",\"startedAt\":\"2026-11-27T09:00:00Z\",\"completedAt\":\"2026-11-27T09:03:00Z\",\"completedNodes\":2,\"failedNodes\":0,\"skippedNodes\":1,\"summary\":\"The run completed. Nodes: 2 completed, 0 failed, 1 skipped.\"}},\"isError\":null}");
+        Frozen(GetPlaybookRunTool.StatusResult(stale, FrozenStart.AddHours(2))).Should().Be(
+            "{\"text\":\"JPS playbook run 0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b: The run was interrupted (Spaarke restarted while it ran) and did not finish; start it again. Nodes: 2 completed, 0 failed, 1 skipped.\","
+            + "\"structuredContent\":{\"runId\":\"0b8a1f5e-2d4c-4e6b-9a7f-1c2d3e4f5a6b\",\"status\":\"failed\",\"result\":{\"playbookId\":\"11111111-2222-4333-8444-555555555555\",\"outcome\":\"interrupted\",\"reasonCode\":\"playbook.run-interrupted\",\"startedAt\":\"2026-11-27T09:00:00Z\",\"completedNodes\":2,\"failedNodes\":0,\"skippedNodes\":1,\"summary\":\"The run was interrupted (Spaarke restarted while it ran) and did not finish; start it again. Nodes: 2 completed, 0 failed, 1 skipped.\"}},\"isError\":null}");
+    }
+
+    [Fact(DisplayName = "037c frozen: both descriptors (name, title, description, input schema, annotations) are unchanged by the widget link; _meta.ui carries only the resourceUri")]
+    public void Frozen_Descriptors()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        foreach (var (tool, expectedSha256) in new (Sprk.Bff.Api.Api.Mcp.McpToolDefinition Tool, string Sha)[]
+                 {
+                     (new RunPlaybookTool(), FrozenRunDescriptorSha256),
+                     (new GetPlaybookRunTool(), FrozenGetDescriptorSha256),
+                 })
+        {
+            var descriptor = JsonSerializer.SerializeToNode(tool.Create(services).ProtocolTool, McpJsonUtilities.DefaultOptions)!.AsObject();
+            descriptor.Remove("_meta");
+            var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(descriptor.ToJsonString())));
+            sha.Should().Be(expectedSha256, $"{descriptor["name"]}: only _meta may change ({descriptor.ToJsonString()})");
+        }
+    }
+
+    // SHA-256 of each descriptor without _meta, taken before task 037c added the widget link (the model reads all of it).
+    private const string FrozenRunDescriptorSha256 = "91F2B0EFCBB0D5B25C7F5885CFC52272C74AB6510003152136439F43256EF127";
+
+    private const string FrozenGetDescriptorSha256 = "27A238939F187B3006E03AD4F0D7B27DC4F3E79DB3AB2637677491539B7AC8EC";
+
     [Fact(DisplayName = "030 descriptions: both name a JPS playbook, say use for / not for, fit 1,024 characters; the start's hints are a reversible, idempotent write")]
     public void Descriptions_AndHints()
     {
