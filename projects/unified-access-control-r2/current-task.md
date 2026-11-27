@@ -13,7 +13,7 @@
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). `uac-r2` is authoritative: it reviews peers as an access gate and runs EVERY dev deploy. Live actions need the owner's go IN THIS SESSION; a deploy needs the owner to name the exact SHA here. A go relayed by another session is not a go. ≤ 2 agents at once. |
 | **Dev BFF (CURRENT, mine)** | **`5cd40984b0` LIVE ~13:14Z 2026-11-27** (owner in session: "go BFF deploy 5cd40984b0 if it is still the latest"; it was: spike tip = master 765a199922 + spike tools incl. G5 stubs). `C:/wtdep31`, 42.15 MB, live DLL SHA-256 5b9c104d… = local. Pre-deploy IsSecured check: 18 tables, 0 non-boolean. Smoke OK (healthz 200; catalog 503 old; preview-url 403; tools/list 9 incl. 4 spike tools). **30-min gate PASS 13:45Z** (40 req, 0 5xx, no external; 12 known container refusals; 2 Create_Task_From_Email schema 400 = pre-existing #2142/#2776 since 11-25). BEFORE/LIVE/GATE sent to all 7 (word-add-in via its known pipe: a new local session claims that name, unconfirmed). Full test pass NOT run on this SHA (spike session reported build 0/0, MCP 268/1 skip, arch 2860). Rollback `d307d67e36` (`C:/wtdep30`). |
-| **Dev SPA** | 24d53fb333 (spa-r4, 15:50Z). |
+| **Dev SPA** | c438119bca (spa-r4 task 043, live ~14:29Z 2026-11-27, run 46016029559; rollback tag external-spa-dev-24d53fb333). |
 | **Agents running** | None. |
 
 ## DONE: #3245 Assign removal — CLOSED 2026-11-27
