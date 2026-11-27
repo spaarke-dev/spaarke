@@ -1,6 +1,6 @@
 # Current Task State — specialist-legal-agents-r1 (umbrella), Phase 0
 
-> **Last Updated**: 2026-11-27 ~21:00Z (spike `af8a5547ef` live on dev ~20:57Z with all 4 spike tools, rollback `d9595dd98e`, gate due ~21:28Z; owner uploaded all 8; scope + load check pending)
+> **Last Updated**: 2026-11-27 ~21:00Z (spike `af8a5547ef` live on dev ~20:57Z with all 4 spike tools, rollback `d9595dd98e`, gate PASSED 21:28Z; owner uploaded all 8; scope + load check pending)
 > **Worktree**: `C:\code_files\spaarke-wt-specialist-legal-agents-r1` · **Branch**: `work/specialist-legal-agents-r1` · **Board**: Issue #3002 under Epic #421
 > **Recovery**: read this file, then `CLAUDE.md` (binding rules, gotchas), then `tasks/TASK-INDEX.md`.
 
@@ -17,7 +17,7 @@
 
 1. Coordination checks on 020: DONE (d1cf402ec2; test markers, run isolation, R1′ wording; reply sent).
 2. DONE 2026-11-27: spike `5cd40984b0` live on dev (owner go in uac-r2), all 4 spike tools in `tools/list`, G5 R4 row sent to coordination. uac-r2's 30-minute gate PASSED at 13:45Z; rollback stays `d307d67e36`. G1 (c) runs from now on see the broadened `spike_review_nda` description (notes/decisions.md 2026-11-27).
-2b. 2026-11-27: master `d9595dd98e` removed the spike tools ~20:19Z; spike `af8a5547ef` (same spike patch-id as `5cd40984b0`) **live ~20:57Z** on the owner's go in uac-r2, `tools/list` = 9, rollback `d9595dd98e`; uac-r2 gate due ~21:28Z. Every future dev deploy from master removes the tools: merge master into the spike branch and send uac-r2 a new tip.
+2b. 2026-11-27: master `d9595dd98e` removed the spike tools ~20:19Z; spike `af8a5547ef` (same spike patch-id as `5cd40984b0`) **live ~20:57Z** on the owner's go in uac-r2, `tools/list` = 9, rollback `d9595dd98e`; uac-r2 gate PASSED 21:28Z. Every future dev deploy from master removes the tools: merge master into the spike branch and send uac-r2 a new tip.
 3. **Owner (2026-11-27): all 8 packages UPLOADED** (screenshots: each Available; agents show the dynamic-discovery banner). Pending from the owner: confirm each Users tab lists only owner + demo@ (R7), then the load check per `phase0/g1-nda/packages/UPLOAD.md` ("List every tool" as owner and demo@; Cowork `/` list), with the answers. Coordination told of the uploads. Remove the G8 artifacts by 2026-11-30.
 4. Then 021/022 runs. The latency p95 check moved into 021.
 
