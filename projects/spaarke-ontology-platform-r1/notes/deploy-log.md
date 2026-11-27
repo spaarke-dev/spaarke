@@ -1,5 +1,22 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-27 21:01Z — Task 234 dev check on dev BFF `af8a5547ef` (d9595dd98e + uac-r2 spike tools): PASS, plus one live bypass that task 237 fixes
+
+- **Owner go:** "Merge, check after" (2026-11-27). Run as the owner's signed-in Console session, after uac-r2's LIVE notice.
+- **Data:** dev had no open inquiry outcome To Do (none of the 4 open outbound inquiries has a reply yet). I created two test To Dos on the matter of one open outbound inquiry:
+  - `zz-234 Record the outcome (test)`, with the derived v5 id and the notes hint, the shape the reply handler creates;
+  - `zz-234 ordinary To Do (test)`.
+- **Route** (`PATCH /api/v1/child-records/sprk_todo/{id}`):
+  - Outcome To Do, `{"statecode":1,"statuscode":659490002}`: **409 `inquiry.disposition_required`**, with the user-facing detail. Nothing saved.
+  - Ordinary To Do, same body: 204, and it read back Dismissed.
+  - **Bypass, live:** the outcome To Do with `{"statecode":"1","statuscode":"2"}` (strings) returned **204** and read back **Completed while the inquiry was still open**. Dataverse accepts string values, and `ClosesTodo` on this build reads only JSON numbers. This is uac-r2's note on #3293. **Task 237 (PR #3308) fixes it.** The row was reopened for the next step.
+- **Chat** (Assistant, `dataverse.update_record`):
+  - Completing the outcome To Do: the tool prepared the update and the confirm card was shown. After Confirm: "The update was NOT written: record the outcome on the inquiry first … Nothing was saved (inquiry.disposition_required)". Read back: still open.
+  - Completing the ordinary To Do: written, and read back Completed.
+- **Inquiry:** still open, disposition empty.
+- **Cleanup:** both test To Dos were deleted (204) and confirmed gone (404). The fetch hook used for the route call was removed and the tab was closed. The token was used only inside the page and never read out.
+- **Not done here:** the SmartTodo and LegalWorkspace code pages carrying #3293's client message are not yet deployed to dev. The Console auto-deployed from `e140b01761`.
+
 ## 2026-11-27 20:41Z — mcp-r1 #3272 (ISS-010 Part C) live decision check on dev BFF `d9595dd98e`: PASS
 
 - **Owner go:** "Yes, run it" (2026-11-27, typed in the main session's chat). Dev BFF `d9595dd98e` was deployed by uac-r2 on the owner's go, live about 20:19Z. It carries #3270, #3277, #3278, #3292, #3293, #3295 and #3272.
