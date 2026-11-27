@@ -4,7 +4,7 @@
     <title>Remove the "Add KPI Assessment" subgrid button; "+ New" is the one KPI create (owner 2026-11-26, 051 OQ-5)</title>
     <phase>6 W6 Standard, guards, docs, retirement</phase>
     <gate>Owner go for the dev import (separate, after merge of the repo change)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Ribbon XML, config and their tests; no server code.</rigor-reason>
     <model-tier>sonnet</model-tier>

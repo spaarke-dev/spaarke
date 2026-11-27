@@ -108,7 +108,7 @@
 | 063 | [Dead code + issue hygiene](063-dead-code-and-issue-hygiene.poml) | FR-28 | sonnet / medium | STANDARD | W6 | 035 | ✅ 2026-11-26: adapter + dead event builder deleted; issues updated (#1318 closed, #3245 filed); DI-045..047 |
 | 064 | [Copy ordinary mapped values regardless of caller rights (owner 4b/4c)](064-copy-mapped-values-regardless-of-caller-rights.poml) | FR-08 amendment (owner 2026-10-27, reconfirmed 2026-11-26) | opus / high | FULL | W6 | none (UAC-r2 diff review) | ✅ |
 | 065 | [Copy a mapped value from the filing parent even when its source column is field-secured (owner 2026-11-26)](065-copy-field-secured-source-values.poml) | FR-08 amendment (owner 2026-11-26) | opus / high | FULL | W6 | UAC-r2 diff review | 🔲 |
-| 066 | [Remove the "Add KPI Assessment" subgrid button (051 OQ-5)](066-remove-add-kpi-assessment-button.poml) | 051 OQ-5 (owner 2026-11-26) | sonnet / high | STANDARD | W6 | owner go for the dev import | 🔲 |
+| 066 | [Remove the "Add KPI Assessment" subgrid button (051 OQ-5)](066-remove-add-kpi-assessment-button.poml) | 051 OQ-5 (owner 2026-11-26) | sonnet / high | STANDARD | W6 | owner go for the dev import | ✅ |
 
 ## Phase 7 — W7 Record family service and Family tool (spec amendment 2026-10-27; design.md §12)
 
