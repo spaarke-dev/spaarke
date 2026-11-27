@@ -223,6 +223,15 @@ public sealed class BillingDecisionRecorder
     /// not own). An ordinary record makes no share call. Never throws and never fails or undoes the decision: a <c>Failed</c> or
     /// <c>Incomplete</c> answer and any fault are logged (ids and status only) and left to the two-minute reconcile, the backstop.</para>
     /// <para>The synchronizer is scoped and this recorder is a singleton, so it is resolved from a fresh scope per share, disposed after it.</para>
+    /// <para><b>Cost (known limit, review 2026-11-26).</b> A first-time ordinary record makes no call. A secure record costs one per-child
+    /// mirror, the work the reconcile would otherwise do for it. A retry of an already-recorded record costs the synchronizer's ownership
+    /// reads (about three) even when the row is ordinary, because only the stored row can say. The line-decision loop records at most
+    /// <see cref="InvoiceLineDecisionService.MaxLinesPerRequest"/> lines per request, so this is bounded and proportional to the writer's own
+    /// per-line reads.</para>
+    /// <para><b>Why this wrapper is not shared with the commit route's.</b> The rule itself is uac-r2's (<c>SyncChildAsync</c>); what is
+    /// repeated here is only the log-and-swallow around it, and its gate reads a different answer (the writer's
+    /// <see cref="DecisionRecordWriteResult.SecureOwnerTeamId"/>, not the commit route's owner resolution). Sharing it would mean editing
+    /// the ontology-owned <c>DecisionCommitService</c>, which another open change is editing.</para>
     /// </summary>
     private async Task ShareSecureRecordAsync(DecisionRecordWriteResult result, Guid decisionId, string what)
     {
