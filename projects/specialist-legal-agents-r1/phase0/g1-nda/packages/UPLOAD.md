@@ -11,7 +11,7 @@
 2. **Scope: owner and the test user `demo@` only, never All users, never an org-wide group (R7).** If the route you use cannot be limited to those two accounts, **do not upload**; tell the session where it would have landed.
 3. **Dev tenant only.**
 4. The G8 artifacts are removed (due 2026-11-30; this precedes the G1 run, task 022).
-5. The dev BFF serves the spike tools (`d307d67e36`, live 2026-11-26 about 18:00Z). Other dev users can see the spike tools; tell them before the runs.
+5. The dev BFF serves the spike tools (`5cd40984b0`, live 2026-11-27 about 13:14Z; before that `d307d67e36`). Other dev users can see the spike tools; tell them before the runs.
 6. **Never change the OAuth registration** (A1), and never add anything to an action URL. Nothing in these packages needs either.
 
 ## Rules that apply to every package
