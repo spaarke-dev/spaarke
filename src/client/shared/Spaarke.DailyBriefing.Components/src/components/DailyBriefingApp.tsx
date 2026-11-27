@@ -411,7 +411,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({
   const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId, dataService?.preferences);
   // The Preferences menu persists a change: offered on the default path, and on an injected host only
   // when it can save (a read-only host would get a menu whose Save does nothing).
-  const canSavePreferences = injected ? Boolean(dataService?.preferences?.save) : true;
+  const canSavePreferences = injected ? Boolean(dataService.preferences?.save) : true;
   const preferencesSlot = canSavePreferences ? (
     <PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />
   ) : undefined;

@@ -198,3 +198,12 @@ Owner's words verbatim, then what each one means here.
   - It forwards one field and calls the existing persistence that the Workspace path already uses.
   - Output stays the capability's own Deliver Output.
 - **Security:** no HTTP route binds `PlaybookRunRequest` from a body (it is built server-side in `PlaybookRunEndpoints.cs:186` and `AnalysisEndpoints.cs:714`). So the id cannot be chosen by a caller, and `PlaybookParameterPolicy` does not change. A test pins this.
+
+## D-037-cleanup — a Copilot start that does not start deletes its empty analysis (owner, 2026-11-27)
+
+- **Owner's words:** "Yes delete". This answers: "If a Copilot run fails to start, should its empty analysis record be deleted (recommended), or left?"
+- **Decision:** when `DetachedPlaybookRunner.StartReservedAsync` has created the caller's `sprk_analysis` but does not return `Started` (the run was not accepted within the budget, the run table has no run, the caller cancelled, or anything faults after the create), it deletes that analysis in the same request.
+  - The delete runs **as the caller** (`IDataverseUserClient.DeleteAsync`), never app-only (ADR-028 A10). If the caller's delete is refused or faults, the record is left, and an outcome code and the error type are logged; the tool's answer does not change.
+  - The run is abandoned before the delete, so no save follows it. If a late save still reaches a deleted analysis, it fails and is logged (D-037-engine: a failed save never changes the run).
+  - Only the analysis this request created is ever deleted; no id from a caller or a record is used.
+- **Task:** 037d (follow-up to 037).
