@@ -32,3 +32,12 @@ One extra Dataverse read per Do-lane policy pass that has at least one condition
   - Cost of doing nothing: every system-closed (ConditionCleared) Decision Record reads not privileged, even when its evidence communication is Privileged (#3275).
 - Publish size: `dotnet publish -c Release -r linux-x64 --self-contained false src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` in fresh short-path worktrees (`C:\wt233m` = origin/master `6f4d7bc7e4`, `C:\wt233` = this branch), then `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`. Master: 43,716,797 B, 194 files. Branch: 43,718,981 B, 194 files. Delta +2,184 B.
 - No package change, so no CVE re-check is needed.
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `dotnet format --verify-no-changes` on the three BFF files: clean. `tests/Spaarke.ArchTests` (built explicitly first): 2860 passed, 0 failed.
+
+## Step 9.5 (inline self-review; the main session reviews the PR, D-115)
+- No F-class finding. ADR-015: the flag is stamped only and never branched on. ADR-010: no new registration. ADR-052: no new background work. ADR-038: each acceptance criterion has a test, including must-not-fire controls. D-145b: keying and lookup are unchanged, the existing idempotency tests pass, and a re-run after a flagged closure writes and reads nothing.
+- Known limit (K): a communication deleted after the Signal was raised flags its record, because it cannot be judged. This is the same fail-closed rule as the caller read, where an unreturned row flags.
+- Known limit (K): the read uses the evidence as stored before this pass's redaction writes. Redaction removes detail only, so the flag can only err toward flagged.
+
+## Other issues seen (not fixed)
+- None.
