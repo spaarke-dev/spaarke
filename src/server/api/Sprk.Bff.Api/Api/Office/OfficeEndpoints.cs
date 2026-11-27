@@ -526,20 +526,20 @@ public static class OfficeEndpoints
                         correlationId);
                 }
 
-                // Task 141: an attachments add names the saved email, the record it is filed to and at least one attachment.
-                // Without a record or a name there is nothing it could add, and it never falls back to an email save.
+                // Task 141: an attachments add names the saved email and at least one attachment. Without a name there is
+                // nothing it could add, and it never falls back to an email save. Task 143: the record is optional — with
+                // none, the service adds only under a saved email filed to no record (EmailAttachmentAddPlanner.IsFiledToNoRecord).
                 if (OfficeService.SavedEmailAttachmentAddDocumentId(request) is not null
-                    && (request.TargetEntity is null
-                        || request.Email.SelectedAttachmentFileNames is not { Count: > 0 } names
+                    && (request.Email.SelectedAttachmentFileNames is not { Count: > 0 } names
                         || names.Any(string.IsNullOrWhiteSpace)))
                 {
                     logger.LogWarning(
-                        "Attachments add without a record or attachment names, correlation {CorrelationId}",
+                        "Attachments add without attachment names, correlation {CorrelationId}",
                         correlationId);
                     return ProblemDetailsHelper.OfficeValidationError(
                         "OFFICE_VALIDATION",
                         "Validation Error",
-                        "Adding attachments to a saved email needs the record it is filed to and the names of the attachments.",
+                        "Adding attachments to a saved email needs the names of the attachments.",
                         correlationId);
                 }
                 break;

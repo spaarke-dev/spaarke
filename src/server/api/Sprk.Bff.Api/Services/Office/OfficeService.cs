@@ -476,6 +476,10 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         {
             (request, attachmentParentEmail) =
                 await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
+
+            // Task 143: Graph could not read the parent (its id is an RFC Message-ID, or the mailbox is not the caller's own —
+            // a guest's), so the parent is the email the request itself describes, when that email IS the parent.
+            attachmentParentEmail ??= ParentEmailOfTheRequest(request);
         }
 
         // Declared outside the try (task 039, finding 2) so the outer catch can mark THIS save's ProcessingJob
@@ -1948,9 +1952,13 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                     "This saved email is not the email being saved, so its attachments can't be added. Nothing was saved.",
                     retryable: false), null);
             case EmailAttachmentAddPlanner.SavedEmailOutcome.NotFiledToTheRecord:
+                // Task 143: an add that names no record is refused when the saved email is filed to one.
                 return (SavedEmailRefusal(
                     OfficeErrorCodes.AccessDenied,
-                    "This saved email is not filed to that record, so its attachments can't be added there. Nothing was saved.",
+                    request.TargetEntity is null
+                        ? "This saved email is filed to a record, so its attachments can only be added to that record. "
+                          + "Nothing was saved."
+                        : "This saved email is not filed to that record, so its attachments can't be added there. Nothing was saved.",
                     retryable: false), null);
             case EmailAttachmentAddPlanner.SavedEmailOutcome.Unreadable:
                 return (SavedEmailRefusal(
@@ -1978,6 +1986,33 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         }
 
         return (null, plan);
+    }
+
+    /// <summary>
+    /// Task 143: the parent of a single-attachment save, taken from the request's own <see cref="SaveRequest.Email"/>, for when
+    /// Graph could not read it (the pane saves an attachment without its email, including from a mailbox the caller's token
+    /// cannot read). Only when that email IS the parent: its RFC Message-ID or its Exchange item id equals
+    /// <see cref="AttachmentMetadata.ParentEmailId"/> (case-insensitive, as the planner compares message keys). Any other email
+    /// — none, or one that names another message — is never captured or filed for this attachment: <see langword="null"/>.
+    /// The capture and the filing then trust it exactly as an email save trusts its own <c>email</c> metadata.
+    /// </summary>
+    internal static EmailMetadata? ParentEmailOfTheRequest(SaveRequest request)
+    {
+        if (request.ContentType != SaveContentType.Attachment
+            || request.Email is not { } email
+            || string.IsNullOrWhiteSpace(request.Attachment?.ParentEmailId))
+        {
+            return null;
+        }
+
+        var parentId = request.Attachment.ParentEmailId;
+        return IsSameKey(OfficeEmailEnricher.ResolveRfcMessageId(email), parentId)
+            || IsSameKey(OfficeEmailEnricher.ResolveExchangeItemId(email), parentId)
+                ? email
+                : null;
+
+        static bool IsSameKey(string? key, string parentId) =>
+            !string.IsNullOrWhiteSpace(key) && string.Equals(key, parentId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SaveResponse SavedEmailRefusal(string code, string message, bool retryable) => new()

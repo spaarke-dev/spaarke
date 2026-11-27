@@ -51,7 +51,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave;
 /// several collaborators, inherent at this KEEP integration path (B15).</para>
 /// </remarks>
 [Trait("status", "task-130-word-add-in-r1")]
-public class OfficeEmailDocumentCommunicationLinkTests
+public partial class OfficeEmailDocumentCommunicationLinkTests
 {
     private const string RfcId = "<CAF0-130@mail.example.com>";
     private const string ItemId = "AAMkAGI2TG93-130=";
@@ -740,7 +740,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
     /// </summary>
     private static WebApplicationFactory<Program> Host(
         OfficeVersionSaveWorld world, CommunicationStore store, ParentEmailGraph? graph = null, RecordingLoggerProvider? logs = null,
-        RecordOwnershipResolverDouble? documentOwnership = null)
+        RecordOwnershipResolverDouble? documentOwnership = null, IGraphClientFactory? graphFactory = null)
     {
         var dataverse = store.Dataverse;
         var ownership = new RecordOwnershipResolverDouble();
@@ -767,7 +767,7 @@ public class OfficeEmailDocumentCommunicationLinkTests
             if (graph is not null)
             {
                 services.RemoveAll<OfficeEmailEnricher>();
-                services.AddScoped(_ => new OfficeEmailEnricher(graph.Factory, NullLogger<OfficeEmailEnricher>.Instance));
+                services.AddScoped(_ => new OfficeEmailEnricher(graphFactory ?? graph.Factory, NullLogger<OfficeEmailEnricher>.Instance));
             }
 
             if (logs is not null)
