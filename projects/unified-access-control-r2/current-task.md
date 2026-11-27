@@ -40,7 +40,7 @@
 - Quality alerts #1906, #2067, #2866: mention only. Open: #3111, #2158, #3125, #3175, #3241, #1506, #3264/#3265 (R4's).
 
 ## Scratch
-- Keep: `C:\wtdep30` (live), `C:\wtdep28` (rollback), `C:\wtdep29` (test pass), `C:\wtasg` (PR #3269). Older `C:\wtdep*`, `C:\wtirp*`, `C:\wt3120` can go, only via `scripts/worktree/Remove-WorktreeSafe.ps1`.
+- Keep: `C:\wtdep31` (live), `C:\wtdep30` (rollback), `C:\wtdep28`, `C:\wtdep29` (test pass), `C:\wtasg` (PR #3269). Older `C:\wtdep*`, `C:\wtirp*`, `C:\wt3120` can go, only via `scripts/worktree/Remove-WorktreeSafe.ps1`.
 - Scratchpad: `livecheck.ps1 -LocalDll <dll>` (live hash), `after30.ps1` (smoke), `gate-now.ps1 <t0>`, `gate29x.ps1` (exception detail, t0 18:00Z), `cand29.sh`, `asg1.ps1`/`asg2.ps1`/`asg3.ps1` (audit queries), `pr3245.md`.
 - The untracked 0-byte `tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs`: leave it alone.
 - Peer pipe addresses: ebilling `cc-msg-c8f5bbc4…`, mcp-r1 `cc-msg-6ad27070…`, word-add-in `cc-msg-6723e836…`, field-mapping `cc-msg-833ddee7…`, spa-r4 `cc-msg-0fe1b7fa…`, ontology `cc-msg-c1a1d83c…` (or by bare name for spa-r4/ontology-r1/mcp-r1/specialist-legal-agents-r1).
