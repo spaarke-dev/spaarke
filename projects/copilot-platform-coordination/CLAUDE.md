@@ -18,6 +18,12 @@ Coordination project for every Spaarke artifact in Microsoft 365 Copilot tenants
 - Cowork shows the **plugin** name, not the connector name (T13).
 - Two package connectors sharing one OAuth `referenceId` share one sign-in (T14).
 - An org-catalog **update** that changes a declarative agent's action takes the action offline for a while. In V1 (2026-11-24) it was still missing ~25 min after one upload, and it was back at ~40 min after another. Test an updated agent about 45 min after upload, not minutes after. This probably explains the five failed `802fd9cc` versions, each tested within minutes (not proven). Detail: specialist `notes/agent-package-identity-and-distribution.md` BR-3.
+- Skills in Word (accelerator WP-1/WP-5, 2026-11-25..27):
+  - Word desktop does not load a skill that ships Python.
+  - It does run Office.js that a skill supplies. The code runner wraps it as `async function main(context) { ... }`, with no `Word.run`.
+  - The runner does not pass the return value back.
+  - It refuses `toString` and a top-level `await`.
+  - Detail: accelerator PR #3266.
 
 ## Key sources
 
