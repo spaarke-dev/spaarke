@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 - **New `scripts/quality/runaway-processes.py`**: lists processes that Claude Code sessions left running, with the owning session (from the `claude.exe --resume=<id>` ancestor, or a session path on a child's command line) or, for orphans, the session or worktree their command lines point to; verdicts safe-to-stop / likely-leaked / check / busy (protected) / idle-leftover. A live session's processes are at most `check`. `kill <pid>` rescans, stops only a still-stoppable tree by explicit PIDs (`check`/`busy` need `--force`), and never stops a Claude session; nothing is stopped automatically. Controls: `scripts/quality/tests/test_runaway_processes.py`.
 - **`.claude/settings.json`**: `SessionStart` (`startup|resume`) also runs `runaway-processes.py banner` (cached report, background refresh after 10 minutes).
+- **New `scripts/quality/Register-RunawayScan.ps1`**: registers (or `-Unregister`s) a per-user scheduled task that runs `runaway-processes.py notify` every 15 minutes under `pythonw`, from the main checkout; it shows one Windows notification per new spinning tree and never stops anything.
 - **`.claude/FAILURE-MODES.md`**: G-26.
 - **Root `CLAUDE.md` §16**: one sentence added to the existing `startup|resume` bullet. **Budget:** 219 lines (unchanged), 22,232 → 22,522 bytes (**+290 bytes**, LF), under the 30 KB ceiling.
 

@@ -425,6 +425,120 @@ class Banner(Base):
             self.assertEqual(popen.call_count, 2)
 
 
+class Notify(Base):
+    """cmd_notify (the scheduled task) scans (take_snapshot replaced) and toasts once per new spinning tree."""
+
+    def notify(self, snap, toast_fails=False):
+        args = argparse.Namespace(cache=self.cache, projects_dir=self.projects, tasks_dir=self.tasks, snapshot=None)
+        toasts = []
+
+        def fake_toast(title, body):
+            if toast_fails:
+                raise RuntimeError("no notifier")
+            toasts.append((title, body))
+
+        with mock.patch.object(rp, "take_snapshot", return_value=snap.build()), \
+                mock.patch.object(rp, "show_toast", side_effect=fake_toast):
+            rc = rp.cmd_notify(args)
+        return rc, toasts
+
+    def leak(self, pid=100):
+        s = Snap()
+        s.add(pid, 999, "bash.exe", BASH_TOOL % "python - <<'EOF'", age=40 * HOUR)
+        s.add(pid + 1, pid, "python.exe", "python -", age=40 * HOUR, rate=1.0)
+        return s
+
+    def test_new_spinning_tree_is_notified_once(self):
+        s = self.leak()
+        rc, toasts = self.notify(s)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(toasts), 1)
+        self.assertIn("1 spinning", toasts[0][0])
+        self.assertIn("pid 100 bash.exe", toasts[0][1])
+        self.assertEqual(self.notify(s), (0, []))                       # same tree next run: no repeat
+
+    def test_a_further_tree_is_notified_and_only_it_is_named(self):
+        s = self.leak()
+        self.notify(s)
+        s.add(200, 999, "node.exe", "node spin.js", age=2 * HOUR, rate=1.0)
+        rc, toasts = self.notify(s)
+        self.assertEqual(len(toasts), 1)
+        self.assertIn("2 spinning", toasts[0][0])
+        self.assertIn("pid 200", toasts[0][1])
+        self.assertNotIn("pid 100", toasts[0][1])
+
+    def test_plain_scan_keeps_the_notified_set(self):
+        s = self.leak()
+        self.notify(s)
+        with mock.patch.object(rp, "take_snapshot", return_value=s.build()):     # a banner's background scan
+            rp.scan_and_cache(argparse.Namespace(cache=self.cache, projects_dir=self.projects,
+                                                 tasks_dir=self.tasks, snapshot=None))
+        self.assertEqual(self.notify(s), (0, []))
+
+    def test_kill_keeps_the_notified_set(self):
+        s = self.leak()
+        s.add(200, 999, "node.exe", "node spin.js", age=2 * HOUR, rate=1.0)
+        self.notify(s)
+        args = argparse.Namespace(cache=self.cache, projects_dir=self.projects, tasks_dir=self.tasks, snapshot=None,
+                                  pids=[200], force=False)
+        with mock.patch.object(rp, "take_snapshot", return_value=s.build()), \
+                mock.patch.object(rp.subprocess, "run",
+                                  return_value=subprocess.CompletedProcess([], 0, "SUCCESS", "")), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(rp.cmd_kill(args), 0)
+        self.assertEqual(self.notify(s), (0, []))                          # pid 100 is not toasted again
+
+    def test_toast_names_three_trees_and_counts_the_rest(self):
+        s = Snap()
+        for i in range(5):
+            s.add(100 + i, 999, "node.exe", "node spin%d.js" % i, age=2 * HOUR, rate=1.0)
+        rc, toasts = self.notify(s)
+        title, body = toasts[0]
+        self.assertIn("5 spinning", title)
+        self.assertEqual(body.count("pid "), 3)
+        self.assertIn("and 2 more", body)
+
+    def test_toast_xml_is_escaped(self):
+        with mock.patch.object(rp.subprocess, "run",
+                               return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            rp.show_toast("a <b> & c", 'node "x" <y>')
+        xml = run.call_args.kwargs["env"]["RUNAWAY_TOAST_XML"]
+        self.assertIn("a &lt;b&gt; &amp; c", xml)
+        self.assertIn("node \"x\" &lt;y&gt;", xml)
+        self.assertNotIn("<b>", xml)
+
+    def test_idle_leftovers_and_busy_trees_are_not_notified(self):
+        s = Snap()
+        s.add(200, 999, "tail.exe", "tail -f /dev/null", age=20 * HOUR)
+        s.add(300, 999, "VBCSCompiler.exe", "VBCSCompiler.exe", age=6 * HOUR, rate=8.0, avg=3.0)
+        rc, toasts = self.notify(s)
+        self.assertEqual((rc, toasts), (0, []))
+        self.assertEqual(self.verdicts(rp.read_cache(self.cache)), {200: "idle-leftover", 300: "busy"})
+
+    def test_failed_toast_is_retried_next_run(self):
+        s = self.leak()
+        rc, _ = self.notify(s, toast_fails=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("no notifier", rp.read_cache(self.cache)["notify_error"])
+        self.assertEqual(len(self.notify(s)[1]), 1)
+
+    def test_skips_while_another_scan_holds_the_lock(self):
+        self.assertTrue(rp.acquire_lock(self.cache))
+        with mock.patch.object(rp, "take_snapshot") as snap:
+            self.assertEqual(rp.cmd_notify(argparse.Namespace(cache=self.cache, projects_dir=self.projects,
+                                                              tasks_dir=self.tasks, snapshot=None)), 0)
+            snap.assert_not_called()
+        self.assertTrue(os.path.exists(self.cache + ".lock"))             # not released: not ours
+
+    def test_releases_the_lock_after_a_failed_scan(self):
+        with mock.patch.object(rp, "take_snapshot", side_effect=RuntimeError("wmi down")):
+            rc = rp.cmd_notify(argparse.Namespace(cache=self.cache, projects_dir=self.projects,
+                                                  tasks_dir=self.tasks, snapshot=None))
+        self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(self.cache + ".lock"))
+        self.assertIn("wmi down", rp.read_cache(self.cache)["error"])
+
+
 class Kill(Base):
     """cmd_kill rescans (take_snapshot replaced) and names every PID it stops (taskkill replaced)."""
 

@@ -44,6 +44,9 @@ Usage:
   python scripts/quality/runaway-processes.py kill PID [PID ...]  stop listed trees (the user's yes first)
   python scripts/quality/runaway-processes.py banner             SessionStart hook: show the cached report; refresh
                                                                  it in the background when older than 10 min
+  pythonw scripts/quality/runaway-processes.py notify            scheduled task (Register-RunawayScan.ps1): scan and
+                                                                 show a Windows notification once per new spinning
+                                                                 tree (safe-to-stop, likely-leaked, check)
 Every scan writes the report to --cache (default: %TEMP%\\spaarke-runaway-processes.json); a failed scan records its
 error there and the banner shows it.
 Test seams: --snapshot <json> replaces the live snapshot; --projects-dir and --tasks-dir replace the transcript and
@@ -580,26 +583,38 @@ def load_snapshot(args, seconds):
     return take_snapshot(seconds)
 
 
-def cmd_scan(args):
-    lock = args.cache + ".lock"
+def entry_key(e):
+    return "%d@%s" % (e["root_pid"], e["root_created"])
+
+
+def scan_and_cache(args):
+    """Scan, write the report (keeping the keys already notified that are still listed) and return it. A failure is
+    recorded in the cache, keeping the last good report, and re-raised."""
     try:
         snap = load_snapshot(args, SAMPLE_SECONDS)
         previous = read_cache(args.cache) or {}
         report = classify(snap, args.projects_dir, previous.get("hot") or {},
                           exclude_root=None if args.snapshot else os.getpid(), tasks_dir=args.tasks_dir)
+        listed = {entry_key(e) for e in report["entries"]}
+        report["notified"] = [k for k in previous.get("notified") or [] if k in listed]
         write_cache(args.cache, report)
+        return report
     except Exception as e:
         failed = read_cache(args.cache) or {}
         failed.update(error=str(e)[:300], failed_at=iso_now())
         write_cache(args.cache, failed)
+        raise
+
+
+def cmd_scan(args):
+    try:
+        report = scan_and_cache(args)
+    except Exception as e:
         print("runaway-processes: scan failed: %s" % e, file=sys.stderr)
         return 1
     finally:
         if args.background:
-            try:
-                os.remove(lock)
-            except OSError:
-                pass
+            release_lock(args.cache)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     elif not args.background:
@@ -656,20 +671,35 @@ def cmd_kill(args):
         if r.returncode != 0:
             rc = 1
         report["entries"] = [x for x in report["entries"] if x["root_pid"] != pid]
+    report["notified"] = previous.get("notified") or []     # the next scan drops keys no longer listed
     if not args.snapshot:
         write_cache(args.cache, report)
     return rc
 
 
-def start_background_scan(cache):
+def acquire_lock(cache):
+    """Only one scan at a time (banner refreshes and scheduled notify runs share the lock)."""
     lock = cache + ".lock"
     try:
         if os.path.exists(lock) and time.time() - os.path.getmtime(lock) >= LOCK_STALE:
             os.remove(lock)
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)   # only one scan at a time
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
+        return True
     except OSError:
+        return False
+
+
+def release_lock(cache):
+    try:
+        os.remove(cache + ".lock")
+    except OSError:
+        pass
+
+
+def start_background_scan(cache):
+    if not acquire_lock(cache):
         return False
     flags = 0
     if os.name == "nt":
@@ -739,6 +769,77 @@ def cmd_banner(args):
     return 0
 
 
+PS_TOAST = r"""
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml($env:RUNAWAY_TOAST_XML)
+$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show(
+  [Windows.UI.Notifications.ToastNotification]::new($xml))
+"""
+
+
+def show_toast(title, body):
+    """A Windows notification. Windows PowerShell 5.1, not pwsh: pwsh 7 has no WinRT projection."""
+    from xml.sax.saxutils import escape
+    xml = ('<toast><visual><binding template="ToastGeneric"><text>%s</text><text>%s</text></binding></visual></toast>'
+           % (escape(title), escape(body)))
+    encoded = base64.b64encode(PS_TOAST.encode("utf-16-le")).decode("ascii")
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                       capture_output=True, text=True, errors="replace", timeout=60, stdin=subprocess.DEVNULL,
+                       env=dict(os.environ, RUNAWAY_TOAST_XML=xml),
+                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    if r.returncode != 0:
+        raise RuntimeError("toast failed: " + r.stderr.strip()[:300])
+
+
+def toast_text(new, act):
+    title = "Runaway processes: %d spinning process tree(s) to review" % len(act)
+    lines = []
+    for e in new[:3]:
+        core = sum(m["core_now"] for m in e["processes"])
+        age = max(m["age_h"] for m in e["processes"])
+        where = e["owner"].get("cwd") or e["owner"].get("worktree_hint") or ""
+        lines.append("pid %d %s, %.1f core, %.0f h, %s%s" % (
+            e["root_pid"], e["root_name"], core, age, LABEL[e["verdict"]].lower(),
+            (" (" + os.path.basename(where.rstrip("\\/")) + ")") if where else ""))
+    if len(new) > 3:
+        lines.append("and %d more" % (len(new) - 3))
+    lines.append("Ask Claude, or run: python scripts/quality/runaway-processes.py")
+    return title, "\n".join(lines)
+
+
+def cmd_notify(args):
+    """Scheduled scan: refresh the report and show a Windows notification for spinning trees not notified before.
+    Never stops anything. Runs under pythonw (no console), so it prints nothing."""
+    if not acquire_lock(args.cache):
+        return 0                                        # a banner refresh is scanning right now
+    try:                                                # held through the last write, so no scan drops `notified`
+        try:
+            report = scan_and_cache(args)
+        except Exception:
+            return 1                                    # recorded in the cache; the banner shows it
+        act = [e for e in report["entries"] if e["verdict"] in ACT_ON]
+        seen = set(report.get("notified") or [])
+        new = [e for e in act if entry_key(e) not in seen]
+        if not new:
+            return 0
+        try:
+            show_toast(*toast_text(new, act))
+        except Exception as e:
+            report["notify_error"] = str(e)[:300]
+            write_cache(args.cache, report)
+            return 1
+        report["notified"] = sorted(seen | {entry_key(e) for e in new})
+        report.pop("notify_error", None)
+        write_cache(args.cache, report)
+        return 0
+    finally:
+        release_lock(args.cache)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--cache", default=DEFAULT_CACHE)
@@ -756,9 +857,12 @@ def main(argv=None):
                       help="also stop a listed check/busy tree (never an unlisted PID, a claude.exe or your own shell)")
     banner = sub.add_parser("banner", help="SessionStart hook")
     banner.add_argument("--no-refresh", action="store_true")
+    sub.add_parser("notify", help="scheduled task: scan and show a Windows notification for new spinning trees")
     args = ap.parse_args(argv)
     if args.command == "kill":
         return cmd_kill(args)
+    if args.command == "notify":
+        return cmd_notify(args)
     if args.command == "banner":
         return cmd_banner(args)
     args.background = getattr(args, "background", False)
