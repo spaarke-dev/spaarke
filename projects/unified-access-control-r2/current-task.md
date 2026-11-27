@@ -5,7 +5,7 @@
 > - **History:** git log of this file. **Earlier checkpoints:** `notes/handoff-history/2026-11.md`.
 > - **NOTE:** master is ahead of this work branch on project files. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-27 ~15:40Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
+> **Last Updated**: 2026-11-27 ~20:05Z (desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-*.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -31,6 +31,12 @@
 - **word-add-in-r1 #3214 (task 140):** gate passed. **Task 141 (`fix/word-addin-141` 2a66132dc0, no PR yet): APPROVED 2026-11-26 ~20:45Z**. The named-.eml attachments add requires Write on the named .eml (version-save filter) plus EntityAccessFilter, IsFiledTo, the NotThisEmail check and the container guard. resolve-email-identity's savedAttachmentNames checks Read on each child via InternalPlaneDocumentNarrowing (ADR-008 A1). Nits accepted: replay confirmed per caller (IdempotencyFilter keys on userId); child id will be logged; batch or cap comes in their next fix round. **MERGED as PR #3289 → d2991fd743** (word-add-in-r1, ~22:15Z); they want the live SHA + gate result after the deploy.
 
 - **intake-pipeline-r1 (PR #3253 draft, head 9bad3f4815):** asked for a dev BFF deploy ~16:00Z on a go from THEIR session. Declined: merge base 24d53fb333 is far behind live (5cd40984b0 / 765a199922 / 6f4d7bc7e4 not ancestors, would roll back gated work); the go must be the owner's here on an exact SHA. Path given: master merge + their task 013 → send access-relevant src/server diff to me (EmailChannelSender createReply, Communication services, DocumentProcessingJobHandler removal, OfficeJobStatusService, app-only IAgreementAi) → merge to master → I batch it into the next candidate.
+
+## NEXT DEV BFF CANDIDATE: master `d9595dd98e` (~20:00Z 2026-11-27) — awaiting the owner's exact-SHA go here
+- Over live (5cd40984b0 spike): #3290 (approved), #3292/#3293/#3295 (ontology 233-235: Opus access review APPROVE w/ notes, notes sent to ontology-r1), #3300 (page only), #3301 search (Opus review APPROVE w/ notes; note 1 = parent CLEARED on a secure/ancestry read fault in DocumentIndexParentResolver, availability only, sent to the search session), #3298 field-mapping 065+066 = 49eece4926 (src identical to approved 46ae0bc33a), #3272 Part C = d9595dd98e (src = approved 18be14d973; #3270 inline share still after accessWindow.Close()). Rollback for Part C without deploy: `Signals__DecisionAccessWindow__Enabled=false` (owner decision).
+- Drops the 6 spike commits (4 spike tools): asked specialist-legal-agents-r1 (a) drop or (b) re-merge spike on master; no answer yet.
+- Before: `issecured.ps1`. After: smoke + 30-min gate + 065 live push check (user without read on a secured column pushes; children unchanged); notify the search session (#3301 checks), field-mapping-r1, mcp-r1, and the 7 peers.
+- Pending client deploy: ebilling #3274 sprk_invoicereviewpage on its merge SHA (owner go here).
 
 ## Waiting on the owner
 - ADR-052 amendment security sign-off (mcp-r2).
