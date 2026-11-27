@@ -9,7 +9,7 @@
 | Field | Value |
 |---|---|
 | **Phase** | Phase 0 in execution. `spec.md` (2026-11-25), `plan.md`, project `CLAUDE.md`, 20 POMLs + `tasks/TASK-INDEX.md` (2026-11-26, lint PASS, no drift) |
-| **Active task** | 001–015 ✅; spike live on dev (now `5cd40984b0`). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8). G5 stubs `spike_review_agreement` / `spike_review_legal_hold` at spike `5cd40984b0`, **live on dev 2026-11-27 ~13:14Z** (uac-r2; `tools/list` 9 tools incl. all 4 spike tools; rollback `d307d67e36`; 30-min gate due ~13:45Z). G5 R4 row sent 2026-11-27, so all 8 rows are sent |
+| **Active task** | 001–015 ✅; spike live on dev (now `5cd40984b0`). **020 🔄**: 8 packages built (a0d73c0b9e). R4 rows for 7 sent; coordination recorded them PLANNED (263cfa87b8). G5 stubs `spike_review_agreement` / `spike_review_legal_hold` at spike `5cd40984b0`, **live on dev 2026-11-27 ~13:14Z** (uac-r2; `tools/list` 9 tools incl. all 4 spike tools; rollback `d307d67e36`; 30-min gate due ~13:45Z). G5 R4 row sent 2026-11-27 and recorded PLANNED by coordination (c0445b2cbe), so all 8 rows are recorded |
 | **Stop points** | 010 DEV write (`agreement-review-spike`) needs the owner's go; 015 dev deploy needs the owner's per-SHA go via uac-r2 |
 | **Uncommitted** | see `git status` |
 

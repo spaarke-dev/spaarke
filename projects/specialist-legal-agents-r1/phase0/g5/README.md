@@ -99,7 +99,7 @@ The function tools are the ones the Phase 0 spike branch exposes on `/mcp/legal-
 | G5-a | `spaarke-legal-g5-area-test` (app id `f7af4143-02b0-4912-b3ee-e73b0e202422`, v1.0.0, built 2026-11-26 by task 020) | App package, one declarative agent, one MCP action on `/mcp/legal-operations`, A1 `reference_id`, dynamic discovery | specialist-legal-agents-r1 | Phase 0 G5: three-function routing | Owner + test user only (R7), org catalog | Owner removes it in admin center when the G5 result is recorded; removal date set when the row is sent |
 | G5-b | *Spaarke Legal Review* (existing) | **No change.** Read only: confirm instructions, send prompts | accelerator r1 (owner of the agent) | G5 baseline | Existing scope | None |
 
-R4 row sent: **2026-11-27** to COPILOT-PLATFORM-COORDINATION (session message, after the stubs went live on dev). The row below is the text sent. The upload is the owner's, after coordination records the row.
+R4 row sent: **2026-11-27** to COPILOT-PLATFORM-COORDINATION (session message, after the stubs went live on dev); recorded PLANNED, closing at task 031 (coordination commit `c0445b2cbe`). The row below is the text sent. The upload is the owner's, after coordination records the row.
 
 #### R4 row (to send)
 
