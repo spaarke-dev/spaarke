@@ -52,7 +52,8 @@ public sealed record CoreRecordContext(
     string Type, Guid Id, string? Name, string? Number, int? StatusCode, string? Status, DateOnly? OpenedDate, DateOnly? ClosedDate);
 
 /// <summary>Budget and spend exactly as the matter / project rollups store them (FinanceRollupService); nothing is recomputed here.</summary>
-/// <param name="AsOf">The core record's <c>modifiedon</c>: the rollups carry no timestamp of their own, so this is the last write of any kind to the record.</param>
+/// <param name="AsOf">The core record's <c>modifiedon</c>: the rollups carry no timestamp of their own. The roll-up writes only when a stored value
+/// really changes (ontology task 232, #3288), so this is the last real change to the record (a rollup value or any other column), not the last recalculation.</param>
 public sealed record BudgetContext(
     decimal? Budget, decimal? SpendToDate, decimal? Remaining, decimal? UtilizationPercent, int? InvoiceCount, DateTime? AsOf);
 
