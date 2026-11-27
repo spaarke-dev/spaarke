@@ -200,6 +200,15 @@ export interface ITodoSaveResult {
  */
 export const INQUIRY_DISPOSITION_REQUIRED_REASON = 'inquiry.disposition_required';
 
+/**
+ * Ontology tasks 228 and 234 (#1984, #3279, D-233): the one message shown when the server refuses to complete or dismiss
+ * the "Record the outcome" To Do of an open budget inquiry ({@link INQUIRY_DISPOSITION_REQUIRED_REASON}), by TodoDetail
+ * and by the Smart To Do service. That To Do is completed by recording the inquiry's outcome.
+ */
+export const INQUIRY_TODO_CLOSE_MESSAGE =
+  'Record the outcome on the inquiry first. This To Do is completed by recording how the budget inquiry turned out: ' +
+  'open it from the Worklist and record the outcome. Nothing was saved.';
+
 // ---------------------------------------------------------------------------
 // Picker option types
 // ---------------------------------------------------------------------------

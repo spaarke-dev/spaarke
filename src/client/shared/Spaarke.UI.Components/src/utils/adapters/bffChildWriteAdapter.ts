@@ -287,9 +287,10 @@ export async function createRecordViaBffWithWarnings(
 
 /**
  * Updates (re-files) a child record through the BFF: the caller's own update, with the owner re-derived when it changes
- * what the row is filed under. Rejects with a {@link ChildRecordWriteError} carrying the server's message — nothing was
- * written. For a {@link FILING_ONLY_REFILE_TABLES} table, `payload` must name only the filing (the server answers 400
- * otherwise); {@link withBffChildWrites} splits a mixed update for its callers.
+ * what the row is filed under. Rejects with a {@link ChildRecordWriteError} carrying the server's message and
+ * `reasonCode` — nothing was written — whether the injected fetch returns the non-2xx or throws it as an `ApiError`.
+ * For a {@link FILING_ONLY_REFILE_TABLES} table, `payload` must name only the filing (the server answers 400 otherwise);
+ * {@link withBffChildWrites} splits a mixed update for its callers.
  */
 export async function updateChildRecordViaBff(
   authenticatedFetch: ResponseFetchFn,
@@ -303,11 +304,22 @@ export async function updateChildRecordViaBff(
     throw new ChildRecordWriteError(`'${table}' records are not re-filed through the BFF.`, 0);
   }
 
-  const response = await authenticatedFetch(joinUrl(bffBaseUrl, route(cleanId(id))), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload ?? {}),
-  });
+  let response: Response;
+  try {
+    response = await authenticatedFetch(joinUrl(bffBaseUrl, route(cleanId(id))), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload ?? {}),
+    });
+  } catch (err) {
+    // Ontology task 234 (F2-1): the fetch every Dataverse host injects (@spaarke/auth) THROWS an ApiError for a non-2xx
+    // instead of returning it. Answer it as the ChildRecordWriteError a returned non-2xx gives, so callers read one
+    // shape (reasonCode, status). Anything else (AuthError, a network failure) is rethrown unchanged.
+    if (isApiError(err)) {
+      throw new ChildRecordWriteError(err.message, err.status, reasonCodeOf(problemOf(err)));
+    }
+    throw err;
+  }
   if (!response.ok) {
     throw await failureOf(response, 'The record could not be updated');
   }
