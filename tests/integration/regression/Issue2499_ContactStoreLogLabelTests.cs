@@ -42,6 +42,7 @@ public class Issue2499_ContactStoreLogLabelTests
         "home tenant read" => Box(store.ReadHomeTenantAsync(ContactId, CancellationToken.None)),
         "contacts by email" => Box(store.FindActiveContactsByEmailAsync("o'brien@firm.example", CancellationToken.None)),
         "contacts by oid" => Box(store.FindContactsByOidAsync(Oid, CancellationToken.None)),
+        "contacts by key mirror" => Box(store.FindContactsByKeyMirrorAsync(Oid, CancellationToken.None)),
         "contact by id" => Box(store.GetContactAsync(ContactId, CancellationToken.None)),
         _ => throw new ArgumentOutOfRangeException(nameof(read), read, null),
     };
@@ -54,6 +55,7 @@ public class Issue2499_ContactStoreLogLabelTests
     [InlineData("guest systemuser lookup")]
     [InlineData("home contact lookup")]
     [InlineData("contacts by oid")]
+    [InlineData("contacts by key mirror")]
     public async Task AFailedRead_OfAFormerlyUnlabelledRead_LogsAFixedLabelAndTheStatus_NeverTheTenantOrTheOid(string label)
     {
         var logger = new CapturingLogger();
@@ -69,6 +71,7 @@ public class Issue2499_ContactStoreLogLabelTests
     [InlineData("guest systemuser lookup")]
     [InlineData("home contact lookup")]
     [InlineData("contacts by oid")]
+    [InlineData("contacts by key mirror")]
     public async Task AThrownRead_OfAFormerlyUnlabelledRead_LogsAFixedLabel_NeverTheTenantOrTheOid(string label)
     {
         var logger = new CapturingLogger();

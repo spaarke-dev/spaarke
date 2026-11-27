@@ -1654,7 +1654,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     /// <inheritdoc />
     public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct)
-        => ReadContactsAsync(BuildKeyMirrorLookupPath(oid), "key-mirror lookup", ct);
+        => ReadContactsAsync(BuildKeyMirrorLookupPath(oid), "key-mirror lookup", ct, logLabel: "contacts by key mirror");
 
     /// <inheritdoc />
     public async Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct)
@@ -2583,7 +2583,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             // the whole request filter (an email, a tenant, an oid) in a syntax error's message (UAC 047 re-check, probed on
             // dev; r4 task 045, NFR-04). The returned error string below still carries the body, for callers that parse it.
             _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {ErrorCode}", logLabel ?? path, (int)response.StatusCode,
-                ErrorCodeOf(body) ?? "(no error code)");
+                ErrorCodeOfError(body) ?? "(no error code)");
             return (classified, response.StatusCode, null, $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

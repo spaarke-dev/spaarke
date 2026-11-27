@@ -402,7 +402,7 @@ public sealed class AssignTaskRecipientGatePlaneTests
 
         sets.Invocations.Should().BeEmpty("an unreadable tenant never composes a principal, least of all an empty-tenant one");
         log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("fail closed"));
-        log.Messages.Should().NotContain(m => m.Contains(HomeTenant.ToString("D")) && m.Contains(HomeOid.ToString("D")));
+        log.Messages.Should().NotContain(m => m.Contains(HomeTenant.ToString("D")) || m.Contains(HomeOid.ToString("D")));
     }
 
     /// <summary>Cancellation is not a fault: it propagates out of the composition's tenant read, as out of the link check's.</summary>

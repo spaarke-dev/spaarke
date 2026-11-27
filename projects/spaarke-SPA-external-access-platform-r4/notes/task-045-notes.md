@@ -56,3 +56,15 @@ Also `DataverseContactIdentityStoreTests.AFailingHomeLinkRead_...`: its "not rel
 ### Found, not fixed
 - `GetAsync`'s thrown-read warning logs the whole exception (type, message, stack); a token-source fault's text is logged as before. The coordinator files it.
 - Reads that stay unlabelled still log their request path: `GetContactAsync` and the removed-marker and invite-marker reads (contact ids only, not in NFR-04's list).
+
+## Main-session gates and review (2026-11-27)
+
+- **Clean build + tests on `f43a11fb59`:** test project 0 errors. The Signals, ExternalAccess, IdentityBinding and Issue2499 filters pass 13,294 (0 failed, 6 live-schema skips); ArchTests 2,873/2,873. The two Stop-hook build failures earlier were file locks (Defender, VBCSCompiler) while agents built, not compile errors.
+- **Publish size:** master `c55b9812d8` zips to 43,731,639 bytes; the 045 branch (with 044+047) to 43,732,427 bytes. +788 bytes in all, 045's share under 100 bytes; 194 files each; Compress-Archive; worktrees `C:\wt045m` / `C:\wt045b`. No package change, so no new CVE.
+- **Adversarial review (opus, one pass):** no fail-open. Fixed in the fix commit:
+  - F4: `FindContactsByKeyMirrorAsync` had no label, so a failed or thrown read logged the oid through its path. Labelled `"contacts by key mirror"` and added to both Issue2499 label theories. Seeding: label removed → 2 failed / 27 passed; restored.
+  - F2: the unreadable-tenant test's log check used `&&` (it failed only when one line had both values); now `||`.
+  - K1 hardening: `GetAsync`'s failed-read log uses the shape-checked `ErrorCodeOfError`, like `WriteAsync`.
+  - Fix-scope tests: Issue2499, the gate plane tests and the store tests pass 291/291.
+- **Review K2, for the PR and ontology:** `WorkforcePrincipal.TenantId` is not read by the composition or the accessible-set service (the cache tenant comes from `HttpContext`), so the stored-tenant change does not change who is emailed today. It is a fidelity fix plus a new fail-closed exit and one extra read, not a live access bug. The race between the two tenant reads cannot widen access.
+- **Found in passing:** the workforce resolver's tid/oid logs (also on successful sign-ins) were added to D-44 #3265; the binder's oid logs are D-47 #3315.

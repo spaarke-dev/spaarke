@@ -537,3 +537,11 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 **Why it matters.** NFR-04: external-plane logs carry no tenant, oid, UPN, email or token. Not yet checked whether such a message can carry a tenant id.
 
 **Fix.** Log the exception type and the fixed label (as `AssignTaskRecipientGate` does), or scrub the message and keep the stack; first check that no alert depends on the text. Effort: one to two hours plus a log-assertion test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3313 (board Type=Idea).
+
+## D-47 — Contact identity binder logs the caller's object id (https://github.com/spaarke-dev/spaarke/issues/3315)
+
+**What.** `ContactIdentityBinder.cs` log lines on bind, create, collision and resolve include the caller's oid (~:1751, :1820, :2401, :2509, :2547, :2561). Found by task 045's review; same class as D-44 (#3265, the workforce resolver), whose issue now also lists the resolver's successful-sign-in lines (:433, :484, at Information).
+
+**Why it matters.** NFR-04: external-plane logs carry no tenant, oid, UPN, email or token.
+
+**Fix.** Log the contact id, decision/deny code and correlation id only (or a hash); check no alert depends on the field. uac-r2 owns the binder. Effort: two to three hours plus a log-assertion test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3315 (board Type=Bug).
