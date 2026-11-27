@@ -1103,7 +1103,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// <see cref="WorkItemPrivilege.FlaggedAppOnlyAsync{TKey}"/> with the job's application identity (the nightly has no caller). Never
     /// <c>sprk_signal.sprk_privilegeflagged</c> (DI-64: nothing writes it). One batched read per policy pass (none when no closure names a
     /// communication). Fails closed: a Signal whose evidence was not read is undetermined, and a fault returns null (every record flagged).
-    /// Record accuracy only (ADR-015): nothing branches on it, and the closure is never held back by it.
+    /// Record accuracy only (ADR-015): nothing branches on it, and the closure is never held back by it. Read app-only, the flag reflects the
+    /// application's view of every evidence communication: false tells a reader of the record that its communications are not classified
+    /// privileged. The communication ids are already in the Signal's stored evidence refs.
     /// </summary>
     private async Task<IReadOnlySet<Guid>?> ClosurePrivilegeFlagsAsync(PolicyRow policy, IReadOnlyList<ExistingSignal> signals, CancellationToken ct)
     {

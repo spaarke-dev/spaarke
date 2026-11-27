@@ -186,8 +186,9 @@ public sealed class WorkItemPrivilege
     /// item, and a FAULT (an exception, or a result that says more rows follow) flags every item that needed the read. Never throws but for
     /// cancellation.
     /// </summary>
-    /// <remarks>Owner decision D-232: the flag is a stamp only (ADR-015: nothing branches on it), and a reader who can see the record
-    /// learns no more than the Decide lane already shows (D-142). The job already reads <c>sprk_communication</c> app-only (its witness
+    /// <remarks>Owner decision D-232: the flag is a stamp only (ADR-015: nothing branches on it). It reflects the application's view of
+    /// every evidence communication, not any one reader's: false tells a reader of the record that its communications are not classified
+    /// privileged. The communication ids themselves are already in the Signal's stored evidence refs. The job already reads <c>sprk_communication</c> app-only (its witness
     /// reads); this adds no privilege. Every caller-facing read stays <see cref="FlaggedAsync{TKey}"/> (as the caller, no app-only
     /// fallback).</remarks>
     /// <typeparam name="TKey">The item key (a Signal id for the job).</typeparam>

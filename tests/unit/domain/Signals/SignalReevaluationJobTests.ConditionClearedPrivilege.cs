@@ -169,6 +169,36 @@ public partial class SignalReevaluationJobTests
         h.Sysadmin.PrivilegeReads.Should().BeEmpty("a linked closure is not a candidate: nothing is read for it");
     }
 
+    [Theory]
+    [InlineData(ClassificationPrivileged, true)]
+    [InlineData(ClassificationNone, false)] // must-not-fire twin
+    public async Task Run_ClosureWhoseSubjectIsACommunication_IsFlaggedByTheSubjectsOwnClassification(int classification, bool flagged)
+    {
+        // The subject itself is a communication, with no evidence lines: the flag comes from the subject's classification alone.
+        var h = new Harness().WithTodoPolicy();
+        var communicationId = Guid.NewGuid();
+        h.Sysadmin.Stub(new Entity("sprk_communication", communicationId)
+        {
+            ["sprk_communicationid"] = communicationId,
+            ["sprk_name"] = "Re: draft",
+            ["sprk_privilegeclassification"] = new OptionSetValue(classification),
+        });
+        var signalId = h.Org.SeedSignal(Key(TodoPolicyCode, "sprk_communication", communicationId, 1), SignalWriter.SignalStatusOpen,
+            policyId: h.Sysadmin.PolicyIdOf(TodoPolicyCode), versionId: h.Sysadmin.CurrentVersionOf(TodoPolicyCode));
+        h.Org.Rows[signalId]["createdon"] = RunAt.UtcDateTime.AddDays(-3);
+        h.Sysadmin.Person(OtherUserId);
+        h.Sysadmin.LastChange[communicationId] = (OtherUserId, RunAt.UtcDateTime.AddDays(-1));
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.Rows[signalId].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionConditionCleared,
+            "precondition: the pass closed it as condition-cleared");
+        RecordFlag(h).Should().Be(flagged);
+        h.Sysadmin.PrivilegeReads.Should().ContainSingle()
+            .Which.Criteria.Conditions.Single().Values.Should().BeEquivalentTo(new object[] { communicationId }, "the subject is the one source");
+    }
+
     private static bool FlagOfRecordLinkedTo(Harness h, Guid signalId) =>
         h.Org.DecisionRecordRows[h.Org.Rows[signalId].GetAttributeValue<EntityReference>("sprk_decisionrecord")!.Id]
             .GetAttributeValue<bool>("sprk_privilegeflagged");

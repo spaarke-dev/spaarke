@@ -41,3 +41,16 @@ One extra Dataverse read per Do-lane policy pass that has at least one condition
 
 ## Other issues seen (not fixed)
 - None.
+
+## Fix round 1 (PR #3292, coordinator after the Opus review; no F-class findings)
+1. Doc correction: the `FlaggedAppOnlyAsync` remarks and the job's `ClosurePrivilegeFlagsAsync` summary no longer claim the flag reveals "no more than the Decide lane shows" (D-142). They now say what holds:
+   - the flag reflects the application's view of every evidence communication;
+   - false tells a reader of the record that its communications are not classified privileged;
+   - the communication ids are already in the Signal's stored evidence refs.
+   No other place in the PR made the claim; the PR body did not.
+2. New theory `Run_ClosureWhoseSubjectIsACommunication_IsFlaggedByTheSubjectsOwnClassification`: a Signal whose subject is a `sprk_communication`, with no evidence lines.
+   - Classified Privileged: the record is flagged.
+   - Must-not-fire twin, classified None: the record is not flagged.
+   - Both rows assert a single read naming the subject.
+   With the origin/master job code both rows fail (Privileged reads false; None makes no read). Restored afterwards.
+- Signals filter: 5639 passed, 0 failed, 6 skipped.
