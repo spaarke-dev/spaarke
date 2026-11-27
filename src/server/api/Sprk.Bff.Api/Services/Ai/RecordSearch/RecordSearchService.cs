@@ -650,7 +650,15 @@ public sealed class RecordSearchService : IRecordSearchService
         var limit = request.Options?.Limit ?? 20;
         var offset = request.Options?.Offset ?? 0;
 
-        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}";
+        // The index the request targets is part of the answer: the cache is read BEFORE the index is resolved and validated, so
+        // without it the same query against another index (or the standard one) is served the first index's cached results for
+        // the whole TTL. A named index and the standard index (no name) never share a key, even when the name spells the
+        // standard index; the name is hashed so a caller-supplied string never shapes the key itself.
+        var indexPart = string.IsNullOrWhiteSpace(request.SearchIndexName)
+            ? "std"
+            : "idx-" + _embeddingCache.ComputeContentHash(request.SearchIndexName.Trim().ToLowerInvariant());
+
+        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:{indexPart}";
     }
 
     /// <summary>
