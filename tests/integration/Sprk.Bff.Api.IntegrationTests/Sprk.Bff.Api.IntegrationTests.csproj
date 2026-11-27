@@ -54,6 +54,7 @@
        the KEEP path tests/integration/regression/; Sprk.Bff.Api.Tests removes the file from its regression glob. -->
   <ItemGroup>
     <Compile Include="..\regression\Signals\DecideLanePagingTests.cs" LinkBase="RegressionTests" />
+    <Compile Include="..\regression\Signals\Issue2015_DecisionRecordsTabRecordFirstTests.cs" LinkBase="RegressionTests" />
   </ItemGroup>
 
   <!-- appnotification option-set snapshot, linked from the unit project so there is ONE copy; read by the opt-in live test

@@ -155,6 +155,7 @@
     <!-- spaarkeai-mcp-bff-api-r1 task 015: the Decide-lane paging tests are a part of SignalReadRouteTests and need its World fixture,
          so they compile into Sprk.Bff.Api.IntegrationTests instead (see that csproj), like the worklist golden baselines above. -->
     <Compile Remove="..\..\integration\regression\Signals\DecideLanePagingTests.cs" />
+    <Compile Remove="..\..\integration\regression\Signals\Issue2015_DecisionRecordsTabRecordFirstTests.cs" />
   </ItemGroup>
 
   <!--
