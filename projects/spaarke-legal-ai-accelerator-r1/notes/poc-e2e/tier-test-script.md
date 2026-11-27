@@ -354,13 +354,13 @@ and tell me, so copilot-platform-coordination can update its inventory. **Result
 
 **Why.** WP-5 showed Word desktop runs our fixed JavaScript. A real Word edition needs three more things: Copilot
 fills in a list of edits while our code stays fixed; our code can report a problem back to Copilot; and the code
-can be as long as a real redline applier. Needs **probe plugin v0.6** (`Spaarke Word probe plugin v0.6.zip`; v0.5 was refused at upload because two skill files were over 20,000 characters),
+can be as long as a real redline applier. Needs **probe plugin v0.7** (`Spaarke Word probe plugin v0.7.zip`; the admin-center upload refused v0.5 and v0.6, most likely because their manifest version started with 0),
 which adds five skills: `spaarke-word-probe-edits`, `spaarke-word-probe-error` and
 `spaarke-word-probe-size-5k` / `-10k` / `-17k`. Their code is already in the form Word's runner used in WP-5 run 3,
 so Copilot shouldn't need to change any line.
 
 **Setup (once):**
-1. Cowork › Customize › Plugins: remove **Spaarke Word Probe** (v0.4), then **Upload** v0.6 (Only you; or in the admin center, Tools › Upload, scoped to just you). Wait until
+1. Cowork › Customize › Plugins: remove **Spaarke Word Probe** (v0.4), then **Upload** v0.7 (Only you; or in the admin center, Tools › Upload, scoped to just you). If the admin center refuses it, try Cowork › Customize › Plugins › Upload (the route v0.4 used) and tell me which route worked. Wait until
    it shows.
 2. Word desktop: **new blank document**. Copilot pane: **Spaarke MCP off**; **Spaarke Word Probe** on. If the new
    skills don't show in **+**, close and reopen Word.
@@ -407,7 +407,7 @@ so Copilot shouldn't need to change any line.
 | 6c–6e: the first size that fails, and its message | The most code a Word skill can carry (Copilot re-types the code each time, so this is also what it will copy) |
 
 **Record:** for each run, the reply, whether Copilot said it changed any line, and a screenshot of the paragraph
-with its comments for 6a. Then delete the test document. **Afterwards:** keep v0.6 until the results are in, then
+with its comments for 6a. Then delete the test document. **Afterwards:** keep v0.7 until the results are in, then
 remove it and tell me (copilot-platform-coordination tracks it).
 
 ---

@@ -846,3 +846,14 @@ recommended for Copilot Chat). **Finding (likely, confirmed if v0.6 uploads):** 
 20,000-character SKILL.md limit, so a Word skill can carry at most about 17 KB of code with its instructions. Our
 build now refuses a SKILL.md over 20,000 characters (`gates.py` `skill-md-size`, PR #3266 `7bad18b520`). v0.6 has
 size probes of 5, 10 and 17 KB.
+
+**Correction (owner, 2026-11-27): v0.6 was refused too**, with the same message, although every SKILL.md was under
+20,000 characters. So size was not (or not only) the cause. The Microsoft 365 Agents Toolkit validator
+(`atk validate --package-file`, validation rules) failed v0.6 on one rule only: "App version should not start with
+'0'". v0.4 (version 0.4.0) went in through Cowork › Customize › Plugins. v0.5 and v0.6 went through the admin center
+(Tools › Upload). The admin-deployed `spaarke-decisions` plugin is version 1.0.0. **Likely finding:** the
+admin-center upload applies Microsoft's validation rules, including "no 0.x version", and Cowork's own upload
+doesn't. v0.7 ships manifest version 1.7.0 and passes all 59 validator rules. **Consequence if confirmed:** our
+accelerator plugins (versions 0.1.x) can't be admin-deployed until their manifest version starts at 1. That matters
+for the org-wide route. The 20,000-character SKILL.md gate stays as a precaution (documented for Chat and
+declarative agents).
