@@ -198,13 +198,15 @@ public sealed class McpOriginCheckTests
     }
 
     [Fact]
-    public async Task Enforce_AllowedAndBadOriginTogether_IsRejected()
+    public async Task Enforce_CommaJoinedOrigin_IsRejected()
     {
         await using var host = await OriginHost.StartAsync(Config("Enforce"));
 
+        // HttpClient sends the two values as ONE header line, which Kestrel keeps as one value. That an allowed value cannot carry a
+        // bad one when they arrive as separate values is pinned by Evaluate_SeveralOriginValues_PassOnlyWhenEveryValueIsAllowed.
         using var response = await host.CallAsync(origin: null, extraHeaders: new() { ["Origin"] = Allowed + ", " + Evil });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "every Origin value must be allowed, so one allowed value cannot carry a bad one");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a comma-joined Origin matches no allowed origin");
     }
 
     [Fact]
@@ -357,6 +359,20 @@ public sealed class McpOriginCheckTests
             .Build();
 
         McpOriginCheckFilter.ResolveAllowedHosts(configuration).Should().BeEmpty("only indexed entries (AllowedHosts:0, :1, ...) bind to the list");
+    }
+
+    [Theory]
+    [InlineData("AllowedHosts")]
+    [InlineData("AllowedOrigins")]
+    public async Task Startup_WarnsWhenAListIsSetWithoutAnIndex_WithoutLoggingItsValue(string list)
+    {
+        var config = Config("LogOnly", withHosts: true);
+        config.Remove("Mcp:OriginCheck:" + list + ":0");
+        config["Mcp:OriginCheck:" + list] = "unindexed.example.test";
+        await using var host = await OriginHost.StartAsync(config);
+
+        var warning = StartupWarnings(host).Should().ContainSingle().Which;
+        warning.Should().Contain("Mcp:OriginCheck:" + list + " is set as a single value").And.NotContain("unindexed.example.test");
     }
 
     private static List<string> StartupWarnings(OriginHost host) =>

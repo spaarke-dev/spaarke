@@ -130,7 +130,22 @@ public sealed class McpOriginCheckFilter(IConfiguration configuration, ILogger<M
             return;
         }
 
-        var mode = ParseMode(configuration.GetSection(SectionName)["Mode"], out var unrecognised);
+        var section = configuration.GetSection(SectionName);
+        foreach (var list in new[] { "AllowedHosts", "AllowedOrigins" })
+        {
+            // A setting without an index (App Service "Mcp__OriginCheck__AllowedHosts" instead of "..__AllowedHosts__0") is a scalar, which
+            // binds to no list: AllowedHosts then falls back to other host names, AllowedOrigins allows no origin. Name it; never its value.
+            if (section.GetSection(list).Value is not null)
+            {
+                logger.LogWarning(
+                    "[MCP-ORIGIN] Mcp:OriginCheck:{List} is set as a single value, which is not read as a list and is ignored. "
+                    + "Set each entry with an index: {IndexedSetting}, __1, ...",
+                    list,
+                    "Mcp__OriginCheck__" + list + "__0");
+            }
+        }
+
+        var mode = ParseMode(section["Mode"], out var unrecognised);
         if (unrecognised is not null)
         {
             logger.LogWarning(
