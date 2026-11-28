@@ -417,7 +417,65 @@ public class DocumentIndexParentResolverTests
 
         decision.Parent.Should().BeNull();
         decision.Decided.Should().BeFalse();
+        // A failed read is "could not read" (the stored parent must survive it); a request that is not there is an answer.
+        decision.RowUnreadable.Should().Be(how == "throws");
         (await Resolver().ResolveAsync(Document.ToString(), CancellationToken.None)).Should().BeNull();
+    }
+
+    // ── an intermediate (event, communication, service request) that cannot be read is "could not read", not "no parent" ──
+
+    /// <summary>Both entry points: Send-to-Index's (the document already read) and the id-only one (job, enqueuer, sweep).</summary>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.IndexParentDecision[]> DecideBothWays() =>
+    [
+        await Resolver().DecideAsync(new DocumentEntity { Id = Document.ToString(), Name = "a.pdf" }, CancellationToken.None),
+        await Resolver().DecideAsync(Document.ToString(), CancellationToken.None),
+    ];
+
+    [Fact]
+    public async Task AnEventThatCannotBeRead_IsCouldNotRead_SoTheStoredParentSurvives()
+    {
+        DocumentRow(("sprk_relatedevent", "sprk_event", Event, "Hearing"));
+        _dataverse.Setup(d => d.RetrieveAsync("sprk_event", Event, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse did not answer"));
+
+        foreach (var decision in await DecideBothWays())
+        {
+            decision.Parent.Should().BeNull();
+            decision.Decided.Should().BeFalse();
+            decision.RowUnreadable.Should().BeTrue("a throttle or timeout on the event read decided nothing");
+            decision.Named.Should().ContainSingle(p => p.EntityType == "event");
+        }
+    }
+
+    [Fact]
+    public async Task ACommunicationThatCannotBeRead_IsCouldNotRead_SoTheStoredParentSurvives()
+    {
+        var communication = Guid.Parse("4d000000-0000-4000-8000-0000000017c9");
+        DocumentRow(("sprk_relatedcommunication", "sprk_communication", communication, "Email"));
+        _dataverse.Setup(d => d.RetrieveAsync("sprk_communication", communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse did not answer"));
+
+        foreach (var decision in await DecideBothWays())
+        {
+            decision.Decided.Should().BeFalse();
+            decision.RowUnreadable.Should().BeTrue();
+        }
+    }
+
+    /// <summary>Control: an event that is not there is an ANSWER (nothing governs the document), so no parent is storable.</summary>
+    [Fact]
+    public async Task AnEventThatIsNotFound_IsNotCouldNotRead()
+    {
+        DocumentRow(("sprk_relatedevent", "sprk_event", Event, "Hearing"));
+        _dataverse.Setup(d => d.RetrieveAsync("sprk_event", Event, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+
+        foreach (var decision in await DecideBothWays())
+        {
+            decision.Parent.Should().BeNull();
+            decision.Decided.Should().BeFalse();
+            decision.RowUnreadable.Should().BeFalse("a related record that does not exist is a decided 'none', not a failed read");
+        }
     }
 
     /// <summary>Control: a document that names a record directly keeps it; the service request it is also related to is not

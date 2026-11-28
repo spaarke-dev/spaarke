@@ -323,6 +323,11 @@ export const App: React.FC<AppProps> = ({
   // email, the lookup found nothing / failed — the ordinary save form).
   // Task 120: an Outlook email in read mode (`canResolveEmailIdentity`) is looked up too, so the pane can say it is
   // already saved; it is seeded 'checking' for the same reason (the Save tab shows the brief "checking" line).
+  // Task 143: for an email NOT saved as an .eml, the names of its attachments saved on their own (from the email lookup's
+  // `not_saved` answer). Undefined = nothing can be said: no saved/unsaved marks in the first save (task 141's rule).
+  const [unsavedEmailSavedAttachmentNames, setUnsavedEmailSavedAttachmentNames] = useState<string[] | undefined>(
+    undefined
+  );
   const [documentIdentity, setDocumentIdentity] = useState<DocumentIdentityState | undefined>(() => {
     try {
       const capabilities = hostAdapter.getCapabilities();
@@ -523,10 +528,15 @@ export const App: React.FC<AppProps> = ({
   const resolveOpenEmailIdentity = useCallback(async () => {
     const attempt = ++identityAttemptRef.current;
     setDocumentIdentity('checking');
+    // Task 143: no claim while the lookup runs; a failed lookup leaves none (task 141's "not determined").
+    setUnsavedEmailSavedAttachmentNames(undefined);
     let outcome: DocumentIdentityOutcome | null = null;
+    let standaloneNames: string[] | undefined;
     try {
       const keys = hostAdapter.getEmailIdentityKeys ? await hostAdapter.getEmailIdentityKeys() : null;
-      outcome = await resolveEmailIdentity(keys);
+      outcome = await resolveEmailIdentity(keys, names => {
+        standaloneNames = names;
+      });
     } catch (err) {
       console.warn('[Spaarke] Email identity lookup failed; showing the save form', err);
     }
@@ -535,6 +545,7 @@ export const App: React.FC<AppProps> = ({
     }
     const settled = outcome;
     setDocumentIdentity(settled ?? undefined);
+    setUnsavedEmailSavedAttachmentNames(settled ? undefined : standaloneNames);
     if (settled) {
       setSavedContext(prev => applyDocumentIdentityOutcome(prev, settled, toFriendlyRegardingType));
     }
@@ -1152,6 +1163,9 @@ export const App: React.FC<AppProps> = ({
             // version by default when resolved; conflict / indeterminate / denied / error never create
             // silently. The retry re-runs task 013's resolution.
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+            {...(unsavedEmailSavedAttachmentNames !== undefined
+              ? { standaloneSavedAttachmentNames: unsavedEmailSavedAttachmentNames }
+              : {})}
             onRetryDocumentIdentity={retryDocumentIdentity}
             onDocumentFiled={handleDocumentFiled}
             // Task 094: lifts the Save tab's saved-state bundle above its own mount lifecycle.

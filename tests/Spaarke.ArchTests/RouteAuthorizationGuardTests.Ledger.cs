@@ -77,10 +77,11 @@ public partial class RouteAuthorizationGuardTests
             + "AddDocumentAuthorizationFilter (share-link, gated by task 072, was RETIRED 2026-10-16, #1350; resolve-identity pairs DocumentUrlIdentityFilter "
             + "with it; GET /{documentId}/identity since word-add-in task 112; resolve-email-identity pairs "
             + "DocumentEmailIdentityFilter with it since word-add-in task 120). ADR-008 Amendment A1 (word-add-in task 141): "
-            + "resolve-email-identity's savedAttachmentNames lists the saved .eml's children, which only the handler's own "
-            + "lookup finds; ReadSavedAttachmentNamesAsync checks Read on each child through "
-            + "InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync before naming it (refused = left out; a fault omits the "
-            + "field)."),
+            + "resolve-email-identity's savedAttachmentNames lists the saved .eml's children and (task 143) the email's "
+            + "standalone attachment documents, which only the route's own lookups find; "
+            + "DocumentEmailIdentityFilter.ReadSavedAttachmentNamesAsync (shared by the handler and the not_saved answer) checks "
+            + "Read on each through InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync before naming it (refused = left out; "
+            + "a fault omits the field)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows, a byte download, the pointer attach (POST /{id}/file, task 166 f1) and the "
             + "two container-keyed listings (gated by task 078; GET /api/v1/documents?containerId= since task 166 carries "
@@ -1673,6 +1674,10 @@ public partial class RouteAuthorizationGuardTests
             "spaarkeai-mcp-bff-api-r1 task 021 (ADR-028 A10): McpConnectorTokenFilter (McpToolAuthorization.cs) refuses with 401 a token that "
             + "is not an A10 caller (tenant, issuer, audience, scope, user); a TOKEN rule that names no record and decides nothing about who may "
             + "act on what. The MCP credit (RouteAuthorizationGuardTests.Mcp.cs) requires it on every MCP route; it is never a per-resource credit."),
+        new NotAuthorizationForm("RequireMcpOriginCheck",
+            "spaarkeai-mcp-bff-api-r1 ISS-007 (#2835): McpOriginCheckFilter (McpOriginCheckFilter.cs) checks the request's Host and Origin headers "
+            + "against an allow-list (MCP transport DNS-rebinding guard); LogOnly by default, 403 in Enforce. Chained AFTER .RequireAuthorization() "
+            + "and RequireMcpConnectorToken, so a 401 is unchanged. It reads no principal and no record and decides nothing about who may act on what."),
         new NotAuthorizationForm("WithMetadata(new McpAreaMetadata)",
             "spaarkeai-mcp-bff-api-r1 task 020: endpoint METADATA naming the product area the route serves (/mcp/{area}); McpModule reads it to "
             + "choose the route's tool set. Not a filter; decides nothing."),
@@ -3688,7 +3693,7 @@ public partial class RouteAuthorizationGuardTests
             "Narrates the caller's PRE-COLLECTED payload: NarrateAsync passes systemUserId: null so nothing is "
             + "collected (DailyBriefingCompositeService.cs:163-176)."),
         Permanent("POST /api/ai/rag/embedding", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Embeds the request text only (GetEmbeddingAsync(request.Text), RagEndpoints.cs:468); reads no "
+            "Embeds the request text only (GetEmbeddingAsync(request.Text), RagEndpoints.cs:466); reads no "
             + "index document."),
         Permanent("POST /api/communications/draft", PermanentBasis.CallerSuppliedContentOnly, "167",
             "Drafts from the request's intent, instruction, body and subject only "

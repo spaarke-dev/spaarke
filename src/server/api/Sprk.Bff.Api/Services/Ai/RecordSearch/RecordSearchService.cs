@@ -178,6 +178,16 @@ public sealed class RecordSearchService : IRecordSearchService
         // semantic reranker so exact-name records are not buried under conceptually-similar ones.
         var preferKeywordRanking = request.Options?.PreferKeywordRanking ?? false;
 
+        // GitHub #3239: a query of just "*" is Azure AI Search's match-all ("every record that passes the filters"), not
+        // text to embed. Sent with a query vector it becomes a PURE VECTOR query, and Azure rejects highlighting on one
+        // (400 "Parameter 'highlight' is not supported for search requests with pure vector queries"), which surfaced as a
+        // 500. So it runs as a plain keyword "*" search: no embedding, no highlights, no semantic ranking.
+        var matchAll = MatchAllQuery.IsMatchAll(request.Query);
+        if (matchAll)
+        {
+            hybridMode = RecordHybridSearchMode.KeywordOnly;
+        }
+
         _logger.LogDebug(
             "Starting record search: mode={Mode}, query length={QueryLength}, recordTypes=[{RecordTypes}]",
             hybridMode, request.Query.Length, string.Join(",", request.RecordTypes));
@@ -267,10 +277,11 @@ public sealed class RecordSearchService : IRecordSearchService
                 filter,
                 limit,
                 offset,
-                preferKeywordRanking);
+                preferKeywordRanking,
+                matchAll);
 
             // Step 6: Execute search
-            var searchText = hybridMode != RecordHybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(request.Query)
+            var searchText = !matchAll && hybridMode != RecordHybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(request.Query)
                 ? request.Query
                 : "*";
 
@@ -311,6 +322,22 @@ public sealed class RecordSearchService : IRecordSearchService
 
             return searchResponse;
         }
+        catch (RequestFailedException ex) when (ex.Status == 400 && IsCallerNamedOtherIndex(request.SearchIndexName))
+        {
+            // GitHub #3307: the caller named an allowed index that is not a records index (a document index, say), and the
+            // index rejected the record-search request because it has none of the records fields. That is the caller's
+            // choice of index, so it is a 400 naming the index, not a 500. Not applied to the configured records index: a
+            // 400 from THAT index is a defect in this request, and stays a 500.
+            _logger.LogWarning(ex,
+                "Record search rejected by caller-named index {IndexName}; it is not a records index", request.SearchIndexName);
+
+            throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                code: Sprk.Bff.Api.Models.Ai.SemanticSearch.SearchErrorCodes.IndexNotRecordsIndex,
+                title: "AI Search index not usable for record search",
+                detail: $"The AI Search index '{request.SearchIndexName!.Trim()}' is not a records index, so record search cannot run on it.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["indexName"] = request.SearchIndexName.Trim() });
+        }
         catch (RequestFailedException ex)
         {
             _logger.LogError(ex, "Azure AI Search error during record search");
@@ -319,6 +346,23 @@ public sealed class RecordSearchService : IRecordSearchService
     }
 
     #region Private Methods
+
+    /// <summary>
+    /// True when the caller named an index and it is not the configured records index (GitHub #3307).
+    /// </summary>
+    private bool IsCallerNamedOtherIndex(string? searchIndexName)
+    {
+        if (string.IsNullOrWhiteSpace(searchIndexName))
+        {
+            return false;
+        }
+
+        var recordsIndex = string.IsNullOrWhiteSpace(_docIntelOptions.AiSearchIndexName)
+            ? RecordsIndexName
+            : _docIntelOptions.AiSearchIndexName;
+
+        return !string.Equals(searchIndexName.Trim(), recordsIndex.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Gets embedding with caching support via IEmbeddingCache.
@@ -420,7 +464,8 @@ public sealed class RecordSearchService : IRecordSearchService
         string filter,
         int limit,
         int offset,
-        bool preferKeywordRanking)
+        bool preferKeywordRanking,
+        bool matchAll)
     {
         var searchOptions = new SearchOptions
         {
@@ -469,7 +514,8 @@ public sealed class RecordSearchService : IRecordSearchService
         // ranking. The semantic reranker orders by conceptual similarity and buries exact-name matches, so
         // the Association Engine's record-matching rungs opt out (preferKeywordRanking) to rank by name/keyword
         // relevance. When opted out, results carry the raw BM25 @search.score (no reranker score).
-        if (useKeyword && !preferKeywordRanking)
+        // Neither the semantic ranker nor highlights have query text to work on for a match-all ("*") search.
+        if (useKeyword && !preferKeywordRanking && !matchAll)
         {
             searchOptions.QueryType = SearchQueryType.Semantic;
             searchOptions.SemanticSearch = new SemanticSearchOptions
@@ -479,9 +525,13 @@ public sealed class RecordSearchService : IRecordSearchService
             };
         }
 
-        // Enable highlighting on relevant fields
-        searchOptions.HighlightFields.Add("recordName");
-        searchOptions.HighlightFields.Add("recordDescription");
+        // Enable highlighting on relevant fields — only when a keyword query runs. A vector-only request is sent with the
+        // match-all text "*", i.e. a pure vector query, and Azure AI Search rejects highlighting on those (400).
+        if (useKeyword && !matchAll)
+        {
+            searchOptions.HighlightFields.Add("recordName");
+            searchOptions.HighlightFields.Add("recordDescription");
+        }
 
         return searchOptions;
     }
@@ -608,22 +658,24 @@ public sealed class RecordSearchService : IRecordSearchService
     /// </summary>
     private string BuildCacheId(RecordSearchRequest request)
     {
+        // Every request field that can change the results is in the key: query, recordTypes, the four filters, hybridMode, limit,
+        // offset, preferKeywordRanking (it switches off semantic ranking and the score normalisation) and the target index. A new
+        // field that reaches the search must be added here.
         var queryHash = _embeddingCache.ComputeContentHash(request.Query);
-        var recordTypesHash = _embeddingCache.ComputeContentHash(
-            string.Join(",", request.RecordTypes.OrderBy(t => t)));
+        var recordTypesHash = _embeddingCache.ComputeContentHash(SortedListKey(request.RecordTypes));
 
         var filtersHash = "none";
         if (request.Filters is not null)
         {
             var filterParts = new List<string>();
             if (request.Filters.Organizations is { Count: > 0 })
-                filterParts.Add("org:" + string.Join(",", request.Filters.Organizations.OrderBy(o => o)));
+                filterParts.Add("org:" + SortedListKey(request.Filters.Organizations));
             if (request.Filters.People is { Count: > 0 })
-                filterParts.Add("ppl:" + string.Join(",", request.Filters.People.OrderBy(p => p)));
+                filterParts.Add("ppl:" + SortedListKey(request.Filters.People));
             if (request.Filters.ReferenceNumbers is { Count: > 0 })
-                filterParts.Add("ref:" + string.Join(",", request.Filters.ReferenceNumbers.OrderBy(r => r)));
+                filterParts.Add("ref:" + SortedListKey(request.Filters.ReferenceNumbers));
             if (request.Filters.MatterTypes is { Count: > 0 })
-                filterParts.Add("mt:" + string.Join(",", request.Filters.MatterTypes.OrderBy(m => m, StringComparer.Ordinal)));
+                filterParts.Add("mt:" + SortedListKey(request.Filters.MatterTypes));
 
             if (filterParts.Count > 0)
                 filtersHash = _embeddingCache.ComputeContentHash(string.Join("|", filterParts));
@@ -632,9 +684,25 @@ public sealed class RecordSearchService : IRecordSearchService
         var mode = request.Options?.HybridMode ?? RecordHybridSearchMode.Rrf;
         var limit = request.Options?.Limit ?? 20;
         var offset = request.Options?.Offset ?? 0;
+        var keywordRanking = request.Options?.PreferKeywordRanking == true ? "kw" : "sem";
 
-        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}";
+        // The index the request targets is part of the answer: the cache is read BEFORE the index is resolved and validated, so
+        // without it the same query against another index (or the standard one) is served the first index's cached results for
+        // the whole TTL. A named index and the standard index (no name) never share a key, even when the name spells the
+        // standard index; the name is hashed so a caller-supplied string never shapes the key itself.
+        var indexPart = string.IsNullOrWhiteSpace(request.SearchIndexName)
+            ? "std"
+            : "idx-" + _embeddingCache.ComputeContentHash(request.SearchIndexName.Trim().ToLowerInvariant());
+
+        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:{keywordRanking}:{indexPart}";
     }
+
+    /// <summary>
+    /// An order-insensitive, unambiguous key for a list of values. Values are JSON-encoded, so a value that itself contains a
+    /// comma ("Smith, Jones LLP") never collides with two values ("Smith", "Jones LLP") - the two filter differently.
+    /// </summary>
+    private static string SortedListKey(IEnumerable<string> values) =>
+        System.Text.Json.JsonSerializer.Serialize(values.OrderBy(v => v, StringComparer.Ordinal));
 
     /// <summary>
     /// Gets cached search response from Redis via ITenantCache.

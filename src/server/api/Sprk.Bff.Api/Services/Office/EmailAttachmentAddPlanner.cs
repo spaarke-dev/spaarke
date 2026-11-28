@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Workers.Office;
 
@@ -185,10 +186,14 @@ public class EmailAttachmentAddPlanner
         /// </summary>
         NotASavedEmail,
 
-        /// <summary>The <c>.eml</c> is not filed to the request's record (<see cref="IsFiledTo"/>).</summary>
+        /// <summary>
+        /// The <c>.eml</c> is not filed to the request's record, or — task 143 — the request names no record and the <c>.eml</c> is
+        /// filed to one, by THE filed rule (<see cref="IsPlacedHereAsync"/>: its own record link, else its communication's).
+        /// </summary>
         NotFiledToTheRecord,
 
-        /// <summary>The stored <c>.eml</c> could not be read.</summary>
+        /// <summary>The stored <c>.eml</c> could not be read, or — task 143 — the <c>.eml</c> has no record link of its own and its
+        /// communication could not be read (<see cref="IsPlacedHereAsync"/>), so where it is filed is not known.</summary>
         Unreadable,
 
         /// <summary>
@@ -226,6 +231,10 @@ public class EmailAttachmentAddPlanner
     /// <param name="requestEmail">The keys of the email the request describes. The named <c>.eml</c> must store that email
     /// (<see cref="IsTheNamedEmailAsync"/>), else <see cref="SavedEmailOutcome.NotThisEmail"/>: the request's metadata never
     /// decides anything about another email's <c>.eml</c>.</param>
+    /// <param name="targetLogicalName">The request's record type, or <see langword="null"/> with <paramref name="targetRecordId"/>
+    /// <see cref="Guid.Empty"/> when the request names no record (task 143): the <c>.eml</c> must then be filed to no record
+    /// (<see cref="IsFiledToNoRecord"/>); otherwise to that record (<see cref="IsFiledTo"/>).</param>
+    /// <param name="targetRecordId">The request's record id, or <see cref="Guid.Empty"/>.</param>
     public async Task<(SavedEmailOutcome Outcome, Plan? Plan)> PlanForSavedEmailAsync(
         Guid emlDocumentId,
         IReadOnlyCollection<string> selection,
@@ -300,7 +309,22 @@ public class EmailAttachmentAddPlanner
             return (SavedEmailOutcome.NotThisEmail, null);
         }
 
-        if (!IsFiledTo(filing, targetLogicalName, targetRecordId))
+        // Task 143: THE "filed" rule (FiledRecordAsync): the .eml's own record link, else its communication's record. A named
+        // add that names NO record adds only under an .eml filed to neither; one that names a record, only under an .eml filed
+        // to that record by the rule. The key-matched add (task 138) always names its save's record.
+        var namesNoRecord = requestEmail is not null && targetLogicalName is null && targetRecordId == Guid.Empty;
+        var placement = await IsPlacedHereAsync(emlDocumentId, filing, namesNoRecord, targetLogicalName, targetRecordId, cancellationToken);
+        if (placement is null)
+        {
+            // The .eml has no record link of its own and its communication could not be read: where it is filed is not
+            // known, so nothing is added (fail closed; the caller answers it as an unreadable email, retryable).
+            _logger.LogWarning(
+                "Email re-save: the communication of saved .eml document {DocumentId} could not be read; nothing is added",
+                emlDocumentId);
+            return (SavedEmailOutcome.Unreadable, null);
+        }
+
+        if (placement is false)
         {
             // The key matched a save that filed this .eml somewhere else (or it was re-filed since): adding under it would
             // make children of another record's email, and expose that record's content to this record's readers.
@@ -496,6 +520,101 @@ public class EmailAttachmentAddPlanner
             .ToList();
         return links.Count > 0 && links.All(r => r!.Id == targetRecordId);
     }
+
+    /// <summary>
+    /// Task 143 (owner 2026-11-27: an email's <c>.eml</c> and its communication are always filed to the same record): THE
+    /// "filed" rule an attachments add applies, the one the email identity route reports to the pane
+    /// (<c>DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync</c>, task 132). The <c>.eml</c> is filed by its OWN
+    /// record links when it has any (<see cref="IsFiledToNoRecord"/> false): then <see cref="IsFiledTo"/> decides, and its
+    /// communication is not read. With none, it is filed to the record its <c>sprk_communication</c>
+    /// (<c>sprk_relatedcommunication</c>) is filed to — the first populated regarding lookup, read by that SAME reader (same
+    /// columns, same priority). Unfiled = neither.
+    /// </summary>
+    /// <param name="namesNoRecord">The request is a named add that names no record: placed here only when unfiled.</param>
+    /// <returns><see langword="true"/> when the add may go under the <c>.eml</c>, <see langword="false"/> when it is filed
+    /// elsewhere (or an unreadable row: fail closed), <see langword="null"/> when its communication could not be read (where it
+    /// is filed is not known: the caller refuses).</returns>
+    internal async Task<bool?> IsPlacedHereAsync(
+        Guid emlDocumentId,
+        Microsoft.Xrm.Sdk.Entity? emlRow,
+        bool namesNoRecord,
+        string? targetLogicalName,
+        Guid targetRecordId,
+        CancellationToken cancellationToken)
+    {
+        if (emlRow is null)
+        {
+            return false;
+        }
+
+        if (!IsFiledToNoRecord(emlRow))
+        {
+            return !namesNoRecord && IsFiledTo(emlRow, targetLogicalName, targetRecordId);
+        }
+
+        if (CommunicationOf(emlRow) is not { } communicationId)
+        {
+            return namesNoRecord;
+        }
+
+        // The identity route's columns and its record selector (DocumentUrlIdentityResolution, task 132): one reader. A read
+        // that faults, or no row, is "not known", as the route answers it (RelatedRecordWithheld): never "unfiled".
+        Microsoft.Xrm.Sdk.Entity? communication;
+        try
+        {
+            communication = await _entities.RetrieveAsync(
+                CommunicationEntityName,
+                communicationId,
+                DocumentUrlIdentityResolution.CommunicationRecordColumns.ToArray(),
+                cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                ex,
+                "Email re-save: could not read the communication {CommunicationId} of .eml document {DocumentId}",
+                communicationId,
+                emlDocumentId);
+            return null;
+        }
+
+        if (communication is null)
+        {
+            return null;
+        }
+
+        var record = DocumentUrlIdentityResolution.CommunicationRecordOf(communication);
+        if (record is null)
+        {
+            return namesNoRecord;
+        }
+
+        return !namesNoRecord
+            && !string.IsNullOrEmpty(targetLogicalName)
+            && targetRecordId != Guid.Empty
+            && string.Equals(record.LogicalName, targetLogicalName, StringComparison.Ordinal)
+            && record.Id == targetRecordId;
+    }
+
+    /// <summary>
+    /// Task 143: the link columns that name the email ITSELF, not a record it is filed to: its communication
+    /// (<c>sprk_relatedcommunication</c>, the identity of the email in Spaarke) and its email activity (<c>sprk_email</c>).
+    /// </summary>
+    private static readonly HashSet<string> EmailIdentityLinkColumns =
+        new(StringComparer.Ordinal) { RelatedCommunicationColumn, "sprk_email" };
+
+    /// <summary>
+    /// Task 143: whether the <c>.eml</c> row is filed to NO record — the only <c>.eml</c> an attachments add that names no record
+    /// adds under. Filed to no record = no non-empty link in ANY <see cref="DocumentLinkFields.All"/> column (both column
+    /// families, every record type, not only the save targets) except <see cref="EmailIdentityLinkColumns"/>. A link to any record
+    /// — a matter, a project, a contact, an event, … — is a filing. An unreadable row is not unfiled: fail closed.
+    /// </summary>
+    internal static bool IsFiledToNoRecord(Microsoft.Xrm.Sdk.Entity? emlRow) =>
+        emlRow is not null
+        && DocumentLinkFields.All
+            .Where(f => !EmailIdentityLinkColumns.Contains(f.LogicalName))
+            .All(f => emlRow.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(f.LogicalName) is not { Id: var id }
+                || id == Guid.Empty);
 
     /// <summary>
     /// The attachment selection rule of an email save: <c>null</c> = every attachment, a list = the attachments with those

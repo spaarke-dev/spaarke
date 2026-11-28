@@ -257,8 +257,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     // Task 064 (owner 4b/4c, 2026-10-27 / 2026-11-26): an ORDINARY mapped lookup or value from the record the row is filed
     // under is now WRITTEN whatever the caller's AppendTo or field security — those cases are in the .Task064.cs partial
     // (CreateAsync_AnOrdinaryMappedLookupFromTheFilingParent_..._IsWritten). The drop stays for a BFF-owned invariant column
-    // (the Assigned-To lookup below), a field-secured source column (sprk_location below is secured on both tables), a
-    // source that is not the filing parent, and an adapter's default.
+    // (the Assigned-To lookup below), a field-secured source column of a source that is not the filing parent (task 065:
+    // from the filing parent it is copied, sprk_location below), a source that is not the filing parent, and an adapter's
+    // default.
     // =====================================================================================
 
     /// <summary>Task 064: the Assigned-To column is a BFF-owned invariant (it confers access), so it keeps the drop.</summary>
@@ -336,17 +337,18 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
-    public async Task CreateAsync_AMappedFieldSecuredValue_IsDropped_ButACallersFieldSecuredValue_Refuses()
+    public async Task CreateAsync_AMappedFieldSecuredValueFromTheFilingParent_IsWritten_ButACallersFieldSecuredValue_Refuses()
     {
+        // Task 065: sprk_location is field-secured on both tables; mapped from the filing parent it is copied (the caller can
+        // read it). The caller's own value into the same column is checked as before.
         MatterToEventProfile();
         _scripted.SecuredColumns.Add("sprk_location");
 
         var mapped = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
 
         mapped.Succeeded.Should().BeTrue(mapped.Refusal?.Detail);
-        _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_location");
-        mapped.MappingWarnings.Should().ContainSingle()
-            .Which.Should().Match<RecordCreationWarning>(w => w.Code == RecordCreationWarning.MappedValueDroppedCode && w.Column == "sprk_location");
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_location").Should().Be("Courtroom 4");
+        mapped.MappingWarnings.Should().BeEmpty();
 
         _creates.Clear();
         var supplied = await Service().CreateAsync(
@@ -745,13 +747,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     // =====================================================================================
 
     [Fact]
-    public async Task CreateAsync_ASourceColumnTheCallerCannotRead_IsNotCopied_ButTheReadableOnesAre()
+    public async Task CreateAsync_FromASourceThatIsNotTheFilingParent_ASourceColumnTheCallerCannotRead_IsNotCopied_ButTheReadableOnesAre()
     {
-        // Must fire: the app read returns sprk_location ("Courtroom 4"); field security hides it from the caller.
+        // Must fire: the app read returns sprk_location ("Courtroom 4"); field security hides it from the caller. Task 067 (C2):
+        // the mask holds for every source that is not the row's filing parent (here the event is filed under another matter).
         MatterToEventProfile();
         _callerRead.Secured.Add("sprk_location");
 
-        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        var outcome = await Service().CreateAsync(
+            EventUnder(SecureMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var fields = _creates.Should().ContainSingle().Subject.Fields;
@@ -773,7 +777,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     [InlineData("403")]
     [InlineData("500")]
     [InlineData("no-user-context")]
-    public async Task CreateAsync_WhenTheCallerReadOfTheSourceFails_NothingIsMapped_WithTheUniformWarning_AndTheRowIsCreated(
+    public async Task CreateAsync_FromASourceThatIsNotTheFilingParent_WhenTheCallerReadOfTheSourceFails_NothingIsMapped_WithTheUniformWarning(
         string failure)
     {
         MatterToEventProfile();
@@ -788,9 +792,11 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             case "no-user-context": _callerRead.FailWithStatus = 0; break; // no caller context (OBO unavailable)
         }
 
-        var failed = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+        // Task 067 (C2): the caller column read is made for a source that is not the row's filing parent.
+        var failed = await Service().CreateAsync(
+            EventUnder(SecureMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
         var denied = await Service().CreateAsync(
-            EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", DeniedMatter)), AsCaller(), CancellationToken.None);
+            EventUnder(SecureMatter, mappingSource: ("sprk_matter", DeniedMatter)), AsCaller(), CancellationToken.None);
 
         failed.Succeeded.Should().BeTrue("a mapping failure never refuses the create: {0}", failed.Refusal?.Detail);
         _sourceReads.Should().ContainSingle("the app read happened (the probe answered Read) — and was then discarded");

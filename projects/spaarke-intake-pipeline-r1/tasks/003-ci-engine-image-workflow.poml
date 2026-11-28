@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-01 CI: engine image build → Trivy scan (fail on fixable HIGH/CRITICAL) → ACR push, copied from build-provisioning-sidecar.yml</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>startable (authoring); first green run needs task 001's Dockerfile</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new CI workflow file with explicit constraints; no application code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copy-and-adapt of an existing workflow (build-provisioning-sidecar.yml) with a named reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ci-cd, devops, infrastructure</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create `.github/workflows/build-intake-engine-image.yml` by copying `.github/workflows/build-provisioning-sidecar.yml` (build → Trivy scan → ACR push) for the engine image built from `src/server/services/Sprk.Intake.EngineJob/Dockerfile` with repo-root context. It fails on any fixable HIGH or CRITICAL finding and never pushes from a pull request.</prompt>
+  <role>SPAARKE platform developer. Expert in GitHub Actions, Docker builds, Trivy, ACR with OIDC login. Follow ADRs strictly.</role>
+  <goal>A new workflow that triggers on master push and pull_request for the engine folder, the accelerator engine folder and itself (plus workflow_dispatch); builds the image; runs Trivy with `severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`; uploads SARIF `if: always()`; pushes to ACR only on master/dispatch via OIDC.</goal>
+
+  <context>
+    <background>Spec FR-01(d) and NFR-07 (container image CVE-scanned in CI). plan.md names `build-provisioning-sidecar.yml` as the only container build → Trivy → ACR workflow. Hot-path declaration has `ci-workflows = Y`: coordinate per `projects/INDEX.md` before merging. The engines change in the accelerator's folder, so engine edits must rebuild this image too.</background>
+    <relevant-files>
+      <file role="new">.github/workflows/build-intake-engine-image.yml</file>
+      <file role="canonical-reference">.github/workflows/build-provisioning-sidecar.yml (copy structure: triggers, PR-gated push, Trivy gate, SARIF upload, size check)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Intake.EngineJob/Dockerfile (created by task 001)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Dockerfile for the first green run (authoring is independent).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the Trivy step. Same gate as the sidecar workflow: `HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: 1`; SARIF upload runs `if: always()` so unfixed findings still reach the Security tab (NFR-07, FR-01d).</constraint>
+    <constraint source="ADR-028">Scope: Azure login and ACR push. OIDC federated login only (no client secret, no ACR admin credentials); login and push steps gated off on `pull_request`.</constraint>
+    <constraint source="project">Scope: triggers. `paths` include `src/server/services/Sprk.Intake.EngineJob/**`, `src/accelerators/core/engines/**` and the workflow file; no trigger on unrelated paths.</constraint>
+    <constraint source="project">Scope: this task. Only the new workflow file is created; `build-provisioning-sidecar.yml` and other workflows are not edited.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Container build + Trivy gate + ACR push" location=".github/workflows/build-provisioning-sidecar.yml">PR builds and scans but never pushes; master/dispatch pushes via OIDC; header explains the gate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Copy build-provisioning-sidecar.yml to build-intake-engine-image.yml; replace header, name, paths, image name (`sprk-intake-engine`), Dockerfile path and build context (repo root).</step>
+    <step order="2">Keep the Trivy gate, SARIF upload, PR push gating and size check; tag with the commit SHA and the engines' version if exposed.</step>
+    <step order="3">Validate YAML (actionlint if available, otherwise `gh workflow view` after push of the branch) and confirm no secret is referenced except OIDC ids already used by the sidecar workflow.</step>
+    <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="5">Document any deviation in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `projects/INDEX.md` shows another active project holding `.github/workflows/**` under a coordination window, STOP and ask the owner before merging (hot-path ci-workflows = Y).</trigger>
+    <trigger>If the first scan of the built image reports fixable HIGH/CRITICAL findings that a base-image bump cannot clear, STOP and escalate; do not relax the gate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 7 (no engine image exists); `.github/workflows/build-provisioning-sidecar.yml` is the only container build → scan → push workflow (plan.md Discovered Resources).</existing>
+    <extension>No — the sidecar workflow is path-scoped to its own image and documents a monthly cadence; adding a second image to it would couple two unrelated release cycles.</extension>
+    <cost-of-doing-nothing>The engine image is never CVE-scanned or published, so FR-01(d) and NFR-07 fail and the Container Apps Job (task 002) has no image to pull.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="gh">Inspect workflow runs</tool>
+    <tool name="terminal">actionlint / yaml validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/build-intake-engine-image.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The workflow parses (actionlint or GitHub accepts it) and triggers on master push, pull_request and workflow_dispatch for exactly the three path globs named in the constraints.</criterion>
+    <criterion testable="true">The Trivy step fails the job on a fixable HIGH or CRITICAL finding and the SARIF upload runs `if: always()`.</criterion>
+    <criterion testable="true">Negative: on `pull_request`, the Azure login, ACR login and push steps are skipped; no step pushes an image from a PR.</criterion>
+    <criterion testable="true">Negative: no client secret or ACR admin credential is referenced; login is OIDC.</criterion>
+    <criterion testable="true">Once task 001's Dockerfile exists, a PR run builds and scans the image green (recorded in task 008's spike report if 001 lands later).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01(d), NFR-07. Root CLAUDE.md hot-path `ci-workflows` = Y for this project. Completed 2026-11-25: workflow authored, YAML parsed with PyYAML (no actionlint or Docker locally); first green run waits on task 001. Deviations (two-scan Trivy split, Python packages in scan scope, hash-pin guard, 400 MB size guard, ACR variable fallback): notes/003-ci-engine-image-workflow-deviations.md. rework: none task 003</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

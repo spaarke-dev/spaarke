@@ -1187,3 +1187,33 @@ Design: `notes/task-056-private-message-design.md`. UAC-r2 approved its access p
 - Still open, and not blocking 051:
   - OQ-4: should the home-grid and subgrid New close further?
   - OQ-5: keep both "Add KPI Assessment" and "New KPI Assessment" on the KPI subgrid?
+
+## 2026-11-26 — Owner: a mapped field copies whatever its field security; 051 OQ-4 and OQ-5 closed
+
+- **Field-secured sources (supersedes "never copied until a same-profile-set rule exists"):** "if two records are related and there is field mapping then the field should copy write - security does not matter." A mapped value from the caller's filing parent is copied even when its source column is field-secured. This needs a follow-up task: today `FieldSecuredSourceRule` drops these values on create and on push. The other 064 boundaries are unchanged: the filing lookup, the invariant and access-conferring columns, sources outside the filing chain, the source Read check as the caller, and the secure-source owner rule. Not built yet. The access logic changes, so it goes to UAC-r2's gate before merge.
+  - **Consequence (owner-accepted):** a copied value is readable by whoever can read the target column. If that column is not field-secured, that is anyone who can read the new record, including the BFF's app-only read paths. An admin who wants the copy kept restricted secures the target column too. This joins the existing target-side known limit.
+  - **Bounds:** a copy reads only the caller's own filing parent, never another record.
+- **Post-mapping defaults:** the owner asked what this meant, so it is not decided yet. In code, the only default is the Office add-in create's "Assigned To = the creator's own contact", used when mapping leaves it empty. It is an access-conferring column, so it keeps the caller's checks under any answer. No mapping rule on dev sets a fixed value: all 57 are Copy rules.
+- **051 OQ-4:** closed. The owner knows of no other places to close New.
+- **051 OQ-5:** "only +New is required". The KPI subgrid keeps "New KPI Assessment" (the BFF create-then-open). "Add KPI Assessment" (`sprk.matter.subgrid.kpi.AddKpiButton`) is to be removed. This is a ribbon change; the dev import needs the owner's go.
+
+## 2026-11-27 — Owner: a mapped copy from the filing parent runs whatever the caller can read; Repair copies field-secured values too (task 067)
+
+- **Repair:** "Yes also field secured values." The Repair pass copies a value from a field-secured source column of the row's filing parent, like create and push.
+- **The caller-read mask:** "a field to field copy executed regardless of the user as access to the destination record." A mapped value from the record the row is filed under is copied whatever the caller can read on that record's columns. What is needed is the caller's access to the row being created or pushed. This lifts `MappingSourceCallerMask` (#2188) for the filing parent on create and at email send, and the as-caller source read on push for rows filed under the source by a listed Filing edge. Supersedes "the value is still read as the caller" (2026-11-26).
+  - **Consequence (owner-accepted):** a user who cannot read a field-secured column on the parent can still see its value. They create or push a child the column maps into, then read the child's target column. To keep a value restricted, field-secure the target column too.
+  - **Bounds, unchanged:**
+    - only the row's own filing parent (create: the caller's filing record, table and id; push: a listed Filing edge; Repair: the row's filing parent);
+    - any other source keeps the caller mask and the field-secured drop;
+    - the FR-04 source Read probe as the caller stays: a caller who cannot read the parent record at all maps nothing;
+    - every other 064 and 065 boundary is unchanged: the filing lookup's AppendTo refusal, invariant and access-conferring columns, adapter defaults, the secure-source owner rule, and the final whole-row check.
+  - The FR-04 probe is kept by default; the owner's answer did not name it. Lifting it too is open to the owner.
+- **No live test:** "No test required just implement it." No temporary dev rule is set up for a positive copy check.
+- Access logic changes, so UAC-r2 reviews the diff before merge.
+
+## 2026-11-27 (later) — Owner: send copies the full mapped content; invoice columns copy too; "a mapping rule maps regardless of user privileges" (task 067 review)
+
+- **Email send:** "The email need to be complete with all information." Send keeps the filing-parent copy: the analysis's mapped columns fill the email's subject and body whatever the caller can read on them. Consequence (owner-accepted): the value goes to the email's recipients.
+- **Invoices:** "All information on invoice need to be written regardless of user privileges." The invoice columns that the review fix had added to the access-model list (the totals, firm hold, vendor, review detail) copy from an invoice that is the filing parent like any other business column. The access-column registry (`ParentLineage.AccessColumns`) is no longer read for the field-mapping list; the list is the closed set of identity, invitation, secure-flag and file-pointer columns.
+- **Principle stated:** "when there is a data mapping rule the data will be mapped regardless of user privileges." Applied in task 067 to the filing parent's columns on create, send, push and Repair. Whether it also covers the record-level Read on the source, the identity and access columns, and sources other than the filing parent is put to the owner separately (each widens what a caller can read without access to the source record).
+- **Scope of the principle (owner, same day):** asked about the three remaining limits, the owner kept all three. (1) "Yes keep check 1": the caller's record-level Read on the source stays required. (2) Only the row's filing parent is copied past the caller's view; other sources keep the caller's view ("Ok"). (3) The access-model columns (identity, invitation, secure flags, file pointers, an invoice's firm and firm hold, a user's contact link) keep the caller's view ("Ok"). Invoice totals and review detail copy (access-control review: the caller already reads both; the invoice is never written).

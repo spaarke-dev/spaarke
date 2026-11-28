@@ -675,6 +675,29 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
     }
   );
 
+  it('Task 143 A1: a save already in Spaarke whose job names no document shows the duplicate card with nothing to open', async () => {
+    saveResponses.push(accepted());
+    mockFetch.mockImplementation(async (url: string) =>
+      String(url).includes('/api/office/save')
+        ? (saveResponses.shift() ?? Promise.reject(new Error('Unexpected save request')))
+        : json(true, 200, {
+            jobId: 'job-1',
+            status: 'Completed',
+            currentPhase: 'DeduplicatedToExisting',
+            completedPhases: [],
+            result: {},
+          })
+    );
+    renderWord();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await screen.findByText('Document Already Saved');
+    expect(screen.getByText('This item is already in Spaarke. Nothing new was saved.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View Existing Document' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Save Not Confirmed')).not.toBeInTheDocument();
+  });
+
   it('AC4: the duplicate card hides View Existing Document when the host cannot open a browser window', async () => {
     saveResponses.push(json(true, 200, { duplicate: true, documentId: SAVED_ID, message: 'Already saved.' }));
     renderWord({ canOpenRecord: false });

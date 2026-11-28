@@ -426,13 +426,14 @@ public class DataverseContactIdentityStoreTests
         logger.Messages.Should().ContainSingle().Which.Should().Contain("home link lookup")
             .And.NotContain(HomeTenant.ToString("D")).And.NotContain(Oid.ToString("D"));
 
-        // Control: a read that was not relabelled keeps logging its path.
+        // Control: a read that was not relabelled keeps logging its path (r4 task 045 labelled FindHomeContactsAsync and the by-oid read, so the
+        // control is the by-id read), and still never the body.
         logger.Messages.Clear();
         var control = new DataverseContactIdentityStore(
             new ScriptedHttp((HttpStatusCode.InternalServerError, echo)), _ => Task.FromResult("token"),
             "https://org.test.invalid", logger);
-        await control.FindHomeContactsAsync(HomeTenant, Oid, CancellationToken.None);
-        logger.Messages.Should().ContainSingle().Which.Should().Contain(HomeTenant.ToString("D"));
+        await control.GetContactAsync(TenantContact, CancellationToken.None);
+        logger.Messages.Should().ContainSingle().Which.Should().Contain(TenantContact.ToString("D")).And.NotContain("bad filter");
     }
 
     [Fact]
@@ -1422,8 +1423,8 @@ public class DataverseContactIdentityStoreTests
 
         // Control: a read with no email keeps logging its path (the warning is not silenced wholesale).
         logger.Messages.Clear();
-        await store.FindContactsByOidAsync(Oid, CancellationToken.None);
-        logger.Messages.Should().ContainSingle().Which.Should().Contain("aaaaaaaa-0000-4000-8000-000000000001");
+        await store.GetContactAsync(TenantContact, CancellationToken.None);
+        logger.Messages.Should().ContainSingle().Which.Should().Contain(TenantContact.ToString("D"));
     }
 
     private sealed class CapturingLogger : ILogger

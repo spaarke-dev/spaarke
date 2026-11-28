@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Azure.Core;
 using FluentAssertions;
@@ -978,6 +979,166 @@ public class IdentityLinkReconciliationTests
         result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
+    // ── #2578 (FR-31 c): a foreign environment that refuses the BFF's membership logs at Warning ──────
+    //
+    // Dev: spaarke-acme is a registry row whose environment has no application user for this BFF, so its WhoAmI answers
+    // 403 0x80072560 every run. The environment is still aborted before any decision and the run still reports it; only the
+    // Error line (an App Insights Error every 5 minutes) becomes a Warning. The REAL store runs over a fake Web API so the
+    // wire answer, not a stub, decides. The own environment, a Masked column and every other failure keep their Error.
+
+    private const string AcmeEnvironment = "https://spaarke-acme.crm.dynamics.com";
+
+    // The message carries a marker the job's own line must never repeat (NFR-04: URL and code only, never the body).
+    private const string NotAMemberBody =
+        """{"error":{"code":"0x80072560","message":"The user is not a member of the organization. BODY-MARKER-NOT-TO-BE-LOGGED"}}""";
+
+    private const string OtherForbiddenBody =
+        """{"error":{"code":"0x80040220","message":"SecLib::AccessCheckEx failed. BODY-MARKER-NOT-TO-BE-LOGGED"}}""";
+
+    private static bool OnlyWhoAmIReads(RefusingDataverse http)
+        => http.Requests.Count > 0
+           && http.Requests.All(r => r.Method == HttpMethod.Get && r.Uri.EndsWith("/WhoAmI", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task AForeignEnvironment_RefusingTheBffsMembership_LogsWarningNotError_AndIsStillAbortedAndReported()
+    {
+        var acme = new RefusingDataverse(HttpStatusCode.Forbidden, NotAMemberBody);
+
+        var result = await RunAsync(writes: true, targets: new(),
+            stores: new() { [AcmeEnvironment] = RealStore(acme, AcmeEnvironment) }, registry: new[] { AcmeEnvironment });
+
+        _log.Entries.Should().NotContain(e => e.Level >= LogLevel.Error, "the run raises no Error for the refused environment");
+        var warning = _log.Entries.Should()
+            .ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("refuses this identity's membership")).Subject;
+        warning.Message.Should().Contain(AcmeEnvironment).And.Contain("0x80072560")
+            .And.NotContain("BODY-MARKER", "the line names the URL and the code only, never the response body")
+            .And.NotContain("not a member of the organization");
+
+        // Aborted before any decision: the environment saw only the identity's own WhoAmI reads (no scan, no write).
+        OnlyWhoAmIReads(acme).Should().BeTrue();
+
+        // The run report still records the environment as failed, exactly as before.
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain($"[{AcmeEnvironment}]").And.Contain("nothing was decided or written");
+        TargetStatus(result, AcmeEnvironment).Should().Be("error");
+        TargetReadability(result, AcmeEnvironment).Should().Be("Failed");
+
+        // ... and the other environments are reconciled as ever.
+        _store.SystemUsers[TestUser1].PrimaryContactId.Should().Be(TestUser1Contact, "one refusing target never stops the others");
+    }
+
+    // Must-not-fire pair of the test above: the SAME wire answer in this BFF's own environment is still an Error. This is the
+    // test that reddens if own-vs-foreign is ignored (or re-derived wrongly): it is not a foreign environment's answer.
+    [Fact]
+    public async Task TheOwnEnvironment_RefusingTheBffsMembership_StillLogsErrorAndIsAbortedBeforeAnyDecision()
+    {
+        var own = new RefusingDataverse(HttpStatusCode.Forbidden, NotAMemberBody);
+        var ownBinder = new ContactIdentityBinder(
+            RealStore(own, OwnEnvironment), Tenants(CustomerTenant), new FakeTimeProvider(Now),
+            new BindingLogCapture<ContactIdentityBinder>(), NoOwnerUnderTest);
+
+        var result = await RunAsync(writes: true, ownerAwareBinder: ownBinder);
+
+        var error = _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
+        error.Message.Should().Contain(OwnEnvironment).And.Contain("binding column Failed")
+            .And.Contain("environment aborted before any decision");
+        _log.Entries.Should().NotContain(e => e.Message.Contains("refuses this identity's membership"));
+        own.Requests.Should().ContainSingle("the own environment's probe is exactly as before: one proof read, no follow-up question")
+            .Which.Uri.Should().EndWith("/WhoAmI");
+        result.Success.Should().BeFalse();
+        Readability(result).Should().Be("Failed");
+    }
+
+    [Theory]
+    [InlineData("Failed")]
+    [InlineData("Masked")]
+    public async Task TheOwnEnvironment_WhoseProbeIsFailedOrMasked_StillLogsErrorAndIsAbortedBeforeAnyDecision(string readability)
+    {
+        if (readability == "Failed") _store.FailProbe = true;
+        else _store.MaskBindingColumn = true;
+
+        var result = await RunAsync(writes: true);
+
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.Message.Should().Contain(OwnEnvironment).And.Contain($"binding column {readability}")
+            .And.Contain("environment aborted before any decision");
+        _store.Writes.Should().BeEmpty();
+        _store.Reads.Should().NotContain("scan-users", "nothing is decided on an unreadable binding column");
+        result.Success.Should().BeFalse();
+        Readability(result).Should().Be(readability);
+    }
+
+    [Fact]
+    public async Task AForeignEnvironment_WhoseBindingColumnIsMasked_StillLogsError()
+    {
+        // Masking is a real configuration fault (field-level security without Read), not a membership refusal.
+        // Masking shows only on a marked row (a plane with no oid), so the environment holds one bound contact.
+        var demo = new InMemoryContactIdentityStore { MaskBindingColumn = true };
+        demo.AddContact(Guid.NewGuid(), "bound.person@demo.spaarke.com", Guid.NewGuid().ToString("D"), IdentityPlaneMarker.External);
+        demo.AddSystemUser(Guid.NewGuid(), Guid.NewGuid(), "new.user@demo.spaarke.com");
+
+        var result = await RunAsync(writes: true, targets: new() { [DemoEnvironment] = demo }, registry: new[] { DemoEnvironment });
+
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.Message.Should().Contain(DemoEnvironment).And.Contain("binding column Masked");
+        demo.Writes.Should().BeEmpty();
+        demo.Reads.Should().NotContain("scan-users");
+        TargetStatus(result, DemoEnvironment).Should().Be("error");
+        TargetReadability(result, DemoEnvironment).Should().Be("Masked");
+    }
+
+    // Anything but the exact answer (HTTP 403 AND 0x80072560) is an ordinary failure and keeps its Error: a throttle, a 403
+    // with another code, and the membership code under another status.
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable, """{"error":{"message":"throttled"}}""")]
+    [InlineData(HttpStatusCode.Forbidden, OtherForbiddenBody)]
+    [InlineData(HttpStatusCode.InternalServerError, NotAMemberBody)]
+    public async Task AForeignEnvironment_FailingForAnyOtherReason_StillLogsErrorAndIsAborted(HttpStatusCode status, string body)
+    {
+        var acme = new RefusingDataverse(status, body);
+
+        var result = await RunAsync(writes: true, targets: new(),
+            stores: new() { [AcmeEnvironment] = RealStore(acme, AcmeEnvironment) }, registry: new[] { AcmeEnvironment });
+
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.Message.Should().Contain(AcmeEnvironment).And.Contain("binding column Failed")
+            .And.NotContain("BODY-MARKER");
+        _log.Entries.Should().NotContain(e => e.Message.Contains("refuses this identity's membership"));
+        OnlyWhoAmIReads(acme).Should().BeTrue();
+        TargetStatus(result, AcmeEnvironment).Should().Be("error");
+        result.Success.Should().BeFalse();
+    }
+
+    // Task 047 review K1 (r4 task 045): the classifier compares the PARSED error.code exactly, never a substring of the error text.
+    // MUST FIRE: the exact code under 403 (including a body the store cut at 400 characters after the code). MUST NOT FIRE: the code
+    // only in the message, another code, an unparseable error, a 403 without the code, the code under another status.
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80072560","message":"The user is not a member of the organization."}}""", true)]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80072560","message":"The user is not a member of the organi""", true)]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80040220","message":"mentions 0x80072560 in its text"}}""", false)]
+    [InlineData(HttpStatusCode.Forbidden, "403: this is not json but says 0x80072560", false)]
+    [InlineData(HttpStatusCode.Forbidden, "403: {\"error\":{\"message\":\"0x80072560\"", false)]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80040220","message":"denied"}}""", false)]
+    [InlineData(HttpStatusCode.Forbidden, null, false)]
+    [InlineData(HttpStatusCode.BadRequest, """400: {"error":{"code":"0x80072560","message":"x"}}""", false)]
+    public void IsMembershipRefusal_ComparesTheParsedErrorCodeExactly_UnderExactly403(HttpStatusCode status, string? error, bool expected)
+        => DataverseContactIdentityStore.IsMembershipRefusal(status, error).Should().Be(expected);
+
+    // Justification (beyond the cases the task names): pins the interface default. A store that cannot tell why its probe failed
+    // (every store but the Dataverse one) answers "not refused", so it keeps the Error, which is the fail-loud direction.
+    [Fact]
+    public async Task AForeignEnvironment_WhoseStoreCannotTellWhyItFailed_StillLogsError()
+    {
+        var demo = new InMemoryContactIdentityStore { FailProbe = true };
+
+        var result = await RunAsync(writes: true, targets: new() { [DemoEnvironment] = demo }, registry: new[] { DemoEnvironment });
+
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.Message.Should().Contain(DemoEnvironment).And.Contain("binding column Failed");
+        demo.Reads.Should().NotContain("scan-users");
+        TargetStatus(result, DemoEnvironment).Should().Be("error");
+    }
+
     // ── Shipping state ───────────────────────────────────────────────────────────────────────────────
 
     /// <remarks>
@@ -1008,6 +1169,11 @@ public class IdentityLinkReconciliationTests
     /// own environment) and each provisioning-target URL is served by its store; a URL with no store throws when its
     /// binder is built, as an unreachable environment would.
     /// </param>
+    /// <param name="stores">
+    /// Targets served by any other store, e.g. the REAL <see cref="DataverseContactIdentityStore"/> over a fake Web API
+    /// (<see cref="RefusingDataverse"/>), for a test whose subject is what the wire answer does. Needs <paramref name="targets"/>
+    /// to be set too (it may be empty).
+    /// </param>
     private async Task<JobRunResult> RunAsync(
         bool? writes,
         string? rawSwitch = null,
@@ -1017,7 +1183,8 @@ public class IdentityLinkReconciliationTests
         bool registryFails = false,
         ContactIdentityBinder? ownerAwareBinder = null,
         DataverseEnvironmentRecord[]? registryRecords = null,
-        string? ownAppService = null)
+        string? ownAppService = null,
+        Dictionary<string, IContactIdentityStore>? stores = null)
     {
         var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = OwnEnvironment };
         if (ownAppService is not null) settings[IdentityLinkReconciliationJob.OwnAppServiceConfigKey] = ownAppService;
@@ -1040,7 +1207,7 @@ public class IdentityLinkReconciliationTests
                 Mock.Of<TokenCredential>(),
                 Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
                 NullLogger<RegistrationDataverseService>.Instance,
-                new PerEnvironmentBinderFactory(targets),
+                new PerEnvironmentBinderFactory(targets, stores),
                 ownBinder,
                 // Task 132: the team/BU write-path eviction hook; this suite writes no team or BU.
                 new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
@@ -1107,6 +1274,20 @@ public class IdentityLinkReconciliationTests
             .GetProperty("status").GetString()!;
     }
 
+    private static string Readability(JobRunResult result)
+    {
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.GetProperty("readability").GetString()!;
+    }
+
+    private static string TargetReadability(JobRunResult result, string environment)
+    {
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.GetProperty("provisioningTargets").GetProperty("environments").EnumerateArray()
+            .Single(e => e.GetProperty("environment").GetString() == environment)
+            .GetProperty("readability").GetString()!;
+    }
+
     private static List<string> TargetEnvironments(JobRunResult result)
     {
         using var doc = JsonDocument.Parse(result.ResultJson!);
@@ -1118,15 +1299,49 @@ public class IdentityLinkReconciliationTests
     /// The binder factory's virtual store seam (the registration path's own test convention): each environment URL
     /// gets its in-memory store, so "this environment was reconciled" is asserted on its own rows — no HTTP double.
     /// </summary>
-    private sealed class PerEnvironmentBinderFactory(Dictionary<string, InMemoryContactIdentityStore> stores)
+    private sealed class PerEnvironmentBinderFactory(
+        Dictionary<string, InMemoryContactIdentityStore> stores, Dictionary<string, IContactIdentityStore>? otherStores = null)
         : ContactIdentityBinderFactory(Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant),
             new FakeTimeProvider(Now), FactoryConfiguration())
     {
         public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
-            => stores.TryGetValue(dataverseBaseUrl, out var store)
-                ? store
+            => stores.TryGetValue(dataverseBaseUrl, out var store) ? store
+                : otherStores is not null && otherStores.TryGetValue(dataverseBaseUrl, out var other) ? other
                 : throw new InvalidOperationException($"{dataverseBaseUrl} could not be reached");
     }
+
+    /// <summary>
+    /// A hand-written fake Dataverse that answers EVERY request with one scripted status and body, which is what an
+    /// environment that does not know the BFF's application user does, and records each request. Not a
+    /// <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 B1 bans that, not a fake; the shape of <c>ReadProofHttp</c>).
+    /// </summary>
+    private sealed class RefusingDataverse(HttpStatusCode status, string body) : IHttpClientFactory
+    {
+        public HttpStatusCode Status { get; } = status;
+
+        public string Body { get; } = body;
+
+        public List<(HttpMethod Method, string Uri)> Requests { get; } = new();
+
+        public HttpClient CreateClient(string name) => new(new Handler(this));
+
+        private sealed class Handler(RefusingDataverse owner) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+            {
+                lock (owner.Requests)
+                {
+                    owner.Requests.Add((request.Method, request.RequestUri!.ToString()));
+                }
+
+                return Task.FromResult(new HttpResponseMessage(owner.Status) { Content = new StringContent(owner.Body) });
+            }
+        }
+    }
+
+    /// <summary>The REAL Web API store over <paramref name="http"/>, on the injected clock (so its proof is a real proof).</summary>
+    private static DataverseContactIdentityStore RealStore(RefusingDataverse http, string environment)
+        => new(http, _ => Task.FromResult("token"), environment, NullLogger.Instance, new FakeTimeProvider(Now));
 
     /// <summary>The environment registry at its virtual read (no HTTP double).</summary>
     private sealed class RegistryDouble(

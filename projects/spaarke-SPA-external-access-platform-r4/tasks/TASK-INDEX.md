@@ -45,9 +45,9 @@
 | 040 | Workforce-contact tabs scoped by grants (FR-24) | 4 | ✅ [done] | 038 | Group E | opus / high |
 | 041 | Licensed user's first sign-in skips the profile form (FR-25) | 4 | ✅ [done] | 038 | — (may edit `CallerPrincipalResolver.cs` with 043) | opus / high |
 | 043 | Binder faults → 503 + SPA retry; ProjectPage 404 fold (FR-28) | 4 | ✅ [done] | 038 | Group E | opus / high |
-| 044 | no-mock-identity test warm-up (FR-29) | 4 | 🔲 [open] | 038 | Group E | sonnet / medium |
-| 045 | Contact store log labels + test double + gate fix (FR-30) | 4 | 🔲 [open] | 038 | Group E | sonnet / high |
-| 047 | Foreign-environment 403 → Warning / cooldown (FR-31c) | 4 | 🔲 [open] | 038 | Group E | sonnet / xhigh |
+| 044 | no-mock-identity test warm-up (FR-29) | 4 | ✅ [done] | 038 | Group E | sonnet / medium |
+| 045 | Contact store log labels + test double + gate fix (FR-30) | 4 | ✅ [done] | 038 | Group E | sonnet / high |
+| 047 | Foreign-environment 403 → Warning / cooldown (FR-31c) | 4 | ✅ [done] | 038 | Group E | sonnet / xhigh |
 | 042 | Email-missing text + email rule alignment (FR-26, FR-27) | 4 | ✅ [done] | 041 | Group F | sonnet / high |
 | 048 | Teams mobile layout (FR-32) | 4 | 🔲 [open] | 040 | Group F | sonnet / high |
 | 046 | acme fault: owner-approved checks + data fix (FR-31a/b) | 4 | 🔲 [open] | none (owner-gated) | — (live) | sonnet / high |

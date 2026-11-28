@@ -448,6 +448,7 @@ public static class RagEndpoints
     private static async Task<IResult> GetEmbedding(
         EmbeddingRequest request,
         IRagService ragService,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Text))
@@ -476,9 +477,10 @@ public static class RagEndpoints
         }
         catch (Exception ex)
         {
+            loggerFactory.CreateLogger("RagEndpoints").LogError(ex, "Embedding generation failed");
             return Results.Problem(
                 title: "Embedding Generation Failed",
-                detail: ex.Message,
+                detail: "The embedding could not be generated.",
                 statusCode: 500);
         }
     }
@@ -579,7 +581,10 @@ public static class RagEndpoints
         {
             // The partition key is the TOKEN's tenant (task 163 / #1041), never the body's — the body value
             // was proven equal above and is deliberately not passed on.
-            var indexRequest = request with { TenantId = callerTenantId };
+            // GitHub #3223: the parent on the chunks is replaced only when it was decided. A request that names a parent has
+            // decided it; one that names neither a document nor a parent decided nothing, and must not un-file a document
+            // already indexed (anyone who can read the file can call this route). A document's row decides below.
+            var indexRequest = request with { TenantId = callerTenantId, ReplaceParentEntity = request.ParentEntity is not null };
 
             if (!string.IsNullOrEmpty(request.DocumentId))
             {
@@ -592,7 +597,7 @@ public static class RagEndpoints
                     return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
                 }
 
-                var (rowProblem, rowParent) = await HoldIndexFileRequestToRowAsync(request, document, parentResolver, cancellationToken);
+                var (rowProblem, rowParent, replaceParent) = await HoldIndexFileRequestToRowAsync(request, document, parentResolver, cancellationToken);
                 if (rowProblem is not null)
                 {
                     logger.LogWarning(
@@ -614,6 +619,7 @@ public static class RagEndpoints
                     // The record that governs the document (DocumentIndexParentResolver, task 177) when the row
                     // names one; the body parent the filter authorized (AppendTo) only when the row names none.
                     ParentEntity = rowParent,
+                    ReplaceParentEntity = replaceParent,
                 };
             }
 
@@ -690,24 +696,27 @@ public static class RagEndpoints
     ///   could not be read, no parent is used, never the body's.</item>
     /// </list>
     /// </remarks>
-    internal static async Task<(string? Problem, ParentEntityContext? Parent)> HoldIndexFileRequestToRowAsync(
+    internal static async Task<(string? Problem, ParentEntityContext? Parent, bool ReplaceParent)> HoldIndexFileRequestToRowAsync(
         FileIndexRequest request, DocumentEntity document, DocumentIndexParentResolver parentResolver, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
         {
-            return ("INDEX_FILE_DOCUMENT_HAS_NO_FILE", null);
+            return ("INDEX_FILE_DOCUMENT_HAS_NO_FILE", null, false);
         }
 
         if (!string.Equals(request.DriveId, document.GraphDriveId, StringComparison.Ordinal)
             || !string.Equals(request.ItemId, document.GraphItemId, StringComparison.Ordinal))
         {
-            return ("INDEX_FILE_ITEM_MISMATCH", null);
+            return ("INDEX_FILE_ITEM_MISMATCH", null, false);
         }
 
+        // GitHub #3223: the parent on the chunks is replaced by the decided answer (a decided "none" clears the old one); a row
+        // that could not be read decided nothing, so the chunks keep the parent they have.
         var decision = await parentResolver.DecideAsync(document, ct);
+        var replaceParent = !decision.RowUnreadable;
         if (decision.Named.Count == 0)
         {
-            return (null, decision.Decided ? request.ParentEntity : null);
+            return (null, decision.Decided ? request.ParentEntity : null, replaceParent);
         }
 
         if (request.ParentEntity is not null)
@@ -720,11 +729,11 @@ public static class RagEndpoints
                     && rowId == bodyId);
             if (!matched)
             {
-                return ("INDEX_FILE_PARENT_MISMATCH", null);
+                return ("INDEX_FILE_PARENT_MISMATCH", null, false);
             }
         }
 
-        return (null, decision.Parent);
+        return (null, decision.Parent, replaceParent);
     }
 
     private static string NormalizeParentType(string? entityType)
@@ -1296,7 +1305,12 @@ public static class RagEndpoints
                 // or communication): the one secure record (effective), several of one secure family -> the most
                 // specific of them; none secure -> the most specific; two different secure roots or an unreadable
                 // secure state -> no parent (fail closed). A row naming one record keeps the parent it always had.
-                var parentEntity = await parentResolver.ResolveAsync(document, cancellationToken);
+                //
+                // GitHub #3223: the decided answer REPLACES the parent on the chunks, so a document no longer filed under a record
+                // (or whose parent the rule now withholds) stops being findable under it. A row that cannot be read decides
+                // nothing: the chunks keep the parent they have.
+                var parentDecision = await parentResolver.DecideAsync(document, cancellationToken);
+                var parentEntity = parentDecision.Parent;
 
                 // Step 4: Build file index request. The index follows the content type (task 041, FR-40): the request
                 // names none, so the pipeline writes the files index; no record or business-unit index column is read.
@@ -1311,11 +1325,7 @@ public static class RagEndpoints
                     FileName = document.FileName ?? document.Name,
                     DocumentId = documentId,
                     ParentEntity = parentEntity,
-                    // Task 048 (spaarkeai-word-add-in-r1): this route re-indexes an EXISTING Dataverse
-                    // document by id ("Send to Index" / the Dataverse ribbon button) — the item may
-                    // already carry chunks from an earlier index. Trim any leftover tail after the new
-                    // chunks land; a first index (never-indexed document) finds nothing to trim.
-                    ReplaceStaleChunks = true,
+                    ReplaceParentEntity = !parentDecision.RowUnreadable,
                 };
 
                 // Step 5: Index via OBO authentication
@@ -1398,7 +1408,7 @@ public static class RagEndpoints
                 {
                     DocumentId = documentId,
                     Success = false,
-                    ErrorMessage = ex.Message
+                    ErrorMessage = "The document could not be indexed."
                 });
             }
         }
@@ -1492,13 +1502,6 @@ public static class RagEndpoints
                 ParentEntity = request.ParentEntity,
                 Source = "EnqueueEndpoint",
                 EnqueuedAt = DateTimeOffset.UtcNow,
-                // Task 048 (spaarkeai-word-add-in-r1): thread the caller's own value through instead of
-                // silently dropping it. FileIndexRequest.ReplaceStaleChunks has been a bindable field on
-                // this request body since task 029; before this fix a caller that set it true on the
-                // wire had that intent discarded here. This endpoint has no first-class "this is a
-                // re-index" signal of its own (unlike SendToIndex / the Knowledge Base reindex route), so
-                // the caller decides, same as the sibling IndexFile endpoint.
-                ReplaceStaleChunks = request.ReplaceStaleChunks,
             }));
 
             // Step 4: Create and submit job
@@ -1534,7 +1537,7 @@ public static class RagEndpoints
             logger.LogError(ex, "Failed to enqueue RAG indexing job for {FileName}", request.FileName);
             return Results.Problem(
                 title: "Enqueue Failed",
-                detail: ex.Message,
+                detail: "The indexing job could not be queued.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -1632,7 +1635,7 @@ public static class RagEndpoints
             logger.LogError(ex, "Failed to submit bulk RAG indexing job for tenant {TenantId}", request.TenantId);
             return Results.Problem(
                 title: "Submit Failed",
-                detail: ex.Message,
+                detail: "The bulk indexing job could not be submitted.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

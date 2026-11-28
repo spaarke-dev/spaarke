@@ -138,12 +138,12 @@ User Token → OBO Exchange → SPE Access Token → Graph API
 **Key Components:**
 - `EmailEndpoints.cs` (in `Api/`) receives email-related requests
 - `EmailAssociationService` handles email-to-document association logic
-- `EmailAnalysisJobHandler` processes email analysis via Service Bus
+- `IncomingCommunicationJobHandler` processes inbound email via Service Bus
 - `SpeFileStore` (in `Infrastructure/Graph/`) uploads with app-only auth via delegated operations
 - `AppOnlyDocumentAnalysisJobHandler` runs Document Profile playbook
 - `RagIndexingJobHandler` indexes documents for AI Search
 
-> **Note**: The earlier `EmailToDocumentJobHandler`, `EmailToDocumentService`, `EmailWebhookEndpoints`, and `EmailPollingWorker` have been removed or consolidated. Email processing now uses `EmailAnalysisJobHandler` and `EmailAssociationService`.
+> **Note**: The earlier `EmailToDocumentJobHandler`, `EmailToDocumentService`, `EmailWebhookEndpoints`, and `EmailPollingWorker` have been removed or consolidated. Email processing now uses `IncomingCommunicationJobHandler` and `EmailAssociationService`; the archived `.eml` is profiled by `AppOnlyDocumentAnalysisJobHandler`. (`EmailAnalysisJobHandler` was deleted 2026-11-25: nothing enqueued it.)
 
 **Authentication Flow:**
 ```
@@ -342,8 +342,8 @@ public class ResolvedScope
 
 | Job Type | Handler | Purpose | Idempotency Key |
 |----------|---------|---------|-----------------|
-| `AppOnlyDocumentAnalysis` | `AppOnlyDocumentAnalysisJobHandler` | Run Document Profile playbook | `analysis-{documentId}` |
-| `EmailAnalysis` | `EmailAnalysisJobHandler` | Analyze email content | `email-{messageId}` |
+| `AppOnlyDocumentAnalysis` | `AppOnlyDocumentAnalysisJobHandler` | Run Document Profile playbook | `analysis-{documentId}-documentprofile` (`ProfileIdempotencyKey`, shared by every enqueue site) |
+| `IncomingCommunication` | `IncomingCommunicationJobHandler` | Process an inbound email | `Communication:{messageId}:Process` |
 | `RagIndexing` | `RagIndexingJobHandler` | Index document for AI Search | `rag-index-{driveId}-{itemId}` |
 | `AttachmentClassification` | `AttachmentClassificationJobHandler` | Classify attachment types | `attach-{itemId}` |
 
@@ -562,7 +562,7 @@ The Azure AI Search index (`sprk-knowledge-shared`) stores:
 │                                                                     │
 │  2. EMAIL PROCESSING                                                │
 │     │                                                               │
-│     ├── EmailAnalysisJobHandler receives job                        │
+│     ├── IncomingCommunicationJobHandler receives job                │
 │     ├── Fetches email via Graph (app-only)                         │
 │     ├── Converts to .eml format                                     │
 │     ├── Extracts attachments (filters signature images)            │
@@ -633,8 +633,8 @@ The Azure AI Search index (`sprk-knowledge-shared`) stores:
 
 | Handler | File | Job Type |
 |---------|------|----------|
-| `AppOnlyDocumentAnalysisJobHandler` | `Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` | `AppOnlyDocumentAnalysis` |
-| `EmailAnalysisJobHandler` | `Services/Jobs/Handlers/EmailAnalysisJobHandler.cs` | `EmailAnalysis` |
+| `AppOnlyDocumentAnalysisJobHandler` | `Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs` | `AppOnlyDocumentAnalysis` |
+| `IncomingCommunicationJobHandler` | `Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs` | `IncomingCommunication` |
 | `RagIndexingJobHandler` | `Services/Jobs/Handlers/RagIndexingJobHandler.cs` | `RagIndexing` |
 | `AttachmentClassificationJobHandler` | `Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs` | `AttachmentClassification` |
 

@@ -218,8 +218,9 @@ public class OfficeJobStatusService
         try
         {
             var row = await _jobService.GetCallersProcessingJobByIdempotencyKeyAsync(idempotencyKey, callerObjectId, ct);
-            if (row is null)
+            if (row is null || IsIntakeRun(row))
             {
+                // An intake run is no Office save, so it is never an Office save's duplicate (FR-06b).
                 return null;
             }
 
@@ -262,6 +263,15 @@ public class OfficeJobStatusService
             return null;
         }
 
+        // FR-06b: one table, two record kinds. An intake run belongs to the intake status surface, so the Office read
+        // answers it as not found, whoever asks and whatever its creator (the Office ownership check would pass the
+        // submitter of the request, whose id the run records as its initiator).
+        if (IsIntakeRun(row))
+        {
+            _logger.LogDebug("Job {JobId} is an intake run, not an Office job; treating as not found", jobId);
+            return null;
+        }
+
         var job = ToEffectiveView(row, _time.GetUtcNow());
 
         if (userId is not null && !string.Equals(job.CreatedBy, userId, StringComparison.OrdinalIgnoreCase))
@@ -274,6 +284,13 @@ public class OfficeJobStatusService
 
         return job;
     }
+
+    /// <summary>
+    /// Whether a <c>sprk_processingjob</c> row is an intake pipeline run (<c>sprk_jobtype</c> = Intake run) rather than an
+    /// Office job. The Office reads exclude it (FR-06b); intake status reads select it.
+    /// </summary>
+    internal static bool IsIntakeRun(ProcessingJobRecord row) =>
+        row.JobType == (int)Sprk.Bff.Api.Models.ProcessingJobType.IntakeRun;
 
     /// <summary>
     /// The job's effective state, from its row. ONE rule for both readers (notes §3).
@@ -465,12 +482,21 @@ public class OfficeJobStatusService
     /// <b>Reconnect.</b> Every published event after <paramref name="lastEventId"/> is sent once; none at or before it is
     /// sent again. Redis pub/sub keeps no history, so the state between them arrives as the unnumbered snapshot.
     /// </para>
+    /// <para>
+    /// <b>What the caller may be told (task 143, owner A1).</b> Every status read from the job's row passes through
+    /// <paramref name="statusForCaller"/> before an event is formed from it, so a content-duplicate job's existing document
+    /// reaches the stream only when the status read would name it to this caller. Published updates are not passed through
+    /// it: only the finalization workers publish, and a content-duplicate job is never finalized.
+    /// </para>
     /// </remarks>
     public IAsyncEnumerable<byte[]> StreamAsync(
         Guid jobId,
         string? lastEventId,
+        Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>> statusForCaller,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(statusForCaller);
+
         // Use Channel to produce events - avoids yield-inside-try-catch limitation
         var channel = System.Threading.Channels.Channel.CreateUnbounded<byte[]>(
             new System.Threading.Channels.UnboundedChannelOptions
@@ -480,7 +506,7 @@ public class OfficeJobStatusService
             });
 
         // Start the producer task
-        _ = ProduceJobStatusEventsAsync(jobId, lastEventId, channel.Writer, cancellationToken);
+        _ = ProduceJobStatusEventsAsync(jobId, lastEventId, statusForCaller, channel.Writer, cancellationToken);
 
         return channel.Reader.ReadAllAsync(cancellationToken);
     }
@@ -491,11 +517,19 @@ public class OfficeJobStatusService
     private async Task ProduceJobStatusEventsAsync(
         Guid jobId,
         string? lastEventId,
+        Func<JobStatusResponse, CancellationToken, Task<JobStatusResponse>> statusForCaller,
         System.Threading.Channels.ChannelWriter<byte[]> writer,
         CancellationToken cancellationToken)
     {
         using var subscriptionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task? subscription = null;
+
+        // The job's row, as this caller may be told it (task 143). A fault in the decision ends the stream with the error
+        // event below, never with the unfiltered status.
+        async Task<JobStatusResponse?> ReadForCallerAsync() =>
+            await GetAsync(jobId, userId: null, cancellationToken) is { } status
+                ? await statusForCaller(status, cancellationToken)
+                : null;
 
         try
         {
@@ -532,7 +566,7 @@ public class OfficeJobStatusService
             await writer.WriteAsync(SseHelper.FormatConnected(jobId), cancellationToken);
 
             // The snapshot: the state pub/sub cannot replay. Unnumbered.
-            var currentStatus = await GetAsync(jobId, userId: null, cancellationToken);
+            var currentStatus = await ReadForCallerAsync();
             if (currentStatus is null)
             {
                 // Job not found - send error and close
@@ -666,7 +700,7 @@ public class OfficeJobStatusService
                 _logger.LogWarning(
                     "SSE stream: the subscription for job {JobId} ended without an outcome; polling instead",
                     jobId);
-                currentStatus = await GetAsync(jobId, userId: null, cancellationToken);
+                currentStatus = await ReadForCallerAsync();
                 if (currentStatus is null)
                 {
                     _logger.LogWarning("SSE stream: Job {JobId} was deleted during streaming", jobId);
@@ -713,7 +747,7 @@ public class OfficeJobStatusService
 
                     await Task.Delay(fallbackPollInterval, cancellationToken);
 
-                    currentStatus = await GetAsync(jobId, userId: null, cancellationToken);
+                    currentStatus = await ReadForCallerAsync();
                     if (currentStatus is null)
                     {
                         _logger.LogWarning("SSE stream: Job {JobId} was deleted during streaming", jobId);

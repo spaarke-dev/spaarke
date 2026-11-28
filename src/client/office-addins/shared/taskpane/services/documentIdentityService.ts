@@ -193,11 +193,7 @@ function toResolvedOutcome(response: BffDocumentIdentityResponse): DocumentIdent
     ...(recordWithheld ? { relatedRecordKnown: false } : {}),
     // Task 141: only a list is kept; anything else is "not determined" (no marks), never "none saved".
     ...(Array.isArray(response.savedAttachmentNames)
-      ? {
-          savedAttachmentNames: response.savedAttachmentNames.filter(
-            (name): name is string => typeof name === 'string' && name.trim() !== ''
-          ),
-        }
+      ? { savedAttachmentNames: savedAttachmentNamesOf(response) ?? [] }
       : {}),
   };
 }
@@ -362,11 +358,45 @@ const RESOLVE_EMAIL_IDENTITY_ENDPOINT = '/api/documents/resolve-email-identity';
  * answer never blocks Save. Never throws. Keys are sent in the body, never in a URL.
  */
 export async function resolveEmailIdentity(
-  keys: { internetMessageId: string; exchangeItemId: string | null } | null | undefined
+  keys: { internetMessageId: string; exchangeItemId: string | null } | null | undefined,
+  /**
+   * Task 143: called (before the promise settles) with the `not_saved` answer's `savedAttachmentNames` — the email's
+   * attachments saved on their own — only when the email is not saved and the server sent the field.
+   */
+  onUnsavedEmailSavedAttachmentNames?: (names: string[]) => void
 ): Promise<DocumentIdentityOutcome | null> {
+  const answer = await resolveEmailIdentityAnswer(keys);
+  if (!answer.identity && answer.savedAttachmentNames) {
+    onUnsavedEmailSavedAttachmentNames?.(answer.savedAttachmentNames);
+  }
+  return answer.identity;
+}
+
+/**
+ * Task 143: the email lookup's whole answer. `identity` is exactly {@link resolveEmailIdentity}'s result. When the email is
+ * NOT saved (`identity` null), `savedAttachmentNames` are the names of its attachments saved on their own (no `.eml`) that
+ * the caller may read — present only when the server sent the field. Absent means nothing can be said (an older server,
+ * a read fault, a failed lookup): the pane then marks no attachment saved or unsaved (task 141's rule). Never throws.
+ */
+export interface EmailIdentityAnswer {
+  identity: DocumentIdentityOutcome | null;
+  savedAttachmentNames?: string[];
+}
+
+/** The `savedAttachmentNames` list of a response, the same filter as {@link toResolvedOutcome}; undefined when absent. */
+function savedAttachmentNamesOf(response: BffDocumentIdentityResponse): string[] | undefined {
+  return Array.isArray(response.savedAttachmentNames)
+    ? response.savedAttachmentNames.filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+    : undefined;
+}
+
+/** Task 143: {@link resolveEmailIdentity}, also returning the names a `not_saved` answer carries. */
+export async function resolveEmailIdentityAnswer(
+  keys: { internetMessageId: string; exchangeItemId: string | null } | null | undefined
+): Promise<EmailIdentityAnswer> {
   const internetMessageId = keys?.internetMessageId?.trim();
   if (!internetMessageId) {
-    return null;
+    return { identity: null };
   }
   try {
     const response = await apiClient.post<BffDocumentIdentityResponse>(RESOLVE_EMAIL_IDENTITY_ENDPOINT, {
@@ -374,12 +404,13 @@ export async function resolveEmailIdentity(
       ...(keys?.exchangeItemId ? { exchangeItemId: keys.exchangeItemId } : {}),
     });
     if (!response.resolved || !cleanGuid(response.documentId)) {
-      return null;
+      const names = response.resolved ? undefined : savedAttachmentNamesOf(response);
+      return names ? { identity: null, savedAttachmentNames: names } : { identity: null };
     }
-    return toResolvedOutcome(response);
+    return { identity: toResolvedOutcome(response) };
   } catch (err) {
     console.warn('[Spaarke] Email identity lookup failed; showing the save form', err);
-    return null;
+    return { identity: null };
   }
 }
 

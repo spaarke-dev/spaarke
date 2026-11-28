@@ -21,8 +21,8 @@ using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
-using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 using Commit = Sprk.Bff.Api.Tests.Integration.DataMutation.Signals.DecisionCommitServiceTests;
+using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
@@ -67,7 +67,16 @@ public sealed partial class SecureChildOwnershipAiToolTests
         }
     }
 
-    private FourActionWorld BuildFourActionWorld()
+    /// <param name="staged">Wrap each executor in the profile's stage-naming proxy, so every call carries its step's name. The proxy
+    /// is not a <c>ChildCreateExecutorBase</c>, so the commit's access window (ISS-010 C) is SUSPENDED for every step's execute; the
+    /// default (unstaged) runs the real executor types, as production does.</param>
+    /// <param name="withoutAccessWindow">The request drops the commit's access window as it is opened (its <c>Items</c> refuse it), so
+    /// every caller-access question goes to the wire, as before ISS-010 part C. Nothing else changes.</param>
+    /// <param name="windowSwitch">The commit's <c>Signals:DecisionAccessWindow:Enabled</c> setting (ISS-010 C off switch); null leaves it unset (on).</param>
+    /// <param name="withoutOwnerLookups">The request refuses its business-unit and team configuration cache (ISS-010 D1), so every
+    /// create reads them as before D1. Nothing else changes.</param>
+    private FourActionWorld BuildFourActionWorld(
+        bool staged = false, bool withoutAccessWindow = false, string? windowSwitch = null, bool withoutOwnerLookups = false)
     {
         var profile = new DecisionCommitCallProfile();
         _world.WithUser(Commit.Caller, Commit.CallerOid, Directory.ChildBu); // the commit rig's caller, in the child business unit
@@ -104,12 +113,23 @@ public sealed partial class SecureChildOwnershipAiToolTests
         services.AddSingleton(appOnly);
 
         var http = Commit.Http();
+        if (withoutAccessWindow)
+            http.Items = new NoAccessWindowItems();
+        if (withoutOwnerLookups)
+            http.Items = new NoOwnerLookupsItems();
         ((ClaimsIdentity)http.User.Identity!).AddClaim(
             new Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", Commit.CallerOid.ToString()));
         http.RequestServices = services.BuildServiceProvider();
 
         var probe = new DecisionCommitCallProfile.ProfiledProbe(profile, Commit.Caller);
         var rig = new Commit.Rig { ActiveBudgets = 0, ProbeOverride = probe };
+        if (windowSwitch is not null)
+        {
+            rig.Configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { [DecisionAccessWindow.EnabledConfigKey] = windowSwitch })
+                .Build();
+        }
+
         rig.AddSignal(Commit.Primary, DecisionLane.Decide, OrdinaryMatter, PfVersion);
         rig.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", PfVersion, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_policyversion", PfVersion) { ["sprk_decisionplan"] = FourActionPlan });
@@ -130,9 +150,30 @@ public sealed partial class SecureChildOwnershipAiToolTests
             new AssignTaskExecutor(probe, cores, entities),
             new AddTodoExecutor(probe, cores, entities),
             new AssignWorkExecutor(probe, cores, entities),
-        }.Select(profile.Staged).ToList();
+        }.Select(e => staged ? profile.Staged(e) : e).ToList();
 
         return new FourActionWorld(rig, http, profile, user, probe, callers);
+    }
+
+    /// <summary>A request's <c>Items</c> that refuse the decision commit's access window (and keep everything else), so a test can
+    /// run the commit exactly as before ISS-010 part C with no switch in production code.</summary>
+    private sealed class NoAccessWindowItems : Dictionary<object, object?>, IDictionary<object, object?>
+    {
+        object? IDictionary<object, object?>.this[object key]
+        {
+            get => this[key];
+            set
+            {
+                if (value is not DecisionAccessWindow)
+                    this[key] = value;
+            }
+        }
+
+        void IDictionary<object, object?>.Add(object key, object? value)
+        {
+            if (value is not DecisionAccessWindow)
+                Add(key, value);
+        }
     }
 
     private static DecisionReview FourActionReview(Guid reviewId) => new()
@@ -194,7 +235,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task Iss010_OnTheRoute_TheFourCreates_ReadEachMetadataPathOnce_ExceptTheStepThatKeepsTheCallersOwnClient()
     {
-        var w = BuildFourActionWorld();
+        var w = BuildFourActionWorld(staged: true); // the assertion names each repeat's step
 
         var result = await w.CommitAsync();
 

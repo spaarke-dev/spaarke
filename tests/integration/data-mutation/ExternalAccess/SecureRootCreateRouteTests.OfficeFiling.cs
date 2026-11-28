@@ -115,9 +115,10 @@ public partial class SecureRootCreateRouteTests
     // ── #2191 K2: filed under the record it is created from, whatever the mapping could read ──────────────────────────
 
     /// <summary>
-    /// #2191 K2, must fire: the mapping source cannot be read — by the caller (a 429) or app-only (a timeout) — so the mapping
-    /// copies nothing and warns; the project made from a SECURE matter is still filed under it and created INTO isolation,
-    /// never unfiled and ordinary.
+    /// #2191 K2, must fire: the mapping source cannot be read app-only (a timeout); or the mapping's record-level Read probe as
+    /// the caller fails (RetrievePrincipalAccess answers 503 after the route's own source check allowed it). Either way the
+    /// mapping copies nothing and warns, and the project made from a SECURE matter is still filed under it and created INTO
+    /// isolation, never unfiled and ordinary.
     /// </summary>
     [Theory]
     [InlineData(true)]
@@ -129,7 +130,7 @@ public partial class SecureRootCreateRouteTests
         var matterType = RecordTypeRef(_fixture, "sprk_matter");
         _fixture.MapProjectsUnder(matter, matterType);
         if (callerReadFails)
-            _fixture.SourceCallerReadFailStatus = 429;
+            _fixture.FullAccessProbeThrows = true;
         else
             _fixture.SourceAppReadFails = true;
 
@@ -137,6 +138,9 @@ public partial class SecureRootCreateRouteTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning, "the mapping source was unavailable");
+        if (callerReadFails)
+            _fixture.DelegationProbes.Count(p => p.RecordId == matter).Should().BeGreaterThan(1,
+                "the mapping's own Read probe on the matter was asked after the route's source check, and failed");
         var project = ShouldBeFiledUnderTheDerivedPair(matter, matterType);
         _fixture.OfficeCreates.Single().GetAttributeValue<bool>("sprk_issecure").Should().BeTrue("created INTO isolation");
         _fixture.OfficeCreates.Single().GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("ownerid").Id.Should().Be(SecureTeam);
@@ -157,7 +161,7 @@ public partial class SecureRootCreateRouteTests
         var matterType = RecordTypeRef(_fixture, "sprk_matter");
         _fixture.MapProjectsUnder(matter, matterType);
         if (callerReadFails)
-            _fixture.SourceCallerReadFailStatus = 503;
+            _fixture.FullAccessProbeThrows = true;
 
         var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, Body(matter));
 
@@ -166,9 +170,13 @@ public partial class SecureRootCreateRouteTests
         _fixture.OfficeCreates.Single().GetAttributeValue<bool>("sprk_issecure").Should().BeFalse("an ordinary matter passes no isolation on");
         _fixture.OwningTeamOf(project).Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "the record-first owner, never the secure team");
         _fixture.SharesOn(project).Should().BeEmpty();
+        // The mapping's record-level Read probe as the caller failed: nothing is copied and the one warning says so; the
+        // project is filed under the matter all the same.
         if (callerReadFails)
-            (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning,
-                "the case must prove the source read really failed, or it pins nothing (018c review F3)");
+        {
+            (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning);
+            _fixture.DelegationProbes.Count(p => p.RecordId == matter).Should().BeGreaterThan(1);
+        }
     }
 
     /// <summary>#2191 K2 review F3: a project created from a SECURE PROJECT is filed under that project and created into isolation.</summary>

@@ -11,7 +11,9 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <para>
 /// <b>Not an access-scoped read.</b> Its only consumer, <see cref="CommunicationThreadReadService.ReadRegardingAppOnlyAsync"/>,
 /// is called after the external endpoint has checked the record against the caller's composed accessible set, and its
-/// query is keyed on that one record. It is never a fallback for an unresolved impersonated caller.
+/// query is keyed on that one record. It is never a fallback for an unresolved impersonated caller. Second consumer (field mapping
+/// task 067): the field-mapping push reads the ONE source row of a Filing-edge push through it, after the caller's Read probe on
+/// that record allowed it and the caller's own read of the row returned it, with a <c>$select</c> of exactly the mapped columns.
 /// </para>
 /// <para>
 /// <b>Component Justification (CLAUDE.md §11):</b> (1) Existing — <see cref="IImpersonatedCommunicationQuery"/> is the

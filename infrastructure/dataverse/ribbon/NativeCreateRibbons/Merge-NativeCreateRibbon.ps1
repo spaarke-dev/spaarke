@@ -21,6 +21,9 @@
       4. nativeNew = "kept": no form or subgrid New change (the entry's reason and ownerQuestion say why). With homeGridNew = "hidden"
          (owner OQ-1, 2026-11-26: a budget / KPI assessment is created only in its parent matter's context) the platform HOME-grid New
          (Mscrm.HomepageGrid.<t>.NewRecord) is hidden, with no replacement.
+      5. RETIRED BUTTONS. A table with mustBeAbsent (the KPI subgrid's "Add KPI Assessment", removed in task 066) has each listed button,
+         its command (<button id>.Command) and its labels (<button id>.*) removed, so a fresh export that still carries the button
+         comes out without it. A create-privilege rule the command used is left (an unused rule is harmless).
       Where a redirected table has gridButton = "none" (the report card) the home grid has no New at all; the form button opens the
       table's wizard filed under the parent the form names.
 
@@ -89,6 +92,17 @@ foreach ($section in @($customActions, $commandDefinitions, $locLabels)) {
     foreach ($node in @($section.ChildNodes)) {
         if ($node -is [System.Xml.XmlElement] -and $node.GetAttribute('Id').StartsWith('sprk.NativeCreate.')) { [void] $section.RemoveChild($node) }
     }
+}
+
+# Retired buttons (config mustBeAbsent, task 066): remove the button's CustomAction, its command (<button id>.Command) and its labels
+# (<button id>.*). A no-op when the ribbon does not carry them, so it is idempotent. A rule the command used (for example a
+# create-privilege DisplayRule) is left in place: an unreferenced rule is harmless and another command may share it.
+$retiredButtons = @(@($entry.mustBeAbsent) | Where-Object { $_ } | ForEach-Object { [string]$_ })
+$retiredCommands = @($retiredButtons | ForEach-Object { "$_.Command" })
+foreach ($buttonId in $retiredButtons) {
+    foreach ($node in @($customActions.SelectNodes("*[local-name()='CustomAction'][.//*[local-name()='Button' and @Id='$buttonId']]"))) { [void] $customActions.RemoveChild($node) }
+    foreach ($node in @($commandDefinitions.SelectNodes("*[local-name()='CommandDefinition' and @Id='$buttonId.Command']"))) { [void] $commandDefinitions.RemoveChild($node) }
+    foreach ($node in @($locLabels.SelectNodes("*[local-name()='LocLabel' and starts-with(@Id, '$buttonId.')]"))) { [void] $locLabels.RemoveChild($node) }
 }
 
 # A hide, once per Location (an existing hide of the same Location, under any id, is kept and not repeated).
@@ -175,11 +189,16 @@ try {
 
     [xml] $merged = Get-Content -Raw -LiteralPath $temp
     $after = Get-CommandIds $merged
-    $lost = @($before | Where-Object { $_ -notlike 'sprk.NativeCreate.*' -and $after -notcontains $_ })
+    $lost = @($before | Where-Object { $_ -notlike 'sprk.NativeCreate.*' -and $retiredCommands -notcontains $_ -and $after -notcontains $_ })
     if ($lost.Count -gt 0) { throw "The merge dropped existing command(s): $($lost -join ', '). Nothing was written; -Out is unchanged." }
     foreach ($surface in 'Form', 'HomepageGrid', 'SubGrid') {
         if (-not $merged.SelectSingleNode("//*[local-name()='HideCustomAction' and @Location='Mscrm.$surface.$t.Assign']")) {
             throw "The merged file does not hide Mscrm.$surface.$t.Assign. Nothing was written; -Out is unchanged."
+        }
+    }
+    foreach ($buttonId in $retiredButtons) {
+        if ($merged.SelectSingleNode("//*[local-name()='Button' and @Id='$buttonId']")) {
+            throw "The merged file still carries the retired button $buttonId. Nothing was written; -Out is unchanged."
         }
     }
     if ($entry.nativeNew -eq 'redirected' -and -not $merged.SelectSingleNode("//*[local-name()='CommandDefinition' and @Id='sprk.NativeCreate.$t.New.Command']")) {

@@ -145,27 +145,29 @@ public sealed record FileIndexRequest
     /// </remarks>
     public ParentEntityContext? ParentEntity { get; init; }
 
+    /// <summary>
+    /// When true, <see cref="ParentEntity"/> is the COMPLETE answer to "which record is this document filed under": a null
+    /// parent is written to the index as "no parent", replacing the parent a previous index left on the document's chunks.
+    /// When false (the default), a null parent leaves whatever parent the chunks already carry (a non-null parent always
+    /// replaces it).
+    /// </summary>
+    /// <remarks>
+    /// Opt in only where the parent answer was actually DECIDED: an explicit parent was given, or
+    /// <c>DocumentIndexParentResolver</c> answered about the document's row (a decided "none", including its fail-closed
+    /// secure-state answer, replaces the old parent; a row it could not read decides nothing and does not). A request that
+    /// names no parent because it never asked (<c>/index-file</c> with neither a document nor a parent, the Office add-in
+    /// worker) must not read that silence as "no parent" and erase one another path stamped. Server-set only: it is never
+    /// read from a request body or a queue payload.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ReplaceParentEntity { get; init; }
+
     // No index name (field-mapping-server-write-path-r1 task 041, FR-40): the index follows the content type, so a request
     // cannot name one. A JSON body or queued payload that still carries "searchIndexName" binds and the value is ignored.
 
-    /// <summary>
-    /// Task 029 (spaarkeai-word-add-in-r1, owner decision 2026-09-15): when true, after ALL new chunks are written
-    /// the file's chunks beyond the new chunk count are deleted from the same index
-    /// (<see cref="IRagService.DeleteChunksBeyondCountAsync"/>) — the leftovers of a previous, longer version, which
-    /// the id-keyed overwrite cannot reach. Upload first, then trim, so the file is never without chunks. A trim
-    /// failure fails the indexing result (retryable) with the new chunks already in place.
-    /// <b>Task 048</b>: every re-index path that can touch an EXISTING item now sets this true — the
-    /// <see cref="Services.Ai.PostUploadIndexingEnqueuer"/> seam (Compose save-back, the Create* wizards,
-    /// Office create + version save, Email-to-Document, outbound-email enrichment, post-AI-analysis
-    /// re-index), manual Run Index (<c>POST /api/ai/rag/send-to-index</c>), the Knowledge Base admin
-    /// reindex route, the playbook Index node, the document check-in re-index trigger, and bulk
-    /// re-indexing when <c>ForceReindex</c> is requested. A first index of a brand-new item has no tail
-    /// to remove — the trim is a harmless no-op search call in that case (proven by test). Default
-    /// remains false on the record itself; only the scheduled "unindexed only" bulk sweep and
-    /// pre-extracted content indexing (<see cref="IFileIndexingService.IndexContentAsync"/>, which never
-    /// reads this property) still never set it.
-    /// </summary>
-    public bool ReplaceStaleChunks { get; init; }
+    // No stale-chunk switch (GitHub #3304): every index of a file now removes its chunks beyond the new chunk count once
+    // the new ones are written (FileIndexingService). A JSON body or queued payload that still carries
+    // "replaceStaleChunks" binds and the value is ignored.
 }
 
 /// <summary>
@@ -279,6 +281,13 @@ public sealed record FileIndexingResult
 
     /// <summary>Why the file was skipped (a stable code), when <see cref="Skipped"/> is true.</summary>
     public string? SkipReason { get; init; }
+
+    /// <summary>
+    /// True when every new chunk was written but chunks from an earlier index of the file beyond the new count could not be
+    /// removed (GitHub #3304). <see cref="Success"/> is false so a retrying caller retries; a caller that does not retry may
+    /// still treat the document as indexed, since search already answers from the new chunks.
+    /// </summary>
+    public bool LeftoverChunksRemain { get; init; }
 
     /// <summary>
     /// Creates a skipped result: success, zero chunks, nothing to retry, and the document must not be stamped as indexed.

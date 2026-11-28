@@ -29,7 +29,7 @@ public static class JobProcessingModule
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
 
         // Unconditional handlers (no AI dependencies)
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
+        // (DocumentProcessing, EmailAnalysis and ProfileSummary handlers were deleted: no producer, intake-pipeline-r1 task 005.)
         // Task 156: re-stamps ONE child the storage resolver refused as container_ancestor_stale (ADR-052: queue →
         // ADR-004 IJobHandler). Its dependency, CoreAncestorRestamper, is registered unconditionally beside
         // CoreAncestorResolver (MetadataServiceExtensions.AddCoreAncestorResolver).
@@ -43,7 +43,6 @@ public static class JobProcessingModule
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AssignedAccessCreateGrantJobHandler>();
         // AI-coupled handlers relocated to Services/Ai/Jobs/ per task 051 (FR-E3); JobType strings unchanged
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
-        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.EmailAnalysisJobHandler>();
 
         // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
         // Zone B IJobHandler per SPEC §3.5 (Services/Jobs/Insights/) — injects
@@ -53,13 +52,28 @@ public static class JobProcessingModule
         // queued from UploadFinalizationWorker.QueueNextStageAsync.
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestJobHandler>();
 
+        // Intake pipeline (spaarke-intake-pipeline-r1 task 012, FR-08): the harness registry, built from every
+        // registered IIntakeHarness (none yet; the NDA harness is task 015, one AddScoped<IIntakeHarness, …> line
+        // here). Scoped because IConsumerRoutingService (RoutingModule, unconditional) and the harnesses are scoped.
+        // Unconditional: it has no AI dependency of its own.
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.Harnesses.IntakeHarnessRegistry>();
+
+        // Intake run orchestrator (task 013, FR-07). ADR-052 placement: queue → ADR-004 IJobHandler in the BFF, with the run
+        // row as the state machine (design §4 written reason: every stage uses BFF domain code; low volume; the one long wait,
+        // approval, is a persisted status). Unconditional: IAgreementAi resolves to its Null peer when the AI gate is off
+        // (the run is then held), and ITextExtractor has its Null peer too. Kill switches: IntakePipelineOptions, read per run.
+        // Door returns plug in as IIntakeDoorReturn (none yet: Front Door 021, Console 022, email 043, Copilot 044).
+        services.Configure<IntakePipelineOptions>(configuration.GetSection(IntakePipelineOptions.SectionName));
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeRunStore>();
+        services.AddScoped<Sprk.Bff.Api.Services.Intake.IntakeContentTextReader>();
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Intake.IntakeRunJobHandler>();
+
         // AI-dependent handlers (require IFileIndexingService and/or IOpenAiClient)
         // Mixed handlers (RagIndexing references Dataverse) stay in Services/Jobs/Handlers/;
-        // pure-AI handlers (ProfileSummary, BulkRagIndexing) relocated per task 051 (FR-E3)
+        // pure-AI handler (BulkRagIndexing) relocated per task 051 (FR-E3)
         if (documentIntelligenceEnabled)
         {
             services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
-            services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.ProfileSummaryJobHandler>();
             services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.BulkRagIndexingJobHandler>();
         }
 
@@ -107,10 +121,16 @@ public static class JobProcessingModule
             configuration.GetSection(Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions.SectionName));
         services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>();
 
-        // RecordSyncJob — incremental Dataverse to AI Search record sync (AIPU2-041)
-        services.Configure<Sprk.Bff.Api.Services.Jobs.RecordSyncOptions>(
-            configuration.GetSection(Sprk.Bff.Api.Services.Jobs.RecordSyncOptions.SectionName));
-        services.AddHostedService<Sprk.Bff.Api.Services.Jobs.RecordSyncJob>();
+        // RecordSyncJob — Dataverse to records-index sync (AIPU2-041). GitHub #3321: an ADR-036 scheduled job (ADR-052: the hand-rolled
+        // timer migrated when its behaviour changed), so one instance runs each tick under the host's lease. Enabled and
+        // IntervalMinutes are read at startup; the admin job endpoints enable or disable it at run time.
+        var recordSync = configuration.GetSection(Sprk.Bff.Api.Services.Jobs.RecordSyncOptions.SectionName);
+        services.Configure<Sprk.Bff.Api.Services.Jobs.RecordSyncOptions>(recordSync);
+        Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
+        Spaarke.Scheduling.ScheduledJobServiceCollectionExtensions.AddScheduledJob<Sprk.Bff.Api.Services.Jobs.RecordSyncJob>(
+            services,
+            Sprk.Bff.Api.Services.Jobs.RecordSyncJob.CronFor(recordSync.GetValue("IntervalMinutes", 30)),
+            enabled: recordSync.GetValue("Enabled", false));
 
         services.Configure<ReindexingOptions>(
             configuration.GetSection(ReindexingOptions.SectionName));

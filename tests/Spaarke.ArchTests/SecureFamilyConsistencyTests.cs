@@ -19,7 +19,8 @@ namespace Spaarke.ArchTests;
 /// fails; a lineage table missing from the census fails. The census also lists tables that are not lineage children (a
 /// root, a service request, transport and job rows): only the lineage children of the census are compared. A table that
 /// belongs in one list and not another is allow-listed below with its reason; an allow-list entry that no longer
-/// describes a gap fails, so the lists cannot go stale. All three allow-lists are empty at task 182.</para>
+/// describes a gap fails, so the lists cannot go stale. All three allow-lists were empty at task 182; intake-pipeline-r1
+/// task 013 added the one <c>RoleSetNotInLineage</c> entry (<c>sprk_processingjob</c>, chosen by unified-access-control-r2).</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> Existing: <c>SecureChildLineageTests</c> (unit tests) pins the
 /// lineage to the role set, strictly. Extension: the census list lives in this assembly, so the tie that includes it lives
 /// here; the unit test stays (it also pins the roots). An allow-list entry for a lineage/role gap must therefore also be
@@ -34,9 +35,23 @@ public class SecureFamilyConsistencyTests
     private static readonly IReadOnlyDictionary<string, string> LineageNotInRoleSet =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Role-set child tables that deliberately have no lineage row, with the reason. Empty.</summary>
+    /// <summary>
+    /// Role-set child tables that deliberately have no lineage row, with the reason. Each entry is mirrored in
+    /// <c>SecureChildLineageTests.RoleSetChildrenNotInLineage</c> (tests/unit/domain/Access), which pins the lineage to the
+    /// role set. <c>sprk_processingjob</c>: path (b) chosen by unified-access-control-r2 on 2026-11-27, reason text theirs.
+    /// </summary>
     private static readonly IReadOnlyDictionary<string, string> RoleSetNotInLineage =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_processingjob"] =
+                "spaarke-intake-pipeline-r1 task 013: an intake run (sprk_processingjob, job type 7) has one filing parent, its "
+                + "service request (sprk_servicerequest). The secure walk deliberately never looks through a service request "
+                + "(RecordOwnershipResolver.IsReparentableChild; SecureChildLineage 'Deliberately absent', D-36), so the run "
+                + "takes its owner once, at create, from IRecordOwnershipResolver over its lookups (secure-if-any: a request "
+                + "resolved as secure gives the Secure Record Owners team), exactly as its request does, and is never re-owned "
+                + "or share-mirrored by the reconciler. sprk_outputdocument is an output link, not a parent. Office "
+                + "job-tracking rows of the table are never team-owned (census waiver).",
+        };
 
     /// <summary>Tables with a lineage row that are deliberately not in the census, with the reason. Empty.</summary>
     private static readonly IReadOnlyDictionary<string, string> LineageNotInCensus =
@@ -112,7 +127,8 @@ public class SecureFamilyConsistencyTests
     private static readonly IReadOnlyDictionary<string, string> RoleSetKinds = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["root"] = "carries sprk_issecure; the Secure team owns the record itself",
-        ["child"] = "a secure root's child: a lineage row, a census entry, re-owned and mirrored",
+        ["child"] = "a secure root's child: a lineage row, a census entry, re-owned and mirrored — unless RoleSetNotInLineage "
+            + "states why its owner is routed at create only",
         ["grant"] = "an external-access grant row: owned by its root's team (D-11), moved with the root, never mirrored",
     };
 

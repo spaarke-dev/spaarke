@@ -521,3 +521,27 @@ The fix would change principal precedence, which is escalation trigger 3 for tas
 **Why it matters.** Identifiers in log storage are personal data; the external plane's rule is codes only.
 
 **Fix.** Log the deny code and correlation id only (or a hash if support needs to match a caller); check no alert depends on the fields. uac-r2 owns the resolver. Effort: an hour or two. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3265 (board Type=Bug).
+
+## D-45 — External SPA: seven more test files time out on a cold transform cache (#3309)
+
+**What.** Task 044 fixed the cold-transform timeout (#2275) in `no-mock-identity.test.tsx` with a `beforeAll` module warm-up. In the same full run on a loaded machine, seven other files each failed one or two tests at the 60 s per-test limit, and all passed alone (444/444): `invite-code`, `workforce-auth`, `teams-real-msal`, `DocumentUploadPage.externalUpload`, `teams-home-auth`, `workforce-home-auth`, `InvoiceSubmitPage`. Task 044's POML limits it to the one file.
+
+**Why it matters.** A full `npm test` on a busy machine shows false failures, so a real regression can be dismissed as flaky.
+
+**Fix.** Copy the warm-up into each file, or a suite-level warm-up (owner decision if `vitest.config.ts` changes). Entry-point: `src/client/external-spa/tests/no-mock-identity.test.tsx` (the `beforeAll`). Status: **Superseded → D-29 (#2964)**, which already tracked these files. #3309 closed as a duplicate 2026-11-27, and the task 044 result was added to #2964.
+
+## D-46 — Contact store: a thrown read logs the exception's full text (https://github.com/spaarke-dev/spaarke/issues/3313)
+
+**What.** `DataverseContactIdentityStore.GetAsync` logs the whole exception object (type, message, stack) when a read throws. A transport exception carries no body, but a token-source fault's text is logged as-is, and credential-library messages can name directory or application identifiers. Found by task 045, which removed response bodies from the store's failed-read and failed-write logs.
+
+**Why it matters.** NFR-04: external-plane logs carry no tenant, oid, UPN, email or token. Not yet checked whether such a message can carry a tenant id.
+
+**Fix.** Log the exception type and the fixed label (as `AssignTaskRecipientGate` does), or scrub the message and keep the stack; first check that no alert depends on the text. Effort: one to two hours plus a log-assertion test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3313 (board Type=Idea).
+
+## D-47 — Contact identity binder logs the caller's object id (https://github.com/spaarke-dev/spaarke/issues/3315)
+
+**What.** `ContactIdentityBinder.cs` log lines on bind, create, collision and resolve include the caller's oid (~:1751, :1820, :2401, :2509, :2547, :2561). Found by task 045's review; same class as D-44 (#3265, the workforce resolver), whose issue now also lists the resolver's successful-sign-in lines (:433, :484, at Information).
+
+**Why it matters.** NFR-04: external-plane logs carry no tenant, oid, UPN, email or token.
+
+**Fix.** Log the contact id, decision/deny code and correlation id only (or a hash); check no alert depends on the field. uac-r2 owns the binder. Effort: two to three hours plus a log-assertion test. Status: Open (urgency: someday). Issue: https://github.com/spaarke-dev/spaarke/issues/3315 (board Type=Bug).

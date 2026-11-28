@@ -383,8 +383,14 @@ class Redliner:
             pos += len(txt)
         return out
 
+    @staticmethod
+    def editable_text(p):
+        """The editable text: the paragraph's direct-child runs only, outside any existing revision, hyperlink or
+        content control (what an edit is placed in; segment_clauses --anchor-text reports it)."""
+        return "".join(Redliner._run_char(c) for r in p.findall(q("r")) for c in r if c.tag != q("rPr"))
+
     def text(self, p):
-        return "".join(t for _, _, t in self.runs(p))
+        return self.editable_text(p)
 
     def _split(self, p, off):
         for r, s, t in self.runs(p):

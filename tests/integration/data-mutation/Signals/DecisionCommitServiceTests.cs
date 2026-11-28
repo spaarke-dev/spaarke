@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -99,6 +100,29 @@ public sealed partial class DecisionCommitServiceTests
 
     internal sealed class Rig
     {
+        /// <summary>
+        /// ISS-010 part C: inside a decision commit's access window, FR-51 and the executors ask the probe's
+        /// <c>GetCallerRightsForRecordsOrUnknownAsync</c> and <c>CallerPrivilegeAnswerAsync</c> (so an unknown answer is never kept).
+        /// A Moq probe that scripts only <c>GetCallerRightsAsync</c> / <c>CallerHoldsPrivilegeAsync</c> answers those two from what it
+        /// scripted (an answered <see cref="AccessRights"/> is a known answer; a held privilege is Held, otherwise NotHeld), so every
+        /// test's script, including a per-test override, still decides.
+        /// </summary>
+        internal static void AnswerAccessWindowFormsFromThePlainQuestions(Mock<CallerRecordAccessProbe> probe)
+        {
+            probe.Setup(p => p.GetCallerRightsForRecordsOrUnknownAsync(
+                    It.IsAny<string?>(), It.IsAny<IReadOnlyList<(string EntitySet, Guid RecordId)>>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string? token, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct) =>
+                {
+                    var answers = new List<AccessRights?>();
+                    foreach (var (set, id) in targets)
+                        answers.Add(await probe.Object.GetCallerRightsAsync(token, set, id, ct));
+                    return (IReadOnlyList<AccessRights?>)answers;
+                });
+            probe.Setup(p => p.CallerPrivilegeAnswerAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string? token, string privilege, CancellationToken ct) =>
+                    await probe.Object.CallerHoldsPrivilegeAsync(token, privilege, ct) ? CallerPrivilegeAnswer.Held : CallerPrivilegeAnswer.NotHeld);
+        }
+
         public Dictionary<Guid, Entity> Signals { get; } = new();
         public Dictionary<Guid, int> Versions { get; } = new();
         public HashSet<Guid> CallerCannotRead { get; } = new();
@@ -234,6 +258,12 @@ public sealed partial class DecisionCommitServiceTests
 
         /// <summary>Task 170: when set, the commit asks THIS probe (the shipped one, wire seams counted) instead of <see cref="Probe"/>.</summary>
         public CallerRecordAccessProbe? ProbeOverride { get; set; }
+
+        /// <summary>The commit's configuration (ISS-010 C off switch <c>Signals:DecisionAccessWindow:Enabled</c>); empty by default, so the window is on.</summary>
+        public IConfiguration? Configuration { get; set; }
+
+        /// <summary>The commit's logger (ISS-010 C observability); the null logger by default.</summary>
+        public ILogger<DecisionCommitService>? Logger { get; set; }
 
         /// <summary>ISS-010 (#3184): when set, the commit runs THESE executors (the real ones over a create world) instead of the
         /// scripted <see cref="Executors"/>.</summary>
@@ -458,6 +488,7 @@ public sealed partial class DecisionCommitServiceTests
                     RightsAsked.Add((set, id));
                     return Rights.TryGetValue((set, id), out var granted) ? granted : AllRights;
                 });
+            AnswerAccessWindowFormsFromThePlainQuestions(Probe);
 
             var jobs = new Mock<JobSubmissionService>(MockBehavior.Loose, Options.Create(new ServiceBusOptions { QueueName = "test" }),
                 NullLogger<JobSubmissionService>.Instance, new Mock<ServiceBusClient>().Object);
@@ -726,7 +757,7 @@ public sealed partial class DecisionCommitServiceTests
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(RealExecutors ?? Executors.Values.Cast<IDecisionActionExecutor>()), records, WriterClient(),
                 EntitiesSeam ?? Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads,
                 Synchronizer(), new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance), UserSeam ?? User.Object,
-                Clock, CommitLogger ?? NullLogger<DecisionCommitService>.Instance);
+                Clock, Configuration ?? new ConfigurationBuilder().Build(), Logger ?? CommitLogger ?? NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);

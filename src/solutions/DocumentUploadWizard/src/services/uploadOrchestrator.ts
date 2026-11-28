@@ -43,6 +43,7 @@ import type { EntityConfigResolver } from "@spaarke/ui-components/services/docum
 // was deleted in favour of @spaarke/sdap-client's; on 2026-11-24 (DEF-001) that package was folded
 // back into ui-components (services/sdap), so there is still exactly one, imported from the main barrel.
 import { cleanGuid, SdapApiClient, type ConflictBehaviorOption } from "@spaarke/ui-components";
+import { buildRagIndexFileBody } from "./ragIndexFileBody";
 
 import { authenticatedFetch } from "@spaarke/auth";
 
@@ -552,21 +553,8 @@ async function triggerRagIndexing(
     config: UploadOrchestratorConfig,
     logger: ILogger,
 ): Promise<void> {
-    // Map Dataverse logical name (e.g., "sprk_matter") to the short form the BFF stores
-    // ("matter"). Mirrors the convention used by RagEndpoints.SendToIndex when building
-    // ParentEntityContext from a Document's lookups.
-    const shortEntityType = parentContext.parentEntityName?.startsWith("sprk_")
-        ? parentContext.parentEntityName.substring("sprk_".length)
-        : parentContext.parentEntityName ?? "";
-
-    const parentEntity =
-        shortEntityType && parentContext.parentRecordId
-            ? {
-                  entityType: shortEntityType,
-                  entityId: parentContext.parentRecordId,
-                  entityName: parentContext.parentDisplayName ?? "",
-              }
-            : undefined;
+    const body = buildRagIndexFileBody({ driveId, itemId, fileName, tenantId, documentId, parentContext });
+    const shortEntityType = body.parentEntity?.entityType ?? "";
 
     try {
         const response = await authenticatedFetch(
@@ -574,14 +562,7 @@ async function triggerRagIndexing(
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    driveId,
-                    itemId,
-                    fileName,
-                    tenantId,
-                    documentId,
-                    parentEntity,
-                }),
+                body: JSON.stringify(body),
             },
         );
 

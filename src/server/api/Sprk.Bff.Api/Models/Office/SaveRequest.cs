@@ -47,7 +47,9 @@ public record SaveRequest
     // Admin "New Folder" action is for.
 
     /// <summary>
-    /// Email-specific metadata (required when ContentType is Email).
+    /// Email-specific metadata (required when ContentType is Email). Task 143: optional when ContentType is Attachment — the
+    /// parent email of the attachment, used only when Graph could not read the parent and only when its keys equal
+    /// <see cref="AttachmentMetadata.ParentEmailId"/> (<c>OfficeService.ParentEmailOfTheRequest</c>).
     /// </summary>
     public EmailMetadata? Email { get; init; }
 
@@ -246,9 +248,12 @@ public record EmailMetadata
     /// <remarks>
     /// <para>The request names the document, so the route's filter checks it: <c>write</c> on it
     /// (<c>OfficeVersionSaveAuthorizationFilter</c>, the version save's gate), as the version save does for
-    /// <c>Document.ExistingDocumentId</c>. <see cref="SaveRequest.TargetEntity"/> must be the record the <c>.eml</c> is filed
-    /// to (the route's <c>EntityAccessFilter</c> checks it as for any save) and the selection must name at least one file:
-    /// the route refuses either missing with a 400.</para>
+    /// <c>Document.ExistingDocumentId</c>. <see cref="SaveRequest.TargetEntity"/>, when set, must be the record the <c>.eml</c>
+    /// is filed to (the route's <c>EntityAccessFilter</c> checks it as for any save). Task 143: with no
+    /// <see cref="SaveRequest.TargetEntity"/>, the <c>.eml</c> must be filed to no record, else the save is refused (403
+    /// <c>OFFICE_009</c>). "Filed" is ONE rule (<c>EmailAttachmentAddPlanner.IsPlacedHereAsync</c>): the <c>.eml</c>'s own record
+    /// link, else the record its communication is filed to; the added attachments are filed to that record. The selection
+    /// must name at least one file: the route refuses it missing with a 400.</para>
     /// <para>Absent (every older client, and every ordinary email save): unchanged behaviour.</para>
     /// </remarks>
     public Guid? SavedDocumentId { get; init; }
@@ -388,7 +393,9 @@ public record AttachmentMetadata
     /// <summary>
     /// The parent email's identifier: an Exchange item id (the Graph key the server fetches the email and this attachment's
     /// content by) or an RFC 5322 Message-ID. Task 130 resolves the parent's <c>sprk_communication</c> from it: an RFC id is
-    /// looked up directly; an Exchange item id is fetched from Graph and the email captured.
+    /// looked up directly; an Exchange item id is fetched from Graph and the email captured. Task 143: when Graph cannot read
+    /// it (an RFC id, or a mailbox the caller's token cannot read), a <see cref="SaveRequest.Email"/> whose keys equal this id is
+    /// the parent that is captured.
     /// </summary>
     [MaxLength(998)]
     public string? ParentEmailId { get; init; }

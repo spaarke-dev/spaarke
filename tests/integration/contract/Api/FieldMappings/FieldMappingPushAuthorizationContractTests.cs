@@ -218,11 +218,17 @@ public partial class FieldMappingPushAuthorizationContractTests
         {
             "/api/data/v9.2/EntityDefinitions(LogicalName='sprk_matter')/Attributes",
             "/api/data/v9.2/sprk_matters",
+            "/api/data/v9.2/sprk_matters",
             "/api/data/v9.2/EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships",
             "/api/data/v9.2/sprk_events",
         });
-        dataverse.Requests.Should().OnlyContain(r => r.CallerId == CallerSystemUserId.ToString(),
-            "every read on the push, metadata included, impersonates the caller");
+        // Task 067: sprk_regardingmatter is a listed Filing edge, so after the caller's own read of the source the same one row is
+        // read app-only for exactly its mapped column; every other read, metadata included, impersonates the caller.
+        var appOnly = dataverse.Requests.Should().ContainSingle(r => r.CallerId == null).Subject;
+        Uri.UnescapeDataString(appOnly.Uri.Query).Should()
+            .Be($"?$select=sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1");
+        dataverse.Requests.Where(r => r != appOnly).Should().OnlyContain(r => r.CallerId == CallerSystemUserId.ToString(),
+            "every other read on the push, metadata included, impersonates the caller");
         host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
             "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
         host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
@@ -263,12 +269,14 @@ public partial class FieldMappingPushAuthorizationContractTests
             "a rule field that is not a logical name is never interpolated into the caller's query");
     }
 
+    /// <summary>Task 067 C2 (must not fire): through a lookup that is not a listed Filing edge, the source is read only as the
+    /// caller.</summary>
     [Fact]
-    public async Task Push_ReadsTheSourceFieldsAsTheCaller_NeverAppOnly()
+    public async Task Push_ThroughALookupThatIsNotAFilingEdge_ReadsTheSourceFieldsAsTheCaller_NeverAppOnly()
     {
         await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read;
-        host.ArrangeHappyPathData();
+        host.ArrangeHappyPathData(lookupsToSource: [NonFilingLookup]);
 
         var response = await host.SendAsync(Authenticated(PushBody()));
 
@@ -281,16 +289,18 @@ public partial class FieldMappingPushAuthorizationContractTests
         host.FieldMappings.Verify(f => f.RetrieveRecordFieldsAsync(
             It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
             "no app-only source read remains on this route");
+        host.AppOnly.Reads.Should().BeEmpty("task 067: only a Filing-edge push reads the source's mapped columns app-only");
     }
 
-    // A column under field-level security that the caller cannot read comes back NULL from an impersonated read. The
-    // push must not copy it into children the caller CAN read (the app-only read used to return its real value).
+    // A column under field-level security that the caller cannot read comes back NULL from an impersonated read. Through a
+    // lookup that is not a Filing edge, the push must not copy it into children the caller CAN read (task 067 C2).
     [Fact]
-    public async Task Push_ASourceColumnTheCallerCannotReadUnderFieldSecurity_IsNeverCopiedIntoAChild()
+    public async Task Push_ThroughALookupThatIsNotAFilingEdge_ASourceColumnTheCallerCannotRead_IsNeverCopiedIntoAChild()
     {
         await using var host = await PushHost.StartAsync();
         host.Probe.Rights = AccessRights.Read;
-        host.ArrangeHappyPathData(sourceValue: null);
+        host.ArrangeHappyPathData(sourceValue: null, lookupsToSource: [NonFilingLookup]);
+        host.AppOnly.ExtraColumns["sprk_clientreference"] = JsonSerializer.SerializeToElement("REF-SECURED");
 
         var response = await host.SendAsync(Authenticated(PushBody()));
 
@@ -300,7 +310,8 @@ public partial class FieldMappingPushAuthorizationContractTests
             Times.Never, "a value the caller cannot read is never written anywhere");
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
         json["skippedCount"]!.GetValue<int>().Should().Be(2);
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("REF-166");
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("REF-166").And.NotContain("REF-SECURED");
+        host.AppOnly.Reads.Should().BeEmpty();
     }
 
     [Fact]
@@ -318,6 +329,7 @@ public partial class FieldMappingPushAuthorizationContractTests
         host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
             It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
+        host.AppOnly.Reads.Should().BeEmpty("task 067 (C1): a source the caller's own read does not return is never read app-only");
     }
 
     // =========================================================================================
@@ -337,10 +349,12 @@ public partial class FieldMappingPushAuthorizationContractTests
             "the live 'Matter to Invoice (Attorney Matrix)' profile works: sprk_invoice names its matter in sprk_matter");
         host.MetadataQueries.Should().Equal(new[]
         {
-            ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
-             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute,IsSecured", CallerSystemUserId),
+            // Task 065: the parent lookup is resolved first (it decides the field-secured-source rule); sprk_invoice.sprk_matter
+            // is a Filing edge, so the source catalog is read without IsSecured.
             ("EntityDefinitions(LogicalName='sprk_invoice')/ManyToOneRelationships",
              (string?)"$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName", CallerSystemUserId),
+            ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
+             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute", CallerSystemUserId),
         }, "the metadata is read through the same impersonated seam, as the caller; with no lookup rule the source's "
            + "relationships are not read");
         host.ChildQueries.Should().ContainSingle().Which.Should().Be(
@@ -747,6 +761,9 @@ public partial class FieldMappingPushAuthorizationContractTests
 
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Loose);
 
+        /// <summary>Task 067: the app-only read of a Filing-edge push's one source row.</summary>
+        public AppOnlySourceRead AppOnly { get; }
+
         /// <summary>#2253 fix round 3 (F1): when set, the impersonated seam is the REAL
         /// <see cref="DataverseImpersonatedCommunicationQuery"/> over the REAL <see cref="DataverseWebApiService"/>,
         /// and this handler stands in for Dataverse, so a URL guard on that path is exercised, not mocked away.</summary>
@@ -756,6 +773,7 @@ public partial class FieldMappingPushAuthorizationContractTests
         {
             Probe = new SeamProbe(ProbedSources);
             _dataverse = dataverse;
+            AppOnly = new AppOnlySourceRead(this);
         }
 
         /// <param name="dataverse">A stand-in for Dataverse behind the REAL impersonated seam (#2253 fix round 3).</param>
@@ -879,6 +897,7 @@ public partial class FieldMappingPushAuthorizationContractTests
                 Attribute("sprk_assignedattorney1", "Lookup", secured: SecurityOf("sprk_assignedattorney1")),
                 Attribute("sprk_assignedattorney1name", "String", validOData: false, secured: SecurityOf("sprk_assignedattorney1name")),
                 Attribute("sprk_client", "Customer", secured: SecurityOf("sprk_client")),
+                .. ExtraSourceAttributes.Select(column => Attribute(column, "String", secured: SecurityOf(column))),
             ];
 
             Impersonated
@@ -979,12 +998,79 @@ public partial class FieldMappingPushAuthorizationContractTests
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             ChildQueries.Should().BeEmpty("no child query — as the caller or app-only — before the source is authorized");
             SourceReads.Should().BeEmpty("no source read — as the caller or app-only — before the source is authorized");
+            AppOnly.Reads.Should().BeEmpty("task 067 (C1): no app-only read of the source's mapped columns before the source is authorized");
+        }
+
+        /// <summary>Task 067 (C7): every line the host logged, level and formatted message.</summary>
+        public List<(LogLevel Level, string Message)> Logs { get; } = new();
+
+        /// <summary>Task 067: further String columns the source catalog lists (e.g. an access-model column a rule reads).</summary>
+        public List<string> ExtraSourceAttributes { get; } = new();
+
+        private sealed class LogCapture(List<(LogLevel Level, string Message)> lines) : ILoggerProvider, ILogger
+        {
+            public ILogger CreateLogger(string categoryName) => this;
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                lock (lines)
+                    lines.Add((logLevel, formatter(state, exception)));
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        /// <summary>
+        /// Task 067: the app-only source read (<see cref="IAppOnlyCommunicationQuery"/>). By default it answers what the caller's
+        /// own source read answers for the same set and query (so an ordinary test sees one view), plus <see cref="ExtraColumns"/>:
+        /// the values the app-only read returns that the caller's read does not (a column under field security). It records every
+        /// read; the replayed caller read is not added to <see cref="SourceReads"/>.
+        /// </summary>
+        internal sealed class AppOnlySourceRead(PushHost host) : IAppOnlyCommunicationQuery
+        {
+            public List<(string EntitySet, string? Query)> Reads { get; } = new();
+
+            public Dictionary<string, JsonElement> ExtraColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            /// <summary>When set, the app-only read returns no row (the record is gone app-only).</summary>
+            public bool ReturnsNoRow { get; set; }
+
+            public async Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(string entitySetName, string? odataQuery, CancellationToken ct)
+            {
+                Reads.Add((entitySetName, odataQuery));
+                if (ReturnsNoRow)
+                    return [];
+
+                var before = host.SourceReads.Count;
+                var rows = await host.Impersonated.Object.QueryAsync(entitySetName, odataQuery, CallerSystemUserId, ct);
+                if (host.SourceReads.Count > before)
+                    host.SourceReads.RemoveAt(host.SourceReads.Count - 1);
+
+                if (rows.Count == 0)
+                {
+                    // The caller's view hides the row; the app-only read still sees it (ordinary tests never reach here: the
+                    // caller's empty read already answered 404).
+                    rows = [new Dictionary<string, JsonElement>()];
+                }
+
+                var row = new Dictionary<string, JsonElement>(rows[0], StringComparer.OrdinalIgnoreCase);
+                foreach (var (column, value) in ExtraColumns)
+                    row[column] = value;
+                return [row];
+            }
         }
 
         private async Task InitializeAsync(Action<IServiceCollection>? configure)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
+            builder.Logging.AddProvider(new LogCapture(Logs));
             builder.Services
                 .AddAuthentication(o =>
                 {
@@ -1001,6 +1087,9 @@ public partial class FieldMappingPushAuthorizationContractTests
                 ? Impersonated.Object
                 : new DataverseImpersonatedCommunicationQuery(new OfflineWebApiService(_dataverse)));
             builder.Services.AddSingleton(Entities.Object);
+            builder.Services.AddSingleton<IAppOnlyCommunicationQuery>(_dataverse is null
+                ? AppOnly
+                : new DataverseAppOnlyCommunicationQuery(new OfflineWebApiService(_dataverse)));
             // Batch-4 integration (task 156): the push re-stamps each written child's descendants after its own write —
             // a module boundary here (no child in these tests has descendants); the restamp is not this file's subject.
             builder.Services.AddSingleton(

@@ -90,7 +90,8 @@ export interface WorklistGroupData {
   items: WorklistRouteItem[];
   /**
    * Decided set only (task 226, D-231): the Decision Records in this group that resolved no item the caller sees (an email-gate
-   * record). They have no item, so nothing opens them. Absent in every other set.
+   * record; task 235, D-234: a Record Procedure, invoice-level billing (D-236) or assign-firm record). They have no item, so nothing
+   * opens them. Absent in every other set.
    */
   records?: WorklistDecision[];
 }

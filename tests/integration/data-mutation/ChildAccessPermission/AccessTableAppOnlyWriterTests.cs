@@ -128,8 +128,8 @@ public class AccessTableAppOnlyWriterTests
             "sprk_submissionsequence", "sprk_previoussequence", "sprk_firminvoicenumber", "sprk_findingsjson",
         ],
 
-        // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
-        // access; both decide whether the invoice can be approved and exported, and both have typed writers only (the persister; 095d's assign-firm).
+        // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. The firm decides
+        // which firm's contacts see the invoice and the hold hides it from that firm; both decide whether it can be approved and exported, and both have typed writers only (the persister; 095d's assign-firm).
         // ebilling-r1 082c-2 fix round 1 (uac-r2 F4): + its review detail, derived from the open hold reasons; typed writers only.
         // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): + its billed total and five derived totals, field-secured and typed-writer only.
         ["sprk_invoice"] =
@@ -1026,8 +1026,8 @@ public class AccessTableAppOnlyWriterTests
         }
 
         InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_firmhold"])!.Reason
-            .Should().Contain("decides whether the invoice can be approved and exported").And.NotContain("who may see");
-        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_vendororg"])!.Reason.Should().NotContain("who may see");
+            .Should().Contain("decides whether the invoice can be approved and exported").And.Contain("which firm's contacts see the invoice").And.NotContain("who may see");
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_vendororg"])!.Reason.Should().Contain("which firm's contacts see the invoice").And.NotContain("who may see");
 
         // Must not fire: an ordinary invoice column, the same names on other tables, a neighbouring name, and the caller's own write.
         Code(invoice, "sprk_description").Should().BeNull("an ordinary column");

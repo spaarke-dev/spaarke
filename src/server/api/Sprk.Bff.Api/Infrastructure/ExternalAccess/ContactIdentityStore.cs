@@ -296,6 +296,17 @@ public interface IContactIdentityStore
     Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct);
 
     /// <summary>
+    /// For a probe that answered <see cref="BindingReadability.Failed"/>: whether the environment refuses this identity's
+    /// MEMBERSHIP outright, i.e. it answers the identity's own <c>WhoAmI</c> with HTTP 403 and Dataverse error
+    /// <c>0x80072560</c> ("not a member of the organization"; the application user does not exist in that environment).
+    /// True only on that exact answer. False for every other answer (a throttle, a 5xx, a 403 with another code, an
+    /// unreachable host) and for a store that cannot tell, which is the default: a caller that treats a Failed probe as a
+    /// fault keeps doing so. Informational only: it never changes what <see cref="ProbeBindingReadabilityAsync"/> returns,
+    /// and a caller must not decide or write on the strength of it (the environment is still unread).
+    /// </summary>
+    Task<bool> IsEnvironmentMembershipRefusedAsync(CancellationToken ct) => Task.FromResult(false);
+
+    /// <summary>
     /// ADR-028 A9 (r3 task 046): systemusers whose stored home link — the FIELD-SECURED pair <c>sprk_hometenantid</c> /
     /// <c>sprk_homeobjectid</c> — is (<paramref name="homeTenantId"/>, <paramref name="homeObjectId"/>). Any state, two rows.
     /// Read-only. Never filters on the unsecured key mirrors and never on <c>azureactivedirectoryobjectid</c>.
@@ -1569,6 +1580,44 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         }
     }
 
+    /// <summary>
+    /// The <c>error.code</c> of a read's error string, which is the store's <c>"{status}: {body}"</c> with the body cut to
+    /// <see cref="Trim"/>'s 400 characters (so the JSON may be truncated and <see cref="ErrorCodeOf"/> cannot parse it). Reads
+    /// tokens until the code is found. Null when there is none, or when it is not a short code-shaped token (letters, digits,
+    /// <c>_ . -</c>, at most 64), so a message can never reach a log through this method. Pure.
+    /// </summary>
+    internal static string? ErrorCodeOfError(string? error)
+    {
+        var start = error?.IndexOf('{') ?? -1;
+        if (error is null || start < 0) return null;
+        try
+        {
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(error[start..]), isFinalBlock: true, state: default);
+            string? depthOneProperty = null;
+            while (reader.Read())
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName) continue;
+                if (reader.CurrentDepth == 1)
+                {
+                    depthOneProperty = reader.GetString();
+                }
+                else if (reader.CurrentDepth == 2 && depthOneProperty == "error" && reader.ValueTextEquals("code"))
+                {
+                    var code = reader.Read() && reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
+                    return code is { Length: > 0 and <= 64 } && code.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '-')
+                        ? code
+                        : null;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // A body cut at 400 characters ends mid-token once the code has passed; an unreadable error has no code.
+        }
+
+        return null;
+    }
+
     /// <summary>True when a Dataverse error body says the alternate key in the URL is not defined.</summary>
     public static bool IsKeyMissing(string? body)
         => body is not null && body.Contains("key in the request URI is not valid", StringComparison.OrdinalIgnoreCase);
@@ -1586,7 +1635,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     /// <inheritdoc />
     public Task<ContactLookup> FindContactsByOidAsync(Guid oid, CancellationToken ct)
-        => ReadContactsAsync(BuildOidLookupPath(oid), "oid lookup", ct);
+        => ReadContactsAsync(BuildOidLookupPath(oid), "oid lookup", ct, logLabel: "contacts by oid");
 
     /// <inheritdoc />
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct)
@@ -1605,7 +1654,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     /// <inheritdoc />
     public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct)
-        => ReadContactsAsync(BuildKeyMirrorLookupPath(oid), "key-mirror lookup", ct);
+        => ReadContactsAsync(BuildKeyMirrorLookupPath(oid), "key-mirror lookup", ct, logLabel: "contacts by key mirror");
 
     /// <inheritdoc />
     public async Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct)
@@ -1794,6 +1843,33 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// One more <c>WhoAmI</c> (the proof's own first read), asked only when a caller already holds a Failed probe, so a healthy
+    /// environment never pays for it. It is a fresh read rather than a reason carried out of the proof, so the shared
+    /// <see cref="SecuredColumnReadProof"/> contract is untouched and the answer also holds when the proof was held and a
+    /// later read is what failed. A labelled read logs the status and the Dataverse error code only, never the body.
+    /// </remarks>
+    public async Task<bool> IsEnvironmentMembershipRefusedAsync(CancellationToken ct)
+    {
+        var (_, code, _, error) = await GetAsync(BuildWhoAmIPath(), ct, logLabel: "membership check").ConfigureAwait(false);
+        return IsMembershipRefusal(code, error);
+    }
+
+    /// <summary>The Dataverse error code for "the user is not a member of the organization".</summary>
+    internal const string NotAMemberErrorCode = "0x80072560";
+
+    /// <summary>
+    /// True when a read's refusal is Dataverse's membership refusal: HTTP 403 whose error text carries
+    /// <see cref="NotAMemberErrorCode"/> (<paramref name="error"/> is the store's <c>"{status}: {body}"</c>). Exact status and
+    /// code, never a range or a substring: the parsed <c>error.code</c> (<see cref="ErrorCodeOfError"/>) must equal the code, so
+    /// a 403 whose message merely mentions it, a 403 with any other code, an unparseable error, or the code under another
+    /// status is not this refusal. Pure.
+    /// </summary>
+    internal static bool IsMembershipRefusal(HttpStatusCode status, string? error)
+        => status == HttpStatusCode.Forbidden
+           && string.Equals(ErrorCodeOfError(error), NotAMemberErrorCode, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
     public async Task<HomeLinkLookup> FindHomeLinkedSystemUsersAsync(Guid homeTenantId, Guid homeObjectId, CancellationToken ct)
     {
         var (status, _, body, _) = await GetAsync(
@@ -1822,7 +1898,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <inheritdoc />
     public async Task<HomeLinkLookup> FindSystemUsersByGuestObjectIdAsync(Guid guestObjectId, CancellationToken ct)
     {
-        var (status, _, body, _) = await GetAsync(BuildGuestSystemUserLookupPath(guestObjectId), ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(
+            BuildGuestSystemUserLookupPath(guestObjectId), ct, logLabel: "guest systemuser lookup").ConfigureAwait(false);
         if (status != LookupStatus.Read || body is null)
         {
             if (status == LookupStatus.ColumnMissing)
@@ -1857,7 +1934,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     {
         // Not ReadContactsAsync: its missing-column branch logs the binding-schema script, and a missing A9 column must be
         // ONE error naming Set-WorkforceHomeIdentitySchema.ps1 (as the home link read above).
-        var (status, _, body, _) = await GetAsync(BuildHomeContactLookupPath(homeTenantId, homeObjectId), ct).ConfigureAwait(false);
+        var (status, _, body, _) = await GetAsync(
+            BuildHomeContactLookupPath(homeTenantId, homeObjectId), ct, logLabel: "home contact lookup").ConfigureAwait(false);
         if (status != LookupStatus.Read || body is null)
         {
             if (status == LookupStatus.ColumnMissing)
@@ -2318,7 +2396,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         var (status, code, body, error) = await GetAsync(path, ct).ConfigureAwait(false);
         if (status != LookupStatus.Read || code == HttpStatusCode.NotFound || body is null)
         {
-            throw new InvalidOperationException($"A readability-proof read did not answer ({status}, {error ?? code.ToString()}).");
+            // The proof logs this exception: the message carries the status and the Dataverse error code, never the response
+            // body (which can echo a filter value) nor a transport exception's text.
+            throw new InvalidOperationException(
+                $"A readability-proof read did not answer ({status}, HTTP {(int)code}, error code {ErrorCodeOfError(error) ?? "(none)"}).");
         }
 
         return TryParseJson(body) ?? throw new InvalidOperationException("A readability-proof read did not answer JSON.");
@@ -2435,7 +2516,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
                 return new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: Trim(body));
             }
 
-            _logger.LogWarning("[ID-BIND] {Method} {Path} failed: {Status} {Body}", method, path, (int)response.StatusCode, Trim(body));
+            // Status and Dataverse error code only, never the body (it can echo a payload or filter value; r4 task 045, NFR-04). The
+            // returned Error below still carries the body for the callers that parse it.
+            _logger.LogWarning("[ID-BIND] {Method} {Path} failed: {Status} {ErrorCode}", method, path, (int)response.StatusCode,
+                ErrorCodeOfError(body) ?? "(no error code)");
             if (method == HttpMethod.Post && IsOwnerPrivilegeFault(response.StatusCode, body))
             {
                 return new StoreWriteResult(StoreWriteStatus.OwnerPrivilegeMissing, Error: $"{(int)response.StatusCode}: {Trim(body)}");
@@ -2495,17 +2579,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             var classified = ClassifyError(body);
-            if (logLabel is null)
-            {
-                _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {Body}", path, (int)response.StatusCode, Trim(body));
-            }
-            else
-            {
-                // A labelled read carries the caller's email in its $filter, and Dataverse echoes the whole filter in a syntax
-                // error's message (UAC 047 re-check, probed on dev). Log the status and the error code only, never the body.
-                _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {ErrorCode}", logLabel, (int)response.StatusCode,
-                    ErrorCodeOf(body) ?? "(no error code)");
-            }
+            // Every read, labelled or not, logs the status and the Dataverse error code only, never the body: Dataverse echoes
+            // the whole request filter (an email, a tenant, an oid) in a syntax error's message (UAC 047 re-check, probed on
+            // dev; r4 task 045, NFR-04). The returned error string below still carries the body, for callers that parse it.
+            _logger.LogWarning("[ID-BIND] GET {Path} failed: {Status} {ErrorCode}", logLabel ?? path, (int)response.StatusCode,
+                ErrorCodeOfError(body) ?? "(no error code)");
             return (classified, response.StatusCode, null, $"{(int)response.StatusCode}: {Trim(body)}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

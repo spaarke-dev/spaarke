@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph;
 using Microsoft.Xrm.Sdk;
@@ -63,6 +64,7 @@ public class SendTimeFieldMappingTests
     private MappingSourceCallerReadDouble? _callerRead;
     private bool _callerExternal;
     private bool _appOnlyReturnsNull;
+    private Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<CommunicationService>? _log;
     private Func<IReadOnlyCollection<Guid>, Task<DocumentNarrowingResult>> _narrowing =
         ids => Task.FromResult(DocumentNarrowingResult.NotNarrowed(ids.Select(id => new DocumentNarrowingRow(id, default, Guid.Empty, Guid.Empty))));
 
@@ -156,7 +158,7 @@ public class SendTimeFieldMappingTests
             Microsoft.Extensions.Options.Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            NullLogger<CommunicationService>.Instance);
+            (ILogger<CommunicationService>?)_log ?? NullLogger<CommunicationService>.Instance);
     }
 
     /// <summary>The caller's request context: an authenticated principal, a bearer token and the services the step reads.</summary>
@@ -304,10 +306,50 @@ public class SendTimeFieldMappingTests
 
         var send = () => Sut().SendAsync(Email(subject: "", body: "<p>b</p>", Analysed()), Http());
 
-        (await send.Should().ThrowAsync<SdapProblemException>()).Which.Detail.Should().Contain("Subject is required");
+        var problem = (await send.Should().ThrowAsync<SdapProblemException>()).Which;
+        problem.Detail.Should().Contain("Subject is required");
+        AssertNoAnalysisValueIn(problem.Detail, problem.Message);
         _graph.Requests.Should().BeEmpty();
+        _stored.Should().BeNull("nothing is stored for a send that fails its validation");
         _probe.Asked.Should().Contain(AnalysisId);
         _entities.Verify(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Task 067, must not leak: a caller who cannot read the analysis gets none of its values, whichever field was left for the
+    /// mapping. Nothing is sent (no Graph request carries a subject, a body or any other field), nothing is stored, and the
+    /// response (the validation problem: its detail, title, code and extensions) carries no value of the analysis.
+    /// MUTATION: reading the analysis app-only for this caller sends the message with its title or summary.
+    /// </summary>
+    [Theory]
+    [InlineData(AccessRights.None, "", "<p>b</p>", "Subject is required")]
+    [InlineData(AccessRights.None, "Typed subject", "", "Body is required")]
+    [InlineData(AccessRights.None, "", "", "Subject is required")]
+    [InlineData(AccessRights.Write | AccessRights.Append, "Typed subject", "", "Body is required")]
+    public async Task ACallerWhoCannotReadTheAnalysis_NoAnalysisValueIsSentStoredOrReturned(
+        AccessRights rights, string subject, string body, string validation)
+    {
+        SubjectAndBodyProfile();
+        _probe.Rights[AnalysisId] = rights;
+
+        var send = () => Sut().SendAsync(Email(subject: subject, body: body, Analysed()), Http());
+
+        var problem = (await send.Should().ThrowAsync<SdapProblemException>()).Which;
+        problem.Detail.Should().Contain(validation);
+        AssertNoAnalysisValueIn(problem.Detail, problem.Title, problem.Code, problem.Message, JsonSerializer.Serialize(problem.Extensions));
+        _graph.Requests.Should().BeEmpty("no message is sent, so no field of one carries a value");
+        AssertNoAnalysisValueIn(_graph.Requests.Select(r => r.Body).ToArray());
+        _stored.Should().BeNull("nothing is stored");
+        _entities.Verify(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static void AssertNoAnalysisValueIn(params string?[] texts)
+    {
+        foreach (var text in texts.Where(t => t is not null))
+        {
+            text.Should().NotContain(AnalysisTitle).And.NotContain(AnalysisSummary)
+                .And.NotContain("Master services agreement").And.NotContain("three open risks");
+        }
     }
 
     [Fact]
@@ -322,18 +364,129 @@ public class SendTimeFieldMappingTests
         _entities.Verify(e => e.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    /// <summary>A column the caller cannot read (field-level security) is not copied: the app-only read is masked to the caller.</summary>
+    /// <summary>
+    /// Task 067 (owner 2026-11-27), must fire: the analysis is the email's filing parent (its primary association, table and id),
+    /// so a column the caller cannot read (field-level security) is copied, no caller column read is made, and one Information
+    /// line names the source and target columns, never the value. MUTATION: masking the filing parent sends no subject.
+    /// </summary>
     [Fact]
-    public async Task AColumnTheCallerCannotRead_IsNotCopied()
+    public async Task AColumnTheCallerCannotRead_FromTheFilingParent_IsCopied_AndLoggedWithoutItsValue()
+    {
+        SubjectAndBodyProfile();
+        _callerRead = MappingSourceCallerReadDouble.MirroringAppReads(_entities);
+        _callerRead.Secured.Add("sprk_name");
+        _log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<CommunicationService>();
+
+        await Sut().SendAsync(Email(subject: "", body: "<p>b</p>", Analysed()), Http());
+
+        _stored.Should().NotBeNull();
+        _stored!["sprk_subject"].Should().Be(AnalysisTitle, "the filing parent's mapped value is copied whatever the caller can read on it");
+        _callerRead.Paths.Should().BeEmpty("no caller column read is made for the filing parent (no access-model column is mapped)");
+        var copied = _log.Entries.Where(e => e.Level == LogLevel.Information && e.Message.Contains("without the caller's column read")).ToList();
+        copied.Should().Contain(e => e.Message.Contains("sprk_analysis.sprk_name") && e.Message.Contains("sprk_subject"));
+        _log.Messages.Should().NotContain(m => m.Contains(AnalysisTitle) || m.Contains(AnalysisSummary), "a log line never carries the value");
+    }
+
+    /// <summary>
+    /// Task 067 C2, must not fire: an analysis that is an association but not the PRIMARY one is not the email's filing parent, so
+    /// the read is masked as before (#2188) and a column the caller cannot read is not copied.
+    /// </summary>
+    [Fact]
+    public async Task AColumnTheCallerCannotRead_FromAnAnalysisThatIsNotTheFilingParent_IsNotCopied()
     {
         SubjectAndBodyProfile();
         _callerRead = MappingSourceCallerReadDouble.MirroringAppReads(_entities);
         _callerRead.Secured.Add("sprk_name");
 
-        var send = () => Sut().SendAsync(Email(subject: "", body: "<p>b</p>", Analysed()), Http());
+        var send = () => Sut().SendAsync(Email(subject: "", body: "<p>b</p>", Matter(), Analysed()), Http());
 
         (await send.Should().ThrowAsync<SdapProblemException>()).Which.Detail.Should().Contain("Subject is required");
         _graph.Requests.Should().BeEmpty();
+        _callerRead.Paths.Should().ContainSingle("the source is masked to the caller's column view");
+    }
+
+    /// <summary>Task 067 C2 (table AND id), must not fire: a primary association with the analysis' id but another table is not the
+    /// filing parent; the analysis keeps the mask.</summary>
+    [Fact]
+    public async Task AColumnTheCallerCannotRead_WhenThePrimaryAssociationHasTheAnalysisIdButAnotherTable_IsNotCopied()
+    {
+        SubjectAndBodyProfile();
+        _callerRead = MappingSourceCallerReadDouble.MirroringAppReads(_entities);
+        _callerRead.Secured.Add("sprk_name");
+
+        var send = () => Sut().SendAsync(
+            Email(subject: "", body: "<p>b</p>", new CommunicationAssociation { EntityType = "sprk_matter", EntityId = AnalysisId }, Analysed()),
+            Http());
+
+        (await send.Should().ThrowAsync<SdapProblemException>()).Which.Detail.Should().Contain("Subject is required");
+        _callerRead.Paths.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("sprk_analysis", true)]
+    [InlineData("SPRK_Analysis", true)]
+    [InlineData(" sprk_analysis", false)] // the send's regarding map does not trim, so it would not file under it
+    [InlineData("sprk_matter", false)]
+    public void SourceIsTheCommunicationsFilingParent_IsTheTableAndIdOfThePrimaryAssociation(string table, bool expected)
+    {
+        var request = Email("", "", new CommunicationAssociation { EntityType = table, EntityId = AnalysisId });
+        SendTimeFieldMapping.SourceIsTheCommunicationsFilingParent(request, AnalysisId).Should().Be(expected);
+        SendTimeFieldMapping.SourceIsTheCommunicationsFilingParent(request, OtherAnalysisId).Should().BeFalse("another id");
+        SendTimeFieldMapping.SourceIsTheCommunicationsFilingParent(Email("", "", Matter(), Analysed()), AnalysisId)
+            .Should().BeFalse("a second association is not the filing parent");
+        SendTimeFieldMapping.SourceIsTheCommunicationsFilingParent(Email("", ""), AnalysisId).Should().BeFalse("no association");
+    }
+
+    /// <summary>
+    /// Task 067 C3, must fire: from the filing parent, a rule that reads an access-model column keeps the masked read, so a value the
+    /// caller cannot read there is not copied, and a warning names the target column.
+    /// </summary>
+    [Fact]
+    public async Task ARuleReadingAnAccessModelColumn_FromTheFilingParent_KeepsTheMask_AndIsNamed()
+    {
+        _profiles
+            .Setup(p => p.GetFieldMappingProfileWithRulesAsync("sprk_analysis", "sprk_communication", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FieldMappingProfileEntity
+            {
+                Name = "Analysis to Communication",
+                SourceEntity = "sprk_analysis",
+                TargetEntity = "sprk_communication",
+                IsActive = true,
+                Rules = [CopyRule("adx_identity_passwordhash", "sprk_subject", 0), CopyRule("sprk_description", "sprk_body", 1)],
+            });
+        _analysis = Analysis(AnalysisId);
+        _analysis["adx_identity_passwordhash"] = "not-to-be-copied";
+        _callerRead = MappingSourceCallerReadDouble.MirroringAppReads(_entities);
+        _callerRead.Secured.Add("adx_identity_passwordhash");
+        _log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<CommunicationService>();
+
+        var send = () => Sut().SendAsync(Email(subject: "", body: "", Analysed()), Http());
+
+        (await send.Should().ThrowAsync<SdapProblemException>()).Which.Detail.Should().Contain("Subject is required");
+        _callerRead.Paths.Should().ContainSingle("the access-model column is judged by the caller's read");
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning
+                                           && e.Message.Contains(AccessModelSourceColumns.ReadAsTheCallerWarning("sprk_subject")));
+        _log.Messages.Should().NotContain(m => m.Contains("not-to-be-copied"));
+    }
+
+    /// <summary>Task 067 C4: the app-only read is of the one analysis, for exactly its mapped columns (and the gate columns it was
+    /// always read with, which are never copied).</summary>
+    [Fact]
+    public async Task TheAppOnlyRead_AsksForExactlyTheMappedColumnsOfTheOneAnalysis()
+    {
+        SubjectAndBodyProfile();
+        var asked = new List<(Guid Id, string[] Columns)>();
+        _entities
+            .Setup(s => s.RetrieveAsync("sprk_analysis", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, Guid id, string[] columns, CancellationToken _) => asked.Add((id, columns)))
+            .ReturnsAsync(() => _analysis!);
+
+        await Sut().SendAsync(Email(subject: "", body: "", Analysed()), Http());
+
+        var read = asked.Should().ContainSingle().Subject;
+        read.Id.Should().Be(AnalysisId);
+        read.Columns.Should().BeEquivalentTo(
+            new[] { "sprk_name", "sprk_description" }.Concat(Sprk.Bff.Api.Services.RecordCreation.MappingSourceCopyGate.SourceGateColumns("sprk_analysis")).Distinct());
     }
 
     /// <summary>The mapping-source rule: a source whose owner cannot be told is not copied from (fail closed).</summary>

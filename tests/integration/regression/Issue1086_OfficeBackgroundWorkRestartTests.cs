@@ -662,7 +662,7 @@ public class Issue1086_OfficeBackgroundWorkRestartTests
         var endedOnItsOwn = true;
         try
         {
-            await foreach (var chunk in stream.StreamAsync(jobId, lastEventId, deadline.Token))
+            await foreach (var chunk in stream.StreamAsync(jobId, lastEventId, static (status, _) => Task.FromResult(status), deadline.Token))
             {
                 text.Append(Encoding.UTF8.GetString(chunk));
             }

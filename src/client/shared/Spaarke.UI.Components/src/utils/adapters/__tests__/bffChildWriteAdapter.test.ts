@@ -215,6 +215,36 @@ describe('BFF child-record writes (task 147 r1)', () => {
     expect(fetchFn.mock.calls[0][1].method).toBe('PATCH');
   });
 
+  // Ontology task 234 fix round 1 (F2-1): the fetch every Dataverse host injects (@spaarke/auth's authenticatedFetch) THROWS
+  // an ApiError for a non-2xx instead of returning the response. The update still rejects with a ChildRecordWriteError
+  // carrying the server's reasonCode, status and detail, as documented, so a caller reads one shape whatever the fetch.
+  it('a refusal the host fetch THROWS (ApiError) becomes a ChildRecordWriteError with its reasonCode', async () => {
+    const thrown = Object.assign(new Error('Record the outcome first.'), {
+      name: 'ApiError',
+      status: 409,
+      problemDetails: { status: 409, detail: 'Record the outcome first.', reasonCode: 'inquiry.disposition_required' },
+    });
+    const fetchFn = jest.fn().mockRejectedValue(thrown);
+
+    const error = await updateChildRecordViaBff(fetchFn, BFF, 'sprk_todo', ID, { statecode: 1, statuscode: 2 }).catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(ChildRecordWriteError);
+    expect(error).toMatchObject({
+      status: 409,
+      reasonCode: 'inquiry.disposition_required',
+      message: 'Record the outcome first.',
+    });
+  });
+
+  it('a thrown failure that is not an ApiError (AuthError, network) passes through unchanged', async () => {
+    const authError = Object.assign(new Error('Authentication failed after all retry attempts'), { name: 'AuthError' });
+    const fetchFn = jest.fn().mockRejectedValue(authError);
+
+    await expect(updateChildRecordViaBff(fetchFn, BFF, 'sprk_todo', ID, { statecode: 1 })).rejects.toBe(authError);
+  });
+
   it('refuses a table that is not created through the BFF, without calling it', async () => {
     const fetchFn = jest.fn();
     await expect(createChildRecordViaBff(fetchFn, BFF, NON_BFF_TABLE, {})).rejects.toBeInstanceOf(

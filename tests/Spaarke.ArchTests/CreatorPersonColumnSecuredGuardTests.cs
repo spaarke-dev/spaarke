@@ -42,6 +42,8 @@ public class CreatorPersonColumnSecuredGuardTests
     /// Entity.xml), both in the script's <c>$Tables</c>.
     /// Task 086: sprk_storedfile (no Entity.xml; Deploy-EbillingStoredFileSchema.ps1 created the column unsecured, 088), in the
     /// script's <c>$Tables</c>.
+    /// spaarke-intake-pipeline-r1 task 013: sprk_processingjob (the intake run; its Entity.xml does not define the column), in the
+    /// script's <c>$Tables</c>.
     /// </summary>
     internal static readonly DeployScriptSecured[] SecuredOnlyByDeployScript =
     [
@@ -52,7 +54,13 @@ public class CreatorPersonColumnSecuredGuardTests
         new("sprk_ruleset", EbillingScriptReason, ChildCreatorPersonScript),
         new("sprk_procedureassignment", EbillingScriptReason, ChildCreatorPersonScript),
         new("sprk_storedfile", EbillingScriptReason, ChildCreatorPersonScript),
+        // spaarke-intake-pipeline-r1 task 013: sprk_processingjob (its SpaarkeMaster Entity.xml does not define the column, as
+        // sprk_policy's), in the script's $Tables; created and secured on spaarkedev1 2026-11-27 by the script (-Apply, -Verify PASS).
+        new("sprk_processingjob", IntakeScriptReason, ChildCreatorPersonScript),
     ];
+
+    private const string IntakeScriptReason =
+        "column created for the intake run by the child creator-person script (its Entity.xml does not define it); secured by the script's empty-before-securing gate";
 
     private const string ChildCreatorPersonScript = "scripts/Set-ChildRecordCreatorPersonSchema.ps1";
 

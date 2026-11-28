@@ -376,6 +376,11 @@ public sealed class SecureChildShareSynchronizer
     internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct) =>
         ResolveSecureOwnerTeamForCopyGateAsync(_dataverse, _configuration, ct);
 
+    /// <summary>ISS-010 D1: <see cref="SecureOwnerTeamAsync(CancellationToken)"/> over a child-records request's
+    /// <paramref name="cache"/> (R1, R2); <see langword="null"/> is exactly the overload without it.</summary>
+    internal Task<(Guid? TeamId, string? Refusal)> SecureOwnerTeamAsync(CancellationToken ct, RecordOwnerLookupCache? cache) =>
+        ResolveSecureOwnerTeamForCopyGateAsync(_dataverse, _configuration, ct, cache);
+
     /// <summary>The refusal <see cref="ResolveSecureOwnerTeamForCopyGateAsync"/> gives when the Secure Record business unit
     /// exists and holds no Secure Record owner team with the configured name.</summary>
     internal const string SecureOwnerTeamNotFoundRefusal =
@@ -387,7 +392,7 @@ public sealed class SecureChildShareSynchronizer
     /// (<c>RecordOwnershipResolver</c>: no Secure Record business unit means no secure owner; a business unit whose named
     /// team is missing or not unique is a refusal):
     /// <list type="bullet">
-    /// <item>the team's id, as <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken)"/>
+    /// <item>the team's id, as <see cref="ResolveSecureOwnerTeamAsync(IGenericEntityService, IConfiguration, CancellationToken, RecordOwnerLookupCache?)"/>
     /// answers it;</item>
     /// <item><c>(null, null)</c>: this environment has no Secure Record business unit, so no team can own a secure record;</item>
     /// <item><c>(null, refusal)</c>: the business unit is ambiguous, or the named team is ambiguous, or the business unit
@@ -396,13 +401,13 @@ public sealed class SecureChildShareSynchronizer
     /// A Dataverse fault propagates. The business unit is read a second time only when no team was found.
     /// </summary>
     internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamForCopyGateAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct, RecordOwnerLookupCache? cache = null)
     {
-        var team = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        var team = await ResolveSecureOwnerTeamAsync(dataverse, configuration, ct, cache).ConfigureAwait(false);
         if (team.TeamId is not null || team.Refusal is not null)
             return team;
 
-        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct, cache: cache).ConfigureAwait(false);
         if (secureBu.Ambiguous)
             return (null, "more than one business unit carries the Secure Record name");
         return secureBu.Id is null ? (null, null) : (null, SecureOwnerTeamNotFoundRefusal);
@@ -565,7 +570,13 @@ public sealed class SecureChildShareSynchronizer
     /// entry honoured. A row that is not Secure-team-owned answers <see cref="SecureChildShareSyncStatus.NotApplicable"/>
     /// and nothing is written; a fault or an ambiguous Secure team writes nothing (<see cref="SecureChildShareSyncStatus.Failed"/>).
     /// </summary>
-    public async Task<SecureChildShareSyncResult> SyncChildAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    public Task<SecureChildShareSyncResult> SyncChildAsync(string childLogicalName, Guid childId, CancellationToken ct) =>
+        SyncChildAsync(childLogicalName, childId, ct, cache: null);
+
+    /// <summary>ISS-010 D1: <see cref="SyncChildAsync(string, Guid, CancellationToken)"/> with the Secure Record owner team read
+    /// over a child-records request's <paramref name="cache"/> (R1, R2); <see langword="null"/> is exactly the overload without it.</summary>
+    internal async Task<SecureChildShareSyncResult> SyncChildAsync(
+        string childLogicalName, Guid childId, CancellationToken ct, RecordOwnerLookupCache? cache)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
         if (!SecureChildLineage.Children.TryGetValue(childLogicalName.Trim(), out var table))
@@ -574,7 +585,7 @@ public sealed class SecureChildShareSynchronizer
         Guid secureTeamId;
         try
         {
-            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+            var team = await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct, cache).ConfigureAwait(false);
             if (team.Refusal is { } refusal)
                 return SecureChildShareSyncResult.Failed(refusal);
             if (team.TeamId is not { } id)
@@ -1356,11 +1367,27 @@ public sealed class SecureChildShareSynchronizer
     /// are secure). A Dataverse fault propagates.
     /// </summary>
     /// <remarks>Also used by <c>DirectThreadAccessService</c> (task 149 r1), which must not grant a thread participant Read
-    /// on a message whose shares this synchronizer owns.</remarks>
-    internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamAsync(
-        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    /// on a message whose shares this synchronizer owns. ISS-010 D1: with a <paramref name="cache"/> (one child-records request's)
+    /// the answer is read once per configured unit and team name (the values read now) and kept only when one team was found;
+    /// <see langword="null"/> reads every time, exactly as before.</remarks>
+    internal static Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct, RecordOwnerLookupCache? cache = null)
     {
-        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        var teamName = SecureRecordOwnerTeam.OwnerTeamName(configuration);
+        // ISS-010 D1 (review round 2, accepted for request scope): the key reads the configured unit name here, and the read
+        // behind it reads that name again through R1. A configuration reload between the two could file one request's R2
+        // answer under the old unit name; the next request has its own cache, so the window is one request.
+        return cache is null
+            ? ReadSecureOwnerTeamAsync(dataverse, configuration, teamName, ct, cache: null)
+            : cache.SecureOwnerTeamAsync(SecureRecordOwnerTeam.BusinessUnitName(configuration), teamName,
+                () => ReadSecureOwnerTeamAsync(dataverse, configuration, teamName, ct, cache));
+    }
+
+    /// <summary>The reads behind <see cref="ResolveSecureOwnerTeamAsync"/>.</summary>
+    private static async Task<(Guid? TeamId, string? Refusal)> ReadSecureOwnerTeamAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, string teamName, CancellationToken ct, RecordOwnerLookupCache? cache)
+    {
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(dataverse, configuration, ct, cache: cache).ConfigureAwait(false);
         if (secureBu.Ambiguous)
             return (null, "more than one business unit carries the Secure Record name");
         if (secureBu.Id is not { } secureBuId)
@@ -1368,7 +1395,7 @@ public sealed class SecureChildShareSynchronizer
 
         var teamQuery = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 2, NoLock = true };
         teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, secureBuId);
-        teamQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
+        teamQuery.Criteria.AddCondition("name", ConditionOperator.Equal, teamName);
         teamQuery.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
         teamQuery.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
         var teams = (await dataverse.RetrieveMultipleAsync(teamQuery, ct).ConfigureAwait(false)).Entities;

@@ -305,8 +305,6 @@ public static class FileAccessEndpoints
             ResolveEmailIdentityRequest? request,
             IGenericEntityService dataverse,
             [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
-            IDocumentDataverseService documents,
-            Spaarke.Core.Auth.IAuthorizationService authorizationService,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -320,110 +318,14 @@ public static class FileAccessEndpoints
             }
 
             var response = await BuildIdentityResponseAsync(identity, dataverse, callerAccessProbe, context, logger, ct);
-            var savedAttachmentNames = await ReadSavedAttachmentNamesAsync(
-                identity.DocumentId, documents, authorizationService, context, logger, ct);
+
+            // Task 141 (the .eml's children) and task 143 (the email's standalone attachment documents): each checked for the
+            // caller before it is named (ADR-008 A1), in the filter's one implementation, which the not_saved answer shares.
+            var keys = Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.ParseEmailKeys(
+                request?.InternetMessageId, request?.ExchangeItemId);
+            var savedAttachmentNames = await DocumentEmailIdentityFilter.ReadSavedAttachmentNamesAsync(
+                identity.DocumentId, excludedDocumentId: null, keys, context, logger, ct);
             return TypedResults.Ok(response with { SavedAttachmentNames = savedAttachmentNames });
-        }
-
-        /// <summary>
-        /// Task 141: the names of the saved <c>.eml</c>'s child documents (its saved attachments) that the CALLER may read, by the
-        /// planner's one name rule (<see cref="Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf"/>), or
-        /// <see langword="null"/> (the field is omitted) when they cannot be read.
-        /// </summary>
-        /// <remarks>
-        /// ADR-008 Amendment A1: the children are found by this lookup (the request names only the email's keys), so each one is
-        /// checked here, as the caller, with the check the route's filter makes on the parent: <c>read</c> through
-        /// <see cref="InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync"/> (the root grants, then the external document
-        /// narrowing). Task 141 review: one call over all the children first, which allows only when every child is allowed;
-        /// only when it denies is each child checked on its own. A child the caller may not read is left out. Only the lookup
-        /// runs before the check; no child content is read at all. Fail closed: a read that throws, or a check (of all the
-        /// children, or of one) that answers the system-failure deny
-        /// (<see cref="Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode"/> — the authorization service answers a
-        /// fault that way and does not throw), omits the whole field, so the pane never claims an attachment is unsaved on a
-        /// guess and keeps today's behaviour.
-        /// </remarks>
-        static async Task<IReadOnlyList<string>?> ReadSavedAttachmentNamesAsync(
-            Guid emlDocumentId,
-            IDocumentDataverseService documents,
-            Spaarke.Core.Auth.IAuthorizationService authorizationService,
-            HttpContext context,
-            ILogger logger,
-            CancellationToken ct)
-        {
-            try
-            {
-                var userId = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(context.User);
-                if (string.IsNullOrEmpty(userId))
-                {
-                    return null;
-                }
-
-                var children = (await documents.GetDocumentsByParentAsync(emlDocumentId, ct))
-                    .Select(child => (Child: child, Id: Guid.TryParse(child.Id, out var id) ? id : Guid.Empty))
-                    .Where(c => c.Id != Guid.Empty)
-                    .ToList();
-                var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context);
-
-                // Task 141 review (F6): ONE check over every child first. AuthorizeDocumentsAsync allows a list only when it
-                // allows every id in it (the root grants per id, then one narrowing call over all), so an allow names them all.
-                // Only a deny is checked again one child at a time, to leave out exactly the ones the caller may not read.
-                var all = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
-                    context, authorizationService, userId, children.Select(c => c.Id).ToList(), "read", token,
-                    "email-identity:saved-attachments", logger, ct);
-                if (all.IsAllowed)
-                {
-                    return NamesOf(children.Select(c => c.Child));
-                }
-
-                if (IsSystemFailure(all))
-                {
-                    logger.LogWarning(
-                        "Email identity: the access check of the saved attachments of document {DocumentId} faulted; the field is omitted.",
-                        emlDocumentId);
-                    return null;
-                }
-
-                var readable = new List<DocumentEntity>();
-                foreach (var (child, childId) in children)
-                {
-                    var decision = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
-                        context, authorizationService, userId, new[] { childId }, "read", token,
-                        "email-identity:saved-attachments", logger, ct);
-                    if (decision.IsAllowed)
-                    {
-                        readable.Add(child);
-                    }
-                    else if (IsSystemFailure(decision))
-                    {
-                        // The check did not decide: the service answers a fault as a deny with this reason code, never a
-                        // throw. Dropping the child would make the pane show it as unsaved on a guess, so say nothing.
-                        logger.LogWarning(
-                            "Email identity: the access check of saved attachment {ChildDocumentId} of document {DocumentId} faulted; "
-                            + "the field is omitted.",
-                            childId, emlDocumentId);
-                        return null;
-                    }
-                }
-
-                return NamesOf(readable);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                logger.LogWarning(ex,
-                    "Email identity: the saved attachments of document {DocumentId} could not be read; the field is omitted.",
-                    emlDocumentId);
-                return null;
-            }
-
-            static IReadOnlyList<string> NamesOf(IEnumerable<DocumentEntity> readableChildren) =>
-                readableChildren
-                    .SelectMany(Sprk.Bff.Api.Services.Office.EmailAttachmentAddPlanner.SavedNamesOf)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-            static bool IsSystemFailure(Spaarke.Core.Auth.AuthorizationResult decision) =>
-                string.Equals(
-                    decision.ReasonCode, Spaarke.Core.Auth.AuthorizationResult.SystemFailureReasonCode, StringComparison.Ordinal);
         }
 
         /// <summary>

@@ -716,7 +716,11 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             return await HaveRightsOnAllAsync(targets, AccessRights.AppendTo) ? null : Forbidden(reasonCode);
         }
 
-        /// <summary>AppendTo on the regarding record, Create on sprk_event, and Assign when the owner is someone else.</summary>
+        /// <summary>Read and AppendTo on the regarding record, Create on sprk_event, and Assign when the owner is someone else.</summary>
+        /// <remarks>Read as well as AppendTo (#3317, the owner's D-3181 rule extended, 2026-11-27): the create copies the regarding
+        /// record's name onto the new task app-only (<c>TaskActionCore</c>, <c>sprk_regardingrecordname</c>) and the caller then reads that
+        /// task back. AppendTo does not imply Read, so a caller who may attach to a record but not read it would learn its name. The
+        /// deny is unchanged: the same 403 and reason code, also for a record that does not exist.</remarks>
         private async Task<Denial?> AuthorizeTaskCreateAsync(
             string regardingEntity, Guid regardingId, Guid? assignedTo, string reasonCode)
         {
@@ -724,7 +728,7 @@ public sealed class CommunicationRecordAuthorizationFilter : IEndpointFilter
             // TaskActionCore also accepts) is denied, never guessed.
             var entitySet = RegardingNameFields.EntitySetName(regardingEntity.Trim().ToLowerInvariant());
             if (entitySet is null
-                || !await HasRightsAsync(entitySet, regardingId, AccessRights.AppendTo)
+                || !await HasRightsAsync(entitySet, regardingId, AccessRights.Read | AccessRights.AppendTo)
                 || !await HoldsPrivilegeAsync(CreateEventPrivilege))
                 return Forbidden(reasonCode);
 

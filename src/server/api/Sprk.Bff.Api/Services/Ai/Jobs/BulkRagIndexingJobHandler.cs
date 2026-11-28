@@ -281,7 +281,28 @@ public class BulkRagIndexingJobHandler : IJobHandler
             // The record that governs the document (matter, project, work assignment or invoice): the ONE decision every other
             // indexing path uses (DocumentIndexParentResolver). It fails closed to no parent when it cannot decide, and that
             // answer is kept: no parent of this handler's own is substituted.
-            var parentEntity = await _parentResolver.ResolveAsync(doc.DocumentId, ct);
+            //
+            // GitHub #3223: the decided answer REPLACES the parent on the chunks (a decided "none", including the fail-closed
+            // secure-state answer, clears the old one). A row that cannot be read decides nothing, and writing "no parent" from
+            // it would un-file the document with the sweep counting a success: the document fails instead and stays unindexed,
+            // so the next sweep (or a forced re-index) picks it up again.
+            var parentDecision = await _parentResolver.DecideAsync(doc.DocumentId, ct);
+            if (parentDecision.RowUnreadable)
+            {
+                _logger.LogWarning(
+                    "Document {DocumentId} ({FileName}): its row could not be read, so its parent is undecided; not indexed this run",
+                    doc.DocumentId, doc.FileName);
+
+                await _statusStore.RecordErrorAsync(
+                    jobIdStr,
+                    doc.DocumentId,
+                    "The document's parent could not be decided (its row could not be read)",
+                    ct);
+
+                return DocumentIndexOutcome.Failed;
+            }
+
+            var parentEntity = parentDecision.Parent;
 
             // Build the file index request. It names no index (task 041, FR-40): every document lands in the content
             // type's index; no record or business-unit index column is read.
@@ -293,19 +314,12 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 FileName = doc.FileName,
                 DocumentId = doc.DocumentId,
                 ParentEntity = parentEntity,
+                ReplaceParentEntity = true,
                 Metadata = new Dictionary<string, string>
                 {
                     ["source"] = "BulkIndexing",
                     ["batchJobId"] = batchJob.JobId.ToString()
                 },
-                // Task 048 (spaarkeai-word-add-in-r1): tied to ForceReindex rather than unconditional —
-                // ForceReindex is this handler's own signal that a document may already carry chunks (it
-                // is what bypasses the per-item idempotency skip above AND the "unindexed only" Dataverse
-                // filter in QueryDocumentsAsync). The default "unindexed" sweep (ScheduledRagIndexingService
-                // and the admin default) queries ONLY documents with sprk_ragindexedon eq null, so there is
-                // never a tail to trim there — matching the negative acceptance criterion without an extra
-                // search call on every scheduled run.
-                ReplaceStaleChunks = payload.ForceReindex,
             };
 
             // Call FileIndexingService using app-only authentication.

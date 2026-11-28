@@ -179,6 +179,25 @@ public class IndexingWorkerHostedService : BackgroundService
                 // Call FileIndexingService using app-only authentication.
                 var result = await fileIndexingService.IndexFileAppOnlyAsync(indexRequest, args.CancellationToken);
 
+                if (!result.Success && result.LeftoverChunksRemain)
+                {
+                    // Every new chunk is written; only chunks from an earlier index of the file could not be removed
+                    // (GitHub #3304). This worker does not retry, so the document is recorded as indexed: search
+                    // already answers from the new chunks.
+                    _logger.LogWarning(
+                        "RAG indexing for job {JobId} wrote {ChunksIndexed} chunks but left earlier chunks of the file in the index: {Error}",
+                        message.JobId,
+                        result.ChunksIndexed,
+                        result.ErrorMessage);
+
+                    if (payload.DocumentId != Guid.Empty)
+                        await StampSearchIndexAsync(searchIndexNameResolver, payload.DocumentId.ToString(), args.CancellationToken);
+
+                    await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
+                    await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+                    return;
+                }
+
                 if (!result.Success)
                 {
                     // Per spec, indexing failures are not fatal - document remains accessible

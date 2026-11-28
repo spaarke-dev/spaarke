@@ -584,9 +584,22 @@ public class OfficeEmailEnricher
         if (!metadata.IsNameSystemDerived && !blankTypedName)
             return (documentName, documentName);
 
-        var stem = documentName[..^".eml".Length];
+        return (documentName, WithUniqueSuffix(documentName));
+    }
+
+    /// <summary>
+    /// Task 046 (b): the STORED form of a system-derived file name — <paramref name="fileName"/> with a short unique suffix
+    /// (<c>_{8 hex}</c>) before its extension, so <c>{stem}.{ext}</c> becomes <c>{stem}_{8 hex}.{ext}</c> and the extension stays
+    /// last (SPE infers the type from it). A name with no extension gets the suffix at the end. The one suffix rule for every
+    /// system-derived Office save name: the <c>.eml</c> (<see cref="GenerateEmlNames"/>) and, since task 143, an attachment saved
+    /// on its own. Random per save, not derived from the content, for the reason <see cref="GenerateEmlNames"/> gives.
+    /// </summary>
+    public static string WithUniqueSuffix(string fileName)
+    {
+        var extension = Path.GetExtension(fileName);
+        var stem = fileName[..^extension.Length];
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        return (documentName, $"{stem}_{suffix}.eml");
+        return $"{stem}_{suffix}{extension}";
     }
 
     // ── Task 121 (spaarkeai-word-add-in-r1): the email's two keys ────────────────────────────────────────────────────

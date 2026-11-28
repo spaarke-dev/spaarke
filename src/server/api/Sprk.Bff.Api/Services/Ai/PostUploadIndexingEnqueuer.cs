@@ -176,11 +176,19 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
             // #1510 (unified-access-control-r2 task 177): a caller that knows the document but sent no parent (the
             // Compose create-on-save) gets the parent the document row names — the same derivation the app-only job
             // handler and Send-to-Index use — so its chunks stay findable in record search. A parent the caller sent
-            // is used as is; an unreadable row indexes without one, as before.
+            // is used as is.
+            //
+            // GitHub #3223: the stored parent is REPLACED only when it was decided — a parent the caller sent, or the
+            // resolver's answer about the row (a decided "none" clears the old parent). A caller that names neither a parent
+            // nor a document decided nothing, and a row that cannot be read decides nothing: both index without touching
+            // the parent already on the chunks (this seam never fails the upload, so it does not retry).
             var parentEntity = request.ParentEntity;
+            var replaceParent = parentEntity is not null;
             if (parentEntity is null && !string.IsNullOrEmpty(request.DocumentId))
             {
-                parentEntity = await _parentResolver.ResolveAsync(request.DocumentId, ct);
+                var decision = await _parentResolver.DecideAsync(request.DocumentId, ct);
+                parentEntity = decision.Parent;
+                replaceParent = !decision.RowUnreadable;
             }
 
             var fileIndexRequest = new FileIndexRequest
@@ -191,14 +199,7 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 FileName = request.FileName,
                 DocumentId = request.DocumentId,
                 ParentEntity = parentEntity,
-                // Task 048 (spaarkeai-word-add-in-r1): this is the single seam every OBO upload/re-index
-                // caller converges on (Compose save-back, the Create* wizards, SprkChat persist, the
-                // "LinearDocumentProfile" direct-Action re-index). A first index has nothing to trim
-                // (IRagService.DeleteChunksBeyondCountAsync finds no tail and deletes nothing); a re-index
-                // of an item that already has chunks — e.g. every Compose save of the same document — no
-                // longer leaves a stale tail behind. Does not change this method's idempotency behaviour:
-                // it has none (no key/skip check here today).
-                ReplaceStaleChunks = true,
+                ReplaceParentEntity = replaceParent,
             };
 
             _logger.LogInformation(
@@ -335,15 +336,6 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 ParentEntity = request.ParentEntity,
                 Source = request.Source,
                 EnqueuedAt = DateTimeOffset.UtcNow,
-                // Task 048 (spaarkeai-word-add-in-r1): unconditional as of this task (was
-                // `versionDiscriminator is not null`, task 029) — every app-only producer through this
-                // seam (Office create + version save, Email-to-Document, outbound-email enrichment,
-                // post-AI-analysis re-index) now replaces the item's stale tail after a successful
-                // upload, not only a version save. A first index has nothing to trim. The
-                // IdempotencyKey ternary immediately below is UNCHANGED: versionDiscriminator still
-                // governs ONLY the key suffix (so a version is not skipped as a duplicate of the
-                // item's earlier index) — this task does not touch key or skip behaviour.
-                ReplaceStaleChunks = true,
             };
 
             var job = new JobContract

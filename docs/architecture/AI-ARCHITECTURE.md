@@ -408,6 +408,8 @@ Facade registrations live in `Infrastructure/DI/AnalysisServicesModule.cs`; ever
 - `ProfileSummaryJobHandler`
 - `EmbeddingMigrationService`
 
+`EmailAnalysisJobHandler` and `ProfileSummaryJobHandler` were later deleted (2026-11-25, spaarke-intake-pipeline-r1 task 005): nothing enqueued their job types. Email documents are profiled by `AppOnlyDocumentAnalysisJobHandler`, enqueued at the archival sites.
+
 Handlers with mixed AI + Dataverse coupling stay in `Services/Jobs/Handlers/` per the G1 reconciliation (AI-coupled = references `Sprk.Bff.Api.Services.Ai.*` AND does NOT require `Spaarke.Dataverse` / `Microsoft.Xrm.Sdk`).
 
 ### FR-C6 CI Guard (Task 082, Deferred)

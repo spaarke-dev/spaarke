@@ -48,6 +48,27 @@ public class ContentDedupDetectorTests
         return c;
     }
 
+    /// <summary>
+    /// A duplicate notification is a durable, asynchronous channel with no per-reader access check, so it
+    /// names no other document: nothing the written appnotification carries (any attribute, the action data
+    /// JSON) may contain the canonical document's id.
+    /// </summary>
+    private static void AssertNamesNoOtherDocument(Entity notification, Guid canonical)
+    {
+        notification.GetAttributeValue<string>("data")?.Should().NotContainEquivalentOf("regardingId",
+            "the notification action data links to no other document");
+        foreach (var attribute in notification.Attributes)
+        {
+            var rendered = attribute.Value switch
+            {
+                EntityReference er => er.Id.ToString() + er.Name + er.LogicalName,
+                _ => attribute.Value?.ToString() ?? string.Empty,
+            };
+            rendered.Should().NotContainEquivalentOf(canonical.ToString(),
+                $"attribute '{attribute.Key}' must not carry the canonical document's id");
+        }
+    }
+
     private static ContentDedupDetector Detector(Mock<SpeFileStore> spe, Mock<IGenericEntityService> ds)
     {
         var notifications = new NotificationService(ds.Object, NullLogger<NotificationService>.Instance);
@@ -165,6 +186,8 @@ public class ContentDedupDetectorTests
 
         decision.IsDuplicate.Should().BeTrue();
         notification.Should().NotBeNull("a detected duplicate must NOTIFY the uploader — never silent");
+        notification!.GetAttributeValue<string>("body").Should().Contain("brief.pdf").And.Contain("matches the content of an existing document");
+        AssertNamesNoOtherDocument(notification, canonical);
     }
 
     // ── FR-C3 graduate-on-divergence (email-communication-intelligence-r2) ──────────────────────────
@@ -242,6 +265,8 @@ public class ContentDedupDetectorTests
         await Detector(spe, ds).NotifyLinkedCopyAsync(oid.ToString(), canonical, "draft.docx");
 
         notification.Should().NotBeNull("a hash-linked editable copy must NOTIFY the uploader — never silent");
+        notification!.GetAttributeValue<string>("body").Should().Contain("draft.docx").And.Contain("currently identical to an existing document");
+        AssertNamesNoOtherDocument(notification, canonical);
     }
 
     [Fact]

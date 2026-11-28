@@ -13,7 +13,7 @@ import { createSseConnection, type SseConnection, type SseEvent } from '../servi
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { toDocxFileName } from '../utils/documentFileName';
 import { EmailContentCaptureContext } from './emailContentCaptureContext';
-import type { EmailContentCapture } from '../services/emailContentCapture';
+import { EmailCaptureError, type EmailContentCapture } from '../services/emailContentCapture';
 import {
   readEmailFilingProblem,
   type EmailFilingOutcome,
@@ -40,6 +40,16 @@ export type SourceType = 'OutlookEmail' | 'OutlookAttachment' | 'WordDocument';
  * Save flow states based on spec.md Task Pane State Diagram.
  */
 export type SaveFlowState = 'idle' | 'selecting' | 'uploading' | 'processing' | 'complete' | 'error' | 'duplicate';
+
+/**
+ * Task 143 (owner A1): the phase of a job whose content was identical to a document already in Spaarke (server
+ * `OfficeService.ContentDuplicatePhase`). Nothing was created. The job names that document only to a caller who may see it;
+ * for anyone else it completes with no document, and the pane says the item is already in Spaarke.
+ */
+export const CONTENT_DUPLICATE_PHASE = 'DeduplicatedToExisting';
+
+/** What the pane says when a save's content is already in Spaarke in a document the job does not name. */
+export const ALREADY_IN_SPAARKE_MESSAGE = 'This item is already in Spaarke. Nothing new was saved.';
 
 /**
  * Processing options for the save operation.
@@ -227,9 +237,44 @@ export type SaveTarget =
   | {
       mode: 'addAttachments';
       savedDocumentId: string;
-      record: { entityType: string; id: string; name: string };
+      /**
+       * Task 143: absent when the saved `.eml` is filed to NO record — the add then sends no `targetEntity`, and the server
+       * adds only under an `.eml` filed to none (`EmailAttachmentAddPlanner.IsFiledToNoRecord`, else 403 OFFICE_009).
+       */
+      record?: { entityType: string; id: string; name: string };
       attachmentFileNames: string[];
     };
+
+/**
+ * Task 143: the outcome of an attachments-only save ("Save the email" unticked) — one `Attachment` save per ticked
+ * attachment. `saved` are the names the server accepted (or already held); `failed` each name that was not saved, with the
+ * sentence that says why. Never "all saved" unless `failed` is empty.
+ */
+export interface AttachmentsOnlyOutcome {
+  saved: string[];
+  failed: Array<{ name: string; message: string }>;
+  /**
+   * Task 143 (owner A1): each attachment whose bytes are identical to a document already in Spaarke (the server answered
+   * `contentDuplicate: true`): nothing was created or changed, and it counts as neither saved nor failed. `existing` is that
+   * document's id and name, present only when the server let the caller see it (Read + the external narrowing); absent,
+   * the pane says just "Already in Spaarke". Optional: an outcome without it has none.
+   */
+  alreadyInSpaarke?: Array<{ name: string; existing?: { id: string; name: string } }>;
+}
+
+/**
+ * Task 143 (owner A1): the existing document a content-duplicate save answer names (`existingDocument`), or `undefined`
+ * when the answer withheld it or it is malformed. Exported for its unit tests.
+ */
+export function existingDocumentOf(responseData: unknown): { id: string; name: string } | undefined {
+  const existing = (responseData as { existingDocument?: unknown } | null | undefined)?.existingDocument as
+    | { id?: unknown; name?: unknown }
+    | null
+    | undefined;
+  return typeof existing?.id === 'string' && existing.id && typeof existing.name === 'string' && existing.name
+    ? { id: existing.id, name: existing.name }
+    : undefined;
+}
 
 /**
  * Save flow context data.
@@ -388,8 +433,8 @@ export interface UseSaveFlowResult {
   error: ErrorMessage | null;
   /** Clear error */
   clearError: () => void;
-  /** Duplicate detection info */
-  duplicateInfo: { documentId: string; message: string } | null;
+  /** Duplicate detection info. No `documentId` when the existing document is not named to this caller (task 143). */
+  duplicateInfo: { documentId?: string; message: string } | null;
   /** Whether save is in progress */
   isSaving: boolean;
   /** Whether form is valid (association selected) */
@@ -417,6 +462,18 @@ export interface UseSaveFlowResult {
    * already being watched. Finishes through `onAttachmentsAddFinished` / `onAttachmentsAddUnconfirmed` like any watch.
    */
   watchAttachmentsAdd: (jobId: string, documentId: string, names: string[]) => void;
+  /**
+   * Task 143: saves ONLY the ticked attachments, without the email — one `contentType: 'Attachment'` request per
+   * attachment, sequentially, each with its own idempotency key, the bytes read in the pane (Office.js) and the open email
+   * as the parent (`attachment.parentEmailId` = its Message-ID, else its Exchange item id). Filed to the picked record,
+   * or to none. Ends in `idle` with {@link attachmentsOnlyOutcome} set; it never completes as an email save (no
+   * `onComplete`, no saved document), so the caller re-reads the identity for the marks.
+   */
+  saveAttachmentsOnly: (context: SaveFlowContext) => Promise<void>;
+  /** Task 143: the last attachments-only save's outcome; null before one, and while one runs. */
+  attachmentsOnlyOutcome: AttachmentsOnlyOutcome | null;
+  /** Task 143: clears {@link attachmentsOnlyOutcome}. */
+  clearAttachmentsOnlyOutcome: () => void;
 }
 
 /** Task 141 review: the server's answer about a save's attachments (see {@link UseSaveFlowResult.getAttachmentsAnswer}). */
@@ -675,11 +732,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState<ErrorMessage | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<{
-    documentId: string;
+    documentId?: string;
     message: string;
   } | null>(null);
   const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
   const [savedDocumentUrl, setSavedDocumentUrl] = useState<string | null>(null);
+  const [attachmentsOnlyOutcome, setAttachmentsOnlyOutcome] = useState<AttachmentsOnlyOutcome | null>(null);
+  // Task 143: failed attachments-only attempts per file name (lower case), so a retry is a new key — never the key of a
+  // failed attempt (the route's response cache replays an answer for a repeated key). Only grows, like the others.
+  const attachmentOnlyFailuresRef = useRef<Map<string, number>>(new Map());
 
   // Task 116a: reads the email's body + attachments at submit, when the pane supplies a reader (SaveView).
   const captureEmailContent = useContext(EmailContentCaptureContext);
@@ -700,6 +761,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     terminalOutcomeAppliedRef.current = true;
     return true;
   }, []);
+  // Task 143 (owner A1): the stream has reported CONTENT_DUPLICATE_PHASE (its snapshot precedes its job-complete event, which
+  // carries no phase). Reset when tracking starts.
+  const contentDuplicatePhaseSeenRef = useRef(false);
   // FR-11 (task 024): whether the save in flight is a VERSION save, and how many version-save attempts have
   // FAILED in this pane session (see VersionIdempotencyParts.failedAttempts). Deliberately NOT reset by
   // reset(): the counter must only grow, or a later identical re-send could reproduce a failed attempt's
@@ -874,6 +938,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     stopAddWatches();
     pendingAddJobRef.current = null;
     setFlowState('idle');
+    setAttachmentsOnlyOutcome(null);
     setSelectedAttachmentIds(new Set());
     setIncludeBody(true);
     setProcessingOptions(DEFAULT_PROCESSING_OPTIONS);
@@ -906,6 +971,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     onError?.(errorMsg);
   }, [onError]);
 
+  // Task 143 (owner A1): a job Completed with no document whose content was already in Spaarke (CONTENT_DUPLICATE_PHASE).
+  // The existing document is withheld from this caller, so there is nothing to open; it is the duplicate state without
+  // "View Existing Document", not "Save Not Confirmed" (the save did finish, and created nothing).
+  const showAlreadyInSpaarke = useCallback(() => {
+    setDuplicateInfo({ message: ALREADY_IN_SPAARKE_MESSAGE });
+    setFlowState('duplicate');
+  }, []);
+
   // Handle SSE event
   const handleSseEvent = useCallback(
     (event: SseEvent) => {
@@ -917,6 +990,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
       if (eventType === 'progress' || eventType === 'message') {
         // Progress update: { progress: number, currentPhase: string }
+        if (data.currentPhase === CONTENT_DUPLICATE_PHASE) contentDuplicatePhaseSeenRef.current = true;
         setJobStatus(prev => {
           if (!prev) return null;
           const progress = typeof data.progress === 'number' ? data.progress : prev.progress;
@@ -968,6 +1042,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           setSavedDocumentUrl(documentUrl || null);
           setFlowState('complete');
           notifyComplete(documentId, documentUrl || '');
+        } else if (contentDuplicatePhaseSeenRef.current) {
+          showAlreadyInSpaarke();
         } else {
           failUnconfirmedCompletion();
         }
@@ -993,7 +1069,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       }
       // Ignore heartbeat events
     },
-    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, notifyComplete, onError]
+    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, notifyComplete, onError, showAlreadyInSpaarke]
   );
 
   // Poll for job status
@@ -1108,6 +1184,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             setSavedDocumentUrl(documentUrl || null);
             setFlowState('complete');
             notifyComplete(documentId, documentUrl || '');
+          } else if (status.status === 'Completed' && rawStatus.currentPhase === CONTENT_DUPLICATE_PHASE) {
+            showAlreadyInSpaarke();
           } else if (status.status === 'Completed') {
             failUnconfirmedCompletion();
           } else if (status.status === 'Failed') {
@@ -1150,7 +1228,16 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
     },
-    [apiBaseUrl, claimTerminalOutcome, cleanup, failUnconfirmedCompletion, getAccessToken, notifyComplete, onError]
+    [
+      apiBaseUrl,
+      claimTerminalOutcome,
+      cleanup,
+      failUnconfirmedCompletion,
+      getAccessToken,
+      notifyComplete,
+      onError,
+      showAlreadyInSpaarke,
+    ]
   );
 
   // Start SSE connection with polling fallback.
@@ -1166,6 +1253,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       // Reset retry counter and the terminal-outcome claim at start of tracking
       pollingRetryCountRef.current = 0;
       terminalOutcomeAppliedRef.current = false;
+      contentDuplicatePhaseSeenRef.current = false;
 
       // Initialize job status with standard stages
       const initialStages: StageStatus[] = [
@@ -1232,6 +1320,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       setFlowState('uploading');
       setError(null);
       setDuplicateInfo(null);
+      setAttachmentsOnlyOutcome(null);
 
       // Cancel any existing operations
       cleanup();
@@ -1349,9 +1438,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             entityId: sentEntity.id,
             displayName: sentEntity.name,
           };
-        } else if (addTarget) {
+        } else if (addTarget?.record) {
           // Task 141: the record the saved .eml is filed to. The route checks the caller may file to it, and the server
-          // refuses (OFFICE_009) when the .eml is not filed to it.
+          // refuses (OFFICE_009) when the .eml is not filed to it. Task 143: an .eml filed to no record sends none.
           serverRequest.targetEntity = {
             entityType: addTarget.record.entityType,
             entityId: cleanGuid(addTarget.record.id),
@@ -1697,6 +1786,186 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     }
   }, [startSave]);
 
+  // Task 143: "Save the email" unticked — save only the ticked attachments, each as its own document through the existing
+  // single-attachment save (`SaveContentType.Attachment`). SEQUENTIAL, one request at a time: each request also carries the
+  // open email as the parent, and the server captures that parent's communication from it when it has none
+  // (`OfficeService.ParentEmailOfTheRequest`), so parallel requests could race to capture the same email; it also keeps the
+  // load bounded and the per-attachment report in order. One failure never stops the others.
+  const saveAttachmentsOnly = useCallback(
+    async (context: SaveFlowContext) => {
+      setAttachmentsOnlyOutcome(null);
+      setError(null);
+      setDuplicateInfo(null);
+      const ticked = context.attachments.filter(a => selectedAttachmentIds.has(a.id));
+      if (ticked.length === 0) return; // Save is disabled then; nothing is ever sent
+      // Never retried as an email save: the error banner's Retry resends `savedContextRef`, which this save never sets.
+      savedContextRef.current = null;
+      // Every ticked attachment fails with one reason (nothing was sent), reported per attachment like any other failure.
+      const failAll = (message: string) => {
+        setAttachmentsOnlyOutcome({ saved: [], failed: ticked.map(a => ({ name: a.name, message })) });
+        setFlowState('idle');
+      };
+      const parentEmailId = context.internetMessageId?.trim() || context.itemId?.trim() || '';
+      if (!parentEmailId || !captureEmailContent) {
+        // Never a server-side mailbox read: without the pane's reader there are no bytes to send (task 116).
+        failAll('This email could not be read here, so nothing was saved.');
+        return;
+      }
+      setFlowState('uploading');
+      cleanup();
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+
+      const saved: string[] = [];
+      const failed: AttachmentsOnlyOutcome['failed'] = [];
+      const alreadyInSpaarke: NonNullable<AttachmentsOnlyOutcome['alreadyInSpaarke']> = [];
+
+      // Each attachment is read on its OWN request budget (body + that one file), because each is sent in its own request:
+      // one shared read would carry an email save's combined limit, so two files that each fit would leave the second
+      // reported as too large. A ticked attachment the reader could not carry (too large, a cloud link) or could not read
+      // is reported with its own reason and never stops the others; the body failing to read or fit stops them all.
+      let body: string | undefined;
+      const capturedAttachments: EmailContentCapture['attachments'] = [];
+      for (const attachment of ticked) {
+        let one: EmailContentCapture;
+        try {
+          one = await captureEmailContent([attachment], new Set([attachment.id]));
+        } catch (err) {
+          if (err instanceof EmailCaptureError && err.failure?.kind === 'attachment-unreadable') {
+            failed.push({
+              name: attachment.name,
+              message: `Outlook could not read "${attachment.name}", so it was not saved. Try again.`,
+            });
+            continue;
+          }
+          failAll(createErrorFromException(err, 'This email could not be read, so nothing was saved.').message);
+          return;
+        }
+        body ??= one.body;
+        for (const skip of one.skipped) {
+          failed.push({ name: skip.name, message: skip.message });
+        }
+        capturedAttachments.push(...one.attachments);
+      }
+
+      const recipients =
+        context.recipients?.map(r => ({
+          type: r.type === 'to' ? 'To' : r.type === 'cc' ? 'Cc' : 'Bcc',
+          email: r.email,
+          name: r.displayName,
+        })) || [];
+      // The parent email, as an email save describes it (no attachment bytes: each request carries its own file). The
+      // server uses it only when its Message-ID or item id equals `attachment.parentEmailId`.
+      const email = {
+        subject: context.itemName || 'Untitled Email',
+        isNameSystemDerived: true,
+        senderEmail: context.senderEmail || 'unknown@placeholder.com',
+        senderName: context.senderDisplayName,
+        recipients,
+        sentDate: context.sentDate?.toISOString(),
+        body: body ?? '',
+        isBodyHtml: true,
+        attachments: capturedAttachments.map(({ contentBase64: _bytes, ...reference }) => reference),
+        ...(context.internetMessageId ? { internetMessageId: context.internetMessageId } : {}),
+        ...(context.itemId ? { exchangeItemId: context.itemId } : {}),
+      };
+      const target = selectedEntity?.id
+        ? {
+            entityType: selectedEntity.entityType,
+            entityId: cleanGuid(selectedEntity.id),
+            displayName: selectedEntity.name,
+          }
+        : undefined;
+
+      for (const attachment of capturedAttachments) {
+        if (signal.aborted) return;
+        const nameKey = attachment.fileName.toLowerCase();
+        const failedAttempts = attachmentOnlyFailuresRef.current.get(nameKey) ?? 0;
+        const recordFailure = (message: string) => {
+          attachmentOnlyFailuresRef.current.set(nameKey, failedAttempts + 1);
+          failed.push({ name: attachment.fileName, message });
+        };
+        try {
+          const serverRequest: Record<string, unknown> = {
+            contentType: 'Attachment',
+            triggerAiProcessing:
+              processingOptions.deepAnalysis || processingOptions.ragIndex || processingOptions.profileSummary,
+            aiOptions: {
+              profileSummary: processingOptions.profileSummary,
+              ragIndex: processingOptions.ragIndex,
+              deepAnalysis: processingOptions.deepAnalysis,
+            },
+            ...(target ? { targetEntity: target } : {}),
+            attachment: {
+              attachmentId: attachment.attachmentId,
+              fileName: attachment.fileName,
+              contentType: attachment.contentType,
+              size: attachment.size,
+              contentBase64: attachment.contentBase64,
+              parentEmailId,
+            },
+            email,
+          };
+          // Its own key: this attachment, its bytes, its parent, its record and its failed attempts.
+          const idempotencyKey = await sha256Hex(
+            JSON.stringify({
+              attachmentOnly: {
+                parentEmailId,
+                attachmentId: attachment.attachmentId,
+                fileName: attachment.fileName,
+                contentSha256: await sha256Hex(attachment.contentBase64),
+                recordId: target?.entityId ?? null,
+                ...(failedAttempts > 0 ? { failedAttempts } : {}),
+              },
+            })
+          );
+          // Also in the body, as the version save sends it: the server's PERSISTENT job dedupe keys on
+          // `request.idempotencyKey` when present, and its own key for an attachment (type|record|message|attachment id)
+          // has no attempt count, so a retry after a failed attempt would be answered with that failed job.
+          serverRequest.idempotencyKey = idempotencyKey;
+          const response = await authenticatedJsonFetch(
+            `${apiBaseUrl}/api/office/save`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Idempotency-Key': idempotencyKey },
+              body: JSON.stringify(serverRequest),
+              signal,
+            },
+            await getAccessToken(),
+            { getRetryToken: getAccessToken }
+          );
+          const responseText = await response.text();
+          let responseData: unknown;
+          try {
+            responseData = JSON.parse(responseText);
+          } catch {
+            responseData = undefined;
+          }
+          if (response.ok && (responseData as { contentDuplicate?: unknown } | undefined)?.contentDuplicate === true) {
+            // Owner A1: identical to a document already in Spaarke. Nothing was created or changed: neither saved nor failed.
+            const existing = existingDocumentOf(responseData);
+            alreadyInSpaarke.push({ name: attachment.fileName, ...(existing ? { existing } : {}) });
+          } else if (response.ok) {
+            saved.push(attachment.fileName); // accepted, or (200 duplicate) already saved
+          } else if (isProblemDetails(responseData)) {
+            recordFailure(describeCollisionFailure(responseData).message);
+          } else {
+            recordFailure(`Save failed (${response.status}).`);
+          }
+        } catch (err) {
+          if (err instanceof Error && err.name === 'AbortError') return;
+          recordFailure(createErrorFromException(err, 'Failed to save. Please try again.').message);
+        }
+      }
+
+      setAttachmentsOnlyOutcome({ saved, failed, ...(alreadyInSpaarke.length > 0 ? { alreadyInSpaarke } : {}) });
+      setFlowState('idle');
+    },
+    [apiBaseUrl, captureEmailContent, cleanup, getAccessToken, processingOptions, selectedAttachmentIds, selectedEntity]
+  );
+
+  const clearAttachmentsOnlyOutcome = useCallback(() => setAttachmentsOnlyOutcome(null), []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1709,6 +1978,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     flowState,
     selectedEntity,
     setSelectedEntity,
+    saveAttachmentsOnly,
+    attachmentsOnlyOutcome,
+    clearAttachmentsOnlyOutcome,
     selectedAttachmentIds,
     setSelectedAttachmentIds,
     includeBody,

@@ -81,7 +81,15 @@ public static class StartupDiagnostics
                 "\ud83d\udccb Job handlers registered: {Count} handlers available: [{HandlerTypes}]",
                 handlers.Count, handlerTypes);
 
-            var expectedHandlers = new[] { "AppOnlyDocumentAnalysis", "DocumentProcessing", "ProcessEmailToDocument", "ProfileSummary", "RagIndexing", "BatchProcessEmails", "BulkRagIndexing", "EmailAnalysis" };
+            // Expected = the handlers the BFF must always register, plus the RAG handlers that
+            // JobProcessingModule registers only when DocumentIntelligence:Enabled=true. Every entry is a
+            // JobType a handler actually declares (a name with no handler would warn on every start).
+            var expectedHandlers = new List<string> { Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler.JobTypeName };
+            if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
+            {
+                expectedHandlers.Add(Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler.JobTypeName);
+                expectedHandlers.Add(Sprk.Bff.Api.Services.Ai.Jobs.BulkRagIndexingJobHandler.JobTypeName);
+            }
             var missingHandlers = expectedHandlers.Where(e => !handlers.Any(h => h.JobType == e)).ToList();
             if (missingHandlers.Any())
             {

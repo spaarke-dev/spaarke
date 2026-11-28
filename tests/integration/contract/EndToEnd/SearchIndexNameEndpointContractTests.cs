@@ -298,14 +298,16 @@ public sealed class SearchIndexNameEndpointTestFixture : WebApplicationFactory<P
     public SemanticSearchRequest? LastCapturedRequest { get; private set; }
 
     // Test seam: when set, the mock throws this exception instead of returning a
-    // success response. Used by the INDEX_NOT_ALLOWED ProblemDetails test.
-    private Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException? _exceptionToThrow;
+    // success response. Used by the INDEX_NOT_ALLOWED ProblemDetails test and the #3307 500-text tests.
+    private Exception? _exceptionToThrow;
 
     public void ResetCapture()
     {
         LastCapturedRequest = null;
         _exceptionToThrow = null;
     }
+
+    public void ConfigureServiceToThrow(Exception exception) => _exceptionToThrow = exception;
 
     public void ConfigureServiceToThrowIndexNotAllowed(string rejectedIndexName)
     {

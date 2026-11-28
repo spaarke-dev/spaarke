@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -619,6 +620,38 @@ class SegmentAndProbeTests(Base):
         rl = ooxml_redline.Redliner(self.orig, AUTHOR)
         for s in keyed:
             rl.find_para(s["para_key"])  # raises if not unique
+
+    def test_anchor_text_is_off_by_default(self):
+        res = segment_clauses.segment(self.orig)
+        self.assertFalse(any("anchor_text" in s for s in res["sections"]))
+
+    def test_anchor_text_is_exactly_what_the_redliner_searches_including_existing_markup(self):
+        src = self.path("anchors.docx")
+        fx.build(src, PARAS)
+        fx.add_existing_insertion(src, "Governing Law", " and federal law")
+        fx.add_existing_deletion(src, "Anonymized Data", " without limit")
+        res = segment_clauses.segment(src, with_anchor_text=True)
+        rl = ooxml_redline.Redliner(src, AUTHOR)
+        paras = rl.paras()
+        for s in res["sections"]:
+            p = paras[s["index"]]
+            self.assertEqual(s["anchor_text"], {"visible": rl.visible_text(p), "editable": rl.text(p)})
+        by_key = {s["para_key"]: s["anchor_text"] for s in res["sections"] if s["para_key"]}
+        law = next(v for k, v in by_key.items() if k.startswith("9. Governing"))
+        self.assertIn(" and federal law", law["visible"])  # an earlier reviewer's insertion: seen, not editable
+        self.assertNotIn(" and federal law", law["editable"])
+        data = next(v for k, v in by_key.items() if k.startswith("5. Anonymized"))
+        self.assertNotIn("without limit", data["visible"] + data["editable"])  # deleted: neither
+        remedies = next(v for k, v in by_key.items() if k.startswith("8. Remedies"))
+        self.assertIn("\t", remedies["visible"])  # raw: the tab is not collapsed to a space
+        plain = next(v for k, v in by_key.items() if k.startswith("7. Term"))
+        self.assertEqual(plain["visible"], plain["editable"])  # no markup: the two are the same
+
+    def test_anchor_text_cli_flag(self):
+        script = os.path.join(os.path.dirname(HERE), "segment_clauses.py")
+        for flags, expected in (([], False), (["--anchor-text"], True)):
+            p = subprocess.run([sys.executable, script, self.orig, *flags], capture_output=True, check=True, timeout=120)
+            self.assertEqual([("anchor_text" in s) for s in json.loads(p.stdout)["sections"]], [expected] * len(PARAS))
 
     def test_hidden_text_is_flagged(self):
         self.assertFalse(segment_clauses.segment(self.orig)["has_hidden_text"])

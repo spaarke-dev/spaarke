@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15907316274422067031"
+      "templateHash": "16247619226876372473"
     }
   },
   "parameters": {
@@ -208,6 +208,41 @@
         "description": "High availability for the per-customer cache. Owner D12: Enabled. Fixed at create time — changing it on an existing stamp is rejected by Azure."
       }
     },
+    "deployIntakeEngine": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the intake engine: a Container Apps environment + event-triggered Job (KEDA Service Bus) running as its own least-privileged identity, the stamp-private `intake-staging` blob container with a 7-day lifecycle delete rule, and the `intake-engine-requests` and `intake-engine-completions` queues. Default false: existing stamps are unchanged until provisioning opts in (customer-provisioning-orchestration-r1 owes the call)."
+      }
+    },
+    "intakeEngineImage": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Engine image pinned by digest ({loginServer}/sprk-intake-engine@sha256:{digest}, from provisioning-artifacts/intake-engine/latest.json). Empty = deploy the engine infrastructure and identity WITHOUT the Job, because Job creation validates the image pull and the identity's AcrPull on the platform ACR is granted by provisioning after this deployment. Deploy again with the image to create or upgrade the Job."
+      }
+    },
+    "intakeEngineRegistryLoginServer": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Login server of the platform ACR that holds the engine image (platform-controlplane.bicep output acrLoginServer). The decided registry for dev and Model 1 stamps. When set, intakeEngineRegistryName is ignored and provisioning grants AcrPull on the platform ACR to output intakeEngineIdentityObjectId."
+      }
+    },
+    "intakeEngineRegistryName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Name of an EXISTING Azure Container Registry in the stamp resource group (only when intakeEngineRegistryLoginServer is empty, e.g. a Model 2 stamp with an imported image). Never created here."
+      }
+    },
+    "intakeEngineGrantAcrPull": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Grant the intake engine identity AcrPull on intakeEngineRegistryName. Set false when the registry is elsewhere and the grant is made there (controlplane-acr.bicep)."
+      }
+    },
     "tags": {
       "type": "object",
       "defaultValue": {
@@ -371,6 +406,107 @@
         "parameters": {
           "name": {
             "value": "[format('mi-spaarke-{0}-{1}-ontology-writer', parameters('customerId'), parameters('environmentName'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "9540690764789504680"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128,
+              "metadata": {
+                "description": "Name of the User-Assigned Managed Identity (per-customer). Recommended pattern: sprk-{env}-{customerId}-uami. Case-insensitive; 3-128 chars."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the UAMI. Defaults to resource group location."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tag envelope applied to the UAMI. Spaarke standard: env, customerId, owner. Do NOT hardcode - always pass from caller."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            }
+          ],
+          "outputs": {
+            "id": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource ID of the UAMI. Consumed by App Service identity.userAssignedIdentities map key (task 029) and by App Service keyVaultReferenceIdentity PATCH (task 029 + H4). Also POML step 2 \"resourceId\"."
+              },
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('name'))]"
+            },
+            "name": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the UAMI resource. Convenience for downstream logging + Dataverse env-var writes."
+              },
+              "value": "[parameters('name')]"
+            },
+            "principalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Principal (object) ID of the UAMI service principal. Consumed by ALL role assignments in task 030 (Key Vault Secrets User, Storage Blob Data Contributor, Cognitive Services User, Cosmos DB Data Contributor, etc.) + Graph app-role grants (H10)."
+              },
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('name')), '2023-01-31').principalId]"
+            },
+            "clientId": {
+              "type": "string",
+              "metadata": {
+                "description": "Client (application) ID of the UAMI. Consumed by Graph token acquisition scope (H10 app-only Graph client) + Dataverse App User application ID field (H10 registration) + BFF shared-lib MI migration (task 011 #3b)."
+              },
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('name')), '2023-01-31').clientId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployIntakeEngine')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('uami-intake-engine-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('mi-spaarke-{0}-{1}-intake-engine', parameters('customerId'), parameters('environmentName'))]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -3934,6 +4070,729 @@
       ]
     },
     {
+      "condition": "[parameters('deployIntakeEngine')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('intake-staging-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "storageAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.storageAccountName.value]"
+          },
+          "jobPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          },
+          "bffPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "15764312293823914060"
+            }
+          },
+          "parameters": {
+            "storageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the existing stamp storage account, in the resource group this module deploys into."
+              }
+            },
+            "containerName": {
+              "type": "string",
+              "defaultValue": "intake-staging",
+              "metadata": {
+                "description": "Name of the private staging container (the engine pipeline contract: Sprk.Intake.EngineJob and the BFF run job read it from configuration)."
+              }
+            },
+            "deleteAfterDays": {
+              "type": "int",
+              "defaultValue": 7,
+              "minValue": 1,
+              "maxValue": 30,
+              "metadata": {
+                "description": "Days after creation after which staged blobs are deleted. 7 = past any Service Bus retry or dead-letter window (design section 5; spec NFR-03)."
+              }
+            },
+            "jobPrincipalId": {
+              "type": "string",
+              "minLength": 36,
+              "metadata": {
+                "description": "Principal (object) id of the engine job identity. Granted Storage Blob Data Contributor on this container only. On a stamp: the Job's own identity (customer.bicep uamiIntakeEngine), never the stamp UAMI."
+              }
+            },
+            "bffPrincipalId": {
+              "type": "string",
+              "minLength": 36,
+              "metadata": {
+                "description": "Principal (object) id of the BFF identity that stages inputs and reads outputs. Granted Storage Blob Data Contributor on this container only. On a stamp: the stamp UAMI. The two ids are merged (union), so passing the same principal twice makes one assignment, not two with the same name."
+              }
+            }
+          },
+          "variables": {
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe",
+            "containerPrincipalIds": "[union(createArray(parameters('jobPrincipalId')), createArray(parameters('bffPrincipalId')))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-01-01",
+              "name": "[format('{0}/{1}/{2}', parameters('storageAccountName'), 'default', parameters('containerName'))]",
+              "properties": {
+                "publicAccess": "None",
+                "metadata": {
+                  "purpose": "intake-engine-staging",
+                  "ttlDays": "[string(parameters('deleteAfterDays'))]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/managementPolicies",
+              "apiVersion": "2023-01-01",
+              "name": "[format('{0}/{1}', parameters('storageAccountName'), 'default')]",
+              "properties": {
+                "policy": {
+                  "rules": [
+                    {
+                      "name": "delete-intake-staging",
+                      "enabled": true,
+                      "type": "Lifecycle",
+                      "definition": {
+                        "filters": {
+                          "blobTypes": [
+                            "blockBlob"
+                          ],
+                          "prefixMatch": [
+                            "[format('{0}/', parameters('containerName'))]"
+                          ]
+                        },
+                        "actions": {
+                          "baseBlob": {
+                            "delete": {
+                              "daysAfterCreationGreaterThan": "[parameters('deleteAfterDays')]"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "copy": {
+                "name": "containerBlobRbac",
+                "count": "[length(variables('containerPrincipalIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerName')), variables('containerPrincipalIds')[copyIndex()], variables('storageBlobDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalId": "[variables('containerPrincipalIds')[copyIndex()]]",
+                "principalType": "ServicePrincipal",
+                "description": "Intake engine staging container only (container scope; spaarke-intake-pipeline-r1 task 002)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containerName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "containerName": {
+              "type": "string",
+              "value": "[parameters('containerName')]"
+            },
+            "deleteAfterDays": {
+              "type": "int",
+              "value": "[parameters('deleteAfterDays')]"
+            },
+            "blobEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').primaryEndpoints.blob]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployIntakeEngine')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('intake-engine-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "environmentName": {
+            "value": "[format('sprk-{0}-{1}-cae', parameters('customerId'), parameters('environmentName'))]"
+          },
+          "jobName": {
+            "value": "[format('sprk-{0}-{1}-intake-job', parameters('customerId'), parameters('environmentName'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.logAnalyticsId.value]"
+          },
+          "serviceBusNamespaceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusName.value]"
+          },
+          "identityResourceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName'))), '2025-04-01').outputs.id.value]"
+          },
+          "identityPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          },
+          "identityClientId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]"
+          },
+          "bffPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          },
+          "registryLoginServer": {
+            "value": "[parameters('intakeEngineRegistryLoginServer')]"
+          },
+          "registryName": {
+            "value": "[parameters('intakeEngineRegistryName')]"
+          },
+          "grantAcrPull": {
+            "value": "[parameters('intakeEngineGrantAcrPull')]"
+          },
+          "image": {
+            "value": "[parameters('intakeEngineImage')]"
+          },
+          "stagingStorageAccountName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.storageAccountName.value]"
+          },
+          "stagingContainerName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-staging-{0}', variables('baseName'))), '2025-04-01').outputs.containerName.value]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "12477459638130124694"
+            }
+          },
+          "parameters": {
+            "environmentName": {
+              "type": "string",
+              "metadata": {
+                "description": "Container Apps environment name."
+              }
+            },
+            "jobName": {
+              "type": "string",
+              "metadata": {
+                "description": "Container Apps Job name."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the environment and job."
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource id of the stamp Log Analytics workspace (monitoring.bicep logAnalyticsId). The environment sends its console and system logs there through a diagnostic setting."
+              }
+            },
+            "serviceBusNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Existing stamp Service Bus namespace name (service-bus.bicep output). Not created here."
+              }
+            },
+            "requestQueueName": {
+              "type": "string",
+              "defaultValue": "intake-engine-requests",
+              "metadata": {
+                "description": "Engine request queue created here. The engine pipeline contract: the BFF run job sends to it, the Job consumes it."
+              }
+            },
+            "completionQueueName": {
+              "type": "string",
+              "defaultValue": "intake-engine-completions",
+              "metadata": {
+                "description": "Engine completion queue created here. The Job sends completions to it; the BFF consumes it with a processor that accepts only IntakeEngineCompleted (task 014)."
+              }
+            },
+            "identityResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource id of the Job's OWN user-assigned managed identity (customer.bicep uamiIntakeEngine). Never the stamp UAMI."
+              }
+            },
+            "identityPrincipalId": {
+              "type": "string",
+              "minLength": 36,
+              "metadata": {
+                "description": "Principal (object) id of the Job identity, for its RBAC grants."
+              }
+            },
+            "identityClientId": {
+              "type": "string",
+              "minLength": 36,
+              "metadata": {
+                "description": "Client id of the Job identity, exposed to the container as AZURE_CLIENT_ID so DefaultAzureCredential picks it."
+              }
+            },
+            "bffPrincipalId": {
+              "type": "string",
+              "minLength": 36,
+              "metadata": {
+                "description": "Principal (object) id of the BFF identity (the stamp UAMI). Granted Sender on the request queue and Receiver on the completion queue."
+              }
+            },
+            "registryLoginServer": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Login server of a registry OUTSIDE this resource group (the platform ACR: platform-controlplane.bicep output acrLoginServer). When set, registryName is ignored, no lookup is made here, and the AcrPull grant is made on that registry by provisioning. Empty = use registryName in this resource group."
+              }
+            },
+            "registryName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Name of an EXISTING Azure Container Registry in this resource group (only when registryLoginServer is empty). Never created here."
+              }
+            },
+            "grantAcrPull": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Grant the identity AcrPull on registryName (local registry only; ignored when registryLoginServer is set)."
+              }
+            },
+            "image": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Full image reference pinned by digest: {loginServer}/sprk-intake-engine@sha256:{digest}, read from provisioning-artifacts/intake-engine/latest.json (build-intake-engine-image.yml). EMPTY = deploy everything except the Job: Container Apps validates the image pull when the Job is created, so the Job identity's AcrPull on the platform ACR must exist first, and that grant is made by provisioning after this deployment creates the identity. Deploy again with the image to create (or upgrade) the Job."
+              }
+            },
+            "stagingStorageAccountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Stamp storage account name; the staging container lives in it (intake-staging-storage.bicep)."
+              }
+            },
+            "stagingContainerName": {
+              "type": "string",
+              "defaultValue": "intake-staging",
+              "metadata": {
+                "description": "Staging container name (intake-staging-storage.bicep)."
+              }
+            },
+            "appInsightsConnectionString": {
+              "type": "securestring",
+              "metadata": {
+                "description": "Application Insights connection string (monitoring.outputs.connectionString), the same value the BFF gets. Held as a Job secret."
+              }
+            },
+            "replicaTimeoutSeconds": {
+              "type": "int",
+              "defaultValue": 600,
+              "minValue": 60,
+              "maxValue": 600,
+              "metadata": {
+                "description": "Hard stop per execution, in seconds. 600 = the 10-minute job timeout (spec NFR-05); the platform allows more, this module does not."
+              }
+            },
+            "maxExecutions": {
+              "type": "int",
+              "defaultValue": 5,
+              "minValue": 1,
+              "maxValue": 10,
+              "metadata": {
+                "description": "Maximum parallel executions. The spec assumes at most 200 requests per day per stamp, so a small cap is enough."
+              }
+            },
+            "pollingIntervalSeconds": {
+              "type": "int",
+              "defaultValue": 30,
+              "metadata": {
+                "description": "KEDA polling interval, in seconds."
+              }
+            },
+            "cpu": {
+              "type": "string",
+              "defaultValue": "1.0",
+              "metadata": {
+                "description": "Container CPU cores. Python 3.11 + lxml over one .docx."
+              }
+            },
+            "memory": {
+              "type": "string",
+              "defaultValue": "2Gi",
+              "metadata": {
+                "description": "Container memory."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for all resources."
+              }
+            }
+          },
+          "variables": {
+            "deployJob": "[not(empty(parameters('image')))]",
+            "serviceBusDataSenderRoleId": "69a216fc-b8fb-44d8-bc22-1f3c2cd27a39",
+            "serviceBusDataReceiverRoleId": "4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0",
+            "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+            "useLocalRegistry": "[empty(parameters('registryLoginServer'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ServiceBus/namespaces/queues",
+              "apiVersion": "2022-10-01-preview",
+              "name": "[format('{0}/{1}', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]",
+              "properties": {
+                "lockDuration": "PT5M",
+                "maxSizeInMegabytes": 1024,
+                "requiresDuplicateDetection": false,
+                "requiresSession": false,
+                "defaultMessageTimeToLive": "P14D",
+                "deadLetteringOnMessageExpiration": true,
+                "maxDeliveryCount": 5,
+                "enablePartitioning": false
+              }
+            },
+            {
+              "type": "Microsoft.ServiceBus/namespaces/queues",
+              "apiVersion": "2022-10-01-preview",
+              "name": "[format('{0}/{1}', parameters('serviceBusNamespaceName'), parameters('completionQueueName'))]",
+              "properties": {
+                "lockDuration": "PT5M",
+                "maxSizeInMegabytes": 1024,
+                "requiresDuplicateDetection": false,
+                "requiresSession": false,
+                "defaultMessageTimeToLive": "P14D",
+                "deadLetteringOnMessageExpiration": true,
+                "maxDeliveryCount": 5,
+                "enablePartitioning": false
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), parameters('identityPrincipalId'), variables('serviceBusDataReceiverRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataReceiverRoleId'))]",
+                "principalId": "[parameters('identityPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "Intake engine Job consumes the engine request queue (spaarke-intake-pipeline-r1 task 002)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), parameters('identityPrincipalId'), variables('serviceBusDataSenderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataSenderRoleId'))]",
+                "principalId": "[parameters('identityPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "Intake engine Job sends the scheduled retry copy (PriorDeliveryCount) to the engine request queue, then completes the original, like ServiceBusJobProcessor (task 002)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName')), parameters('identityPrincipalId'), variables('serviceBusDataSenderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataSenderRoleId'))]",
+                "principalId": "[parameters('identityPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "Intake engine Job sends the completion Job Contract to its own completion queue (task 002)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), parameters('bffPrincipalId'), variables('serviceBusDataSenderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataSenderRoleId'))]",
+                "principalId": "[parameters('bffPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF dispatches engine runs to the engine request queue (spaarke-intake-pipeline-r1 task 014)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName')), parameters('bffPrincipalId'), variables('serviceBusDataReceiverRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataReceiverRoleId'))]",
+                "principalId": "[parameters('bffPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF consumes engine completions from the engine completion queue (spaarke-intake-pipeline-r1 task 014)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName'))]"
+              ]
+            },
+            {
+              "condition": "[and(variables('useLocalRegistry'), parameters('grantAcrPull'))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('identityPrincipalId'), variables('acrPullRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+                "principalId": "[parameters('identityPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "Intake engine Job pulls the engine image (task 002)"
+              }
+            },
+            {
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2025-01-01",
+              "name": "[parameters('environmentName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "appLogsConfiguration": {
+                  "destination": "azure-monitor"
+                },
+                "workloadProfiles": [
+                  {
+                    "name": "Consumption",
+                    "workloadProfileType": "Consumption"
+                  }
+                ],
+                "zoneRedundant": false
+              }
+            },
+            {
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]",
+              "name": "to-log-analytics",
+              "properties": {
+                "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                "logs": [
+                  {
+                    "category": "ContainerAppConsoleLogs",
+                    "enabled": true
+                  },
+                  {
+                    "category": "ContainerAppSystemLogs",
+                    "enabled": true
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"
+              ]
+            },
+            {
+              "condition": "[variables('deployJob')]",
+              "type": "Microsoft.App/jobs",
+              "apiVersion": "2025-01-01",
+              "name": "[parameters('jobName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', parameters('identityResourceId'))]": {}
+                }
+              },
+              "properties": {
+                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]",
+                "workloadProfileName": "Consumption",
+                "configuration": {
+                  "triggerType": "Event",
+                  "replicaTimeout": "[parameters('replicaTimeoutSeconds')]",
+                  "replicaRetryLimit": 0,
+                  "eventTriggerConfig": {
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1,
+                    "scale": {
+                      "minExecutions": 0,
+                      "maxExecutions": "[parameters('maxExecutions')]",
+                      "pollingInterval": "[parameters('pollingIntervalSeconds')]",
+                      "rules": [
+                        {
+                          "name": "intake-engine-requests",
+                          "type": "azure-servicebus",
+                          "metadata": {
+                            "queueName": "[parameters('requestQueueName')]",
+                            "namespace": "[parameters('serviceBusNamespaceName')]",
+                            "messageCount": "1"
+                          },
+                          "identity": "[parameters('identityResourceId')]"
+                        }
+                      ]
+                    }
+                  },
+                  "registries": [
+                    {
+                      "server": "[if(variables('useLocalRegistry'), reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), '2023-07-01').loginServer, parameters('registryLoginServer'))]",
+                      "identity": "[parameters('identityResourceId')]"
+                    }
+                  ],
+                  "secrets": [
+                    {
+                      "name": "appinsights-connection-string",
+                      "value": "[parameters('appInsightsConnectionString')]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "intake-engine",
+                      "image": "[parameters('image')]",
+                      "resources": {
+                        "cpu": "[json(parameters('cpu'))]",
+                        "memory": "[parameters('memory')]"
+                      },
+                      "env": [
+                        {
+                          "name": "AZURE_CLIENT_ID",
+                          "value": "[parameters('identityClientId')]"
+                        },
+                        {
+                          "name": "INTAKE_SERVICEBUS_FQDN",
+                          "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
+                        },
+                        {
+                          "name": "INTAKE_REQUEST_QUEUE",
+                          "value": "[parameters('requestQueueName')]"
+                        },
+                        {
+                          "name": "INTAKE_COMPLETION_QUEUE",
+                          "value": "[parameters('completionQueueName')]"
+                        },
+                        {
+                          "name": "INTAKE_STAGING_ACCOUNT_URL",
+                          "value": "[format('https://{0}.blob.{1}', parameters('stagingStorageAccountName'), environment().suffixes.storage)]"
+                        },
+                        {
+                          "name": "INTAKE_STAGING_CONTAINER",
+                          "value": "[parameters('stagingContainerName')]"
+                        },
+                        {
+                          "name": "INTAKE_MAX_DELIVERY_COUNT",
+                          "value": "5"
+                        },
+                        {
+                          "name": "INTAKE_JOB_TIMEOUT_SECONDS",
+                          "value": "[string(parameters('replicaTimeoutSeconds'))]"
+                        },
+                        {
+                          "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                          "secretRef": "appinsights-connection-string"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('identityPrincipalId'), variables('acrPullRoleId')))]",
+                "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]",
+                "[extensionResourceId(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), parameters('identityPrincipalId'), variables('serviceBusDataReceiverRoleId')))]",
+                "[extensionResourceId(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('completionQueueName')), parameters('identityPrincipalId'), variables('serviceBusDataSenderRoleId')))]",
+                "[extensionResourceId(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ServiceBus/namespaces/queues', parameters('serviceBusNamespaceName'), parameters('requestQueueName')), parameters('identityPrincipalId'), variables('serviceBusDataSenderRoleId')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "environmentName": {
+              "type": "string",
+              "value": "[parameters('environmentName')]"
+            },
+            "environmentId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"
+            },
+            "jobName": {
+              "type": "string",
+              "value": "[if(variables('deployJob'), parameters('jobName'), '')]"
+            },
+            "jobId": {
+              "type": "string",
+              "value": "[if(variables('deployJob'), resourceId('Microsoft.App/jobs', parameters('jobName')), '')]"
+            },
+            "requestQueueName": {
+              "type": "string",
+              "value": "[parameters('requestQueueName')]"
+            },
+            "completionQueueName": {
+              "type": "string",
+              "value": "[parameters('completionQueueName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-staging-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName')))]"
+      ]
+    },
+    {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[format('kvSecrets-{0}', variables('baseName'))]",
@@ -4513,6 +5372,38 @@
     "appServiceStagingSlotName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApiSlot-{0}', variables('baseName'))), '2025-04-01').outputs.slotName.value]"
+    },
+    "intakeEngineDeployed": {
+      "type": "bool",
+      "value": "[parameters('deployIntakeEngine')]"
+    },
+    "intakeEngineJobName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-engine-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'jobName', 'value'), '')]"
+    },
+    "intakeEngineEnvironmentName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-engine-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'environmentName', 'value'), '')]"
+    },
+    "intakeEngineRequestQueueName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-engine-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'requestQueueName', 'value'), '')]"
+    },
+    "intakeEngineCompletionQueueName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-engine-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'completionQueueName', 'value'), '')]"
+    },
+    "intakeEngineIdentityObjectId": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'principalId', 'value'), '')]"
+    },
+    "intakeEngineIdentityClientId": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-intake-engine-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'clientId', 'value'), '')]"
+    },
+    "intakeStagingContainerName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('deployIntakeEngine'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('intake-staging-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'containerName', 'value'), '')]"
     }
   }
 }

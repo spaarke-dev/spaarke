@@ -1643,7 +1643,7 @@ public sealed class IncomingCommunicationProcessor
     /// Enqueues an AppOnlyDocumentAnalysis job for a document record (best-effort).
     /// Mirrors CommunicationService.EnqueueDocumentAnalysisAsync for inbound parity.
     /// </summary>
-    private async Task EnqueueDocumentAnalysisAsync(Guid documentId, Guid communicationId, CancellationToken ct)
+    internal async Task EnqueueDocumentAnalysisAsync(Guid documentId, Guid communicationId, CancellationToken ct)
     {
         try
         {
@@ -1653,9 +1653,9 @@ public sealed class IncomingCommunicationProcessor
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = communicationId.ToString("N"),
-                IdempotencyKey = $"DocAnalysis:{documentId}",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
-                MaxAttempts = 2,
+                MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,
                 Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
                 {
