@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -34,7 +35,21 @@ public static class PromptInputSection
     /// supplied <see cref="JsonElement"/> (the caller owns the operand's shape) — the renderer never
     /// re-cases it, so a camelCase element renders camelCase (matching the narrator replica).
     /// </summary>
-    private static readonly JsonSerializerOptions IndentedOptions = new() { WriteIndented = true };
+    /// <remarks>
+    /// <b>Text is shown to the model as text, not as <c>\uXXXX</c> escapes</b>
+    /// (<see cref="JavaScriptEncoder.UnsafeRelaxedJsonEscaping"/>; the default encoder escapes every non-ASCII
+    /// character and <c>" ' &amp; &lt; &gt; +</c>). A prompt is not HTML, so the HTML-safety escaping buys nothing,
+    /// and it costs correctness: a model asked to quote a right single quote or a left double quote that it was
+    /// shown as the escape text (backslash, u, 2019 / 201C) copies the escape and garbles it (spaarke-intake-pipeline-r1 task 004 live run 2026-11-26:
+    /// gpt-5-reasoning wrote <c>\u0019</c>, <c>\u001c</c>, <c>\u001d</c>; gpt-4.1-mini wrote <c>\u0000</c>,
+    /// <c>\u0002</c>, <c>\u001A</c>, all present as escape text in the raw HTTP response bytes). Control characters, <c>"</c> and <c>\</c> are still
+    /// escaped, as JSON requires; characters outside the BMP are still written as surrogate-pair escapes.
+    /// </remarks>
+    internal static readonly JsonSerializerOptions IndentedOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     /// <summary>
     /// True when <paramref name="input"/> carries a renderable operand (non-null, non-<c>Null</c>,

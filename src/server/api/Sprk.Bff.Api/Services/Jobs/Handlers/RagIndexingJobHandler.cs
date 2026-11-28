@@ -167,9 +167,6 @@ public class RagIndexingJobHandler : IJobHandler
                     Metadata = payload.Metadata,
                     ParentEntity = parentEntity,
                     ReplaceParentEntity = replaceParent,
-                    // Task 029: only a version-save job sets this; the leftover chunks are removed from the index the
-                    // new chunks landed in.
-                    ReplaceStaleChunks = payload.ReplaceStaleChunks
                 };
 
                 // Call FileIndexingService using app-only authentication.
@@ -407,19 +404,6 @@ public class RagIndexingJobPayload
     // No index name (field-mapping-server-write-path-r1 task 041, FR-40): a payload queued before the change that still
     // carries "searchIndexName" deserializes and the value is ignored.
 
-    /// <summary>
-    /// Task 029 (spaarkeai-word-add-in-r1): when true, after the new chunks are written the file's leftover
-    /// chunks from a previous, longer index are deleted from the same index
-    /// (<see cref="FileIndexRequest.ReplaceStaleChunks"/>). Originally set only for the index job of an
-    /// Office VERSION save; <b>task 048</b> made every producer that builds this payload through
-    /// <see cref="Services.Ai.PostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync"/> set it
-    /// unconditionally (Office create + version save, Email-to-Document, outbound-email enrichment,
-    /// post-AI-analysis re-index), plus the Knowledge Base admin reindex route, the playbook Index node,
-    /// and the document check-in re-index trigger. The scheduled "unindexed only" bulk sweep is the one
-    /// producer that still omits it (nothing to trim by construction — the query excludes already-indexed
-    /// documents). False is still omitted from the JSON (<c>WhenWritingDefault</c>), so a producer that
-    /// never sets the property keeps a byte-for-byte-unchanged payload.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public bool ReplaceStaleChunks { get; set; }
+    // No stale-chunk switch (GitHub #3304): every index removes the file's leftover chunks (FileIndexingService). A
+    // payload queued before the change that still carries "ReplaceStaleChunks" deserializes and the value is ignored.
 }

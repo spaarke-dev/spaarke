@@ -101,7 +101,7 @@ R3 ships `InMemoryBackgroundJobStore` (default registration). A `DataverseBackgr
 - Reads `sprk_backgroundjob` rows on startup + refreshes hourly (or on-demand via `RefreshDefinitionsAsync` after admin enable/disable)
 - For each enabled job, parses cron via Cronos → computes next-fire → dispatches `IScheduledJob.ExecuteAsync` at the right time
 - Wraps each invocation in `JobRetryPolicy` (default 3 attempts; no delay before attempt 1, then `BaseDelay·2^(attempt-2)` — 5s, 10s — capped at 2min; corrected 2026-09-13 against `JobRetryPolicy.cs`)
-- Persists `sprk_backgroundjobrun` row per invocation; idempotency probe via `HasRunForScheduledTimeAsync` prevents duplicate execution on restart mid-tick
+- Records each invocation's run (`BackgroundJobRunRecord`) in the `IBackgroundJobStore`. **Today** that store is `InMemoryBackgroundJobStore`, so run history is process-local and lost on restart; a `sprk_backgroundjobrun` row per invocation is the **target** state, once a `DataverseBackgroundJobStore` exists (see "Runtime as built" below). The idempotency probe `HasRunForScheduledTimeAsync` is likewise process-local today, so it does not prevent a duplicate execution across a restart mid-tick
 - Honors `CancellationToken` end-to-end; `StopAsync` drains in-flight jobs within 30s (NFR-07)
 
 **Registration** (canonical):

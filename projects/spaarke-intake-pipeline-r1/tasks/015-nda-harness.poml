@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-09: NDA harness — edit plan → engine → redline/external/clean + clause table → check_outputs → sprk_document + sprk_analysis on the run; pinned standard version stamped; prior markup preserved</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>blocked — tasks 014, 004, 008 (Clean-copy resolution recorded by the owner 2026-11-26)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF harness (.cs) writing documents and analyses on the persist path; depends on 3 tasks; high-risk item R1 in the plan.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FULL rigor with 3 dependencies and plan Risk Register R1 (prior markup / Clean copy); the first concrete harness defines how every later harness persists.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>014, 004, 008</deps>
+    <tags>bff-api, ai, worker, unit-test, integration-test</tags>
+    <estimated-effort>8-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the NDA harness on the task 012 contract: build the edit plan through `IAgreementAi` (task 004), run the engine through the task 014 dispatcher, and on a passing `check_outputs` persist the redline, external and (per the 008 resolution) clean outputs plus the clause table as `sprk_document`s on the request and the results as `sprk_analysis`/`sprk_analysisoutput` linked to the run, in one persist step, stamping the pinned NDA standard version on the run and every output. Prior tracked changes and comments in the submitted draft are preserved.</prompt>
+  <role>SPAARKE platform developer. Expert in the BFF write path (sprk_document via SPE, sprk_analysis persistence), AI facades and the intake harness contract. Follow ADRs strictly.</role>
+  <goal>`Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs` registered with key `nda` (one DI line; the Binding row exists from task 012), with Analyse = edit plan (persisted before Build), Build = engine dispatch/await via 014, Persist = SPE upload + `sprk_document` + `sprk_analysis`/`sprk_analysisoutput` in one Dataverse transaction with deterministic ids, approval-required = true, a return payload of document ids; tests on the synthetic corpus for clean NDA, counterparty-markup NDA, check failure and version stamp.</goal>
+
+  <context>
+    <background>Spec FR-09 (acceptance a–f), NFR-09 (pinned "Spaarke NDA – Mutual" v1.2), NFR-10, Unresolved Q1 (resolved 2026-11-26: Clean accepts all revisions from all sides) and Q2 (ADR-049 scope, Path C, confirm in `/adr-check`); project CLAUDE.md §2 (prior markup preserved; redline/external lose no edit and never auto-accept; refused edits "A with B as backup"). On master the engine refuses the WHOLE plan (exit 3) when one edit cannot be placed, and task 001 reports that as `plan_does_not_fit` with the refused edit index + reason code; the harness repairs that edit once through IAgreementAi and re-dispatches, then turns a still-refused edit into a comment plus a "manual" clause-table row; with the accelerator skip-and-report mode (asked 2026-11-26) the engine reports refused edits itself. The harness must not post-process the .docx. The Phase 0 spike report (`notes/spikes/phase0-spike-report.md`, task 008) records the Clean-copy behaviour and the owner's resolution. Classification is already persisted by the orchestrator's Classify stage (task 013); the harness reuses it and never re-classifies. Corpus: `src/accelerators/practices/nda/evals/corpus/nda-01` (clean), `nda-02` (counterparty markup), `nda-03` (injection), `msa-01` (non-NDA).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs</file>
+      <file role="new">tests/integration/seam/Intake/NdaIntakeHarnessSeamTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs (one harness registration)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IIntakeHarness.cs (task 012), src/server/api/Sprk.Bff.Api/Services/Intake/Engine/IntakeEngineDispatcher.cs (task 014), src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IAgreementAi.cs (task 004)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (SPE upload; ADR-007)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs:236 (CreateDocumentWithSpePointersAsync — confirm it is the canonical app-only sprk_document writer, CAPABILITY-INDEX rows 4 and 13)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs (sprk_analysis / sprk_analysisoutput persistence)</file>
+      <file role="canonical-reference">projects/spaarke-intake-pipeline-r1/notes/spikes/phase0-spike-report.md (task 008; Clean-copy outcome)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">Engine dispatch, completion and timeout.</dependency>
+      <dependency task="004" status="pending">IAgreementAi.BuildEditPlanAsync.</dependency>
+      <dependency task="008" status="pending">Spike report incl. the Clean-copy finding and owner resolution.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Scope: every output file. Uploaded to SPE only through `SpeFileStore`; outputs are never served from the staging container.</constraint>
+    <constraint source="ADR-013">Scope: AI calls in the harness. Only through `IAgreementAi` (no direct IActionRunner); the classification result is read from the run, not recomputed.</constraint>
+    <constraint source="ADR-039">Scope: AI used by the harness. Catalogued Actions only (`agreement-classify`, `agreement-edit-plan`), resolved by ConsumerTypes key.</constraint>
+    <constraint source="ADR-049">Scope: output authoring. Outputs are new documents produced by the engine, never authored through Compose or ComposeShadowPatchEngine; no fuzzy text search or .docx post-processing in this harness (Path C; confirm in `/adr-check`, Unresolved Q2).</constraint>
+    <constraint source="ADR-002">Scope: Persist. Documents and analyses are created by the BFF write path in one transaction with deterministic ids, so a redelivered Persist creates nothing new (FR-07b).</constraint>
+    <constraint source="project">Scope: prior markup. Existing tracked changes and comments are never accepted, rejected or removed; refused/crossing edits get one AI rewrite, then appear as a comment plus a "manual" clause-table row (FR-09f); the redline and external outputs lose no edit and accept none; the Clean copy accepts all revisions from all sides (FR-09e, owner 2026-11-26).</constraint>
+    <constraint source="project">Scope: version stamping. The pinned standard name and version (v1.2) are written on the run and on every output record (NFR-09).</constraint>
+    <constraint source="project">Scope: tests and fixtures. Synthetic corpus only; never `answer-key/` or a real NDA (NFR-10). No edits under `Services/Finance/Submission/`.</constraint>
+    <constraint source="ADR-015">Scope: logs and run fields. Ids, outcome codes and counts only; no clause text.</constraint>
+    <constraint source="bff-extensions">Scope: the PR. State the Placement Justification, measure the publish-size delta against a fresh master build, ≤ 60 MB total, no new package and no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Harness contract" location="src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/IIntakeHarness.cs">Implement the task 012 contract; register with one DI line.</pattern>
+      <pattern name="App-only document + SPE pointers" location="src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs">Create the sprk_document with SPE pointers after upload.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the 008 spike report and notes/decisions.md rows of 2026-11-26 (Clean copy; refused edits "A with B as backup").</step>
+    <step order="2">Analyse: call BuildEditPlanAsync; persist the plan reference on the run (blob/staging id, not content) before advancing.</step>
+    <step order="3">Build: dispatch via IntakeEngineDispatcher and await completion through the run state (014).</step>
+    <step order="4">Persist: on check pass, upload outputs to the request's SPE container via SpeFileStore and create `sprk_document`s + `sprk_analysis`/`sprk_analysisoutput` (clause table) in one transaction with deterministic ids; stamp the standard version; on check failure hold with admin attention.</step>
+    <step order="5">Return result: approval-required = true; return payload = document ids.</step>
+    <step order="6">Register the harness (key `nda`); write NdaIntakeHarnessTests: nda-01 three outputs + clause table; nda-02 keeps every prior revision/comment and lists refused edits as manual rows; check failure → held, nothing for approval; version stamp; redelivered Persist creates nothing new.</step>
+    <step order="7">Run `/adr-check` on the change and record the ADR-049 scope confirmation (Unresolved Q2).</step>
+    <step order="8">`dotnet build`, `dotnet test`; measure publish size vs fresh master.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="10">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the redline or external output loses or accepts any prior or new edit, STOP and escalate (owner rule 2026-11-26); do not post-process the .docx to hide it.</trigger>
+    <trigger>If `/adr-check` does not confirm ADR-049 I-5/I-7 are Compose-scoped (Unresolved Q2), STOP and raise the 🔔 ADR Conflict per root CLAUDE.md §6.5.</trigger>
+    <trigger>If preserving prior markup would need harness-side .docx edits (beyond what the engine outputs), STOP and coordinate with the accelerator session "acclerator-r1"; never edit the engines.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 1 (orchestration; invoice-typed, not reusable) and row 14 (app-only AI via facade); spec §11 "Harness contract and registry" (the NDA harness is its first implementation). Persistence reuses SpeFileStore (CAPABILITY-INDEX row 13) and AnalysisResultPersistence.</existing>
+    <extension>No — no existing component turns an agreement into engine-produced redline outputs; the harness composes existing writers rather than duplicating them.</extension>
+    <cost-of-doing-nothing>A submitted NDA never produces a marked-up output for attorney approval; success criterion 4 and FR-09 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/Harnesses/Nda/NdaIntakeHarness.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</output>
+    <output type="test">tests/integration/seam/Intake/NdaIntakeHarnessSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given synthetic nda-01, the harness produces the outputs required by the Clean-copy resolution plus a clause table, `check_outputs` passes, and they are persisted as `sprk_document`s on the request with `sprk_analysis` linked to the run (FR-09a).</criterion>
+    <criterion testable="true">Given synthetic nda-02 (counterparty revisions and comments), every prior revision and comment remains in the redline and external outputs, and each refused edit appears as a comment plus a "manual" clause-table row (FR-09b).</criterion>
+    <criterion testable="true">Negative: a `check_outputs` failure holds the run with admin attention and nothing is sent for approval (FR-09c).</criterion>
+    <criterion testable="true">The run and every output record carry the pinned standard version v1.2 (FR-09d, NFR-09).</criterion>
+    <criterion testable="true">The Clean output accepts all revisions from all sides; the redline and external outputs keep every prior and new edit and accept none (FR-09e, owner 2026-11-26).</criterion>
+    <criterion testable="true">Refused edits (FR-09f, owner "A with B as backup"): given a plan with one unplaceable edit, the harness gives that edit one AI rewrite and one more engine pass; if still refused it becomes a comment plus a "manual" clause-table row and the other edits are applied; with the accelerator skip-and-report mode available the harness uses it instead of whole-plan refusal. Negative: the run never fails because of a single refused edit, and no clause text from engine errors is logged.</criterion>
+    <criterion testable="true">Negative: a redelivered Persist creates no second document or analysis; resume after Analyse does not call BuildEditPlanAsync again.</criterion>
+    <criterion testable="true">`/adr-check` records the ADR-049 Path C confirmation; no Compose code is referenced.</criterion>
+    <criterion testable="true">No test reads `answer-key/` or a real NDA; PR states Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Seeding proof requested for the prior-markup preservation test (losing a counterparty revision is a data-loss outcome): feed an output with one prior revision removed, confirm the test fails, restore. If OfficeDocumentPersistence is not the right app-only document writer, use the CAPABILITY-INDEX row 4 write-path owner and record the choice. Accelerator skip-and-report contract (proposed 2026-11-26, PR pending; full text in notes/001-engine-container.md): ooxml_redline.py --skip-unplaceable REPORT.json (codes only, 0-based edit index, closed code set), summary_table.py/check_outputs.py --refused REPORT.json. Accelerator flag, agreed: in skip mode the EXTERNAL redline silently lacks the refused changes, so when refused &gt; 0 the run and the approval Work Item must carry the refused count and the "Changes to make by hand" list so the attorney sees it before approving the external copy. B repair: re-plan only the refused edits through IAgreementAi, one more engine pass on the original draft, then by-hand rows. Deterministic anchoring (owner 2026-11-26, notes/decisions.md): segment_clauses runs first (engine job `segment` operation); the edit-plan AI picks `para` only from the closed para_key list and quotes verbatim; the BFF exact-match pre-check refuses bad anchors (closed codes) before the engine; never fuzzy, approximate or whole-document text matching. Refused edits from the pre-check and from the engine take the same B path (one rewrite, then manual row).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

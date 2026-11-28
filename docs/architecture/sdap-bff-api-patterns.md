@@ -250,8 +250,8 @@ Forwarding registrations in `GraphModule` resolve narrow interfaces to the compo
 
 Job handlers implement `IJobHandler`, registered by `JobType` string in `JobProcessingModule`:
 
-- `DocumentProcessingJobHandler`, `AppOnlyDocumentAnalysisJobHandler`, `EmailAnalysisJobHandler`
-- `RagIndexingJobHandler`, `ProfileSummaryJobHandler`, `BulkRagIndexingJobHandler`
+- `AppOnlyDocumentAnalysisJobHandler`, `RagIndexingJobHandler`, `BulkRagIndexingJobHandler`
+- `IncomingCommunicationJobHandler`, `AttachmentClassificationJobHandler`, invoice and billing handlers (full list: `JobProcessingModule`)
 
 All handlers follow the same pattern: idempotency check, acquire Redis processing lock, process, release lock in finally block, mark as processed with 7-day TTL. AI/RAG failures are non-fatal.
 

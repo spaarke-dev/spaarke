@@ -47,7 +47,7 @@ Identity + resolution columns (Phase 1R originals):
 | `sprk_environment` | NVARCHAR(100) | `dev` \| `test` \| `prod` \| `*` (wildcard). Specific beats wildcard. |
 | `sprk_priority` | Int | Tiebreaker — **lowest wins**. Null → 500. Convention: named canonical rows 400, `default` alias 500, overrides 100, fallback 900. |
 | `sprk_enabled` | Boolean | `false` rows are invisible to every resolve path. Soft-disable without deletion. |
-| `sprk_matchconditions` | Memo (JSON) | Optional flat `{key: string \| string[]}` predicate against `IRoutingContext` (`mimeType`, `documentType`). Null/empty/`{}` always matches; malformed JSON **fails closed**; unknown keys fail the match (context doesn't expose them). |
+| `sprk_matchconditions` | Memo (JSON) | Optional flat `{key: string \| string[]}` predicate against `IRoutingContext` (`mimeType`, `documentType`, `requestType`). Null/empty/`{}` always matches; malformed JSON **fails closed**; unknown keys fail the match (context doesn't expose them). |
 | `sprk_playbook` | Lookup → `sprk_analysisplaybook` | Legacy frozen-engine target. Null on Action-target rows. |
 | `sprk_action` | Lookup → `sprk_analysisaction` | The execution-unit target (canonical). Null on pure-engine legacy rows. Rows with NEITHER target are admin errors — skipped by resolution. |
 

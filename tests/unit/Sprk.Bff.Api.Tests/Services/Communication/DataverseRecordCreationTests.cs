@@ -156,8 +156,22 @@ public class DataverseRecordCreationTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            // Task 006 (§10.1 item 7): an email reply (InReplyToMessageId) is now sent as createReply on its parent, so the mailbox
+            // must answer the parent lookup and the createReply with an id. These tests are about the Dataverse record the send
+            // writes, not about Graph, so the parent always exists. Everything else is answered as before.
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && path.EndsWith("/createReply", StringComparison.Ordinal))
+                return Task.FromResult(Json(HttpStatusCode.Created, """{"id":"DRAFT"}"""));
+            if (request.Method == HttpMethod.Get && path.Contains("/messages", StringComparison.OrdinalIgnoreCase)
+                && !path.Contains("sentitems", StringComparison.OrdinalIgnoreCase))
+                return Task.FromResult(Json(HttpStatusCode.OK,
+                    path.EndsWith("/messages", StringComparison.Ordinal) ? """{"value":[{"id":"PARENT"}]}""" : """{"id":"PARENT"}"""));
+
             return Task.FromResult(new HttpResponseMessage(_statusCode));
         }
+
+        private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
+            new(status) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
     }
 
     #endregion
@@ -843,9 +857,36 @@ public class DataverseRecordCreationTests
     }
 
     private Task<SendCommunicationResponse> SendReplyAsync(
-        ICommunicationDataverseService comm, bool userMode, bool? isInternalOnly = null, Guid? threadId = null) =>
-        CreateService(communicationDataverse: comm).SendAsync(
-            EmailRequest(userMode, isInternalOnly, threadId: threadId, inReplyTo: ReplyParentMessageId), CallerContext());
+        ICommunicationDataverseService comm, bool userMode, bool? isInternalOnly = null, Guid? threadId = null)
+    {
+        // Task 006 (uac-r2): an app-only reply needs a parent the caller can read. These tests are about the record the send writes, so
+        // the caller can read it (the check itself: tests/integration/auth/Communication/CommunicationReplyParentAccessTests.cs).
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_communication" && q.TopCount != null),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity> { new("sprk_communication", ReplyParentId) }));
+        var context = CallerContext();
+        context.Request.Headers.Authorization = "Bearer caller-token";
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions
+            .AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(services, new ReadableParentProbe());
+        context.RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+
+        return CreateService(communicationDataverse: comm).SendAsync(
+            EmailRequest(userMode, isInternalOnly, threadId: threadId, inReplyTo: ReplyParentMessageId), context);
+    }
+
+    /// <summary>The caller holds Read on every record asked about.</summary>
+    private sealed class ReadableParentProbe() : Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe(
+        new HttpClient(),
+        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+        Mock.Of<ILogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>>())
+    {
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default) =>
+            Task.FromResult(AccessRights.Read);
+    }
 
     [Theory]
     [InlineData(false, null)]

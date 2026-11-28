@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -264,7 +265,8 @@ public sealed class AssignTaskRecipientGatePlaneTests
                 .ReturnsAsync((Guid _, string entity, CancellationToken _) => empty(entity));
         }
 
-        var composed = await Gate(Mock.Of<IContactIdentityStore>(), sets.Object)
+        // r4 task 045: a WorkforceHome composition reads the stored tenant, so the store answers it (the row's own tenant is not read).
+        var composed = await Gate(Identities(row).Object, sets.Object)
             .ComposePortalPrincipalAsync(row, AssignTaskRecipientGate.PortalPlaneOf(row), CancellationToken.None);
 
         composed.Principal.Plane.Should().Be(
@@ -315,6 +317,107 @@ public sealed class AssignTaskRecipientGatePlaneTests
         (await Gate(Identities(row).Object, sets.Object).DecideAsync(Contact, Core, Guid.NewGuid(), null, CancellationToken.None))
             .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.Unverified));
         sets.Invocations.Should().BeEmpty();
+    }
+
+    // ── r4 task 045 (#2499): the WorkforceHome principal carries the STORED home tenant, as GetContactAsync's row has none ──
+
+    /// <summary>The contact row as production's <c>GetContactAsync</c> answers it: the home pair's oid and plane, no tenant.</summary>
+    private static ContactBindingRow HomeContactAsGetContactReadsIt() => HomeContact() with { RawExternalTenantId = null };
+
+    [Fact]
+    public async Task AWorkforceHomeContact_WithAReadableStoredTenant_ComposesThePortalPrincipalWithThatTenant()
+    {
+        var row = HomeContactAsGetContactReadsIt();
+        var identities = Identities(row);
+        identities.Setup(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HomeTenantLookup.FromStored(HomeTenant.ToString("D")));
+        var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        sets.Setup(s => s.ComposeAsync(
+                It.Is<WorkforcePrincipal>(p => p.IsContactOnly && p.ContactId == Contact && p.TenantId == HomeTenant.ToString("D")),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entity,
+                Rights = new Dictionary<Guid, AccessRights>(),
+                Sources = new AccessibleRecordSetSources(false, true, false),
+            });
+
+        var composed = await Gate(identities.Object, sets.Object)
+            .ComposePortalPrincipalAsync(row, ExternalContactPlane.WorkforceHome, CancellationToken.None);
+
+        composed.Principal.Plane.Should().Be(CallerPrincipalPlane.Workforce);
+        sets.Invocations.Should().HaveCount(3, "one composition per root table, each with the stored tenant (the strict setup would throw otherwise)");
+    }
+
+    [Theory]
+    [InlineData(Access.StandingGrant)]
+    [InlineData(Access.Organization)]
+    public async Task AWorkforceHomeContact_WhoseRowCarriesNoTenant_IsStillEmailed_AsTheStoredTenantIsRead(Access access)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        var task = data.Add("matters", Matter, "Assigned task");
+
+        var identities = Identities(HomeContactAsGetContactReadsIt());
+        identities.Setup(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HomeTenantLookup.FromStored(HomeTenant.ToString("D")));
+
+        (await Gate(identities.Object, Evaluator(access), data.NewService())
+                .DecideAsync(Contact, Core, Guid.Parse(task), null, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.ForExternal());
+    }
+
+    public enum TenantRead { Failed, ColumnMissing, Empty, NotAGuid, Throws }
+
+    /// <summary>MUST NOT FIRE: the first tenant read (the link check's) answers, the second (the composition's) does not.
+    /// The decision ends Unverified with a fail-closed warning, nothing is composed, and nobody is emailed.</summary>
+    [Theory]
+    [InlineData(TenantRead.Failed)]
+    [InlineData(TenantRead.ColumnMissing)]
+    [InlineData(TenantRead.Empty)]
+    [InlineData(TenantRead.NotAGuid)]
+    [InlineData(TenantRead.Throws)]
+    public async Task AWorkforceHomeContact_WhoseStoredTenantCannotBeReadForTheComposition_IsUnverified_AndNeverComposedWithAnEmptyTenant_MustNotFire(
+        TenantRead second)
+    {
+        var row = HomeContactAsGetContactReadsIt();
+        var identities = Identities(row);
+        var good = HomeTenantLookup.FromStored(HomeTenant.ToString("D"));
+        var sequence = identities.SetupSequence(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>())).ReturnsAsync(good);
+        _ = second switch
+        {
+            TenantRead.Failed => sequence.ReturnsAsync(HomeTenantLookup.Failed),
+            TenantRead.ColumnMissing => sequence.ReturnsAsync(HomeTenantLookup.ColumnMissing),
+            TenantRead.Empty => sequence.ReturnsAsync(HomeTenantLookup.FromStored(null)),
+            TenantRead.NotAGuid => sequence.ReturnsAsync(HomeTenantLookup.FromStored("not-a-guid")),
+            _ => sequence.ThrowsAsync(new HttpRequestException("tenant read down")),
+        };
+        var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        var log = new BindingLogCapture<AssignTaskRecipientGate>();
+        var gate = new AssignTaskRecipientGate(identities.Object, new AssignedAccessTestDoubles.FakeAssignedAccessStore(),
+            new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None), null!, null!, sets.Object, null!, log);
+
+        (await gate.DecideAsync(Contact, Core, Guid.NewGuid(), null, CancellationToken.None))
+            .Should().Be(AssignTaskRecipient.Refused(AssignTaskRefusal.Unverified));
+
+        sets.Invocations.Should().BeEmpty("an unreadable tenant never composes a principal, least of all an empty-tenant one");
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("fail closed"));
+        log.Messages.Should().NotContain(m => m.Contains(HomeTenant.ToString("D")) || m.Contains(HomeOid.ToString("D")));
+    }
+
+    /// <summary>Cancellation is not a fault: it propagates out of the composition's tenant read, as out of the link check's.</summary>
+    [Fact]
+    public async Task AWorkforceHomeContact_WhoseTenantReadIsCancelled_PropagatesTheCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        var identities = Identities(HomeContactAsGetContactReadsIt());
+        identities.Setup(i => i.ReadHomeTenantAsync(Contact, It.IsAny<CancellationToken>()))
+            .Returns(() => { cts.Cancel(); throw new OperationCanceledException(cts.Token); });
+
+        var act = () => Gate(identities.Object, Mock.Of<IAccessibleRecordSetService>())
+            .ComposePortalPrincipalAsync(HomeContactAsGetContactReadsIt(), ExternalContactPlane.WorkforceHome, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
@@ -386,7 +489,10 @@ public sealed class AssignTaskRecipientGatePlaneTests
         // The gate's answer, from the contact row as stored: the stored pair IS the token pair.
         var row = (await store.GetContactAsync(contactId, CancellationToken.None)).Rows.Should().ContainSingle().Subject;
         row.Binding.Should().Be(new BindingState(BindingKind.Bound, HomeOid, IdentityPlaneMarker.WorkforceHome));
-        Guid.Parse(row.RawExternalTenantId!).Should().Be(HomeTenant);
+        // The row GetContactAsync answers carries no tenant (as production: ContactSelect leaves the A9 column out); the stored
+        // tenant is what ReadHomeTenantAsync answers, and what the gate reads.
+        row.RawExternalTenantId.Should().BeNull("the real GetContactAsync never selects sprk_externaltenantid");
+        (await store.ReadHomeTenantAsync(contactId, CancellationToken.None)).HomeTenantId.Should().Be(HomeTenant);
 
         var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
         var gate = Gate(store, sets.Object);

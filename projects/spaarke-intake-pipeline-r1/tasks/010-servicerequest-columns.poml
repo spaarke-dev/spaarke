@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-05: sprk_servicerequest intake columns — channel, stage, current run, send-email-updates, correlation id (reuse sprk_requesttype and sprk_assignedtointernal if types fit)</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>blocked — ontology coordination on sprk_servicerequest (spec Unresolved Q3); owner OK for the dev schema change</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new schema script and Dataverse columns with explicit ADR-002 constraints; no BFF/PCF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema work with an exact script to copy (Add-BindingContextTypeTagsColumn.ps1) and the dataverse-create-schema skill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, fields, solution</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the intake columns to `sprk_servicerequest` through an idempotent schema script copied from `scripts/Add-BindingContextTypeTagsColumn.ps1`, after agreeing names with spaarke-ontology-platform-r1. Reuse `sprk_requesttype` and `sprk_assignedtointernal` if their types fit (verify on dev); make stage writable only by the BFF; update `docs/data-model/sprk_servicerequest.md`.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse schema via Web API + PowerShell (no PAC column commands), column security and the BFF write-path model. Follow ADRs strictly.</role>
+  <goal>`scripts/Add-ServiceRequestIntakeColumns.ps1` (idempotent, -WhatIf) creates on dev: channel (choice: Front Door, Console, Email, Copilot), intake stage (choice: Submitted, In review, Needs triage, Awaiting approval, Returned, Closed), current run (lookup → sprk_processingjob), send email updates (boolean, column default No — the BFF sets the per-channel default at create), correlation id (string, canonical GUID text per ADR-044); stage is column-secured so only the BFF application user can update it; the solution XML and data-model doc reflect the result.</goal>
+
+  <context>
+    <background>Spec FR-05 (acceptance a–c), Assumptions ("send email updates" default ON for email-door requests, OFF for Front Door and Console — applied by the BFF at create, not by the column default), Unresolved Q3, ADR Tensions row ADR-002. Plan §2 Schema findings: `sprk_servicerequest` already has `sprk_requesttype` (local choice: NDA Assessment 100000000, Invention 100000001, Policy 100000002, Trademark 100000003 — documented at docs/data-model/sprk_servicerequest.md:22), `sprk_assignedtointernal` (not in the data-model doc; type unconfirmed), and ontology-owned `sprk_direction`, `sprk_disposition`. The live Dataverse MCP was unavailable at planning, so types must be confirmed on dev. The request record's run lookup targets `sprk_processingjob` (task 011 adds the reverse request lookup).</background>
+    <relevant-files>
+      <file role="new">scripts/Add-ServiceRequestIntakeColumns.ps1</file>
+      <file role="modify">docs/data-model/sprk_servicerequest.md</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/Entity.xml (export after deploy, if the solution XML is maintained for this entity)</file>
+      <file role="canonical-reference">scripts/Add-BindingContextTypeTagsColumn.ps1 (script structure to copy: params, auth, idempotent create, -WhatIf)</file>
+      <file role="canonical-reference">scripts/ebilling/Deploy-EbillingDecisionNoteColumns.ps1 (column security, IsSecured precedent)</file>
+      <file role="canonical-reference">scripts/check-dataverse-columns.ps1 (verify types on dev)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependency; external gate: ontology agreement (Unresolved Q3) and owner OK for the dev change.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">Scope: the stage, current-run and assigned-attorney columns. No plugin; the BFF is the single writer: stage is column-secured with a field security profile granting update only to the BFF application user, so a client (form, Xrm.WebApi) write of stage is refused (FR-05b).</constraint>
+    <constraint source="ADR-044">Scope: the correlation id column. Stores canonical lowercase hyphenated GUID text (36 chars), the same format the BFF writes to `sprk_processingjob.sprk_correlationid`.</constraint>
+    <constraint source="project">Scope: column names and the ontology columns. Do not create, rename or alter `sprk_direction`, `sprk_disposition` or a response-due-date column; new names are agreed with spaarke-ontology-platform-r1 before the script runs (FR-05c).</constraint>
+    <constraint source="project">Scope: reuse. Use `sprk_requesttype` as the request type and `sprk_assignedtointernal` as the assigned attorney only if dev confirms a choice and a systemuser lookup respectively; otherwise escalate instead of adding parallel columns.</constraint>
+    <constraint source="project">Scope: execution against dev. Run the script with -WhatIf first, then for real only after the owner's explicit OK; dev only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>docs/data-model/sprk_servicerequest.md</file>
+      <file>.claude/skills/script-aware/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Add columns to an existing entity" location="scripts/Add-BindingContextTypeTagsColumn.ps1">Idempotent Web API column create with -WhatIf, metadata existence check first.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Coordinate with spaarke-ontology-platform-r1 (message the owner or that session): confirm no planned column overlaps channel/stage/current run/send email updates/correlation id, and agree the logical names. Record the agreement in `notes/decisions.md` context notes.</step>
+    <step order="2">On dev, read the metadata of `sprk_requesttype` and `sprk_assignedtointernal` (`scripts/check-dataverse-columns.ps1`); record types.</step>
+    <step order="3">Write `scripts/Add-ServiceRequestIntakeColumns.ps1` copying Add-BindingContextTypeTagsColumn.ps1; include the field security profile for stage (copy the IsSecured pattern).</step>
+    <step order="4">Run with -WhatIf; ask the owner for OK; run on dev; re-run to prove idempotency.</step>
+    <step order="5">Verify: a non-BFF user update of stage is refused; the BFF application user can update it.</step>
+    <step order="6">Update docs/data-model/sprk_servicerequest.md (columns, option values, writer = BFF, defaults rule) and export the entity XML if the solution XML is maintained.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="8">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before any column is created, ontology coordination (spec Unresolved Q3) must be recorded; if ontology r1 claims any of these columns or names, STOP and escalate.</trigger>
+    <trigger>If `sprk_requesttype` is not a choice or `sprk_assignedtointernal` is not a systemuser lookup on dev, STOP and escalate rather than adding a parallel column.</trigger>
+    <trigger>If column security cannot restrict stage to the BFF application user on dev, STOP and escalate (FR-05b otherwise fails; no plugin is allowed).</trigger>
+    <trigger>The dev schema change needs the owner's explicit OK (project CLAUDE.md §5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>spec §11 table row "Columns on sprk_servicerequest" (verdict: extend the entity); reuse-scan.md row 11 (Front Door request create: `ExternalIntakeEndpoints.cs:143`, `scripts/Set-ChildRecordCreatorContactSchema.ps1:7`). Existing `sprk_requesttype` and `sprk_assignedtointernal` are reused when their types fit.</existing>
+    <extension>Yes — extends the existing `sprk_servicerequest` entity; only the five missing attributes are added.</extension>
+    <cost-of-doing-nothing>Requests have no channel, stage, current run or notification choice, so the orchestrator (013), status emails (FR-12) and approval (FR-11) have nowhere to write their state.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script (-WhatIf first)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Add-ServiceRequestIntakeColumns.ps1</output>
+    <output type="docs">docs/data-model/sprk_servicerequest.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On dev, `sprk_servicerequest` has channel (4 options), stage (6 options in the spec order), current run (lookup to sprk_processingjob), send email updates (boolean, default No) and correlation id, created by the script (FR-05a).</criterion>
+    <criterion testable="true">A second script run makes no change (idempotent); -WhatIf makes no change.</criterion>
+    <criterion testable="true">Negative: an update of stage by a non-BFF user (form or Web API) is refused; the BFF application user's update succeeds (FR-05b).</criterion>
+    <criterion testable="true">Negative: no ontology-owned column (`sprk_direction`, `sprk_disposition`, response-due date) is created or changed, and the agreed names are recorded (FR-05c).</criterion>
+    <criterion testable="true">`sprk_requesttype` and `sprk_assignedtointernal` types are recorded from dev and reused, or the task escalated.</criterion>
+    <criterion testable="true">docs/data-model/sprk_servicerequest.md lists every new column, its options, its single writer (BFF) and the per-channel default rule.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-11-27 (a689958ce8; notes/010-servicerequest-intake-columns.md). Live on dev: 5 columns created, re-run idempotent, stage secured via the existing BFF-Managed Field Readers/Writers profiles (BFF app users mi-bff-api-dev, SDAP-BFF-SPE-API = update; non-admin users read-only per RetrievePrincipalAttributePrivileges). A live refused write by a non-admin user was not exercised (the runner is System Administrator, which bypasses field security); task 029 E2E covers it with a non-admin user. Entity.xml not hand-edited: regenerated by the release-owner export (scripts/solution-authoring/Export-SpaarkeMasterSource.ps1), same as task 011. Copilot-door default for send-email-updates = column default No until the owner decides. Spec Unresolved Q3 is the hard gate. The per-channel default for "send email updates" is applied by the door code at create (tasks 021, 022 and Phase 2), not here. Nothing here touches the BFF.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

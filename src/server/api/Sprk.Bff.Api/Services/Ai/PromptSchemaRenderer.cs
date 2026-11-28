@@ -280,7 +280,8 @@ public sealed class PromptSchemaRenderer
             {
                 sb.AppendLine($"Input: \"{example.Input}\"");
                 sb.AppendLine("Expected output:");
-                sb.AppendLine(JsonSerializer.Serialize(example.Output, new JsonSerializerOptions { WriteIndented = true }));
+                // Same text-not-escapes options as `## Input`: an example written as "§" teaches the model to write escapes.
+                sb.AppendLine(JsonSerializer.Serialize(example.Output, PromptInputSection.IndentedOptions));
                 sb.AppendLine();
             }
         }

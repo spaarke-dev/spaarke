@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-17 + NFR-04: Intake mailbox — intake flag + default request type on sprk_communicationaccount; any sender → request + run; thread reply → new run; per-sender daily cap</title>
+    <phase>2 Email and Copilot doors</phase>
+    <gate>after:029</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api and dataverse; modifies the inbound email processor (.cs) and adds Dataverse columns; depends on the whole Phase 1 chain via 029.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brownfield change in a hot shared file (`IncomingCommunicationProcessor.cs`, PR #1494 nearby) with redelivery and an abuse guard; a wrong gate auto-creates requests from ordinary mailboxes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with 042 (processor) and 043 (DI module); 041/042 read the flag added here.</parallel-reason>
+    <deps>029</deps>
+    <tags>bff-api, backend, dataverse, fields, config</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make a mailbox an intake door. Add two columns to `sprk_communicationaccount` (intake flag, default request type) mapped on `CommunicationAccount`. In `IncomingCommunicationProcessor`, after normal filing, mail at an intake mailbox from ANY sender creates one request (channel Email) and one run via task 022's submit service, unless the sender is over the per-sender daily cap (default 20): then the mail is filed with no run and raises admin attention. A reply on a request's thread adds a run to that request. A non-intake mailbox never creates a request.</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke inbound email pipeline (`IncomingCommunicationProcessor`, thread resolution), Dataverse schema scripts and ADR-004 idempotency. Follow ADRs strictly.</role>
+  <goal>Intake columns deployed by script and mapped; an intake step idempotent per Graph message that respects the cap and kill switch and never affects filing; tests for each FR-17 case.</goal>
+
+  <context>
+    <background>Spec FR-17 (a–e), NFR-04, NFR-08; owner Q7. Reuse-scan row 8: extend the inbound processor; `sprk_autocreaterecords` gates attachment filing (`:433`) and must not mean "takes requests". The processor dedups at step 1 (`:140-149`), so the intake step must stay reachable after a crash between filing and request creation. Request + run creation goes through task 022's `IntakeRequestSubmitService`. The #1920 producer at the same site is task 042.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (account read ~:152, filing gate :433)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs (select list :72, mapping ~:165)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAccount.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeMailboxStep.cs</file>
+      <file role="modify">the intake DI module created by task 013 (registration of IntakeMailboxStep; exact name set by 013)</file>
+      <file role="new">scripts/Add-IntakeMailboxColumns.ps1</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_CommunicationAccount/Entity.xml</file>
+      <file role="modify">docs/data-model/sprk_communicationaccount.md</file>
+      <file role="new">tests/integration/data-mutation/Communication/IntakeMailboxStepTests.cs</file>
+      <file role="new">tests/unit/domain/Communication/IntakeSenderCapTests.cs</file>
+      <file role="canonical-reference">scripts/Add-BindingContextTypeTagsColumn.ps1 (add columns to an existing entity)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (thread join for replies)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRequestSubmitService.cs (task 022)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs (job entry; touched by open PR #1494 — read only here)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">Phase 1 deployed and verified (request/run records, orchestrator, submit service from 022, status emails from 020).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = the intake gate. Only an account with the new intake flag = true runs the intake step; `sprk_autocreaterecords` is not read for this decision; a non-intake mailbox never creates a request or run (FR-17 d).</constraint>
+    <constraint source="project">SCOPE = filing. The intake step runs after the existing filing steps (communication, attachment documents, .eml archive) and is best-effort with respect to them: an intake failure never fails or skips filing (FR-17 e).</constraint>
+    <constraint source="ADR-004">SCOPE = the intake step. Idempotent per Graph message: key `intake-email:{graphMessageId}` claimed atomically before the request is created; the step is also reached on the duplicate-detected path for intake mailboxes, so a redelivery after a crash completes it once; run payloads carry ids only.</constraint>
+    <constraint source="ADR-039">SCOPE = the per-sender cap (the Event-path budget). Count requests with channel Email whose requester email equals the normalized (lower-case) sender created since 00:00 UTC on this stamp; at or over `Intake:Email:PerSenderDailyCap` (default 20) → no request, no run, a telemetry event `Intake.SenderCapExceeded` and a Warning log with ids only (sender hashed); the mail is still filed (FR-17 c).</constraint>
+    <constraint source="ADR-032">SCOPE = the email door. Kill switch `Intake:Doors:Email:Enabled` (default false) makes the intake step a no-op; filing is unchanged.</constraint>
+    <constraint source="ADR-015">SCOPE = logs and payloads. No email body, subject, attachment bytes or sender address in logs or queue payloads; ids and a sender hash only.</constraint>
+    <constraint source="ADR-002">SCOPE = request creation. Through `IntakeRequestSubmitService` only (channel Email, requester = matched contact/user or the sender address, owner = the intake mailbox's owning team, request type = the account's default until classification sets it, send-email-updates ON per task 020).</constraint>
+    <constraint source="project">SCOPE = shared files. `IncomingCommunicationProcessor.cs` is shared with the email-communication projects; run `/conflict-check`; if PR #1494 (touches `IncomingCommunicationJobHandler.cs`) merges first, rebase over it. Dataverse schema changes on dev need the owner's OK.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+      <file>docs/guides/COMMUNICATION-ADMIN-GUIDE.md</file>
+      <file>docs/data-model/sprk_communicationaccount.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/reuse-scan.md (row 8)</file>
+    </files>
+    <patterns>
+      <pattern name="Background workers" location=".claude/patterns/api/background-workers.md">Idempotent side effect inside a job.</pattern>
+      <pattern name="Entity operations" location=".claude/patterns/dataverse/entity-operations.md">Column reads/writes.</pattern>
+      <pattern name="Plugin structure" location=".claude/patterns/dataverse/plugin-structure.md">Tag-mapped; no plugin is added (ADR-002).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files; read the processor end to end (dedup, account lookup, filing, DocAnalysis enqueue ~:1640) and ThreadResolver; check PR #1494's state; declare RIGOR FULL, tier opus, effort high.</step>
+    <step order="2">Write `scripts/Add-IntakeMailboxColumns.ps1` (copy `Add-BindingContextTypeTagsColumn.ps1`): `sprk_isintakemailbox` (Yes/No, default No) and `sprk_intakedefaultrequesttype` (Choice, same values as `sprk_servicerequest.sprk_requesttype`); update Entity.xml and the data-model doc. Run on dev only with the owner's OK.</step>
+    <step order="3">Map the columns on `CommunicationAccount` and add them to the account select list(s).</step>
+    <step order="4">Write `IntakeMailboxStep.RunAsync(account, communicationId, graphMessageId, sender, ct)`: kill switch → thread check (reply to a communication that is a request's regarding communication → new run on that request) → cap → create request + run via `IntakeRequestSubmitService`; all under the idempotency key.</step>
+    <step order="5">Call it from the processor after filing for intake accounts, and from the duplicate-detected path for intake accounts.</step>
+    <step order="6">Tests per the criteria (data-mutation for the step, domain unit for the cap rule); build and run tests; measure the publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="8">Document deviations (final column names) in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before running the schema script on dev, STOP and get the owner's explicit OK (project CLAUDE.md §5).</trigger>
+    <trigger>If the thread resolution cannot tell a reply on a request's thread from a new mail without reading the body, STOP and escalate rather than matching on subject text (ADR-015, and fuzzy matching would misroute).</trigger>
+    <trigger>If PR #1494 or another project has uncommitted changes to the same processor methods, STOP and coordinate before editing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row 8: `IncomingCommunicationProcessor.cs:152` (gate `:433`), `CommunicationAccountService.cs:165` (columns `:72`), `CommunicationAccount` model; the closest flag `sprk_autocreaterecords` gates filing. spec New Components row "Intake flag on sprk_communicationaccount".</existing>
+    <extension>The processor and account model are extended. New columns are needed because neither `sprk_autocreaterecords` (filing) nor `sprk_accounttype` (owner kind) means "this mailbox takes requests"; overloading them would change filing for existing mailboxes. `IntakeMailboxStep` is a separate class so the 2,000-line processor gains one call, not a second responsibility.</extension>
+    <cost-of-doing-nothing>Mail sent to the legal mailbox never becomes a request, so the email door (FR-17, success criterion 6) does not exist; without the cap, any sender could trigger unbounded AI runs (NFR-04).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="pwsh">Schema script</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeMailboxStep.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAccount.cs</output>
+    <output type="code">scripts/Add-IntakeMailboxColumns.ps1</output>
+    <output type="docs">docs/data-model/sprk_communicationaccount.md</output>
+    <output type="test">tests/integration/data-mutation/Communication/IntakeMailboxStepTests.cs</output>
+    <output type="test">tests/unit/domain/Communication/IntakeSenderCapTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new mail at an intake mailbox from any sender creates exactly one request (channel Email) and one run (FR-17 a).</criterion>
+    <criterion testable="true">A reply on that request's thread creates a second run on the same request and no new request (FR-17 b).</criterion>
+    <criterion testable="true">The sender's mail over the daily cap is filed, creates no request or run, and emits `Intake.SenderCapExceeded` (FR-17 c); the cap value comes from configuration (default 20).</criterion>
+    <criterion testable="true">Negative: mail at a non-intake mailbox (including one with `sprk_autocreaterecords` = true) creates no request or run (FR-17 d).</criterion>
+    <criterion testable="true">Normal filing (communication, attachment documents, .eml archive) happens for every mail, including over-cap and intake-failure cases (FR-17 e).</criterion>
+    <criterion testable="true">Redelivering the same Graph message (including after a simulated crash between filing and request creation) yields exactly one request and one run.</criterion>
+    <criterion testable="true">With the email kill switch off, no request or run is created and filing is unchanged.</criterion>
+    <criterion testable="true">No log or payload contains the body, subject, attachment bytes or sender address.</criterion>
+    <criterion testable="true">The schema script is idempotent (re-run is a no-op) and the data-model doc lists both columns.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof for the non-intake gate.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17, NFR-04. Column names are proposals; record the final names in notes and the data-model doc.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute (FULL rigor).</protocol>
+  </execution>
+</task>

@@ -165,12 +165,18 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 processedRequest.DocumentIds,
                 processedRequest.Filters);
 
+            // GitHub #3306: with no query text to rank by (empty, or "*"), the index returns chunks in index order, so one
+            // long document could fill the page. Fetch one row per document instead; the summary below keeps the
+            // caller's own filter.
+            var hasQueryText = !matchAll && !string.IsNullOrWhiteSpace(processedRequest.Query);
+            var indexFilter = hasQueryText ? filter : SearchFilterBuilder.WithOneRowPerDocument(filter);
+
             // Step 5: Build search options
             searchStopwatch.Start();
             var searchOptions = BuildSearchOptions(
                 hybridMode,
                 queryEmbedding,
-                filter,
+                indexFilter,
                 limit,
                 offset,
                 includeHighlights,
@@ -213,7 +219,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // (no semantic intent to rank against). Applying a 0.5 threshold to those
             // wipes EVERYTHING, leaving the user with an empty grid for what should be a
             // "show me everything in scope" query.
-            var hasQuery = !string.IsNullOrWhiteSpace(processedRequest.Query) && !matchAll;
+            var hasQuery = hasQueryText;
             if (minScore > 0.0 && hasQuery)
             {
                 var beforeCount = results.Count;
@@ -302,10 +308,11 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 request.DocumentIds,
                 request.Filters);
 
-            // Build count-only search options
+            // Build count-only search options. GitHub #3306: one row per document, so the count is of documents, not
+            // chunks (a count ignores any query text, so it is always the no-query case).
             var searchOptions = new Azure.Search.Documents.SearchOptions
             {
-                Filter = filter,
+                Filter = SearchFilterBuilder.WithOneRowPerDocument(filter),
                 Size = 0, // We only want count
                 IncludeTotalCount = true
             };

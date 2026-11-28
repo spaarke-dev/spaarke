@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-13: Front Door door — enqueue a run for a submitted request; on Return, release the approved outputs on the request and post a message so the bell fires</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:013,010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api and endpoints; modifies an external-plane endpoint (.cs) shared with another project; external visibility of AI output is a fail-closed concern (FR-13 c).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive external plane: a requester must never see an unapproved output; edits a hot-path file shared with spaarke-SPA-external-access-platform-r4; an open design question (when to enqueue relative to the document upload) needs judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with tasks 020 and 022 on the intake DI module and 013's Return-stage hook.</parallel-reason>
+    <deps>013, 010</deps>
+    <tags>bff-api, endpoints, backend, authorization</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the Front Door into the pipeline: a submitted NDA request (the `POST /api/v1/external/servicerequests` create plus its document upload) gets one run enqueued through task 013's run-submit API, with channel Front Door; on the Return stage for that channel, make the approved outputs visible to the requester on the request and post one message regarding the request through `CommunicationService.PostToRecordThreadAsync` so the requester's bell fires. Coordinate with spaarke-SPA-external-access-platform-r4, which shares these files.</prompt>
+  <role>SPAARKE platform developer. Expert in the External Access plane (CIAM callers, record gates), ADR-004 jobs and Dataverse write paths. Follow ADRs strictly.</role>
+  <goal>Front Door submissions start exactly one run per request (idempotent), a submission without a document lands in manual triage (not a failed run), the requester sees outputs only after approval, and the approval produces one bell-firing message on the request; contract and unit tests cover it.</goal>
+
+  <context>
+    <background>Spec FR-13 (a–d), NFR-02, NFR-08. Reuse-scan row 11: extend `SubmitServiceRequestAsync` (ExternalIntakeEndpoints.cs:143, create at ~:293) to enqueue a run, and reuse the message path for the return. At authoring time the SPA creates the request first (`intake-client.ts`, `NdaAssessmentWizard.tsx` calls `submitServiceRequest` with no document) and documents go through a separate route, `POST /servicerequests/{id}/documents` (`ExternalProjectDataEndpoints.cs:364`). Enqueuing at create would therefore race the upload; step 1 settles the trigger with the owner. Outputs are persisted on the request by the NDA harness (task 015) and returned only after approval (task 017).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeEndpoints.cs (SubmitServiceRequestAsync :143, create ~:293)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs (UploadServiceRequestDocument :364) — only if the owner picks the upload trigger</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/FrontDoorReturn.cs</file>
+      <file role="modify">the Return-stage hook and intake DI module created by task 013 (exact names set by 013)</file>
+      <file role="modify">tests/integration/contract/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/FrontDoorReturnTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs (PostMessageCoreAsync :210 → CommunicationService.PostToRecordThreadAsync; servicerequests root :84)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (PostToRecordThreadAsync :2256)</file>
+      <file role="canonical-reference">src/client/external-spa/src/api/intake-client.ts (submit contract) — read only</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Run-submit API (request id + channel → run, idempotent), Return-stage hook keyed by channel, kill switches.</dependency>
+      <dependency task="010" status="pending">Request channel and current-run columns.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = shared files. `ExternalIntakeEndpoints.cs`, `ExternalProjectDataEndpoints.cs` and the external SPA are shared with spaarke-SPA-external-access-platform-r4: run `/conflict-check` before editing and before the PR; keep the create DTO and its status codes unchanged (no breaking change to `intake-client.ts`).</constraint>
+    <constraint source="ADR-004">SCOPE = the enqueue. Ids only in the payload (request id, run id, correlation id); a deterministic idempotency key per request trigger (e.g. `intake-run:{requestId}:frontdoor`) so a retried submit or upload enqueues one run.</constraint>
+    <constraint source="ADR-032">SCOPE = the Front Door door. A door kill switch (`Intake:Doors:FrontDoor:Enabled`) makes the enqueue a no-op; the existing create and upload behave exactly as before.</constraint>
+    <constraint source="ADR-008">SCOPE = the external routes touched. Their existing filters, CIAM checks and record gates stay unchanged; no new external route is added.</constraint>
+    <constraint source="ADR-034">SCOPE = output visibility. An output document is reachable by the requester only after the run is Approved: release happens in `FrontDoorReturn` (the approved version from 017), never at Persist. Fail closed: if release cannot be confirmed, nothing is released and the run is held with admin attention.</constraint>
+    <constraint source="ADR-045">SCOPE = the return message. Post through `CommunicationService.PostToRecordThreadAsync` regarding the request, app-only; one message per run (marker before post, key `intake-return-msg:{runId}`).</constraint>
+    <constraint source="ADR-015">SCOPE = message text and logs. Fixed text ("Your request has been reviewed; the documents are on the request") plus the request number; no document or clause text; logs carry ids only.</constraint>
+    <constraint source="project">SCOPE = test data. Synthetic NDAs only; never real NDAs or the accelerator `answer-key/` (NFR-10).</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>docs/data-model/sprk_servicerequest.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md (new tests go under KEEP paths: contract/auth/data-mutation)</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Existing external filters stay in place.</pattern>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">No new route; ProblemDetails unchanged.</pattern>
+      <pattern name="Access control" location=".claude/patterns/auth/uac-access-control.md">External visibility of documents.</pattern>
+      <pattern name="SSO binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Caller principal on external routes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files; trace the Front Door NDA flow (wizard → create → document upload) and how a `sprk_document` on a request becomes visible to the requester; declare RIGOR FULL, tier opus, effort high. Then fire the first escalation trigger with the options before coding.</step>
+    <step order="2">Implement the owner-chosen trigger: call 013's run-submit API with channel Front Door after the create (and/or upload) succeeds; the enqueue never changes the HTTP response of the existing route; enqueue failure is logged and leaves the request for admin re-drive (task 023), never a 500 to the requester.</step>
+    <step order="3">Ensure Persist (015) leaves outputs invisible to the requester; implement `FrontDoorReturn` (registered on 013's Return hook for channel Front Door): release the approved versions to the requester, then post the one message.</step>
+    <step order="4">Tests: contract tests on the create/upload route (one run per request, kill switch off → no enqueue, unchanged status codes) and unit tests on `FrontDoorReturn` (release then message, marker, hold on failure).</step>
+    <step order="5">Build and run tests; measure the publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record the trigger decision and the r4 coordination in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before coding, STOP and ask the owner (root CLAUDE.md §6) which event enqueues the run, because the create and the document upload are separate calls: (A) on the first document upload to an NDA-type request, recommended, no DTO change; (B) the SPA calls a new "submit complete" route after upload (SPA + new route, coordinate with r4); (C) the create accepts the document in one multipart call (breaking change to the r4-owned contract). Also confirm FR-13(d): with (A), who enqueues the triage run for a request that never gets a document.</trigger>
+    <trigger>If outputs persisted by task 015 are already visible to the requester before approval, STOP and escalate (FR-13 c, security) rather than patching visibility in this task.</trigger>
+    <trigger>If spaarke-SPA-external-access-platform-r4 has open changes to the same functions, STOP and coordinate before editing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row 11: `ExternalIntakeEndpoints.cs:110` (`SubmitServiceRequestAsync` :143) is extended; `ExternalMessageEndpoints.cs` / `CommunicationService.PostToRecordThreadAsync` is reused for the return message. CAPABILITY-INDEX row 12 (communication send/post).</existing>
+    <extension>Yes for the door (the submit route is extended, not replaced). `FrontDoorReturn` is new only because the Return stage needs a per-channel step (release + message) that no existing component performs.</extension>
+    <cost-of-doing-nothing>A Front Door NDA submission never becomes a run, and an approved review never reaches the requester or rings their bell, so FR-13 and success criterion 4 fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="conflict-check">Shared-file check with r4</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/FrontDoorReturn.cs</output>
+    <output type="test">tests/integration/contract/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/FrontDoorReturnTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Front Door NDA submission (with its document, per the chosen trigger) enqueues exactly one run with channel Front Door; a retried call enqueues no second run.</criterion>
+    <criterion testable="true">A submission with no document creates the request and reaches the manual-triage path, not a Failed run (FR-13 d).</criterion>
+    <criterion testable="true">The existing create route's DTO, status codes and error codes are unchanged (existing contract tests pass).</criterion>
+    <criterion testable="true">With the Front Door kill switch off, no run is enqueued and the create/upload behave as before.</criterion>
+    <criterion testable="true">Negative: before approval the requester cannot list or open any output document of the run (FR-13 c); a release failure releases nothing and holds the run with admin attention.</criterion>
+    <criterion testable="true">On Return, the approved versions become visible to the requester and exactly one message is posted regarding the request; a redelivered Return posts no second message.</criterion>
+    <criterion testable="true">No log or message contains document or clause text.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification, the publish-size delta (≤ 60 MB, no new HIGH CVE) and the r4 coordination. Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof for the "no output visible before approval" guard.</criterion>
+  </acceptance-criteria>
+
+  <notes>FR-13(a) and (b) are verified live on dev in task 029. The SPA's NDA wizard has no document upload at authoring time; if the chosen trigger needs SPA work, that work is coordinated with r4 and may become its own task. External SPA build note (memory): the BFF host is baked in at Vite build time.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute (FULL rigor).</protocol>
+  </execution>
+</task>

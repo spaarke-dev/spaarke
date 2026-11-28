@@ -50,6 +50,13 @@ The critical design principle is **Graph send is the critical path** — if the 
 
 2. **User Mode** (OBO Auth): Same pipeline but sender derived from JWT claims; sends via `graphClient.Me.SendMail.PostAsync()`.
 
+**Threaded reply (`InReplyToMessageId`)**: both modes hand the send to `EmailChannelSender`, which owns this branch. A send with no `InReplyToMessageId` is the `sendMail` above, unchanged. A send that carries one goes out as a real reply, so Exchange sets `In-Reply-To` and `References` (Graph rejects a custom `internetMessageHeaders` entry that does not start with `x-`, so a new message cannot carry them by header):
+
+1. Find the parent in the **sending mailbox**: by its RFC-2822 Internet-Message-Id (a value in angle brackets, which is what `InReplyToMessageId` holds for email), else by Graph message id.
+2. `createReply` on the parent (a draft). The server-send marker, when the send has one, rides on this request's `message` parameter, because Graph does not list `internetMessageHeaders` among a draft's updatable properties.
+3. `PATCH` the draft to the request's subject, body, recipients and sender (the quoted original is replaced, as callers compose their own body), add its attachments (one request each, up to 3 MB; a larger one fails the reply up front), then `send` the draft.
+
+The reply never silently becomes a new message. A parent that is not found fails with `sdap.communication.reply_parent_not_found` (404) and nothing is created or sent. A failure before the `send` is `sendOutcome: NotSent` and the draft is deleted (best-effort); a `send` of unknown outcome is not retried and its draft is kept. A system-mail send cannot be a reply (a draft's `send` always saves to Sent Items). The Internet-Message-Id read-back from Sent Items is the same as for any send.
 **Daily send limit**: Enforced synchronously before Graph call. `DailySendCountResetService` resets counts at midnight UTC.
 
 ### Inbound Pipeline
@@ -211,6 +218,9 @@ Do not add a sixth client-side send implementation; if a new mount emerges, add 
 | `DAILY_SEND_LIMIT_REACHED` | 429 | `SendsToday >= DailySendLimit` |
 | `ATTACHMENT_LIMIT_EXCEEDED` | 400 | >150 attachments or >35MB total |
 | `GRAPH_SEND_FAILED` | 502/500 | Graph sendMail API error |
+| `sdap.communication.reply_parent_not_found` | 404 | `InReplyToMessageId` names a message that is not in the sending mailbox; nothing sent |
+| `sdap.communication.reply_attachment_too_large` | 413 | A threaded reply with an attachment above 3 MB; nothing sent |
+| `sdap.communication.reply_system_mail_unsupported` | 400 | A system-mail send that is also a reply; nothing sent |
 
 ---
 

@@ -152,7 +152,7 @@ Legacy (retired) dual entry: Webhook (real-time) + EmailPollingBackupService (5-
 | Email endpoints | `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` | Webhook receiver |
 | EML converter | `src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs` | RFC 5322 .eml via MimeKit |
 | Attachment filter | `src/server/api/Sprk.Bff.Api/Services/Email/AttachmentFilterService.cs` | Filter noise attachments |
-| Job handler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/` | EmailAnalysisJobHandler |
+| Job handler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/` | IncomingCommunicationJobHandler |
 
 **Change impact:**
 

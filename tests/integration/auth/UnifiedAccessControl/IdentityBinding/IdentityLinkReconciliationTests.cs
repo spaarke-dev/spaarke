@@ -1109,6 +1109,21 @@ public class IdentityLinkReconciliationTests
         result.Success.Should().BeFalse();
     }
 
+    // Task 047 review K1 (r4 task 045): the classifier compares the PARSED error.code exactly, never a substring of the error text.
+    // MUST FIRE: the exact code under 403 (including a body the store cut at 400 characters after the code). MUST NOT FIRE: the code
+    // only in the message, another code, an unparseable error, a 403 without the code, the code under another status.
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80072560","message":"The user is not a member of the organization."}}""", true)]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80072560","message":"The user is not a member of the organi""", true)]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80040220","message":"mentions 0x80072560 in its text"}}""", false)]
+    [InlineData(HttpStatusCode.Forbidden, "403: this is not json but says 0x80072560", false)]
+    [InlineData(HttpStatusCode.Forbidden, "403: {\"error\":{\"message\":\"0x80072560\"", false)]
+    [InlineData(HttpStatusCode.Forbidden, """403: {"error":{"code":"0x80040220","message":"denied"}}""", false)]
+    [InlineData(HttpStatusCode.Forbidden, null, false)]
+    [InlineData(HttpStatusCode.BadRequest, """400: {"error":{"code":"0x80072560","message":"x"}}""", false)]
+    public void IsMembershipRefusal_ComparesTheParsedErrorCodeExactly_UnderExactly403(HttpStatusCode status, string? error, bool expected)
+        => DataverseContactIdentityStore.IsMembershipRefusal(status, error).Should().Be(expected);
+
     // Justification (beyond the cases the task names): pins the interface default. A store that cannot tell why its probe failed
     // (every store but the Dataverse one) answers "not refused", so it keeps the Error, which is the fail-loud direction.
     [Fact]

@@ -129,6 +129,10 @@ public static class RecordCreatorPerson
         // asked (none for a contact uploader or a job). 088 created the column UNSECURED in SpaarkeMaster; the script empty-checks,
         // secures and verifies it, never creates it.
         "sprk_storedfile",
+        // spaarke-intake-pipeline-r1 task 013: IntakeRunStore.CreateRunAsync creates the intake run (a child of its service request)
+        // app-only and routes its owner through IRecordOwnershipResolver, so it records the person who asked when a door names one.
+        // Added to scripts/Set-ChildRecordCreatorPersonSchema.ps1 in the same change (dry run / -Apply / -Verify on dev).
+        "sprk_processingjob",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-19 (#1920, §10.1 item 1a): AttachmentClassification producer — the email door enqueues the existing job once per invoice-candidate attachment at an intake mailbox</title>
+    <phase>2 Email and Copilot doors</phase>
+    <gate>after:012,040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; modifies the inbound email processor (.cs) to enqueue background work.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One enqueue call with an explicit contract (job type, payload, key) copied from the adjacent `EnqueueDocumentAnalysisAsync`; the handler already exists and is not edited.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with task 040 on Services/Communication/IncomingCommunicationProcessor.cs; reads 040's intake flag.</parallel-reason>
+    <deps>012, 040</deps>
+    <tags>bff-api, backend, worker, job</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the orphaned `AttachmentClassificationJobHandler` its producer: when an inbound mail at an intake mailbox files an attachment as a `sprk_document` and the attachment is an invoice candidate by file type, enqueue one `AttachmentClassification` job (payload `{ DocumentId, DriveId, ItemId }`) next to the existing `DocAnalysis` enqueue. Then update issue #1920. No eBilling code changes.</prompt>
+  <role>SPAARKE platform developer. Expert in the inbound email pipeline and the ADR-004 Job Contract. Follow ADRs strictly.</role>
+  <goal>`IncomingCommunicationProcessor` enqueues `AttachmentClassification` exactly once per qualifying attachment document, only when the handler is registered and the mailbox is an intake mailbox; tests prove it; #1920 is updated with the PR link.</goal>
+
+  <context>
+    <background>Spec FR-19 (a–c); owner §10.1 decision: item 1a in Phase 2. Issue #1920 (open): "AttachmentClassification job is never enqueued by any BFF code"; the handler is registered only when `DocumentIntelligence:RecordMatchingEnabled` is true (`FinanceModule.cs:430-433`), so enqueuing with the flag off would dead-letter. `notes/section10-verification-2026-11-25.md` §1: natural producer site is `IncomingCommunicationProcessor.cs` near `:1653`, where `DocAnalysis` is enqueued (`EnqueueDocumentAnalysisAsync`). Payload class `AttachmentClassificationPayload` (`AttachmentClassificationJobHandler.cs:632`: DocumentId, DriveId, ItemId).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (EnqueueDocumentAnalysisAsync ~:1640-1665)</file>
+      <file role="new">tests/integration/data-mutation/Communication/AttachmentClassificationProducerTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AttachmentClassificationJobHandler.cs (JobTypeName, payload :632) — read only, owned by ebilling-r1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (:425-433 conditional registration) — read only</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">Routing key / harness registry (brief dependency: the email door's classify step).</dependency>
+      <dependency task="040" status="pending">Intake flag and the intake step in the same processor.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = eBilling code. No edit to `Services/Finance/**`, `AttachmentClassificationJobHandler.cs` or `FinanceModule.cs` (FR-19 b; eBilling owns them and `Services/Finance/Submission/` is frozen until UAT sign-off).</constraint>
+    <constraint source="ADR-004">SCOPE = the enqueue. Job type `AttachmentClassificationJobHandler.JobTypeName`; ids-only payload `{ DocumentId, DriveId, ItemId }`; idempotency key `AttachmentClassification:{documentId}`; MaxAttempts 3; correlation id = the communication id; a redelivered mail enqueues no second job for the same document.</constraint>
+    <constraint source="ADR-032">SCOPE = when to enqueue. Only when `DocumentIntelligence:RecordMatchingEnabled` is true (the handler exists), the account's intake flag is true and the intake email door switch from 040 is on; otherwise no enqueue and no error.</constraint>
+    <constraint source="project">SCOPE = which attachments. Invoice candidates by MIME type/extension only (pdf, png, jpg/jpeg, tif/tiff, docx, xlsx); never by reading content; inline images and signature images excluded the same way the filing step excludes them.</constraint>
+    <constraint source="ADR-015">SCOPE = logs. Ids and job type only; no file names or content.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/jobs-architecture.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/section10-verification-2026-11-25.md (§1)</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Background workers" location=".claude/patterns/api/background-workers.md">Job Contract enqueue.</pattern>
+      <pattern name="Scheduled jobs" location=".claude/patterns/api/scheduled-jobs.md">Tag-mapped; not used.</pattern>
+      <pattern name="DocAnalysis enqueue" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">`EnqueueDocumentAnalysisAsync` is the shape to copy (best-effort, JobContract fields).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run `gh issue view 1920` for the contract; read the handler's payload parsing and the processor's attachment filing path; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Add `EnqueueAttachmentClassificationAsync(documentId, driveId, itemId, communicationId, ct)` beside `EnqueueDocumentAnalysisAsync`, best-effort (a failure is logged, never fails filing), and call it per qualifying attachment document under the gates.</step>
+    <step order="3">Tests per the criteria; build and run tests; measure the publish-size delta.</step>
+    <step order="4">After merge-ready: comment on #1920 with the PR link and what changed; close it only if the owner agrees the doc-drift part belongs to eBilling.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="6">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ebilling-r1 or #1920 says the producer must also run at non-intake (e.g. invoice) mailboxes, STOP and escalate for an owner decision rather than widening the gate.</trigger>
+    <trigger>If producing the job would need any change to the handler or `FinanceModule.cs`, STOP and escalate (eBilling-owned code).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>section10-verification §1: `AttachmentClassificationJobHandler.cs:43` (668 LOC) registered at `FinanceModule.cs:432` with no producer; issue #1920. `EnqueueDocumentAnalysisAsync` in the same processor is the enqueue shape copied.</existing>
+    <extension>Yes, extended: one private enqueue method in the existing processor; no new class, registration or job type.</extension>
+    <cost-of-doing-nothing>Invoice attachments arriving by email are never classified, so the eBilling classification gate stays unwired (#1920) and the handler remains dead code (§10.1 item 1a).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="gh">Read and update issue #1920</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="test">tests/integration/data-mutation/Communication/AttachmentClassificationProducerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An invoice-candidate attachment filed from a mail at an intake mailbox enqueues exactly one `AttachmentClassification` job with payload `{ DocumentId, DriveId, ItemId }` and key `AttachmentClassification:{documentId}` (FR-19 a).</criterion>
+    <criterion testable="true">Redelivering the same mail enqueues no second job for that document.</criterion>
+    <criterion testable="true">Negative: no enqueue when `DocumentIntelligence:RecordMatchingEnabled` is false, when the mailbox is not an intake mailbox, when the email door switch is off, or for a non-candidate file type.</criterion>
+    <criterion testable="true">An enqueue failure is logged and does not fail or skip filing.</criterion>
+    <criterion testable="true">No file under `Services/Finance/**`, the handler or `FinanceModule.cs` changed (FR-19 b).</criterion>
+    <criterion testable="true">#1920 carries a comment linking the PR (FR-19 c).</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19. Dependency on 040 added beyond the brief's 012 because the gate reads the intake flag and the same file is edited. `docs/architecture/finance-intelligence-architecture.md:39` still claims an `EmailToDocumentJobHandler` trigger; that doc fix belongs to eBilling per #1920 — do not edit it here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

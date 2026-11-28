@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-21: Copilot door — `spaarke_submit_request` and `spaarke_get_request_status` MCP tools on the existing server (OBO caller-only)</title>
+    <phase>2 Email and Copilot doors</phase>
+    <gate>after:029</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags bff-api and endpoints; adds two MCP tool classes (.cs) on a shared host, one of which writes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Formulaic under the mcp-tool-handler skill: copy `CompleteDecisionTool.cs` (app-only write) and `ShowDecisionsTool.cs` (model-visible read) over existing services (022, 024); the ledger ArchTest and startup validation enforce the auth shape.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>029</deps>
+    <tags>bff-api, endpoints, api</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two tools to the existing Spaarke MCP server's `legal-operations` area, following the `mcp-tool-handler` skill: `spaarke_submit_request` (write, app-only visibility: creates one request + run as the caller through task 022's `IntakeRequestSubmitService` for a `sprk_document` the caller can read) and `spaarke_get_request_status` (read-only, model-visible: the caller's request stages and, once approved, links to the outputs, through task 024's `IntakeRunStatusService`). Coordinate with spaarkeai-mcp-bff-api-r1 and do not change the host.</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke MCP server (McpToolDefinition, McpToolCatalog, McpToolAuthorization) and OBO caller identity. Follow ADRs strictly.</role>
+  <goal>Two tool classes under `Api/Mcp/LegalOperations/Intake/`, their ledger entries, and the auth, contract, size and data-mutation tests the skill requires, with the MCP conformance job green.</goal>
+
+  <context>
+    <background>Spec FR-21 (a–d), NFR-02 (MCP tools OBO caller-only). Reuse-scan row 10: new tools on the existing server following the Decisions pattern; no MCP tool starts background work today (the submit tool only enqueues through the submit service; the run executes in the orchestrator). Skill conventions: every writing tool is app-only (`_meta.ui.visibility = ["app"]`) — the model never commits; tools are thin adapters over the REST route's service; results under 64 KiB and 30 s; kill switch `Mcp:Enabled`.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Intake/SubmitRequestTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Intake/GetRequestStatusTool.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs (McpTools ledger)</file>
+      <file role="new">tests/integration/auth/Mcp/IntakeToolsAuthTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/IntakeToolsContractTests.cs</file>
+      <file role="new">tests/integration/data-mutation/Mcp/SubmitRequestToolTests.cs</file>
+      <file role="modify">tests/integration/regression/Mcp/McpResultSizeTests.cs and McpFiveToolFixtures.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs (app-only write tool)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs (model-visible read tool)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolCatalog.cs (discovery by [McpArea]) and McpToolAuthorization.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRequestSubmitService.cs (022) and IntakeRunStatusService.cs (024)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">Phase 1 on dev, incl. the submit (022) and status (024) services.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = the MCP host. Do not edit `McpEndpoints.cs`, `McpToolCatalog.cs`, `McpToolAuthorization.cs` or `McpModule.cs` (owned by spaarkeai-mcp-bff-api-r1); the tools are found by `[McpArea(McpEndpoints.LegalOperationsArea)]`. Run `/conflict-check` before the PR.</constraint>
+    <constraint source="ADR-028">SCOPE = both tools. Run as the caller: pass exactly `IHttpContextAccessor.HttpContext` to the service; null context or unauthenticated → fail closed, never app-only. `[Authorize]` (bare) on each class; never `ExternalCollaboration`.</constraint>
+    <constraint source="ADR-008">SCOPE = both tools. Add each to the `McpTools` ledger (policy, caller seam, reason); the ArchTest must pass.</constraint>
+    <constraint source="ADR-039">SCOPE = `spaarke_submit_request`. `ReadOnly = false` and app-only visibility per the skill (the model never commits); explicit input schema `{ documentId: string (guid), requestType?: enum }` with `additionalProperties: false`; idempotency key from the call (same as 022's) so a replay creates nothing new.</constraint>
+    <constraint source="ADR-034">SCOPE = `spaarke_get_request_status`. Returns only requests the caller can read, through `IntakeRunStatusService`'s authorization (FR-21 b); minimal model-visible output: request number, stage, run status, and output links only when approved; no document or clause text.</constraint>
+    <constraint source="ADR-019">SCOPE = tool errors. Domain failures are `isError: true` results via `McpToolResults` with the same error codes as the REST routes (INTAKE_*); never a transport error.</constraint>
+    <constraint source="ADR-032">SCOPE = submit. When `Intake:Doors:Copilot:Enabled` is off, the tool returns `isError` INTAKE_DISABLED and creates nothing; `Mcp:Enabled=false` behaves as today.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file>docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Tag-mapped; MCP tools follow the skill, not route mapping.</pattern>
+      <pattern name="Endpoint filters" location=".claude/patterns/api/endpoint-filters.md">Authorization equivalent: [Authorize] + ledger.</pattern>
+      <pattern name="App-only write tool" location="src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/CompleteDecisionTool.cs">Copy for submit.</pattern>
+      <pattern name="Model-visible read tool" location="src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs">Copy for status.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the skill and knowledge files; fire the first escalation trigger about submit visibility before writing the submit tool; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `GetRequestStatusTool` (copy ShowDecisionsTool) over `IntakeRunStatusService`.</step>
+    <step order="3">Write `SubmitRequestTool` (copy CompleteDecisionTool) over `IntakeRequestSubmitService` with channel Copilot, per the owner's visibility answer.</step>
+    <step order="4">Add both ledger entries; write auth, contract, size and data-mutation tests per the skill; build, run tests and ArchTests; confirm the `mcp-conformance` job passes in CI.</step>
+    <step order="5">Measure the publish-size delta for the PR.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before writing `spaarke_submit_request`, STOP and ask the owner: the skill makes every writing tool app-only (callable only from a widget), and no intake widget exists, so a Copilot user could not submit by asking the agent. Options: (A) app-only submit plus a small confirm widget (new UI, separate task); (B) a convention exception reviewed with spaarkeai-mcp-bff-api-r1 (root CLAUDE.md §6.5); (C) ship only the status tool now. Recommend A.</trigger>
+    <trigger>If either tool needs a change to the MCP host files, STOP and coordinate with spaarkeai-mcp-bff-api-r1.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row 10: `Api/Mcp/LegalOperations/Decisions/*Tool.cs` (CompleteDecisionTool.cs:40, ShowDecisionsTool.cs:47); no MCP tool submits work today. The domain logic is reused from 022 (`IntakeRequestSubmitService`) and 024 (`IntakeRunStatusService`).</existing>
+    <extension>No: MCP tools are one class per tool by the catalog's design; the existing Decisions tools serve Work Item decisions, not requests. Both new tools are thin adapters with no domain logic.</extension>
+    <cost-of-doing-nothing>The Copilot/Teams door does not exist: a user in Copilot cannot submit a document for review or ask where their request is (FR-21, success criterion 6).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF and ArchTests</tool>
+    <tool name="mcp-tool-handler">Conventions and test checklist</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Intake/SubmitRequestTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Intake/GetRequestStatusTool.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Mcp.cs</output>
+    <output type="test">tests/integration/auth/Mcp/IntakeToolsAuthTests.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/IntakeToolsContractTests.cs</output>
+    <output type="test">tests/integration/data-mutation/Mcp/SubmitRequestToolTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`spaarke_submit_request` with a readable document creates exactly one request (channel Copilot) and one run attributed to the caller; a replay with the same key creates nothing new (FR-21 a).</criterion>
+    <criterion testable="true">`spaarke_get_request_status` returns only requests the caller can read; another user's request returns `isError` INTAKE_REQUEST_NOT_FOUND with no data (FR-21 b).</criterion>
+    <criterion testable="true">The submit tool is `ReadOnly = false` with app-only visibility per the owner's answer; the status tool is `ReadOnly = true`, model-visible, with minimal output (FR-21 c).</criterion>
+    <criterion testable="true">Negative: unauthenticated → 401 before any tool runs; a CIAM token is refused; an unreadable document → `isError` and nothing created; door switch off → `isError` INTAKE_DISABLED.</criterion>
+    <criterion testable="true">Both tools are in the `McpTools` ledger; ArchTests, size tests (&lt; 64 KiB) and the conformance job pass (FR-21 d).</criterion>
+    <criterion testable="true">No MCP host file changed; no tool output or log contains document or clause text or token claims.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: the tests the skill lists for these two tools plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-21; skill step 7: auth-touching MCP changes are reviewed with the uac-r2 reviewer. Tool names follow `spaarke_{verb}_{object}`; confirm against the naming note in projects/spaarkeai-mcp-bff-api-r1 before finalizing.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute and the mcp-tool-handler skill.</protocol>
+  </execution>
+</task>

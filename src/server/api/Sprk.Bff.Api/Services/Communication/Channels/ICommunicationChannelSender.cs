@@ -79,6 +79,14 @@ public sealed record ChannelSendRequest
     /// <see cref="Sprk.Bff.Api.Services.Communication.ServerSendMarker.HeaderName"/> header. Null on every other send (no header; byte-unchanged).
     /// </summary>
     public string? ServerSendMarker { get; init; }
+
+    /// <summary>
+    /// Email channel, app-only (<see cref="UserMode"/> false) threaded reply only (spaarke-intake-pipeline-r1 task 006, uac-r2): true when
+    /// the caller was shown to be able to read the reply parent's <c>sprk_communication</c>, or the parent was set by server code
+    /// (<see cref="SendCommunicationRequest.ReplyParentSetByServer"/>). False (the default) refuses an app-only reply exactly as a parent
+    /// missing from the mailbox is refused. Unused by a user-mode send, a send that is not a reply and the messaging channel.
+    /// </summary>
+    public bool ReplyParentAuthorized { get; init; }
 }
 
 /// <summary>Channel-neutral attachment payload for a send.</summary>

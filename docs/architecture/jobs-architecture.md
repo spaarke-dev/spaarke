@@ -29,16 +29,13 @@ The system was designed to replace in-process background queues with a durable, 
 | DeadLetterQueueService | `src/server/api/Sprk.Bff.Api/Services/Jobs/DeadLetterQueueService.cs` | DLQ inspection (summary, list, get) and re-drive with attempt count reset |
 | JobProcessingModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs` | DI registration for handlers, Service Bus client, and hosted services |
 
-## Job Handlers (13 handlers)
+## Job Handlers (10 entries)
 
 | Handler | JobType Constant | Domain | Key Behavior |
 |---------|-----------------|--------|-------------|
-| DocumentProcessingJobHandler | `DocumentProcessing` | Documents | Sample/scaffold handler for generic document operations |
 | AppOnlyDocumentAnalysisJobHandler | `AppOnlyDocumentAnalysis` | AI | Runs Document Profile analysis via AppOnlyAnalysisService; idempotency key `analysis-{docId}-documentprofile` |
-| EmailAnalysisJobHandler | `EmailAnalysis` | AI/Email | Combined email + attachment AI analysis; idempotency key `emailanalysis-{emailId}` |
 | RagIndexingJobHandler | `RagIndexing` | AI/Search | Single-document RAG indexing via FileIndexingService; updates Dataverse tracking fields |
 | BulkRagIndexingJobHandler | `BulkRagIndexing` | AI/Search | Batch RAG indexing with bounded concurrency (SemaphoreSlim), Dataverse document query, BatchJobStatusStore progress tracking |
-| ProfileSummaryJobHandler | `ProfileSummary` | AI/Office | Office add-in post-save profile extraction; chains to RagIndexing job |
 | AttachmentClassificationJobHandler | `AttachmentClassification` | Finance | AI classification of email attachments as invoice candidates; multi-signal entity matching (reference, vendor, parent, keyword) |
 | InvoiceSubmissionProcessingJobHandler | `InvoiceSubmissionProcessing` | Finance | Reads the invoice (Content Understanding), evaluates it and persists the `sprk_invoice`; its after-steps enqueue InvoiceIndexing (ebilling-r1 049). The legacy `InvoiceExtraction` job and its handler were deleted by ebilling-r1 050b |
 | InvoiceIndexingJobHandler | `InvoiceIndexing` | Finance/Search | Indexes invoice into Azure AI Search with embeddings (text-embedding-3-large, 3072 dims) |
@@ -63,7 +60,6 @@ The system was designed to replace in-process background queues with a durable, 
 
 Several handlers chain to downstream jobs upon completion:
 
-- `ProfileSummaryJobHandler` → queues `RagIndexing` job
 - `InvoiceSubmissionProcessingJobHandler` → queues `InvoiceIndexing` job (after the invoice is accepted; the retired `InvoiceExtractionJobHandler` used to)
 - `UploadFinalizationWorker` → queues profile or indexing stage
 

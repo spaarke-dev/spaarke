@@ -60,37 +60,26 @@ public class RecordSyncJobTests
             configuration,
             opts,
             new DefaultAzureCredential(),
+            TimeProvider.System,
             loggerMock.Object);
 
         return (job, cacheMock, factoryMock);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // (f) Disabled — no work done
+    // (f) Disabled — since #3321 the job is an ADR-036 scheduled job: RecordSync:Enabled is the registration's enabled flag, so
+    // a disabled job is never dispatched by the host. The old StartAsync test of the timer loop went with the loop.
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task ExecuteAsync_WhenDisabled_DoesNotQueryDataverseOrSearch()
+    [Theory]
+    [InlineData(15, "*/15 * * * *")]
+    [InlineData(30, "*/30 * * * *")]
+    [InlineData(60, "0 * * * *")]
+    [InlineData(7, "*/30 * * * *")]
+    [InlineData(0, "*/30 * * * *")]
+    public void CronFor_IntervalMinutes_RunsAtThatIntervalOrEvery30Minutes(int intervalMinutes, string expected)
     {
-        // Arrange
-        var (job, cache, factory) = CreateJob(new RecordSyncOptions { Enabled = false });
-        using var cts = new CancellationTokenSource();
-
-        // Act
-        await job.StartAsync(cts.Token);
-        // Await the actual execute task: a disabled job's ExecuteAsync returns straight away. The bound only
-        // matters if it regressed into the polling loop, in which case this times out and fails.
-        await job.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
-        await job.StopAsync(CancellationToken.None);
-
-        // Assert
-        cache.Verify(
-            c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never, "Watermark should never be read when the job is disabled");
-
-        factory.Verify(
-            f => f.CreateClient(It.IsAny<string>()),
-            Times.Never, "No HTTP clients should be created when the job is disabled");
+        RecordSyncJob.CronFor(intervalMinutes).Should().Be(expected);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -98,24 +87,25 @@ public class RecordSyncJobTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ExecuteAsync_WhenAiSearchEndpointMissing_DoesNotStart()
+    public async Task ExecuteAsync_WhenAiSearchEndpointMissing_SkipsTheRunAndReadsNothing()
     {
         // Arrange
         var opts = DefaultOptions();
         opts.AiSearchEndpoint = string.Empty;
-        var (job, cache, _) = CreateJob(opts);
-        using var cts = new CancellationTokenSource();
+        var (job, cache, factory) = CreateJob(opts);
 
         // Act — should not throw
-        await job.StartAsync(cts.Token);
-        // Missing endpoint => ExecuteAsync returns straight away (see the disabled test above).
-        await job.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
-        await job.StopAsync(CancellationToken.None);
+        var result = await job.ExecuteAsync(
+            new Spaarke.Scheduling.JobRunContext(Guid.NewGuid(), "corr", Spaarke.Scheduling.JobRunTrigger.Scheduled, new Dictionary<string, object>()),
+            CancellationToken.None);
 
         // Assert
+        result.Success.Should().BeTrue();
+        result.Skipped.Should().BeTrue();
         cache.Verify(
             c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
+        factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Never);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -520,7 +510,7 @@ internal sealed class TestableRecordSyncJob : RecordSyncJob
         IHttpClientFactory factory,
         IOptions<RecordSyncOptions> options,
         ILogger<RecordSyncJob> logger)
-        : base(cache, factory, new ConfigurationBuilder().Build(), options, new DefaultAzureCredential(), logger)
+        : base(cache, factory, new ConfigurationBuilder().Build(), options, new DefaultAzureCredential(), TimeProvider.System, logger)
     {
     }
 

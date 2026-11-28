@@ -10,7 +10,7 @@
         <LocalizedCollectionName description="Background Jobs" languagecode="1033" />
       </LocalizedCollectionNames>
       <Descriptions>
-        <Description description="Job definition for the Spaarke.Scheduling background-job framework (R3 Part 2). Read by ScheduledJobHost on startup + hourly refresh. Per-run audit history lives in sprk_backgroundjobrun. Distinct from sprk_processingjob, which is Office-scoped — do NOT overload that entity." languagecode="1033" />
+        <Description description="Job definition for the Spaarke.Scheduling background-job framework (R3 Part 2). Read by ScheduledJobHost on startup + hourly refresh. Per-run audit history lives in sprk_backgroundjobrun. Distinct from sprk_processingjob, which holds run records for Office saves and intake pipeline runs — do NOT overload that entity." languagecode="1033" />
       </Descriptions>
       <attributes>
         <attribute PhysicalName="CreatedBy">

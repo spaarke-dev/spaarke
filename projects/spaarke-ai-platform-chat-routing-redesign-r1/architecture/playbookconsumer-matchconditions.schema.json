@@ -24,7 +24,9 @@
     { "mimeType": "application/pdf" },
     { "mimeType": ["application/pdf", "text/plain"] },
     { "documentType": "nda" },
-    { "documentType": "nda", "mimeType": "application/pdf" }
+    { "documentType": "nda", "mimeType": "application/pdf" },
+    { "requestType": "nda" },
+    { "requestType": "nda", "documentType": "nda" }
   ],
-  "$comment": "Match keys initially supported by ConsumerRoutingService (chat-routing-redesign-r1 task 028a / FR-1R-02): 'mimeType' (matches IRoutingContext.MimeType) and 'documentType' (matches IRoutingContext.DocumentType when classification is available — Phase 4). Unknown keys are IGNORED at match time (defensive: future-compatible). New match keys MUST be added to IRoutingContext + ConsumerRoutingService.TryMatchConditions in lockstep, then documented here."
+  "$comment": "Match keys initially supported by ConsumerRoutingService (chat-routing-redesign-r1 task 028a / FR-1R-02): 'mimeType' (matches IRoutingContext.MimeType) and 'documentType' (matches IRoutingContext.DocumentType when classification is available — Phase 4). 'requestType' (matches IRoutingContext.RequestType, a default interface member returning null; added by spaarke-intake-pipeline-r1 task 012 / FR-08 for intake-harness Bindings). An unknown key FAILS the match (fail closed; ConsumerRoutingService.ResolveContextValue returns null for it). New match keys MUST be added to IRoutingContext + ConsumerRoutingService.TryMatchConditions in lockstep, then documented here."
 }

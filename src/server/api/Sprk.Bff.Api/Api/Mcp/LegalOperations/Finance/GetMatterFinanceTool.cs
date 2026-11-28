@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Finance;
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md section 11).
 //   Existing: FinanceSummaryService.GetSummaryAsync behind the REST summary route; FinanceAuthorizationFilter.AuthorizeMatterFinanceReadAsync
-//     (task 008, CAPABILITY-INDEX row 52), the one statement of that route's rule (step 0, then finance.read on the matter).
+//     (task 008, CAPABILITY-INDEX row 53), the one statement of that route's rule (step 0, then finance.read on the matter).
 //   Extension: both are reused unchanged; the tool adds no authorization check. The only new logic is the argument read, the mapping of
 //     each refusal to an isError result with fixed text, and the slim projection of the summary.
 //   Cost of doing nothing: Copilot users cannot ask for a matter's finance position (FR-11 fails).
