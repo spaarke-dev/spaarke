@@ -31,7 +31,13 @@ public class AccessModelSourceColumnsGuardTests
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, string> BusinessColumns = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["sprk_invoice.sprk_matter"] = "the invoice's matter (a filing lookup; the target side keeps its own rules)",
+        ["sprk_invoice.sprk_approvedtotal"] = "an invoice amount",
+        ["sprk_invoice.sprk_expensestotal"] = "an invoice amount",
+        ["sprk_invoice.sprk_feestotal"] = "an invoice amount",
+        ["sprk_invoice.sprk_invoiceadjustmentstotal"] = "an invoice amount",
+        ["sprk_invoice.sprk_lineadjustmentstotal"] = "an invoice amount",
+        ["sprk_invoice.sprk_totalamount"] = "an invoice amount",
+        ["sprk_invoice.sprk_matter"] ="the invoice's matter (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_project"] = "the invoice's project (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_regardingworkassignment"] = "the invoice's work assignment (a filing lookup; the target side keeps its own rules)",
         ["sprk_invoice.sprk_supersedesinvoice"] = "the invoice this one supersedes (a business lookup)",
@@ -58,9 +64,9 @@ public class AccessModelSourceColumnsGuardTests
     [
         "adx_identity_logonenabled", "adx_identity_passwordhash", "sprk_accessinheritance", "sprk_accesspermissiongrant",
         "sprk_externalaccessremovedon", "sprk_externalinvitecodehash", "sprk_externalinvitedemailhash", "sprk_externalinvitedon",
-        "sprk_externalinvitedtenantid", "sprk_externalobjectid", "sprk_externaltenantid", "sprk_graphdriveid", "sprk_graphitemid",
+        "sprk_externalinvitedtenantid", "sprk_externalobjectid", "sprk_externaltenantid", "sprk_firmhold", "sprk_graphdriveid", "sprk_graphitemid",
         "sprk_graphitemidbound", "sprk_homeobjectid", "sprk_hometenantid", "sprk_identityplane", "sprk_issecure",
-        "sprk_restrictedbysubmission", "sprk_standinggrant",
+        "sprk_primarycontact", "sprk_restrictedbysubmission", "sprk_standinggrant", "sprk_vendororg",
     ];
 
     private static readonly string[] AlwaysScopedTables = ["contact", "systemuser", "sprk_document", "sprk_communication"];
@@ -116,7 +122,7 @@ public class AccessModelSourceColumnsGuardTests
     internal static IReadOnlyList<string> Unclassified(
         IEnumerable<SecuredColumn> secured, IReadOnlyDictionary<string, string> business) =>
         secured
-            .Where(c => !AccessModelSourceColumns.Contains(c.Table, c.Column) && !business.ContainsKey($"{c.Table}.{c.Column}"))
+            .Where(c => !AccessModelSourceColumns.Contains(c.Column) && !business.ContainsKey($"{c.Table}.{c.Column}"))
             .Select(c => $"{c.Table}.{c.Column} ({c.File})")
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -128,7 +134,7 @@ public class AccessModelSourceColumnsGuardTests
     {
         var present = secured.Select(c => $"{c.Table}.{c.Column}").ToHashSet(StringComparer.Ordinal);
         return business
-            .Where(e => !present.Contains(e.Key) || AccessModelSourceColumns.Contains(e.Key[..e.Key.IndexOf('.')], e.Key[(e.Key.IndexOf('.') + 1)..])
+            .Where(e => !present.Contains(e.Key) || AccessModelSourceColumns.Contains(e.Key[(e.Key.IndexOf('.') + 1)..])
                         || string.IsNullOrWhiteSpace(e.Value))
             .Select(e => e.Key)
             .Order(StringComparer.Ordinal)
@@ -169,34 +175,28 @@ public class AccessModelSourceColumnsGuardTests
         Assert.Equal(PinnedAccessModelColumns, AccessModelSourceColumns.Exact.Select(c => c.ToLowerInvariant()).Order(StringComparer.Ordinal));
         Assert.Equal("sprk_identitycollision", AccessModelSourceColumns.IdentityCollisionPrefix);
 
-        // Must fire: the exact names and the prefix on every table (any table, none at all), spelled any way.
-        Assert.True(AccessModelSourceColumns.Contains("contact", "adx_identity_passwordhash"));
-        Assert.True(AccessModelSourceColumns.Contains("sprk_matter", " SPRK_IsSecure "));
-        Assert.True(AccessModelSourceColumns.Contains(null, "sprk_identitycollisionreason"));
-        Assert.True(AccessModelSourceColumns.Contains("account", "sprk_graphdriveid"));
-        Assert.True(AccessModelSourceColumns.Contains("sprk_document", " SPRK_RestrictedBySubmission "));
+        // Must fire: the C3 names on every table, spelled any way, the document's file binding, and the prefix.
+        Assert.True(AccessModelSourceColumns.Contains("adx_identity_passwordhash"));
+        Assert.True(AccessModelSourceColumns.Contains(" SPRK_IsSecure "));
+        Assert.True(AccessModelSourceColumns.Contains("sprk_graphdriveid"));
+        Assert.True(AccessModelSourceColumns.Contains(" SPRK_RestrictedBySubmission "));
+        Assert.True(AccessModelSourceColumns.Contains("sprk_identitycollisionreason"));
 
-        // Must fire: a column the access-column registry lists, on the table it lists it for (any spelling of either), and
-        // every registry entry on its own table.
-        Assert.True(AccessModelSourceColumns.Contains("team", "name"));
-        Assert.True(AccessModelSourceColumns.Contains(" BusinessUnit ", " Name "));
-        Assert.True(AccessModelSourceColumns.Contains("systemuser", " ParentSystemUserId "));
-        foreach (var (table, columns) in Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.AccessColumns)
-        {
-            Assert.All(columns, column => Assert.True(AccessModelSourceColumns.Contains(table, column),
-                $"{table}.{column} is in the access-column registry but not denied"));
-        }
+        // Must fire: the invoice's firm and firm hold, and a user's own contact (they decide who sees an invoice), on any table.
+        Assert.True(AccessModelSourceColumns.Contains("sprk_vendororg"));
+        Assert.True(AccessModelSourceColumns.Contains(" SPRK_FirmHold "));
+        Assert.True(AccessModelSourceColumns.Contains("sprk_primarycontact"));
 
-        // Must not fire: a registry name on a table the registry does not list it for (the filing parent's own columns are
-        // copied), or with no table; a business column; a name that only contains an access-model name; nothing.
-        Assert.False(AccessModelSourceColumns.Contains("sprk_matter", "name"));
-        Assert.False(AccessModelSourceColumns.Contains("account", "name"));
-        Assert.False(AccessModelSourceColumns.Contains("sprk_event", "sprk_regardingmatter"));
-        Assert.False(AccessModelSourceColumns.Contains(null, "parentsystemuserid"));
-        Assert.False(AccessModelSourceColumns.Contains("sprk_matter", "sprk_clientname"));
-        Assert.False(AccessModelSourceColumns.Contains("sprk_matter", "sprk_issecurebackup_x"));
-        Assert.False(AccessModelSourceColumns.Contains("contact", "x_sprk_identitycollision"));
-        Assert.False(AccessModelSourceColumns.Contains("contact", null));
+        // Must not fire (owner 2026-11-27: a mapped business column is copied whatever the caller can read): the invoice amounts
+        // and review label, a business column, a name that only contains an access-model name, nothing.
+        Assert.False(AccessModelSourceColumns.Contains("sprk_totalamount"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_approvedtotal"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_reviewdetail"));
+        Assert.False(AccessModelSourceColumns.Contains("name"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_clientname"));
+        Assert.False(AccessModelSourceColumns.Contains("sprk_issecurebackup_x"));
+        Assert.False(AccessModelSourceColumns.Contains("x_sprk_identitycollision"));
+        Assert.False(AccessModelSourceColumns.Contains(null));
     }
 
     private static string EntityXml(string table, params (string Column, bool Secured)[] attributes) =>
@@ -213,8 +213,6 @@ public class AccessModelSourceColumnsGuardTests
         { "an unclassified secured column on a table that carries sprk_issecure",
             EntityXml("sprk_Matter", ("sprk_issecure", false), ("sprk_newsecret", true)) },
         { "an unclassified secured column on sprk_document", EntityXml("sprk_Document", ("sprk_newsecret", true)) },
-        { "a registry name on a table the registry does not list it for",
-            EntityXml("sprk_Matter", ("sprk_issecure", false), ("name", true)) },
         { "an unclassified secured column on sprk_communication", EntityXml("sprk_Communication", ("sprk_newsecret", true)) },
     };
 
@@ -244,7 +242,7 @@ public class AccessModelSourceColumnsGuardTests
         { "sprk_issecure secured on a table that carries it", EntityXml("sprk_Project", ("sprk_issecure", true)) },
         { "a document's file binding", EntityXml("sprk_Document", ("sprk_graphdriveid", true), ("sprk_graphitemidbound", true)) },
         { "a pinned business column", EntityXml("sprk_Invoice", ("sprk_issecure", false), ("sprk_matter", true)) },
-        { "an access-registry column (an invoice amount)", EntityXml("sprk_Invoice", ("sprk_issecure", false), ("sprk_totalamount", true)) },
+        { "a pinned business column (an invoice amount)", EntityXml("sprk_Invoice", ("sprk_issecure", false), ("sprk_totalamount", true)) },
         { "a secured column on a table that is not scoped", EntityXml("sprk_Event", ("sprk_newsecret", true)) },
         { "an unsecured column on contact", EntityXml("Contact", ("sprk_newsecret", false)) },
     };

@@ -86,6 +86,7 @@ public sealed class InvoiceMoneyColumnsAppOnlyWriteGuardTests
         typeof(Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule), // ReadableColumns of sprk_invoice
         typeof(InheritedAccessPermission), // AccessColumns of sprk_invoice (app-only generic writers refuse the six amounts)
         typeof(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules), // MappingProtectedColumns of sprk_invoice (field-mapping rules skip the six amounts)
+        typeof(Sprk.Bff.Api.Services.Dataverse.FieldMapping.AccessModelSourceColumns), // Exact: a mapping never reads the invoice's firm past the caller's view; reads and writes no row
     ];
 
     private static IEnumerable<Type> Reviewed => Writers.Concat(Readers).Concat(Registrations);

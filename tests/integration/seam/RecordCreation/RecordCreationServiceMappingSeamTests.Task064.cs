@@ -153,6 +153,8 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     [Theory]
     [InlineData("sprk_externalobjectid")]
     [InlineData("sprk_identitycollisionnote")]
+    [InlineData("sprk_vendororg")]      // an invoice's firm
+    [InlineData("sprk_primarycontact")] // a user's own contact
     public async Task CreateAsync_FromTheFilingParent_ARuleReadingAnAccessModelColumn_KeepsTheCallersView_AndIsNamed(string accessColumn)
     {
         _sources[("sprk_matter", OrdinaryMatter)][accessColumn] = "not-to-be-copied";
@@ -170,6 +172,32 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
             RecordCreationWarning.MappingRuleSkippedCode, "sprk_location",
             Sprk.Bff.Api.Services.Dataverse.FieldMapping.AccessModelSourceColumns.ReadAsTheCallerWarning("sprk_location")));
+    }
+
+    /// <summary>
+    /// Task 067 (owner 2026-11-27), must not fire: an invoice amount (<c>sprk_totalamount</c>) is a business column, not an
+    /// access-model one, so from the filing parent it is copied though the caller cannot read it, with no warning and no caller
+    /// column read. The list matches by name on every table, so the source table here does not change the decision. MUTATION:
+    /// putting <c>sprk_totalamount</c> on the access-model list keeps the caller's view and leaves sprk_location unwritten.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_totalamount")]
+    [InlineData("sprk_approvedtotal")]
+    public async Task CreateAsync_FromTheFilingParent_AnInvoiceAmountTheCallerCannotRead_IsCopied(string amountColumn)
+    {
+        _sources[("sprk_matter", OrdinaryMatter)][amountColumn] = "1250.00";
+        MatterEventTypeToEventProfile(Rule(amountColumn, "sprk_location", Text));
+        _scripted.SecuredColumns.Add(amountColumn);
+        _callerRead.Secured.Add(amountColumn);
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_location").Should().Be("1250.00", "a business column of the filing parent is copied whatever the caller can read");
+        StringOf(fields, "sprk_description").Should().Be("From the matter");
+        outcome.MappingWarnings.Should().BeEmpty();
+        _callerRead.Paths.Should().BeEmpty("no access-model column is mapped, so no caller column read is made");
     }
 
     /// <summary>Task 067 C4: the filing parent is read app-only once, for its id, and for exactly the mapped columns (plus the
