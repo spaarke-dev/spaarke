@@ -429,7 +429,9 @@ comment, which only Office.js can make, so the document shows which runner ran i
    `Spaarke Word probe plugin v0.8 no script new id.zip` (same app id `9248c601-…`, version 1.8.0). If the admin
    center won't update it, remove it and upload `Spaarke Word probe plugin v0.8 no script id admin-test-2.zip`
    instead (another new id, `15c2936d-…`), scoped to just you. Tell me which went in. Wait until the probe shows in
-   Word's Copilot pane with the new skill `spaarke-word-probe-office-error`.
+   Word's Copilot pane with the new skill `spaarke-word-probe-office-error`. An admin-center update can take about
+   40 minutes to reach you, so test about 45 minutes after uploading. Until the new skill shows, Word still has
+   v0.7, and its edit and size probes would run the old code.
 2. Word desktop: **new blank document**. Copilot pane: **Spaarke MCP off**, **Spaarke Word Probe** on. If the new
    skill doesn't show in **+**, close and reopen Word.
 3. A **new Copilot chat for each run**; pick the skill's chip from **+** first.
