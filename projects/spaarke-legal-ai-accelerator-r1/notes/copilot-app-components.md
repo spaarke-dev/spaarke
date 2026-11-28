@@ -20,6 +20,14 @@ and §10 without renumbering. Instructions alone did not hold the redline rules;
 | Table and redline in one pass | Yes: plan table, one approval card, then all files | Only as far as the model follows its instructions |
 | Cost | Cowork credits per step | Within the Copilot licence |
 
+**From specialist-legal-agents-r1 (2026-11-28, their dev-tenant runs; not re-tested here):**
+- Each declarative agent's MCP action needs its own per-user sign-in (a "Sign in to Spaarke MCP …" card), even when
+  the tenant connector is already connected.
+- In an agent, a user's first "list every tool" answer can name no tools until the agent has called one Spaarke tool
+  in that chat.
+- A skills-only Cowork plugin reaches no Spaarke tool unless the **Spaarke MCP** source is switched on. Our NDA tests
+  run with it off, so any test that needs the MCP must check the switch first.
+
 **Installing a plugin: one app id per route (2026-11-27, WP-6 setup).** The admin center (Tools › Upload) refuses a
 plugin whose app id was already uploaded through Cowork › Customize › Plugins, even after it's removed there. The
 only message is "We couldn't validate this manifest file". A new app id fixes it. Our accelerator builds give each

@@ -39,6 +39,7 @@
 
 ## Related sessions
 - **copilot-platform-coordination**: send a row BEFORE any tenant upload; tell it on every probe upload/removal (row P1; v0.4 removed, v0.5/v0.6 refused, v0.7 planned).
+- **specialist-legal-agents-r1** (standing request, 2026-11-28): send it each finding on Copilot Chat agents, Cowork skills/plugins, Word, the Spaarke MCP connector or NDA review as we record it (one line + where written). It sends us its results in our area (G6 coexistence, task 024). Its D-A13 (Microsoft-first markup) pairs with our Word edition decision.
 - **intake-pipeline-r1**: messages us before changing the closed refusal code set; we message it before changing the engine CLI contract.
 - **mcp-r1 / mcp-r2** (`spaarkeai-mcp-bff-api-*`), **specialist-legal-agents-r1**, **accelerator-claude-r2**, **ontology-r1**, **provisioning-r1**: read-only from here.
 - `src/accelerators` changes go to master by their own PR, then sync into this branch.
