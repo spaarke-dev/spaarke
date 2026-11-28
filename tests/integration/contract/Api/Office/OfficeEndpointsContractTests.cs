@@ -1351,6 +1351,15 @@ public sealed class OfficeVersionSaveWorld
     public Dictionary<string, Guid> CommunicationsByMessageId { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// Task 143 (fix B): the record a registered communication is filed to — its <c>sprk_regarding*</c> column and the record —
+    /// by communication id. Empty by default: every communication is filed to none, as before.
+    /// </summary>
+    public Dictionary<Guid, (string Column, Microsoft.Xrm.Sdk.EntityReference Record)> CommunicationFiling { get; } = new();
+
+    /// <summary>Task 143 (fix B): communications whose read throws. Empty by default.</summary>
+    public HashSet<Guid> FaultingCommunicationReads { get; } = new();
+
+    /// <summary>
     /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
     /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
     /// factory's <see cref="ISecurableEntityRegistry"/> double reports those LOGICAL names securable — and only the
@@ -1454,10 +1463,20 @@ public sealed class OfficeVersionSaveWorld
             }
         }
 
-        // Task 141 review: a communication registered by Message-ID, read back with that Message-ID.
+        // Task 143 (fix B): a communication whose read faults.
+        if (entity == "sprk_communication" && FaultingCommunicationReads.Contains(id))
+            throw new InvalidOperationException("Test: Dataverse could not read the sprk_communication.");
+
+        // Task 141 review: a communication registered by Message-ID, read back with that Message-ID. Task 143 (fix B): with
+        // the record it is filed to, when a test files it (CommunicationFiling).
         if (entity == "sprk_communication"
             && CommunicationsByMessageId.FirstOrDefault(c => c.Value == id) is { Key: { } internetMessageId })
-            return new Microsoft.Xrm.Sdk.Entity("sprk_communication", id) { ["sprk_internetmessageid"] = internetMessageId };
+        {
+            var communication = new Microsoft.Xrm.Sdk.Entity("sprk_communication", id) { ["sprk_internetmessageid"] = internetMessageId };
+            if (CommunicationFiling.TryGetValue(id, out var filed))
+                communication[filed.Column] = filed.Record;
+            return communication;
+        }
 
         return null;
     }

@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Workers.Office;
 
@@ -186,12 +187,13 @@ public class EmailAttachmentAddPlanner
         NotASavedEmail,
 
         /// <summary>
-        /// The <c>.eml</c> is not filed to the request's record (<see cref="IsFiledTo"/>), or — task 143 — the request names no
-        /// record and the <c>.eml</c> is filed to one (<see cref="IsFiledToNoRecord"/>).
+        /// The <c>.eml</c> is not filed to the request's record, or — task 143 — the request names no record and the <c>.eml</c> is
+        /// filed to one, by THE filed rule (<see cref="IsPlacedHereAsync"/>: its own record link, else its communication's).
         /// </summary>
         NotFiledToTheRecord,
 
-        /// <summary>The stored <c>.eml</c> could not be read.</summary>
+        /// <summary>The stored <c>.eml</c> could not be read, or — task 143 — the <c>.eml</c> has no record link of its own and its
+        /// communication could not be read (<see cref="IsPlacedHereAsync"/>), so where it is filed is not known.</summary>
         Unreadable,
 
         /// <summary>
@@ -307,12 +309,22 @@ public class EmailAttachmentAddPlanner
             return (SavedEmailOutcome.NotThisEmail, null);
         }
 
-        // Task 143: a named add that names NO record adds only under an .eml filed to no record (IsFiledToNoRecord); one that
-        // names a record keeps the rule above (IsFiledTo). The key-matched add (task 138) always names its save's record.
-        var placedHere = requestEmail is not null && targetLogicalName is null && targetRecordId == Guid.Empty
-            ? IsFiledToNoRecord(filing)
-            : IsFiledTo(filing, targetLogicalName, targetRecordId);
-        if (!placedHere)
+        // Task 143: THE "filed" rule (FiledRecordAsync): the .eml's own record link, else its communication's record. A named
+        // add that names NO record adds only under an .eml filed to neither; one that names a record, only under an .eml filed
+        // to that record by the rule. The key-matched add (task 138) always names its save's record.
+        var namesNoRecord = requestEmail is not null && targetLogicalName is null && targetRecordId == Guid.Empty;
+        var placement = await IsPlacedHereAsync(emlDocumentId, filing, namesNoRecord, targetLogicalName, targetRecordId, cancellationToken);
+        if (placement is null)
+        {
+            // The .eml has no record link of its own and its communication could not be read: where it is filed is not
+            // known, so nothing is added (fail closed; the caller answers it as an unreadable email, retryable).
+            _logger.LogWarning(
+                "Email re-save: the communication of saved .eml document {DocumentId} could not be read; nothing is added",
+                emlDocumentId);
+            return (SavedEmailOutcome.Unreadable, null);
+        }
+
+        if (placement is false)
         {
             // The key matched a save that filed this .eml somewhere else (or it was re-filed since): adding under it would
             // make children of another record's email, and expose that record's content to this record's readers.
@@ -507,6 +519,69 @@ public class EmailAttachmentAddPlanner
             .Where(r => r is { Id: var id } && id != Guid.Empty)
             .ToList();
         return links.Count > 0 && links.All(r => r!.Id == targetRecordId);
+    }
+
+    /// <summary>
+    /// Task 143 (owner 2026-11-27: an email's <c>.eml</c> and its communication are always filed to the same record): THE
+    /// "filed" rule an attachments add applies, the one the email identity route reports to the pane
+    /// (<c>DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync</c>, task 132). The <c>.eml</c> is filed by its OWN
+    /// record links when it has any (<see cref="IsFiledToNoRecord"/> false): then <see cref="IsFiledTo"/> decides, and its
+    /// communication is not read. With none, it is filed to the record its <c>sprk_communication</c>
+    /// (<c>sprk_relatedcommunication</c>) is filed to — the first populated regarding lookup, read by that SAME reader (same
+    /// columns, same priority). Unfiled = neither.
+    /// </summary>
+    /// <param name="namesNoRecord">The request is a named add that names no record: placed here only when unfiled.</param>
+    /// <returns><see langword="true"/> when the add may go under the <c>.eml</c>, <see langword="false"/> when it is filed
+    /// elsewhere (or an unreadable row: fail closed), <see langword="null"/> when its communication could not be read (where it
+    /// is filed is not known: the caller refuses).</returns>
+    internal async Task<bool?> IsPlacedHereAsync(
+        Guid emlDocumentId,
+        Microsoft.Xrm.Sdk.Entity? emlRow,
+        bool namesNoRecord,
+        string? targetLogicalName,
+        Guid targetRecordId,
+        CancellationToken cancellationToken)
+    {
+        if (emlRow is null)
+        {
+            return false;
+        }
+
+        if (!IsFiledToNoRecord(emlRow))
+        {
+            return !namesNoRecord && IsFiledTo(emlRow, targetLogicalName, targetRecordId);
+        }
+
+        if (CommunicationOf(emlRow) is not { } communicationId)
+        {
+            return namesNoRecord;
+        }
+
+        var (record, undetermined) = await DocumentUrlIdentityResolution.ResolveDerivedRelatedRecordAsync(
+            new DocumentUrlIdentityResolution.Resolution(
+                emlDocumentId,
+                DocumentName: null,
+                FileName: null,
+                RelatedRecord: null,
+                RelatedCommunication: new Microsoft.Xrm.Sdk.EntityReference(CommunicationEntityName, communicationId)),
+            _entities,
+            _logger,
+            cancellationToken);
+        if (undetermined)
+        {
+            return null;
+        }
+
+        if (record is null)
+        {
+            return namesNoRecord;
+        }
+
+        return !namesNoRecord
+            && !string.IsNullOrEmpty(targetLogicalName)
+            && targetRecordId != Guid.Empty
+            && string.Equals(record.LogicalName, targetLogicalName, StringComparison.Ordinal)
+            && record.Id == targetRecordId;
     }
 
     /// <summary>

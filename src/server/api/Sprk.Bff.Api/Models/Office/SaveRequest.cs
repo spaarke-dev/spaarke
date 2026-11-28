@@ -250,8 +250,9 @@ public record EmailMetadata
     /// (<c>OfficeVersionSaveAuthorizationFilter</c>, the version save's gate), as the version save does for
     /// <c>Document.ExistingDocumentId</c>. <see cref="SaveRequest.TargetEntity"/>, when set, must be the record the <c>.eml</c>
     /// is filed to (the route's <c>EntityAccessFilter</c> checks it as for any save). Task 143: with no
-    /// <see cref="SaveRequest.TargetEntity"/>, the <c>.eml</c> must be filed to no record
-    /// (<c>EmailAttachmentAddPlanner.IsFiledToNoRecord</c>), else the save is refused (403 <c>OFFICE_009</c>). The selection
+    /// <see cref="SaveRequest.TargetEntity"/>, the <c>.eml</c> must be filed to no record, else the save is refused (403
+    /// <c>OFFICE_009</c>). "Filed" is ONE rule (<c>EmailAttachmentAddPlanner.IsPlacedHereAsync</c>): the <c>.eml</c>'s own record
+    /// link, else the record its communication is filed to; the added attachments are filed to that record. The selection
     /// must name at least one file: the route refuses it missing with a 400.</para>
     /// <para>Absent (every older client, and every ordinary email save): unchanged behaviour.</para>
     /// </remarks>

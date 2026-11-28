@@ -1806,13 +1806,30 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     }
     if (!pending.sawChecking) return;
     attachmentsRefreshRef.current = null;
-    const serverNames =
+    const identityOfThisDocument =
       documentIdentity !== undefined &&
       documentIdentity.kind === 'resolved' &&
-      cleanGuid(documentIdentity.documentId) === pending.documentId &&
+      cleanGuid(documentIdentity.documentId) === pending.documentId;
+    const serverNames =
+      identityOfThisDocument &&
+      documentIdentity.kind === 'resolved' &&
       Array.isArray(documentIdentity.savedAttachmentNames)
         ? documentIdentity.savedAttachmentNames
         : undefined;
+    // Task 143 (fix B; owner 2026-11-27: an email's .eml and its communication are always filed to the same record): the
+    // filing the identity route reports — the .eml's own record, else its communication's — replaces the one this pane
+    // saved with, so the add the view then offers (to that record, or with none only when neither is filed) is the add the
+    // server's one "filed" rule accepts. A record not known (withheld, unknown) changes nothing.
+    const refreshedFiling =
+      identityOfThisDocument &&
+      (resolvedRelatedRecord.kind === 'associated' || resolvedRelatedRecord.kind === 'unassociated')
+        ? {
+            filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
+            filedToNumber:
+              resolvedRelatedRecord.kind === 'associated' ? relatedRecordNumber(resolvedRelatedRecord) : null,
+            filedRecord: relatedRecordRef(resolvedRelatedRecord),
+          }
+        : {};
     updateSavedState(prev => {
       if (!prev.savedDocument || prev.savedDocument.documentId !== pending.documentId) return prev;
       const { savedAttachmentNames: _previous, attachmentsAdding, attachmentsAddJobs, ...rest } = prev.savedDocument;
@@ -1840,6 +1857,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         ...prev,
         savedDocument: {
           ...rest,
+          ...refreshedFiling,
           ...(serverNames ? { savedAttachmentNames: serverNames } : {}),
           ...(stillAdding.length ? { attachmentsAdding: stillAdding } : {}),
           ...(jobsLeft.length ? { attachmentsAddJobs: jobsLeft } : {}),

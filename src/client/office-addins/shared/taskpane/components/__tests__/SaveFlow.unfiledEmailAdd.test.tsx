@@ -8,7 +8,7 @@
  *
  * Real SaveFlow + real useSaveFlow; only fetch, SSE, the Profile section and the picker are doubled.
  */
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SaveFlow } from '../SaveFlow';
 import { EmailContentCaptureContext, type CaptureEmailContent } from '../../hooks/emailContentCaptureContext';
@@ -95,12 +95,14 @@ function OutlookPane({ identity }: { identity: DocumentIdentityState }) {
           getAccessToken={jest.fn().mockResolvedValue('token')}
           apiBaseUrl="https://bff"
           documentIdentity={identity}
-          onRetryDocumentIdentity={jest.fn()}
+          onRetryDocumentIdentity={retryIdentity}
         />
       </EmailContentCaptureContext.Provider>
     </FluentProvider>
   );
 }
+
+const retryIdentity = jest.fn();
 
 const saveCalls = () => mockFetch.mock.calls.filter(([url]) => String(url).includes('/api/office/save'));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the request body is read loosely, as JSON
@@ -156,6 +158,60 @@ describe('SaveFlow — add attachments to a saved email filed to no record (task
     expect(screen.getByText(B)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: `Select ${B}` })).toBeNull();
     expect(addButton()).toBeNull();
+  });
+});
+
+describe('SaveFlow — after a save, the add follows the filing the server reports (task 143 fix B)', () => {
+  // Owner 2026-11-27: an email's .eml and its communication are always filed to the same record. The pane saved with no
+  // record, but the identity re-read after the save reports the .eml filed (through its communication) to a matter: the
+  // next add goes to that matter, never with no record (the server refuses that, 403).
+  it('takes the re-read record: the next add sends it', async () => {
+    const { rerender } = render(<OutlookPane identity={savedEmail(null)} />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: `Select ${B}` }));
+    fireEvent.click(addButton()!);
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    expect(bodyOf(saveCalls()[0]!).targetEntity).toBeUndefined();
+    await waitFor(() => expect(retryIdentity).toHaveBeenCalled());
+
+    // The re-read the completed add asks for: checking, then the server's answer.
+    rerender(<OutlookPane identity="checking" />);
+    rerender(<OutlookPane identity={savedEmail(FILED_RECORD)} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toContain('Filed to Gamma Merger');
+
+    // B is still ticked from the first add (nothing was added, so it is still unsaved).
+    expect(await screen.findByRole('checkbox', { name: `Select ${B}` })).toBeChecked();
+    fireEvent.click(addButton()!);
+    await waitFor(() => expect(saveCalls()).toHaveLength(2));
+    expect(bodyOf(saveCalls()[1]!).targetEntity).toEqual({
+      entityType: 'Matter',
+      entityId: MATTER_ID,
+      displayName: 'Gamma Merger',
+    });
+  });
+
+  it('negative: a re-read whose record is not known keeps what the pane saved with', async () => {
+    const { rerender } = render(<OutlookPane identity={savedEmail(null)} />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: `Select ${B}` }));
+    fireEvent.click(addButton()!);
+    await waitFor(() => expect(saveCalls()).toHaveLength(1));
+    await waitFor(() => expect(retryIdentity).toHaveBeenCalled());
+
+    rerender(<OutlookPane identity="checking" />);
+    rerender(<OutlookPane identity={savedEmail(null, { relatedRecordKnown: false })} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // B is still ticked from the first add (nothing was added, so it is still unsaved).
+    expect(await screen.findByRole('checkbox', { name: `Select ${B}` })).toBeChecked();
+    fireEvent.click(addButton()!);
+    await waitFor(() => expect(saveCalls()).toHaveLength(2));
+    expect(bodyOf(saveCalls()[1]!).targetEntity).toBeUndefined();
   });
 });
 
