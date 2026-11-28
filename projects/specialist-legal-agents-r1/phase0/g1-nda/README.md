@@ -1,5 +1,7 @@
 # Phase 0 test G1-NDA: does an agent follow an attorney's profile?
 
+> **Before any run:** apply `../accelerator-findings.md` (accelerator findings, 2026-11-28): Part A is binding run preparation; Part B scoring proposals are decided by the owner before the first run.
+
 > **Program:** specialist-legal-agents-r1 (spec FR-04 and FR-05; design §8 G1, the go/no-go for D-A7).
 > **Built by:** task 002 (this kit). **Corpus:** task 003 (`corpus/`). **Spike tools:** task 011. **Test agents and skills:** task 020. **Runs and verdict:** task 022, then task 030.
 > **Status:** test kit, not yet run. Every profile and document here is synthetic or public.

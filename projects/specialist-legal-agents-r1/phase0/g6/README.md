@@ -1,5 +1,7 @@
 # Phase 0 test G6: do Spaarke functions and Microsoft Legal for Cowork capture each other's tasks?
 
+> **Before any run:** apply `../accelerator-findings.md` (accelerator findings, 2026-11-28): Part A is binding run preparation; Part B scoring proposals are decided by the owner before the first run.
+
 > **Program:** specialist-legal-agents-r1 (spec FR-07, design D-A13). G6 subsumes the accelerator's **T-P2**.
 > **Throwaway test.** Nothing here is installed, uploaded or changed by Claude. All prompt content is synthetic.
 > **Who does what:**

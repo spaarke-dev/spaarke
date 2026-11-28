@@ -1,5 +1,7 @@
 # Phase 0 patent test content and the Cowork drafting spike
 
+> **Before any run:** apply `../accelerator-findings.md` (accelerator findings, 2026-11-28): Part A is binding run preparation; Part B scoring proposals are decided by the owner before the first run.
+
 > **Program:** specialist-legal-agents-r1 (spec FR-09 content, FR-10 drafting spike; design §3.14, OD-2, OD-4).
 > **Built by:** task 006 (content and this kit). **Spike run:** task 025 (records its results here). **G1-PAT:** `../g1-pat/README.md` (task 026).
 > **Status: test.** Every profile, disclosure and skill here is labelled `status: test` and is **not reviewed by a patent attorney** (spec Assumptions: no attorney review in Phase 0; a patent attorney is needed from Phase 1 for the golden set). The owner judges the drafting spike.

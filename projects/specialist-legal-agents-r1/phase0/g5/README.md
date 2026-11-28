@@ -1,5 +1,7 @@
 # Phase 0 test G5: can one practice-area agent route each request to the right function?
 
+> **Before any run:** apply `../accelerator-findings.md` (accelerator findings, 2026-11-28): Part A is binding run preparation; Part B scoring proposals are decided by the owner before the first run.
+
 > **Program:** specialist-legal-agents-r1 (design.md §3.9 and §8 G5; spec FR-06, FR-01).
 > **Decides:** D-A12's delivery shape (one area agent, or one agent per function). It does **not** decide the go/no-go.
 > **Status:** kit written, not run. Nothing here is uploaded, installed or changed in the tenant.

@@ -1,5 +1,7 @@
 # Phase 0 test G2 remainder: packaging questions
 
+> **Before any run:** apply `../accelerator-findings.md` (accelerator findings, 2026-11-28): Part A is binding run preparation; Part B scoring proposals are decided by the owner before the first run.
+
 > **Program:** specialist-legal-agents-r1 (design.md §8 G2 and G7; spec FR-08, FR-01).
 > **Status:** kit written, not run. Nothing here is uploaded, installed or changed in the tenant.
 > **Nature:** informational. It decides packaging, not the go/no-go. Each question is answered **yes, no or untestable**, with evidence (FR-08).

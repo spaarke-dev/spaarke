@@ -1,5 +1,7 @@
 # Phase 0 test G3: profile resolution from the caller's identity
 
+> **Before any run:** apply `../accelerator-findings.md` Part A (rows A5, A11 apply to G3).
+
 > **Program:** specialist-legal-agents-r1 (design.md §8 G3; spec FR-02, FR-03, NFR-04, NFR-05).
 > **Status:** spike branch built and tested (task 011). On the dev BFF since 2026-11-26; live now: `b84fa5f061` (spike `af8a5547ef` + mcp-r2 file probe, 2026-11-28). Not yet run against Copilot for G3: the run sheet (task 021) is below; the header tables stay empty until the owner runs it.
 > **Who does what:** the owner deploys the spike branch to DEV (on a go that names the SHA), sends the prompts and removes the branch afterwards; this session reads App Insights. Claude sessions never click tenant or admin actions.
@@ -86,13 +88,13 @@ Proven by tests on the spike branch against the production MCP host (real Kestre
 
 | Row | Surface | Caller kind | Account | Prompt, sent 3 times in the same chat | What it tests |
 |---|---|---|---|---|---|
-| G3-1 | Copilot Chat, no agent | tenant connector "Spaarke MCP" | owner | `Call the Spaarke tool spike_get_profile with function nda and tell me only the profileVersion` | headers on the connector path; same `profileVersion` across one run |
+| G3-1 | Copilot Chat, no agent | tenant connector "Spaarke MCP" | owner | `Call the tool spike_get_profile with function nda and tell me only the profileVersion` | headers on the connector path; same `profileVersion` across one run |
 | G3-2 | Copilot Chat, no agent | tenant connector | owner | same, in a **second** new chat | does any header change between two runs (run key)? |
 | G3-3 | Copilot Chat, agent `spaarke-legal-g1a-nda-test` | agent action | owner | same | headers on the agent-action path |
 | G3-4 | Copilot Chat, agent `spaarke-legal-g1b-nda-test` | agent action | owner | same, **once** | does any header differ between two agents (agent identity)? |
 | G3-5 | Copilot Chat, agent `spaarke-legal-g1a-nda-test` | agent action | demo | same | identity: demo gets `g1-b-v1`, never `g1-a-v1` |
 | G3-6 | Cowork | tenant connector | owner | same, in one Cowork task | headers on Cowork |
-| G3-7 (optional) | Copilot in Word, blank new document | tenant connector | owner | same | headers on Word, if Word reaches the tool at all |
+| G3-7 (optional) | Copilot in Word **desktop**, blank new document, agent mode | tenant connector | owner | same | headers on Word, if Word reaches the tool at all; record mode, host and document state (A11) |
 | G3-8 (optional) | Copilot in Teams | tenant connector | owner | same | headers on Teams, if reachable |
 
 Expected answers: the owner always sees `g1-a-v1`, demo always `g1-b-v1`. Any other value, or a profile shown with no tool call, stop and tell the session.
