@@ -11,7 +11,10 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 using Sprk.Bff.Api.Tests.Services.Documents;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Documents;
@@ -185,6 +188,78 @@ public class DocumentEmailIdentityStandaloneAttachmentsContractTests
             c.AttributeName == "sprk_internetmessageid" && Equals(c.Values.Single(), MessageId));
     }
 
+    // ── The external document narrowing (a document hidden from an external caller is not named) ───────────────────
+
+    /// <summary>The cases that hide ONE document from an external caller, leaving another shown (not the caller-wide faults).</summary>
+    public static TheoryData<string> PerDocumentHiddenCases => new()
+    {
+        HiddenDocumentCases.OwnRestricted, HiddenDocumentCases.InternalOnlyCommunication, HiddenDocumentCases.RestrictedParent,
+    };
+
+    /// <summary>The cases that fault for the whole caller (the narrowing read, or the caller lookup).</summary>
+    public static TheoryData<string> CallerWideFaultCases => new()
+    {
+        HiddenDocumentCases.NarrowingFault, HiddenDocumentCases.LookupFault,
+    };
+
+    [Theory]
+    [MemberData(nameof(PerDocumentHiddenCases))]
+    public async Task NoSavedEmail_ExternalCaller_LeavesOutAStandaloneAttachmentTheNarrowingHides_AndNamesTheShownOne(string @case)
+    {
+        var shown = Document("Exhibit A.pdf");
+        var hidden = Document("Privileged memo.pdf");
+        var world = new AppOnlyDocumentWorld();
+        world.Document(shown.Id);
+        var mode = HiddenDocumentCases.Arrange(world, hidden.Id, @case);
+        using var host = Host(
+            eml: null, children: null, standalone: new[] { shown, hidden }, rights: Readable(null, shown, hidden),
+            caller: mode, world: world);
+
+        var raw = await RawResolve(host);
+
+        raw.Should().NotContain("Privileged memo", "the caller holds Read on it, but the external narrowing hides it");
+        Names(JsonDocument.Parse(raw).RootElement).Should().Equal("Exhibit A.pdf");
+        world.Calls.Should().BeGreaterThan(0, "the external narrowing decided");
+    }
+
+    [Theory]
+    [MemberData(nameof(PerDocumentHiddenCases))]
+    public async Task SavedEmail_ExternalCaller_LeavesOutAStandaloneAttachmentTheNarrowingHides_AndKeepsTheShownOnes(string @case)
+    {
+        var emlId = Guid.NewGuid();
+        var child = Document("Settlement terms.pdf");
+        var shown = Document("Exhibit A.pdf");
+        var hidden = Document("Privileged memo.pdf");
+        var world = new AppOnlyDocumentWorld();
+        world.Document(emlId);
+        world.Document(child.Id);
+        world.Document(shown.Id);
+        var mode = HiddenDocumentCases.Arrange(world, hidden.Id, @case);
+        using var host = Host(
+            eml: emlId, children: new[] { child }, standalone: new[] { shown, hidden },
+            rights: Readable(emlId, child, shown, hidden), caller: mode, world: world);
+
+        var raw = await RawResolve(host);
+
+        raw.Should().NotContain("Privileged memo");
+        Names(JsonDocument.Parse(raw).RootElement).Should().BeEquivalentTo(new[] { "Settlement terms.pdf", "Exhibit A.pdf" });
+    }
+
+    [Theory]
+    [MemberData(nameof(CallerWideFaultCases))]
+    public async Task NoSavedEmail_ExternalCaller_WhenTheNarrowingFaults_NeverNamesTheStandaloneAttachment(string @case)
+    {
+        var hidden = Document("Privileged memo.pdf");
+        var world = new AppOnlyDocumentWorld();
+        var mode = HiddenDocumentCases.Arrange(world, hidden.Id, @case);
+        using var host = Host(
+            eml: null, children: null, standalone: new[] { hidden }, rights: Readable(null, hidden), caller: mode, world: world);
+
+        var raw = await RawResolve(host);
+
+        raw.Should().NotContain("Privileged memo", "a narrowing that did not decide fails closed");
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Entity Document(string name, string? fileName = null)
@@ -212,15 +287,16 @@ public class DocumentEmailIdentityStandaloneAttachmentsContractTests
 
     private static WebApplicationFactory<Program> Host(
         Guid? eml, Entity[]? children, Entity[]? standalone, Dictionary<Guid, AccessRights> rights, Guid? faultFor = null,
-        Action<QueryExpression>? onStandaloneQuery = null) =>
-        Host(eml, children, standalone, rights, out _, faultFor, onStandaloneQuery);
+        Action<QueryExpression>? onStandaloneQuery = null, NarrowingCallerMode? caller = null, AppOnlyDocumentWorld? world = null) =>
+        Host(eml, children, standalone, rights, out _, faultFor, onStandaloneQuery, caller, world);
 
     /// <param name="eml">The saved <c>.eml</c> the archive lookup finds; <see langword="null"/> = none.</param>
     /// <param name="children">The <c>.eml</c>'s children; <see langword="null"/> = none read.</param>
     /// <param name="standalone">The standalone lookup's answer; <see langword="null"/> = the read throws.</param>
     private static WebApplicationFactory<Program> Host(
         Guid? eml, Entity[]? children, Entity[]? standalone, Dictionary<Guid, AccessRights> rights,
-        out Mock<IDataverseService> dataverse, Guid? faultFor = null, Action<QueryExpression>? onStandaloneQuery = null)
+        out Mock<IDataverseService> dataverse, Guid? faultFor = null, Action<QueryExpression>? onStandaloneQuery = null,
+        NarrowingCallerMode? caller = null, AppOnlyDocumentWorld? world = null)
     {
         var entityService = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entityService
@@ -271,6 +347,9 @@ public class DocumentEmailIdentityStandaloneAttachmentsContractTests
         {
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(documents.Object);
+            // The caller and the app-only world THE external document narrowing reads, when a test states them.
+            if (caller is { } mode && world is not null)
+                services.AddStatedNarrowingCaller(() => mode, () => world);
         }));
     }
 
