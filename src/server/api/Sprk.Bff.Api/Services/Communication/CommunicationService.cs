@@ -1447,6 +1447,85 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
+    /// Spaarke-intake-pipeline-r1 task 006 (uac-r2): the problem code (503) of an app-only email reply whose reply-parent access check
+    /// could not be answered (a Dataverse or probe fault). Nothing is sent or written.
+    /// </summary>
+    public const string ReplyParentCheckUnavailableCode = "sdap.communication.reply_parent_check_unavailable";
+
+    /// <summary>The most <c>sprk_communication</c> rows the reply-parent access check reads for one parent message id.</summary>
+    internal const int MaxReplyParentCandidates = 5;
+
+    /// <summary>
+    /// Task 006 (uac-r2): the reply-parent access check of a shared-mailbox (app-only) email reply, giving
+    /// <see cref="ChannelSendRequest.ReplyParentAuthorized"/>. True when the parent was set by server code
+    /// (<see cref="SendCommunicationRequest.ReplyParentSetByServer"/>), or when the caller holds Read, asked as the caller through the
+    /// equalised gate question, on at least one <c>sprk_communication</c> whose <c>sprk_internetmessageid</c> or
+    /// <c>sprk_graphmessageid</c> equals <see cref="SendCommunicationRequest.InReplyToMessageId"/> (the two-way match of
+    /// <see cref="ApplyReplyParentThreadFloorAsync"/>). No request services, no bearer token, no probe, no such row or no readable row is
+    /// false (the sender then refuses the reply). A fault while asking is the 503 <see cref="ReplyParentCheckUnavailableCode"/>; the
+    /// caller's own cancellation propagates. A send that is not an email reply is false without asking (the value is unused there).
+    /// </summary>
+    private async Task<bool> IsReplyParentAuthorizedAsync(
+        SendCommunicationRequest request, HttpContext? httpContext, string correlationId, CancellationToken ct)
+    {
+        if (request.CommunicationType != CommunicationType.Email || string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            return false;
+
+        if (request.ReplyParentSetByServer)
+            return true;
+
+        var probe = httpContext?.RequestServices?.GetService<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+        var callerToken = httpContext is null ? null : Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        if (probe is null || string.IsNullOrWhiteSpace(callerToken))
+            return false;
+
+        var parentReference = request.InReplyToMessageId.Trim();
+        try
+        {
+            var query = new QueryExpression("sprk_communication")
+            {
+                ColumnSet = new ColumnSet("sprk_communicationid"),
+                TopCount = MaxReplyParentCandidates,
+            };
+            var byEitherId = new FilterExpression(LogicalOperator.Or);
+            byEitherId.AddCondition("sprk_internetmessageid", ConditionOperator.Equal, parentReference);
+            byEitherId.AddCondition("sprk_graphmessageid", ConditionOperator.Equal, parentReference);
+            query.Criteria.AddFilter(byEitherId);
+
+            var candidates = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+            foreach (var candidate in candidates.Entities)
+            {
+                if (candidate.Id == Guid.Empty)
+                    continue;
+
+                var rights = await probe.GetCallerRightsForAuthorizationGateAsync(
+                    callerToken, Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.CommunicationEntitySet, candidate.Id, ct);
+                if (rights.HasFlag(AccessRights.Read))
+                    return true;
+            }
+
+            return false;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Reply-parent access check could not be answered; nothing sent | CorrelationId: {CorrelationId}",
+                correlationId);
+            throw new SdapProblemException(
+                code: ReplyParentCheckUnavailableCode,
+                title: "Reply Temporarily Unavailable",
+                detail: "Whether you can reply to this message could not be checked. Nothing was sent. Try again.",
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+    }
+
+    /// <summary>
     /// Issue #2033 (owner decision, NFR-01 fail closed): the problem code (403) of a send-as-user email refused because the
     /// caller has no ENABLED Dataverse systemuser: disabled in Dataverse while still active in Entra, or no systemuser at all.
     /// Nothing is sent or written.
@@ -2477,6 +2556,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "A server-only send must be a send-as-user email that is not archived to SharePoint Embedded and is not system mail.");
         }
 
+        // Spaarke-intake-pipeline-r1 task 006 (uac-r2): a reply parent set by server code is defined for a shared-mailbox email reply only.
+        // Refused before anything is sent or written.
+        if (request.ReplyParentSetByServer
+            && (request.CommunicationType != CommunicationType.Email
+                || request.SendMode != SendMode.SharedMailbox
+                || string.IsNullOrWhiteSpace(request.InReplyToMessageId)))
+        {
+            throw new InvalidOperationException(
+                "A reply parent set by server code must be on a shared-mailbox email that names its parent message.");
+        }
+
         // ISS-010 part E (#3184): the deferred post-send tail is defined for a plain email only. Refused before anything is sent.
         if (request.DeferPostSend
             && (request.CommunicationType != CommunicationType.Email
@@ -2615,6 +2705,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             httpContext is null ? null : CallerResolution.ResolveObjectId(httpContext.User),
             correlationId, cancellationToken, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
 
+        // Step 2d (task 006, uac-r2): the reply-parent access check of an app-only threaded reply. The answer rides to the sender, which
+        // refuses an unauthorized reply at its mailbox lookup with the same 404 as a parent missing from the mailbox.
+        var replyParentAuthorized = await IsReplyParentAuthorizedAsync(request, httpContext, correlationId, cancellationToken);
+
         // Step 3+4: Send via the email channel seam (dispatch by CommunicationType — ADR-045 rule 4).
         // The sender owns Graph message construction, transport, and provider-error mapping; a provider
         // failure surfaces as SdapProblemException (GRAPH_SEND_FAILED) and propagates unchanged.
@@ -2632,7 +2726,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     FromDisplayName = senderResult.DisplayName,
                     UserMode = false,
                     Attachments = fileAttachments,
-                    CorrelationId = correlationId
+                    CorrelationId = correlationId,
+                    ReplyParentAuthorized = replyParentAuthorized
                 },
                 cancellationToken);
 

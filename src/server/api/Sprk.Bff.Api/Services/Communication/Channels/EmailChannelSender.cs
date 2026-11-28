@@ -239,6 +239,16 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                 extensions: new Dictionary<string, object> { ["correlationId"] = request.CorrelationId });
         }
 
+        // Task 006 (uac-r2): an app-only reply goes ahead only on a parent the caller can read (or one set by server code). Otherwise
+        // it gets the same answer as a parent missing from the mailbox, at the point of the mailbox lookup, before any Graph call.
+        if (!request.UserMode && !request.ReplyParentAuthorized)
+        {
+            _logger.LogWarning(
+                "Reply parent message not readable by the caller; nothing sent | CorrelationId: {CorrelationId}, From: {From}, UserMode: {UserMode}",
+                request.CorrelationId, request.FromAddress, request.UserMode);
+            throw ReplyParentNotFound(request.CorrelationId);
+        }
+
         var sendOption = new NoTransientRetryOption();
         var sendStartedUtc = DateTimeOffset.UtcNow;
         var sendAttempted = false;
@@ -265,12 +275,7 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                 _logger.LogWarning(
                     "Reply parent message not found in the sending mailbox; nothing sent | CorrelationId: {CorrelationId}, From: {From}, UserMode: {UserMode}",
                     request.CorrelationId, request.FromAddress, request.UserMode);
-                throw new SdapProblemException(
-                    code: ReplyParentNotFoundCode,
-                    title: "Reply Parent Not Found",
-                    detail: "The message this email replies to was not found in the sending mailbox, so the reply cannot be threaded. Nothing was sent.",
-                    statusCode: 404,
-                    extensions: new Dictionary<string, object> { ["correlationId"] = request.CorrelationId });
+                throw ReplyParentNotFound(request.CorrelationId);
             }
 
             // The update carries everything BuildGraphMessage sets except the marker (not patchable; see the summary). The property is
@@ -344,6 +349,18 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
             ProviderMessageId = internetMessageId
         };
     }
+
+    /// <summary>
+    /// The one <see cref="ReplyParentNotFoundCode"/> problem (404), for a parent missing from the sending mailbox and for an app-only reply
+    /// whose parent the caller cannot be shown to read: the two answers are the same.
+    /// </summary>
+    internal static SdapProblemException ReplyParentNotFound(string correlationId) =>
+        new(
+            code: ReplyParentNotFoundCode,
+            title: "Reply Parent Not Found",
+            detail: "The message this email replies to was not found in the sending mailbox, so the reply cannot be threaded. Nothing was sent.",
+            statusCode: 404,
+            extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
 
     /// <summary>Best-effort removal of a reply draft that will never be sent; a failure is logged and swallowed.</summary>
     private async Task TryDeleteReplyDraftAsync(ReplyMailbox? mailbox, string? draftId, string correlationId)

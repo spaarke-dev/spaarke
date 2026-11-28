@@ -107,6 +107,72 @@ public class Intake10_1_Item7_EmailChannelSenderThreadedReplyTests
         transport.Paths.Should().NotContain(p => p.Contains("createReply") || p.EndsWith("/send") || p.EndsWith("/sendMail"));
     }
 
+    // ── The reply-parent access answer (uac-r2) ───────────────────────────────────────────────────────────────
+
+    /// <summary>MUTATION: dropping the <c>ReplyParentAuthorized</c> check sends the reply (createReply and send appear).</summary>
+    [Fact]
+    public async Task Reply_AppOnly_WhenTheParentIsNotAuthorized_FailsWithTheNotFoundProblem_BeforeAnyGraphCall()
+    {
+        var transport = new Transport();
+        var factory = new Mock<IGraphClientFactory>();
+        factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(new HttpClient(transport)));
+
+        var act = () => new EmailChannelSender(factory.Object, NullLogger<EmailChannelSender>.Instance)
+            .SendAsync(Request(userMode: false, inReplyTo: ParentRfcId, replyParentAuthorized: false));
+
+        var failure = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        failure.Code.Should().Be(EmailChannelSender.ReplyParentNotFoundCode);
+        failure.StatusCode.Should().Be(404);
+        transport.Calls.Should().BeEmpty();
+        factory.Verify(f => f.ForApp(), Times.Never, "not even the app-only Graph client is built");
+    }
+
+    [Fact]
+    public async Task Reply_AppOnly_NotAuthorized_AndParentMissingFromTheMailbox_AreTheSameProblem()
+    {
+        var unauthorized = await FailureOf(new Transport(), Request(userMode: false, inReplyTo: ParentRfcId, replyParentAuthorized: false));
+        var notInMailbox = await FailureOf(new Transport { ParentExists = false }, Request(userMode: false, inReplyTo: ParentRfcId));
+
+        unauthorized.Code.Should().Be(notInMailbox.Code);
+        unauthorized.Title.Should().Be(notInMailbox.Title);
+        unauthorized.Detail.Should().Be(notInMailbox.Detail);
+        unauthorized.StatusCode.Should().Be(notInMailbox.StatusCode);
+        unauthorized.Extensions!.Keys.Should().BeEquivalentTo(notInMailbox.Extensions!.Keys);
+        unauthorized.Extensions["correlationId"].Should().Be(notInMailbox.Extensions["correlationId"]);
+    }
+
+    /// <summary>The validation refusals keep their place ahead of the access answer (same order as before for every case).</summary>
+    [Theory]
+    [InlineData("attachment", 413)]
+    [InlineData("system-mail", 400)]
+    public async Task Reply_AppOnly_NotAuthorized_StillGetsTheEarlierValidationRefusalFirst(string refusal, int status)
+    {
+        var request = Request(userMode: false, inReplyTo: ParentRfcId, replyParentAuthorized: false);
+        request = refusal == "attachment"
+            ? request with { Attachments = [new ChannelAttachment { Name = "Big.docx", Content = new byte[EmailChannelSender.MaxReplyAttachmentBytes + 1] }] }
+            : request with { Communication = request.Communication with { SystemMail = new SystemMailOptions { StoredBody = "<p>stored</p>" } } };
+
+        (await FailureOf(new Transport(), request)).StatusCode.Should().Be(status);
+    }
+
+    /// <summary>User mode replies from the caller's own mailbox: the access answer is not consulted there.</summary>
+    [Fact]
+    public async Task Reply_UserMode_ThreadsWhateverTheAccessAnswer()
+    {
+        var transport = new Transport();
+
+        await Sender(transport, userMode: true).SendAsync(Request(userMode: true, inReplyTo: ParentRfcId, replyParentAuthorized: false));
+
+        transport.Paths.Should().Contain($"POST /me/messages/{ParentGraphId}/createReply");
+        transport.Paths.Should().Contain($"POST /me/messages/{DraftId}/send");
+    }
+
+    private static async Task<SdapProblemException> FailureOf(Transport transport, ChannelSendRequest request)
+    {
+        var act = () => Sender(transport, request.UserMode).SendAsync(request);
+        return (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+    }
+
     // ── A send with no parent is unchanged ────────────────────────────────────────────────────────────────────
 
     [Theory]
@@ -267,7 +333,8 @@ public class Intake10_1_Item7_EmailChannelSenderThreadedReplyTests
         return new EmailChannelSender(factory.Object, NullLogger<EmailChannelSender>.Instance);
     }
 
-    private static ChannelSendRequest Request(bool userMode, string? inReplyTo) => new()
+    /// <param name="replyParentAuthorized">The service's reply-parent access answer (uac-r2); true unless a test is about it.</param>
+    private static ChannelSendRequest Request(bool userMode, string? inReplyTo, bool replyParentAuthorized = true) => new()
     {
         Communication = new SendCommunicationRequest
         {
@@ -281,6 +348,7 @@ public class Intake10_1_Item7_EmailChannelSenderThreadedReplyTests
         UserMode = userMode,
         HttpContext = userMode ? new DefaultHttpContext() : null,
         CorrelationId = "task-006",
+        ReplyParentAuthorized = replyParentAuthorized,
     };
 
     private sealed record Call(string Method, string Path, string Query, string? Body);
