@@ -99,6 +99,11 @@ public class PrivateMessageWriteGuardCensusTests
             "Not a communication: it asks the rule for ExternalDocumentNarrowing.DocumentTable (sprk_document) only, and builds "
             + "document profile fields.",
             "ADR-013 (AI output is mapped onto the document by the BFF); ADR-002"),
+        new Listed(new Member("src/server/api/Sprk.Bff.Api/Api/FieldMappings/PushRuleSelection.cs", "TypedWriterTargetRefusal"),
+            "A predicate that writes nothing: the push's rule selection (PushRuleSelection.Select) asks it per rule to leave out a "
+            + "rule whose target only its typed writers write (DI-053). The push's writer asks the guard per child row.",
+            "ADR-002 (one server-side owner per invariant: a typed-writer column is never a mapping target)",
+            CoveredBy: new Member(FieldMappingEndpoints, "ApplyMappingsToChildRecordsAsync")),
         new Listed(new Member(FieldMappingEndpoints, "PushMayWrite"),
             "A predicate that writes nothing: the push preview (FieldMappingPushFamily Plan / PreviewAsync) lists what the push may "
             + "write. The push's writer asks the guard per child row.",
