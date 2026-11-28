@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-02: App-only agreement classify + edit-plan Action behind a new PublicContracts facade (IAgreementAi / AgreementAi / NullAgreementAi), schema-valid edit plans on 3 synthetic NDAs</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>blocked — external PR #3163 (edit-plan.schema.json, topics.yaml, synthetic corpus on master) and task 005 (ConsumerTypes constants)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds .cs code to the BFF (new facade + Null peer + DI registrations) and a new catalogued Action; tags include bff-api and ai.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component facade with an exact reference to copy (IInvoiceAi / InvoiceAi / NullInvoiceAi) and existing JPS skills for the Action.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>bff-api, ai, azure-openai, di, unit-test</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the BFF an app-only way to (1) classify an agreement with the existing `agreement-classify` Action and (2) produce an accelerator edit plan for an NDA, through a new PublicContracts facade on the IInvoiceAi pattern. The edit plan must validate against the accelerator's `edit-plan.schema.json`, with every `topic` id present in the pinned NDA `topics.yaml` (v1.2).</prompt>
+  <role>SPAARKE platform developer. Expert in the JPS Action catalogue (Actions, Bindings, ConsumerTypes), the PublicContracts AI facade boundary and .NET 10 Minimal API DI. Follow ADRs strictly.</role>
+  <goal>`IAgreementAi` (ClassifyAsync, BuildEditPlanAsync) with `AgreementAi` (IActionResolver + IActionRunner by ConsumerTypes key, fail closed) and `NullAgreementAi` (ADR-032 P3), registered in AnalysisServicesModule beside IInvoiceAi; a new catalogued Action `agreement-edit-plan` (action JSON + input/output schema + Binding row + `ConsumerTypes.AgreementEditPlan` in `All`); unit tests proving schema-valid plans on the 3 synthetic NDAs and a not-an-NDA result on the synthetic MSA.</goal>
+
+  <context>
+    <background>Spec FR-02 (acceptance a–d), NFR-09 (pinned standard version), NFR-10. `agreement-classify` and `agreement-review` already exist (`infra/dataverse/actions/*.action.json`). `agreement-review`'s output is a CLOSED contract (`{overallRisk, flaggedSections[]}`) consumed by the Console review flow (`src/solutions/SpaarkeAi/src/components/conversation/useAgreementReviewGate.ts`, memo and Word-comment export), so it is NOT changed: the edit plan comes from a new Action whose output schema mirrors `edit-plan.schema.json`'s `edits` shape. The facade fills `author`, `date`, `review_basis` (standard name + pinned version) and `provenance` deterministically; the model produces only topic-keyed edits. Task 005 adds the `agreement-classify` / `nda-review` / `nda-standard-summary` constants (FR-03 item 6, which also satisfies FR-02(d)); this task adds only `AgreementEditPlan`.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IAgreementAi.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/AgreementAi.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullAgreementAi.cs</file>
+      <file role="new">infra/dataverse/actions/agreement-edit-plan.action.json</file>
+      <file role="new">infra/dataverse/outputschemas/agreement-edit-plan.schema.json</file>
+      <file role="new">infra/dataverse/inputschemas/agreement-edit-plan.input.schema.json</file>
+      <file role="new">tests/integration/seam/Intake/AgreementAiEditPlanSeamTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (add AgreementEditPlan + All entry; `All` at :416)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (Null peer near :611, real near :1419 AddPublicContractsFacade)</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (new Binding row)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvoiceAi.cs:27, InvoiceAi.cs:30, NullInvoiceAi.cs</file>
+      <file role="canonical-reference">infra/dataverse/actions/agreement-classify.action.json (reused unchanged)</file>
+      <file role="canonical-reference">src/accelerators/core/schemas/edit-plan.schema.json, src/accelerators/practices/nda/topics.yaml, src/accelerators/practices/nda/evals/corpus/*.docx (on master after #3163; confirmed only in the accelerator worktree)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Lands the `AgreementClassify` / `NdaReview` / `NdaStandardSummary` constants in ConsumerTypes.cs (shared file).</dependency>
+      <dependency task="external-#3163" status="pending">Schema, topics and synthetic corpus on master.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Scope: every AI call added in this task. AI is reached only through the new `IAgreementAi` facade; no non-AI module injects `IActionRunner`/`IActionResolver` directly.</constraint>
+    <constraint source="ADR-039">Scope: the new Action. It is catalogued (action JSON + Binding row + `ConsumerTypes.AgreementEditPlan` in `All`) in the same change; `/healthz/catalog` (RoutingConsumerTypeHealthCheck) reports no drift.</constraint>
+    <constraint source="ADR-032">Scope: DI. `NullAgreementAi` is registered unconditionally and the real `AgreementAi` replaces it only where `InvoiceAi` does (AddPublicContractsFacade); the Null peer fails fast with a typed exception, never returns a fake plan.</constraint>
+    <constraint source="ADR-015">Scope: AgreementAi logs and exceptions. Consumer type, reason code, exception type and ids only; no document text, clause text or plan content.</constraint>
+    <constraint source="ADR-010">Scope: DI registrations added. Register the interface only because it is a real seam (Null peer); no other new interfaces.</constraint>
+    <constraint source="project">Scope: agreement-review and agreement-classify Actions and their Bindings. Unchanged by this task (Console consumers depend on them).</constraint>
+    <constraint source="project">Scope: all tests and fixtures. Synthetic corpus only (`nda-01/02/03`, `msa-01`); never the accelerator `answer-key/` or a real NDA (NFR-10). Topic ids and the standard version come from the pinned `topics.yaml` / "Spaarke NDA – Mutual" v1.2 (NFR-09).</constraint>
+    <constraint source="bff-extensions">Scope: the PR for this task. State the Placement Justification (`.claude/constraints/bff-extensions.md`), measure the publish-size delta against a fresh master build, keep total ≤ 60 MB, and add no package (JsonSchema.Net is already referenced) and no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="PublicContracts facade + Null peer" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvoiceAi.cs">Resolve Action by ConsumerTypes key, run with the request as the Input operand, parse structured output, fail closed with a typed exception.</pattern>
+      <pattern name="Binding row" location="infra/dataverse/sprk_playbookconsumer-rows.json">Copy the agreement-classify row shape (disposition Informational, risk None) with an app-only surface and no toolDescription.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm #3163 and 005 are merged; read edit-plan.schema.json and topics.yaml on master.</step>
+    <step order="2">Author `agreement-edit-plan` with `/jps-action-create` (input: document text + standard topics; output: Structured-Outputs-compatible `edits[]` mirroring the schema's edit item); validate with `/jps-validate`.</step>
+    <step order="3">Add the Binding row and `ConsumerTypes.AgreementEditPlan` (+ `All`).</step>
+    <step order="4">Write IAgreementAi / AgreementAi / NullAgreementAi copying the InvoiceAi shape; ClassifyAsync maps agreement-classify output (isAgreement, candidates, confidence); BuildEditPlanAsync assembles the full plan (deterministic header fields + model edits) and validates it against the schema and topic list before returning; invalid → typed failure, never a partial plan.</step>
+    <step order="5">Register in AnalysisServicesModule (Null unconditional, real in AddPublicContractsFacade).</step>
+    <step order="6">Write AgreementAiTests (mocked IActionRunner outputs recorded from the synthetic corpus) and run the catalog drift test (`RoutingConsumerTypeHealthCheckTests`).</step>
+    <step order="7">Run a dev smoke of the real Action on the 3 synthetic NDAs + the MSA only if the owner OKs a dev Action deploy; otherwise record that 008 does it.</step>
+    <step order="8">`dotnet build`, `dotnet test`; measure publish size vs fresh master.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="10">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If producing an edit plan appears to require changing `agreement-review`'s output contract (instead of the new `agreement-edit-plan` Action), STOP and escalate per root CLAUDE.md §6 — it breaks Console consumers.</trigger>
+    <trigger>If the edit-plan schema cannot be expressed in Azure OpenAI Structured Outputs (e.g. `format`, `oneOf`), keep model output to the compatible subset and validate the full plan in code; if even `edits[]` cannot be expressed, STOP and escalate.</trigger>
+    <trigger>Deploying the Action/Binding to dev needs the owner's OK (project CLAUDE.md §5).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 14 (app-only AI Action from code): `AppOnlyAnalysisService.cs:545`, `InvoiceAi.cs:30`; verdict "new PublicContracts facade for agreement Actions, on the InvoiceAi pattern". CAPABILITY-INDEX row 17 (let another BFF module use AI). The `agreement-edit-plan` Action has no existing equivalent: `agreement-review` emits findings, not an edit plan.</existing>
+    <extension>No — `IInvoiceAi` is invoice-typed and owned by ebilling-r1 (frozen until UAT); `agreement-review`'s closed output contract is consumed by the Console and cannot carry a plan.</extension>
+    <cost-of-doing-nothing>The NDA harness (task 015) has no edit plan to hand the engines, so no marked-up NDA is produced server-side (FR-02, FR-09 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IAgreementAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/AgreementAi.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullAgreementAi.cs</output>
+    <output type="code">infra/dataverse/actions/agreement-edit-plan.action.json</output>
+    <output type="code">infra/dataverse/outputschemas/agreement-edit-plan.schema.json</output>
+    <output type="code">infra/dataverse/inputschemas/agreement-edit-plan.input.schema.json</output>
+    <output type="code">infra/dataverse/sprk_playbookconsumer-rows.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</output>
+    <output type="test">tests/integration/seam/Intake/AgreementAiEditPlanSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the 3 synthetic NDAs, BuildEditPlanAsync returns a plan that validates against `edit-plan.schema.json` (JsonSchema.Net) and every `topic` id exists in the pinned `topics.yaml` (FR-02a).</criterion>
+    <criterion testable="true">The plan's `review_basis` names "Spaarke NDA – Mutual" and the pinned version v1.2 (NFR-09).</criterion>
+    <criterion testable="true">Negative: given the synthetic MSA, ClassifyAsync reports not-an-NDA and no plan is built (FR-02b).</criterion>
+    <criterion testable="true">Negative: a model output with an unknown topic id or a schema violation yields a typed failure, never a returned plan.</criterion>
+    <criterion testable="true">Negative: with AI off, `NullAgreementAi` throws its typed exception; DI resolves `IAgreementAi` in both modes (DiGraphValidationTests pass).</criterion>
+    <criterion testable="true">`ConsumerTypes.All` contains `agreement-edit-plan`, the Binding row exists, and RoutingConsumerTypeHealthCheckTests report no drift (FR-02d with task 005).</criterion>
+    <criterion testable="true">`agreement-review.action.json`, `agreement-classify.action.json` and their Binding rows are byte-unchanged.</criterion>
+    <criterion testable="true">No test reads `answer-key/` or a real NDA (FR-02c, NFR-10).</criterion>
+    <criterion testable="true">PR states Placement Justification and publish-size delta (≤ 60 MB total, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Rework line (2026-11-26, task 004 agent): built and verified except the live criterion; status stays in-progress because "schema-valid plans on the 3 NDAs" is proven against recorded model output only and needs an owner-approved dev run (see notes/004-agreement-edit-plan.md). Brief deviation: the main session listed deps "none"; this task depends on 005 because both edit ConsumerTypes.cs (file overlap, task-create Step 3.8) and on external #3163 for the schema/corpus. Facade naming (`IAgreementAi`) is a proposal; keep it if no closer name exists in PublicContracts. Deterministic anchoring (owner 2026-11-26, notes/decisions.md): segment_clauses runs first (engine job `segment` operation); the edit-plan AI picks `para` only from the closed para_key list and quotes verbatim; the BFF exact-match pre-check refuses bad anchors (closed codes) before the engine; never fuzzy, approximate or whole-document text matching. This task: Action input = segment_clauses JSON (not free text); para constrained to supplied keys; exact-match pre-check with negative tests (FR-02e). Completed 2026-11-26: live run on dev gpt-5-reasoning (owner OK) after fixing D1 (partial summary row lost the whole plan; now a nullable summaryRow object, per-edit refusal), D2 (pre-check now simulates the plan in order against the redliner's own texts via segment_clauses --anchor-text), D4 (shared prompt rendering escaped non-ASCII as \uXXXX, so models garbled curly quotes; fixed in PromptInputSection/PromptSchemaRenderer for every AI consumer). Run 3: 48/48 edits kept, engine applied all; MSA not an NDA. Deploying the Action and Binding rows to dev is deferred to task 008 (no BFF caller before task 015). Notes: notes/004-agreement-edit-plan.md. Rework: none outstanding.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

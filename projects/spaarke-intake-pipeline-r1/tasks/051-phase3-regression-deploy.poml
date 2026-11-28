@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>Phase 3 regression + dev deploy: eBilling suite and end-to-end run unchanged, then BFF dev deploy with the invoice harness</title>
+    <phase>3 Invoice harness</phase>
+    <gate>after:050 + owner OK for live actions</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy and verification only; no code authored; single dependency.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive run-and-record steps with an explicit pass bar (suite unchanged, E2E report).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to the shared dev environment; single task in its group.</parallel-reason>
+    <deps>050</deps>
+    <tags>deploy, bff-api, e2e-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run eBilling's full test suite and its end-to-end run unchanged against the task 050 branch; if green, deploy the BFF to dev via `/bff-deploy` with the owner's OK, turn on the invoice harness switch with the owner's OK, and repeat the end-to-end run on dev with synthetic invoices.</prompt>
+  <role>SPAARKE platform developer. Expert in the eBilling test suite, Spaarke deployment skills and dev verification. Follow ADRs strictly.</role>
+  <goal>`projects/spaarke-intake-pipeline-r1/notes/051-phase3-regression-report.md` shows the eBilling suite and E2E passing unchanged, the dev deploy, the publish size and the switch value.</goal>
+
+  <context>
+    <background>Spec success criterion 7 (eBilling suite + E2E report, FR-22 a). The eBilling E2E seam tests are ebilling-r1 task 160; the UAT rollout is task 163.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="canonical-reference">projects/ebilling-r1/tasks/160-e2e-seam-tests.poml</file>
+      <file role="canonical-reference">projects/ebilling-r1/tasks/163-uat-dev-rollout.poml</file>
+      <file role="canonical-reference">scripts/Test-BffDevDeployReadback.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Invoice harness.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = eBilling tests. Run them unchanged; no test file edited in this task; any failure stops the deploy.</constraint>
+    <constraint source="project">SCOPE = every live action (BFF deploy, app setting / kill switch, any submission on dev). Ask the owner in chat and wait for an explicit yes, one approval per action.</constraint>
+    <constraint source="project">SCOPE = the BFF deploy. `/bff-deploy` only; record the publish size (≤ 60 MB).</constraint>
+    <constraint source="project">SCOPE = data. Synthetic invoices only; no firm notice or email to a real external address without the owner's OK.</constraint>
+    <constraint source="ADR-015">SCOPE = the report. Ids, statuses and counts; no invoice content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/ebilling-r1/tasks/160-e2e-seam-tests.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint definition" location=".claude/patterns/api/endpoint-definition.md">Tag-mapped.</pattern>
+      <pattern name="Control init" location=".claude/patterns/pcf/control-initialization.md">Tag-mapped (e2e-test).</pattern>
+      <pattern name="Theme" location=".claude/patterns/pcf/theme-management.md">Tag-mapped; dark-mode check in ui-tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm 050 is ✅ and master is merged; check the dev-deploy coordination doc.</step>
+    <step order="2">Run the eBilling unit, integration and ArchTest suites (`dotnet test` filtered to Finance/Invoice); compare pass counts with the 050 baseline; confirm `git diff master -- tests/` shows no eBilling test change.</step>
+    <step order="3">Run the eBilling E2E seam tests (ebilling-r1 task 160) locally; record results.</step>
+    <step order="4">Owner OK → `/bff-deploy` to dev; readback; record the publish size.</step>
+    <step order="5">Owner OK → set `Intake:Harnesses:Invoice:Enabled` on dev; submit a synthetic invoice; confirm the run record, the stages and the submission outcome; link an unlinked one and confirm resume-on-link.</step>
+    <step order="6">Write the report; file defects with `/project-defer-issue-tracking`; run `/context-handoff`.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before each live action in steps 4–5, STOP and get the owner's explicit OK.</trigger>
+    <trigger>If any eBilling test or E2E check fails, STOP: do not deploy; reopen task 050 and report.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Invoice submission shows the run">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_invoicesubmission&amp;id={submission-id}</url>
+      <steps>
+        <step>Open the synthetic submission from step 5; check its status and the linked run; check the console for errors.</step>
+      </steps>
+      <expected>Status matches the run outcome; no console errors.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Repeat in dark theme.</step>
+      </steps>
+      <expected>No white backgrounds or black text introduced by this project.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Run the eBilling suites</tool>
+    <tool name="bff-deploy">BFF deploy (only path)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/051-phase3-regression-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The eBilling suites and E2E seam tests pass with pass counts equal to the 050 baseline and no eBilling test file changed (success criterion 7).</criterion>
+    <criterion testable="true">BFF deployed to dev via `/bff-deploy` after an owner OK; publish size ≤ 60 MB recorded.</criterion>
+    <criterion testable="true">On dev with the switch on, a synthetic invoice runs as an intake run; a linked submission is never Failed; an unlinked one resumes on link.</criterion>
+    <criterion testable="true">Negative: no deploy happened while any test failed; no real invoice or external address was used.</criterion>
+  </acceptance-criteria>
+
+  <notes>Verification-only task; code fixes go back to 050.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; prescriptive steps bind.</protocol>
+  </execution>
+</task>

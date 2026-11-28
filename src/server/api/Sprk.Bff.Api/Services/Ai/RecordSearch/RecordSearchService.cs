@@ -322,6 +322,22 @@ public sealed class RecordSearchService : IRecordSearchService
 
             return searchResponse;
         }
+        catch (RequestFailedException ex) when (ex.Status == 400 && IsCallerNamedOtherIndex(request.SearchIndexName))
+        {
+            // GitHub #3307: the caller named an allowed index that is not a records index (a document index, say), and the
+            // index rejected the record-search request because it has none of the records fields. That is the caller's
+            // choice of index, so it is a 400 naming the index, not a 500. Not applied to the configured records index: a
+            // 400 from THAT index is a defect in this request, and stays a 500.
+            _logger.LogWarning(ex,
+                "Record search rejected by caller-named index {IndexName}; it is not a records index", request.SearchIndexName);
+
+            throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                code: Sprk.Bff.Api.Models.Ai.SemanticSearch.SearchErrorCodes.IndexNotRecordsIndex,
+                title: "AI Search index not usable for record search",
+                detail: $"The AI Search index '{request.SearchIndexName!.Trim()}' is not a records index, so record search cannot run on it.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["indexName"] = request.SearchIndexName.Trim() });
+        }
         catch (RequestFailedException ex)
         {
             _logger.LogError(ex, "Azure AI Search error during record search");
@@ -330,6 +346,23 @@ public sealed class RecordSearchService : IRecordSearchService
     }
 
     #region Private Methods
+
+    /// <summary>
+    /// True when the caller named an index and it is not the configured records index (GitHub #3307).
+    /// </summary>
+    private bool IsCallerNamedOtherIndex(string? searchIndexName)
+    {
+        if (string.IsNullOrWhiteSpace(searchIndexName))
+        {
+            return false;
+        }
+
+        var recordsIndex = string.IsNullOrWhiteSpace(_docIntelOptions.AiSearchIndexName)
+            ? RecordsIndexName
+            : _docIntelOptions.AiSearchIndexName;
+
+        return !string.Equals(searchIndexName.Trim(), recordsIndex.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Gets embedding with caching support via IEmbeddingCache.

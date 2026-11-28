@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-11: Approve / Reject / Claim command on the sprk_servicerequest form, calling the task-017 decision endpoint</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:017</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a new JavaScript web resource and a ribbon customization (code file + ribbon tag); calls an auth-protected endpoint.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component ribbon script with explicit canonical references (sprk_registrationribbon.js structure, Spaarke.BffAuth token helper) and a fixed endpoint contract from 017.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>017</deps>
+    <tags>ribbon, frontend, dataverse, solution</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add Approve, Reject and Claim commands to the model-driven `sprk_servicerequest` main form. Each calls `POST {bffHost}/api/intake/runs/{runId}/decision` (task 017) for the request's current run, shows the result as a form notification and refreshes the form. Copy the structure of `src/client/webresources/js/sprk_registrationribbon.js` (env-var configuration, form-context command, notifications); acquire the token through the shared `Spaarke.BffAuth` helper.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse ribbon customizations (RibbonDiffXml, enable rules) and JavaScript web resources. Follow ADRs strictly.</role>
+  <goal>A new web resource `sprk_servicerequestribbon.js` plus RibbonDiff entries on `sprk_ServiceRequest` that show the three commands only when the request's current run is AwaitingApproval (Claim also when no attorney is assigned), call the 017 endpoint with a delegated BFF token, and surface every endpoint outcome (200, 401, 403, 404, 409, 503) as a readable form notification.</goal>
+
+  <context>
+    <background>Spec FR-11 and Owner Clarification "Approve UI": attorneys approve from the Console Work Item (task 019) AND from the MDA service-request form, through ONE endpoint (ADR-002: clients never write stage, run or attorney). The current run id comes from the request's current-run column (task 010). The endpoint body is `{ "action": "claim" | "approve" | "reject", "reason"?: string }`; Reject prompts for a reason.</background>
+    <relevant-files>
+      <file role="new">src/solutions/webresources/sprk_servicerequestribbon.js</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/RibbonDiff.xml</file>
+      <file role="canonical-reference">src/client/webresources/js/sprk_registrationribbon.js (config from env vars :115-144 incl. HOST-ONLY strip of a trailing /api at :136-137; approveRequestFromForm :554; notifications :326-356)</file>
+      <file role="canonical-reference">src/solutions/webresources/sprk_kpi_ribbon_actions.js (a ribbon script that calls the BFF through Spaarke.BffAuth)</file>
+      <file role="canonical-reference">src/solutions/webresources/sprk_bff_auth.js (Spaarke.BffAuth.authenticatedFetch / getToken)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="pending">The decision endpoint and its status-code contract.</dependency>
+      <dependency task="010" status="complete">Request current-run and stage columns (via 017's dependency).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = the BFF base URL in the new script. Read `sprk_BffApiBaseUrl` and treat it as HOST ONLY: strip trailing slashes and a trailing `/api` exactly as `sprk_registrationribbon.js:136-137`; paths add `/api/...` themselves. Never build `.../api/api/...` (recurring production defect).</constraint>
+    <constraint source="webresource.md">SCOPE = every BFF call in the new script. Call through `Spaarke.BffAuth.authenticatedFetch` (load `sprk_bff_auth.js` before the library in the command definition); a null token or failed acquisition shows an error notification and never falls back to an anonymous call. Use `"use strict"`, the `Spaarke.ServiceRequestRibbon` namespace, and wrap every command handler in try/catch.</constraint>
+    <constraint source="ADR-002">SCOPE = the script. It never writes stage, current run or assigned attorney via `Xrm.WebApi`; the endpoint is the only writer. Enable rules only hide/show commands; they are not authorization (the endpoint decides).</constraint>
+    <constraint source="ADR-006">SCOPE = this task. A web resource is allowed here only because ribbon commands cannot be PCF; no UI beyond `Xrm.Navigation.openConfirmDialog`/`openAlertDialog`/form notifications.</constraint>
+    <constraint source="ADR-015">SCOPE = console logging in the script. Log ids and status codes only; never the reject reason.</constraint>
+    <constraint source="project">SCOPE = ribbon edits. Use the `ribbon-edit` skill (export → edit → import) on dev; Dataverse changes on dev need the owner's OK first (project CLAUDE.md §5).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/data-model/sprk_servicerequest.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ribbon command calling the BFF" location="src/client/webresources/js/sprk_registrationribbon.js">Form-context approve/reject with confirm dialog, BFF call, notification and refresh.</pattern>
+      <pattern name="Delegated BFF token from a web resource" location="src/solutions/webresources/sprk_bff_auth.js">Spaarke.BffAuth.authenticatedFetch(url, options, apiBaseUrl).</pattern>
+      <pattern name="PCF init / theme" location=".claude/patterns/pcf/control-initialization.md">Not used for logic here; listed per tag mapping.</pattern>
+      <pattern name="Theme" location=".claude/patterns/pcf/theme-management.md">Dialogs use platform dialogs (theme follows the app).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files and 017's endpoint; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `sprk_servicerequestribbon.js`: config resolution (HOST-ONLY URL), `Spaarke.ServiceRequestRibbon.approve(formContext)`, `.reject(formContext)` (prompts for a reason), `.claim(formContext)`, and enable-rule functions `isAwaitingApproval(formContext)` and `canClaim(formContext)` that read the stage and assigned-attorney columns on the form.</step>
+    <step order="3">Map responses: 200 → success notification + `formContext.data.refresh(false)`; 401/403 → "You are not on the team that owns this request"; 404 → "This run no longer exists"; 409 → "This request is no longer awaiting approval" (refresh); 503 → "Intake approval is turned off"; network/token failure → error notification.</step>
+    <step order="4">Add the three buttons, command definitions (library `sprk_bff_auth.js` then `sprk_servicerequestribbon.js`) and enable rules to `sprk_ServiceRequest/RibbonDiff.xml` via the ribbon-edit skill; add the web resource to the SpaarkeMaster solution.</step>
+    <step order="5">With the owner's OK, import to dev and run the ui-tests below.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before importing the ribbon or web resource to dev, STOP and get the owner's explicit OK (project CLAUDE.md §5: Dataverse changes on dev).</trigger>
+    <trigger>If the 017 endpoint contract (route, body or status codes) differs from this POML, STOP and escalate rather than adapting the client to a guessed contract.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row 4 (approve paths are domain-bound); plan §2 Reusable Code names `sprk_registrationribbon.js:28` as the closest ribbon script. `RibbonDiff.xml` on sprk_ServiceRequest has no command definitions today (`&lt;CommandDefinitions /&gt;`).</existing>
+    <extension>No: `sprk_registrationribbon.js` is bound to `sprk_registrationrequest` and its endpoints; a second entity's commands in that file would couple two unrelated approvals. Its structure is copied instead.</extension>
+    <cost-of-doing-nothing>An attorney working in the model-driven app cannot approve or reject a request, breaking the owner's "both surfaces" decision (FR-11 e).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Commands render only when awaiting approval">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_servicerequest&amp;id={awaiting-request-id}</url>
+      <steps>
+        <step>Open a synthetic request whose current run is AwaitingApproval.</step>
+        <step>Verify Approve, Reject and Claim are visible; open a request in "In review" and verify they are hidden.</step>
+        <step>Check the console for JavaScript errors.</step>
+      </steps>
+      <expected>Commands follow the enable rules; no console errors.</expected>
+    </test>
+    <test name="Approve round trip">
+      <steps>
+        <step>As a member of the owning team, click Approve and confirm.</step>
+        <step>Verify the success notification, the form refresh, the stage no longer "Awaiting approval", and the network call goes to `{bff-host}/api/intake/runs/{run-id}/decision` (no `/api/api`).</step>
+      </steps>
+      <expected>200; stage advanced; one Decision Record row exists.</expected>
+    </test>
+    <test name="Forbidden and wrong-state messages">
+      <steps>
+        <step>As a user outside the owning team, click Approve.</step>
+        <step>As a team member, click Approve on a request already approved in another tab.</step>
+      </steps>
+      <expected>403 shows the team message and nothing changes; 409 shows "no longer awaiting approval" and refreshes.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Switch the app to dark theme and open the form.</step>
+        <step>Verify buttons, dialogs and notifications use platform theme colors (no hard-coded colors from the script).</step>
+      </steps>
+      <expected>No light-only styling introduced by the script.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="ribbon-edit">Export/edit/import the sprk_servicerequest ribbon</tool>
+    <tool name="terminal">pac / deploy scripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_servicerequestribbon.js</output>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/RibbonDiff.xml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Approve, Reject and Claim appear on the sprk_servicerequest main form only when the current run is AwaitingApproval (Claim only when no attorney is assigned).</criterion>
+    <criterion testable="true">Each command calls `POST {host}/api/intake/runs/{runId}/decision` with the matching `action`; the host is stripped of any trailing `/api`.</criterion>
+    <criterion testable="true">The call carries a delegated token from `Spaarke.BffAuth`; a failed token acquisition shows an error and makes no request.</criterion>
+    <criterion testable="true">Responses 200/401/403/404/409/503 each produce the mapped notification; 200 and 409 refresh the form.</criterion>
+    <criterion testable="true">Negative: the script performs no `Xrm.WebApi` write to stage, current run or assigned attorney.</criterion>
+    <criterion testable="true">Reject requires a non-empty reason before calling the endpoint; cancelling makes no call.</criterion>
+    <criterion testable="true">The ui-tests above pass on dev with no console errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deviation from the brief, recorded deliberately: `sprk_registrationribbon.js` loads its own MSAL, but `.claude/constraints/webresource.md` (2026-10-01) requires `Spaarke.BffAuth`; the new script copies the registration ribbon's structure and uses `Spaarke.BffAuth` for the token. New web resources live in `src/solutions/webresources/` beside `sprk_bff_auth.js`. Deployment to dev is bundled in task 029.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

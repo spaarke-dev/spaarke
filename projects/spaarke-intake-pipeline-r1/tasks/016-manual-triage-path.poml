@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-10: Manual-triage path — no harness or confidence below 0.85 → request stage Needs triage, one Work Item to the owning legal team, no AI output, run Completed (no-op)</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>blocked — task 013</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs (orchestrator triage slot + new triage step) with an idempotency requirement (exactly one Work Item).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component step plugged into a defined orchestrator slot, with exact seams to call (IActionSeam.CreateTaskAsync, RecordOwnershipResolver).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>file-overlap with task 014 (Infrastructure/DI/JobProcessingModule.cs); run 014 and 016 one after the other or rebase the second.</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api, worker, job, unit-test</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fill the orchestrator's triage slot (task 013): when a request is not an NDA, has no registered harness for its type, or classification confidence is below 0.85, set the request stage to Needs triage, create exactly one Work Item for the owning legal team through `IActionSeam.CreateTaskAsync`, produce no AI output and no automatic reply, and end the run Completed (no-op).</prompt>
+  <role>SPAARKE platform developer. Expert in the BFF jobs framework, the IActionSeam task seam and record ownership resolution. Follow ADRs strictly.</role>
+  <goal>`Services/Intake/IntakeTriageStep.cs` (registered in JobProcessingModule) invoked from the triage slot in `IntakeRunJobHandler.cs`; a run marker taken before CreateTaskAsync so a redelivery creates no second Work Item; Guid.Empty from the seam treated as failure (retryable), never as success; tests for the three triggers, idempotency and the degraded-success case.</goal>
+
+  <context>
+    <background>Spec FR-10 (acceptance a–c), FR-08c, Assumptions (triage threshold 0.85, from the `agreement-classify` confirm threshold), owner clarification "No harness / low confidence → manual triage". `IActionSeam.CreateTaskAsync` (`Services/Ai/PublicContracts/IActionSeam.cs:44`) has a "degraded success" contract: a Dataverse rejection returns `Guid.Empty` rather than throwing — the step must check it. The owning legal team: `Services/Dataverse/RecordOwnershipResolver.cs` is the candidate resolver (confirm it resolves a team for `sprk_servicerequest`). Status emails for Needs triage are task 020 (FR-12); this task sends nothing.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeTriageStep.cs</file>
+      <file role="new">tests/integration/data-mutation/Intake/IntakeTriageStepTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunJobHandler.cs (triage slot from task 013)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs:44 (CreateTaskAsync)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs:437 (proposal apply creating a task via the seam)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Orchestrator, run store and triage slot.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Scope: Work Item creation. A marker on the run is taken atomically before `CreateTaskAsync` (with the deterministic key `triage:{runId}`), so redelivery never creates a second Work Item; `Guid.Empty` → retryable failure, marker released or left for resume per 013's rules.</constraint>
+    <constraint source="ADR-017">Scope: the triage run. Request stage set to Needs triage, then the run's terminal status Completed (no-op) written last; the run is never Failed for a triage outcome.</constraint>
+    <constraint source="ADR-039">Scope: this step. No AI call, no Action dispatch, no outbound message or email.</constraint>
+    <constraint source="ADR-015">Scope: the Work Item and logs. Work Item subject/description carry the request id, request type and reason code only — no document text or classification reasoning.</constraint>
+    <constraint source="project">Scope: thresholds. 0.85 read from `IntakePipelineOptions` (task 013), not hard-coded in the step.</constraint>
+    <constraint source="bff-extensions">Scope: the PR. State the Placement Justification, measure the publish-size delta against a fresh master build, ≤ 60 MB total, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Task via the action seam" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs">CreateTaskAsync with a degraded-success Guid.Empty result that callers must check.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm how RecordOwnershipResolver resolves the owning team for a `sprk_servicerequest`; record it.</step>
+    <step order="2">Implement IntakeTriageStep: reason code (not-an-NDA / no-harness / low-confidence), atomic marker, CreateTaskAsync regarding the request and owned by the team, Guid.Empty check, request stage Needs triage.</step>
+    <step order="3">Call it from the 013 triage slot; run ends Completed (no-op), terminal last.</step>
+    <step order="4">Register in JobProcessingModule; write IntakeTriageStepTests.</step>
+    <step order="5">`dotnet build`, `dotnet test`; measure publish size vs fresh master.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations in `projects/spaarke-intake-pipeline-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no existing resolver yields an owning legal team for a service request, STOP and escalate (owner decision on the triage queue owner) rather than assigning to a hard-coded team or user.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 4 (task seam: `IActionSeam.cs:44` CreateTaskAsync — reuse); spec §11 rows "Harness contract and registry" (no harness → triage). No existing intake triage step exists.</existing>
+    <extension>Partly — reuses IActionSeam and RecordOwnershipResolver; the step is new because the orchestrator (task 013) is new and owns the triage decision.</extension>
+    <cost-of-doing-nothing>A non-NDA or low-confidence request would either fail or be guessed at; FR-10 requires it reach a human with no AI output.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeTriageStep.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRunJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs</output>
+    <output type="test">tests/integration/data-mutation/Intake/IntakeTriageStepTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a non-agreement document, exactly one triage Work Item is created for the owning legal team and the request stage is Needs triage (FR-10a).</criterion>
+    <criterion testable="true">Given a request type with no harness, or confidence below 0.85, the same triage outcome occurs with the matching reason code.</criterion>
+    <criterion testable="true">The run ends Completed (no-op), never Failed (FR-10b), with the terminal status written last.</criterion>
+    <criterion testable="true">Negative: redelivery of the triage stage creates no second Work Item.</criterion>
+    <criterion testable="true">Negative: `CreateTaskAsync` returning `Guid.Empty` is treated as a retryable failure, not as success; the run is not Completed.</criterion>
+    <criterion testable="true">No AI call, no Action dispatch and no outbound message or email occurs on the triage path (FR-10c; status emails are task 020).</criterion>
+    <criterion testable="true">PR states Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes. All tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-10. Seeding proof requested for the Guid.Empty check (treating it as success silently drops a request on the floor): remove the check, confirm the test fails, restore.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

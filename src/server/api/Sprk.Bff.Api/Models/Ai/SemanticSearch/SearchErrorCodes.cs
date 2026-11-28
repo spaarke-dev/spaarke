@@ -172,4 +172,7 @@ public static class SearchErrorCodes
     /// Record search operation failed due to a service error.
     /// </summary>
     public const string RecordSearchFailed = "RECORD_SEARCH_FAILED";
+
+    /// <summary>GitHub #3307: the named index is allowed but is not a records index, so record search cannot run on it.</summary>
+    public const string IndexNotRecordsIndex = "INDEX_NOT_RECORDS_INDEX";
 }

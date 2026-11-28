@@ -522,7 +522,12 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             AfterRead?.Invoke("contact");
             if (FailGetContact) return Task.FromResult(ContactLookup.Failed);
             if (GetContactStatus == LookupStatus.ColumnMissing) return Task.FromResult(ContactLookup.ColumnMissing);
-            return Task.FromResult(Contacts.TryGetValue(contactId, out var c) ? ContactLookup.Of(Row(c)) : ContactLookup.Of());
+            // r4 task 045 (#2499): the real GetContactAsync selects ContactSelect, which leaves the A9 tenant column out
+            // (HomeContactSelect adds it), so the row it answers carries NO tenant. Only this read: the others keep what their
+            // real counterparts select. A caller needing the tenant reads it with ReadHomeTenantAsync.
+            return Task.FromResult(Contacts.TryGetValue(contactId, out var c)
+                ? ContactLookup.Of(Row(c) with { RawExternalTenantId = null })
+                : ContactLookup.Of());
         }
     }
 

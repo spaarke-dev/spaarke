@@ -571,6 +571,33 @@ A regression in any of these ships green. "New Email" would open with no "Relate
 **Related**: DEF-008 (#2908), PR #2938, PR #2947
 
 ---
+
+### ISS-009 — Record search returns records that were deleted in Dataverse
+
+| Field | Value |
+|---|---|
+| **Status** | In progress, not deferred (owner, 2026-11-28: "Yes separate issue but ensure it gets worked on not deferred"). Fix on branch `fix/records-index-deleted-3321`. DEV rollout is two steps, each on the owner's go: (1) set `RecordSync__DeletedRecordSweepHours=0` and deploy (through uac-r2), so the deploy removes nothing; (2) set it back to 6 (or trigger the job), which removes the stale rows on the next run. |
+| **Urgency** | now |
+| **Filed** | 2026-11-28 |
+| **Source** | Records-search half of #3306, found while fixing #3304/#3306/#3307 (PR #3319) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/3321 |
+
+**Description**
+
+The record sync job only added and updated records-index rows, so the row of a matter, project, invoice, contact or account deleted in Dataverse stayed in the index. Record search kept returning it: on DEV the records index held about 200–250 matter rows for 54 matters. A remove method exists on the record-matching sync service, but nothing calls it.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/RecordSyncJob.cs` (the job; it also moves from its own timer to the ADR-036 host, as ADR-052 requires when its behaviour changes)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/JobProcessingModule.cs` (registration)
+
+**Fix**: each record type's rows in this tenant are checked against the ids Dataverse still holds, at most once per `RecordSync:DeletedRecordSweepHours` (default 6), and the rows of deleted records are removed. Nothing is removed when Dataverse cannot be read, or when it returns no records of a type the index holds. Regression test: `tests/integration/regression/Issue3321_RecordSyncRemovesDeletedRecordsTests.cs`.
+
+**Estimated effort**: one day, plus the DEV cleanup and deploy
+**Blockers**: the owner's go for the DEV deploy and the first removal pass on DEV
+**Related**: #3306, PR #3319
+
+---
 ## Closed
 
 ### ISS-001 — node-executor-authoring.md still names the renamed `ActionType` enum

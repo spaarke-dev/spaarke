@@ -231,9 +231,10 @@ public static class SemanticSearchEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Semantic search failed for tenant {TenantId}", tenantId);
+            // A fixed message: the exception's own text (an index or Dataverse error) is logged above, never returned.
             return Results.Problem(
                 title: "Search Failed",
-                detail: ex.Message,
+                detail: "Search could not be completed.",
                 statusCode: 500);
         }
     }
@@ -384,7 +385,7 @@ public static class SemanticSearchEndpoints
             logger.LogError(ex, "Semantic search count failed for tenant {TenantId}", tenantId);
             return Results.Problem(
                 title: "Count Failed",
-                detail: ex.Message,
+                detail: "Search results could not be counted.",
                 statusCode: 500);
         }
     }

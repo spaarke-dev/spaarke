@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-18: Job B "Submit as request (type)" proposal kind at non-intake mailboxes — Accept creates request + run under the confirming user; Dismiss audited; never automatic</title>
+    <phase>2 Email and Copilot doors</phase>
+    <gate>after:029,040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag bff-api; modifies the Job B proposal producer and apply service (.cs) on a user-impersonated write path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extends an impersonated, ArchTest-guarded write path (`CommunicationProposalApplyService` is a pinned `ConfirmedProposal` caller) shared with the email-intelligence projects; a mistake creates requests without confirmation or breaks existing field-update proposals.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>reads the intake flag added by task 040 (must run after it); no file overlap with 042–044.</parallel-reason>
+    <deps>029, 040</deps>
+    <tags>bff-api, backend, ai, dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a new Job B proposal kind, "Submit as request (type)", to the existing review queue. At non-intake mailboxes, when the existing `CommunicationTriageAi` result signals a request (no extra AI call), the Job B propose step writes one such proposal per communication. Accept (through `CommunicationProposalApplyService.ApplyAsync`) creates the request and run under the confirming user via task 022's `IntakeRequestSubmitService`; Dismiss writes the existing single Dismissed audit row. Nothing is ever created without an Accept, and existing field-update proposals behave unchanged.</prompt>
+  <role>SPAARKE platform developer. Expert in the email-intelligence Job B pipeline (`CommunicationEnrichmentService`, `CommunicationProposalApplyService`, `sprk_emailreviewlog`) and ADR-028 A5 impersonation. Follow ADRs strictly.</role>
+  <goal>The propose step emits the new kind only for non-intake mailboxes with a request signal; Apply and Dismiss handle it with the existing guards; the queue feed carries it in the existing `QueueFeedItem` shape; tests prove the four FR-18 cases.</goal>
+
+  <context>
+    <background>Spec FR-18 (a–d); owner reuse decision (2026-11-25): extend the Job B proposal queue, triage supplies the signal (reuse-scan row 9). Job B proposals are `sprk_emailreviewlog` rows (target entity/field/record, `sprk_action`) written by `CommunicationEnrichmentService.RunEmailProposeAsync` (:881, called :243 with the triage result) and resolved by `CommunicationProposalApplyService` (ApplyAsync :169 — resolves the caller fail-closed, loads the row, refuses an already-resolved row; DismissAsync :354 writes one Dismissed row). The queue feed is `GET /api/communications/queue-feed` (`CommunicationEndpoints.cs:382`). The intake flag comes from task 040; intake mailboxes already create requests, so they get no proposal.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (RunEmailProposeAsync :881)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationProposalApplyService.cs (ApplyAsync :169, DismissAsync :354, resolved-state guard ~:626)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (queue-feed projection :382 — only if the new kind needs a label field)</file>
+      <file role="modify">tests/integration/seam/Communication/CommunicationProposalApplySeamTests.cs</file>
+      <file role="new">tests/integration/data-mutation/Communication/SubmitAsRequestProposalTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ICommunicationTriageAi.cs (CommunicationTriageResult :82 — Category, Summary, Obligations, Priority, ReviewOutcome)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Intake/IntakeRequestSubmitService.cs (task 022)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (UpdateRecordAsync remarks: pinned ConfirmedProposal callers, ArchTest ActionSeamUpdateRecordCallerGuardTests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">Phase 1 on dev; `IntakeRequestSubmitService` (task 022).</dependency>
+      <dependency task="040" status="pending">Intake flag on the communication account.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">SCOPE = the propose step. No new AI call and no new Action: the kind is derived only from the existing triage result already passed to `RunEmailProposeAsync`; if triage is null (Null-Object or failure), no proposal of this kind is written.</constraint>
+    <constraint source="project">SCOPE = mailbox gate. The kind is written only when the receiving account's intake flag is false; never for an intake mailbox; at most one open proposal of this kind per communication.</constraint>
+    <constraint source="ADR-028">SCOPE = Accept. The request and run are created attributed to the confirming user resolved server-side (the existing caller resolution, fail closed 403); never app-only and never from a client-supplied user id. Existing impersonation rules stay as they are (A5).</constraint>
+    <constraint source="ADR-002">SCOPE = request creation. Only through `IntakeRequestSubmitService` with channel Email, regarding the communication, idempotency key `intake-jobb:{reviewLogId}`; no direct Dataverse create in the apply service.</constraint>
+    <constraint source="project">SCOPE = existing proposals. Field-update proposals (all current kinds) keep their exact Apply, Dismiss, Undo and queue-feed behaviour; existing seam tests pass unchanged. The ArchTest pinning `ActionSeam.UpdateRecordAsync` callers must still pass (do not route the new kind through UpdateRecordAsync).</constraint>
+    <constraint source="ADR-015">SCOPE = proposal text and logs. The proposal label is fixed text plus the request-type label ("Submit as request (NDA review)"); no triage summary, body or obligations copied into the row or logs.</constraint>
+    <constraint source="ADR-032">SCOPE = the new kind. Kill switch `Intake:Doors:JobBSuggest:Enabled` (default false) stops new proposals of this kind; open ones still resolve normally.</constraint>
+    <constraint source="root-CLAUDE.md-§10">SCOPE = this task's BFF changes. State the Placement Justification in the PR (`.claude/constraints/bff-extensions.md`); measure the publish-size delta against a fresh master build (total ≤ 60 MB); no new package, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/reuse-scan.md (row 9)</file>
+    </files>
+    <patterns>
+      <pattern name="Streaming endpoints" location=".claude/patterns/ai/streaming-endpoints.md">Tag-mapped (ai); no streaming is added.</pattern>
+      <pattern name="Public contracts facade" location=".claude/patterns/ai/public-contracts-facade.md">Triage reached only through ICommunicationTriageAi.</pattern>
+      <pattern name="Entity operations" location=".claude/patterns/dataverse/entity-operations.md">sprk_emailreviewlog rows.</pattern>
+      <pattern name="Plugin structure" location=".claude/patterns/dataverse/plugin-structure.md">Tag-mapped; no plugin added.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files; read `RunEmailProposeAsync`, `ApplyAsync`, `DismissAsync`, the queue-feed projection and the TRIAGE-EMAIL Action's category choices; decide how the kind is encoded on `sprk_emailreviewlog` with existing columns (e.g. target entity `sprk_servicerequest`, a reserved target-field value, proposed value = request type); declare RIGOR FULL, tier opus, effort high.</step>
+    <step order="2">Propose: in `RunEmailProposeAsync`, when the account is not intake, the switch is on, and the triage result's category/outcome maps to a request type, write one proposal of the new kind (skip if one is open).</step>
+    <step order="3">Apply: branch on the kind before the field-update path: resolve caller (existing), refuse resolved rows (existing), call `IntakeRequestSubmitService` as the caller, mark the row Applied with the request id. Dismiss: the existing path unchanged.</step>
+    <step order="4">Queue feed: ensure the kind appears with its fixed label in the existing `QueueFeedItem` shape.</step>
+    <step order="5">Tests per the criteria; build and run tests incl. ArchTests; measure the publish-size delta.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document the encoding choice and deviations in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the triage result has no category or outcome that can signal "this is a request for legal review", STOP and escalate (adding a choice is an Action/catalog change, ADR-039) rather than adding an AI call or keyword matching on the body.</trigger>
+    <trigger>If the new kind cannot be encoded on `sprk_emailreviewlog` without a schema change, or the Exceptions Queue surface cannot render it from the existing `QueueFeedItem` shape, STOP and escalate (shared with the email-intelligence projects).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>notes/reuse-scan.md row 9: `CommunicationProposalApplyService` (Accept/Dismiss/audit), queue feed `CommunicationEndpoints.cs:382`, `ICommunicationTriageAi` (AnalysisServicesModule.cs:632); owner chose the Job B queue over the triage hint. spec New Components row "Job B Submit as request proposal kind".</existing>
+    <extension>Yes, extended: a new proposal kind on the existing producer, row type, apply/dismiss service and feed; no new surface, endpoint or AI call.</extension>
+    <cost-of-doing-nothing>A request emailed to an ordinary (non-intake) mailbox never reaches the pipeline unless the sender re-sends it to the intake mailbox (FR-18).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF, incl. ArchTests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationProposalApplyService.cs</output>
+    <output type="test">tests/integration/data-mutation/Communication/SubmitAsRequestProposalTests.cs</output>
+    <output type="test">tests/integration/seam/Communication/CommunicationProposalApplySeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At a non-intake mailbox with a request signal in the triage result, exactly one open "Submit as request (type)" proposal is written; none at an intake mailbox, none when triage is null, none with the switch off.</criterion>
+    <criterion testable="true">Negative: no request or run exists for the communication until Accept (FR-18 a).</criterion>
+    <criterion testable="true">Accept creates exactly one request (channel Email, regarding the communication) and one run attributed to the confirming user; a second Accept creates nothing more (FR-18 b).</criterion>
+    <criterion testable="true">Negative: an unresolvable caller gets 403 and nothing is created; an unknown proposal id 404.</criterion>
+    <criterion testable="true">Dismiss leaves no request and writes exactly one Dismissed audit row (FR-18 c).</criterion>
+    <criterion testable="true">Existing field-update proposals pass their existing seam tests unchanged; the ActionSeam caller ArchTest passes (FR-18 d).</criterion>
+    <criterion testable="true">The proposal row and logs contain no body, summary or obligations text.</criterion>
+    <criterion testable="true">Build and all tests pass; the PR states the Placement Justification and publish-size delta (≤ 60 MB, no new HIGH CVE). Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes. One seeding proof for "no request without Accept".</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-18. Dependency on 040 added beyond the brief's 029 because the gate reads 040's intake flag. Run `/conflict-check` (Services/Communication is shared with the email-communication projects).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute (FULL rigor).</protocol>
+  </execution>
+</task>

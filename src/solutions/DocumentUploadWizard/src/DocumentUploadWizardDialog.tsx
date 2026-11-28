@@ -636,6 +636,13 @@ export function DocumentUploadWizardDialog({
                         uploadedFiles={fileStateRef.current.selectedFiles}
                         bffBaseUrl={bffBaseUrl}
                         bffTokenProvider={bffTokenProvider}
+                        // The parent the upload's own index request named (Phase 4), so Find Similar's request names
+                        // the same one and cannot clear it (#3299).
+                        parentContext={{
+                            parentEntityName: effectiveParentEntityType,
+                            parentRecordId: effectiveParentEntityId,
+                            parentDisplayName: effectiveParentEntityName,
+                        }}
                         onEmailControllerChange={(c) => { emailControllerRef.current = c; }}
                     />
                 ),
@@ -657,6 +664,7 @@ export function DocumentUploadWizardDialog({
             emailStepProps,
             effectiveParentEntityName,
             effectiveParentEntityType,
+            effectiveParentEntityId,
             effectiveIsUnassociated,
             handleFilesAdded,
             handleFileRemoved,

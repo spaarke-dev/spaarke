@@ -4,7 +4,7 @@
     <title>Contact store log labels, faithful in-memory double, and the gate's tenant read (FR-30, #2499)</title>
     <phase>4 Access, sign-in, carry-overs, Teams</phase>
     <gate>after 038 (P3 deploy); the gate part needs spaarke-ontology-platform-r1's agreement</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tag bff-api; modifies .cs in Infrastructure/ExternalAccess and Services/Signals plus a test double</rigor-reason>
     <model-tier>sonnet</model-tier>

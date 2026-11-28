@@ -29,6 +29,12 @@ This directory contains authoritative documentation for Dataverse entity schemas
 | [sprk_createdbycontact.md](sprk_createdbycontact.md) | `sprk_createdbycontact` on Document, To Do, Event and Communication: the contact-creator lookup the BFF stamps from the resolved principal (FLS: BFF writers only); read by the R3 delete-own check (FR-25/FR-26). Service requests use `sprk_requestedby` | 2026-10-10 | 2026-10-10 | Current |
 | [sprk_communicationaccount.md](sprk_communicationaccount.md) | Communication account entity | 2026-04-05 | 2026-04-05 | Current |
 
+### Entity Documentation — Job Runs
+
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [sprk_processingjob.md](sprk_processingjob.md) | Processing Job run record: Office save jobs and intake pipeline runs (job type "Intake run"); request and output-document lookups, harness key, engine execution id, staging prefix, re-drive marker; one request has many runs; BFF-only writers; no content | 2026-11-26 | 2026-11-26 | Current |
+
 ### Entity Documentation — Notification Spine
 
 | Document | Description | Last Updated | Last Reviewed | Status |

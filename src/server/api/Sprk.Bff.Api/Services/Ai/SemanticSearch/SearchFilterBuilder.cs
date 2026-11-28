@@ -62,6 +62,25 @@ public static class SearchFilterBuilder
     }
 
     /// <summary>
+    /// The clause that keeps one row per document: its first chunk, or a row with no chunk number (written before chunk
+    /// numbers existed). GitHub #3306.
+    /// </summary>
+    public const string FirstChunkClause = "(chunkIndex eq 0 or chunkIndex eq null)";
+
+    /// <summary>
+    /// Narrows a filter to one row per document (<see cref="FirstChunkClause"/>), for a request that has no query text to
+    /// rank by: an empty query or a match-all <c>*</c> (GitHub #3306).
+    /// </summary>
+    /// <remarks>
+    /// A document is stored as many chunks. Ranked by a query, a page of chunks spreads across many documents; without
+    /// one, the page comes back in index order, where one long document's chunks can fill it, so a page of twenty rows
+    /// collapses into one or two documents (and none, when those documents are ones the caller cannot open). One row
+    /// per document makes the page size, offset and count mean documents.
+    /// </remarks>
+    public static string WithOneRowPerDocument(string filter) =>
+        string.IsNullOrWhiteSpace(filter) ? FirstChunkClause : $"({filter}) and {FirstChunkClause}";
+
+    /// <summary>
     /// Builds the tenant isolation filter.
     /// </summary>
     /// <param name="tenantId">The tenant ID.</param>

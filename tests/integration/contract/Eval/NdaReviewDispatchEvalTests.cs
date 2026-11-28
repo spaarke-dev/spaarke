@@ -53,11 +53,11 @@ namespace Sprk.Bff.Api.Tests.Eval.NdaReview;
 /// </para>
 /// <para>
 /// <b>catalogStatus grounding</b> (honest — no invented capability names): both <c>nda-review</c> and
-/// <c>nda-standard-summary</c> are <c>mirrored</c> (rows in
+/// <c>nda-standard-summary</c> are <c>existing</c> (rows in
 /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>, task 022) but NOT YET live-seeded on
 /// spaarkedev1 in this session (<c>Seed-PlaybookConsumers.ps1</c> is env-blocked per task 022's notes)
-/// and NOT <see cref="ConsumerTypes"/> constants (routing keys on the Dataverse row, not a code
-/// constant, per ADR-039 — the Binding table is the ONLY routing surface).
+/// and, since spaarke-intake-pipeline-r1 task 005 (design 10.1 item 6), <see cref="ConsumerTypes"/> constants too (routing keys on the Dataverse row, not a code
+/// constant, per ADR-039 — the Binding table is the ONLY routing surface; the constant only keeps the closed catalog equal to the rows).
 /// </para>
 /// </remarks>
 [Trait("Category", "GoldenUtteranceEval")]
@@ -145,7 +145,7 @@ public class NdaReviewDispatchEvalTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void DispatchCases_ExpectedConsumerType_IsGroundedInTheMirror_AndNotYetACodeConstant()
+    public void DispatchCases_ExpectedConsumerType_IsGroundedInTheMirror_AndIsACodeConstant()
     {
         var suite = LoadSuite();
         var mirrorConsumerTypes = LoadMirrorConsumerTypes();
@@ -153,13 +153,13 @@ public class NdaReviewDispatchEvalTests
         foreach (var c in suite.Cases.Where(c => c.Expected.ConsumerType is not null))
         {
             var consumerType = c.Expected.ConsumerType!;
-            c.Expected.CatalogStatus.Should().Be("mirrored",
-                $"case {c.CaseId}: nda-review/nda-standard-summary are mirrored (row in the mirror file), not yet a ConsumerTypes constant");
+            c.Expected.CatalogStatus.Should().Be("existing",
+                $"case {c.CaseId}: nda-review/nda-standard-summary are rows in the mirror file AND ConsumerTypes constants (spaarke-intake-pipeline-r1 task 005, design 10.1 item 6)");
             mirrorConsumerTypes.Should().Contain(consumerType,
                 $"case {c.CaseId}: '{consumerType}' must be a row in infra/dataverse/sprk_playbookconsumer-rows.json");
-            ConsumerTypes.All.Should().NotContain(consumerType,
-                $"case {c.CaseId}: '{consumerType}' has no server-side ConsumerTypes dependency yet — flip catalogStatus " +
-                "to existing only if a constant is added");
+            ConsumerTypes.All.Should().Contain(consumerType,
+                $"case {c.CaseId}: '{consumerType}' has a Binding row, so it must be in ConsumerTypes.All or " +
+                "/healthz/catalog reports the row as drift");
         }
     }
 
@@ -505,7 +505,7 @@ public sealed record NdaReviewExpected
     [JsonPropertyName("notConsumerType")]
     public string? NotConsumerType { get; init; }
 
-    /// <summary>mirrored (row in sprk_playbookconsumer-rows.json) — null for the pure off-target case.</summary>
+    /// <summary>existing (row in sprk_playbookconsumer-rows.json and a ConsumerTypes constant) — null for the pure off-target case.</summary>
     [JsonPropertyName("catalogStatus")]
     public string? CatalogStatus { get; init; }
 

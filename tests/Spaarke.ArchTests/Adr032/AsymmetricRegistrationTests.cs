@@ -57,8 +57,6 @@ public class AsymmetricRegistrationTests
         new("AttachmentClassificationJobHandler", "TextExtractorService", "DEF-FIN", "gated on RecordMatchingEnabled alone; TextExtractorService needs DocumentIntelligence:Enabled"),
 
         new("AppOnlyDocumentAnalysisJobHandler", "IAppOnlyAnalysisService", "DEF-JOBS", "registered unconditionally; IAppOnlyAnalysisService only under analysis && docIntel"),
-        new("EmailAnalysisJobHandler", "IAppOnlyAnalysisService", "DEF-JOBS", "registered unconditionally; IAppOnlyAnalysisService only under analysis && docIntel"),
-        new("ProfileSummaryJobHandler", "IAppOnlyAnalysisService", "DEF-JOBS", "gated on docIntel; IAppOnlyAnalysisService needs analysis && docIntel"),
         new("EmbeddingMigrationService", "IKnowledgeDeploymentService", "DEF-JOBS", "hosted service registered unconditionally; needs AI Search (analysis && docIntel && AiSearchEndpoint)"),
         new("EmbeddingMigrationService", "IOpenAiClient", "DEF-JOBS", "hosted service registered unconditionally; IOpenAiClient only under docIntel"),
 

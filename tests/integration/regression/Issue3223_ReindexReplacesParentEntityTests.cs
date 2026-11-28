@@ -218,6 +218,12 @@ public sealed class Issue3223_ReindexReplacesParentEntityTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            // GitHub #3304: every file index is followed by the leftover-chunk trim's search; this wire holds nothing, so no tail.
+            if (request.RequestUri!.AbsolutePath.Contains("search.post.search", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"value\":[]}", Encoding.UTF8, "application/json") };
+            }
+
             var body = request.Content is null ? "{}" : await request.Content.ReadAsStringAsync(cancellationToken);
             using var parsed = JsonDocument.Parse(body);
             var keys = new List<string>();

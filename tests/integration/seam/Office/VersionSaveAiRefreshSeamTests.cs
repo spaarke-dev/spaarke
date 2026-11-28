@@ -202,12 +202,10 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             $"rag-index-{Drive}-{emailItem}",
         });
 
+        // GitHub #3304: no index job carries a stale-chunk switch any more; the indexing service trims on every index.
         firstJobs.Concat(emailJobs)
             .Where(j => j.JobType == RagIndexingJobHandler.JobTypeName)
-            .Should().OnlyContain(j => HasProperty(j.Payload!.RootElement, "ReplaceStaleChunks")
-                                        && j.Payload!.RootElement.GetProperty("ReplaceStaleChunks").GetBoolean(),
-                "task 048: every non-version index job now asks for the trim too — only the version-key " +
-                "suffix stays exclusive to a version save, not the trim flag");
+            .Should().OnlyContain(j => !HasProperty(j.Payload!.RootElement, "ReplaceStaleChunks"));
 
         await _pipeline.RunAllAsync(firstJobs.Concat(emailJobs));
 

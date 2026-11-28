@@ -107,7 +107,7 @@ Its non-blocking note: if the extra WhoAmI throws instead of returning a status,
 - **/conflict-check:** none of the 34 open PRs touches the four changed files.
 - **Adversarial review (opus, one pass over 044+047):** approve, no F-class findings.
   - K1, classifier looseness: `Contains` over the whole error string. Tightened to an exact `error.code` match, carried in task 045's change set (same file).
-  - K4, owner question: the registration default environment (`DATAVERSE_URL`) is also reconciled as a provisioning target, so it gets the Warning too. This is consistent with the POML wording.
+  - K4, owner question: the registration default environment (`DATAVERSE_URL`) is also reconciled as a provisioning target, so it gets the Warning too. This is consistent with the POML wording. **Owner decision 2026-11-27: keep the Warning** for that environment as well; no code change.
   - K2, test gaps: the foreign-Masked negative test is not load-bearing on `readability == Failed` (Masked and membership cannot co-occur on a real path); the "no Error" assertion watches the job logger only, and the store/proof lines were checked by reading the code.
   - K4, task 058's gate: the proof's Warning-with-exception still writes an `exceptions` row at Warning severity every run.
   - The pre-existing body-in-logs defect (NFR-04) is fixed in task 045.

@@ -627,6 +627,12 @@ public static class AnalysisServicesModule
         // DI resolution green under compound-OFF and surfaces 503 ProblemDetails to callers.
         services.AddScoped<IInvoiceAi, NullInvoiceAi>();
 
+        // L1 - IAgreementAi (P3 Fail-Fast; spaarke-intake-pipeline-r1 task 004, FR-02). Real impl registered in
+        // AddPublicContractsFacade. Consumed by the intake orchestrator's NDA harness (task 015), which is unconditional;
+        // this Null peer keeps its DI resolution green under compound-OFF and holds the run with a typed
+        // FeatureDisabledException (ai.agreement.disabled) instead of returning an empty classification or a fake plan.
+        services.AddScoped<IAgreementAi, NullAgreementAi>();
+
         // L1 — IWorkspacePrefillAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
         // Consumed by MatterPreFillService (Create-Matter wizard pre-fill). Stream-pre-stream
         // invariant: NullWorkspacePrefillAi throws synchronously BEFORE returning the
@@ -1434,6 +1440,13 @@ public static class AnalysisServicesModule
 
         services.AddScoped<IBriefingAi, BriefingAi>();
         services.AddScoped<IInvoiceAi, InvoiceAi>();
+
+        // IAgreementAi -> AgreementAi (spaarke-intake-pipeline-r1 task 004, FR-02): the ADR-013 PublicContracts seam for the
+        // app-only agreement-classify and agreement-edit-plan Actions, on IInvoiceAi's pattern. Its dependencies are
+        // IActionResolver/IActionRunner (AddLinearConsumers, same compound gate), IAgreementTypeRegistryReader and the
+        // prompt assembler (AddAnalysisOrchestrationServices, same gate) and TimeProvider (registered unconditionally above).
+        // Null peer: NullAgreementAi in AddNullObjectsForCompoundOff. Scoped like IActionResolver.
+        services.AddScoped<IAgreementAi, AgreementAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
 

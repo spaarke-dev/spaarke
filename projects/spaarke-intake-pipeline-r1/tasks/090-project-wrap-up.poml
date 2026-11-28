@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>Project wrap-up: final code-review + adr-check (incl. ADR-049 I-5/I-7 scope confirmation), repo cleanup, README/plan complete, lessons learned, test diet, archive</title>
+    <phase>END Wrap-up</phase>
+    <gate>after:all tasks ✅</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Mandatory wrap-up (task-create Step 3.7; examples.md: FULL — code-review + adr-check + repo-cleanup); depends on every task.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FULL rigor with 3+ dependencies (rubric 3.5.5b); the final review spans the whole change set, including auth and shared hot files, and decides the ADR-049 scope question.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>END</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Last task; reads and edits project-wide files (README, plan, TASK-INDEX) after every other task.</parallel-reason>
+    <deps>all</deps>
+    <tags>documentation, cleanup, wrap-up, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project per task-create Step 3.7: run the final quality gates over all project code (including confirming the ADR-049 I-5/I-7 Compose-scoped reading, spec Unresolved Q2), clean the repository, mark README and plan Complete, write lessons learned, run the project-close `/test-diet` and archive the project.</prompt>
+  <role>SPAARKE platform developer. Expert in Spaarke quality gates, ADR compliance and project close-out. Follow ADRs strictly.</role>
+  <goal>No F-class finding remains; README and plan say Complete; `notes/lessons-learned.md` exists; `/test-diet` has classified every test the project added; `/devops-project-archive` has written `.archived` and closed the Issue (#3128).</goal>
+
+  <context>
+    <background>task-create Step 3.7 and root CLAUDE.md §7 (`/test-diet` gate at project close). Spec Unresolved Q2: confirm in `/adr-check` that ADR-049 I-5/I-7 are Compose-scoped and that the engine path (anchor exactly once, refuse otherwise, no fuzzy text search; outputs not authored through Compose) complies. Spec Unresolved Q1 (Clean copy for drafts with prior markup) and Q3 (ontology columns) must each show a recorded outcome.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-intake-pipeline-r1/README.md</file>
+      <file role="modify">projects/spaarke-intake-pipeline-r1/plan.md</file>
+      <file role="modify">projects/spaarke-intake-pipeline-r1/tasks/TASK-INDEX.md</file>
+      <file role="canonical-reference">.claude/skills/task-create/SKILL.md (Step 3.7)</file>
+      <file role="canonical-reference">projects/spaarke-intake-pipeline-r1/spec.md (Unresolved Questions, ADR Tensions, Success Criteria)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="all" status="pending">Every task in TASK-INDEX.md complete.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root-CLAUDE.md-§8.5">SCOPE = review findings. Classify per task-execute Step 9.5 (F1–F4 fix-now, K1–K4 known-limit); fix every F-class finding before archive; one top-tier review over the project change set (two passes for the auth and tenant-isolation parts: tasks 017, 024, 044).</constraint>
+    <constraint source="ADR-049">SCOPE = the ADR-049 confirmation. Record the I-5/I-7 verdict and its reasoning in `notes/decisions.md`; if the reading is not confirmed, raise an ADR Conflict (root §6.5) instead of archiving.</constraint>
+    <constraint source="ADR-038">SCOPE = tests. `/test-diet` classifies every test added or changed by the project as scaffolding (delete) or maintain (keep at a KEEP path per tests/CLAUDE.md); move-never-delete for anything uncertain.</constraint>
+    <constraint source="project">SCOPE = repository cleanup. `/repo-cleanup` removals only after reviewing its report; archive `notes/handoffs/` to `.archive/`; never rename or move the project folder (no `x-` prefix).</constraint>
+    <constraint source="project">SCOPE = open items. Every deferred item is in both `notes/defer-issues.md` and a GitHub issue; nothing is closed silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/task-create/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/spec.md</file>
+      <file>projects/spaarke-intake-pipeline-r1/notes/decisions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Lessons learned" location=".claude/skills/task-create/SKILL.md">Step 3.7 item 5: one lesson per entry with a one-line summary.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Final quality gates: `/code-review` and `/adr-check` on all project code (`git diff master...HEAD`); include the ADR-049 I-5/I-7 confirmation and record it in notes/decisions.md; fix every F-class finding.</step>
+    <step order="2">Confirm spec Unresolved Q1 and Q3 each have a recorded outcome (decision or filed issue).</step>
+    <step order="3">`/repo-cleanup projects/spaarke-intake-pipeline-r1`; review the report; approve removals in notes/debug, notes/spikes, notes/drafts; archive notes/handoffs to .archive/.</step>
+    <step order="4">README.md: Status Complete, Last Updated, Phase Complete, Progress 100%, Completed Date, graduation criteria checked, changelog entry. plan.md: Status Complete, every milestone ✅.</step>
+    <step order="5">Append lessons to `notes/lessons-learned.md` (corrections and confirmed non-obvious approaches, with why).</step>
+    <step order="6">Run `/test-diet` for the project; apply its verdicts.</step>
+    <step order="7">Final verification: every task ✅ in TASK-INDEX.md; build and tests green; docs current.</step>
+    <step order="8">`/devops-project-archive` (closes #3128, sets board Status, writes `.archived`). Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `/adr-check` does not confirm the ADR-049 I-5/I-7 Compose-scoped reading, STOP and raise 🔔 ADR Conflict — Resolution Required (root §6.5); do not archive.</trigger>
+    <trigger>If an F-class finding needs a change in another project's code (eBilling, accelerator, MCP, External Access), STOP and coordinate with the owner before editing.</trigger>
+    <trigger>If `/test-diet` proposes deleting a test whose purpose is unclear, STOP and ask the owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="code-review">Final review</tool>
+    <tool name="adr-check">ADR compliance incl. ADR-049 scope</tool>
+    <tool name="repo-cleanup">Repository hygiene</tool>
+    <tool name="test-diet">Project-close test reconciliation</tool>
+    <tool name="devops-project-archive">Close and archive</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/README.md</output>
+    <output type="docs">projects/spaarke-intake-pipeline-r1/plan.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review` and `/adr-check` ran over the full project diff; no F-class finding remains; the ADR-049 I-5/I-7 verdict is recorded in notes/decisions.md.</criterion>
+    <criterion testable="true">Spec Unresolved Q1, Q2 and Q3 each have a recorded outcome.</criterion>
+    <criterion testable="true">README and plan show Complete; every TASK-INDEX row is ✅.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with at least one entry per phase.</criterion>
+    <criterion testable="true">`/test-diet` classified every project-added test; kept tests are at KEEP paths.</criterion>
+    <criterion testable="true">Negative: the project folder was not renamed or moved; no deferred item exists only in notes or only on GitHub.</criterion>
+    <criterion testable="true">`.archived` exists and Issue #3128 is closed. Test scope: no new tests; build and existing tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>task-create Step 3.7; root CLAUDE.md §7. Portfolio Issue #3128.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; prescriptive steps bind.</protocol>
+  </execution>
+</task>

@@ -163,6 +163,17 @@ public sealed record SendCommunicationRequest
     internal ServerSendOptions? ServerSend { get; init; }
 
     /// <summary>
+    /// Spaarke-intake-pipeline-r1 task 006 (uac-r2): when true, <see cref="InReplyToMessageId"/> was set by server code (the intake
+    /// return, which replies on its run's own inbound message), not taken from a request body. Shared-mailbox email only, with a
+    /// non-blank <see cref="InReplyToMessageId"/>; any other send is refused before anything is sent. The reply-parent access check
+    /// (the caller must be able to read the parent's <c>sprk_communication</c>) is skipped for it. False for every other send (the
+    /// default). Internal and <see cref="System.Text.Json.Serialization.JsonIgnoreAttribute"/>: server code sets it, a request body
+    /// never can.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal bool ReplyParentSetByServer { get; init; }
+
+    /// <summary>
     /// Ontology task 176 (D-216; review round 2 item 7): when the send's find-or-create step CREATES the email's thread, it is
     /// created Private (<see cref="ThreadResolutionRequest.CreatePrivate"/>), so a follow-up posted into it with the composer's
     /// External default is still stored internal-only. Only the budget inquiry send sets it (<c>InquiryEmailSender.Build</c>).

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-11: Console approval Work Item card (Fluent v9): outputs, clause table, Claim / Approve / Reject through the task-017 endpoint</title>
+    <phase>1 Pipeline core and first doors</phase>
+    <gate>after:017</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies and creates .tsx/.ts code in src/solutions/SpaarkeAi (frontend, fluent-ui tags).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single UI component composed from existing ConsoleKit / StatusBadge parts with an explicit visual spec and a fixed endpoint contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>017</deps>
+    <tags>frontend, fluent-ui, react, typescript</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Console card an attorney uses to decide an intake approval Work Item: it shows the request, the run's output documents and the page-1 clause table, and offers Claim, Approve and Reject, each calling `POST /api/intake/runs/{runId}/decision` (task 017) through `authenticatedFetch`. Compose it from `@spaarke/ui-components` parts first (ADR-012); add only what does not exist.</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 code pages, Fluent UI v9 and @spaarke/ui-components. Follow ADRs strictly.</role>
+  <goal>`IntakeApprovalCard.tsx` and `intakeApprovalService.ts` in the Console, mounted where the Console shows an intake approval Work Item, with the visual spec below, every 017 status code mapped to a user message, dark mode correct, and component tests.</goal>
+
+  <context>
+    <background>Spec FR-11 and Owner Clarification "Approve UI" (Console Work Item AND MDA form, one endpoint). The approval Work Item is a Dataverse `task` created by 017 (regarding the request). Precedent for a type-specific Work Item action in the Console: Worklist billing items open Invoice Review through a host callback (`openInvoiceReview`) instead of the Decision wizard. Data reads (output documents, clause-table rows on `sprk_analysisoutput`) follow `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`.</background>
+    <relevant-files>
+      <file role="new">src/solutions/SpaarkeAi/src/components/workspace/IntakeApprovalCard.tsx</file>
+      <file role="new">src/solutions/SpaarkeAi/src/services/intakeApprovalService.ts</file>
+      <file role="new">src/solutions/SpaarkeAi/src/components/workspace/__tests__/IntakeApprovalCard.test.tsx</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/components/conversation/DocumentPerItemCards.tsx (Console card chrome: makeStyles + tokens, Button usage)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/index.ts (RecordRow, StatusBar, EvidenceLine, consoleStatus badges)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/openInvoiceReview.ts and WorklistWidget.tsx (host-callback precedent for a type-specific Work Item: prop `openInvoiceReview`)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/src/services/authInit.ts (authenticatedFetch :96)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="pending">Decision endpoint, status codes, Work Item regarding the request.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">SCOPE = every visual part of the card. Use `RecordRow`, `StatusBar`/`CONSOLE_STATE_BADGES` and `StatusBadge` from `@spaarke/ui-components` where they fit; a new shared-lib component is out of scope. If surfacing the card needs a WorklistWidget prop, make only an additive optional prop mirroring `openInvoiceReview` and run `/conflict-check`.</constraint>
+    <constraint source="ADR-021">SCOPE = the new component. Fluent v9 only, `tokens.*` for every color/spacing/radius, no hex or rgb literals, icons from `@fluentui/react-icons` (currentColor); theme from the host FluentProvider (dark mode must work).</constraint>
+    <constraint source="ADR-028">SCOPE = every BFF call in `intakeApprovalService.ts`. Use `authenticatedFetch` from `services/authInit.ts`; no other token code.</constraint>
+    <constraint source="ADR-002">SCOPE = the card. It never writes stage, run or assigned attorney directly; decisions go only through the 017 endpoint. Buttons disable while a call is in flight (no double submit).</constraint>
+    <constraint source="ADR-015">SCOPE = client logging and telemetry. Ids and status codes only; never document text, clause text or the reject reason.</constraint>
+    <constraint source="project">SCOPE = visual direction (binding): Fluent v9 `Card` (appearance "filled-alternative"), full pane width, padding `tokens.spacingVerticalM`/`spacingHorizontalM`, gap `spacingVerticalS`. Header: request name (Subtitle2) + StatusBadge "Awaiting approval" + harness label "NDA review" (Caption1, `colorNeutralForeground3`) + the pinned standard version. Section "Outputs": one `RecordRow` per output document (icon `DocumentRegular`, name, open link). Section "Clause table": Fluent `Table` size="small", columns Topic | Our position | Action (Edited / Comment / Manual), first 8 rows then a "Show all" Link. Footer right-aligned: Button appearance="primary" "Approve", Button "Reject" (opens a Dialog with a required Textarea "Reason"), Button appearance="subtle" "Claim" (only when no attorney assigned). Errors in a `MessageBar` intent="error" above the footer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/theme-consistency.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">makeStyles + tokens, no literals.</pattern>
+      <pattern name="Fluent v9 theming" location=".claude/patterns/ui/fluent-v9-theming.md">Host FluentProvider; dark mode.</pattern>
+      <pattern name="Control init" location=".claude/patterns/pcf/control-initialization.md">Tag-mapped; the card has no PCF init.</pattern>
+      <pattern name="Theme management" location=".claude/patterns/pcf/theme-management.md">Tag-mapped; follow the host theme.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load the knowledge files; confirm where the Console shows Work Items (Worklist via the embedded workspace, or a Console surface) and pick the mount point; declare RIGOR FULL, tier sonnet, effort high.</step>
+    <step order="2">Write `intakeApprovalService.ts`: `decide(runId, action, reason?)` → typed result `{ ok } | { status, errorCode, message }`; read helpers for the run's output documents and clause-table rows per the data-access criteria.</step>
+    <step order="3">Write `IntakeApprovalCard.tsx` per the visual constraint; map 401/403 → "Only the owning legal team can decide this request", 404 → "This request no longer needs a decision", 409 → "Already decided or claimed — refreshed" (reload), 503 → "Intake approval is turned off".</step>
+    <step order="4">Mount it for intake approval Work Items (additive host-callback prop if the Worklist is the surface).</step>
+    <step order="5">Write component tests (render, each response mapping, reject requires a reason, buttons disabled in flight); run `npm run build` and tests in src/solutions/SpaarkeAi.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`.</step>
+    <step order="7">Document the chosen mount point and any deviation in projects/spaarke-intake-pipeline-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If showing the card requires changing more than one additive optional prop in `@spaarke/ui-components` Worklist or any edit in `src/solutions/LegalWorkspace/`, STOP and escalate (shared-lib/hot-path change beyond this task).</trigger>
+    <trigger>If the data-access criteria require a BFF read for outputs or clause rows and no endpoint exists (task 024 is the run-status read), STOP and escalate rather than adding a BFF endpoint here.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CAPABILITY-INDEX: no intake/approval card row. Closest: `DocumentPerItemCards.tsx` (action cards, chat-routed, no decision call); `ConsoleKit` parts (RecordRow, StatusBar) and `StatusBadge` are reused; Worklist `openInvoiceReview` is the type-specific Work Item precedent (plan §2 "No work-item card component exists yet").</existing>
+    <extension>No: DocumentPerItemCards sends chat instructions for a document tab, not a record decision; the Decision wizard records Decide-lane judgments, not intake approvals. The card composes the existing parts.</extension>
+    <cost-of-doing-nothing>An attorney in the Console cannot see the NDA outputs and clause table next to the decision, so approval happens only in the model-driven form, breaking the owner's "both surfaces" decision (FR-11 e).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Card renders for an approval Work Item">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai</url>
+      <steps>
+        <step>Open the Console with a synthetic NDA run in AwaitingApproval.</step>
+        <step>Open its Work Item; verify header, Outputs rows (3 documents), clause table (≤ 8 rows + Show all), Approve/Reject/Claim.</step>
+        <step>Check the console for errors.</step>
+      </steps>
+      <expected>Card renders per the visual spec with no console errors.</expected>
+    </test>
+    <test name="Approve and Reject">
+      <steps>
+        <step>Click Approve; verify one POST to `/api/intake/runs/{run-id}/decision` with action "approve" and the card shows the approved state.</step>
+        <step>On another run click Reject; verify the Dialog requires a reason and the POST carries action "reject".</step>
+        <step>Double-click Approve quickly; verify one request is sent.</step>
+      </steps>
+      <expected>One call per decision; state updates; no duplicate submits.</expected>
+    </test>
+    <test name="Forbidden and conflict">
+      <steps>
+        <step>As a user outside the owning team, click Approve.</step>
+        <step>Approve a run already approved from the MDA form.</step>
+      </steps>
+      <expected>403 shows the team MessageBar; 409 shows "Already decided" and reloads.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the Console to dark theme.</step>
+        <step>Verify card, table, badges, dialog and MessageBar adapt (no white backgrounds, no black text); icons use currentColor.</step>
+      </steps>
+      <expected>All colors come from Fluent v9 tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test src/solutions/SpaarkeAi (`npm run build`, tests)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/IntakeApprovalCard.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/services/intakeApprovalService.ts</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/workspace/__tests__/IntakeApprovalCard.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an intake approval Work Item, the Console shows the card with header, output documents, clause table and the three actions per the visual spec.</criterion>
+    <criterion testable="true">Approve, Reject and Claim each send exactly one POST to `/api/intake/runs/{runId}/decision` with the matching action via `authenticatedFetch`; buttons are disabled while in flight.</criterion>
+    <criterion testable="true">Reject cannot be sent without a non-empty reason; cancelling the dialog sends nothing.</criterion>
+    <criterion testable="true">Negative: 401/403, 404, 409 and 503 each show their mapped message; 409 reloads the card; a network failure shows an error MessageBar and leaves the buttons usable.</criterion>
+    <criterion testable="true">The card writes nothing to Dataverse directly and logs no document, clause or reason text.</criterion>
+    <criterion testable="true">Dark mode renders with tokens only (no color literals in the new files).</criterion>
+    <criterion testable="true">SpaarkeAi builds and its tests pass. Test scope: cover the stated contract plus the negative cases named above; anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Unconfirmed at authoring time: which Console surface lists Work Items (the Worklist lives in `@spaarke/ui-components` and is registered by `src/solutions/LegalWorkspace/src/sections/worklist.registration.ts`). Step 1 settles it; the escalation trigger bounds the change. Deploy is in task 029 (code-page-deploy / `scripts/Deploy-SpaarkeAi.ps1`). Synthetic NDAs only for any demo data (NFR-10).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute.</protocol>
+  </execution>
+</task>

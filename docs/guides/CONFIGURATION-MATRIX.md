@@ -202,7 +202,7 @@ Options class: `AnalysisOptions` (`Configuration/AnalysisOptions.cs`)
 | `Analysis:ExecuteFlowName` | `analysis-execute` | string | appsettings | Execute flow deployment name |
 | `Analysis:ContinueFlowName` | `analysis-continue` | string | appsettings | Continue flow deployment name |
 | `Analysis:DefaultRagModel` | `Shared` | Shared/Dedicated | appsettings | Default RAG deployment model. `CustomerOwned` was removed (task 230b) — any other value fails at startup |
-| `Analysis:SharedIndexName` | `spaarke-knowledge-index-v2` | string | appsettings | Shared RAG index name |
+| `Analysis:SharedIndexName` | `spaarke-files-index` | string | appsettings | Shared RAG index name |
 | `Analysis:TenantFilterField` | `customerId` | string | appsettings | Tenant isolation field |
 | `Analysis:MaxKnowledgeResults` | `5` | 1-20 | appsettings | Knowledge results per query |
 | `Analysis:MinRelevanceScore` | `0.7` | 0.0-1.0 | appsettings | Min relevance threshold |
@@ -225,7 +225,7 @@ Options class: `AiSearchOptions` (`Options/AiSearchOptions.cs`)
 |---------|---------|----------|-------------|
 | `AiSearch:Endpoint` | -- | Env Var / Key Vault | AI Search endpoint |
 | `AiSearch:ApiKeySecretName` | `AzureAISearchApiKey` | appsettings | Key Vault secret name for API key |
-| `AiSearch:KnowledgeIndexName` | `spaarke-knowledge-index-v2` | appsettings | Knowledge base index |
+| `AiSearch:KnowledgeIndexName` | `spaarke-files-index` | appsettings | Knowledge base index. Its `chunkIndex` must be filterable: a re-index and a no-query document search filter on it |
 | `AiSearch:DiscoveryIndexName` | `discovery-index` | appsettings | Discovery search index |
 | `AiSearch:RagReferencesIndexName` | `spaarke-rag-references` | appsettings | RAG references index |
 | `AiSearch:SemanticConfigName` | `semantic-config` | appsettings | Semantic search config |

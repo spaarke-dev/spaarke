@@ -467,6 +467,21 @@ public sealed class ConsumerRoutingServiceTests
     }
 
     [Fact]
+    public async Task ResolveBindingAsync_OtherRequestTypeAfterACachedMatch_DoesNotServeTheCachedBinding()
+    {
+        // spaarke-intake-pipeline-r1 task 012: requestType is a match dimension, so it must be in the cache
+        // key — otherwise the nda resolution would be served for an invoice request for the next 5 minutes.
+        SetupQueryResponse(BuildEntity(PlaybookA, matchConditionsJson: """{ "requestType": "nda" }"""));
+        var sut = CreateService();
+
+        var nda = await sut.ResolveBindingAsync("intake-harness", context: new RoutingContext { RequestType = "nda" });
+        var invoice = await sut.ResolveBindingAsync("intake-harness", context: new RoutingContext { RequestType = "invoice" });
+
+        nda.Should().NotBeNull();
+        invoice.Should().BeNull("the requestType=nda row does not match an invoice request");
+    }
+
+    [Fact]
     public async Task ResolveAsync_CachesNullResult_DoesNotRequeryDataverse()
     {
         SetupQueryResponse(); // no records

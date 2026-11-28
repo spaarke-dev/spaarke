@@ -1,0 +1,96 @@
+{
+  "edits": [
+    {
+      "topic": "nda.oral-disclosure",
+      "para": "1. Confidential",
+      "find": "delivered to the Recipient within ten (10) days",
+      "old": "ten (10)",
+      "replace": "thirty (30)",
+      "after": null,
+      "insert": null,
+      "comment": "Ten days to confirm oral disclosures in writing is short. Aligned to the standard's longer confirmation window.",
+      "summaryRow": {
+        "section": "§1 Definition",
+        "issue": "Ten-day written confirmation of oral disclosures",
+        "revision": "Thirty-day confirmation window",
+        "priority": "Medium"
+      }
+    },
+    {
+      "topic": "nda.compelled-disclosure",
+      "para": "6. Compelled",
+      "find": null,
+      "old": null,
+      "replace": null,
+      "after": "regulation or court order",
+      "insert": ", after giving the Disclosing Party prompt written notice where legally permitted",
+      "comment": "Notice to the other party before a compelled disclosure was missing.",
+      "summaryRow": {
+        "section": "§6 Compelled Disclosure",
+        "issue": "No notice before compelled disclosure",
+        "revision": "Prompt notice where legally permitted",
+        "priority": "Medium"
+      }
+    },
+    {
+      "topic": "nda.residuals",
+      "para": "8. Residuals.",
+      "find": "*",
+      "old": null,
+      "replace": "Intentionally Omitted.",
+      "after": null,
+      "insert": null,
+      "comment": "Residuals clause removed. Escalated to counsel if the counterparty insists on it.",
+      "summaryRow": {
+        "section": "§8 Residuals",
+        "issue": "Residuals clause permits use of retained information",
+        "revision": "Clause removed; escalate if pressed",
+        "priority": "High"
+      }
+    },
+    {
+      "topic": "nda.term",
+      "para": "9. Term. This",
+      "find": "obligations shall terminate upon expiration of this Agreement",
+      "old": "shall terminate upon expiration of this Agreement",
+      "replace": "shall continue for two (2) years after each disclosure, provided that obligations with respect to trade secrets continue for as long as the information remains a trade secret under applicable law",
+      "after": null,
+      "insert": null,
+      "comment": "Obligations ended with the agreement. Aligned to a two-year tail after disclosure, with trade secrets protected for as long as they qualify.",
+      "summaryRow": {
+        "section": "§9 Term",
+        "issue": "Obligations end when the agreement expires",
+        "revision": "Two-year tail; trade secrets open-ended",
+        "priority": "High"
+      }
+    },
+    {
+      "topic": "nda.term",
+      "para": "9. Term. This",
+      "find": "one (1) year from the Effective Date",
+      "old": null,
+      "replace": null,
+      "after": null,
+      "insert": null,
+      "comment": "The one-year period runs from the Effective Date, not from each disclosure.",
+      "summaryRow": null
+    },
+    {
+      "topic": "nda.assignment",
+      "para": "13. Assignment.",
+      "find": "Either party may assign this Agreement without the consent of the other party.",
+      "old": null,
+      "replace": "Neither party may assign this Agreement without the other party's prior written consent, except to a successor to all or substantially all of the relevant business that assumes this Agreement.",
+      "after": null,
+      "insert": null,
+      "comment": "Free assignment is not acceptable. Consent required, with a successor exception.",
+      "summaryRow": {
+        "section": "§13 Assignment",
+        "issue": "Either party may assign freely",
+        "revision": "Consent required; successor exception",
+        "priority": "Medium"
+      }
+    }
+  ],
+  "unplaceable": []
+}

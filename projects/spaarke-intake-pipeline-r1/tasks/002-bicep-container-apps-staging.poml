@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-intake-pipeline-r1">
+  <metadata>
+    <title>FR-01 infra: Bicep for Container Apps environment + engine Job (KEDA Service Bus, UAMI, RBAC), stamp-private staging container with 7-day lifecycle, engine request queue</title>
+    <phase>0 Foundations and cleanup</phase>
+    <gate>startable (authoring); dev deployment needs owner OK (task 008)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates new infrastructure files with explicit ADR constraints; no BFF/PCF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Infrastructure authoring with named reference modules to copy (temp-blob-lifecycle, service-bus, ebilling-file-store, controlplane-sb-rbac).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, infrastructure, worker</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the per-stamp Bicep for the engine job: a Container Apps managed environment, a Container Apps Job with an event trigger (KEDA `azure-servicebus` scaler on the engine request queue, managed-identity auth), the stamp's user-assigned MI with least-privilege RBAC on the queue and the staging container, a stamp-private staging blob container with a 7-day lifecycle delete rule, and the engine request queue. Wire it into `customer.bicep` and recompile `customer.json`. Do not deploy.</prompt>
+  <role>SPAARKE platform developer. Expert in Azure Bicep, Container Apps Jobs, KEDA scalers, Service Bus and Storage RBAC. Follow ADRs strictly.</role>
+  <goal>Two new modules (`intake-engine-job.bicep`, `intake-staging-storage.bicep`) wired into `infrastructure/bicep/customer.bicep` behind a deploy flag (default off), the engine request queue added to the stamp's queue list, `customer.json` regenerated, `az bicep build` clean, and ArchTests (`CustomerStampKeylessTemplateTests`) green.</goal>
+
+  <context>
+    <background>Spec FR-01, NFR-03 (stamp-private, 7-day TTL from Assumptions), NFR-05 (10-minute job timeout), Assumptions (≤ 200 requests/day/stamp → KEDA max executions small). design §5; ADR-052 guardrails. This is the first Container Apps resource in the repo (project CLAUDE.md §6). Completion path: `ServiceBusJobProcessor` consumes ONE queue (`Services/Jobs/ServiceBusJobProcessor.cs:61,79`), so the engine's completion message is a Job Contract sent to the BFF's existing jobs queue; this task grants the job MI Data Sender on that queue and creates NO dedicated completion queue (a separate completion queue would need a new hosted processor — see escalation). Provisioning per stamp is owed by customer-provisioning-orchestration-r1; this task supplies the modules they call.</background>
+    <relevant-files>
+      <file role="new">infrastructure/bicep/modules/intake-engine-job.bicep</file>
+      <file role="new">infrastructure/bicep/modules/intake-staging-storage.bicep</file>
+      <file role="modify">infrastructure/bicep/customer.bicep (module calls near :335 storage and :364 serviceBus; `serviceBusQueues` param :89)</file>
+      <file role="modify">infrastructure/bicep/customer.json (regenerate with `az bicep build --file customer.bicep --outfile customer.json`)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/temp-blob-lifecycle.bicep (lifecycle rule — copy, set deleteAfterDays 7)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/service-bus.bicep:37 (queue resource shape; MaxDeliveryCount, lock duration)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/ebilling-file-store.bicep (container-scoped role assignment, never account-scoped)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/controlplane-sb-rbac.bicep (Service Bus data-plane role assignment to a UAMI)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/controlplane-acr.bicep (AcrPull for a UAMI)</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs (reads compiled customer.json; no key material)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent; task 001 consumes the queue/container names; task 008 deploys.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: every resource in both new modules. Identity-only: the job runs as the stamp's user-assigned MI; KEDA scaler auth uses that MI (`identity` on the scale rule), never a connection string or SAS; no `listKeys()` and no secret outputs (CustomerStampKeylessTemplateTests must stay green).</constraint>
+    <constraint source="ADR-015">Scope: the staging container. Private (no public access), role assignments at container scope only (Storage Blob Data Contributor for the job MI and the BFF MI), lifecycle delete after 7 days on the staging prefix.</constraint>
+    <constraint source="ADR-004">Scope: the engine request queue. `maxDeliveryCount` set explicitly (5, matching `JobContract.cs:65`), dead-lettering on expiration enabled, duplicate detection left off like every BFF queue (guarded by `JobQueueDuplicateDetectionOffGuardTests` in tests/Spaarke.ArchTests); the job MI gets Data Receiver on this queue and Data Sender on the BFF jobs queue only (completion), nothing namespace-wide.</constraint>
+    <constraint source="ADR-052">Scope: the Job resource. Event-triggered, `replicaTimeout` 600 s (10-minute hard timeout), `replicaRetryLimit` 0 (Service Bus redelivery is the retry), small `maxExecutions` (≤ 10), no ingress.</constraint>
+    <constraint source="project">Scope: customer.bicep. New modules sit behind a `deployIntakeEngine` bool param defaulting to false, so existing stamp deployments are unchanged until provisioning opts in.</constraint>
+    <constraint source="project">Scope: this task. Author and compile only; no `az deployment` against any environment (deployment is task 008 with owner OK).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/patterns/auth/managed-identity-resource-rbac.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Lifecycle rule" location="infrastructure/bicep/modules/temp-blob-lifecycle.bicep">managementPolicies rule with a prefix filter and delete-after-days.</pattern>
+      <pattern name="Container-scoped RBAC" location="infrastructure/bicep/modules/ebilling-file-store.bicep">Role assignment scoped to one container, deterministic guid() name.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Write `intake-staging-storage.bicep` over the existing stamp storage account: container `intake-staging` (private), lifecycle rule copied from temp-blob-lifecycle.bicep with 7 days, container-scoped Storage Blob Data Contributor for the job MI and the BFF MI.</step>
+    <step order="2">Write `intake-engine-job.bicep`: Log Analytics-linked managed environment, Container Apps Job (event trigger, azure-servicebus scale rule on `intake-engine-requests` with MI auth, image param, env vars for queue/container/MI client id/correlation settings, AcrPull for the MI), Service Bus RBAC (Receiver on the request queue, Sender on the BFF jobs queue).</step>
+    <step order="3">Add `intake-engine-requests` to the stamp queue list (or a dedicated queue resource in the module if the shared list cannot carry per-queue settings) and wire both modules into customer.bicep behind `deployIntakeEngine`.</step>
+    <step order="4">Run `az bicep build` for both modules and customer.bicep; regenerate customer.json; run `dotnet test tests/Spaarke.ArchTests`.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="6">Record names, outputs and any deviation in `projects/spaarke-intake-pipeline-r1/notes/` for tasks 001, 008 and 014.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the design requires a dedicated completion queue the BFF must consume (instead of a Job Contract on the existing jobs queue), STOP and escalate: a second queue consumer in the BFF is new background work under ADR-052 / root CLAUDE.md §17.</trigger>
+    <trigger>If the image registry choice is unclear (platform ACR via `controlplane-acr.bicep` vs. a per-stamp registry owed by customer-provisioning-orchestration-r1), STOP and ask the owner rather than creating a registry.</trigger>
+    <trigger>Any actual deployment to an Azure environment needs the owner's explicit OK (project CLAUDE.md §5); this task never deploys.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>reuse-scan.md row 7: no Container Apps / KEDA resource in `infra/` or `infrastructure/`; row 6: lifecycle rules absent from stamp storage (`temp-blob-lifecycle.bicep` is a test-documents module, copied here).</existing>
+    <extension>No — no Container Apps module exists to extend; queues and storage reuse the existing stamp service-bus and storage modules (only a queue name and a container are added).</extension>
+    <cost-of-doing-nothing>The engine image (task 001) has nowhere to run and staged NDA content would have no TTL, breaking FR-01 and NFR-03.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="az">`az bicep build` only (no deployment)</tool>
+    <tool name="dotnet">`dotnet test tests/Spaarke.ArchTests`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/intake-engine-job.bicep</output>
+    <output type="code">infrastructure/bicep/modules/intake-staging-storage.bicep</output>
+    <output type="code">infrastructure/bicep/customer.bicep</output>
+    <output type="code">infrastructure/bicep/customer.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`az bicep build` succeeds with no errors for both new modules and customer.bicep; customer.json is regenerated from the edited customer.bicep.</criterion>
+    <criterion testable="true">With `deployIntakeEngine=false` (default), the compiled customer.json deploys the same resources as before plus nothing new (what-if or JSON diff shows only the param and conditional modules).</criterion>
+    <criterion testable="true">The staging container is private, its lifecycle rule deletes blobs after 7 days, and its role assignments are container-scoped.</criterion>
+    <criterion testable="true">The Job has an event trigger on `intake-engine-requests` with MI-authenticated KEDA scaling, `replicaTimeout` 600, no ingress, and runs as its own identity (`uamiIntakeEngine`), never the stamp UAMI.</criterion>
+    <criterion testable="true">Negative: no connection string, SAS, `listKeys()` or secret output appears in either module; `CustomerStampKeylessTemplateTests` and the rest of `tests/Spaarke.ArchTests` pass.</criterion>
+    <criterion testable="true">The job identity has exactly: Receiver + Sender on the request queue, Sender on `intake-engine-completions`, Blob Data Contributor on the staging container, AcrPull on the registry — no role on any BFF queue and nothing namespace- or account-wide. The BFF identity gets Sender on the request queue and Receiver on the completion queue.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completed 2026-11-25. Names, env vars, deviations and the open registry decision: notes/002-intake-infra-names.md. Added per main-session brief: Data Sender on the request queue (retry copy) and APPLICATIONINSIGHTS_CONNECTION_STRING from monitoring.outputs.connectionString (same source as the BFF app setting); job uses the existing stamp uami. rework: none task 002. Brief deviation: the main session's brief said "engine request/completion queues"; this task creates only the request queue because `ServiceBusJobProcessor` is single-queue (completion as a Job Contract on the existing BFF jobs queue keeps the BFF side to one more `IJobHandler`, task 014). If the owner prefers a dedicated completion queue, the escalation trigger applies. REWORK 2026-11-25 (owner, main session): the trigger was resolved — dedicated job identity `uamiIntakeEngine` and its own completion queue `intake-engine-completions`; the job has no send right on `sdap-jobs` (Sender is per queue, not per message type). See notes/decisions.md and notes/002-intake-infra-names.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

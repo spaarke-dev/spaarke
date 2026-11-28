@@ -32,8 +32,8 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// identifiers + cache outcome — <c>consumerType</c>, <c>consumerCode</c>,
 /// <c>env</c>, <c>cacheHit</c>, <c>durationMs</c>, <c>resolvedPlaybookId</c>.
 /// Never log <see cref="IRoutingContext"/> field values that could carry
-/// user-supplied content (none today — both <c>MimeType</c> and
-/// <c>DocumentType</c> are deterministic identifiers — but the contract is
+/// user-supplied content (none today — <c>MimeType</c>, <c>DocumentType</c>
+/// and <c>RequestType</c> are deterministic identifiers — but the contract is
 /// enforced regardless).
 /// </para>
 /// </remarks>
@@ -328,8 +328,8 @@ public interface IConsumerRoutingService
 /// interface + updating <c>ConsumerRoutingService.TryMatchConditions</c> + the
 /// JSON schema at
 /// <c>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/playbookconsumer-matchconditions.schema.json</c>
-/// in lockstep. Unknown keys in <c>sprk_matchconditions</c> are IGNORED (defensive
-/// forward-compat — older BFFs handling newer routing records).
+/// in lockstep. An unknown key in <c>sprk_matchconditions</c> fails the match (fail
+/// closed — an older BFF never routes a newer record whose condition it cannot evaluate).
 /// </para>
 /// <para>
 /// <b>ADR-015 binding</b>: every field MUST be a deterministic identifier
@@ -354,6 +354,19 @@ public interface IRoutingContext
     /// <c>"documentType"</c> key of <c>sprk_matchconditions</c>.
     /// </summary>
     string? DocumentType { get; }
+
+    /// <summary>
+    /// Optional request type for request-pipeline routing (e.g., select the
+    /// intake harness Binding for <c>"nda"</c>; spaarke-intake-pipeline-r1
+    /// FR-08). A deterministic identifier from the request record, never
+    /// user-supplied text (ADR-015). Matched against the <c>"requestType"</c>
+    /// key of <c>sprk_matchconditions</c>.
+    /// </summary>
+    /// <remarks>
+    /// Default-implemented as <c>null</c> so existing implementers and callers
+    /// are unchanged: a context without a request type routes exactly as before.
+    /// </remarks>
+    string? RequestType => null;
 }
 
 /// <summary>
@@ -368,4 +381,7 @@ public sealed record RoutingContext : IRoutingContext
 
     /// <inheritdoc />
     public string? DocumentType { get; init; }
+
+    /// <inheritdoc />
+    public string? RequestType { get; init; }
 }

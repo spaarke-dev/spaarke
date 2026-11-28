@@ -268,6 +268,20 @@
     <EmbeddedResource Include="Services\Signals\Schemas\*.json" />
   </ItemGroup>
 
+  <!-- spaarke-intake-pipeline-r1 task 004 (FR-02, NFR-09): the pinned NDA standard "Spaarke NDA - Mutual" v1.2 and the accelerator's
+       edit-plan schema, embedded so AgreementAi stamps and validates every edit plan against the version it was built for and needs
+       no on-disk path at runtime. Copies of src/accelerators/practices/nda/positions/ and core/schemas/; a KEEP-path contract test
+       (AgreementEditPlanPinnedStandardContractTests) fails when either copy drifts from the accelerator, so moving to a new
+       standard version is a deliberate change here. Remove the json first so it is embedded only (the Web SDK's default *.json glob
+       would also copy it loose as Content). -->
+  <ItemGroup>
+    <Content Remove="Services\Ai\PublicContracts\Standards\*.json" />
+    <EmbeddedResource Include="Services\Ai\PublicContracts\Standards\spaarke-nda-mutual-v1.2.md"
+                      LogicalName="Sprk.Bff.Api.Standards.spaarke-nda-mutual-v1.2.md" />
+    <EmbeddedResource Include="Services\Ai\PublicContracts\Standards\edit-plan.schema.json"
+                      LogicalName="Sprk.Bff.Api.Standards.edit-plan.schema.json" />
+  </ItemGroup>
+
   <!-- spaarkeai-mcp-bff-api-r1 task 030 (FR-12, NFR-03): the Spaarke decisions MCP App widget, ONE self-contained html file built by
        src/client/widgets/spaarke-decisions (npm run build), served by DecisionsWidgetResource as ui://spaarke/decisions.html.
        Condition=Exists keeps a local `dotnet build` without the widget built working: nothing is embedded and resources/read then
