@@ -162,7 +162,14 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
   });
 
   describe('keyboard focus after a move to either end (ISS-055)', () => {
-    const Browse: React.FC<{ guard?: SprkModalNav['onBeforeNavigate']; external?: number }> = ({ guard, external }) => {
+    const Browse: React.FC<{
+      guard?: SprkModalNav['onBeforeNavigate'];
+      external?: number;
+      /** Turns the whole nav off once a move has happened (both ‹ › disabled). */
+      lockAfterMove?: boolean;
+      /** The host ignores the press (index unchanged), as WizardShell does while it is busy. */
+      ignore?: boolean;
+    }> = ({ guard, external, lockAfterMove, ignore }) => {
       const [index, setIndex] = React.useState(0);
       React.useEffect(() => {
         if (external !== undefined) setIndex(external);
@@ -174,8 +181,11 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
           title="Rec"
           nav={{
             index,
-            total: 2,
-            onNavigate: dir => setIndex(i => (dir === 'next' ? i + 1 : i - 1)),
+            total: 3,
+            disabled: lockAfterMove === true && index > 0,
+            onNavigate: dir => {
+              if (!ignore) setIndex(i => (dir === 'next' ? i + 1 : i - 1));
+            },
             onBeforeNavigate: guard,
           }}
         >
@@ -190,28 +200,68 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
       renderWithProviders(<Browse />);
       next().focus();
       fireEvent.click(next());
+      await screen.findByText('2 of 3');
+      expect(document.activeElement).toBe(next()); // not at an end: focus stays where it was
+      fireEvent.click(next());
       await waitFor(() => expect(next()).toBeDisabled());
       expect(document.activeElement).toBe(prev());
+      fireEvent.click(prev());
       fireEvent.click(prev());
       await waitFor(() => expect(prev()).toBeDisabled());
       expect(document.activeElement).toBe(next());
     });
 
     it('does the same when the move waits on an async guard', async () => {
-      renderWithProviders(<Browse guard={() => Promise.resolve(true)} />);
+      renderWithProviders(<Browse guard={() => Promise.resolve(true)} external={1} />);
+      await screen.findByText('2 of 3');
       next().focus();
       fireEvent.click(next());
       await waitFor(() => expect(next()).toBeDisabled());
       expect(document.activeElement).toBe(prev());
     });
 
-    it('leaves focus alone when it is somewhere real, or when the index changes without a nav move', async () => {
+    it('puts focus on Close when both ‹ › are off after the move, and recovers focus that fell to the body', async () => {
+      renderWithProviders(<Browse lockAfterMove />);
+      next().focus();
+      fireEvent.click(next());
+      await waitFor(() => expect(next()).toBeDisabled());
+      expect(prev()).toBeDisabled();
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: /^close$/i }));
+    });
+
+    it('leaves focus alone when it is somewhere real', async () => {
       const { rerender } = renderWithProviders(<Browse />);
       const field = screen.getByRole('textbox', { name: 'Body field' });
       field.focus();
-      rerender(<Browse external={1} />);
+      rerender(<Browse external={2} />);
       await waitFor(() => expect(next()).toBeDisabled());
       expect(document.activeElement).toBe(field);
+    });
+
+    it('does nothing when the index changes without a nav move, even with focus on the body', async () => {
+      const { rerender } = renderWithProviders(<Browse />);
+      (document.activeElement as HTMLElement | null)?.blur();
+      expect(document.activeElement).toBe(document.body);
+      rerender(<Browse external={2} />);
+      await waitFor(() => expect(next()).toBeDisabled());
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    it('a press the host ignored does not act on a later, programmatic index change', async () => {
+      const now = jest.spyOn(Date, 'now');
+      try {
+        now.mockReturnValue(1_000);
+        const { rerender } = renderWithProviders(<Browse ignore />);
+        next().focus();
+        fireEvent.click(next()); // ignored: the index stays 0
+        (document.activeElement as HTMLElement).blur();
+        now.mockReturnValue(1_000 + 5_000); // long after the press
+        rerender(<Browse ignore external={2} />);
+        await waitFor(() => expect(next()).toBeDisabled());
+        expect(document.activeElement).toBe(document.body);
+      } finally {
+        now.mockRestore();
+      }
     });
   });
 

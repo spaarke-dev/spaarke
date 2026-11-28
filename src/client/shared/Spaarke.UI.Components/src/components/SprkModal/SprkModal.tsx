@@ -43,6 +43,9 @@ export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProp
 // — that is React 18+; this shell must stay React-16/17-safe (NFR-04).
 let sprkModalTitleIdCounter = 0;
 
+/** How long after a ‹ › press an index change still counts as that move, for putting lost focus back (ISS-055). */
+const MOVE_FOCUS_WINDOW_MS = 2000;
+
 // Task 202 follow-up (modal swap handover). A host sometimes replaces one SprkModal with a different one in the same
 // place (RuleWizard: a "loading" modal until its catalog arrives, then the wizard's own modal). The second modal opens
 // while focus sits on the first one's Close button, so that button, not the control that opened the first, is what it
@@ -349,17 +352,21 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // is left alone.
   const prevButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const nextButtonRef = React.useRef<HTMLButtonElement | null>(null);
-  const movedDirRef = React.useRef<'prev' | 'next' | null>(null);
+  // The move expires: a host whose onNavigate changes nothing (a click ignored while it is busy) must not leave a direction behind
+  // for a later, programmatic index change to act on. 2 s covers a guard's dirty check (up to 1 s).
+  const movedRef = React.useRef<{ dir: 'prev' | 'next'; at: number } | null>(null);
   const navIndex = nav?.index;
   React.useEffect(() => {
-    const dir = movedDirRef.current;
-    movedDirRef.current = null;
-    if (!dir) return;
+    const moved = movedRef.current;
+    movedRef.current = null;
+    if (!moved || Date.now() - moved.at > MOVE_FOCUS_WINDOW_MS) return;
+    const dir = moved.dir;
     const prev = prevButtonRef.current;
     const next = nextButtonRef.current;
-    const active = document.activeElement;
+    const doc = surfaceRef.current?.ownerDocument ?? document;
+    const active = doc.activeElement;
     const lost =
-      !active || active === document.body || (active === prev && prev.disabled) || (active === next && next.disabled);
+      !active || active === doc.body || (active === prev && prev.disabled) || (active === next && next.disabled);
     if (!lost) return;
     const close = surfaceRef.current?.querySelector<HTMLButtonElement>('button[aria-label="Close"]') ?? null;
     const order = dir === 'next' ? [next, prev, close] : [prev, next, close];
@@ -367,7 +374,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   }, [navIndex]);
 
   const navigateTo = (dir: 'prev' | 'next') => {
-    movedDirRef.current = dir;
+    movedRef.current = { dir, at: Date.now() };
     nav?.onNavigate(dir);
   };
 
