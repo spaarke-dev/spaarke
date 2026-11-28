@@ -10,6 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Two scoped changes with file:line maps and stated outcomes.</model-tier-reason>
     <effort>high</effort>
+    <parallel-group>commit-route-hardening-2026-11-28</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Touches DecisionCommitService.cs, DecisionActionExecutors.cs (base class only) and their tests.</parallel-reason>
     <deps>intake-pipeline-r1 017 merged to master</deps>

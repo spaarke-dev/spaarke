@@ -318,7 +318,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ 237 | [ClosesTodo recognises statecode/statuscode sent as a string or a non-integer JSON number, so the open-inquiry guard cannot be skipped (uac-r2 note on #3293)](237-closestodo-lenient-state-values.poml) | FULL | sonnet/high | 234 | group-d-2026-11-27 | uac-r2 access-gate note 2026-11-27 (fix found defects). PR to master |
 | 🔲 238 | [Task 185 leftovers (client): Smart To Do "New To Do" label, composer warns on an unresolvable recipient pick, focus returns to To in the DRV iframe composer](238-185-leftovers-todo-label-recipient-notice-iframe-focus.poml) | FULL | sonnet/high | 185 | 185-leftovers-2026-11-28 | Owner 2026-11-28: fix every open 185 item. PR to master |
 | 🔲 239 | [Task 185 leftover: Create Project Description gets "Generate with AI" by extending the matter summary endpoint (UAT round 4 A1)](239-create-project-generate-description-with-ai.poml) | FULL | sonnet/high | 185 | 185-leftovers-2026-11-28 | Owner 2026-11-28. BFF change: dev deploy via uac-r2. PR to master |
-| 🔲 240 | [Commit route: a clean execute-time refusal answers the preflight status and frees the review id](240-commit-route-execute-time-refusal-status.poml) | FULL | sonnet/high | 017 (intake) merged | — | D-238. Found in the intake 017 review. PR to master after intake 017 merges |
+| 🔲 240 | [Commit route: a clean execute-time refusal answers the preflight status and frees the review id](240-commit-route-execute-time-refusal-status.poml) | FULL | sonnet/high | 017 (intake) merged | commit-route-hardening-2026-11-28 | D-238. Found in the intake 017 review. PR to master after intake 017 merges |
 
 ### Phase 5 — The worklist surface
 
