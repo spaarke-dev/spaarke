@@ -115,9 +115,9 @@ public partial class SecureRootCreateRouteTests
     // ── #2191 K2: filed under the record it is created from, whatever the mapping could read ──────────────────────────
 
     /// <summary>
-    /// #2191 K2, must fire: the mapping source cannot be read — by the caller (a 429) or app-only (a timeout) — so the mapping
-    /// copies nothing and warns; the project made from a SECURE matter is still filed under it and created INTO isolation,
-    /// never unfiled and ordinary.
+    /// #2191 K2, must fire: the mapping source cannot be read app-only (a timeout), so the mapping copies nothing and warns; or
+    /// the caller's column read fails (a 429), which task 067 no longer makes for the filing parent; either way the project made
+    /// from a SECURE matter is still filed under it and created INTO isolation, never unfiled and ordinary.
     /// </summary>
     [Theory]
     [InlineData(true)]
@@ -136,7 +136,11 @@ public partial class SecureRootCreateRouteTests
         var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(OfficeRoute, Body(matter));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
-        (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning, "the mapping source was unavailable");
+        if (callerReadFails)
+            (await WarningsOf(response)).Should().NotContain(MappingSourceReadProbe.SourceUnavailableWarning,
+                "task 067: the filing parent's mapped columns need no caller column read, so its failure leaves the source available");
+        else
+            (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning, "the mapping source was unavailable");
         var project = ShouldBeFiledUnderTheDerivedPair(matter, matterType);
         _fixture.OfficeCreates.Single().GetAttributeValue<bool>("sprk_issecure").Should().BeTrue("created INTO isolation");
         _fixture.OfficeCreates.Single().GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("ownerid").Id.Should().Be(SecureTeam);
@@ -166,9 +170,10 @@ public partial class SecureRootCreateRouteTests
         _fixture.OfficeCreates.Single().GetAttributeValue<bool>("sprk_issecure").Should().BeFalse("an ordinary matter passes no isolation on");
         _fixture.OwningTeamOf(project).Should().Be(RecordOwnershipResolverDouble.DefaultTeamId, "the record-first owner, never the secure team");
         _fixture.SharesOn(project).Should().BeEmpty();
+        // Task 067: the matter is the project's filing parent, so no caller column read is made and its failure changes nothing.
         if (callerReadFails)
-            (await WarningsOf(response)).Should().Contain(MappingSourceReadProbe.SourceUnavailableWarning,
-                "the case must prove the source read really failed, or it pins nothing (018c review F3)");
+            (await WarningsOf(response)).Should().NotContain(MappingSourceReadProbe.SourceUnavailableWarning,
+                "the filing parent's mapped columns are read app-only after the caller's Read on it (task 067)");
     }
 
     /// <summary>#2191 K2 review F3: a project created from a SECURE PROJECT is filed under that project and created into isolation.</summary>
