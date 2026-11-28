@@ -36,7 +36,7 @@
 
 ## Waiting on the owner
 - **#3323**: D-3181 scope for other AppendTo-only name copies (S2 thread re-file name copy in ThreadResolver; S3 send ancestor stamp; S4 platform lookup display names, not verified live; plus the playbook CreateTask node note). Owner ruling needed before any fix.
-- Next dev BFF deploy: exact-SHA go here (see candidate above). Candidate adds #3328 + #3329 once merged. The same ask states that the deploy removes ~200–250 stale matter rows from the dev records index (bb6d186f55, setting left unset) and gets the owner's confirmation here.
+- Next dev BFF deploy: OWNER 2026-11-28: WAIT until #3328, #3329 and #3330 (word-add-in 143) have merged; then spike re-merge, patch checks, and the exact-SHA ask (see candidate above). Candidate adds #3328 + #3329 once merged. The same ask states that the deploy removes ~200–250 stale matter rows from the dev records index (bb6d186f55, setting left unset) and gets the owner's confirmation here.
 - ADR-052 amendment security sign-off (mcp-r2).
 - Dev hand checks: `notes/owner-test-checklist-2026-11-13.md`; ebilling W/X checklist; word-add-in 136-138.
 - Quality alerts #1906, #2067, #2866: mention only.
