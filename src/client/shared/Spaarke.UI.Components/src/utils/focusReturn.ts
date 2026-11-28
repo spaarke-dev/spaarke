@@ -22,6 +22,13 @@
  *    and focus() inside an inert frame fails silently. It stops at once if focus moved to some other real element
  *    since the previous attempt (a host that deliberately focused something is not fought; body/null counts as
  *    "nobody has it").
+ *  - A surface in an iframe (the Document Relationship Viewer inside Semantic Search's Find Similar dialog) needs three
+ *    more things (task 238): the frame's window takes focus before the element does (`element.focus()` inside a frame
+ *    that does not hold the top-level focus only sets that document's activeElement, and the keys still go elsewhere),
+ *    a landing counts only once `doc.hasFocus()`, and the schedule is longer (FRAMED_FOCUS_RETURN_MAX_ATTEMPTS) because
+ *    the parent page un-yields its dialog and the platform pane hands focus back on their own timers, which can run
+ *    past the first window. After it lands a framed surface is checked once more (FRAMED_FOCUS_CONFIRM_MS) and retried
+ *    if the frame lost focus in between; the "do not fight a host that chose another element" rule is unchanged.
  */
 
 import * as React from 'react';
@@ -29,8 +36,21 @@ import * as React from 'react';
 /** Bounded retry for returning focus: up to 10 attempts, 50 ms apart. */
 export const FOCUS_RETURN_MAX_ATTEMPTS = 10;
 export const FOCUS_RETURN_RETRY_MS = 50;
+/** A framed surface retries for up to ~1.5 s: its parent frame and the platform pane settle on their own timers. */
+export const FRAMED_FOCUS_RETURN_MAX_ATTEMPTS = 30;
+/** After a framed surface gets focus, how long before it checks that the frame still holds it. */
+export const FRAMED_FOCUS_CONFIRM_MS = 150;
 
 type MaybeElement = HTMLElement | null | undefined;
+
+/** True when `win` is a frame inside another window (an iframe), not the top-level window. */
+function isFramedWindow(win: Window): boolean {
+  try {
+    return win.top !== null && win.top !== win;
+  } catch {
+    return true; // a top window we may not even compare against is certainly not this one
+  }
+}
 
 export interface FocusReturnSpec {
   /** The document that owns the surface. Capture it before awaiting: after unmount the owner frame cannot be derived. */
@@ -49,7 +69,10 @@ export interface FocusReturnSpec {
 export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
   const { doc } = spec;
   const win = doc.defaultView ?? window;
+  const framed = isFramedWindow(win);
+  const maxAttempts = framed ? FRAMED_FOCUS_RETURN_MAX_ATTEMPTS : FOCUS_RETURN_MAX_ATTEMPTS;
   let attempts = 0;
+  let landed = false; // framed only: focus landed once and the next step confirms the frame still holds it
   let cancelled = false;
   let timerId: number | undefined;
   let seenAfterAttempt: Element | null = null; // what had focus right after our previous attempt
@@ -62,7 +85,10 @@ export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
     timerId = undefined;
     if (cancelled || spec.isActive?.() === false) return;
     const active = doc.activeElement;
-    if (spec.isKept?.(active)) return;
+    // A frame without the top-level focus keeps nothing: its activeElement may sit on the composer (it survives the
+    // frame losing focus, and the pane that took focus away has just closed) while the keys go elsewhere.
+    const frameHoldsFocus = !framed || doc.hasFocus();
+    if (frameHoldsFocus && spec.isKept?.(active)) return;
     // Retry only: focus is somewhere other than where our last attempt left it, and not "nowhere".
     if (attempts > 0 && active !== seenAfterAttempt && active && active !== doc.body) return;
 
@@ -70,12 +96,22 @@ export function scheduleFocusReturn(spec: FocusReturnSpec): () => void {
     const usable = wanted && wanted.isConnected && !(wanted as HTMLButtonElement).disabled;
     const element = usable ? wanted : spec.fallback?.();
     attempts += 1;
-    if (element && element.isConnected) element.focus();
+    if (element && element.isConnected) {
+      // Framed: hand the frame the top-level focus first, or element.focus() only records it in this document.
+      if (framed) win.focus();
+      element.focus();
+    }
     // Recorded even when nothing could be focused yet (control disabled or not re-rendered): that is what the next
     // attempt compares against, so a link the pane left focus on is not mistaken for "a host chose this".
     seenAfterAttempt = doc.activeElement;
-    if (element && (seenAfterAttempt === element || spec.isKept?.(seenAfterAttempt))) return;
-    if (attempts < FOCUS_RETURN_MAX_ATTEMPTS) schedule(FOCUS_RETURN_RETRY_MS);
+    if (element && (seenAfterAttempt === element || spec.isKept?.(seenAfterAttempt)) && (!framed || doc.hasFocus())) {
+      if (!framed || landed) return;
+      landed = true; // framed: look once more after the parent frame and the platform have settled
+      schedule(FRAMED_FOCUS_CONFIRM_MS);
+      return;
+    }
+    landed = false;
+    if (attempts < maxAttempts) schedule(FOCUS_RETURN_RETRY_MS);
   };
 
   schedule(0);
